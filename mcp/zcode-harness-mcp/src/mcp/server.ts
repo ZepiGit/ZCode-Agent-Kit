@@ -192,12 +192,11 @@ export async function serveHttp(
       res.writeHead(405).end("method not allowed");
       return;
     }
-    // ZAK-010: the 4 MiB bound is enforced on the ACTUAL stream, not just the
-    // declared Content-Length (chunked/absent-length requests bypassed the
-    // metadata check). The body is pre-read into a bounded buffer and the
-    // transport receives a fresh stream built from that buffer — so the size
-    // guard is a real parser boundary AND the transport cannot be starved
-    // (it never observes the original request stream).
+    // ZAK-010/AUD-006: the 4 MiB bound is enforced on the ACTUAL stream, not
+    // just the declared Content-Length. Oversized requests are refused the
+    // moment the limit is crossed (413 + Connection: close, then socket
+    // teardown) — draining until EOF would let a slow writer bind one of the
+    // few request slots for the whole request timeout.
     void handleMcpPostBounded(opts, req, res, MAX_BODY_BYTES);
   });
   // Header/timeout hardening (defaults are generous for a local bridge).
@@ -223,29 +222,34 @@ async function handleMcpPostBounded(
   maxBodyBytes: number,
 ): Promise<void> {
   try {
-    // ZAK-010: enforce the body bound on the ACTUAL stream, not just the
-    // declared Content-Length (chunked/absent-length requests bypassed the
-    // metadata check). Oversized uploads are drained and discarded (keeping
-    // the connection healthy so the client reliably receives the 413) and
-    // never parsed. Under the bound, the parsed body is handed to the
-    // transport via its pre-parsed-body API so the original request stream
-    // semantics stay intact for hono/node-server.
+    // Declared-size fast path (AUD-006): refuse before reading any bytes when
+    // a truthful Content-Length already exceeds the bound. (Conflicting or
+    // duplicate content-length headers are rejected by Node's HTTP parser.)
+    const declared = Number(req.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > maxBodyBytes) {
+      res.writeHead(413, { "Content-Type": "text/plain", Connection: "close" });
+      res.end("request body too large", () => req.destroy());
+      return;
+    }
+    // Stream the body with a hard byte ceiling. Crossing the limit triggers
+    // the immediate refusal above-style teardown; bytes under the limit are
+    // buffered and handed to the transport via its pre-parsed-body API so the
+    // original request stream semantics stay intact for hono/node-server.
     const buffered: Buffer[] = [];
     let total = 0;
     let tooLarge = false;
     for await (const chunk of req) {
-      if (tooLarge) continue; // drain and discard the remainder
       const buf = chunk as Buffer;
       total += buf.length;
       if (total > maxBodyBytes) {
         tooLarge = true;
-        buffered.length = 0;
-        continue;
+        break;
       }
       buffered.push(buf);
     }
     if (tooLarge) {
-      res.writeHead(413).end("request body too large");
+      res.writeHead(413, { "Content-Type": "text/plain", Connection: "close" });
+      res.end("request body too large", () => req.destroy());
       return;
     }
     const raw = Buffer.concat(buffered).toString("utf8");

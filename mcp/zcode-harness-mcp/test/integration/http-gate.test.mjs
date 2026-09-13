@@ -103,14 +103,20 @@ test("http gate: oversized chunked body without content-length is refused with 4
     KEY,
   );
   try {
-    // 5 MiB chunked POST, no content-length header → must hit the streaming
-    // byte bound, not slip past a metadata-only check.
+    // 5 MiB chunked POST, no content-length → must hit the streaming
+    // byte bound. The server refuses as soon as the limit is crossed
+    // (413 + Connection: close + teardown); depending on timing the client
+    // either reads the 413 or observes the connection reset mid-upload —
+    // both mean "refused, never processed".
     const oversized = await requestChunked({
       headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, connection: "close" },
       chunkCount: 5 * 1024 * 1024 / (64 * 1024),
       chunkSize: 64 * 1024,
     });
-    assert.equal(oversized.status, 413, "oversized chunked body must be refused by the streaming bound");
+    assert.ok(
+      oversized.status === 413 || oversized.reset === true,
+      `oversized chunked body must be refused early (got status ${oversized.status}, reset ${oversized.reset})`,
+    );
 
     // A chunked body under the bound still reaches the MCP layer (chunked
     // transfer itself is not treated as an error).
@@ -126,6 +132,40 @@ test("http gate: oversized chunked body without content-length is refused with 4
   }
 });
 
+// AUD-006 fast path: a DECLARED oversized Content-Length is refused before
+// any body byte is read (headers-only request).
+test("http gate: declared oversized content-length refused without body", async () => {
+  const probe = http.createServer();
+  await new Promise((r) => probe.listen(0, "127.0.0.1", r));
+  port = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  const closeServer = await serveHttp(
+    { toolCtx: {}, resourceCtx: {}, serverInfo: { name: "test", version: "0.0.0" } },
+    "127.0.0.1",
+    port,
+    KEY,
+  );
+  try {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1", port, method: "POST", path: "/mcp",
+          headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, "content-length": String(5 * 1024 * 1024) },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(status, 413, "declared oversized body must be refused from headers alone");
+  } finally {
+    await closeServer();
+  }
+});
+
 function requestChunked({ headers = {}, chunkCount = 1, chunkSize = 1024, jsonBody = null } = {}) {
   return new Promise((resolve, reject) => {
     // No content-length → Node sends Transfer-Encoding: chunked.
@@ -134,13 +174,18 @@ function requestChunked({ headers = {}, chunkCount = 1, chunkSize = 1024, jsonBo
       (res) => {
         let data = "";
         res.on("data", (c) => (data += c));
-        res.on("end", () => resolve({ status: res.statusCode, body: data }));
+        res.on("end", () => resolve({ status: res.statusCode, body: data, reset: false }));
       },
     );
-    req.on("error", reject);
+    let reset = false;
+    req.on("error", (err) => {
+      if (err?.code === "ECONNRESET" || err?.code === "EPIPE") resolve({ status: 0, body: "", reset: true });
+      else reject(err);
+    });
+    req.on("socket", (socket) => {
+      socket.on("error", () => { reset = true; });
+    });
     if (jsonBody) {
-      // pad each chunk to chunkSize with JSON-ignored whitespace-free filler
-      // (send as raw filler chunks around the real JSON body)
       req.write(jsonBody);
       const filler = Buffer.alloc(chunkSize, 0x20); // spaces
       for (let i = 0; i < chunkCount; i += 1) req.write(filler);

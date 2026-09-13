@@ -440,6 +440,13 @@ async function cmdAuth() {
 
 // ------------------------------------------------------------------ update
 async function cmdUpdate() {
+  // AUD-009: a tarball install has no .git — the git flow below would fail
+  // with a confusing fetch error. State the actual update path instead.
+  if (!existsSync(join(ROOT, ".git"))) {
+    console.error("update: this is a tarball/pinned-release install (no .git) — it cannot self-update via git.");
+    console.error(`  To update: re-run the installer for the new release, or re-download and extract the release tarball to ${ROOT}.`);
+    return 2;
+  }
   // Conservative by design: refuses on a dirty tree; fast-forward only.
   const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" });
   if ((dirty.stdout ?? "").trim().length > 0) {
@@ -474,13 +481,31 @@ async function cmdUninstall() {
   console.log("Scope: removes KIT-OWNED integrations and artifacts. Your ZCode Desktop login,");
   console.log("~/.zcode-proxy/credentials.json (shared credential store) and harness data are NOT deleted.");
   const ids = listTransactions(BACKUP_DIR);
+  let externalUndone = true;
   for (let i = ids.length - 1; i >= 0; i--) {
     const r = rollbackTransaction(BACKUP_DIR, ids[i]);
     console.log(`rollback ${ids[i]}: ${r.restored.length} restored, ${r.removed.length} removed, ${r.conflicts.length} conflict(s)`);
+    // AUD-008: execute the KNOWN kit registrations' undo hints ourselves
+    // (currently only the claude user-scope MCP registration); never run
+    // arbitrary strings from manifests — only the exact undo command shape
+    // we issued.
+    for (const e of r.external) {
+      if (e.undoHint === 'claude mcp remove zcode-harness --scope user') {
+        const res = spawnSync("claude", ["mcp", "remove", "zcode-harness", "--scope", "user"], { stdio: "inherit" });
+        if (res.status !== 0) externalUndone = false;
+      } else {
+        console.log(`manual undo required: ${e.description}\n  -> ${e.undoHint}`);
+        externalUndone = false;
+      }
+    }
   }
   // Kit-owned generated artifacts (recorded in transactions; delete leftovers too).
   if (existsSync(ctx.generated)) rmSync(ctx.generated, { recursive: true, force: true });
   console.log("generated/ removed. The proxy key (.proxykey) and logs stay; delete manually if desired.");
+  if (!externalUndone) {
+    console.error("uninstall incomplete: at least one external registration could not be removed (see output above).");
+    return 1;
+  }
   return 0;
 }
 

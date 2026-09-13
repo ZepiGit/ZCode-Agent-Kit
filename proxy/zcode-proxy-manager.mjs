@@ -139,8 +139,10 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
     try {
       process.kill(pid, 0);
       return true;
-    } catch {
-      return false;
+    } catch (err) {
+      // AUD-001: only "no such process" proves death; EPERM and unknown
+      // errors fail closed — the process counts as alive.
+      return err?.code !== "ESRCH";
     }
   }
 
@@ -163,6 +165,24 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
           if (Number.isFinite(ticks) && ticks > 0) return ticks / 10000 - 62135596800000;
         } catch {}
       }
+      return null;
+    }
+    if (process.platform === "darwin") {
+      // AUD-007: macOS has no /proc — read the process start time via ps.
+      // LC_ALL=C keeps the date format locale-independent; Date.parse handles
+      // the "Mon Sep 13 18:00:00 2026" ctime format.
+      try {
+        const r = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+          timeout: 15000,
+          env: { ...process.env, LC_ALL: "C" },
+        });
+        if (r.status === 0) {
+          const ms = Date.parse((r.stdout ?? "").trim());
+          if (Number.isFinite(ms)) return ms;
+        }
+      } catch {}
       return null;
     }
     try {
@@ -234,30 +254,33 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
     return { fd, close: () => { try { closeSync(fd); } catch {} } };
   }
 
-  // Manager start lock: guards two parallel `start` invocations. A holder is
-  // taken over ONLY when its pid is verifiably dead (or the record is
-  // corrupt) — never by wall-clock age, so a slow-but-live start cannot be
-  // raced by a second invocation. Release deletes the file only when the
-  // on-disk nonce still matches our own acquisition (ZAK-007).
+  // Manager start lock: guards two parallel `start` invocations. AUD-001:
+  // no automatic stale takeover — an unconditional unlink after a stale
+  // observation lets two contenders delete each other's fresh locks and both
+  // believe they own the lock. A live holder blocks; a stale/unreadable lock
+  // must be removed manually (the error names the path). Release deletes the
+  // file only when the on-disk nonce still matches our own acquisition.
   let startLockNonce = null;
   function acquireStartLock() {
     mkdirSync(LOG_DIR, { recursive: true });
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const nonce = randomBytes(8).toString("hex");
-      try {
-        writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce }), { flag: "wx" });
-        startLockNonce = nonce;
-        return;
-      } catch (err) {
-        if (err.code !== "EEXIST") throw err;
-        let holder = null;
-        try { holder = JSON.parse(readFileSync(LOCK_FILE, "utf8")); } catch {}
-        const stale = !holder || typeof holder.pid !== "number" || !pidAlive(holder.pid);
-        if (!stale) throw new Error(`another manager start is in progress (pid ${holder.pid}). If that is wrong (e.g. pid reuse), remove ${LOCK_FILE}`);
-        try { unlinkSync(LOCK_FILE); } catch {}
+    const nonce = randomBytes(8).toString("hex");
+    try {
+      writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce }), { flag: "wx" });
+      startLockNonce = nonce;
+      return;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      let holder = null;
+      try { holder = JSON.parse(readFileSync(LOCK_FILE, "utf8")); } catch {}
+      if (holder && typeof holder.pid === "number" && pidAlive(holder.pid)) {
+        throw new Error(`another manager start is in progress (pid ${holder.pid}, started ${holder.startedAt}). If that is wrong (e.g. pid reuse), remove ${LOCK_FILE}`);
       }
+      throw new Error(
+        `stale or unreadable manager start lock at ${LOCK_FILE}` +
+          (holder ? ` (holder pid ${holder.pid} is not alive, started ${holder.startedAt})` : "") +
+          ` — refusing automatic takeover. If no start is actually running, remove ${LOCK_FILE} manually and retry.`,
+      );
     }
-    throw new Error("could not acquire manager start lock");
   }
 
   function releaseStartLock() {

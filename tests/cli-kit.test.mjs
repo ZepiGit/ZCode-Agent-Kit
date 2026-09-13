@@ -72,6 +72,65 @@ test("setTopLevelKey inserts a missing key with correct commas", () => {
   assert.deepEqual(parseJsonc(setTopLevelKey(empty, "k", {})), { k: {} });
 });
 
+// AUD-002 regression: an existing top-level key must be REPLACED (exactly
+// one occurrence, byte-idempotent on re-run) — the old scanner was
+// unreachable for the first quote of every key and always re-inserted.
+test("setTopLevelKey replaces an existing key and is byte-idempotent", () => {
+  const input = `{
+  // user comment
+  "provider": {
+    "user-provider": { "name": "keep me" }
+  }
+}
+`;
+  const wanted = {
+    "user-provider": { name: "keep me" },
+    zcode: {
+      name: "ZCode (local proxy)",
+      options: { baseURL: "http://127.0.0.1:8457/v1", apiKey: "{env:ZCODE_PROXY_KEY}" },
+    },
+  };
+  const once = setTopLevelKey(input, "provider", wanted);
+  const twice = setTopLevelKey(once, "provider", wanted);
+  assert.equal((twice.match(/"provider"\s*:/g) ?? []).length, 1, "never creates duplicate top-level keys");
+  assert.equal(twice, once, "second application is byte-identical");
+  const doc = parseJsonc(twice);
+  assert.equal(doc.provider["user-provider"].name, "keep me", "sibling entries survive");
+  assert.equal(doc.provider.zcode.name, "ZCode (local proxy)");
+  assert.match(twice, /\/\/ user comment/, "comments outside the replaced subtree survive");
+});
+
+// AUD-003 regression: a foreign provider.zcode (no kit signature) must be a
+// hard conflict — refused byte-identically, never overwritten.
+test("opencode adapter refuses a foreign provider.zcode byte-identically", async () => {
+  const home = fakeHome("opencode-foreign");
+  const prevAppData = process.env.APPDATA;
+  process.env.APPDATA = join(home, "AppData", "Roaming");
+  try {
+    const { configPath } = await import("../cli/adapters/opencode.mjs");
+    const cfgFile = configPath(home);
+    mkdirSync(dirname(cfgFile), { recursive: true });
+    const original = `{
+  // belongs to the user
+  "provider": {
+    "zcode": {
+      "name": "Corporate gateway",
+      "options": {
+        "baseURL": "https://corp.example/v1",
+        "apiKey": "{env:CORP_KEY}"
+      }
+    }
+  }
+}
+`;
+    writeFileSync(cfgFile, original);
+    await assert.rejects(() => runAdapter("opencode", home), /does not own|not match the kit signature/i);
+    assert.equal(readFileSync(cfgFile, "utf8"), original, "nothing written on conflict");
+  } finally {
+    if (prevAppData === undefined) delete process.env.APPDATA; else process.env.APPDATA = prevAppData;
+  }
+});
+
 // ------------------------------------------------------------ adapters
 async function runAdapter(id, home, { setupHome } = {}) {
   setupHome?.(home);

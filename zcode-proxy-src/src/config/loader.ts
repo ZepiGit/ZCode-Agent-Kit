@@ -395,14 +395,18 @@ function validate(config: ProxyConfig): void {
   // ZAK-002: loopback binding is a startup invariant, not a template default.
   // Reject non-loopback hosts (including 0.0.0.0/:: and DNS names) so an
   // account-backed proxy can never end up reachable from other interfaces.
-  const host = (config.server.host ?? "").trim().toLowerCase();
-  const loopbackOk = host === "127.0.0.1" || host === "::1" || host === "localhost" || host === "[::1]";
+  // AUD-011: normalize the bracketed IPv6 literal — Node's server.listen
+  // expects "::1", not "[::1]".
+  const rawHost = (config.server.host ?? "").trim().toLowerCase();
+  const host = rawHost === "[::1]" ? "::1" : rawHost;
+  const loopbackOk = host === "127.0.0.1" || host === "::1" || host === "localhost";
   if (!loopbackOk) {
     throw new Error(
       `server.host "${config.server.host}" is not a loopback address — the proxy refuses to bind ` +
         `anything except 127.0.0.1 / ::1 / localhost (it fronts a personal, account-backed credential)`,
     );
   }
+  config.server.host = host;
 
   if (!config.models.includes(config.defaultModel)) {
     // defaultModel not in the models list — add it automatically

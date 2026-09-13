@@ -103,16 +103,55 @@ test("a deleted-after-transaction target is restored from backup", () => {
   assert.equal(readFileSync(file, "utf8"), "keep: me\n");
 });
 
-test("parallel setups are locked out; dead holders are taken over", () => {
+// AUD-004: the write-ahead journal makes a crash between rename and finish()
+// discoverable — the in-progress transaction restores the recorded pre-state.
+test("crash after rename is recoverable from the in-progress journal", () => {
+  const backupDir = freshDir("journal");
+  const tx = beginTransaction(backupDir, "journal test");
+  const target = join(backupDir, "target.yml");
+  writeFileSync(target, "original\n");
+  tx.touch(target);
+  // simulate the crash: target mutated mid-flight, finish() never ran
+  writeFileSync(target, "mutated mid-flight\n");
+  const r = rollbackTransaction(backupDir, tx.id);
+  assert.equal(r.restored.length, 1, "mutation recovered");
+  assert.equal(readFileSync(target, "utf8"), "original\n", "original restored");
+  assert.equal(existsSync(join(backupDir, `tx-${tx.id}.manifest.in-progress.json`)), false, "journal consumed after recovery");
+});
+
+test("untouched in-progress op is a no-op rollback", () => {
+  const backupDir = freshDir("journal2");
+  const tx = beginTransaction(backupDir, "j2");
+  const target = join(backupDir, "t2.yml");
+  writeFileSync(target, "stable\n");
+  tx.touch(target);
+  // crash BEFORE the rename — the file still matches preHash
+  const r = rollbackTransaction(backupDir, tx.id);
+  assert.equal(r.restored.length, 0, "nothing to recover");
+  assert.equal(readFileSync(target, "utf8"), "stable\n");
+  assert.equal(existsSync(join(backupDir, `tx-${tx.id}.manifest.in-progress.json`)), false);
+});
+
+// AUD-001: no automatic stale takeover — the unconditional unlink after a
+// stale observation lets two contenders delete each other's fresh locks
+// (lost mutual exclusion). Live holders block; stale locks must be removed
+// manually.
+test("parallel setups are locked out; stale locks are refused fail-closed", () => {
   const backupDir = freshDir("lock");
   const lock = acquireLock(backupDir);
   assert.throws(() => acquireLock(backupDir), /another setup is running/);
   releaseLock(lock);
   acquireLock(backupDir); // free again
   releaseLock(lock);
-  // stale lock with a dead holder pid
+  // stale lock with a dead holder pid — no auto-takeover, clear refusal
   writeFileSync(join(backupDir, ".setup-lock"), JSON.stringify({ pid: 999999, startedAt: new Date().toISOString() }));
-  const lock2 = acquireLock(backupDir); // takeover, no throw
+  assert.throws(() => acquireLock(backupDir), /stale.* refusing automatic takeover/s, "dead holder is not taken over");
+  // unreadable lock — same fail-closed path
+  writeFileSync(join(backupDir, ".setup-lock"), "not-json");
+  assert.throws(() => acquireLock(backupDir), /stale or unreadable/);
+  // manual removal re-enables acquisition
+  unlinkSync(join(backupDir, ".setup-lock"));
+  const lock2 = acquireLock(backupDir);
   releaseLock(lock2);
 });
 

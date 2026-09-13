@@ -85,7 +85,14 @@ function main() {
   }
 
   const rootPkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  // AUD-012: the release marker is version-bound — a marker for a different
+  // version must NOT produce a publishable package. prepublishOnly enforces
+  // the same check inside the package at publish time.
   const releaseMarker = existsSync(join(ROOT, "pack", "ALLOW_PUBLISH"));
+  const markerVersions = releaseMarker
+    ? readFileSync(join(ROOT, "pack", "ALLOW_PUBLISH"), "utf8").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    : [];
+  const releaseAuthorized = markerVersions.includes(rootPkg.version);
   const pkg = {
     name: "zcode-agent-kit",
     version: rootPkg.version,
@@ -95,9 +102,9 @@ function main() {
     bin: { "zcode-kit": "cli/zcode-kit.mjs" },
     engines: { node: ">=20" },
     // Fail closed at the package level, not only in CI (ZAK-012): a generated
-    // package stays private unless pack/ALLOW_PUBLISH existed at build time,
-    // and prepublishOnly re-checks the shipped marker right before publishing.
-    private: !releaseMarker,
+    // package stays private unless pack/ALLOW_PUBLISH existed at build time
+    // AND names this exact version.
+    private: !releaseAuthorized,
     scripts: {
       postinstall: "node setup.mjs --postinstall-hint",
       prepublishOnly: "node scripts/verify-release-marker.mjs",

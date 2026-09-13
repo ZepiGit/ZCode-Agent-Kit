@@ -144,13 +144,14 @@ async:
 # Env overrides: ZCODE_CLAIM_ENABLED, ZCODE_CLAIM_AUTO, ZCODE_CLAIM_ORIGIN,
 # ZCODE_CLAIM_POLL_INTERVAL_MS.
 claim:
-  # On by default: the scheduler polls the preview endpoint every 5 min and
+  # Off by default (AUD-013: matches the loader's fail-closed defaults).
+  # `true` = the scheduler polls the preview endpoint every 5 min and
   # idles until a campaign goes live (404 preview = nothing to claim).
   # `false` = CLI-only (`zcode-proxy claim [list|now]` still works).
-  enabled: true
+  enabled: false
   # Auto-claim in the background while serving. `false` = CLI-only
   # (`zcode-proxy claim` still works when `enabled: true`).
-  auto: true
+  auto: false
   origin: "https://zcode.z.ai"
   # Preview poll cadence (5 min default).
   pollIntervalMs: 300000

@@ -3,7 +3,23 @@
 ## Politik-Entscheidungen (nach externem Audit, 2026-09-13)
 
 Ein externes Audit (14 Findings, „ZAK-001" bis „ZAK-014") führte zu diesen
-dokumentierten Entscheidungen und Code-Nachbesserungen:
+dokumentierten Entscheidungen und Code-Nachbesserungen. Ein zweiter,
+adversarialer Audit des remedierten Stands (13 Findings, „AUD-001" bis
+„AUD-013") wurde vollständig umgesetzt: Lock-Takeover jetzt vollständig
+fail-closed (kein automatisches Löschen von Locks — die Unlink-After-Stale-
+Observation-Race ist ohne atomares Compare-and-Delete nicht sicher schließbar),
+`pidAlive` zählt nur ESRCH als tot, JSONC-Top-Level-Key-Scanner repariert
+(Duplikat-Keys bei Re-Runs), OpenCode-Adapter respektiert fremde
+`provider.zcode`-Einträge (Kit-Signatur), Write-ahead-Journal für
+Crash-Konsistenz (in-progress-Transaktionen sind auffindbar und rollbar),
+wx-Staging-Dateien mit Zufallssuffix, MCP-413 sofort beim Limit-Überschreiten
+(slowloris-resistent) plus Content-Length-Vorabprüfung, macOS-Startzeit über
+`ps -o lstart=` (kein /proc), `zcode-kit update` verweigert auf
+Tarball-Installationen mit klarer Meldung, uninstall entfernt die
+claude-MCP-Registrierung selbst, Continue-Adapter lehnt uneditierbare
+`models:`-Formen ab statt Doppel-Keys zu erzeugen, `[::1]` wird kanonisiert,
+Release-Marker ist versionsgebunden, vendored Beispiel-Config auf
+fail-closed-Claim-Defaults.
 
 1. **CAPTCHA-Solver bleibt, Verhalten ist dokumentiert.** Der im vendored
    Proxy enthaltene Solver beantwortet Gateway-Challenge-Seiten genau so wie

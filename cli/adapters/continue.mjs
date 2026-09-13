@@ -65,6 +65,17 @@ function upsertModels(text, ctx) {
     const insertAt = m.index + m[0].length;
     return text.slice(0, insertAt) + "\n" + yamlBlock(ctx) + text.slice(insertAt);
   }
+  // AUD-010: a column-0 `models:` key in another form (inline value like
+  // `models: []`) cannot be safely block-edited here. Appending a second
+  // top-level `models:` would produce a duplicate YAML key — refuse instead.
+  // (Commented-out or indented occurrences are inert and safe to append to.)
+  if (/^models[ \t]*:/m.test(text)) {
+    throw new Error(
+      "continue: config.yaml contains a `models:` key in a form the kit cannot safely edit " +
+      "(inline value or unusual formatting) — refusing to append a duplicate key. " +
+      "Reformat the models section so `models:` stands alone on a line, then re-run.",
+    );
+  }
   const sep = text.trimEnd() === "" ? "" : text.replace(/\s*$/, "").endsWith("---") ? "\n" : "\n";
   return text.replace(/\s*$/, "") + `${sep}models:\n${yamlBlock(ctx)}\n`;
 }

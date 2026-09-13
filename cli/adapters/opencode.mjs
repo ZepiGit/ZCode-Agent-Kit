@@ -32,6 +32,16 @@ function zcodeProvider(ctx) {
   };
 }
 
+/** Kit-signature: proves an existing provider.zcode entry was written by the
+ * kit (this exact provider shape). Anything else is foreign and a conflict. */
+function isKitOwned(p) {
+  return !!p && typeof p === "object" &&
+    p.npm === "@ai-sdk/openai-compatible" &&
+    p.name === "ZCode (local proxy)" &&
+    p.options?.apiKey === "{env:ZCODE_PROXY_KEY}" &&
+    /^http:\/\/127\.0\.0\.1:\d+\/v1$/.test(p.options?.baseURL ?? "");
+}
+
 export default {
   id: "opencode",
   label: "OpenCode",
@@ -55,8 +65,18 @@ export default {
       log("  opencode: zcode provider already current");
       return { changed: false };
     }
-    if (doc.provider && doc.provider.zcode && !before.includes("127.0.0.1")) {
-      log('  opencode: existing "zcode" provider differs — updating kit-owned entry (baseUrl was not the local proxy; review if this was yours)');
+    // AUD-003: fail closed on foreign entries — an existing provider.zcode
+    // that does not match the kit signature is never overwritten (same
+    // ownership model as the pi adapter).
+    if (doc.provider?.zcode && !isKitOwned(doc.provider.zcode)) {
+      throw new Error(
+        `opencode: ${target} already has a "zcode" provider entry that zcode-kit does not own ` +
+        "(does not match the kit signature) — nothing was changed. " +
+        "Rename your entry or adjust it to hand ownership to the kit.",
+      );
+    }
+    if (doc.provider?.zcode) {
+      log("  opencode: updating kit-owned zcode provider entry");
     }
     text = setTopLevelKey(text, "provider", { ...(doc.provider ?? {}), zcode: wanted });
     // Validate the merged document still parses before writing.
