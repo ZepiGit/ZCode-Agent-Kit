@@ -60,6 +60,15 @@ refuses — the desktop app lives on Windows).
   disposable fake homes; their client behavior is NOT claimed live-tested
   (see SUPPORT_MATRIX.json for per-adapter evidence states).
 
+## Fixed after initial v0.2.0 assets (same tag, re-published tarball)
+
+- OMP adapter migration: a machine still carrying the previous-generation
+  `zcode-omp-integration` managed block in `~/.omp/agent/models.yml` made
+  setup abort (duplicate `zcode` map keys, fail-closed, nothing written).
+  The adapter now takes that legacy block over and refuses — still writing
+  nothing — if it finds a hand-written `zcode` entry outside any managed
+  block. Kit suite is 31/31 with two added regression tests.
+
 ## Security model
 
 - Proxy binds 127.0.0.1 only; bearer key generated locally, never committed.

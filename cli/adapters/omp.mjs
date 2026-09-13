@@ -1,15 +1,39 @@
 // Adapter: OMP / Oh My Pi — native provider via ~/.omp/agent/models.yml
-// (additive managed block) + autostart extension registered in config.yml.
-// Migrated from setup.mjs; behavior unchanged (audit fixes included).
+// (managed block) + autostart extension registered in config.yml.
+// Takeover rules: an existing kit block is replaced in place; a legacy
+// zcode-omp-integration managed block is migrated (same pattern, predecessor
+// tool); a hand-written `zcode` entry outside any managed block aborts the
+// adapter fail-closed instead of being overwritten.
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { removeFromDisabledProviders } from "../../lib/config-edit.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 
-const MARKER_BEGIN = "# >>> zcode-kit (managed block) — do not edit inside";
-const MARKER_END = "# <<< zcode-kit";
+const BLOCK_NAME = "zcode-kit";
+const MARKER_BEGIN = `# >>> ${BLOCK_NAME} (managed block) — do not edit inside`;
+const MARKER_END = `# <<< ${BLOCK_NAME}`;
+// Previous-generation integration (zcode-omp-integration) used the same
+// managed-block pattern; its block is taken over on setup instead of
+// duplicated next to it.
+const LEGACY_BLOCK_NAME = "zcode-omp-integration";
 const EXT_ENTRY_NAME = "zcode-proxy-autostart.ts";
+
+function removeManagedBlock(text, name) {
+  const BEGIN = `# >>> ${name} (managed block)`;
+  const END = `# <<< ${name}`;
+  let out = text;
+  for (let removed = 0; ; removed++) {
+    const begin = out.indexOf(BEGIN);
+    if (begin === -1) return out;
+    if (removed >= 8) throw new Error(`models.yml: more than 8 "${name}" managed blocks — refusing to edit`);
+    const end = out.indexOf(END, begin);
+    if (end === -1) throw new Error(`managed block "${name}": begin marker without end marker`);
+    let cutEnd = end + END.length;
+    if (out[cutEnd] === "\n") cutEnd += 1;
+    out = out.slice(0, begin) + out.slice(cutEnd);
+  }
+}
 
 export function yamlSingleQuoted(s) {
   return `'${s.replace(/'/g, "''")}'`;
@@ -111,17 +135,20 @@ export default {
 
     const models = readFileSync(modelsYml, "utf8");
     let newModels = models;
-    const begin = newModels.indexOf(MARKER_BEGIN);
-    if (begin !== -1) {
-      const end = newModels.indexOf(MARKER_END, begin);
-      if (end === -1) throw new Error("managed block begin without end marker");
-      let cutEnd = end + MARKER_END.length;
-      if (newModels[cutEnd] === "\n") cutEnd += 1;
-      newModels = newModels.slice(0, begin) + newModels.slice(cutEnd);
-    }
+    newModels = removeManagedBlock(newModels, BLOCK_NAME);
+    newModels = removeManagedBlock(newModels, LEGACY_BLOCK_NAME);
     const m = newModels.match(/^providers:\s*$/m);
     if (!m || m.index === undefined) throw new Error("top-level `providers:` key not found in models.yml");
     const insertAt = m.index + m[0].length;
+    const rest = newModels.slice(insertAt);
+    const nextTop = rest.search(/^\S/m);
+    const providersRegion = nextTop === -1 ? rest : rest.slice(0, nextTop);
+    if (/^  zcode:(?:\s.*)?$/m.test(providersRegion)) {
+      throw new Error(
+        "models.yml already has a hand-written `zcode` provider entry outside any managed block — " +
+          "merge or rename it manually; nothing was changed (zcode-kit does not overwrite hand-written entries)",
+      );
+    }
     newModels = newModels.slice(0, insertAt) + "\n" + ompProviderBlock(ctx, port) + newModels.slice(insertAt);
     validateYaml(ctx, newModels, "models.yml (staged)");
 

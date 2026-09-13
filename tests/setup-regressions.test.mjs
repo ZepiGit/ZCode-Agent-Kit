@@ -115,3 +115,83 @@ test("yamlSingleQuoted escapes apostrophes (paths with quotes cannot break YAML)
   assert.equal(yamlSingleQuoted("C:/Users/o'brien/kit/x.mjs"), "'C:/Users/o''brien/kit/x.mjs'");
   assert.equal(yamlSingleQuoted("C:/plain/path.mjs"), "'C:/plain/path.mjs'");
 });
+
+// Models the real-world migration case: a machine with the previous-generation
+// integration's managed block already in models.yml. The kit must take that
+// block over (exactly one zcode provider afterwards), not insert a duplicate
+// (duplicate map keys made setup abort fail-closed in v0.2.0).
+test("omp adapter takes over legacy zcode-omp-integration managed block", () => {
+  const home = join(TMP, `home-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const agent = join(home, ".omp", "agent");
+  mkdirSync(agent, { recursive: true });
+  writeFileSync(
+    join(agent, "models.yml"),
+    [
+      "# user models",
+      "providers:",
+      "",
+      "# >>> zcode-omp-integration (managed block) — do not edit inside",
+      "# Provider ZCode — GLM-5.3 / GLM-5.3-Flash via the local zcode-proxy",
+      "# zcode-omp-integration/EFFORT_MAPPING.md.",
+      "  zcode:",
+      "    name: ZCode",
+      "    baseUrl: http://127.0.0.1:8457",
+      "    api: anthropic-messages",
+      "    apiKey: !node 'C:/Users/someone/zcode-omp-integration/proxy/resolve-zcode-proxy-key.mjs'",
+      "    models:",
+      "      - id: glm-5.3",
+      "        name: GLM-5.3",
+      "# <<< zcode-omp-integration",
+      "  LiteLLMFree:",
+      "    name: LiteLLM",
+      "",
+    ].join("\n"),
+  );
+  const modelsYml = join(agent, "models.yml");
+
+  const out1 = runSetup(home);
+  assert.match(out1, /models\.yml updated/);
+  const models1 = readFileSync(modelsYml, "utf8");
+  assert.doesNotMatch(models1, /zcode-omp-integration/, "legacy markers and content gone");
+  assert.match(models1, /# >>> zcode-kit \(managed block\)/, "kit block present");
+  assert.equal((models1.match(/^  zcode:$/gm) ?? []).length, 1, "exactly one zcode provider entry");
+  assert.match(models1, /LiteLLMFree:/, "unrelated provider preserved");
+  assert.match(models1, /apiKey: !node '/, "kit resolver in place (old root path gone)");
+
+  // second run: byte-identical, no new transaction
+  const sha1 = sha(modelsYml);
+  const out2 = runSetup(home);
+  assert.match(out2, /already up to date/);
+  assert.equal(sha(modelsYml), sha1, "re-run changes nothing");
+});
+
+// A `zcode` entry nobody managed (hand-written, no markers) must not be
+// overwritten and must not be duplicated — the adapter aborts, nothing written.
+test("omp adapter fails closed on hand-written zcode entry outside managed blocks", () => {
+  const home = join(TMP, `home-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const agent = join(home, ".omp", "agent");
+  mkdirSync(agent, { recursive: true });
+  writeFileSync(
+    join(agent, "models.yml"),
+    [
+      "providers:",
+      "  zcode:",
+      "    name: My own zcode",
+      "    baseUrl: http://127.0.0.1:9999",
+      "  Other:",
+      "    name: Other",
+      "",
+    ].join("\n"),
+  );
+  const modelsYml = join(agent, "models.yml");
+  const before = readFileSync(modelsYml, "utf8");
+
+  try {
+    runSetup(home);
+    assert.fail("setup should have failed");
+  } catch (err) {
+    const out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    assert.match(out, /outside any managed block/);
+  }
+  assert.equal(readFileSync(modelsYml, "utf8"), before, "nothing written on refusal");
+});
