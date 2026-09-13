@@ -31,9 +31,17 @@ NODE_MAJOR=$(node --version | sed 's/^v\([0-9]*\)\..*/\1/')
 if ! command -v bun >/dev/null 2>&1; then
   echo "bun not found — installing user-local, pinned bun v1.4.2 ..."
   BUN_DIR="$HOME/.bun"
-  curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64.zip -o /tmp/bun.zip 2>/dev/null || \
-    curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-x64.zip -o /tmp/bun.zip
-  # (Release checklist: verify against the published checksum before unzip.)
+  # SHA256 of the bun-v1.4.2 release artifacts (upstream).
+  BUN_LINUX_SHA256="36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913"
+  BUN_DARWIN_SHA256="80520d7e17526308c9185d261679ac6d27798d3803a0e9f7ff9121ab8affb012"
+  case "$(uname -s)" in
+    Linux) BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64.zip"; BUN_SHA="$BUN_LINUX_SHA256" ;;
+    Darwin) BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-x64.zip"; BUN_SHA="$BUN_DARWIN_SHA256" ;;
+  esac
+  curl -fsSL "$BUN_URL" -o /tmp/bun.zip
+  sha256_bin() { sha256sum "$1" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$1" | awk '{print $1}'; }
+  ACTUAL=$(sha256_bin /tmp/bun.zip)
+  [ "$ACTUAL" = "$BUN_SHA" ] || { echo "ERROR: bun download hash mismatch\n  expected $BUN_SHA\n  actual   $ACTUAL"; exit 1; }
   unzip -o -q /tmp/bun.zip -d "$BUN_DIR"
   export PATH="$BUN_DIR/bun-linux-x64:$BUN_DIR/bun-darwin-x64:$PATH"
 fi

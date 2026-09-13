@@ -1,6 +1,6 @@
-# zcode-agent-kit installer (Windows).
+﻿# zcode-agent-kit installer (Windows).
 #
-# One-command install (once a release tag exists — see docs/RELEASE_CHECKLIST.md):
+# One-command install (once a release tag exists -- see docs/RELEASE_CHECKLIST.md):
 #   irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
 #
 # Security notes (stated honestly):
@@ -11,6 +11,9 @@
 #   channel (repo commit history / signed tag) if you need provenance.
 # - Requires node >= 20 and bun. Offers a user-local, pinned bun install if
 #   bun is missing. No admin rights needed; nothing global is modified.
+#
+# NOTE: this file is intentionally ASCII-only (Windows PowerShell 5.1 parses
+# BOM-less UTF-8 as ANSI and smart-byte punctuation corrupts string parsing).
 param(
   [string]$Version = "v0.2.0",
   [string]$InstallDir = ""
@@ -42,17 +45,19 @@ if (-not (Test-Node)) {
   Write-Error "node >= 20 is required but not found on PATH. Install from https://nodejs.org and re-run."
 }
 if (-not (Test-Bun)) {
-  Write-Host "bun not found — installing user-local, pinned bun v1.4.2 ..."
+  Write-Host "bun not found - installing user-local, pinned bun v1.4.2 ..."
   $bunZip = Join-Path $env:TEMP "bun-1.4.2.zip"
-  $bunSha = "BUN_SHA256_TO_FILL_AT_RELEASE" # release checklist: embed real hash
+  # SHA256 of bun-v1.4.2 bun-windows-x64.zip (upstream release artifact).
+  $bunSha = "ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405"
   Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip" -OutFile $bunZip
   $actual = (Get-FileHash $bunZip -Algorithm SHA256).Hash.ToLower()
-  if ($bunSha -notlike "BUN_SHA256*" -and $actual -ne $bunSha) {
-    Write-Error "bun download hash mismatch ($actual) — aborting."
+  if ($actual -ne $bunSha) {
+    Write-Error "bun download hash mismatch:`n  expected $bunSha`n  actual   $actual`nAborting."
   }
   Expand-Archive -Path $bunZip -DestinationPath (Join-Path $env:LOCALAPPDATA "bun") -Force
-  $env:PATH = (Join-Path $env:LOCALAPPDATA "bun", "bun-windows-x64") + ";" + $env:PATH
-  if (-not (Test-Bun)) { Write-Error "bun installed but not runnable — add it to PATH and re-run." }
+  $bunBin = Join-Path (Join-Path $env:LOCALAPPDATA "bun") "bun-windows-x64"
+  $env:PATH = "$bunBin;$env:PATH"
+  if (-not (Test-Bun)) { Write-Error "bun installed but not runnable - add it to PATH and re-run." }
 }
 
 # --- download + verify -------------------------------------------------------
@@ -64,7 +69,7 @@ try {
   Invoke-WebRequest -Uri "$BaseUrl/checksums.txt" -OutFile $checksums
 
   $expected = (Select-String -Path $checksums -Pattern ([regex]::Escape($Tarball))).Line -split "\s+" | Select-Object -First 1
-  if (-not $expected) { Write-Error "checksums.txt does not contain $Tarball — aborting." }
+  if (-not $expected) { Write-Error "checksums.txt does not contain $Tarball - aborting." }
   $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
   if ($actual -ne $expected.ToLower()) {
     Write-Error "release archive hash mismatch:`n  expected $expected`n  actual   $actual`nAborting."
@@ -74,11 +79,11 @@ try {
   # Safe extraction: tar with explicit top-level prefix validation.
   tar -xzf $archive -C $tmp.FullName
   $extracted = Get-ChildItem $tmp.FullName -Directory | Where-Object { $_.Name -like "zcode-agent-kit*" } | Select-Object -First 1
-  if (-not $extracted) { Write-Error "unexpected archive layout — aborting." }
+  if (-not $extracted) { Write-Error "unexpected archive layout - aborting." }
 
   # --- install ---------------------------------------------------------------
   if (Test-Path $InstallDir) {
-    Write-Host "existing install found — updating in place (config and .proxykey are preserved)"
+    Write-Host "existing install found - updating in place (config and .proxykey are preserved)"
     robocopy $extracted.FullName $InstallDir /MIR /XF .proxykey /XD node_modules backups logs generated /NFL /NDL /NJH /NJS | Out-Null
   } else {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -89,7 +94,7 @@ try {
   Push-Location $InstallDir
   try {
     node cli/zcode-kit.mjs setup --harness auto
-    if ($LASTEXITCODE -ne 0) { Write-Error "setup failed (exit $LASTEXITCODE) — see output above" }
+    if ($LASTEXITCODE -ne 0) { Write-Error "setup failed (exit $LASTEXITCODE) - see output above" }
   } finally {
     Pop-Location
   }
