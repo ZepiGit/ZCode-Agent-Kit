@@ -24,7 +24,7 @@ context), verified reasoning efforts **low / high / max** (default max).
 
 ## Quickstart
 
-**Windows (PowerShell)** — pinned installer, SHA256-verified, no admin rights:
+**Windows (PowerShell)**
 
 ```powershell
 irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
