@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "zcode-harness": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\<you>\\zcode-harness-mcp\\dist\\index.js",
+        "--stdio",
+        "--read-only",
+        "--allow-workspace", "C:\\Users\\<you>\\Projects",
+        "--interaction-policy", "ask",
+        "--interaction-timeout-sec", "300"
+      ]
+    }
+  }
+}

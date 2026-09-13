@@ -1,0 +1,64 @@
+{
+  "$comment": "Effort mapping for the OMP provider 'zcode' (GLM-5.3 / GLM-5.3-Flash) via local zcode-proxy v4.6.4 (commit 9a5cebe) to the ZCode start-plan gateway. Verified live on 2026-09-12/13.",
+  "provider": {
+    "id": "zcode",
+    "displayName": "ZCode",
+    "ompApi": "anthropic-messages",
+    "localProxy": "http://127.0.0.1:8457/v1/messages",
+    "upstream": "https://zcode.z.ai/api/v1/zcode-plan (Bearer start-plan JWT)",
+    "access": "zcode start-plan (same account/quota as the ZCode desktop app)"
+  },
+  "models": {
+    "glm-5.3": {
+      "thinkingMode": "anthropic-budget-effort",
+      "efforts": ["low", "high", "max"],
+      "defaultLevel": "max",
+      "requiresEffort": true,
+      "input": ["text"],
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    },
+    "glm-5.3-flash": {
+      "thinkingMode": "anthropic-budget-effort",
+      "efforts": ["low", "high", "max"],
+      "defaultLevel": "max",
+      "requiresEffort": true,
+      "input": ["text", "image"],
+      "contextWindow": 1000000,
+      "maxTokens": 131072
+    }
+  },
+  "effortWireMapping": {
+    "transport": "anthropic-messages (OMP -> proxy passthrough -> gateway)",
+    "fieldEffort": "output_config.effort",
+    "fieldThinking": "thinking.type=enabled + thinking.budget_tokens",
+    "levels": {
+      "low": { "ompEffort": "low", "budgetTokens": 2048 },
+      "high": { "ompEffort": "high", "budgetTokens": 16384 },
+      "max": { "ompEffort": "max", "budgetTokens": 32768 }
+    },
+    "budgetOwner": "OMP (anthropic-budget-effort mode; proxy leaves anthropic bodies untouched except mandated start-plan system blocks + cache_control)",
+    "budgetSource": "OMP built-in per-level thinking budget table (Rne: low 4096/high 16384/max 32768 observed as 2048/16384/32768 on the wire for this model class)",
+    "deviationNote": "The ZCode desktop bundle (per TriDefender/zcode-api reasoning.ts) pairs effort low/high/max with budgets 8000/16000/32000. OMP is the single budget owner on the anthropic passthrough path; its paired budgets are monotonic, distinct and above the gateway floor (1024). Deviation documented, accepted; upstream accepted all three levels (HTTP 200)."
+  },
+  "normalizationRules": {
+    "off": "normalized by OMP to the lowest supported level (low) with thinking still enabled — GLM-5.3 cannot disable reasoning (vendor docs); never displays 'off' while reasoning continues: OMP records/normalizes the level before display",
+    "none": "same as off",
+    "minimal": "normalized down to low",
+    "medium": "normalized down to low",
+    "xhigh": "normalized down to high (verified on the wire: budget 16384)",
+    "unknown": "rejected by OMP for models with declared efforts (error: 'Thinking effort X is not supported by zcode/glm-5.3...')"
+  },
+  "verification": {
+    "date": "2026-09-12/13",
+    "method": "local mock upstream capture of OMP wire payloads (all levels) + zcode-proxy ZCODE_DUMP_UPSTREAM capture of the final upstream request (flash low/high/max) + live HTTP 200 responses",
+    "evidenceFiles": [
+      "tests/mock-requests.jsonl (OMP wire payloads per level)",
+      "logs/upstream-dump.jsonl (final upstream bodies with output_config.effort + thinking.budget_tokens)"
+    ],
+    "status": {
+      "glm-5.3-flash": "live tested (low/high/max, HTTP 200 + content)",
+      "glm-5.3": "wire fields verified at the proxy boundary; live completion pending quota reset (daily GLM-5.3 bucket was 0/3,000,000 tokens at test time, resets 2026-09-13T15:59:59Z). Run tests/verify-glm53.mjs after reset."
+    }
+  }
+}

@@ -1,0 +1,503 @@
+/**
+ * Integration tests — end-to-end proxy tests with mock upstream.
+ * @see .omo/plans/zcode-proxy.md Task 13
+ */
+import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadConfig } from "./config/loader.js";
+import { AuthManager } from "./auth/manager.js";
+import { startServer, type ProxyServer } from "./server/server.js";
+
+let proxyServer: ProxyServer;
+let mockUpstreamServer: ReturnType<typeof Bun.serve>;
+let proxyPort: number;
+let mockPort: number;
+let capturedUpstreamBodies: string[] = [];
+
+function findFreePort(): number {
+  return 18000 + Math.floor(Math.random() * 1000);
+}
+
+// The former config.test.yaml fixture (removed in f6aa147) inlined as a temp
+// file so the suite stays self-contained.
+let configDir: string;
+
+function writeTestConfig(): string {
+  configDir = mkdtempSync(join(tmpdir(), "zcode-int-"));
+  const yaml = [
+    "server:",
+    '  port: 19090',
+    '  host: "127.0.0.1"',
+    "auth:",
+    '  proxyApiKey: "test-proxy-key"',
+    "provider: zai",
+    "defaultModel: glm-4.6",
+    "models:",
+    "  - glm-4.6",
+    "logging:",
+    "  level: info",
+    "",
+  ].join("\n");
+  const path = join(configDir, "config.test.yaml");
+  writeFileSync(path, yaml);
+  return path;
+}
+
+beforeAll(async () => {
+  mockPort = findFreePort();
+  proxyPort = findFreePort();
+
+  mockUpstreamServer = Bun.serve({
+    port: mockPort,
+    hostname: "127.0.0.1",
+    async fetch(req) {
+      const url = new URL(req.url);
+      const rawBody = await req.text();
+      let parsed: { stream?: boolean; model?: string } = {};
+      try { parsed = JSON.parse(rawBody); } catch {}
+
+      if (url.pathname.includes("/v1/messages")) {
+        capturedUpstreamBodies.push(rawBody);
+        let hasToolResult = false;
+        let hasToolsDefined = false;
+        try {
+          const parsedAny = JSON.parse(rawBody) as {
+            messages?: Array<{ content?: unknown }>;
+            tools?: unknown[];
+          };
+          hasToolResult = (parsedAny.messages ?? []).some(
+            (m) => Array.isArray(m.content) && m.content.some((b: any) => b?.type === "tool_result"),
+          );
+          hasToolsDefined = (parsedAny.tools?.length ?? 0) > 0;
+        } catch {}
+
+        if (hasToolResult) {
+          return new Response(JSON.stringify({
+            id: "msg_after_tool",
+            type: "message",
+            role: "assistant",
+            content: [{ type: "text", text: "Tool result acknowledged" }],
+            model: "glm-4.6",
+            stop_reason: "end_turn",
+            stop_sequence: null,
+            usage: { input_tokens: 25, output_tokens: 4 },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+
+        if (hasToolsDefined && !parsed.stream) {
+          return new Response(JSON.stringify({
+            id: "msg_tool_call",
+            type: "message",
+            role: "assistant",
+            content: [
+              { type: "text", text: "Calling tool." },
+              { type: "tool_use", id: "toolu_http_1", name: "get_weather", input: { city: "SF" } },
+            ],
+            model: "glm-4.6",
+            stop_reason: "tool_use",
+            stop_sequence: null,
+            usage: { input_tokens: 15, output_tokens: 12 },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+
+        if (parsed.stream) {
+          const sse = [
+            'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_int","model":"glm-4.6","usage":{"input_tokens":33,"output_tokens":1}}}\n\n',
+            'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Integration stream"}}\n\n',
+            'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}\n\n',
+            'event: message_stop\ndata: {"type":"message_stop"}\n\n',
+          ].join("");
+          return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }
+        return new Response(JSON.stringify({
+          id: "msg_int_test",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "text", text: "Integration test response" }],
+          model: "glm-4.6",
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: { input_tokens: 10, output_tokens: 8 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      if (url.pathname.includes("/chat/completions")) {
+        capturedUpstreamBodies.push(rawBody);
+        let hasToolResult = false;
+        let hasToolsDefined = false;
+        try {
+          const parsedAny = JSON.parse(rawBody) as {
+            messages?: Array<{ role?: string }>;
+            tools?: unknown[];
+          };
+          hasToolResult = (parsedAny.messages ?? []).some((m) => m.role === "tool");
+          hasToolsDefined = (parsedAny.tools?.length ?? 0) > 0;
+        } catch {}
+
+        if (hasToolResult) {
+          return new Response(JSON.stringify({
+            id: "chatcmpl-after-tool",
+            object: "chat.completion",
+            created: Date.now(),
+            model: "glm-4.6",
+            choices: [{
+              index: 0,
+              message: { role: "assistant", content: "Tool result acknowledged" },
+              finish_reason: "stop",
+            }],
+            usage: { prompt_tokens: 25, completion_tokens: 4, total_tokens: 29 },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+
+        if (hasToolsDefined && !parsed.stream) {
+          return new Response(JSON.stringify({
+            id: "chatcmpl-tool-call",
+            object: "chat.completion",
+            created: Date.now(),
+            model: "glm-4.6",
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Calling tool.",
+                tool_calls: [{
+                  id: "call_http_1",
+                  type: "function",
+                  function: { name: "get_weather", arguments: "{\"city\":\"SF\"}" },
+                }],
+              },
+              finish_reason: "tool_calls",
+            }],
+            usage: { prompt_tokens: 15, completion_tokens: 12, total_tokens: 27 },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+
+        if (parsed.stream) {
+          const sse = [
+            'data: {"id":"chatcmpl-int-stream","object":"chat.completion.chunk","created":1,"model":"glm-4.6","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}',
+            '',
+            'data: {"id":"chatcmpl-int-stream","object":"chat.completion.chunk","created":1,"model":"glm-4.6","choices":[{"index":0,"delta":{"content":"Integration stream"},"finish_reason":null}]}',
+            '',
+            'data: {"id":"chatcmpl-int-stream","object":"chat.completion.chunk","created":1,"model":"glm-4.6","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+            '',
+            'data: {"id":"chatcmpl-int-stream","object":"chat.completion.chunk","created":1,"model":"glm-4.6","choices":[],"usage":{"prompt_tokens":33,"completion_tokens":4,"total_tokens":37}}',
+            '',
+            'data: [DONE]',
+            '',
+          ].join("\n");
+          return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }
+
+        return new Response(JSON.stringify({
+          id: "chatcmpl-int-test",
+          object: "chat.completion",
+          created: Date.now(),
+          model: "glm-4.6",
+          choices: [{
+            index: 0,
+            message: { role: "assistant", content: "OpenAI integration response" },
+            finish_reason: "stop",
+          }],
+          usage: { prompt_tokens: 12, completion_tokens: 6, total_tokens: 18 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+
+      return new Response("not found", { status: 404 });
+    },
+  });
+
+  const config = loadConfig(writeTestConfig());
+  config.server.port = proxyPort;
+  config.server.host = "127.0.0.1";
+  config.auth.proxyApiKey = "integration-test-key";
+  config.providers.zai.anthropicBase = `http://127.0.0.1:${mockPort}/anthropic`;
+  config.providers.zai.openaiBase = `http://127.0.0.1:${mockPort}/coding`;
+
+  const auth = new AuthManager();
+  auth.setOAuthCredential({ apiKey: "integrationTestKey", secret: "integrationTestSecret", provider: "zai" });
+
+  proxyServer = await startServer({ config, auth });
+});
+
+afterAll(() => {
+  // Use stop(false) (not stop(true)) — stop(true) calls process.exit(0) which
+  // terminates test discovery early and masks failures in other test files.
+  proxyServer?.stop(false);
+  mockUpstreamServer?.stop(false);
+  if (configDir) rmSync(configDir, { recursive: true, force: true });
+});
+
+function proxyUrl(path: string): string {
+  return `http://127.0.0.1:${proxyPort}${path}`;
+}
+function authHeader(): Record<string, string> {
+  return { "Authorization": "Bearer integration-test-key", "Content-Type": "application/json" };
+}
+
+describe("integration: OpenAI clients (translated Anthropic upstream)", () => {
+  it("POST /v1/chat/completions returns 200 with a translated OpenAI response", async () => {
+    const resp = await fetch(proxyUrl("/v1/chat/completions"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        messages: [{ role: "user", content: "Hello" }],
+      }),
+    });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.object).toBe("chat.completion");
+    expect(body.choices[0].message.content).toBe("Integration test response");
+    expect(body.model).toBe("glm-4.6");
+  });
+
+  it("gzips the translated response when the client advertises gzip", async () => {
+    const resp = await fetch(proxyUrl("/v1/chat/completions"), {
+      method: "POST",
+      headers: { ...authHeader(), "accept-encoding": "gzip" },
+      body: JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: "Hi" }] }),
+    });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("content-encoding")).toBe("gzip");
+    const body = await resp.json();
+    expect(body.object).toBe("chat.completion");
+    expect(body.choices[0].message.content).toBe("Integration test response");
+  });
+});
+
+describe("integration: OpenAI streaming passthrough", () => {
+  it("passes OpenAI-compatible SSE chunks through", async () => {
+    const resp = await fetch(proxyUrl("/v1/chat/completions"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        messages: [{ role: "user", content: "Stream test" }],
+        stream: true,
+      }),
+    });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("content-type")).toBe("text/event-stream");
+    const text = await resp.text();
+    expect(text).toContain("chat.completion.chunk");
+    expect(text).toContain("Integration stream");
+    expect(text).toContain("data: [DONE]");
+  });
+});
+
+describe("integration: Anthropic streaming usage", () => {
+  it("passes upstream usage through verbatim (input_tokens on message_start)", async () => {
+    const resp = await fetch(proxyUrl("/v1/messages"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        max_tokens: 100,
+        stream: true,
+        messages: [{ role: "user", content: "Stream test" }],
+      }),
+    });
+    expect(resp.status).toBe(200);
+    const text = await resp.text();
+
+    // passthrough: the upstream's message_start usage (input_tokens 33) and
+    // message_delta usage (output_tokens 4) must arrive unmodified
+    const startLine = text.split("\n").find((l) => l.startsWith("data: ") && l.includes('"message_start"'));
+    expect(startLine).toBeDefined();
+    const start = JSON.parse(startLine!.slice(6));
+    expect(start.message.usage.input_tokens).toBe(33);
+
+    const deltaLine = text.split("\n").find((l) => l.startsWith("data: ") && l.includes('"message_delta"'));
+    expect(deltaLine).toBeDefined();
+    const delta = JSON.parse(deltaLine!.slice(6));
+    expect(delta.usage.output_tokens).toBe(4);
+    expect(text).toContain("event: message_stop");
+  });
+});
+
+describe("integration: OpenAI tool-call roundtrip (HTTP layer)", () => {
+  it("returns OpenAI tool_calls on turn 1, accepts tool results on turn 2, upstream receives Anthropic shape", async () => {
+    const tools = [{ type: "function", function: { name: "get_weather", parameters: { type: "object", properties: { city: { type: "string" } } } } }];
+
+    const resp1 = await fetch(proxyUrl("/v1/chat/completions"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        messages: [{ role: "user", content: "weather in SF?" }],
+        tools,
+        tool_choice: "auto",
+      }),
+    });
+    expect(resp1.status).toBe(200);
+    const body1 = await resp1.json();
+    expect(body1.choices[0].finish_reason).toBe("tool_calls");
+    const toolCall = body1.choices[0].message.tool_calls?.[0];
+    expect(toolCall).toBeDefined();
+    expect(toolCall.id).toBe("toolu_http_1");
+    expect(toolCall.function.name).toBe("get_weather");
+    expect(JSON.parse(toolCall.function.arguments)).toEqual({ city: "SF" });
+
+    const resp2 = await fetch(proxyUrl("/v1/chat/completions"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        messages: [
+          { role: "user", content: "weather in SF?" },
+          { role: "assistant", content: null, tool_calls: [toolCall] },
+          { role: "tool", tool_call_id: toolCall.id, content: "62°F" },
+        ],
+        tools,
+      }),
+    });
+    expect(resp2.status).toBe(200);
+    const body2 = await resp2.json();
+    expect(body2.choices[0].finish_reason).toBe("stop");
+    expect(body2.choices[0].message.content).toBe("Tool result acknowledged");
+
+    const toolResultBody = capturedUpstreamBodies
+      .map((b) => JSON.parse(b))
+      .filter((b) => (b.messages ?? []).some(
+        (m: any) => Array.isArray(m.content) && m.content.some((blk: any) => blk?.type === "tool_result" && blk?.tool_use_id === "toolu_http_1"),
+      ));
+    expect(toolResultBody.length).toBeGreaterThanOrEqual(1);
+    const upstreamReq = toolResultBody.at(-1);
+    expect(upstreamReq.messages).toHaveLength(3);
+    expect(upstreamReq.messages[0].role).toBe("user");
+    expect(upstreamReq.messages[1].role).toBe("assistant");
+    expect(upstreamReq.messages[1].content.some((b: any) => b.type === "tool_use" && b.id === "toolu_http_1")).toBeTrue();
+    expect(upstreamReq.messages[2].content.some((b: any) => b.type === "tool_result" && b.content === "62°F")).toBeTrue();
+    expect(upstreamReq.tools).toHaveLength(1);
+    expect(upstreamReq.tools[0].name).toBe("get_weather");
+  });
+});
+
+describe("integration: Anthropic clients (native passthrough)", () => {
+  it("POST /v1/messages returns 200 with the upstream Anthropic response verbatim", async () => {
+    const resp = await fetch(proxyUrl("/v1/messages"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "Hello" }],
+      }),
+    });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.content[0].text).toBe("Integration test response");
+    expect(body.stop_reason).toBe("end_turn");
+  });
+
+  it("round-trips Anthropic tool_use → tool_result with the native shape upstream", async () => {
+    const tools = [{ name: "get_weather", description: "Get weather", input_schema: { type: "object", properties: { city: { type: "string" } } } }];
+
+    // Turn 1: Anthropic client asks for a tool call.
+    const resp1 = await fetch(proxyUrl("/v1/messages"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "weather in SF?" }],
+        tools,
+        tool_choice: { type: "auto" },
+      }),
+    });
+    expect(resp1.status).toBe(200);
+    const body1 = await resp1.json();
+    expect(body1.stop_reason).toBe("tool_use");
+    const toolUse = body1.content.find((b: any) => b.type === "tool_use");
+    expect(toolUse).toBeDefined();
+    expect(toolUse.name).toBe("get_weather");
+    expect(toolUse.input).toEqual({ city: "SF" });
+
+    // Turn 2: Anthropic client replays tool_result history; the upstream must
+    // see the native Anthropic shape (assistant tool_use + user tool_result).
+    const resp2 = await fetch(proxyUrl("/v1/messages"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({
+        model: "glm-4.6",
+        max_tokens: 100,
+        messages: [
+          { role: "user", content: "weather in SF?" },
+          { role: "assistant", content: [toolUse] },
+          { role: "user", content: [{ type: "tool_result", tool_use_id: toolUse.id, content: "62°F" }] },
+        ],
+        tools,
+      }),
+    });
+    expect(resp2.status).toBe(200);
+    const body2 = await resp2.json();
+    expect(body2.stop_reason).toBe("end_turn");
+    expect(body2.content[0].text).toBe("Tool result acknowledged");
+
+    const upstreamReq = capturedUpstreamBodies
+      .map((b) => JSON.parse(b))
+      .filter((b) => (b.messages ?? []).some(
+        (m: any) => Array.isArray(m.content) && m.content.some((blk: any) => blk?.type === "tool_result" && blk?.tool_use_id === toolUse.id),
+      ))
+      .at(-1);
+    expect(upstreamReq).toBeDefined();
+    expect(upstreamReq.messages.map((m: any) => m.role)).toEqual(["user", "assistant", "user"]);
+    expect(upstreamReq.messages[1].content.some((b: any) => b.type === "tool_use" && b.name === "get_weather")).toBeTrue();
+    expect(upstreamReq.messages[2].content.some((b: any) => b.type === "tool_result" && b.content === "62°F")).toBeTrue();
+    expect(upstreamReq.tools[0].name).toBe("get_weather");
+  });
+});
+
+describe("integration: Models endpoint", () => {
+  it("GET /v1/models returns model list", async () => {
+    const resp = await fetch(proxyUrl("/v1/models"), {
+      headers: { Authorization: "Bearer integration-test-key" },
+    });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.object).toBe("list");
+    expect(body.data.length).toBeGreaterThan(0);
+  });
+});
+
+describe("integration: Auth", () => {
+  it("rejects request without proxy key", async () => {
+    const resp = await fetch(proxyUrl("/v1/models"));
+    expect(resp.status).toBe(401);
+  });
+
+  it("rejects request with wrong proxy key", async () => {
+    const resp = await fetch(proxyUrl("/v1/models"), {
+      headers: { Authorization: "Bearer wrong-key" },
+    });
+    expect(resp.status).toBe(401);
+  });
+});
+
+describe("integration: Health", () => {
+  it("GET /health returns ok", async () => {
+    const resp = await fetch(proxyUrl("/health"), {
+      headers: { Authorization: "Bearer integration-test-key" },
+    });
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.status).toBe("ok");
+  });
+});
+
+describe("integration: Error handling", () => {
+  it("unknown route returns 404", async () => {
+    const resp = await fetch(proxyUrl("/unknown"), {
+      headers: { Authorization: "Bearer integration-test-key" },
+    });
+    expect(resp.status).toBe(404);
+  });
+
+  it("CORS preflight returns 204", async () => {
+    const resp = await fetch(proxyUrl("/v1/models"), { method: "OPTIONS" });
+    expect(resp.status).toBe(204);
+    expect(resp.headers.get("access-control-allow-origin")).toBe("*");
+  });
+});

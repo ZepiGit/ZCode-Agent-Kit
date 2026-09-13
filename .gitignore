@@ -1,0 +1,25 @@
+# Secrets / machine-local state — never commit
+.proxykey
+proxy/config.yaml
+backups/
+logs/
+generated/
+*.zcode-staging
+
+# Test workspaces and throwaway artifacts
+tests/fakehome/
+tests/dryhome/
+tests/tooltrip/
+tests/mock-requests.jsonl
+tests/*.log
+tests/*.jsonl
+ext-probe.log
+
+# Vendored proxy: dependencies and app-specific extras not needed here
+zcode-proxy-src/node_modules/
+zcode-proxy-src/Android-APP/
+zcode-proxy-src/config.yaml
+zcode-proxy-src/.zcode-proxy/
+
+# MCP bridge runtime deps (setup.mjs installs them)
+mcp/zcode-harness-mcp/node_modules/

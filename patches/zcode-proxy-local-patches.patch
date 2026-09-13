@@ -1,0 +1,143 @@
+diff --git a/src/proxy/handler.ts b/src/proxy/handler.ts
+index 8b5c039..70ae064 100644
+--- a/src/proxy/handler.ts
++++ b/src/proxy/handler.ts
+@@ -367,10 +367,92 @@ export async function proxyRequest(
+     return passthroughResponse(upstreamResp, clientAcceptsGzip(clientReq), clientBody);
+   }
+ 
++  if (upstreamResp.status === 200) {
++    // The gateway answers some failures with HTTP 200 + a JSON error envelope
++    // (e.g. {"code":1005,"msg":"exceed quota limit"}) instead of an error
++    // status. Anthropic clients would see a valid-but-empty response and
++    // retry blindly — surface a real error status instead.
++    const sniffed = await decodeBodyText(upstreamResp);
++    const envelope = parseGatewayErrorEnvelope(sniffed);
++    if (envelope) {
++      printRow(reqId, format, meta, envelope.status, started, headersAt, 0, 0, 0);
++      return errorResponse(envelope.status, envelope.type, envelope.message);
++    }
++    const plainHeaders = new Headers(upstreamResp.headers);
++    plainHeaders.delete("content-encoding");
++    plainHeaders.delete("content-length");
++    const reconstructed = new Response(sniffed, {
++      status: upstreamResp.status,
++      statusText: upstreamResp.statusText,
++      headers: plainHeaders,
++    });
++    printRow(reqId, format, meta, upstreamResp.status, started, headersAt, 0, 0, 0);
++    return passthroughResponse(reconstructed, clientAcceptsGzip(clientReq));
++  }
++
+   printRow(reqId, format, meta, upstreamResp.status, started, headersAt, 0, 0, 0);
+   return passthroughResponse(upstreamResp, clientAcceptsGzip(clientReq));
+ }
+ 
++/**
++ * Fully decode a response body to text, undoing gzip/deflate/br when the
++ * runtime has not already done so. Tries the raw bytes first and only runs
++ * explicit decompression when the result does not look like JSON, so both
++ * auto-decompressing and transparent runtimes are handled. Returns "" when
++ * nothing decodable can be produced.
++ */
++async function decodeBodyText(resp: Response): Promise<string> {
++  const encoding = (resp.headers.get("content-encoding") ?? "").toLowerCase();
++  try {
++    const buf = await resp.arrayBuffer();
++    const raw = new TextDecoder().decode(buf);
++    if (raw.trimStart().startsWith("{") || !encoding) return raw;
++    let stream = new Response(buf).body;
++    for (const enc of encoding.split(",").map((e) => e.trim()).reverse()) {
++      if (enc === "gzip" || enc === "deflate" || enc === "br") {
++        stream = stream!.pipeThrough(new DecompressionStream(enc) as unknown as ReadableWritablePair<Uint8Array, Uint8Array>);
++      }
++    }
++    return await new Response(stream).text();
++  } catch {
++    return "";
++  }
++}
++
++/**
++ * Detect the gateway's HTTP-200 error envelope. Returns the mapped error
++ * response fields, or null when the body is a legitimate message response.
++ *
++ * Statuses are chosen to match Anthropic client retry semantics:
++ * quota/balance exhaustion (1005/1113) and captcha/capability rejections
++ * (3006/3007/3012) are deterministic for the current account/window, so they
++ * map to non-retryable 400/403 — mirroring Anthropic's own "credit balance
++ * too low" 400 — instead of a retryable 429 that only provokes more
++ * gateway anti-abuse (captcha) challenges.
++ */
++export function parseGatewayErrorEnvelope(
++  body: string,
++): { status: number; type: string; message: string } | null {
++  if (!body || body.length > 4096) return null;
++  const trimmed = body.trim();
++  if (!trimmed.startsWith("{")) return null;
++  let parsed: unknown;
++  try {
++    parsed = JSON.parse(trimmed);
++  } catch {
++    return null;
++  }
++  if (typeof parsed !== "object" || parsed === null) return null;
++  const obj = parsed as Record<string, unknown>;
++  if (typeof obj.code !== "number" || typeof obj.msg !== "string") return null;
++  if (obj.content !== undefined || obj.choices !== undefined || obj.type === "message") return null;
++  const status = obj.code === 1005 || obj.code === 1113 ? 400
++    : obj.code === 3006 || obj.code === 3007 || obj.code === 3012 ? 403
++    : 502;
++  const type = status === 400 ? "invalid_request_error" : status === 403 ? "permission_error" : "upstream_error";
++  return { status, type, message: `[${obj.code}] ${obj.msg}` };
++}
++
+ export function shouldUseOrderedTransport(config: ProxyConfig, clientSession: ClientSessionResult | undefined, hasCustomFetchImpl: boolean): boolean {
+   if (hasCustomFetchImpl) return false;
+   return clientSession?.action === "enforce" || clientSession?.source === "explicit";
+diff --git a/src/proxy/upstream.ts b/src/proxy/upstream.ts
+index fd53a0d..f94c18c 100644
+--- a/src/proxy/upstream.ts
++++ b/src/proxy/upstream.ts
+@@ -195,7 +195,15 @@ export function buildUpstreamHeaderPairs(
+   // Forward the client's Accept-Encoding so the upstream compresses only when
+   // the client can decode it. Hardcoding "gzip" broke clients (e.g. some Tauri
+   // builds) that send `accept-encoding: identity` and cannot auto-decompress.
+-  const clientAcceptEncoding = clientReq.headers.get("accept-encoding") ?? "gzip";
++  //
++  // Local patch (zcode-omp-integration): drop encodings outside the runtime's
++  // auto-decoded set (gzip/x-gzip/deflate/br, plus identity). Some clients
++  // (e.g. Bun-based agents) advertise `zstd` in Accept-Encoding but cannot
++  // decode a zstd response body, and the passthrough would forward undecodable
++  // bytes — the gateway then looks like it streams an empty response.
++  const clientAcceptEncoding = filterAcceptEncoding(
++    clientReq.headers.get("accept-encoding") ?? "gzip",
++  );
+   return [
+     ["content-type", "application/json"],
+     ["accept-encoding", clientAcceptEncoding],
+@@ -205,6 +213,24 @@ export function buildUpstreamHeaderPairs(
+   ];
+ }
+ 
++/**
++ * Encodings the JS runtimes used by local clients auto-decode transparently
++ * (mirrors AUTO_DECODED_ENCODINGS in handler.ts), plus `identity`.
++ */
++const SAFE_ACCEPT_ENCODINGS = new Set(["gzip", "x-gzip", "deflate", "br", "identity"]);
++
++/** Remove encodings the client may advertise but not actually decode (zstd). */
++export function filterAcceptEncoding(header: string): string {
++  const kept: string[] = [];
++  for (const tokenRaw of header.split(",")) {
++    const token = tokenRaw.trim();
++    if (!token) continue;
++    const base = token.split(";")[0].trim().toLowerCase();
++    if (SAFE_ACCEPT_ENCODINGS.has(base)) kept.push(token);
++  }
++  return kept.length > 0 ? kept.join(", ") : "gzip";
++}
++
+ export function buildUpstreamRequest(
+   clientReq: Request,
+   format: Format,

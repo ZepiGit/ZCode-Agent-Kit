@@ -1,0 +1,46 @@
+# zcode-proxy configuration template.
+# setup.mjs copies this to config.yaml and injects a generated proxyApiKey
+# (also written to <clone>/.proxykey, which harness configs reference).
+server:
+  port: 8457
+  host: "127.0.0.1"
+auth:
+  # Key clients must provide; setup.mjs replaces GENERATE_ME with a random key.
+  proxyApiKey: "GENERATE_ME"
+provider: zai
+plan: start-plan
+providers:
+  zai:
+    anthropicBase: "https://api.z.ai/api/anthropic"
+    openaiBase: "https://api.z.ai/api/coding/paas/v4"
+  bigmodel:
+    anthropicBase: "https://open.bigmodel.cn/api/anthropic"
+    openaiBase: "https://open.bigmodel.cn/api/coding/paas/v4"
+defaultModel: glm-5.3
+models:
+  - glm-5.3
+  - glm-5.3-flash
+identity:
+  appVersion: "3.11.2"
+  sourceTitle: "cli"
+  refererOrigin: "https://zcode.z.ai"
+  # Generated once at first `auth login` (stable device identity).
+  deviceMid: ""
+# Responses API (OpenAI Agents SDK / wire_api=responses clients).
+responses:
+  enabled: true
+  store:
+    maxEntries: 1000
+    ttlMs: 86400000
+# Trial auto-claim and off-peak queue deliberately disabled.
+async:
+  enabled: false
+claim:
+  enabled: false
+  auto: false
+endpointRouting:
+  enabled: true
+clientSigning:
+  enabled: true
+logging:
+  level: info

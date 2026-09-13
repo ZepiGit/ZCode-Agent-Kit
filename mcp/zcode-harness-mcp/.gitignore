@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+demo-workspace/
+test/live-ws/
+test/live-data/
+.mimosa/

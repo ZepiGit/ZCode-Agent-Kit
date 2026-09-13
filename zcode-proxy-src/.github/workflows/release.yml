@@ -1,0 +1,307 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "New release tag, e.g. v2.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+      versionCode: ${{ steps.check.outputs.versionCode }}
+      is_prerelease: ${{ steps.check.outputs.is_prerelease }}
+    steps:
+      - name: Validate tag and determine prerelease
+        id: check
+        env:
+          TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! printf '%s' "$TAG" | grep -qE '^v'; then
+            echo "::error::Release tag must start with 'v' (got: '$TAG')"
+            exit 1
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error::Tag '$TAG' already exists on the remote"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          # Android versionCode must be a monotonic integer; derive from semver
+          # major.minor.patch (prerelease suffix stripped). Formula supports
+          # minor/patch up to 99 each — sufficient for this project.
+          VERSION_CODE=$(printf '%s' "${TAG#v}" | awk -F. '{ gsub(/[^0-9].*/, "", $3); print ($1 * 10000) + ($2 * 100) + $3 }')
+          echo "versionCode=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          if printf '%s' "$TAG" | grep -qiE 'alpha|beta|rc'; then
+            echo "is_prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify:
+    needs: detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          # PINNED (keep all 3 jobs + ci.yml in sync): the release runtime
+          # must not drift from dev/CI — a floating "latest" shipped v4.5.2
+          # on Bun 1.4.0 semantics local 1.3.14 never exercised (AGENTS.md #37).
+          bun-version: "1.4.0"
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Type check
+        run: bun x tsc --noEmit
+      - name: Run tests
+        run: bun test
+
+  # Commit the tag's version into package.json + src/index.ts so the repo
+  # never drifts from released artifacts again — no manual bumping. Every
+  # downstream job (builds / tag / docker) checks out this job's SHA and
+  # therefore builds from a tree that already reports the right version.
+  bump:
+    needs: [detect, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version-bump commit
+    outputs:
+      sha: ${{ steps.bump.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Commit version bump
+        id: bump
+        env:
+          VERSION: ${{ needs.detect.outputs.version }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "$BRANCH"
+          # Re-run of a partially-failed workflow: the bump may already be on
+          # the branch — reuse it instead of committing a duplicate. Both
+          # files must match; a partial manual bump falls through to the sed
+          # path and gets completed.
+          if git show "origin/$BRANCH:package.json" | grep -q "\"version\": \"${VERSION}\"" \
+             && git show "origin/$BRANCH:src/index.ts" | grep -q "VERSION = \"${VERSION}\""; then
+            echo "bump for ${VERSION} already on origin/$BRANCH — reusing it"
+            echo "sha=$(git rev-parse "origin/$BRANCH")" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sed -i "s/^export const VERSION = \".*\";$/export const VERSION = \"${VERSION}\";/" src/index.ts
+          sed -i "s/^  \"version\": \".*\",$/  \"version\": \"${VERSION}\",/" package.json
+          grep -q "VERSION = \"${VERSION}\"" src/index.ts
+          grep -q "\"version\": \"${VERSION}\"" package.json
+          node Android-APP/scripts/check-version-sync.mjs
+          git add package.json src/index.ts
+          git commit -m "chore(release): bump version to ${VERSION}"
+          if ! git push origin "HEAD:$BRANCH"; then
+            # Branch moved on since dispatch — rebase and retry once. A
+            # conflict on the version files fails loudly; re-dispatch.
+            git fetch origin "$BRANCH"
+            git rebase "origin/$BRANCH"
+            node Android-APP/scripts/check-version-sync.mjs
+            git push origin "HEAD:$BRANCH"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build-binaries:
+    needs: [detect, bump]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: bun-windows-x64
+            outfile: zcode-proxy.exe
+          - target: bun-linux-x64
+            outfile: zcode-proxy-linux-x64
+          - target: bun-linux-arm64
+            outfile: zcode-proxy-linux-arm64
+          - target: bun-darwin-x64
+            outfile: zcode-proxy-darwin-x64
+          - target: bun-darwin-arm64
+            outfile: zcode-proxy-darwin-arm64
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0" # pinned — see verify job comment
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      # The bump job already committed the version into the sources; this
+      # guard fails the build loudly if the checkout somehow missed it (wrong
+      # ref, reused bump pointing elsewhere, etc.).
+      - name: Assert sources carry the release version
+        env:
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          grep -q "VERSION = \"${RELEASE_VERSION}\"" src/index.ts
+          grep -q "\"version\": \"${RELEASE_VERSION}\"" package.json
+      - name: Build binary
+        run: >-
+          bun build --compile --target=${{ matrix.target }}
+          --define "require.resolve=undefined"
+          src/index.ts --outfile ${{ matrix.outfile }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.outfile }}
+          path: ${{ matrix.outfile }}
+          if-no-files-found: error
+
+  build-android:
+    needs: [detect, bump]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0" # pinned — see verify job comment
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+      # The bump job already committed the version (same guard as
+      # build-binaries); server.cjs therefore embeds the tag version.
+      - name: Assert sources carry the release version
+        env:
+          RELEASE_VERSION: ${{ needs.detect.outputs.version }}
+        run: |
+          grep -q "VERSION = \"${RELEASE_VERSION}\"" src/index.ts
+          grep -q "\"version\": \"${RELEASE_VERSION}\"" package.json
+      - name: Build server bundle (esbuild CJS)
+        run: bun run build:android-bundle
+      - name: Copy server bundle into Android assets
+        run: cp dist/android/server.cjs Android-APP/app/src/main/assets/server_bundle/server.cjs
+      - name: Make gradlew executable
+        working-directory: Android-APP
+        run: chmod +x gradlew
+      - name: Build debug APK
+        working-directory: Android-APP
+        env:
+          ORG_GRADLE_PROJECT_androidApp_versionCode: ${{ needs.detect.outputs.versionCode }}
+          ORG_GRADLE_PROJECT_androidApp_versionName: ${{ needs.detect.outputs.tag }}
+        run: ./gradlew :app:assembleDebug --no-daemon
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-debug.apk
+          path: Android-APP/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Decode signing keystore
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 --decode > Android-APP/app/release.keystore
+      - name: Build signed release APK
+        working-directory: Android-APP
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ORG_GRADLE_PROJECT_androidSigning_keystoreFile: release.keystore
+          ORG_GRADLE_PROJECT_androidSigning_storePassword: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_androidSigning_keyAlias: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_androidSigning_keyPassword: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ORG_GRADLE_PROJECT_androidApp_versionCode: ${{ needs.detect.outputs.versionCode }}
+          ORG_GRADLE_PROJECT_androidApp_versionName: ${{ needs.detect.outputs.tag }}
+        run: ./gradlew :app:assembleRelease --no-daemon
+      - name: Upload release APK
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-release.apk
+          path: Android-APP/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  release:
+    needs: [detect, bump, build-binaries, build-android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Tag the BUMPED commit so the tag's tree already reports its own
+      # version (not the pre-bump dispatch SHA).
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+      - name: Create and push tag
+        env:
+          TAG: ${{ needs.detect.outputs.tag }}
+        run: |
+          git tag "$TAG"
+          git push origin "$TAG"
+      - name: Download artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.detect.outputs.tag }}
+          name: ${{ needs.detect.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ needs.detect.outputs.is_prerelease }}
+          files: dist/*
+
+  docker:
+    needs: [detect, bump, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Build the image from the bumped commit so the bundled sources report
+      # the release version (bump is a direct need — needs.* context only
+      # exposes direct dependencies).
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.bump.outputs.sha }}
+      - name: Compute lowercase image name
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER@L}/zcode-proxy" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.img.outputs.name }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=${{ needs.detect.outputs.version }}
+            type=raw,value=latest,enable=${{ needs.detect.outputs.is_prerelease == 'false' }}
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
