@@ -87,13 +87,29 @@ refuses — the desktop app lives on Windows).
 
 ## Security model
 
-- Proxy binds 127.0.0.1 only; bearer key generated locally, never committed.
+- Proxy binds 127.0.0.1 only **and now enforces it in code** (load-time and
+  listen-time check — non-loopback hosts are rejected, not just discouraged);
+  serving without a real bearer key (placeholder `GENERATE_ME`) is refused.
+- CAPTCHA behavior, stated plainly: the z.ai gateway serves challenge pages
+  as part of its normal client protocol; the official desktop client answers
+  them automatically and invisibly. The vendored proxy replicates exactly
+  that for the user's own logged-in account. No human-verification gate is
+  bypassed, no third-party solver is involved. The MCP bridge additionally
+  needs the desktop app running for model turns.
+- No trial automation: claim/off-peak are absent from the shipped config and
+  the underlying defaults are now fail-closed (`false` — an omitted claim
+  block enables nothing).
+- MCP scope, stated plainly: the bridge registers user-scope on purpose
+  (machine-wide integration); undo is
+  `claude mcp remove zcode-harness --scope user`.
 - `checksums.txt` covers `v0.2.0.tar.gz`, `install.ps1`, `install.sh`
   (integrity). The bun runtime download is additionally hash-pinned inside
   the installers. A hash on the same release host is not provenance — verify
   the tag commit if you need provenance.
-- No quota circumvention, no CAPTCHA/login/device checks bypassed; trial
-  claim and off-peak channels are disabled in the shipped config template.
+- No quota circumvention, no login/device checks bypassed; the npm package
+  is NOT yet published — `package.json` is intentionally private until the
+  maintainer enables publication (the generated package now carries its own
+  version-bound publish gate).
 
 ## Files
 

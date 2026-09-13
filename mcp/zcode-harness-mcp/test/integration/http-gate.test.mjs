@@ -88,3 +88,66 @@ async function runGateAssertions() {
   });
   assert.ok(gatePassed(okOrigin), `legit origin must reach the MCP layer (got ${okOrigin.status})`);
 }
+
+// ZAK-010: the 4 MiB body bound must hold on the ACTUAL stream — a chunked
+// request without Content-Length used to bypass the declared-size check.
+test("http gate: oversized chunked body without content-length is refused with 413", async () => {
+  const probe = http.createServer();
+  await new Promise((r) => probe.listen(0, "127.0.0.1", r));
+  port = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  const closeServer = await serveHttp(
+    { toolCtx: {}, resourceCtx: {}, serverInfo: { name: "test", version: "0.0.0" } },
+    "127.0.0.1",
+    port,
+    KEY,
+  );
+  try {
+    // 5 MiB chunked POST, no content-length header → must hit the streaming
+    // byte bound, not slip past a metadata-only check.
+    const oversized = await requestChunked({
+      headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, connection: "close" },
+      chunkCount: 5 * 1024 * 1024 / (64 * 1024),
+      chunkSize: 64 * 1024,
+    });
+    assert.equal(oversized.status, 413, "oversized chunked body must be refused by the streaming bound");
+
+    // A chunked body under the bound still reaches the MCP layer (chunked
+    // transfer itself is not treated as an error).
+    const underLimit = await requestChunked({
+      headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, connection: "close" },
+      chunkCount: 4,
+      chunkSize: 64 * 1024,
+      jsonBody: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    assert.ok(underLimit.status !== 413 && underLimit.status !== 401 && underLimit.status !== 403, `under-limit chunked body must pass the gate (got ${underLimit.status})`);
+  } finally {
+    await closeServer();
+  }
+});
+
+function requestChunked({ headers = {}, chunkCount = 1, chunkSize = 1024, jsonBody = null } = {}) {
+  return new Promise((resolve, reject) => {
+    // No content-length → Node sends Transfer-Encoding: chunked.
+    const req = http.request(
+      { host: "127.0.0.1", port, method: "POST", path: "/mcp", headers },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => resolve({ status: res.statusCode, body: data }));
+      },
+    );
+    req.on("error", reject);
+    if (jsonBody) {
+      // pad each chunk to chunkSize with JSON-ignored whitespace-free filler
+      // (send as raw filler chunks around the real JSON body)
+      req.write(jsonBody);
+      const filler = Buffer.alloc(chunkSize, 0x20); // spaces
+      for (let i = 0; i < chunkCount; i += 1) req.write(filler);
+    } else {
+      const filler = Buffer.alloc(chunkSize, 0x41); // 'A'
+      for (let i = 0; i < chunkCount; i += 1) req.write(filler);
+    }
+    req.end();
+  });
+}

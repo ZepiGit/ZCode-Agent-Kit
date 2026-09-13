@@ -103,6 +103,68 @@ test("pi adapter merges additively and is idempotent", async () => {
   assert.equal(verify[0].ok, true);
 });
 
+// ZAK-004: a hand-written zcode entry (no ownership marker) must be a hard
+// conflict, never silently overwritten.
+test("pi adapter refuses to overwrite a foreign zcode entry", async () => {
+  const home = fakeHome("pi-foreign");
+  const agent = join(home, ".pi", "agent");
+  mkdirSync(agent, { recursive: true });
+  const foreign = JSON.stringify({ providers: { zcode: { baseUrl: "http://127.0.0.1:9999", api: "openai-completions", apiKey: "my-own-key", models: [{ id: "my-model" }] } } }, null, 2);
+  writeFileSync(join(agent, "models.json"), foreign);
+
+  await assert.rejects(
+    () => runAdapter("pi", home),
+    /does not own/,
+    "foreign entry is a conflict",
+  );
+  assert.equal(readFileSync(join(agent, "models.json"), "utf8"), foreign, "nothing written on conflict");
+});
+
+// Legacy kit entries (pre-marker, resolvable by their resolver shape) are
+// taken over instead of treated as foreign.
+test("pi adapter takes over legacy kit zcode entry", async () => {
+  const home = fakeHome("pi-legacy");
+  const agent = join(home, ".pi", "agent");
+  mkdirSync(agent, { recursive: true });
+  const legacyRoot = "C:/somewhere/old-kit";
+  writeFileSync(join(agent, "models.json"), JSON.stringify({
+    providers: {
+      zcode: {
+        baseUrl: "http://127.0.0.1:8457",
+        api: "anthropic-messages",
+        apiKey: `!node "${legacyRoot}/proxy/resolve-zcode-proxy-key.mjs"`,
+        models: [{ id: "glm-5.3", name: "GLM-5.3" }],
+      },
+    },
+  }, null, 2));
+
+  const r = await runAdapter("pi", home);
+  const doc = parseJsonc(readFileSync(join(agent, "models.json"), "utf8"));
+  assert.equal(doc.providers.zcode["x-zcode-agent-kit"]?.managed, true, "ownership marker written");
+  assert.ok(!JSON.stringify(doc).includes(legacyRoot), "old root path replaced");
+  assert.match(r.logs.join("\n"), /kit-owned/);
+});
+
+// ZAK-008: --dry-run must be a zero-mutation guarantee — the codex adapter
+// used to create generated/codex-home before reaching the commitFile guard.
+test("codex dry-run creates no directories", async () => {
+  const home = fakeHome("codex-dryrun");
+  const { ctx, restore } = ctxWithAppData(home);
+  // redirect the kit root so generated/ is observed inside the fake home,
+  // not in the real checkout's already-existing generated/
+  ctx.root = join(home, "kitroot");
+  ctx.generated = join(ctx.root, "generated");
+  ctx.dryRun = true;
+  const mod = await import("../cli/adapters/codex.mjs");
+  const logs = [];
+  const result = await mod.default.apply(ctx, noopTx(), (m) => logs.push(m));
+  restore();
+  assert.equal(result.changed, false);
+  assert.equal(existsSync(ctx.generated), false, "generated/ not created in dry-run");
+  assert.equal(existsSync(join(ctx.generated, "codex-home")), false, "codex-home not created in dry-run");
+  assert.ok(!logs.join("\n").includes("wrote "), "no write is announced as done");
+});
+
 test("opencode adapter writes JSONC-config and preserves comments", async () => {
   const home = fakeHome("opencode");
   // Resolve the adapter's platform path INSIDE the APPDATA override, exactly

@@ -187,15 +187,19 @@ export async function handleQuota(
   try {
     // Singleflight + short TTL: parallel UI probes (manager status, doctor,
     // webui) share one billing round-trip instead of hammering the gateway.
+    // Cache states are kept distinct (ZAK-009): an in-flight entry carries a
+    // null snapshot and is always awaited — never spread as if it were a
+    // completed snapshot. A completed entry is served only within its TTL;
+    // afterwards a fresh fetch starts instead of serving stale data forever.
     const now = Date.now();
-    if (quotaCache && now - quotaCache.fetchedAtMs < QUOTA_CACHE_TTL_MS) {
+    if (quotaCache?.snapshot && now - quotaCache.fetchedAtMs < QUOTA_CACHE_TTL_MS) {
       const cached: QuotaSnapshot = { ...quotaCache.snapshot, cached: true };
       return new Response(JSON.stringify(cached, null, 1), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
-    if (!quotaCache) {
+    if (!quotaCache || quotaCache.snapshot) {
       const promise = collectQuotaSnapshot(config, fetchImpl, loadCredentialImpl)
         .then((snapshot) => {
           quotaCache = { snapshot, fetchedAtMs: Date.now(), promise: Promise.resolve(snapshot) };

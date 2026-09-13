@@ -192,15 +192,13 @@ export async function serveHttp(
       res.writeHead(405).end("method not allowed");
       return;
     }
-    // Bound the DECLARED body size before reading. The body stream itself must
-    // stay untouched: the MCP transport consumes it (a data listener here would
-    // starve it into "Invalid JSON").
-    const contentLength = Number(req.headers["content-length"] ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
-      res.writeHead(413).end("request body too large");
-      return;
-    }
-    void handleMcpPost(opts, req, res);
+    // ZAK-010: the 4 MiB bound is enforced on the ACTUAL stream, not just the
+    // declared Content-Length (chunked/absent-length requests bypassed the
+    // metadata check). The body is pre-read into a bounded buffer and the
+    // transport receives a fresh stream built from that buffer — so the size
+    // guard is a real parser boundary AND the transport cannot be starved
+    // (it never observes the original request stream).
+    void handleMcpPostBounded(opts, req, res, MAX_BODY_BYTES);
   });
   // Header/timeout hardening (defaults are generous for a local bridge).
   httpServer.headersTimeout = 10_000;
@@ -218,13 +216,64 @@ export async function serveHttp(
     });
 }
 
-async function handleMcpPost(opts: BridgeServerOptions, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleMcpPostBounded(
+  opts: BridgeServerOptions,
+  req: IncomingMessage,
+  res: ServerResponse,
+  maxBodyBytes: number,
+): Promise<void> {
+  try {
+    // ZAK-010: enforce the body bound on the ACTUAL stream, not just the
+    // declared Content-Length (chunked/absent-length requests bypassed the
+    // metadata check). Oversized uploads are drained and discarded (keeping
+    // the connection healthy so the client reliably receives the 413) and
+    // never parsed. Under the bound, the parsed body is handed to the
+    // transport via its pre-parsed-body API so the original request stream
+    // semantics stay intact for hono/node-server.
+    const buffered: Buffer[] = [];
+    let total = 0;
+    let tooLarge = false;
+    for await (const chunk of req) {
+      if (tooLarge) continue; // drain and discard the remainder
+      const buf = chunk as Buffer;
+      total += buf.length;
+      if (total > maxBodyBytes) {
+        tooLarge = true;
+        buffered.length = 0;
+        continue;
+      }
+      buffered.push(buf);
+    }
+    if (tooLarge) {
+      res.writeHead(413).end("request body too large");
+      return;
+    }
+    const raw = Buffer.concat(buffered).toString("utf8");
+    let parsedBody: unknown;
+    try {
+      parsedBody = JSON.parse(raw);
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null }));
+      return;
+    }
+    await handleMcpPost(opts, req, res, parsedBody);
+  } catch (err) {
+    log.error("http request read error", { error: String(err) });
+    if (!res.headersSent) res.writeHead(400).end("bad request");
+    else try { res.end(); } catch { /* already gone */ }
+  }
+}
+
+async function handleMcpPost(opts: BridgeServerOptions, req: IncomingMessage, res: ServerResponse, parsedBody: unknown): Promise<void> {
   try {
     // Stateless streamable HTTP: each POST creates a request-scoped transport.
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     const server = buildServer(opts);
     await server.connect(transport);
-    await transport.handleRequest(req, res);
+    // parsedBody comes from our bounded pre-read (ZAK-010); the transport's
+    // pre-parsed-body path skips reading the (already consumed) request stream.
+    await transport.handleRequest(req, res, parsedBody);
     res.on("close", () => {
       transport.close();
       server.close();

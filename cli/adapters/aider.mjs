@@ -2,9 +2,9 @@
 // (bin/zcode-aider.cmd|.sh): OPENAI_API_BASE + OPENAI_API_KEY + default model
 // openai/glm-5.3. No system-wide setx, no ~/.aider.conf.yml modification —
 // the user's own Aider config stays untouched.
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { commitFile } from "../../lib/edit.mjs";
+import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 export default {
   id: "aider",
@@ -14,7 +14,7 @@ export default {
   detect: (home) => detectOnPath("aider") || detectOnPath("aider-chat"),
 
   apply(ctx, tx, log) {
-    mkdirSync(ctx.generated, { recursive: true });
+    ensureDir(ctx, ctx.generated);
     const envPath = join(ctx.generated, "aider-zcode.env");
     // The launcher sources this file in a child process — never global env.
     const content = `# Sourced by bin/zcode-aider.* — process-local only, never global env.

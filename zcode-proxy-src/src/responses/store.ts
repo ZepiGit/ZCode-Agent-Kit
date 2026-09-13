@@ -65,11 +65,11 @@ export class ResponseStore {
     this.maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   }
 
-  /** Approximate serialized size of an entry (keys + strings). */
+  /** Serialized UTF-8 byte size of an entry (ZAK-014: bytes, not UTF-16 code units). */
   private static byteSize(entry: StoredResponse): number {
     let size = 128; // structural overhead baseline
     try {
-      size += JSON.stringify(entry).length;
+      size += Buffer.byteLength(JSON.stringify(entry), "utf8");
     } catch {
       // cyclic/unserializable output must not poison the store
       return Number.MAX_SAFE_INTEGER;

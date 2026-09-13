@@ -5,9 +5,9 @@
 // The Cline CLI is intentionally NOT configured: its config interface is not
 // documented (docs.cline.bot, checked 2026-09-13) and MCP alone does not count
 // as model integration.
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { commitFile } from "../../lib/edit.mjs";
+import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 export default {
   id: "cline",
@@ -24,7 +24,7 @@ export default {
   },
 
   apply(ctx, tx, log) {
-    mkdirSync(ctx.generated, { recursive: true });
+    ensureDir(ctx, ctx.generated);
     const sheet = join(ctx.generated, "cline-zcode-values.md");
     const values = `# Cline × ZCode — prepared values (manual confirmation required)
 

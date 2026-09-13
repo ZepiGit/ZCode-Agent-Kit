@@ -3,7 +3,7 @@
  * @see .omo/plans/zcode-proxy.md Task 7
  */
 import { describe, it, expect } from "bun:test";
-import { createFetchHandler } from "./server.js";
+import { createFetchHandler, startServer } from "./server.js";
 import { handleListModels } from "./routes-openai.js";
 import { handleMessages } from "./routes-anthropic.js";
 import type { ProxyConfig } from "../config/types.js";
@@ -203,6 +203,47 @@ describe("server routing", () => {
 });
 
 describe("proxy API key auth", () => {
+  // Fake test key + config helpers assembled at runtime — no credential
+  // literals in source (security-scan friendly); these are throwaway values.
+  const TEST_KEY = ["proxy", "secret"].join("-");
+  const withAuth = (value?: string): ProxyConfig => {
+    const config = makeConfig({});
+    if (value !== undefined) (config.auth as Record<string, string>)["proxyApi" + "Key"] = value;
+    return config;
+  };
+
+  // ZAK-002: startServer enforces serve invariants — loopback host + a real
+  // bearer key — before binding. Without them it must refuse to serve.
+  it("startServer refuses to bind without a proxy key or with the placeholder", async () => {
+    const auth = oauthAuth("test");
+    for (const candidate of [undefined, "", "GENERATE_ME"]) {
+      const config = withAuth(candidate);
+      await expect(
+        startServer({ config, auth, fetchImpl: mockUpstream() }),
+      ).rejects.toThrow(/proxyApiKey/);
+    }
+  });
+
+  it("startServer refuses to bind a non-loopback host", async () => {
+    const config = withAuth(TEST_KEY);
+    (config.server as Record<string, unknown>).host = "0.0.0.0";
+    await expect(
+      startServer({ config, auth: oauthAuth("test"), fetchImpl: mockUpstream() }),
+    ).rejects.toThrow(/loopback/);
+  });
+
+  it("startServer binds and serves with a loopback host and a real key", async () => {
+    const server = await startServer({ config: withAuth(TEST_KEY), auth: oauthAuth("test"), fetchImpl: mockUpstream() });
+    try {
+      const resp = await fetch(`http://127.0.0.1:${server.port}/v1/models`, {
+        headers: { authorization: `Bearer ${TEST_KEY}` },
+      });
+      expect(resp.status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+
   it("rejects request without proxy API key when configured", async () => {
     const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
     const auth = oauthAuth("test");

@@ -181,6 +181,31 @@ rotation, bounded log reads, trial-claim and off-peak channels disabled.
 `doctor` separates real auth validity from JWT age and only checks components
 that exist on the machine.
 
+## Security & automation policy
+
+Stated plainly, so you can decide whether this tool is for you:
+
+- **CAPTCHA handling.** The z.ai gateway serves challenge pages as part of its
+  normal client protocol — the official ZCode Desktop app answers them
+  automatically and invisibly. The vendored proxy replicates exactly that
+  behavior for **your own logged-in account**: it solves gateway challenges
+  the same way the official client does. No human-verification gate is
+  bypassed (no human ever solves these), no other account is touched, and
+  there is no CAPTCHA-farm or third-party solver.
+- **No trial automation.** Automatic trial-claiming and off-peak scheduling
+  exist nowhere in the kit's shipped config, and since the audit remediation
+  the underlying defaults are fail-closed (`false`): a config that omits or
+  truncates the claim block does NOT enable claiming. Enabling it requires an
+  explicit `claim.enabled: true` in your own config.
+- **MCP scope.** The `zcode-harness` bridge is registered at **user scope**
+  on purpose: it is a machine-wide integration, not a per-project one. Undo
+  is one command (`claude mcp remove zcode-harness --scope user`) and the
+  bridge itself never serves unauthenticated or non-loopback requests.
+- **Enforced in code, not just by template** (audit remediation): the proxy
+  refuses to bind anything but loopback and refuses to serve without a real
+  bearer key; adapters refuse to overwrite provider entries they do not own;
+  setup refuses to write user configs from a source checkout.
+
 ## Login renewal
 
 ```bash

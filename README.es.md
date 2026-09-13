@@ -183,6 +183,35 @@ forced; rotación y lectura acotada de logs; canales de claim de pruebas y
 off-peak deshabilitados. `doctor` separa la validez real de autenticación de la
 edad del JWT y solo comprueba los componentes presentes.
 
+## Política de seguridad y automatización
+
+Dicho sin rodeos, para que puedas decidir si esta herramienta es para ti:
+
+- **Gestión de CAPTCHA.** El gateway de z.ai sirve páginas de desafío como
+  parte de su protocolo normal de cliente — la app oficial ZCode Desktop las
+  responde de forma automática e invisible. El proxy incluido reproduce
+  exactamente ese comportamiento para **tu propia cuenta iniciada sesión**:
+  resuelve los desafíos del gateway igual que el cliente oficial. No se
+  elude ninguna barrera de verificación humana (nunca hay un humano que los
+  resuelva), no se toca ninguna otra cuenta y no hay granjas de CAPTCHA ni
+  resolutores de terceros.
+- **Sin automatización de pruebas.** La reclamación automática de trials y
+  la programación off-peak no existen en ninguna configuración distribuida
+  por el kit, y desde la remediación de la auditoría los valores por defecto
+  subyacentes son fail-closed (`false`): una configuración que omita o
+  trunque el bloque claim NO activa la reclamación. Activarlo exige un
+  `claim.enabled: true` explícito en tu propia configuración.
+- **Alcance MCP.** El puente `zcode-harness` se registra deliberadamente a
+  **nivel de usuario**: es una integración de toda la máquina, no por
+  proyecto. Deshacerlo es un comando (`claude mcp remove zcode-harness
+  --scope user`), y el puente nunca responde peticiones no autenticadas ni
+  fuera de loopback.
+- **Impuesto en código, no solo por plantilla** (remediación de auditoría):
+  el proxy se niega a enlazar algo que no sea loopback y se niega a servir
+  sin una clave bearer real; los adaptadores se niegan a sobrescribir
+  entradas de provider que no les pertenecen; setup se niega a escribir
+  configuraciones de usuario desde un checkout de código fuente.
+
 ## Renovación de inicio de sesión
 
 ```bash

@@ -148,9 +148,28 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
  * reasoning calls) is mirrored by zeroing Node's request/keep-alive/headers
  * timeouts.
  */
-export function startServer(opts: ServerOptions): Promise<ProxyServer> {
+export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
+  // ZAK-002: loopback binding and bearer auth are startup invariants for the
+  // serve path, not template conventions. Defense in depth: the config loader
+  // already rejects non-loopback hosts; here we re-check both right before
+  // binding, so no code path can listen without a real key or on a wide host.
+  const host = (opts.config.server.host ?? "").trim().toLowerCase();
+  if (!["127.0.0.1", "::1", "localhost", "[::1]"].includes(host)) {
+    throw new Error(
+      `refusing to bind "${opts.config.server.host}" — the proxy fronts a personal, account-backed ` +
+        `credential and only serves loopback (127.0.0.1 / ::1 / localhost)`,
+    );
+  }
+  const key = (opts.config.auth.proxyApiKey ?? "").trim();
+  if (!key || key === "GENERATE_ME") {
+    throw new Error(
+      "auth.proxyApiKey is missing or still the placeholder — generate a local key before serving " +
+        "(the kit's setup does this; manually: replace GENERATE_ME in proxy/config.yaml)",
+    );
+  }
+
   const handler = createFetchHandler(opts);
-  const { port: requestedPort, host } = opts.config.server;
+  const { port: requestedPort, host: bindHost } = opts.config.server;
 
   const server: Server = createServer(async (req, res) => {
     const abortController = new AbortController();
@@ -192,11 +211,11 @@ export function startServer(opts: ServerOptions): Promise<ProxyServer> {
 
   return new Promise<ProxyServer>((resolve, reject) => {
     server.on("error", reject);
-    server.listen(requestedPort, host, () => {
+    server.listen(requestedPort, bindHost, () => {
       const addr = server.address();
       const actualPort = typeof addr === "object" && addr ? addr.port : requestedPort;
       resolve({
-        hostname: host,
+        hostname: bindHost,
         port: actualPort,
         stop: (exit) => {
           server.close();

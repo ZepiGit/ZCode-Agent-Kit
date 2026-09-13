@@ -12,7 +12,9 @@
  *   proxy secrets) are masked to `abcd1234…wxyz` so fingerprints are visible
  *   while credentials stay redacted.
  * - Bodies are JSON.parsed and re-stringified when possible (for readability);
- *   otherwise emitted as the raw string.
+ *   otherwise emitted as the raw string. BODY CONTENT IS NOT REDACTED
+ *   (ZAK-011): agent prompts may contain secrets from the user's project. The
+ *   startup warning below makes that unmistakable when the dump is enabled.
  *
  * The dump file is line-oriented JSON (JSONL); each line is self-contained:
  *
@@ -23,6 +25,15 @@
 import { appendFileSync } from "node:fs";
 
 const DUMP_PATH = process.env.ZCODE_DUMP_UPSTREAM;
+
+if (DUMP_PATH) {
+  console.warn(
+    "[zcode-proxy] WARNING: ZCODE_DUMP_UPSTREAM is set — full request/response BODIES (unredacted " +
+      "prompt content, which may include secrets from your projects) are written in plaintext to:\n" +
+      `  ${DUMP_PATH}\n` +
+      "Headers are masked; bodies are NOT. Use only for short-lived debugging and delete the file afterwards.",
+  );
+}
 
 /** Header names whose values must be masked before dumping. */
 const SENSITIVE_HEADERS = new Set([

@@ -3,9 +3,9 @@
 // prepares the exact values; entering them is manual-confirmation-required.
 // kilo.jsonc model-level tuning is documented only sparsely upstream — the
 // kit does not guess its schema (audit: no invented interfaces).
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { commitFile } from "../../lib/edit.mjs";
+import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 export default {
   id: "kilo-code",
@@ -22,7 +22,7 @@ export default {
   },
 
   apply(ctx, tx, log) {
-    mkdirSync(ctx.generated, { recursive: true });
+    ensureDir(ctx, ctx.generated);
     const sheet = join(ctx.generated, "kilo-zcode-values.md");
     const values = `# Kilo Code × ZCode — prepared values (manual confirmation required)
 

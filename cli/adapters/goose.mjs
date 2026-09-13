@@ -2,9 +2,9 @@
 // `custom_providers` directory (engine openai). The credential helper uses the
 // kit's key resolver via `auth.command` (documented goose mechanism; the
 // command runs directly without a shell and its stdout is the credential).
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { commitFile } from "../../lib/edit.mjs";
+import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 /** Platform-correct custom_providers directory (exported for tests). */
 export function providerDir(home) {
@@ -30,7 +30,7 @@ export default {
 
   apply(ctx, tx, log) {
     const dir = providerDir(ctx.home);
-    mkdirSync(dir, { recursive: true });
+    ensureDir(ctx, dir);
     const file = join(dir, "zcode.json");
     const resolver = join(ctx.root, "proxy", "resolve-zcode-proxy-key.mjs").replace(/\\/g, "/");
     const provider = {

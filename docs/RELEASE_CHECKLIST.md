@@ -43,9 +43,19 @@ not provenance; verify the tag commit for provenance.)
 ## npm publication — still gated (deliberate)
 
 1. Confirm the package name, add the `npm_token` repository secret.
-2. Commit the empty marker file `pack/ALLOW_PUBLISH`.
+2. Commit the marker file `pack/ALLOW_PUBLISH` containing one line with the
+   version to allow (e.g. `0.2.1`) — the marker is version-bound now: the
+   generated package is `private: true` without it, and a package-internal
+   `prepublishOnly` gate (`scripts/verify-release-marker.mjs`) re-checks the
+   shipped marker at publish time, so a manual `npm publish` from pack/dist
+   fails closed too.
 3. The next GitHub release then publishes `pack/dist` via CI (the
    `npm-publish.yml` publish job is skipped without the marker).
+
+**Never replace release assets under an existing tag** (audit ZAK-013): fix
+forward — cut a fresh tag/version from the corrected commit and build the
+assets from that tag in CI. The v0.2.0 asset replacements of 2026-09-13 are
+documented in its release notes; subsequent releases must not repeat that.
 
 **License gate before npm publication:** the vendored zcode-proxy
 (`zcode-proxy-src/`) states MIT in its upstream README but the upstream

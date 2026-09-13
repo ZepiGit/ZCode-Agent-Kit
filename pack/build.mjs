@@ -41,6 +41,7 @@ const ALLOW_PREFIXES = [
   "zcode-proxy-src/tsconfig.json",
   "zcode-proxy-src/bun.lock",
   "patches/",
+  "scripts/verify-release-marker.mjs",
 ];
 
 const FORBIDDEN = [
@@ -84,6 +85,7 @@ function main() {
   }
 
   const rootPkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
+  const releaseMarker = existsSync(join(ROOT, "pack", "ALLOW_PUBLISH"));
   const pkg = {
     name: "zcode-agent-kit",
     version: rootPkg.version,
@@ -92,8 +94,13 @@ function main() {
     type: "module",
     bin: { "zcode-kit": "cli/zcode-kit.mjs" },
     engines: { node: ">=20" },
+    // Fail closed at the package level, not only in CI (ZAK-012): a generated
+    // package stays private unless pack/ALLOW_PUBLISH existed at build time,
+    // and prepublishOnly re-checks the shipped marker right before publishing.
+    private: !releaseMarker,
     scripts: {
       postinstall: "node setup.mjs --postinstall-hint",
+      prepublishOnly: "node scripts/verify-release-marker.mjs",
     },
     repository: rootPkg.repository,
     bugs: rootPkg.bugs,
@@ -101,7 +108,12 @@ function main() {
     files: files.concat(["package.json"]),
   };
   writeFileSync(join(DIST, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
-  console.log(`pack: assembled ${files.length} files into pack/dist (version ${rootPkg.version})`);
+
+  // Ship the consent marker into the package when (and only when) it exists —
+  // the package-internal prepublishOnly gate then re-checks it at publish time.
+  const markerSrc = join(ROOT, "pack", "ALLOW_PUBLISH");
+  if (releaseMarker) cpSync(markerSrc, join(DIST, "ALLOW_PUBLISH"));
+  console.log(`pack: assembled ${files.length} files into pack/dist (version ${rootPkg.version}, private: ${pkg.private})`);
 
   if (dryRunPublish) {
     const res = spawnSync("npm", ["publish", "--dry-run"], {

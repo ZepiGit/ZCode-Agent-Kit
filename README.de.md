@@ -182,6 +182,34 @@ Logrotation und begrenzte Log-Lesezugriffe; Trial-Claim- und Off-Peak-Kanäle si
 deaktiviert. `doctor` trennt echte Auth-Validität vom JWT-Alter und prüft nur
 vorhandene Komponenten.
 
+## Sicherheits- & Automatisierungs-Policy
+
+Klare Worte, damit du entscheiden kannst, ob dieses Tool etwas für dich ist:
+
+- **CAPTCHA-Behandlung.** Das z.ai-Gateway liefert Challenge-Seiten als Teil
+  seines normalen Client-Protokolls — die offizielle ZCode-Desktop-App
+  beantwortet sie automatisch und unsichtbar. Der vendored Proxy repliziert
+  exakt dieses Verhalten für **deinen eigenen angemeldeten Account**: Er löst
+  Gateway-Challenges so wie der offizielle Client. Keine
+  Mensch-Verifikations-Sperre wird umgangen (kein Mensch löst diese Challenges
+  jemals), kein fremder Account wird angerührt, kein CAPTCHA-Dienst oder
+  Fremd-Solver ist im Spiel.
+- **Keine Trial-Automatisierung.** Automatisches Trial-Claiming und
+  Off-Peak-Scheduling gibt es in keiner mitgelieferten Config, und seit der
+  Audit-Nachbesserung sind die zugrundeliegenden Defaults fail-closed
+  (`false`): Eine Config, die den claim-Block auslässt oder verstümmelt,
+  aktiviert KEIN Claiming. Zum Aktivieren ist ein explizites
+  `claim.enabled: true` in der eigenen Config nötig.
+- **MCP-Scope.** Die `zcode-harness`-Bridge wird bewusst im **User-Scope**
+  registriert: sie ist eine maschinenweite Integration, keine pro Projekt.
+  Rückgängig ist das ein Befehl (`claude mcp remove zcode-harness --scope
+  user`), und die Bridge beantwortet niemals unauthentifizierte oder
+  Nicht-Loopback-Anfragen.
+- **Im Code erzwungen, nicht nur per Vorlage** (Audit-Nachbesserung): Der
+  Proxy bindet ausschließlich Loopback und verweigert den Dienst ohne echten
+  Bearer-Key; Adapter überschreiben keine fremden Provider-Einträge; Setup
+  schreibt aus einem Source-Checkout keine Nutzer-Configs.
+
 ## Login-Erneuerung
 
 ```bash

@@ -248,4 +248,32 @@ describe("handleQuota singleflight + cache", () => {
     expect(ok.status).toBe(200);
     clearQuotaCache();
   });
+
+  // ZAK-009: a caller joining an in-flight fetch must receive the COMPLETE
+  // snapshot once it resolves — never the null placeholder spread as a
+  // malformed-but-200 "cached" body.
+  it("a caller joining an in-flight fetch awaits the real snapshot (no null placeholder body)", async () => {
+    clearQuotaCache();
+    const base = makeBillingFetch();
+    let releaseUpstream: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { releaseUpstream = resolve; });
+    const gated: typeof fetch = async (url, init) => {
+      await gate;
+      return base.fetchImpl(url, init);
+    };
+    const first = handleQuota(makeConfig(), gated, loadFake); // starts the fetch, not awaited
+    const second = handleQuota(makeConfig(), gated, loadFake); // joins the in-flight entry
+    releaseUpstream?.();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const bodyA = (await a.json()) as Record<string, unknown>;
+    const bodyB = (await b.json()) as Record<string, unknown>;
+    // both bodies carry real quota fields — the joined one is not a spread null
+    expect(bodyA.asOf).toBeTruthy();
+    expect(bodyB.asOf).toBeTruthy();
+    expect(bodyB).toEqual(bodyA);
+    expect(base.calls.length).toBe(2, "singleflight still coalesces billing calls");
+    clearQuotaCache();
+  });
 });

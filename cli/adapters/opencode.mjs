@@ -3,10 +3,10 @@
 // on Windows; JSONC tolerated). Additive: only the "zcode" provider key is set.
 // The API key is a process-local env reference: the kit's launcher sets
 // ZCODE_PROXY_KEY; users can alternatively run /connect inside OpenCode.
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
-import { commitFile } from "../../lib/edit.mjs";
+import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 /** Platform-correct global config location (exported for tests). */
 export function configPath(home) {
@@ -41,7 +41,7 @@ export default {
 
   apply(ctx, tx, log) {
     const target = configPath(ctx.home);
-    mkdirSync(dirname(target), { recursive: true });
+    ensureDir(ctx, dirname(target));
     let text = existsSync(target) ? readFileSync(target, "utf8") : `{\n}\n`;
     let doc;
     try {

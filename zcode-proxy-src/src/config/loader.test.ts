@@ -117,7 +117,7 @@ logging:
 `);
     const cfg = loadConfig(path);
     expect(cfg.server.port).toBe(8080);
-    expect(cfg.server.host).toBe("0.0.0.0");
+    expect(cfg.server.host).toBe("127.0.0.1"); // ZAK-002: loopback default
     expect(cfg.provider).toBe("zai");
     expect(cfg.defaultModel).toBe("glm-4.6");
     expect(cfg.logging.level).toBe("info");
@@ -138,8 +138,10 @@ logging:
       defaultModel: "",
     });
     expect(cfg.claim).toEqual({
-      enabled: true,
-      auto: true,
+      // ZAK-001 remediation: fail-closed defaults — an omitted claim block
+      // must NOT enable automatic trial claiming.
+      enabled: false,
+      auto: false,
       origin: "https://zcode.z.ai",
       pollIntervalMs: 300000,
       cooldownMs: 600000,
@@ -345,6 +347,29 @@ server:
 provider: openai
 `);
     expect(() => loadConfig(path)).toThrow(/Invalid provider/);
+  });
+
+  // ZAK-002: loopback binding is a load-time invariant, not a template default.
+  it("throws on non-loopback server.host (0.0.0.0, LAN address, DNS name)", () => {
+    for (const host of ["0.0.0.0", "::", "192.168.1.10", "proxy.example.com"]) {
+      const path = writeYaml(`
+server:
+  port: 8457
+  host: "${host}"
+`);
+      expect(() => loadConfig(path)).toThrow(/loopback/);
+    }
+  });
+
+  it("accepts loopback server.host forms (127.0.0.1, localhost, ::1)", () => {
+    for (const host of ["127.0.0.1", "localhost", "::1"]) {
+      const path = writeYaml(`
+server:
+  port: 8457
+  host: "${host}"
+`);
+      expect(() => loadConfig(path)).not.toThrow();
+    }
   });
 
   it("ignores legacy auth.mode/auth.apiKey keys (oauth-only proxy)", () => {

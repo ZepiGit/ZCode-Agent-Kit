@@ -28,7 +28,9 @@ const ENV = {
 
 const DEFAULTS = {
   PORT: 8080,
-  HOST: "0.0.0.0",
+  // ZAK-002: loopback is the enforced invariant — the default must match it
+  // (was 0.0.0.0, which validate() now rejects).
+  HOST: "127.0.0.1",
   PROVIDER: "zai" as const,
   PLAN: "coding-plan" as const,
   DEFAULT_MODEL: "glm-4.6",
@@ -59,8 +61,12 @@ const DEFAULTS = {
   ASYNC_SETTLE_TIMEOUT_MS: 8000,
   ASYNC_CONTROL_TIMEOUT_MS: 15000,
   ASYNC_DEFAULT_MODEL: "",
-  CLAIM_ENABLED: true,
-  CLAIM_AUTO: true,
+  // Fail-closed (ZAK-001 remediation): a config that omits the claim block or
+  // only names it must NOT enable automatic trial claiming. Enabling requires
+  // an explicit `claim.enabled: true` / `claim.auto: true` (or env override) —
+  // kit-shipped configs never set them.
+  CLAIM_ENABLED: false,
+  CLAIM_AUTO: false,
   CLAIM_ORIGIN: "https://zcode.z.ai",
   CLAIM_POLL_INTERVAL_MS: 300000,
   CLAIM_COOLDOWN_MS: 600000,
@@ -384,6 +390,18 @@ function resolveClaimConfig(raw: unknown): ClaimConfig {
 function validate(config: ProxyConfig): void {
   if (config.server.port < 1 || config.server.port > 65535) {
     throw new Error(`server.port ${config.server.port} is out of range (1-65535)`);
+  }
+
+  // ZAK-002: loopback binding is a startup invariant, not a template default.
+  // Reject non-loopback hosts (including 0.0.0.0/:: and DNS names) so an
+  // account-backed proxy can never end up reachable from other interfaces.
+  const host = (config.server.host ?? "").trim().toLowerCase();
+  const loopbackOk = host === "127.0.0.1" || host === "::1" || host === "localhost" || host === "[::1]";
+  if (!loopbackOk) {
+    throw new Error(
+      `server.host "${config.server.host}" is not a loopback address — the proxy refuses to bind ` +
+        `anything except 127.0.0.1 / ::1 / localhost (it fronts a personal, account-backed credential)`,
+    );
   }
 
   if (!config.models.includes(config.defaultModel)) {

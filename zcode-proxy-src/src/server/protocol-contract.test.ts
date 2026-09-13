@@ -179,6 +179,8 @@ describe("protocol contract: /v1/messages (anthropic passthrough)", () => {
     // Full production wiring: startServer (node:http) -> handler -> upstream.
     // The client aborting its fetch closes the socket; the server's per-request
     // AbortController must abort the upstream fetch too.
+    // startServer enforces the serve invariants (loopback + real bearer key,
+    // ZAK-002), so this config carries a key and the request presents it.
     const signals: AbortSignal[] = [];
     const upstream = (async (req: Request | URL | string, init?: RequestInit): Promise<Response> => {
       const sig = init?.signal ?? (req instanceof Request ? req.signal : undefined);
@@ -191,12 +193,12 @@ describe("protocol contract: /v1/messages (anthropic passthrough)", () => {
       });
       return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
     }) as unknown as typeof fetch;
-    const server = await startServer({ config: makeConfig({ server: { port: 0, host: "127.0.0.1" } }), auth: oauthAuth(), fetchImpl: upstream });
+    const server = await startServer({ config: makeConfig({ server: { port: 0, host: "127.0.0.1" }, auth: { proxyApiKey: "contract-test-key" } }), auth: oauthAuth(), fetchImpl: upstream });
     const ctrl = new AbortController();
     try {
       const client = await fetch(`http://127.0.0.1:${server.port}/v1/messages`, {
         method: "POST",
-        headers: { "content-type": "application/json", accept: "text/event-stream" },
+        headers: { "content-type": "application/json", accept: "text/event-stream", authorization: "Bearer contract-test-key" },
         body: JSON.stringify({ model: "glm-5.3-flash", max_tokens: 100, stream: true, messages: [{ role: "user", content: "hi" }] }),
         signal: ctrl.signal,
       });

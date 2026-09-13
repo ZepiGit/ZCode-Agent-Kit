@@ -36,6 +36,7 @@ const REQUIRED_FILES = [
   "setup.mjs",
   "bin/zcode-claude.cmd",
   "bin/zcode-codex.cmd",
+  "scripts/verify-release-marker.mjs",
 ];
 
 const SECRET_PATTERNS = [

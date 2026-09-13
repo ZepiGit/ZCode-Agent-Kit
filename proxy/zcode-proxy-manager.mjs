@@ -18,6 +18,7 @@
 //   - No component is a hard requirement: doctor checks only what is
 //     installed on this machine and separates auth validity from token age.
 import { spawn, execSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, openSync, closeSync, readSync } from "node:fs";
 import { existsSync, readFileSync, statSync, renameSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
@@ -233,20 +234,26 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
     return { fd, close: () => { try { closeSync(fd); } catch {} } };
   }
 
-  // Manager start lock: guards two parallel `start` invocations. Stale locks
-  // (holder dead) are taken over, live ones block with a clear error.
+  // Manager start lock: guards two parallel `start` invocations. A holder is
+  // taken over ONLY when its pid is verifiably dead (or the record is
+  // corrupt) — never by wall-clock age, so a slow-but-live start cannot be
+  // raced by a second invocation. Release deletes the file only when the
+  // on-disk nonce still matches our own acquisition (ZAK-007).
+  let startLockNonce = null;
   function acquireStartLock() {
     mkdirSync(LOG_DIR, { recursive: true });
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      const nonce = randomBytes(8).toString("hex");
       try {
-        writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }), { flag: "wx" });
+        writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce }), { flag: "wx" });
+        startLockNonce = nonce;
         return;
       } catch (err) {
         if (err.code !== "EEXIST") throw err;
         let holder = null;
         try { holder = JSON.parse(readFileSync(LOCK_FILE, "utf8")); } catch {}
-        const stale = !holder || !pidAlive(holder.pid) || Date.now() - statSync(LOCK_FILE).mtimeMs > 60_000;
-        if (!stale) throw new Error(`another manager start is in progress (pid ${holder?.pid})`);
+        const stale = !holder || typeof holder.pid !== "number" || !pidAlive(holder.pid);
+        if (!stale) throw new Error(`another manager start is in progress (pid ${holder.pid}). If that is wrong (e.g. pid reuse), remove ${LOCK_FILE}`);
         try { unlinkSync(LOCK_FILE); } catch {}
       }
     }
@@ -254,6 +261,15 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
   }
 
   function releaseStartLock() {
+    if (!startLockNonce) return;
+    const nonce = startLockNonce;
+    startLockNonce = null;
+    try {
+      const holder = JSON.parse(readFileSync(LOCK_FILE, "utf8"));
+      if (holder.nonce !== nonce) return; // belongs to a successor — leave it alone
+    } catch {
+      return;
+    }
     try { unlinkSync(LOCK_FILE); } catch {}
   }
 

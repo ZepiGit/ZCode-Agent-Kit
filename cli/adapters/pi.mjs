@@ -1,20 +1,24 @@
 // Adapter: pi (pi.dev coding agent) — custom provider via ~/.pi/agent/models.json.
-// Additive merge: existing providers are preserved; an existing "zcode" entry
-// from another tool is never overwritten (kit registers under "zcode" only
-// when absent, else reports the conflict).
+// Additive merge: existing providers are preserved. Ownership is explicit: the
+// kit writes an "x-zcode-agent-kit" marker inside its provider entry and only
+// ever updates entries carrying that marker (or byte-identical legacy kit
+// entries from before the marker existed). A hand-written "zcode" entry
+// without either proof is a hard conflict — nothing is written (ZAK-004).
 // Efforts: pi's thinking system is separate from OMP's; the kit advertises
 // reasoning models with verified low/high/max levels via thinkingLevelMap
 // (documented in EFFORT_MAPPING.md); unverified capabilities are not claimed.
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { parseJsonc } from "../../lib/jsonc.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 
 const MANAGED_NOTE = "// zcode provider block managed by zcode-kit — GLM via local proxy";
+const OWNERSHIP_MARKER = { managed: true, schema: 1 };
 
 function zcodeProvider(ctx) {
   const rootPath = ctx.root.replace(/\\/g, "/");
   return {
+    "x-zcode-agent-kit": OWNERSHIP_MARKER,
     baseUrl: `http://127.0.0.1:${ctx.port()}`,
     api: "anthropic-messages",
     apiKey: `!node "${rootPath}/proxy/resolve-zcode-proxy-key.mjs"`,
@@ -55,7 +59,6 @@ export default {
       log("pi: skipped (no ~/.pi/agent — pi not configured on this machine)");
       return { changed: false };
     }
-    mkdirSync(agentDir, { recursive: true });
     let doc = {};
     let existed = existsSync(modelsJson);
     if (existed) {
@@ -69,11 +72,24 @@ export default {
     if (doc.providers.zcode) {
       const current = doc.providers.zcode;
       const wanted = zcodeProvider(ctx);
+      const owned = current["x-zcode-agent-kit"]?.managed === true;
+      const legacyKitEntry = !current["x-zcode-agent-kit"]
+        && current.api === "anthropic-messages"
+        && typeof current.apiKey === "string"
+        && current.apiKey.startsWith("!node ")
+        && current.apiKey.endsWith("/proxy/resolve-zcode-proxy-key.mjs\"");
+      if (!owned && !legacyKitEntry) {
+        throw new Error(
+          'pi: ~/.pi/agent/models.json already has a "zcode" provider entry that zcode-kit does not own ' +
+          "(no x-zcode-agent-kit marker and not a legacy kit entry) — nothing was changed. " +
+          "Rename your entry or add the marker to hand ownership to the kit.",
+        );
+      }
       if (JSON.stringify(current.models?.map((m) => m.id)) === JSON.stringify(wanted.models.map((m) => m.id)) && current.baseUrl === wanted.baseUrl) {
         log('  pi: "zcode" provider already current');
         return { changed: false };
       }
-      log('  pi: updating existing "zcode" provider entry (kit-owned)');
+      log('  pi: updating kit-owned "zcode" provider entry');
     } else if (Object.keys(doc.providers).length > 0) {
       log('  pi: registering "zcode" alongside existing providers');
     }

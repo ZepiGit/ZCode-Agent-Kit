@@ -4,11 +4,11 @@
 // zcode-omp-integration managed block is migrated (same pattern, predecessor
 // tool); a hand-written `zcode` entry outside any managed block aborts the
 // adapter fail-closed instead of being overwritten.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { removeFromDisabledProviders } from "../../lib/config-edit.mjs";
-import { commitFile } from "../../lib/edit.mjs";
+import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 const BLOCK_NAME = "zcode-kit";
 const MARKER_BEGIN = `# >>> ${BLOCK_NAME} (managed block) — do not edit inside`;
@@ -174,7 +174,7 @@ export default {
 
     const extSrc = join(ctx.root, "proxy", "zcode-proxy-autostart.ts");
     const extDst = join(agentDir, "extensions", EXT_ENTRY_NAME);
-    mkdirSync(dirname(extDst), { recursive: true });
+    ensureDir(ctx, dirname(extDst));
     const rootLiteral = ctx.root.replace(/\\/g, "/").replace(/"/g, '\\"');
     const extContent = readFileSync(extSrc, "utf8")
       .replaceAll("__ZCODE_OM_ROOT__", rootLiteral)

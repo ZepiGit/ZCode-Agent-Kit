@@ -3,9 +3,9 @@
 // ZCode only when explicitly used (bin/zcode-claude.cmd / .sh).
 // Community compatibility: Anthropic does not officially support routing to
 // non-Claude models; tested against claude CLI (see SUPPORT_MATRIX).
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { commitFile } from "../../lib/edit.mjs";
+import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 export default {
   id: "claude-code",
@@ -16,7 +16,7 @@ export default {
 
   apply(ctx, tx, log) {
     const port = ctx.port();
-    mkdirSync(ctx.generated, { recursive: true });
+    ensureDir(ctx, ctx.generated);
     const settingsPath = join(ctx.generated, "claude-zcode-settings.json");
     const settings = {
       env: {
