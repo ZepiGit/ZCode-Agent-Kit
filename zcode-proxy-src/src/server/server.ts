@@ -93,7 +93,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       return handleResponsesRoute(req, responsesOpts);
     }
     if (path === "/v1/models" && method === "GET") {
-      return handleListModels(req);
+      return handleListModels(req, config);
     }
 
     if (path === "/quota" && method === "GET") {

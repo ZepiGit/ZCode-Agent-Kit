@@ -1,0 +1,35 @@
+# CI: run the kit's test suites on push and pull requests.
+# The npm-publish workflow reuses `npm run test` before any publication step.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-kit:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # The proxy + MCP bridge suites need bun (their vendored toolchain).
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.20
+      - name: Install bridge/proxy dependencies
+        run: |
+          cd zcode-proxy-src && bun install --frozen-lockfile
+          cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile
+      - name: Kit tests (node:test)
+        run: npm run test
+      - name: Proxy tests (bun test)
+        run: npm run test:proxy
+      - name: MCP bridge tests
+        run: npm run test:mcp

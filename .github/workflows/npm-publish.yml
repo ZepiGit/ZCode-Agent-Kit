@@ -1,5 +1,15 @@
-# This workflow will run tests using node and then publish a package to GitHub Packages when a release is created
-# For more information see: https://docs.github.com/en/actions/publishing-packages/publishing-nodejs-packages
+# Publishes the npm package when a GitHub release is created.
+# (Adapted from the GitHub template to this repo's reality.)
+#
+# Publication gate (read before removing it):
+# - The root package.json is `private: true` on purpose: `npm publish` refuses
+#   to ship a 248 MB vendored source tree with local config paths. The kit's
+#   npm distribution is a small launcher package prepared under pack/ (see
+#   docs/RELEASE_CHECKLIST.md). Real publication additionally requires the
+#   `npm_token` repository secret and an explicit maintainer decision.
+# - Until then this workflow runs the tests and a `npm publish --dry-run`
+#   against the launcher package layout, which fails loudly if the package
+#   payload would ever leak secrets (no .proxykey, no generated/, no backups).
 
 name: Node.js Package
 
@@ -9,14 +19,25 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.20
       - run: npm ci
       - run: npm test
+      - name: Proxy + MCP bridge suites
+        run: |
+          cd zcode-proxy-src && bun install --frozen-lockfile && bun test
+          cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile && npm test
 
   publish-npm:
     needs: build
@@ -28,6 +49,16 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org/
       - run: npm ci
-      - run: npm publish
+      - name: Assemble launcher package (pack/)
+        run: node pack/build.mjs
+      - name: Verify package payload (no secrets, no vendored trees)
+        run: node pack/verify-payload.mjs
+      # Publication is intentionally gated: root package.json is private until
+      # the maintainer approves npm publication (docs/RELEASE_CHECKLIST.md).
+      - name: Dry-run publish (fails on payload problems, publishes nothing)
+        run: node pack/build.mjs --dry-run-publish
+      - name: Publish (only when pack/allow-publish marker is committed)
+        if: ${{ hashFiles('pack/ALLOW_PUBLISH') != '' }}
+        run: cd pack/dist && npm publish
         env:
-          NODE_AUTH_TOKEN: ${{secrets.npm_token}}
+          NODE_AUTH_TOKEN: ${{ secrets.npm_token }}

@@ -305,6 +305,16 @@ describe("route handler exports", () => {
     expect(resp.status).toBe(200);
   });
 
+  it("handleListModels respects the configured model whitelist", async () => {
+    const resp = handleListModels(
+      new Request("http://localhost/v1/models"),
+      { models: ["glm-5.3", "glm-5.3-flash", "not-in-registry"] },
+    );
+    expect(resp.status).toBe(200);
+    const body = (await resp.json()) as { data: Array<{ id: string }> };
+    expect(body.data.map((m) => m.id).sort()).toEqual(["glm-5.3", "glm-5.3-flash"]);
+  });
+
   it("handleListModels rich catalog on client_version=pi", async () => {
     const resp = handleListModels(new Request("http://localhost/v1/models?client_version=pi"));
     expect(resp.status).toBe(200);
@@ -314,6 +324,7 @@ describe("route handler exports", () => {
         context_window: number;
         max_tokens?: number;
         supported_reasoning_levels: Array<{ effort: string }>;
+        input_modalities: string[];
         visibility: string;
       }>;
       data?: unknown;
@@ -326,14 +337,19 @@ describe("route handler exports", () => {
     expect(flash!.context_window).toBe(1_000_000);
     expect(flash!.max_tokens).toBe(128_000);
     expect(flash!.visibility).toBe("list");
-    // Reasoning model advertises the Codex-style effort levels the DSH
-    // better-basicfun bridge maps onto its selector levels.
+    // Only the verified effort levels are advertised (audit: no invented
+    // medium/xhigh entries).
     const efforts = flash!.supported_reasoning_levels.map((l) => l.effort);
-    expect(efforts).toEqual(["low", "medium", "high", "xhigh"]);
-    // Vision variants advertise image input; non-reasoning ones have no levels.
+    expect(efforts).toEqual(["low", "high", "max"]);
+    // Registry-derived modalities: flash image input is live-verified, so the
+    // pi catalog must NOT hide it behind an id.includes("v") heuristic.
+    expect(flash!.input_modalities).toEqual(["text", "image"]);
+    // Vision variants advertise image input; unverified reasoning models
+    // (glm-4.6v has no efforts entry) expose an empty level list.
     const vModel = body.models.find((m) => m.slug === "glm-4.6v");
     expect(vModel).toBeDefined();
     expect(vModel!.supported_reasoning_levels).toEqual([]);
+    expect(vModel!.input_modalities).toEqual(["text", "image"]);
   });
 
   it("handleMessages is a function", () => {

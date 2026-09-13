@@ -28,7 +28,7 @@ OMP UI/CLI (--thinking low|high|max)
 - **Default:** `max` (verifizierter Modellstandard laut z.ai-Dokumentation und OMP-Katalog).
 - **Budget-Verantwortlicher:** OMP (Modus `anthropic-budget-effort`). Der Proxy verändert
   Anthropic-Bodies nicht; eine doppelte Budgetumrechnung findet nicht statt.
-- `max_tokens` bleibt das OMP-Output-Limit (64000 Default im Test, 131072 Modellmaximum);
+- `max_tokens` bleibt das OMP-Output-Limit (64000 Default im Test, 128000 Modellmaximum (Desktop-Katalog-Spec; Gateway akzeptiert 131072 ebenfalls — Probe 2026-09-13));
   der Proxy addiert nichts. Das Gateway behandelt `max_tokens` als Gesamtausgabe inkl. Thinking
   (Anthropic-Semantik) — Antwortspielraum bleibt erhalten.
 

@@ -1,9 +1,33 @@
 # IMPLEMENTATION_STATUS
 
-Stand: 2026-09-13 — **Kit-Paketierung abgeschlossen** (dieser Ordner, `zcode-agent-kit`,
-ist das teilbare Paket; die Referenzinstallation lebt getrennt davon und blieb unangetastet).
+Stand: **2026-09-13 (spät) — Audit-Remediation + zcode-kit CLI + Zehn-Adapter-Matrix + Release-Vorbereitung**
 
-## Kit-Stand (harness-agnostische Verteilung)
+## Baustein-Status (Audit-Auftrag)
+
+| Baustein | Status |
+|---|---|
+| Sicherheits-/Datenverlust-Fixes (Stufe 2) | **fertig + getestet** — transaktionales Setup (`lib/transaction.mjs`: Hash-Drei-Wege-Rollback, kollisionsfreie Backups, Setup-Lock), gescopetes `disabledProviders`-Editing (`lib/config-edit.mjs`), bun-Install hart fehlschlagend mit Lockfile-Hash-Marker, exklusive Key-Erstellung, YAML/TS-sicheres Quoting, byte-exakte Block-Entfernung (Idempotenz-Bug behoben) |
+| Manager-Rewrite | **fertig + getestet** — stop fail-closed bei nicht verifizierbarer Identität, PID-Reuse-Schutz über Prozess-Startzeiten (PowerShell-Ticks / procfs), Start-Lock, Lazy-Config (help/doctor crashen nicht ohne Config), persönlicher Fallback-Pfad entfernt, ESM-logs-Fix + begrenztes Tail-Lesen, Harness-bewusster Doctor (SKIP statt FAIL), Auth-Validität getrennt vom JWT-Alter, Graceful-then-Forced-Eskalation; Mock-Prozess-Beweise in `tests/manager-safety.test.mjs` |
+| MCP-Sicherheit | **fertig + getestet (36/36)** — Allowlist löst kanonisch durch Junction/Symlink-Eltern (auch für nicht existierende Ziele), Windows-Case-Insensitivität; HTTP-Modus: Bearer-Pflicht (timing-safe), exakte Host-/Origin-Prüfung (DNS-Rebinding + Prefix-Bypass geschlossen), Loopback-Only, Body-/Inflight-Limits, Header-Timeouts; Config: unbekannte Flags = Fehler, Limits validiert, Deny-by-default erhalten |
+| Modell-Registry | **fertig + getestet (858/858)** — eine Quelle (`src/provider/models.ts`): Modalitäten (flash-Bild live belegt, nicht mehr `id.includes("v")`), verifizierte Efforts [low,high,max] (keine erfundenen Stufen), `/v1/models` respektiert `config.models`-Whitelist; 128000-vs-131072 per Desktop-Katalog + Live-Probe entschieden (128000); Quota: Singleflight + TTL + `asOf`/`cached`, unbekannte Werte `null` statt 0, Billing-Timeouts |
+| Protocol-Contract-Tests | **fertig** — SSE-Grenzen (inkl. Multi-Byte-Splits), Thinking, Fehler im Stream, Abort-Propagation (Produktions-Wiring), Bilder, Backpressure, fragmentierte Tool-Args, mehrere Tools, Responses-Isolation + Byte-Budget (neu im Store), Usage-Fidelity |
+| zcode-kit CLI (Stufe 3) | **fertig + getestet** — `cli/zcode-kit.mjs` mit setup / integrate(--dry-run) / run / doctor(--json) / status / models / usage / auth / update / rollback / uninstall; alle Schreibvorgänge transaktional, Dry-Run-Write-Guard zentral (`lib/edit.mjs`); `setup.mjs` ist Shim auf dieselbe Implementierung |
+| Zehn Adapter (Stufe 4/5) | **implementiert + Fake-Home-getestet** — omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose; Live-getestet: omp (Effort-Matrix, Vorläufer-Session), claude-code, codex; ehrlich `runtime-unavailable`: pi/opencode/aider/continue/goose (nicht installiert); `blocked-by-gui`: cline/kilo (Werte vorbereitet, manual-confirmation-required); Details: SUPPORT_MATRIX.json/.md |
+| Distribution (Stufe 6) | **vorbereitet, Publikation gated** — root package.json (private=true), `pack/build.mjs` (Allowlist, 215 Dateien) + `pack/verify-payload.mjs` (Secret-/Pfad-Gate) + `npm publish --dry-run` grün; `install.ps1`/`install.sh` (gepinnte Version, SHA256, WSL-Erkennung, in-place Update); CI (`.github/workflows/ci.yml`) + `npm-publish.yml` (Test-Gate + ALLOW_PUBLISH-Marker); echte Veröffentlichung erfordert Maintainer-Aktionen (docs/RELEASE_CHECKLIST.md) |
+| Lizenz | Root-LICENSE (MIT) + MCP-LICENSE ergänzt; **Release-Gate**: vendored Proxy hat upstream README-MIT, aber keine LICENSE-Datei — Redistribution via npm erst nach Klärung (dokumentiert) |
+| Referenzinstallation | unangetastet (Port 8457); Live-Smoke des GEÄNDERTEN Proxy-Codes lief isoliert auf Port 8477 (Flash 200 „OK", Quota/Catalog-Endpunkte verifiziert) |
+
+## Offene Punkte / Blockaden
+
+1. **Commits/Push**: Mimosa-Hook blockiert Commits aus dieser Session (Fremdbefunde im Plattform-Code `C:\Program Files\ZCode`, nicht Kit) — Übergabe an das Terminal des Nutzers.
+2. **npm/Release-Publikation**: bewusst gated (private-Package + ALLOW_PUBLISH-Marker + npm_token + Lizenzklärung vendored Proxy) — docs/RELEASE_CHECKLIST.md.
+3. **Live-Client-Tests** für pi/opencode/aider/continue/goose: auf dieser Maschine nicht installiert → Status `runtime-unavailable` (Konfiguration getestet, Client-Verhalten nicht behauptet).
+4. **TUI-Interaktion OMP** (interaktive Modellwahl) weiter ungetestet (headless unmöglich).
+5. Bun-Compile-Bundling (runtime-freie Enduser-Installation) ist als Ansatz benannt, aber nicht gebaut — Installer verifizieren stattdessen gepinnte Runtime-Downloads; die Voraussetzung Node ≥ 20 + bun bleibt ehrlich im README genannt.
+
+---
+
+## Vorheriger Stand: Kit-Paketierung (harness-agnostische Verteilung)
 
 | Baustein | Status |
 |---|---|

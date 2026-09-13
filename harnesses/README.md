@@ -14,7 +14,7 @@ Der Kern des Kits ist harness-neutral: ein lokaler HTTP-Proxy auf
 Authentifizierung: `Authorization: Bearer <Inhalt von .proxykey>`
 Der Schlüssel liegt nur lokal (`<clone>/.proxykey`) und wird von setup.mjs erzeugt.
 
-## Von setup.mjs automatisch eingerichtet (nur für erkannte Harnesses)
+## Von `zcode-kit setup` automatisch eingerichtet (nur für erkannte Harnesses)
 
 setup.mjs erkennt, welche Harnesses installiert sind, und richtet **nur für
 diese** etwas ein. Ein Nutzer mit nur OMP bekommt keinerlei Claude-/Codex-
@@ -22,8 +22,17 @@ Artefakte (auch keine generierten Dateien).
 
 | Harness | Mechanismus | Eingriff in bestehende Config |
 |---|---|---|
-| OMP (oh-my-pi) | Provider-Block `zcode` in `~/.omp/agent/models.yml` + Autostart-Extension | additiv (Managed-Block, Backups, idempotent); Modellwahl: `omp --model zcode/glm-5.3[-flash] --thinking low\|high\|max` |
-| MCP-fähige Harnesses | stdio-Server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: Eintrag in `~/.omp/agent/mcp.json` (nur wenn OMP existiert); Claude Code: `claude mcp add` (nur wenn Claude Code erkannt); Codex: im isolierten `generated/codex-home` (nur wenn Codex erkannt) |
+| OMP (oh-my-pi) | Provider-Block `zcode` in `~/.omp/agent/models.yml` + Autostart-Extension | additiv (Managed-Block, transaktional, idempotent); Modellwahl: `omp --model zcode/glm-5.3[-flash] --thinking low\|high\|max` |
+| pi | Provider `zcode` in `~/.pi/agent/models.json` (`api: anthropic-messages`, `!node`-Key-Resolver) | additiv (fremde Provider bleiben); Quelle: pi-mono docs/models.md |
+| Claude Code | `generated/claude-zcode-settings.json` + `bin/zcode-claude.cmd\|.sh` | `~/.claude` bleibt unberührt (Opt-in pro Aufruf) |
+| Codex CLI | isoliertes `generated/codex-home` + `bin/zcode-codex.cmd\|.sh` | `~/.codex` bleibt unberührt; **Unterschied**: eigene Skills/Regeln/MCP gelten im Wrapper nicht |
+| OpenCode | Provider `zcode` in `opencode.json` (`@ai-sdk/openai-compatible`, apiKey `{env:ZCODE_PROXY_KEY}`) | additiv; Kommentare in JSONC bleiben erhalten |
+| Aider | `generated/aider-zcode.env` + `bin/zcode-aider.cmd\|.sh` (prozesslokal, **kein setx**) | Modell `openai/glm-5.3[-flash]` |
+| Continue | Managed-Block in `~/.continue/config.yaml` (schema v1) | vorhandene Modelle/Rollen bleiben |
+| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` | Credential über dokumentierten `auth.command`-Helper (Kit-Key-Resolver, ohne Shell) |
+| Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | Kit fasst VS-Code-State nie an; Werte einmalig in der UI eintragen |
+| Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | Custom-Provider (Anthropic Messages) in der UI; kilo.jsonc schreibt das Kit bewusst nicht |
+| MCP-fähige Harnesses | stdio-Server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: Eintrag in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (nur wenn erkannt); Codex: im isolierten Home. MCP allein zählt NICHT als Modellintegration |
 
 ## Opt-in-Wrapper (bestehende Config bleibt unberührt)
 

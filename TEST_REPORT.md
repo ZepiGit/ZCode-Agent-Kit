@@ -1,7 +1,72 @@
-# TEST_REPORT — ZCode-Provider-Integration in OMP
+# TEST_REPORT — ZCode-Provider-Integration
 
-Stand: 2026-09-13 · OMP 18.1.18 · zcode-proxy v4.6.4 (Commit 9a5cebe) · Node 26.7.0 / Bun 1.4.2
+Stand: **2026-09-13 (Audit-Remediation + zcode-kit CLI + 10-Adapter-Matrix)** · OMP 18.1.18 · zcode-proxy v4.6.4 (Commit 9a5cebe) · Node 26.7.0 / Bun 1.4.2
 Testarten: **[FIXTURE]** = Mock/isoliert ohne Quota · **[LIVE]** = echte Inferenz über den ZCode-Zugang · **[CFG]** = Konfigurations-/Prozesstest
+
+## 0. Aktueller Gesamtstand (Audit-Auftrag, 2026-09-13)
+
+Exakte Befehle und Ergebnisse (alle am heutigen Stand ausgeführt):
+
+| Suite | Befehl | Ergebnis |
+|---|---|---|
+| Kit (Transactions, Manager-Safety, Setup-Regressionen, CLI/Adapter) | `npm run test` | **28/28 PASS** |
+| Proxy (inkl. Gateway-Envelopes, Contract-Tests, Quota-Hardening) | `npm run test:proxy` (`bun test`) | **858/858 PASS** |
+| MCP-Bridge (inkl. HTTP-Gate, Allowlist-Escapes, Robustness) | `npm run test:mcp` | **36/36 PASS** |
+| Package-Pipeline | `node pack/build.mjs --dry-run-publish` + `node pack/verify-payload.mjs` | 215 Dateien, Dry-Run-Publish OK, Payload-Verifikation OK |
+
+### Neue Fixture-Beweise (Audit-Pflichtpunkte)
+
+**[FIXTURE] Manager-Prozess-Sicherheit** (`tests/manager-safety.test.mjs`, mit harmlosen Mock-Prozessen):
+- Fremder Dienst auf dem Port (401 für unseren Key) → `stop` verweigert (Exit 3), Mock-Prozess überlebt.
+- Fehlender Key (Identität nicht verifizierbar) → `stop` fail-closed (Exit 5), kein Kill.
+- PID-Reuse (Startzeit-Datei ≠ Prozess-Startzeit, via PowerShell `StartTime.Ticks`) → `stop` verweigert (Exit 4), Prozess überlebt.
+- Verifiziert-eigener Prozess (Identität + PID + Startzeit matchen) → gestoppt (Exit 0), PID-Datei geräumt.
+- `doctor`/`logs` überleben fehlende Config ohne Crash (Lazy-Load).
+
+**[FIXTURE] Transaktionale Backups** (`tests/transaction.test.mjs`):
+- Rollback stellt modifizierte Dateien byte-identisch wieder her; später geänderte Dateien → Konflikt-Meldung, kein Clobber.
+- Kit-erzeugte Dateien werden beim Rollback gelöscht — außer nachfolgend geändert (Konflikt).
+- Backup-Namen kollisionsfrei über Transaktionen; gelöschte Ziele werden restauriert; parallele Setups werden gelockt (toter Holder wird übernommen).
+
+**[FIXTURE] `disabledProviders`-Scoping** (`tests/transaction.test.mjs` — Audit-Regression):
+- `- zcode` in `disabledProviders` wird entfernt; identischer Eintrag in fremden Listen (`allowTools`, `trustedTools`, verschachtelt) überlebt; Kommentare bleiben.
+
+**[FIXTURE] Setup-Integration** (`tests/setup-regressions.test.mjs`, Fake-Home, PATH-isoliert):
+- Run 1 wendet an (models.yml-Block, config.yml, Extension, mcp.json), Run 2 ist byte-identischer No-op **ohne** neue Transaktion, Rollback stellt Originalzustand byte-identisch her.
+- Gefundene und behobene Bugs: Nicht-Idempotenz des Block-Remove (Nachlauf-Newline), globaler `
+{3,}`-Collapse (könnte fremde Leerzeilen zerstören), Extension-Eintrag ohne Einrückung (`extEntry.trim()`).
+
+**[FIXTURE] Adapter-Matrix** (`tests/cli-kit.test.mjs`): pi (additiver Merge, fremde Provider bleiben), opencode (JSONC-Kommentare bleiben), continue (Managed-Block, fremde Modelle bleiben), goose (auth.command-Helper), aider (Key nur in Env-Datei, nie in Logs), cline/kilo (manual-confirmation-required, kein VS-Code-State-Zugriff), JSONC-Editor (Kommentare + Trailing-Commas), Dry-Run schreibt nichts, unbekannter Harness-Name ist Fehler (Exit 2), Idempotenz je Adapter.
+
+**[FIXTURE] Protocol-Contract** (`zcode-proxy-src/src/server/protocol-contract.test.ts`):
+- SSE-Chunk-Grenzen inkl. mitten im Multi-Byte-UTF-8-Zeichen gesplitteter Chunks (kein U+FFFD, Event-Framing intakt).
+- Thinking-Blöcke pass-through; Usage exakt aus Upstream-Feldern (je Feld genau einmal).
+- Upstream-Fehler mitten im Stream wird sichtbar durchgereicht (kein stilles Stream-Ende).
+- Client-Abort propagiert in den Upstream-Fetch (Produktions-Wiring via `startServer`: Socket-Close → AbortController → upstream signal).
+- Bild-Block erreicht den Upstream unverändert (flash, base64 PNG).
+- Slow-Reader/Backpressure: 200 Chunks, Reihenfolge und Vollständigkeit erhalten.
+- Tool-Calls mit in 3 Fragmente gesplitteten `input_json_delta`-Argumenten → korrekt reassembliert, stabile IDs (Index-Semantik je OpenAI-Streaming-Regel); mehrere Tools in Reihenfolge (non-streaming), distinkte IDs.
+- Responses-State: unbekannte `previous_response_id` → 404 (keine erfundene Historie); Byte-Budget-Eviction → ehrlicher 404, Speicher bounded.
+
+**[FIXTURE] Quota-Hardening** (`routes-quota.test.ts`): Singleflight (3 parallele /quota → genau 1 Billing-Roundtrip), TTL-Cache mit `cached`/`asOf`, fehlgeschlagene Collection wird nicht gecacht, unbekannte Kontingentwerte sind `null` statt erfundener 0, Billing-Calls haben 10s-Timeout.
+
+**[FIXTURE] MCP-Sicherheit** (`test/unit/security.test.mjs`, `test/integration/http-gate.test.mjs`): unbekannte CLI-Flags sind harter Fehler (`--read-onyl`-Schutz), HTTP ohne Key verweigert Start, Nicht-Loopback-Host verweigert, Allowlist löst durch Junction/Symlink-Eltern auf (bestehende UND neu erstellte Ziele unter auswärts zeigendem Elter), Traversal verweigert; Live-Gates: kein Auth → 401 (vor allem anderen), falscher Key → 401, gefälschter Host-Header (DNS-Rebinding) → 403, Origin `http://127.0.0.1.evil` → 403 (Prefix-Bypass geschlossen), legitime Requests erreichen den MCP-Layer.
+
+### [LIVE] Live-Smoke über den GEFIXTEN Proxy-Code (2026-09-13, Port 8477 isoliert)
+
+| Probe | Befehl/Request | Ergebnis |
+|---|---|---|
+| Flash-Completion mit Effort low | `POST /v1/messages` (thinking budget 2048, max_tokens 128000) | **200, end_turn, "OK"**, usage 1716/32 |
+| `/quota` (gehärtet) | `GET /quota` | 200; `asOf`, `cached:false`, echte Balances; glm-5.3 `0/3000000` (Quota-Limit ehrlich sichtbar) |
+| `/v1/models?client_version=pi` | `GET` | flash: `input_modalities: ["text","image"]` (Bildableitung aus Registry, nicht mehr `id.includes("v")`), `supported_reasoning_levels: [low, high, max]` (keine erfundenen medium/xhigh) |
+| `/v1/models` (Whitelist) | `GET` | exakt `glm-5.3`, `glm-5.3-flash` (config.models respektiert) |
+| max_tokens-Grenze | 131072 / 128001 / 128000 je 1 Flash-Request | alle 200/end_turn — Gateway erzwingt 128000 nicht hart; **Entscheidung**: Desktop-Katalog-Spec (128000) gilt, setup/Registry/EFFORT_MAPPING konsistent |
+
+Hinweis: Das Proxy-Credential (`~/.zcode-proxy/credentials.json`) wurde heute zweimal extern geleert (~13:54, ~14:05 — vermutlich Desktop-App-Wartung); der dokumentierte Import-Weg (`auth login zai --import`) stellte es jeweils sofort wieder her.
+
+---
+
+## Historischer Bericht: Referenzinstallation (2026-09-13 vormittags)
 
 ## 1. Provider-Erkennung — [LIVE] ✅
 

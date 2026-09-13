@@ -1,0 +1,27 @@
+{
+  "name": "zcode-agent-kit",
+  "version": "0.2.0",
+  "description": "Local ZCode provider kit: run GLM-5.3 / GLM-5.3-Flash from your own ZCode Desktop account inside your own agent harnesses (OMP, pi, Claude Code, Codex, OpenCode, Cline, Kilo Code, Aider, Continue, Goose).",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test tests/transaction.test.mjs tests/setup-regressions.test.mjs tests/manager-safety.test.mjs tests/cli-kit.test.mjs",
+    "test:proxy": "cd zcode-proxy-src && bun test",
+    "test:mcp": "cd mcp/zcode-harness-mcp && npm test",
+    "test:all": "npm run test && npm run test:proxy && npm run test:mcp",
+    "setup": "node cli/zcode-kit.mjs setup",
+    "kit": "node cli/zcode-kit.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZepiGit/ZCode-Agent-Kit.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ZepiGit/ZCode-Agent-Kit/issues"
+  },
+  "homepage": "https://github.com/ZepiGit/ZCode-Agent-Kit#readme"
+}

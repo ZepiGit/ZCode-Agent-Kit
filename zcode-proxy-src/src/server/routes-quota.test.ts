@@ -11,7 +11,7 @@
  */
 import { describe, it, expect } from "bun:test";
 import os from "node:os";
-import { collectQuotaSnapshot, handleQuota } from "./routes-quota.js";
+import { collectQuotaSnapshot, handleQuota, clearQuotaCache } from "./routes-quota.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { Credential } from "../auth/types.js";
 
@@ -142,6 +142,7 @@ describe("collectQuotaSnapshot fingerprint", () => {
   });
 
   it("no JWT credential → handleQuota returns 503 quota_unavailable envelope", async () => {
+    clearQuotaCache();
     const { fetchImpl, calls } = makeBillingFetch();
     const resp = await handleQuota(makeConfig(), fetchImpl, loadNone);
     expect(resp.status).toBe(503);
@@ -151,6 +152,7 @@ describe("collectQuotaSnapshot fingerprint", () => {
   });
 
   it("upstream nonzero code surfaces in errors, snapshot still 200", async () => {
+    clearQuotaCache();
     const { fetchImpl } = makeBillingFetch({ code: 3012 });
     const snap = await collectQuotaSnapshot(makeConfig(), fetchImpl, loadFake);
     expect(snap.errors.length).toBe(2);
@@ -193,10 +195,57 @@ describe("collectQuotaSnapshot response mapping", () => {
     const snap = await collectQuotaSnapshot(makeConfig(), fetchImpl, loadFake);
     expect(snap.serverTime).toBe(1720000100);
     expect(snap.balances[0].totalUnits).toBe(100);
-    expect(snap.balances[0].usedUnits).toBe(0);
     expect(snap.balances[0].expiresAt).toBe(1735689600);
-    expect(snap.balances[1].totalUnits).toBe(0); // NaN → undefined → 0, JSON.stringify would emit null
-    expect(snap.balances[1].usedUnits).toBe(0);
+    // Unknown/garbage values are null — an invented 0 would make a partially
+    // known balance look exhausted (audit §10: no fabricated zeros).
+    expect(snap.balances[0].usedUnits).toBeNull(); // "x" is garbage
+    expect(snap.balances[1].totalUnits).toBeNull(); // NaN
+    expect(snap.balances[1].usedUnits).toBeNull(); // null upstream
+    expect(snap.balances[1].remainingUnits).toBe(7);
     expect(snap.balances[1].expiresAt).toBeUndefined();
+    // freshness metadata is always present
+    expect(typeof snap.asOf).toBe("string");
+    expect(snap.cached).toBe(false);
+  });
+});
+
+describe("handleQuota singleflight + cache", () => {
+  it("parallel /quota calls share one billing round-trip (singleflight)", async () => {
+    clearQuotaCache();
+    const { fetchImpl, calls } = makeBillingFetch();
+    const [a, b, c] = await Promise.all([
+      handleQuota(makeConfig(), fetchImpl, loadFake),
+      handleQuota(makeConfig(), fetchImpl, loadFake),
+      handleQuota(makeConfig(), fetchImpl, loadFake),
+    ]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    expect(c.status).toBe(200);
+    // exactly two billing calls (balance + preview), not six
+    expect(calls.length).toBe(2);
+    const first = (await a.json()) as { cached: boolean };
+    expect(first.cached).toBe(false);
+  });
+
+  it("within the TTL, follow-up calls are served from cache with cached=true", async () => {
+    clearQuotaCache();
+    const { fetchImpl, calls } = makeBillingFetch();
+    await handleQuota(makeConfig(), fetchImpl, loadFake);
+    const second = await handleQuota(makeConfig(), fetchImpl, loadFake);
+    expect(calls.length).toBe(2, "no additional billing calls within TTL");
+    const body = (await second.json()) as { cached: boolean; asOf: string };
+    expect(body.cached).toBe(true);
+    expect(typeof body.asOf).toBe("string");
+    clearQuotaCache();
+  });
+
+  it("a failed collection is not cached (next call retries)", async () => {
+    clearQuotaCache();
+    const { fetchImpl, calls } = makeBillingFetch();
+    const none = await handleQuota(makeConfig(), fetchImpl, loadNone);
+    expect(none.status).toBe(503);
+    const ok = await handleQuota(makeConfig(), fetchImpl, loadFake);
+    expect(ok.status).toBe(200);
+    clearQuotaCache();
   });
 });

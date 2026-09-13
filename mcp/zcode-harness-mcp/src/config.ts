@@ -1,5 +1,9 @@
 /**
- * Bridge configuration: CLI arguments + environment, no secrets.
+ * Bridge configuration: CLI arguments + environment, no secrets beyond the
+ * HTTP bearer key (which never leaves the local machine).
+ *
+ * Validation is strict: unknown flags are a hard error. A typo like
+ * `--read-onyl` must not silently disable the intended read-only mode.
  */
 import path from "node:path";
 import os from "node:os";
@@ -12,6 +16,8 @@ export interface BridgeConfig {
   port: number;
   host: string;
   readOnly: boolean;
+  /** Bearer token required by HTTP transport (stdio needs none). */
+  httpKey: string | null;
   runtimePathOverride: string | null;
   dataDir: string;
   allowWorkspaces: string[];
@@ -48,6 +54,23 @@ function splitList(v: string | undefined): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** Hosts an HTTP bridge may bind to: loopback only, by design. */
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+function isLoopbackHost(host: string): boolean {
+  const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+  if (LOOPBACK_HOSTS.has(h) || LOOPBACK_HOSTS.has(`[${h}]`)) return true;
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  return false;
+}
+
+function positiveInt(value: number, label: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`invalid ${label}: ${String(value)} (must be a positive integer)`);
+  }
+  return value;
+}
+
 export function parseConfig(argv: string[]): BridgeConfig {
   const args = [...argv];
   const config: BridgeConfig = {
@@ -55,6 +78,7 @@ export function parseConfig(argv: string[]): BridgeConfig {
     port: Number(process.env.ZCODE_HARNESS_HTTP_PORT ?? 3322),
     host: process.env.ZCODE_HARNESS_HTTP_HOST ?? "127.0.0.1",
     readOnly: false,
+    httpKey: process.env.ZCODE_HARNESS_HTTP_KEY ?? null,
     runtimePathOverride: process.env.ZCODE_HARNESS_RUNTIME_PATH ?? null,
     dataDir: defaultDataDir(),
     allowWorkspaces: splitList(process.env.ZCODE_HARNESS_ALLOW_WORKSPACES),
@@ -76,7 +100,7 @@ export function parseConfig(argv: string[]): BridgeConfig {
   };
 
   for (let i = 0; i < args.length; i += 1) {
-    const a = args[i];
+    const a = args[i] ?? "";
     const next = (): string => {
       const v = args[i + 1];
       i += 1;
@@ -97,6 +121,9 @@ export function parseConfig(argv: string[]): BridgeConfig {
         break;
       case "--read-only":
         config.readOnly = true;
+        break;
+      case "--http-key":
+        config.httpKey = next() || null;
         break;
       case "--runtime-path":
         config.runtimePathOverride = next();
@@ -129,8 +156,17 @@ export function parseConfig(argv: string[]): BridgeConfig {
       case "--max-concurrent-tasks":
         config.maxConcurrentTasks = Number(next());
         break;
+      case "--help":
+      case "-h":
+        // handled by the caller (prints usage); recognized here as valid
+        break;
       default:
-        // Unknown args are ignored so that MCP client launch configs stay simple.
+        if (a.startsWith("-")) {
+          throw new Error(
+            `unknown option "${a}" — refusing to start with a possibly-misspelled flag ` +
+              `(e.g. --read-onyl instead of --read-only would silently enable writes)`,
+          );
+        }
         break;
     }
   }
@@ -138,8 +174,29 @@ export function parseConfig(argv: string[]): BridgeConfig {
   if (config.interactionPolicy !== "allowlist" && config.interactionPolicy !== "deny" && config.interactionPolicy !== "ask") {
     throw new Error(`invalid interaction policy: ${String(config.interactionPolicy)}`);
   }
-  if (!Number.isFinite(config.port) || config.port <= 0 || config.port > 65535) {
-    throw new Error(`invalid port: ${String(config.port)}`);
+  positiveInt(config.port, "port");
+  if (config.port > 65535) throw new Error(`invalid port: ${String(config.port)}`);
+  positiveInt(config.interactionTimeoutSec, "interaction timeout");
+  positiveInt(config.maxConcurrentTasks, "max concurrent tasks");
+  positiveInt(config.taskQueueLimit, "task queue limit");
+  positiveInt(config.defaultRequestTimeoutMs, "request timeout");
+  positiveInt(config.maxArtifactBytes, "max artifact bytes");
+  if (config.interactionPolicy === "allowlist" && config.interactionAllowlist.length === 0) {
+    throw new Error('interaction policy "allowlist" requires --interaction-allowlist entries (deny-by-default otherwise)');
+  }
+  if (config.transport === "http") {
+    if (!isLoopbackHost(config.host)) {
+      throw new Error(
+        `refusing to bind HTTP transport to non-loopback host "${config.host}" — ` +
+          `the bridge exposes desktop control and only supports 127.0.0.1 / localhost / ::1`,
+      );
+    }
+    if (!config.httpKey) {
+      throw new Error(
+        "HTTP transport requires --http-key (or ZCODE_HARNESS_HTTP_KEY) — " +
+          "the bridge never serves unauthenticated requests; prefer stdio when in doubt",
+      );
+    }
   }
   return config;
 }

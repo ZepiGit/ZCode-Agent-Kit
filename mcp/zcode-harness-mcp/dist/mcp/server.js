@@ -11,7 +11,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
 import { createServer as createHttpServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { buildTools, toolTextPayload } from "./tools.js";
 import { listResources, readResource } from "./resources.js";
 import { createLogger } from "../util/log.js";
@@ -84,38 +84,126 @@ export async function serveStdio(opts) {
     log.info("bridge ready on stdio");
     // Keep the process alive until stdin closes (transport handles it).
 }
-export async function serveHttp(opts, host, port) {
-    const httpServer = createHttpServer(async (req, res) => {
-        // CORS disabled: same-origin only; origin checking per security policy.
-        const origin = req.headers.origin;
-        if (origin && origin !== `http://${host}:${port}` && !origin.startsWith("http://127.0.0.1") && !origin.startsWith("http://localhost")) {
-            res.writeHead(403).end("origin not allowed");
+export async function serveHttp(opts, host, port, httpKey) {
+    // Defense in depth: the config already rejects non-loopback hosts; assert
+    // again here so no future call site can quietly widen the bind.
+    const h = host.replace(/^\[|\]$/g, "").toLowerCase();
+    const loopback = h === "127.0.0.1" || h === "localhost" || h === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+    if (!loopback)
+        throw new Error(`refusing to bind HTTP transport to non-loopback host "${host}"`);
+    if (!httpKey)
+        throw new Error("HTTP transport requires an auth key — refusing to serve unauthenticated requests");
+    const keyBuf = Buffer.from(httpKey, "utf8");
+    const PORT = port;
+    const allowedHosts = new Set([`${h === "::1" ? "[::1]" : h}:${PORT}`]);
+    if (h !== "::1") {
+        allowedHosts.add(`127.0.0.1:${PORT}`);
+        allowedHosts.add(`localhost:${PORT}`);
+    }
+    else {
+        allowedHosts.add(`[::1]:${PORT}`);
+    }
+    // Simple request-pressure limits: the bridge controls a desktop app, not a
+    // public API. Parallel requests above the cap are shed with 503.
+    let inFlight = 0;
+    const MAX_IN_FLIGHT = 16;
+    const MAX_BODY_BYTES = 4 * 1024 * 1024;
+    const httpServer = createHttpServer((req, res) => {
+        // Exact Host check (anti DNS-rebinding): a browser-side attacker can force
+        // a Host header, so only the literal loopback host:port pairs are accepted.
+        const hostHeader = String(req.headers.host ?? "");
+        if (!allowedHosts.has(hostHeader)) {
+            res.writeHead(403).end("host not allowed");
             return;
         }
-        const url = new URL(req.url ?? "/", `http://${host}:${port}`);
+        // Bearer auth on EVERY request, before any routing: unauthenticated
+        // requests must reach no tools, tasks, or resources. Timing-safe compare.
+        const auth = String(req.headers.authorization ?? "");
+        const expected = Buffer.from(`Bearer ${httpKey}`, "utf8");
+        const given = Buffer.from(auth, "utf8");
+        const authOk = given.length === expected.length && timingSafeEqual(given, expected);
+        if (!authOk) {
+            res.writeHead(401, { "WWW-Authenticate": "Bearer", "Content-Type": "text/plain" });
+            res.end("unauthorized: set Authorization: Bearer <key> (the bridge never serves unauthenticated requests)");
+            return;
+        }
+        // Exact Origin check: parse, compare hostname+port literally. The previous
+        // startsWith("http://127.0.0.1") check accepted hosts like 127.0.0.1.evil.
+        const origin = req.headers.origin;
+        if (origin) {
+            try {
+                const o = new URL(String(origin));
+                const originHost = o.hostname;
+                const originPort = o.port === "" ? (o.protocol === "https:" ? 443 : 80) : Number(o.port);
+                const originOk = (originHost === "127.0.0.1" || originHost === "localhost" || originHost === "[::1]" || originHost === "::1") &&
+                    originPort === PORT &&
+                    o.protocol === "http:";
+                if (!originOk) {
+                    res.writeHead(403).end("origin not allowed");
+                    return;
+                }
+            }
+            catch {
+                res.writeHead(403).end("origin not allowed");
+                return;
+            }
+        }
+        if (inFlight >= MAX_IN_FLIGHT) {
+            res.writeHead(503).end("busy");
+            return;
+        }
+        inFlight += 1;
+        res.on("close", () => { inFlight -= 1; });
+        const url = new URL(req.url ?? "/", `http://${hostHeader}`);
         if (url.pathname !== "/mcp") {
             res.writeHead(404).end("not found");
             return;
         }
-        try {
-            // Stateless streamable HTTP: each POST creates a request-scoped transport.
-            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-            const server = buildServer(opts);
-            await server.connect(transport);
-            await transport.handleRequest(req, res);
-            res.on("close", () => {
-                transport.close();
-                server.close();
-            });
+        // Streamable HTTP semantics are POST-only in the stateless setup; other
+        // methods (GET SSE / DELETE) are not offered.
+        if (req.method !== "POST") {
+            res.writeHead(405).end("method not allowed");
+            return;
         }
-        catch (err) {
-            log.error("http transport error", { error: String(err) });
-            if (!res.headersSent)
-                res.writeHead(500).end("internal error");
+        // Bound the DECLARED body size before reading. The body stream itself must
+        // stay untouched: the MCP transport consumes it (a data listener here would
+        // starve it into "Invalid JSON").
+        const contentLength = Number(req.headers["content-length"] ?? "0");
+        if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+            res.writeHead(413).end("request body too large");
+            return;
         }
+        void handleMcpPost(opts, req, res);
     });
+    // Header/timeout hardening (defaults are generous for a local bridge).
+    httpServer.headersTimeout = 10_000;
+    httpServer.requestTimeout = 120_000;
+    httpServer.keepAliveTimeout = 30_000;
     await new Promise((resolve) => httpServer.listen(port, host, resolve));
-    log.info("bridge ready on http", { host, port, path: "/mcp" });
+    log.info("bridge ready on http", { host, port, path: "/mcp", auth: "bearer" });
     const sessionId = randomUUID().slice(0, 8);
     log.info("http bridge instance", { sessionId });
+    // Returned for clean shutdown (tests, embedded use).
+    return () => new Promise((resolve) => {
+        httpServer.closeAllConnections();
+        httpServer.close(() => resolve());
+    });
+}
+async function handleMcpPost(opts, req, res) {
+    try {
+        // Stateless streamable HTTP: each POST creates a request-scoped transport.
+        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+        const server = buildServer(opts);
+        await server.connect(transport);
+        await transport.handleRequest(req, res);
+        res.on("close", () => {
+            transport.close();
+            server.close();
+        });
+    }
+    catch (err) {
+        log.error("http transport error", { error: String(err) });
+        if (!res.headersSent)
+            res.writeHead(500).end("internal error");
+    }
 }

@@ -16,7 +16,7 @@
       "requiresEffort": true,
       "input": ["text"],
       "contextWindow": 1000000,
-      "maxTokens": 131072
+      "maxTokens": 128000
     },
     "glm-5.3-flash": {
       "thinkingMode": "anthropic-budget-effort",
@@ -25,7 +25,7 @@
       "requiresEffort": true,
       "input": ["text", "image"],
       "contextWindow": 1000000,
-      "maxTokens": 131072
+      "maxTokens": 128000
     }
   },
   "effortWireMapping": {

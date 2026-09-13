@@ -23,11 +23,8 @@ test("persistence: task survives bridge restart as interrupted, results stay rea
     await c1.stop();
   }
 
-  // Restart the bridge on the SAME data dir.
-  const c2 = await startBridge({ extraArgs: ["--data-dir-ignored"], env: {} });
-  // startBridge creates its own data dir; instead spawn manually for same-dir restart:
-  await c2.stop();
-
+  // Restart the bridge on the SAME data dir (c2-style throwaway starts are
+  // gone: unknown flags are a hard error now — see config validation).
   const c3 = await startBridge({ reuseDataDir: dataDir, workspaceDirOverride: c1.workspaceDir });
   try {
     const rec = await c3.tool("zcode_task_get", { taskId: started.taskId });
@@ -135,6 +132,7 @@ test("two clients over HTTP: independent sessions, same tasks visible", async ()
   const server = spawn(process.execPath, [
     path.join(projectRoot, "dist", "index.js"),
     "--http",
+    "--http-key", "test-key-robustness",
     "--port", "3399",
     "--host", "127.0.0.1",
     "--data-dir", dataDir,
@@ -147,12 +145,22 @@ test("two clients over HTTP: independent sessions, same tasks visible", async ()
       ZCODE_HARNESS_LOG_LEVEL: "warn",
     },
   });
-  await new Promise((r) => setTimeout(r, 1200));
+  // poll instead of a fixed sleep: the bridge must be listening before calls
+  let serverUp = false;
+  for (let i = 0; i < 20 && !serverUp; i += 1) {
+    await new Promise((r) => setTimeout(r, 300));
+    serverUp = await fetch("http://127.0.0.1:3399/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer test-key-robustness" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" }),
+    }).then((r) => r.status !== 503).catch(() => false);
+  }
+  assert.ok(serverUp, "bridge HTTP server did not come up in time");
 
   const mcpCall = async (body) => {
     const res = await fetch("http://127.0.0.1:3399/mcp", {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: "Bearer test-key-robustness" },
       body: JSON.stringify(body),
     });
     const text = await res.text();

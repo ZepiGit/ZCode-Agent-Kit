@@ -26,4 +26,13 @@ export interface ModelDef {
   maxOutputTokens?: number;
   /** Whether the model supports reasoning/thinking mode. */
   reasoning?: boolean;
+  /** Verified input modalities. Default (absent): text-only. */
+  inputModalities?: Array<"text" | "image">;
+  /**
+   * Effort levels verified against the start-plan gateway for this model
+   * (output_config.effort pairing). Absent = not verified — routes must not
+   * invent levels (no medium/xhigh unless proven). OMP owns the budget side
+   * upstream of this proxy; see EFFORT_MAPPING.md in the kit.
+   */
+  efforts?: Array<"low" | "high" | "max">;
 }

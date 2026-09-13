@@ -35,24 +35,46 @@ export interface ResponseStoreOptions {
   maxEntries?: number;
   /** TTL in ms before an entry is considered stale. Default 24h. */
   ttlMs?: number;
+  /**
+   * Byte budget over all stored entries (approximate serialized size).
+   * Default 64 MB. Oversized single entries are refused; entries are evicted
+   * oldest-first until the store fits again.
+   */
+  maxTotalBytes?: number;
 }
 
 const DEFAULT_MAX_ENTRIES = 1000;
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 
 /**
  * Bounded LRU + TTL cache of stored responses. Iteration order = insertion
  * order; `get()` re-inserts to refresh LRU position. Stale entries are evicted
- * lazily on access and proactively on `set()` overflow.
+ * lazily on access and proactively on `set()` overflow (count AND bytes).
  */
 export class ResponseStore {
   private readonly maxEntries: number;
   private readonly ttlMs: number;
+  private readonly maxTotalBytes: number;
   private readonly map = new Map<string, StoredResponse>();
+  private totalBytes = 0;
 
   constructor(opts: ResponseStoreOptions = {}) {
     this.maxEntries = opts.maxEntries ?? DEFAULT_MAX_ENTRIES;
     this.ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
+    this.maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  }
+
+  /** Approximate serialized size of an entry (keys + strings). */
+  private static byteSize(entry: StoredResponse): number {
+    let size = 128; // structural overhead baseline
+    try {
+      size += JSON.stringify(entry).length;
+    } catch {
+      // cyclic/unserializable output must not poison the store
+      return Number.MAX_SAFE_INTEGER;
+    }
+    return size;
   }
 
   /** Store a response. Overwrites on duplicate id. Evicts LRU entries on overflow. */
@@ -60,11 +82,24 @@ export class ResponseStore {
     const now = Date.now();
     entry.createdAt = now;
     entry.lastAccessedAt = now;
-    if (this.map.has(entry.id)) this.map.delete(entry.id);
+    const size = ResponseStore.byteSize(entry);
+    if (size > this.maxTotalBytes) {
+      // A single entry beyond the whole budget is not stored (bounded memory
+      // beats remembering one huge transcript).
+      return;
+    }
+    const replaced = this.map.get(entry.id);
+    if (replaced) {
+      this.totalBytes -= ResponseStore.byteSize(replaced);
+      this.map.delete(entry.id);
+    }
     this.map.set(entry.id, entry);
-    while (this.map.size > this.maxEntries) {
+    this.totalBytes += size;
+    while (this.map.size > this.maxEntries || this.totalBytes > this.maxTotalBytes) {
       const oldestKey = this.map.keys().next().value;
       if (oldestKey === undefined) break;
+      const oldest = this.map.get(oldestKey);
+      if (oldest) this.totalBytes -= ResponseStore.byteSize(oldest);
       this.map.delete(oldestKey);
     }
   }
@@ -78,6 +113,7 @@ export class ResponseStore {
     if (!entry) return undefined;
     const now = Date.now();
     if (now - entry.createdAt > this.ttlMs) {
+      this.totalBytes -= ResponseStore.byteSize(entry);
       this.map.delete(id);
       return undefined;
     }
@@ -89,14 +125,23 @@ export class ResponseStore {
   }
 
   delete(id: string): boolean {
+    const entry = this.map.get(id);
+    if (!entry) return false;
+    this.totalBytes -= ResponseStore.byteSize(entry);
     return this.map.delete(id);
   }
 
   clear(): void {
     this.map.clear();
+    this.totalBytes = 0;
   }
 
   size(): number {
     return this.map.size;
+  }
+
+  /** Approximate total serialized bytes currently retained (for diagnostics/tests). */
+  totalBytesUsed(): number {
+    return this.totalBytes;
   }
 }

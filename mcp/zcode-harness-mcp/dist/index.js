@@ -130,7 +130,11 @@ async function main() {
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
     if (config.transport === "http") {
-        await serveHttp(opts, config.host, config.port);
+        // parseConfig already enforces a key for http; the assert documents that
+        // this call site can never start an unauthenticated server.
+        if (!config.httpKey)
+            throw new Error("HTTP transport requires --http-key (refusing to serve unauthenticated)");
+        await serveHttp(opts, config.host, config.port, config.httpKey);
     }
     else {
         await serveStdio(opts);

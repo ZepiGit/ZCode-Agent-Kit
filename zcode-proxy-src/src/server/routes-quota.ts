@@ -18,9 +18,10 @@ import { errorResponse } from "../proxy/handler.js";
 
 export interface QuotaBalanceEntry {
   showName: string;
-  remainingUnits: number;
-  totalUnits: number;
-  usedUnits: number;
+  /** Unknown/missing upstream values are null — never an invented 0. */
+  remainingUnits: number | null;
+  totalUnits: number | null;
+  usedUnits: number | null;
   unitType?: string;
   expiresAt?: number;
 }
@@ -29,7 +30,7 @@ export interface QuotaPlanEntry {
   planId: string;
   name: string;
   description?: string;
-  entitlements: Array<{ showName: string; grantUnits: number; unitType: string; effectiveAt?: number }>;
+  entitlements: Array<{ showName: string; grantUnits: number | null; unitType: string; effectiveAt?: number }>;
 }
 
 export interface QuotaSnapshot {
@@ -45,6 +46,22 @@ export interface QuotaSnapshot {
   balances: QuotaBalanceEntry[];
   claimablePlans: QuotaPlanEntry[];
   errors: string[];
+  /** When the billing endpoints were actually queried (ISO). With `cached`, consumers must display this as the data age. */
+  asOf: string;
+  /** True when served from the singleflight cache (within QUOTA_CACHE_TTL_MS of `asOf`). */
+  cached: boolean;
+}
+
+/** Billing calls are single-shot UI data: bound them hard. */
+const BILLING_TIMEOUT_MS = 10_000;
+/** Singleflight cache: parallel /quota hits reuse one billing round-trip. */
+const QUOTA_CACHE_TTL_MS = 15_000;
+
+let quotaCache: { snapshot: QuotaSnapshot; fetchedAtMs: number; promise: Promise<QuotaSnapshot> } | null = null;
+
+/** Test hook: drop the /quota cache so tests are isolated from each other. */
+export function clearQuotaCache(): void {
+  quotaCache = null;
 }
 
 /** Query one billing URL, tolerating per-endpoint failures. */
@@ -55,7 +72,7 @@ async function fetchBilling(
   fetchImpl: typeof fetch,
 ): Promise<{ code?: number; msg?: string; data?: unknown } | null> {
   try {
-    const resp = await fetchImpl(`${origin.replace(/\/+$/, "")}${path}`, { headers });
+    const resp = await fetchImpl(`${origin.replace(/\/+$/, "")}${path}`, { headers, signal: AbortSignal.timeout(BILLING_TIMEOUT_MS) });
     const text = await resp.text();
     try {
       return JSON.parse(text) as { code?: number; msg?: string; data?: unknown };
@@ -119,11 +136,13 @@ export async function collectQuotaSnapshot(
     // accept both so neither casing drops the field.
     const expiresAt = toFiniteNumber(b.expires_at ?? b.expiresAt);
     const unitType = b.unit_type ?? b.unitType;
+    // Unknown/NaN numbers stay null (audit §10): an invented 0 would make a
+    // partially-known balance look exhausted/empty.
     balances.push({
       showName: String(b.show_name ?? ""),
-      remainingUnits: toFiniteNumber(b.remaining_units ?? b.remainingUnits) ?? 0,
-      totalUnits: toFiniteNumber(b.total_units ?? b.totalUnits) ?? 0,
-      usedUnits: toFiniteNumber(b.used_units ?? b.usedUnits) ?? 0,
+      remainingUnits: toFiniteNumber(b.remaining_units ?? b.remainingUnits) ?? null,
+      totalUnits: toFiniteNumber(b.total_units ?? b.totalUnits) ?? null,
+      usedUnits: toFiniteNumber(b.used_units ?? b.usedUnits) ?? null,
       ...(unitType ? { unitType: String(unitType) } : {}),
       ...(expiresAt !== undefined ? { expiresAt } : {}),
     });
@@ -138,7 +157,7 @@ export async function collectQuotaSnapshot(
       ...(p.description ? { description: String(p.description) } : {}),
       entitlements: (Array.isArray(p.entitlements) ? p.entitlements : []).map((e: any) => ({
         showName: String(e.show_name ?? ""),
-        grantUnits: toFiniteNumber(e.grant_units ?? e.grantUnits) ?? 0,
+        grantUnits: toFiniteNumber(e.grant_units ?? e.grantUnits) ?? null,
         unitType: String(e.unit_type ?? e.unitType ?? "token"),
         ...(toFiniteNumber(e.effective_at ?? e.effectiveAt) !== undefined
           ? { effectiveAt: toFiniteNumber(e.effective_at ?? e.effectiveAt) as number }
@@ -154,6 +173,8 @@ export async function collectQuotaSnapshot(
     balances,
     claimablePlans,
     errors,
+    asOf: new Date().toISOString(),
+    cached: false,
   };
 }
 
@@ -164,7 +185,29 @@ export async function handleQuota(
   loadCredentialImpl: typeof loadCredential = loadCredential,
 ): Promise<Response> {
   try {
-    const snapshot = await collectQuotaSnapshot(config, fetchImpl, loadCredentialImpl);
+    // Singleflight + short TTL: parallel UI probes (manager status, doctor,
+    // webui) share one billing round-trip instead of hammering the gateway.
+    const now = Date.now();
+    if (quotaCache && now - quotaCache.fetchedAtMs < QUOTA_CACHE_TTL_MS) {
+      const cached: QuotaSnapshot = { ...quotaCache.snapshot, cached: true };
+      return new Response(JSON.stringify(cached, null, 1), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (!quotaCache) {
+      const promise = collectQuotaSnapshot(config, fetchImpl, loadCredentialImpl)
+        .then((snapshot) => {
+          quotaCache = { snapshot, fetchedAtMs: Date.now(), promise: Promise.resolve(snapshot) };
+          return snapshot;
+        })
+        .catch((err) => {
+          quotaCache = null;
+          throw err;
+        });
+      quotaCache = { snapshot: null as unknown as QuotaSnapshot, fetchedAtMs: now, promise };
+    }
+    const snapshot = await quotaCache.promise;
     return new Response(JSON.stringify(snapshot, null, 1), {
       status: 200,
       headers: { "content-type": "application/json" },
