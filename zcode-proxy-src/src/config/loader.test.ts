@@ -267,6 +267,43 @@ claim:
     expect(cfg.claim.pollIntervalMs).toBe(45000);
   });
 
+  // Audit backlog: full precedence matrix — env > YAML > default(false).
+  it("claim precedence: env > YAML > fail-closed default", () => {
+    // 1. default: neither YAML nor env → false/false
+    expect(loadConfig(writeYaml(`\n`)).claim.enabled).toBe(false);
+    expect(loadConfig(writeYaml(`\n`)).claim.auto).toBe(false);
+
+    // 2. YAML true, no env → true
+    const yamlTrue = writeYaml(`
+claim:
+  enabled: true
+  auto: true
+`);
+    expect(loadConfig(yamlTrue).claim.enabled).toBe(true);
+    expect(loadConfig(yamlTrue).claim.auto).toBe(true);
+
+    // 3. env false overrides YAML true
+    process.env.ZCODE_CLAIM_ENABLED = "false";
+    process.env.ZCODE_CLAIM_AUTO = "false";
+    expect(loadConfig(yamlTrue).claim.enabled).toBe(false);
+    expect(loadConfig(yamlTrue).claim.auto).toBe(false);
+    delete process.env.ZCODE_CLAIM_ENABLED;
+    delete process.env.ZCODE_CLAIM_AUTO;
+
+    // 4. env true overrides YAML false
+    const yamlFalse = writeYaml(`
+claim:
+  enabled: false
+  auto: false
+`);
+    process.env.ZCODE_CLAIM_ENABLED = "true";
+    process.env.ZCODE_CLAIM_AUTO = "true";
+    expect(loadConfig(yamlFalse).claim.enabled).toBe(true);
+    expect(loadConfig(yamlFalse).claim.auto).toBe(true);
+    delete process.env.ZCODE_CLAIM_ENABLED;
+    delete process.env.ZCODE_CLAIM_AUTO;
+  });
+
   it("async: maxWaitMs=0 is allowed (non-negative, not positive)", () => {
     const path = writeYaml(`
 async:
@@ -361,14 +398,27 @@ server:
     }
   });
 
-  it("accepts loopback server.host forms (127.0.0.1, localhost, ::1)", () => {
-    for (const host of ["127.0.0.1", "localhost", "::1"]) {
+  // Audit backlog: spelling variants that could sneak past a sloppy allowlist.
+  it("rejects loopback lookalikes (malformed IPv4, mapped IPv6, expanded IPv6)", () => {
+    for (const host of ["127.0.0.01", "127.0.0.1.", "::ffff:127.0.0.1", "0:0:0:0:0:0:0:1"]) {
       const path = writeYaml(`
 server:
   port: 8457
   host: "${host}"
 `);
-      expect(() => loadConfig(path)).not.toThrow();
+      expect(() => loadConfig(path)).toThrow(/loopback/);
+    }
+  });
+
+  it("accepts loopback server.host forms and canonicalizes the bracketed IPv6 literal", () => {
+    for (const [host, normalized] of [["127.0.0.1", "127.0.0.1"], ["localhost", "localhost"], ["LOCALHOST", "localhost"], ["::1", "::1"], ["[::1]", "::1"]] as const) {
+      const path = writeYaml(`
+server:
+  port: 8457
+  host: "${host}"
+`);
+      const cfg = loadConfig(path);
+      expect(cfg.server.host).toBe(normalized);
     }
   });
 

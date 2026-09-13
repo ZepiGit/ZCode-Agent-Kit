@@ -363,3 +363,168 @@ test("CLI: integrate --dry-run writes nothing", () => {
     if (prev === undefined) delete process.env.APPDATA; else process.env.APPDATA = prev;
   }
 });
+
+// ------------------------------------------- audit test backlog: dry-run matrix
+import { createHash } from "node:crypto";
+import { readdirSync, statSync } from "node:fs";
+
+/** Recursive path → kind/content-hash snapshot of a directory tree. */
+function snapshotTree(root) {
+  const out = {};
+  if (!existsSync(root)) return out;
+  const walk = (dir, rel) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      const full = join(dir, e.name);
+      if (e.isDirectory()) { out[r] = "dir"; walk(full, r); }
+      else if (e.isSymbolicLink()) out[r] = "symlink";
+      else out[r] = "file:" + createHash("sha256").update(readFileSync(full)).digest("hex");
+    }
+  };
+  walk(root, "");
+  return out;
+}
+
+/** Minimal detection fixture per adapter so its apply() reaches ALL its
+ * write paths (structural skips would make the proof vacuous). */
+function seedDryRunFixture(id, home) {
+  switch (id) {
+    case "omp":
+      mkdirSync(join(home, ".omp", "agent"), { recursive: true });
+      writeFileSync(join(home, ".omp", "agent", "models.yml"), "providers:\n  openai:\n    name: OpenAI\n");
+      break;
+    case "pi":
+      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+      writeFileSync(join(home, ".pi", "agent", "models.json"), JSON.stringify({ providers: {} }, null, 2));
+      break;
+    case "continue":
+      mkdirSync(join(home, ".continue"), { recursive: true });
+      writeFileSync(
+        join(home, ".continue", "config.yaml"),
+        "name: t\nversion: 0.0.1\nschema: v1\nmodels:\n  - name: GPT\n    provider: openai\n    model: gpt-4o\n    apiBase: https://api.openai.com/v1\n    apiKey: k\n",
+      );
+      break;
+    case "opencode":
+      mkdirSync(join(home, "AppData", "Roaming", "opencode"), { recursive: true });
+      writeFileSync(join(home, "AppData", "Roaming", "opencode", "opencode.json"), '{\n  // mine\n  "theme": "dark"\n}');
+      break;
+    // codex/claude-code/cline/kilo-code/aider write under ctx.generated —
+    // nothing in the home to seed; goose/opencode need APPDATA only.
+  }
+}
+
+const DRY_RUN_MATRIX = ["omp", "pi", "claude-code", "codex", "opencode", "cline", "kilo-code", "aider", "continue", "goose"];
+
+test("dry-run matrix: no adapter mutates the fake home (zero-mutation proof)", async () => {
+  for (const id of DRY_RUN_MATRIX) {
+    // control: same fixture, real run — proves the adapter reaches its write
+    // paths (a dry-run proof over paths that never write would be vacuous)
+    const controlHome = fakeHome(`matrix-${id}-control`);
+    seedDryRunFixture(id, controlHome);
+    const control = ctxWithAppData(controlHome);
+    control.ctx.root = join(controlHome, "kitroot");
+    control.ctx.generated = join(control.ctx.root, "generated");
+    if (id === "omp") control.ctx.root = KIT;
+    const mod = await import(`../cli/adapters/${id}.mjs`);
+    const controlBefore = snapshotTree(controlHome);
+    await mod.default.apply(control.ctx, noopTx(), () => {});
+    const controlAfter = snapshotTree(controlHome);
+    control.restore();
+    assert.notDeepEqual(controlAfter, controlBefore, `${id}: control run must actually write (fixture must reach write paths)`);
+
+    // the actual proof: identical fixture, dry-run — zero mutation
+    const home = fakeHome(`matrix-${id}`);
+    seedDryRunFixture(id, home);
+    const { ctx, restore } = ctxWithAppData(home);
+    ctx.root = join(home, "kitroot");
+    ctx.generated = join(ctx.root, "generated");
+    if (id === "omp") ctx.root = KIT;
+    ctx.dryRun = true;
+    const before = snapshotTree(home);
+    await mod.default.apply(ctx, noopTx(), () => {});
+    const after = snapshotTree(home);
+    restore();
+    assert.deepEqual(after, before, `${id}: dry-run must not mutate anything`);
+  }
+});
+
+test("dry-run leaves preexisting staging sentinels untouched", async () => {
+  const home = fakeHome("staging-sentinel");
+  const agent = join(home, ".omp", "agent");
+  mkdirSync(agent, { recursive: true });
+  writeFileSync(join(agent, "models.yml"), "providers:\n  openai:\n    name: OpenAI\n");
+  const sentinel = join(agent, "models.yml.zcode-staging");
+  writeFileSync(sentinel, "sentinel");
+  const { ctx, restore } = ctxWithAppData(home);
+  ctx.dryRun = true;
+  const mod = await import("../cli/adapters/omp.mjs");
+  await mod.default.apply(ctx, noopTx(), () => {});
+  restore();
+  assert.equal(readFileSync(sentinel, "utf8"), "sentinel", "sentinel untouched");
+  assert.ok(!readdirSync(agent).some((f) => f.includes(".zcode-staging") && f !== "models.yml.zcode-staging"), "no new staging files");
+});
+
+// AUD-010: an inline `models:` value cannot be block-edited — the adapter
+// must refuse instead of appending a duplicate top-level key.
+test("continue adapter fails closed on inline models value, appends after commented header", async () => {
+  const home = fakeHome("continue-inline");
+  const cont = join(home, ".continue");
+  mkdirSync(cont, { recursive: true });
+  const original = "name: t\nversion: 0.0.1\nschema: v1\nmodels: []\n";
+  writeFileSync(join(cont, "config.yaml"), original);
+  await assert.rejects(() => runAdapter("continue", home), /cannot safely edit/);
+  assert.equal(readFileSync(join(cont, "config.yaml"), "utf8"), original, "nothing written on refusal");
+
+  // a commented-out header is inert — appending a fresh models: is correct
+  const home2 = fakeHome("continue-commented");
+  mkdirSync(join(home2, ".continue"), { recursive: true });
+  writeFileSync(join(home2, ".continue", "config.yaml"), "# models: disabled earlier\nname: t\n");
+  const r = await runAdapter("continue", home2);
+  const text = readFileSync(join(home2, ".continue", "config.yaml"), "utf8");
+  assert.equal((text.match(/^models:/gm) ?? []).length, 1, "exactly one top-level models key");
+  assert.match(text, /# models: disabled earlier/, "comment preserved");
+  assert.match(r.logs.join("\n"), /kit models appended/);
+});
+
+// AUD test backlog: opencode adapter-level byte idempotence with a commented,
+// kit-owned existing config (the jsonc replace path end-to-end).
+test("opencode adapter is byte-idempotent on a commented config", async () => {
+  const home = fakeHome("opencode-idem");
+  const prevAppData = process.env.APPDATA;
+  process.env.APPDATA = join(home, "AppData", "Roaming");
+  try {
+    const { configPath } = await import("../cli/adapters/opencode.mjs");
+    const cfgFile = configPath(home);
+    mkdirSync(dirname(cfgFile), { recursive: true });
+    writeFileSync(cfgFile, `{\n  // my theme setting\n  "theme": "dark"\n}`);
+    const r1 = await runAdapter("opencode", home);
+    const once = readFileSync(cfgFile, "utf8");
+    assert.equal((once.match(/"provider"/g) ?? []).length, 1, "exactly one provider key");
+    const r2 = await runAdapter("opencode", home);
+    assert.equal(readFileSync(cfgFile, "utf8"), once, "second run is byte-identical");
+    assert.match(r2.logs.join("\n"), /already current/);
+    assert.match(once, /\/\/ my theme setting/, "comments preserved");
+  } finally {
+    if (prevAppData === undefined) delete process.env.APPDATA; else process.env.APPDATA = prevAppData;
+  }
+});
+
+// Audit backlog: no kit-shipped config may enable automatic trial claiming —
+// the claim block in BOTH example configs must be fail-closed false, and no
+// kit launcher may set the enabling env var for its child processes.
+test("shipped proxy configs keep claim disabled (no auto-trial-claiming)", async () => {
+  const { createRequire } = await import("node:module");
+  const req = createRequire(join(KIT, "zcode-proxy-src", "package.json"));
+  const yaml = req("yaml");
+  for (const f of ["proxy/config.example.yaml", "zcode-proxy-src/config.example.yaml"]) {
+    const doc = yaml.parse(readFileSync(join(KIT, f), "utf8"));
+    const claim = doc?.claim ?? {};
+    assert.equal(claim.enabled, false, `${f}: claim.enabled must be false`);
+    assert.equal(claim.auto, false, `${f}: claim.auto must be false`);
+  }
+  for (const f of readdirSync(join(KIT, "bin"))) {
+    const text = readFileSync(join(KIT, "bin", f), "utf8");
+    assert.doesNotMatch(text, /ZCODE_CLAIM_ENABLED\s*=\s*true/, `${f} must not enable claiming`);
+    assert.doesNotMatch(text, /ZCODE_CLAIM_AUTO\s*=\s*true/, `${f} must not enable auto-claiming`);
+  }
+});

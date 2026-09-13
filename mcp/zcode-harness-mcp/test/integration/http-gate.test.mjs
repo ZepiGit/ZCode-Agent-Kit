@@ -166,6 +166,142 @@ test("http gate: declared oversized content-length refused without body", async 
   }
 });
 
+// Audit backlog (AUD-006): slow writer — the 413 must arrive BEFORE the
+// client finishes the upload, so the request slot is freed immediately.
+test("http gate: oversized slow writer receives 413 before EOF", async () => {
+  const probe = http.createServer();
+  await new Promise((r) => probe.listen(0, "127.0.0.1", r));
+  port = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  const closeServer = await serveHttp(
+    { toolCtx: {}, resourceCtx: {}, serverInfo: { name: "test", version: "0.0.0" } },
+    "127.0.0.1",
+    port,
+    KEY,
+  );
+  try {
+    const outcome = await new Promise((resolve, reject) => {
+      const req = http.request({
+        host: "127.0.0.1", port, method: "POST", path: "/mcp",
+        headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, connection: "close" },
+      });
+      let answered = null;
+      const finish = (v) => { if (!answered) { answered = v; resolve(v); } };
+      req.on("response", (res) => {
+        res.resume();
+        res.on("end", () => finish({ status: res.statusCode, beforeEof: true }));
+      });
+      req.on("error", (err) => {
+        if (err?.code === "ECONNRESET" || err?.code === "EPIPE") finish({ status: 0, beforeEof: true, reset: true });
+        else reject(err);
+      });
+      // write past the limit in small chunks and DO NOT call req.end() —
+      // a slow writer holding the slot is exactly the scenario under test
+      const chunk = Buffer.alloc(64 * 1024, 0x41);
+      let written = 0;
+      const timer = setInterval(() => {
+        try { req.write(chunk); written += chunk.length; } catch { clearInterval(timer); }
+        if (written > 5 * 1024 * 1024) {
+          clearInterval(timer);
+          // 5 MiB written, still no refusal and no EOF — the server is letting
+          // the slow writer hold the slot: fail the assertion
+          finish({ status: -1, beforeEof: false });
+        }
+      }, 5);
+    });
+    assert.ok(
+      outcome.beforeEof === true && (outcome.status === 413 || outcome.reset === true),
+      `slow writer must be refused before finishing the upload (got ${JSON.stringify(outcome)})`,
+    );
+  } finally {
+    await closeServer();
+  }
+});
+
+// Audit backlog: exact raw-byte boundary — a body of exactly MAX_BODY_BYTES
+// (valid JSON padded with whitespace) passes; one byte more is refused.
+test("http gate: raw-byte boundary at exactly 4 MiB", async () => {
+  const probe = http.createServer();
+  await new Promise((r) => probe.listen(0, "127.0.0.1", r));
+  port = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  const closeServer = await serveHttp(
+    { toolCtx: {}, resourceCtx: {}, serverInfo: { name: "test", version: "0.0.0" } },
+    "127.0.0.1",
+    port,
+    KEY,
+  );
+  const MAX = 4 * 1024 * 1024;
+  const bodyAtLimit = Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }).padEnd(MAX, " "), "utf8");
+  assert.equal(bodyAtLimit.length, MAX, "test body must be exactly 4 MiB");
+  const bodyOverLimit = Buffer.concat([bodyAtLimit, Buffer.from(" ")]);
+
+  const post = (body) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1", port, method: "POST", path: "/mcp",
+          headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, "content-length": String(body.length) },
+        },
+        (res) => {
+          let data = "";
+          res.on("data", (c) => (data += c));
+          res.on("end", () => resolve({ status: res.statusCode, body: data, reset: false }));
+        },
+      );
+      // an oversized upload may be answered by teardown (413 flushed, then
+      // RST) — the client can observe either the response or the reset
+      req.on("error", (err) => {
+        if (err?.code === "ECONNRESET" || err?.code === "EPIPE") resolve({ status: 0, body: "", reset: true });
+        else reject(err);
+      });
+      req.end(body);
+    });
+
+  try {
+    const at = await post(bodyAtLimit);
+    assert.ok(at.status !== 413, `exactly-4MiB body must not be refused as oversized (got ${at.status})`);
+    const over = await post(bodyOverLimit);
+    assert.ok(over.status === 413 || over.reset === true, `4MiB + 1 byte must be refused (got status ${over.status}, reset ${over.reset})`);
+  } finally {
+    await closeServer();
+  }
+});
+
+// Audit backlog: abandoned upload — a client that dies mid-body must not
+// wedge the bridge; the next request is served normally.
+test("http gate: abandoned upload leaves the bridge healthy", async () => {
+  const probe = http.createServer();
+  await new Promise((r) => probe.listen(0, "127.0.0.1", r));
+  port = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  const closeServer = await serveHttp(
+    { toolCtx: {}, resourceCtx: {}, serverInfo: { name: "test", version: "0.0.0" } },
+    "127.0.0.1",
+    port,
+    KEY,
+  );
+  try {
+    // start a POST, write a partial body, destroy the socket without end
+    const req = http.request({
+      host: "127.0.0.1", port, method: "POST", path: "/mcp",
+      headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, "content-length": "1048576" },
+    });
+    req.on("error", () => {}); // expected: we destroy mid-upload on purpose
+    req.write(Buffer.alloc(1024, 0x41));
+    req.destroy();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const healthy = await request({
+      headers: { "content-type": "application/json", authorization: `Bearer ${KEY}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+    });
+    assert.ok(healthy.status !== 401 && healthy.status !== 403 && healthy.status !== 413, `bridge must serve normally after an abandoned upload (got ${healthy.status})`);
+  } finally {
+    await closeServer();
+  }
+});
+
 function requestChunked({ headers = {}, chunkCount = 1, chunkSize = 1024, jsonBody = null } = {}) {
   return new Promise((resolve, reject) => {
     // No content-length → Node sends Transfer-Encoding: chunked.

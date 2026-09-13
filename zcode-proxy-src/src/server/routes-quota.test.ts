@@ -276,4 +276,53 @@ describe("handleQuota singleflight + cache", () => {
     expect(base.calls.length).toBe(2, "singleflight still coalesces billing calls");
     clearQuotaCache();
   });
+
+  // Audit backlog: a failed collection propagates to every joiner, is not
+  // cached, and the next call starts exactly one fresh collection.
+  it("a failed collection fans out to joiners and is retried cleanly", async () => {
+    clearQuotaCache();
+    const failingLoad: typeof loadCredential = () => { throw new Error("credential store down"); };
+    const first = handleQuota(makeConfig(), makeBillingFetch().fetchImpl, failingLoad);
+    const second = handleQuota(makeConfig(), makeBillingFetch().fetchImpl, failingLoad); // joins the in-flight fetch
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.status).toBe(503);
+    expect(b.status).toBe(503);
+    // next call: exactly one new collection attempt (two billing calls)
+    const { fetchImpl, calls } = makeBillingFetch();
+    const third = await handleQuota(makeConfig(), fetchImpl, loadFake);
+    expect(third.status).toBe(200);
+    expect(calls.length).toBe(2);
+    clearQuotaCache();
+  });
+
+  // Audit backlog: the TTL is anchored at COMPLETION, not request start — a
+  // slow collection must still be served fresh from cache immediately after.
+  it("TTL starts at completion: slow collection stays cached right after finishing", async () => {
+    clearQuotaCache();
+    const base = makeBillingFetch();
+    let releaseUpstream: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => { releaseUpstream = resolve; });
+    const gated: typeof fetch = async (url, init) => {
+      await gate;
+      return base.fetchImpl(url, init);
+    };
+    const realNow = Date.now;
+    const skewMs = 20_000; // QUOTA_CACHE_TTL_MS is 15s — advance past it mid-flight
+    let skew = 0;
+    globalThis.Date.now = () => realNow() + skew;
+    try {
+      const first = handleQuota(makeConfig(), gated, loadFake); // starts, not awaited
+      skew = skewMs; // clock advances while the collection is in flight
+      releaseUpstream?.();
+      await first;
+      // if the TTL were anchored at request start, this call would refetch
+      const second = await handleQuota(makeConfig(), base.fetchImpl, loadFake);
+      const body = (await second.json()) as { cached: boolean };
+      expect(body.cached).toBe(true, "completed snapshot is still fresh right after completion");
+      expect(base.calls.length).toBe(2, "no refetch after completion despite in-flight clock skew");
+    } finally {
+      globalThis.Date.now = realNow;
+      clearQuotaCache();
+    }
+  });
 });

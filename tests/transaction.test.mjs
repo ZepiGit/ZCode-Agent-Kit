@@ -155,6 +155,31 @@ test("parallel setups are locked out; stale locks are refused fail-closed", () =
   releaseLock(lock2);
 });
 
+// Audit backlog: EPERM from process.kill(pid, 0) means "exists, not ours to
+// signal" — the holder must count as ALIVE (fail-closed), not dead.
+test("pidAlive treats EPERM as alive (fail-closed lock decision)", () => {
+  const backupDir = freshDir("lock-eperm");
+  const origKill = process.kill;
+  process.kill = ((pid, signal) => {
+    const err = new Error("access denied");
+    err.code = "EPERM";
+    throw err;
+  });
+  try {
+    writeFileSync(join(backupDir, ".setup-lock"), JSON.stringify({ pid: 999999, startedAt: new Date().toISOString() }));
+    // EPERM holder is treated as live → "another setup is running", NOT the
+    // stale-refusal path (which would imply a dead holder). The regex match
+    // itself proves the fail-closed branch was taken.
+    assert.throws(() => acquireLock(backupDir), (err) => {
+      assert.match(err.message, /another setup is running/);
+      assert.doesNotMatch(err.message, /stale/);
+      return true;
+    });
+  } finally {
+    process.kill = origKill;
+  }
+});
+
 // ZAK-007: a live holder must never be displaced by lock age, and a released
 // lock must never delete a successor's lock.
 test("lock is nonce-owned: live holders keep it, release never deletes a successor's lock", () => {

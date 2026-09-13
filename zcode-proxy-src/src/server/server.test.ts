@@ -244,6 +244,54 @@ describe("proxy API key auth", () => {
     }
   });
 
+  // Audit backlog: every accepted loopback spelling must produce a working bind.
+  it("startServer binds the accepted loopback host forms (localhost, ::1)", async () => {
+    for (const host of ["localhost", "::1"]) {
+      const config = withAuth(TEST_KEY);
+      (config.server as Record<string, unknown>).host = host;
+      const server = await startServer({ config, auth: oauthAuth("test"), fetchImpl: mockUpstream() });
+      try {
+        expect(server.hostname).toBe(host);
+      } finally {
+        server.stop();
+      }
+    }
+  });
+
+  it("startServer rejects a placeholder key even when it comes from the env override", async () => {
+    // ZCODE_PROXY_API_KEY has precedence over YAML in loadConfig; the resolved
+    // value lands in config.auth.proxyApiKey and MUST still be validated here.
+    const saved = process.env.ZCODE_PROXY_API_KEY;
+    process.env.ZCODE_PROXY_API_KEY = "GENERATE_ME";
+    try {
+      // build the config through the real loader so the env override applies
+      const { loadConfig } = await import("../config/loader.js");
+      const { mkdtempSync, writeFileSync } = await import("node:fs");
+      const { tmpdir } = await import("node:os");
+      const { join } = await import("node:path");
+      const net = await import("node:net");
+      const dir = mkdtempSync(join(tmpdir(), "zcode-envkey-"));
+      const cfgFile = join(dir, "config.yaml");
+      // grab a genuinely free port (loadConfig validates the port range)
+      const freePort = await new Promise<number>((resolve) => {
+        const probe = net.createServer();
+        probe.listen(0, "127.0.0.1", () => {
+          const p = (probe.address() as { port: number }).port;
+          probe.close(() => resolve(p));
+        });
+      });
+      writeFileSync(cfgFile, `server:\n  port: ${freePort}\n  host: "127.0.0.1"\nprovider: zai\n`);
+      const config = loadConfig(cfgFile);
+      expect(config.auth.proxyApiKey).toBe("GENERATE_ME");
+      await expect(
+        startServer({ config, auth: oauthAuth("test"), fetchImpl: mockUpstream() }),
+      ).rejects.toThrow(/proxyApiKey/);
+    } finally {
+      if (saved === undefined) delete process.env.ZCODE_PROXY_API_KEY;
+      else process.env.ZCODE_PROXY_API_KEY = saved;
+    }
+  });
+
   it("rejects request without proxy API key when configured", async () => {
     const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
     const auth = oauthAuth("test");
