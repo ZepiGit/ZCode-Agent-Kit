@@ -1,7 +1,11 @@
-﻿# zcode-agent-kit installer (Windows).
+# zcode-agent-kit installer (Windows).
 #
 # One-command install (once a release tag exists -- see docs/RELEASE_CHECKLIST.md):
-#   irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+#   & ([scriptblock]::Create((irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1)))
+#
+# (Do NOT use `irm ... | iex` for this script: the leading BOM/param parsing
+# in Invoke-Expression can break the param() block. scriptblock::Create is
+# the robust invocation form and keeps -Version/-InstallDir usable.)
 #
 # Security notes (stated honestly):
 # - The script downloads a PINNED release tarball (never main) and verifies its

@@ -29,7 +29,7 @@
 **Windows（PowerShell）**——固定版本安装器，SHA256 校验，无需管理员权限：
 
 ```powershell
-irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+& ([scriptblock]::Create((irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1)))
 ```
 
 **macOS / Linux**：

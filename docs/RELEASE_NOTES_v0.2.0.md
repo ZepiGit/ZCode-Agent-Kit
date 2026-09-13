@@ -25,7 +25,7 @@ subscription, no API purchases.
 ## Install (Windows, PowerShell)
 
 ```powershell
-irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+& ([scriptblock]::Create((irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1)))
 ```
 
 or from a repo checkout: `git clone` + `node setup.mjs`.

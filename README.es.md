@@ -32,7 +32,7 @@ contexto 1M); niveles de razonamiento verificados **low / high / max**
 sin permisos de administrador:
 
 ```powershell
-irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+& ([scriptblock]::Create((irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1)))
 ```
 
 **macOS / Linux**:
