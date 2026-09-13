@@ -3,7 +3,7 @@
 [![CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)
 ![Release](https://img.shields.io/github/v/release/ZepiGit/ZCode-Agent-Kit)
 
-**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [sprich Deutsch du H******](README.de.md)
 
 Model access from your own agent harness through **your own ZCode Desktop
 account** — no second subscription, no API purchases. Ten harness adapters,
@@ -205,4 +205,6 @@ npm run test:mcp      :: MCP bridge suite (36 tests incl. HTTP auth/origin gates
 - `IMPLEMENTATION_STATUS.md` — decisions and open points
 - `harnesses/README.md` — per-harness details and manual integration snippets
 - `MANIFEST.md` — vendored components, commits, licenses
-- `docs/RELEASE_CHECKLIST.md` — what is prepared vs. what needs maintainer action
+
+
+I am convinced no coder should be forced to use a different harness to from what he is used to, they get scared easily, so I build this
