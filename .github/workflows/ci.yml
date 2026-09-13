@@ -20,9 +20,11 @@ jobs:
         with:
           node-version: 20
       # The proxy + MCP bridge suites need bun (their vendored toolchain).
+      # Pinned to the version the test evidence was produced with (1.4.2);
+      # older bun (e.g. 1.2.20) rejects the mcp bridge's lockfileVersion 2.
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.2.20
+          bun-version: 1.4.2
       - name: Install bridge/proxy dependencies
         run: |
           cd zcode-proxy-src && bun install --frozen-lockfile

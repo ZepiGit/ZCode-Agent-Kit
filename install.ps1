@@ -42,10 +42,10 @@ if (-not (Test-Node)) {
   Write-Error "node >= 20 is required but not found on PATH. Install from https://nodejs.org and re-run."
 }
 if (-not (Test-Bun)) {
-  Write-Host "bun not found — installing user-local, pinned bun v1.2.20 ..."
-  $bunZip = Join-Path $env:TEMP "bun-1.2.20.zip"
+  Write-Host "bun not found — installing user-local, pinned bun v1.4.2 ..."
+  $bunZip = Join-Path $env:TEMP "bun-1.4.2.zip"
   $bunSha = "BUN_SHA256_TO_FILL_AT_RELEASE" # release checklist: embed real hash
-  Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v1.2.20/bun-windows-x64.zip" -OutFile $bunZip
+  Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip" -OutFile $bunZip
   $actual = (Get-FileHash $bunZip -Algorithm SHA256).Hash.ToLower()
   if ($bunSha -notlike "BUN_SHA256*" -and $actual -ne $bunSha) {
     Write-Error "bun download hash mismatch ($actual) — aborting."

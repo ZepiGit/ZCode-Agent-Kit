@@ -29,10 +29,10 @@ NODE_MAJOR=$(node --version | sed 's/^v\([0-9]*\)\..*/\1/')
 [ "$NODE_MAJOR" -ge 20 ] || { echo "ERROR: node >= 20 required, found $(node --version)"; exit 2; }
 
 if ! command -v bun >/dev/null 2>&1; then
-  echo "bun not found — installing user-local, pinned bun v1.2.20 ..."
+  echo "bun not found — installing user-local, pinned bun v1.4.2 ..."
   BUN_DIR="$HOME/.bun"
-  curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.2.20/bun-linux-x64.zip -o /tmp/bun.zip 2>/dev/null || \
-    curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.2.20/bun-darwin-x64.zip -o /tmp/bun.zip
+  curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-linux-x64.zip -o /tmp/bun.zip 2>/dev/null || \
+    curl -fsSL https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-darwin-x64.zip -o /tmp/bun.zip
   # (Release checklist: verify against the published checksum before unzip.)
   unzip -o -q /tmp/bun.zip -d "$BUN_DIR"
   export PATH="$BUN_DIR/bun-linux-x64:$BUN_DIR/bun-darwin-x64:$PATH"
