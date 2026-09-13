@@ -36,7 +36,8 @@ context), verified reasoning efforts **low / high / max** (default max).
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
 ```
 
-```continue with:
+continue with:
+```
 node cli/zcode-kit.mjs setup
 ```
 
