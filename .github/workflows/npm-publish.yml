@@ -36,11 +36,17 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: npm ci
+      # The kit suite validates generated YAML with the proxy's bundled
+      # `yaml` module — proxy/mcp dependencies must exist BEFORE npm test.
+      - name: Install bridge/proxy dependencies
+        run: |
+          cd zcode-proxy-src && bun install --frozen-lockfile
+          cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile
       - run: npm test
       - name: Proxy + MCP bridge suites
         run: |
-          cd zcode-proxy-src && bun install --frozen-lockfile && bun test
-          cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile && npm test
+          cd zcode-proxy-src && bun test
+          cd ../mcp/zcode-harness-mcp && npm test
 
   publish-npm:
     needs: build
