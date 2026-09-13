@@ -73,10 +73,64 @@ function readKey() {
 }
 
 // ---------------------------------------------------------------- bootstrap
+// Local-only git excludes (kept out of the repo on purpose: no .gitignore is
+// committed). setup.mjs installs the same block into every clone's
+// .git/info/exclude, which git never pushes — the repo listing stays clean.
+const GIT_EXCLUDE_BLOCK = `# >>> zcode-kit local excludes (managed by setup.mjs) — local-only, never pushed
+.proxykey
+proxy/config.yaml
+backups/
+logs/
+generated/
+*.zcode-staging
+
+tests/fakehome/
+tests/dryhome/
+tests/tooltrip/
+tests/mock-requests.jsonl
+tests/*.log
+tests/*.jsonl
+ext-probe.log
+
+zcode-proxy-src/node_modules/
+zcode-proxy-src/Android-APP/
+zcode-proxy-src/config.yaml
+zcode-proxy-src/.zcode-proxy/
+zcode-proxy-src/.omo/
+zcode-proxy-src/_reverse/
+zcode-proxy-src/*.tsbuildinfo
+zcode-proxy-src/zcode-proxy.exe
+zcode-proxy-src/zcode-proxy-linux-*
+zcode-proxy-src/zcode-proxy-darwin-*
+zcode-proxy-src/.idea/
+zcode-proxy-src/.DS_Store
+
+mcp/zcode-harness-mcp/node_modules/
+mcp/zcode-harness-mcp/demo-workspace/
+mcp/zcode-harness-mcp/test/live-ws/
+mcp/zcode-harness-mcp/test/live-data/
+mcp/zcode-harness-mcp/*.log
+.mimosa/
+# <<< zcode-kit
+`;
+
+function ensureLocalGitExclude() {
+  const gitDir = join(ROOT, ".git");
+  if (!existsSync(gitDir)) return; // not a git checkout (e.g. zip download)
+  const infoDir = join(gitDir, "info");
+  const excludeFile = join(infoDir, "exclude");
+  mkdirSync(infoDir, { recursive: true });
+  const existing = existsSync(excludeFile) ? readFileSync(excludeFile, "utf8") : "";
+  if (existing.includes("zcode-kit local excludes")) return;
+  writeFileSync(excludeFile, existing.replace(/\n*$/, "\n") + "\n" + GIT_EXCLUDE_BLOCK);
+  console.log("  local git excludes installed (.git/info/exclude — never pushed)");
+}
+
 function bootstrap() {
   console.log("== bootstrap ==");
   mkdirSync(join(ROOT, "logs"), { recursive: true });
   mkdirSync(GENERATED, { recursive: true });
+  ensureLocalGitExclude();
 
   if (!existsSync(KEY_FILE)) {
     writeFileSync(KEY_FILE, randomBytes(32).toString("base64url") + "\n");
@@ -313,7 +367,7 @@ function setupClaude() {
     },
   };
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n");
-  console.log(`  wrote ${settingsPath} (contains the local proxy key — gitignored)`);
+  console.log(`  wrote ${settingsPath} (contains the local proxy key — excluded via local git excludes)`);
   console.log("  use via: bin\\zcode-claude.cmd  (add --model glm-5.3-flash for the flash model)");
 }
 

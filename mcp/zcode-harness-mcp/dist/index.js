@@ -1,0 +1,142 @@
+/**
+ * zcode-harness-mcp entrypoint.
+ *
+ *   node dist/index.js --stdio                 (default)
+ *   node dist/index.js --http --port 3322 --host 127.0.0.1
+ *   node dist/index.js --read-only --allow-workspace "C:\path"
+ */
+import { parseConfig } from "./config.js";
+import { discoverRuntime } from "./discovery.js";
+import { JsonStore } from "./store/store.js";
+import { WorkspaceAllowlist } from "./security/allowlist.js";
+import { InteractionManager } from "./interactions/manager.js";
+import { RuntimeManager } from "./runtime/manager.js";
+import { TaskManager } from "./tasks/manager.js";
+import { SettingsManager } from "./settings/manager.js";
+import { RuntimeManagerHolder } from "./mcp/runtime-holder.js";
+import { serveStdio, serveHttp } from "./mcp/server.js";
+import { setLogLevel } from "./util/log.js";
+import { createLogger } from "./util/log.js";
+const log = createLogger("index");
+async function main() {
+    const config = parseConfig(process.argv.slice(2));
+    if (process.env.ZCODE_HARNESS_LOG_LEVEL)
+        setLogLevel(process.env.ZCODE_HARNESS_LOG_LEVEL);
+    // Data dir + store
+    const store = new JsonStore(config.dataDir);
+    // Workspace allowlist: CLI/env entries plus the bridge-managed workspace dir.
+    const managedWorkspaces = store.ensureDir("workspaces");
+    const allowlist = new WorkspaceAllowlist([...config.allowWorkspaces, managedWorkspaces]);
+    // Runtime discovery (throws with candidate list when nothing found).
+    let runtimeInfo;
+    let discoveryError = null;
+    const runtimeHolder = { current: null, note: "discovery pending" };
+    try {
+        runtimeInfo = await discoverRuntime({ runtimePathOverride: config.runtimePathOverride });
+    }
+    catch (err) {
+        // Scenario 1 (acceptance): clear diagnosis without crashing, no invented status.
+        const message = err instanceof Error ? err.message : String(err);
+        discoveryError = message;
+        runtimeHolder.note = message;
+        log.error("runtime discovery failed; starting degraded", { error: message });
+    }
+    const interactions = new InteractionManager(store, config.interactionPolicy, config.interactionAllowlist, config.interactionTimeoutSec);
+    let runtime = null;
+    let tasks = null;
+    // Lazy runtime proxy: resolves the real manager once constructed; before
+    // that, diagnostics() reports the honest degraded state and every harness
+    // call fails with a clear diagnosis (degraded mode, no crash).
+    const lazyRuntime = new Proxy({}, {
+        get(_target, prop) {
+            const rt = runtimeHolder.current;
+            if (rt !== null) {
+                const value = Reflect.get(rt, prop);
+                return typeof value === "function" ? value.bind(rt) : value;
+            }
+            if (prop === "diagnostics") {
+                return () => ({ running: false, degraded: true, error: runtimeHolder.note, harnessVersion: null, harnessPath: "", bundleFingerprint: null, desktopVersion: null, lastExit: null, sawTraffic: false, nodeProgram: "node" });
+            }
+            throw new Error(`harness runtime unavailable: ${runtimeHolder.note}`);
+        },
+    });
+    const settings = new SettingsManager(lazyRuntime);
+    if (runtimeInfo) {
+        runtime = new RuntimeManager(config, runtimeInfo, interactions);
+        runtimeHolder.current = runtime;
+        RuntimeManagerHolder.set(runtime);
+        tasks = new TaskManager(runtime, interactions, store, config);
+        tasks.restore();
+        const wiring = tasks.attach();
+        runtime.onEvent((evt) => wiring.onEvent(evt));
+        runtime.onReverseRequest((ctx) => wiring.onReverseRequest(ctx));
+        runtime.setCrashHandler(() => {
+            // Tasks stay as they are; next call re-establishes the connection and
+            // re-verifies. No invented terminal states.
+            log.warn("harness crash detected");
+        });
+    }
+    const toolCtx = {
+        config,
+        runtime: runtime ?? lazyRuntime,
+        runtimeInfo: runtimeInfo ?? {
+            harnessPath: "",
+            nodeProgram: "node",
+            harnessVersion: null,
+            bundleFingerprint: null,
+            bundleBytes: null,
+            desktopVersion: null,
+            source: "default-candidates",
+            candidatesConsidered: [],
+        },
+        tasks: tasks ?? (new Proxy({}, {
+            get() {
+                throw new Error(`task manager unavailable: ${discoveryError ?? "harness runtime not discovered"}`);
+            },
+        })),
+        interactions,
+        settings,
+        allowlist,
+        store,
+        startedAt: new Date().toISOString(),
+    };
+    const resourceCtx = {
+        tasks: toolCtx.tasks,
+        interactions,
+        settings,
+        allowlist,
+    };
+    const opts = {
+        toolCtx,
+        resourceCtx,
+        serverInfo: { name: "zcode-harness-mcp", version: "0.1.0" },
+    };
+    const shutdown = () => {
+        log.info("shutting down");
+        try {
+            tasks?.stopAll();
+        }
+        catch {
+            /* ignore */
+        }
+        try {
+            runtime?.stop();
+        }
+        catch {
+            /* ignore */
+        }
+        process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+    if (config.transport === "http") {
+        await serveHttp(opts, config.host, config.port);
+    }
+    else {
+        await serveStdio(opts);
+    }
+}
+main().catch((err) => {
+    log.error("fatal", { error: err instanceof Error ? err.stack : String(err) });
+    process.exit(1);
+});
