@@ -14,12 +14,16 @@ Der Kern des Kits ist harness-neutral: ein lokaler HTTP-Proxy auf
 Authentifizierung: `Authorization: Bearer <Inhalt von .proxykey>`
 Der Schlüssel liegt nur lokal (`<clone>/.proxykey`) und wird von setup.mjs erzeugt.
 
-## Von setup.mjs automatisch eingerichtet
+## Von setup.mjs automatisch eingerichtet (nur für erkannte Harnesses)
+
+setup.mjs erkennt, welche Harnesses installiert sind, und richtet **nur für
+diese** etwas ein. Ein Nutzer mit nur OMP bekommt keinerlei Claude-/Codex-
+Artefakte (auch keine generierten Dateien).
 
 | Harness | Mechanismus | Eingriff in bestehende Config |
 |---|---|---|
 | OMP (oh-my-pi) | Provider-Block `zcode` in `~/.omp/agent/models.yml` + Autostart-Extension | additiv (Managed-Block, Backups, idempotent); Modellwahl: `omp --model zcode/glm-5.3[-flash] --thinking low\|high\|max` |
-| MCP-fähige Harnesses | stdio-Server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: Eintrag in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add ... --scope user`; Codex: im isolierten `generated/codex-home` |
+| MCP-fähige Harnesses | stdio-Server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: Eintrag in `~/.omp/agent/mcp.json` (nur wenn OMP existiert); Claude Code: `claude mcp add` (nur wenn Claude Code erkannt); Codex: im isolierten `generated/codex-home` (nur wenn Codex erkannt) |
 
 ## Opt-in-Wrapper (bestehende Config bleibt unberührt)
 

@@ -51,6 +51,22 @@ const only = (() => {
 })();
 const want = (name) => !only || only.includes(name);
 
+// Harness detection: every adapter below only acts when its harness is
+// actually installed — an OMP-only user gets no Claude/Codex artifacts at all.
+function commandOnPath(cmd) {
+  try {
+    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const DETECTED = {
+  omp: existsSync(join(HOME, ".omp", "agent")),
+  claude: commandOnPath("claude") || existsSync(join(HOME, ".claude")),
+  codex: commandOnPath("codex") || existsSync(join(HOME, ".codex")),
+};
+
 function backup(file) {
   mkdirSync(BACKUP_DIR, { recursive: true });
   const target = join(BACKUP_DIR, `${STAMP}__${file.split(/[\\/]/).pop()}`);
@@ -346,6 +362,10 @@ function setupOmp() {
 
 // ------------------------------------------------------- claude-code adapter
 function setupClaude() {
+  if (!DETECTED.claude) {
+    console.log("== claude-code: not detected on this machine — skipped ==");
+    return;
+  }
   console.log("== claude-code (opt-in wrapper; ~/.claude is NOT modified) ==");
   const port = proxyPort();
   const settingsPath = join(GENERATED, "claude-zcode-settings.json");
@@ -373,6 +393,10 @@ function setupClaude() {
 
 // ---------------------------------------------------------------- codex
 function setupCodex() {
+  if (!DETECTED.codex) {
+    console.log("== codex: not detected on this machine — skipped ==");
+    return;
+  }
   console.log("== codex (isolated CODEX_HOME; ~/.codex is NOT modified) ==");
   const port = proxyPort();
   const home = join(GENERATED, "codex-home");
@@ -436,12 +460,21 @@ function setupMcp() {
         console.log("  omp: mcp.json updated (zcode-harness -> stdio bridge)");
       }
     }
+  } else if (DETECTED.omp) {
+    // OMP installed but never configured an MCP server — create the file
+    // additively (OMP picks it up automatically).
+    atomicWrite(ompMcp, JSON.stringify({
+      mcpServers: {
+        "zcode-harness": { type: "stdio", command: "node", args: [serverJs, "--stdio"] },
+      },
+    }, null, 2) + "\n");
+    console.log("  omp: created mcp.json with zcode-harness bridge");
   } else {
     console.log("  omp: no mcp.json found — skipped (see harnesses/README.md)");
   }
-  // Claude Code: user-scope registration via its own CLI (additive; the user's
-  // other MCP servers stay untouched).
-  if (existsSync(join(HOME, ".claude"))) {
+  // Claude Code: only when actually installed. User-scope registration via its
+  // own CLI (additive; the user's other MCP servers stay untouched).
+  if (DETECTED.claude) {
     try {
       execFileSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe" });
       console.log('  claude: "zcode-harness" already registered');
@@ -454,6 +487,8 @@ function setupMcp() {
         console.log(`    claude mcp add zcode-harness --scope user -- node "${serverJs}" --stdio`);
       }
     }
+  } else {
+    console.log("  claude: not detected on this machine — skipped");
   }
   console.log("  other MCP-capable harnesses: add a stdio server running");
   console.log(`    node "${serverJs}" --stdio   (see harnesses/README.md)`);
@@ -493,13 +528,18 @@ if (mode === "--rollback" || mode === "rollback") {
   rollback();
 } else {
   bootstrap();
+  console.log(
+    "detected harnesses: " +
+      (Object.entries(DETECTED).filter(([, v]) => v).map(([k]) => k).join(", ") || "none") +
+      " — adapters run only for detected harnesses",
+  );
   if (want("omp")) setupOmp();
-  if (want("claude-code")) setupClaude();
-  if (want("codex")) setupCodex();
+  if (want("claude-code") && DETECTED.claude) setupClaude();
+  if (want("codex") && DETECTED.codex) setupCodex();
   if (want("mcp")) setupMcp();
   console.log("\ndone. Quick checks:");
   console.log(`  node proxy/zcode-proxy-manager.mjs doctor`);
-  console.log(`  omp --model zcode/glm-5.3-flash --thinking low -p "hi"      (if OMP)`);
-  console.log(`  bin\\zcode-claude.cmd -p "hi" --model glm-5.3-flash          (if Claude Code)`);
-  console.log(`  bin\\zcode-codex.cmd exec "say hi" -m glm-5.3-flash          (if Codex)`);
+  if (DETECTED.omp) console.log(`  omp --model zcode/glm-5.3-flash --thinking low -p "hi"`);
+  if (DETECTED.claude) console.log(`  bin\\zcode-claude.cmd -p "hi" --model glm-5.3-flash`);
+  if (DETECTED.codex) console.log(`  bin\\zcode-codex.cmd exec "say hi" -m glm-5.3-flash`);
 }

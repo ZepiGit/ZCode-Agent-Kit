@@ -27,25 +27,34 @@ node setup.mjs
 node proxy\zcode-proxy-manager.mjs doctor
 ```
 
-`setup.mjs` (idempotent, re-runnable, backups before every write):
+`setup.mjs` (idempotent, re-runnable, backups before every write) detects
+which harnesses are installed and **only touches those** — an OMP-only user
+gets no Claude/Codex artifacts, a Claude-only user gets no OMP edits:
 
 1. **bootstrap** — generates the local proxy key (`.proxykey`) and
    `proxy/config.yaml` from the template, installs proxy + MCP dependencies
    (`bun install`), and imports the credential from your existing ZCode
    Desktop login. If the import is not possible you get the exact one-time
    browser-login command printed.
-2. **OMP** (if installed) — adds the additive provider block `zcode` to
-   `~/.omp/agent/models.yml`, registers the proxy-autostart extension, and
-   cleans the obsolete builtin `zcode` entry from `disabledProviders`.
-3. **Claude Code** — writes `generated/claude-zcode-settings.json` and the
-   opt-in wrapper `bin\zcode-claude.cmd`. Your `~/.claude` and your normal
-   `claude` command are **not** touched.
-4. **Codex CLI** — writes an isolated `generated/codex-home` (model provider +
-   `zcode-harness` MCP) and the opt-in wrapper `bin\zcode-codex.cmd`. Your
-   `~/.codex` is **not** touched.
-5. **MCP** — registers the `zcode-harness` stdio bridge with OMP
-   (`mcp.json`) and Claude Code (`claude mcp add`, user scope). Other
-   MCP-capable harnesses: see `harnesses/README.md`.
+2. **OMP** (only if `~/.omp/agent` exists) — adds the additive provider block
+   `zcode` to `~/.omp/agent/models.yml`, registers the proxy-autostart
+   extension, and cleans the obsolete builtin `zcode` entry from
+   `disabledProviders`.
+3. **Claude Code** (only if Claude Code is detected) — writes
+   `generated/claude-zcode-settings.json` and the opt-in wrapper
+   `bin\zcode-claude.cmd`. Your `~/.claude` and your normal `claude` command
+   are **not** touched.
+4. **Codex CLI** (only if Codex is detected) — writes an isolated
+   `generated/codex-home` (model provider + `zcode-harness` MCP) and the
+   opt-in wrapper `bin\zcode-codex.cmd`. Your `~/.codex` is **not** touched.
+5. **MCP** — registers the `zcode-harness` stdio bridge (which drives your
+   installed ZCode Desktop) with the harnesses that are actually present:
+   OMP via `~/.omp/agent/mcp.json`, Claude Code via `claude mcp add`
+   (user scope, only when Claude Code is detected). Other MCP-capable
+   harnesses: see `harnesses/README.md`.
+
+On a machine with only OMP installed, exactly one adapter runs (step 2) plus
+the OMP entry of step 5 — nothing Claude- or Codex-related is created.
 
 ## Usage
 
