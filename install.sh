@@ -59,8 +59,13 @@ ACTUAL=$(sha256sum "$TMP/kit.tar.gz" | awk '{print $1}')
 echo "archive hash verified (${ACTUAL%% *})"
 
 tar -xzf "$TMP/kit.tar.gz" -C "$TMP"
-SRC=$(find "$TMP" -maxdepth 1 -type d -name 'zcode-agent-kit*' | head -1)
-[ -n "$SRC" ] || { echo "ERROR: unexpected archive layout"; exit 1; }
+# Exactly one top-level directory (its name is not load-bearing; git-archive
+# prefixes differ between release tooling versions).
+TOP_COUNT=$(find "$TMP" -mindepth 1 -maxdepth 1 | wc -l)
+SRC=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)
+if [ "$TOP_COUNT" -ne 1 ] || [ -z "$SRC" ]; then
+  echo "ERROR: unexpected archive layout"; exit 1
+fi
 
 mkdir -p "$INSTALL_DIR"
 if [ -d "$INSTALL_DIR/.git" ] || [ -f "$INSTALL_DIR/.proxykey" ]; then

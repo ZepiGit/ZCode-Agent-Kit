@@ -80,10 +80,20 @@ try {
   }
   Write-Host "archive hash verified ($($actual.Substring(0,16))...)"
 
-  # Safe extraction: tar with explicit top-level prefix validation.
-  tar -xzf $archive -C $tmp.FullName
-  $extracted = Get-ChildItem $tmp.FullName -Directory | Where-Object { $_.Name -like "zcode-agent-kit*" } | Select-Object -First 1
-  if (-not $extracted) { Write-Error "unexpected archive layout - aborting." }
+  # Safe extraction: tar with a structural check — the archive must contain
+  # exactly ONE top-level directory (its name is not load-bearing; git-archive
+  # prefixes differ between release tooling versions). Use the explicit
+  # Windows tar: a GNU tar earlier on PATH (e.g. Git Bash) would mis-parse
+  # `-C C:\...` as a remote-host path ("Cannot connect to C:").
+  $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
+  if (-not (Test-Path $tarExe)) { $tarExe = "tar" }
+  & $tarExe -xzf $archive -C $tmp.FullName
+  if ($LASTEXITCODE -ne 0) { Write-Error "archive extraction failed (tar exit $LASTEXITCODE) - aborting." }
+  $top = @(Get-ChildItem $tmp.FullName -Force)
+  if ($top.Count -ne 1 -or -not $top[0].PSIsContainer) {
+    Write-Error "unexpected archive layout - aborting."
+  }
+  $extracted = $top[0]
 
   # --- install ---------------------------------------------------------------
   if (Test-Path $InstallDir) {

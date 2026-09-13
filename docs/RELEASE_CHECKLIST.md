@@ -29,7 +29,7 @@ git commit -m "release: v0.2.0 - embed bun v1.4.2 checksums, release notes"
 git push
 git tag v0.2.0
 git push origin v0.2.0
-git archive --format=tar.gz -o release/v0.2.0.tar.gz v0.2.0
+git archive --format=tar.gz --prefix="zcode-agent-kit-0.2.0/" -o release/v0.2.0.tar.gz v0.2.0
 sha256sum release/v0.2.0.tar.gz release/install.ps1 release/install.sh > release/checksums.txt
 gh release create v0.2.0 release/v0.2.0.tar.gz release/install.ps1 release/install.sh release/checksums.txt --title "zcode-agent-kit v0.2.0" --notes-file docs/RELEASE_NOTES_v0.2.0.md
 ```
