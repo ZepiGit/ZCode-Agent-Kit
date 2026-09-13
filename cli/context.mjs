@@ -1,7 +1,7 @@
 // Shared CLI context: paths, bootstrap (migrated from setup.mjs unchanged in
 // behavior, with the audit fixes).
 import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, closeSync, renameSync } from "node:fs";
-import { createHash as ch } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -38,7 +38,37 @@ export function createCtx(root = kitRoot(), home = homeDir()) {
 }
 
 export function sha256File(file) {
-  return ch.createHash("sha256").update(readFileSync(file)).digest("hex");
+  return createHash("sha256").update(readFileSync(file)).digest("hex");
+}
+
+/**
+ * Create the kit's runtime files (.proxykey, proxy/config.yaml) if missing —
+ * race-safe (exclusive create), so parallel test workers or parallel setups
+ * converge on one consistent key/config pair. A fresh checkout (CI) starts
+ * without both; nothing else may depend on them existing beforehand.
+ */
+export function ensureRuntimeFiles(ctx) {
+  if (!existsSync(ctx.keyFile)) {
+    try {
+      const fd = openSync(ctx.keyFile, "wx");
+      writeFileSync(fd, randomBytes(32).toString("base64url") + "\n");
+      closeSync(fd);
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+  }
+  if (!existsSync(ctx.config)) {
+    const example = readFileSync(ctx.configExample, "utf8");
+    const filled = example.replace('proxyApiKey: "GENERATE_ME"', `proxyApiKey: "${ctx.key()}"`);
+    if (/proxyApiKey: "GENERATE_ME"/.test(filled)) throw new Error("config template key substitution failed");
+    try {
+      const fd = openSync(ctx.config, "wx");
+      writeFileSync(fd, filled);
+      closeSync(fd);
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+    }
+  }
 }
 
 // ------------------------------------------------------------------ bootstrap
@@ -138,7 +168,7 @@ export function bootstrap(ctx) {
   if (!existsSync(ctx.keyFile)) {
     try {
       const fd = openSync(ctx.keyFile, "wx");
-      writeFileSync(fd, ch.randomBytes(32).toString("base64url") + "\n");
+      writeFileSync(fd, randomBytes(32).toString("base64url") + "\n");
       closeSync(fd);
       console.log("  generated local proxy key -> .proxykey (user-local secret, never committed)");
     } catch (err) {

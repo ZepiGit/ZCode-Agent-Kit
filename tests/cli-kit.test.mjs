@@ -7,10 +7,15 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { parseJsonc, setTopLevelKey } from "../lib/jsonc.mjs";
-import { createCtx } from "../cli/context.mjs";
+import { createCtx, ensureRuntimeFiles } from "../cli/context.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 const TMP = join(import.meta.dirname, "fakehome", "kit");
+
+// A fresh checkout (CI) has no .proxykey / proxy/config.yaml (git-excluded by
+// design). Adapter unit tests read them via ctx.port()/ctx.key() — create them
+// race-safely; on a normal machine they already exist and this is a no-op.
+ensureRuntimeFiles(createCtx(KIT));
 
 function fakeHome(name) {
   const home = join(TMP, `${name}-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`);

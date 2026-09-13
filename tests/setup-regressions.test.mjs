@@ -7,9 +7,14 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { yamlSingleQuoted } from "../cli/adapters/omp.mjs";
+import { createCtx, ensureRuntimeFiles } from "../cli/context.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 const TMP = join(import.meta.dirname, "fakehome", "setup");
+
+// Fresh checkout (CI): setup's bootstrap needs the runtime files; create them
+// race-safely if absent (no-op on a normal machine).
+ensureRuntimeFiles(createCtx(KIT));
 
 function sha(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
