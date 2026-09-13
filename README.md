@@ -36,6 +36,7 @@ irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
 ```
 
+
 The installer downloads the pinned release archive, verifies its checksum,
 installs user-locally (default `%LOCALAPPDATA%\zcode-agent-kit` or
 `~/.local/share/zcode-agent-kit`, override with `ZCODE_KIT_HOME`), installs
@@ -207,4 +208,4 @@ npm run test:mcp      :: MCP bridge suite (36 tests incl. HTTP auth/origin gates
 - `MANIFEST.md` — vendored components, commits, licenses
 
 
-I am convinced no coder should be forced to use a different harness to from what he is used to, they get scared easily, so I build this
+I am convinced no coder should be forced to touch a unfamilliar harness. They get scared quiet easily, so I build this
