@@ -58,11 +58,14 @@ ACTUAL=$(sha256sum "$TMP/kit.tar.gz" | awk '{print $1}')
 [ "$ACTUAL" = "$EXPECTED" ] || { echo "ERROR: archive hash mismatch\n  expected $EXPECTED\n  actual   $ACTUAL"; exit 1; }
 echo "archive hash verified (${ACTUAL%% *})"
 
-tar -xzf "$TMP/kit.tar.gz" -C "$TMP"
-# Exactly one top-level directory (its name is not load-bearing; git-archive
-# prefixes differ between release tooling versions).
-TOP_COUNT=$(find "$TMP" -mindepth 1 -maxdepth 1 | wc -l)
-SRC=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)
+# Extract into a dedicated subdirectory: the archive itself lives in $TMP and
+# would otherwise count as a second top-level entry. Then require exactly one
+# top-level directory (its name is not load-bearing; git-archive prefixes
+# differ between release tooling versions).
+mkdir -p "$TMP/out"
+tar -xzf "$TMP/kit.tar.gz" -C "$TMP/out"
+TOP_COUNT=$(find "$TMP/out" -mindepth 1 -maxdepth 1 | wc -l)
+SRC=$(find "$TMP/out" -mindepth 1 -maxdepth 1 -type d | head -1)
 if [ "$TOP_COUNT" -ne 1 ] || [ -z "$SRC" ]; then
   echo "ERROR: unexpected archive layout"; exit 1
 fi

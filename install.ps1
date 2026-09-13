@@ -84,12 +84,15 @@ try {
   # exactly ONE top-level directory (its name is not load-bearing; git-archive
   # prefixes differ between release tooling versions). Use the explicit
   # Windows tar: a GNU tar earlier on PATH (e.g. Git Bash) would mis-parse
-  # `-C C:\...` as a remote-host path ("Cannot connect to C:").
+  # `-C C:\...` as a remote-host path ("Cannot connect to C:"). Extract into a
+  # dedicated subdirectory: the archive itself lives in $tmp and would
+  # otherwise count as a second top-level entry.
+  $outDir = New-Item -ItemType Directory -Path (Join-Path $tmp.FullName "out")
   $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
   if (-not (Test-Path $tarExe)) { $tarExe = "tar" }
-  & $tarExe -xzf $archive -C $tmp.FullName
+  & $tarExe -xzf $archive -C $outDir.FullName
   if ($LASTEXITCODE -ne 0) { Write-Error "archive extraction failed (tar exit $LASTEXITCODE) - aborting." }
-  $top = @(Get-ChildItem $tmp.FullName -Force)
+  $top = @(Get-ChildItem $outDir.FullName -Force)
   if ($top.Count -ne 1 -or -not $top[0].PSIsContainer) {
     Write-Error "unexpected archive layout - aborting."
   }
