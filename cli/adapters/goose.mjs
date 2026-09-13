@@ -6,7 +6,8 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { commitFile } from "../../lib/edit.mjs";
 
-function providerDir(home) {
+/** Platform-correct custom_providers directory (exported for tests). */
+export function providerDir(home) {
   if (process.platform === "win32") {
     const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
     return join(appData, "Block", "goose", "config", "custom_providers");

@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 
-function configPath(home) {
+/** Platform-correct global config location (exported for tests). */
+export function configPath(home) {
   if (process.platform === "win32") {
     const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
     return join(appData, "opencode", "opencode.json");

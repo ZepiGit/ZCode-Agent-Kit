@@ -29,20 +29,25 @@ test("redactDeep masks secret keys and token shapes", () => {
 test("workspace allowlist: inside allowed, outside denied, case-normalized", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "allow-"));
   const list = new WorkspaceAllowlist([tmp]);
+  // Canonical form of the root (CI runners expose tmpdir as an 8.3 short name
+  // like C:\Users\RUNNER~1\... — realpath returns the long form, and the
+  // allowlist reports the canonical path, so expectations must canonicalize too).
+  const tmpCanonical = normalizeWorkspacePath(fs.realpathSync.native(tmp));
   const inside = path.join(tmp, "sub");
   fs.mkdirSync(inside, { recursive: true });
-  assert.equal(list.check(inside), normalizeWorkspacePath(inside));
+  assert.equal(list.check(inside), normalizeWorkspacePath(fs.realpathSync.native(inside)));
   assert.equal(list.check("C:\\Windows"), null);
   assert.throws(() => list.enforce("C:\\Windows"), /not in the bridge allowlist/);
   // case-insensitive drive letter
   const lower = tmp.charAt(0).toLowerCase() + tmp.slice(1);
-  assert.equal(list.check(lower), normalizeWorkspacePath(tmp));
+  assert.equal(list.check(lower), tmpCanonical);
 });
 
 test("resolveInsideWorkspace refuses traversal", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "resolve-"));
+  const tmpCanonical = normalizeWorkspacePath(fs.realpathSync.native(tmp));
   const okFile = resolveInsideWorkspace(tmp, "a/b.txt");
-  assert.ok(normalizeWorkspacePath(okFile).startsWith(normalizeWorkspacePath(tmp)));
+  assert.ok(normalizeWorkspacePath(okFile).startsWith(tmpCanonical));
   assert.throws(() => resolveInsideWorkspace(tmp, "..\\..\\escape.txt"), /escapes workspace/);
 });
 

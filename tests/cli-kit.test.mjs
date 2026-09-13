@@ -105,23 +105,33 @@ test("pi adapter merges additively and is idempotent", async () => {
 
 test("opencode adapter writes JSONC-config and preserves comments", async () => {
   const home = fakeHome("opencode");
-  const cfgDir = join(home, "AppData", "Roaming", "opencode");
-  mkdirSync(cfgDir, { recursive: true });
-  writeFileSync(join(cfgDir, "opencode.json"), `{\n  // my theme setting\n  "theme": "dark",\n}`);
+  // Resolve the adapter's platform path INSIDE the APPDATA override, exactly
+  // like the adapter will see it — otherwise the fixture would land in the
+  // real %APPDATA% (Windows) while the adapter writes into the fake home.
+  const prevAppData = process.env.APPDATA;
+  process.env.APPDATA = join(home, "AppData", "Roaming");
+  try {
+    const { configPath } = await import("../cli/adapters/opencode.mjs");
+    const cfgFile = configPath(home);
+    mkdirSync(dirname(cfgFile), { recursive: true });
+    writeFileSync(cfgFile, `{\n  // my theme setting\n  "theme": "dark",\n}`);
 
-  const r1 = await runAdapter("opencode", home);
-  const text = readFileSync(join(cfgDir, "opencode.json"), "utf8");
-  assert.match(text, /\/\/ my theme setting/, "comments preserved");
-  const doc = parseJsonc(text);
-  assert.equal(doc.theme, "dark", "foreign keys preserved");
-  assert.equal(doc.provider.zcode.npm, "@ai-sdk/openai-compatible");
-  assert.equal(doc.provider.zcode.options.apiKey, "{env:ZCODE_PROXY_KEY}");
+    const r1 = await runAdapter("opencode", home);
+    const text = readFileSync(cfgFile, "utf8");
+    assert.match(text, /\/\/ my theme setting/, "comments preserved");
+    const doc = parseJsonc(text);
+    assert.equal(doc.theme, "dark", "foreign keys preserved");
+    assert.equal(doc.provider.zcode.npm, "@ai-sdk/openai-compatible");
+    assert.equal(doc.provider.zcode.options.apiKey, "{env:ZCODE_PROXY_KEY}");
 
-  const r2 = await runAdapter("opencode", home);
-  assert.equal(r2.logs.join("\n").includes("already current"), true);
+    const r2 = await runAdapter("opencode", home);
+    assert.equal(r2.logs.join("\n").includes("already current"), true);
 
-  const verify = r1.mod.default.verify(r1.ctx);
-  assert.equal(verify[0].ok, true);
+    const verify = r1.mod.default.verify(r1.ctx);
+    assert.equal(verify[0].ok, true);
+  } finally {
+    if (prevAppData === undefined) delete process.env.APPDATA; else process.env.APPDATA = prevAppData;
+  }
 });
 
 test("continue adapter appends managed models block, keeps existing models", async () => {
@@ -144,7 +154,17 @@ test("continue adapter appends managed models block, keeps existing models", asy
 test("goose adapter writes custom provider file with auth helper", async () => {
   const home = fakeHome("goose");
   const r1 = await runAdapter("goose", home);
-  const file = join(home, "AppData", "Roaming", "Block", "goose", "config", "custom_providers", "zcode.json");
+  // Resolve the adapter's platform path under the same APPDATA override the
+  // adapter used (real %APPDATA% must never be touched by tests).
+  const prevAppData = process.env.APPDATA;
+  process.env.APPDATA = join(home, "AppData", "Roaming");
+  let file;
+  try {
+    const { providerDir } = await import("../cli/adapters/goose.mjs");
+    file = join(providerDir(home), "zcode.json");
+  } finally {
+    if (prevAppData === undefined) delete process.env.APPDATA; else process.env.APPDATA = prevAppData;
+  }
   const doc = JSON.parse(readFileSync(file, "utf8"));
   assert.equal(doc.name, "zcode");
   assert.equal(doc.engine, "openai");
