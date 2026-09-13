@@ -121,6 +121,25 @@ test("stop refuses a reused pid whose start time does not match the pid file", a
   }
 });
 
+test("stop is fail-closed when the live start time is undeterminable (start-unknown)", async () => {
+  const root = tmpRoot();
+  const port = ++portCounter;
+  writeConfig(root, port);
+  server = await startMockProxy(port, { mode: "ours" });
+  const dummy = spawnDummy();
+  try {
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: dummy.pid, startedMs: Date.now() }) + "\n");
+    // Platform limitation simulated: the start time cannot be queried at all —
+    // PID reuse cannot be ruled out, so the kill must be refused (audit §7).
+    const m = createManager({ root, home: TMP, processStartMsImpl: () => null });
+    const code = await m.stop();
+    assert.equal(code, 4, "undeterminable start time must refuse the kill, not proceed");
+    assert.ok(m.pidAlive(dummy.pid), "the process must still be alive");
+  } finally {
+    try { dummy.kill(); } catch {}
+  }
+});
+
 test("stop cleanly kills a verified-own process (identity + pid + start time match)", async () => {
   const root = tmpRoot();
   const port = ++portCounter;

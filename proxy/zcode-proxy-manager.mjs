@@ -24,7 +24,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 // ------------------------------------------------------------------ factory
-export function createManager({ root, home } = {}) {
+export function createManager({ root, home, processStartMsImpl } = {}) {
   const ROOT = root ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const HOME = (home ?? process.env.USERPROFILE ?? process.env.HOME ?? "").replace(/\\/g, "/");
   const OMP_AGENT = HOME ? HOME + "/.omp/agent" : null;
@@ -144,19 +144,24 @@ export function createManager({ root, home } = {}) {
   }
 
   // Process start time — the PID-reuse guard. Windows asks PowerShell (ticks
-  // are locale-independent); POSIX reads /proc. null = not determinable here.
+  // are locale-independent); POSIX reads /proc. null = not determinable here,
+  // and the caller MUST treat that as fail-closed (never kill).
   let bootTimeMs = null;
   function processStartMs(pid) {
     if (!Number.isInteger(pid) || pid <= 0) return null;
     if (process.platform === "win32") {
-      try {
-        const out = execSync(
-          `powershell -NoProfile -Command "(Get-Process -Id ${pid}).StartTime.ToUniversalTime().Ticks"`,
-          { stdio: ["ignore", "pipe", "pipe"], timeout: 8000 },
-        ).toString().trim();
-        const ticks = Number(out);
-        if (Number.isFinite(ticks) && ticks > 0) return ticks / 10000 - 62135596800000;
-      } catch {}
+      // Two attempts: PowerShell cold start on busy CI runners can exceed a
+      // single short timeout.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const out = execSync(
+            `powershell -NoProfile -Command "(Get-Process -Id ${pid}).StartTime.ToUniversalTime().Ticks"`,
+            { stdio: ["ignore", "pipe", "pipe"], timeout: 15000 },
+          ).toString().trim();
+          const ticks = Number(out);
+          if (Number.isFinite(ticks) && ticks > 0) return ticks / 10000 - 62135596800000;
+        } catch {}
+      }
       return null;
     }
     try {
@@ -180,7 +185,7 @@ export function createManager({ root, home } = {}) {
    */
   function verifyOwnProcess(pidInfo) {
     if (!pidAlive(pidInfo.pid)) return "dead";
-    const liveStart = processStartMs(pidInfo.pid);
+    const liveStart = (processStartMsImpl ?? processStartMs)(pidInfo.pid);
     if (liveStart === null) return "start-unknown"; // platform limitation
     const recorded = pidInfo.startedMs ?? parseIsoMs(pidInfo.startedIso);
     if (recorded === null) {
@@ -381,6 +386,12 @@ export function createManager({ root, home } = {}) {
     }
     if (verdict === "reuse-suspect") {
       logLine(`ERROR: pid ${pidInfo.pid} exists but its start time does not match the pid file (PID reuse suspected) — refusing to kill.`);
+      return 4;
+    }
+    if (verdict === "start-unknown") {
+      // Fail-closed (audit §7): when the live start time cannot be determined,
+      // PID-reuse cannot be ruled out — never kill on doubtful evidence.
+      logLine(`ERROR: start time of pid ${pidInfo.pid} is not determinable — PID reuse cannot be ruled out, refusing to kill. Find the process manually: netstat -ano | findstr :${portStr}`);
       return 4;
     }
     if (!await killOwned(pidInfo.pid)) {
