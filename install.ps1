@@ -1,11 +1,18 @@
 # zcode-agent-kit installer (Windows).
 #
 # One-command install (once a release tag exists -- see docs/RELEASE_CHECKLIST.md):
-#   & ([scriptblock]::Create((irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1)))
+#   irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
 #
-# (Do NOT use `irm ... | iex` for this script: the leading BOM/param parsing
-# in Invoke-Expression can break the param() block. scriptblock::Create is
-# the robust invocation form and keeps -Version/-InstallDir usable.)
+# This works in Windows PowerShell 5.1 and PowerShell 7+. The script takes no
+# param() block on purpose: Invoke-Expression parses its input in expression
+# mode, where param() is a parse error in PowerShell 7. Configuration goes
+# through environment variables instead (set them in the SAME line or session):
+#
+#   $env:ZCODE_KIT_VERSION     = "v0.2.0"                              # release tag to install
+#   $env:ZCODE_KIT_INSTALL_DIR = "D:\tools\zcode-agent-kit"            # install location
+#
+# Running the saved file also works and reads the same variables:
+#   .\install.ps1
 #
 # Security notes (stated honestly):
 # - The script downloads a PINNED release tarball (never main) and verifies its
@@ -18,17 +25,14 @@
 #
 # NOTE: this file is intentionally ASCII-only (Windows PowerShell 5.1 parses
 # BOM-less UTF-8 as ANSI and smart-byte punctuation corrupts string parsing).
-param(
-  [string]$Version = "v0.2.0",
-  [string]$InstallDir = ""
-)
 
 $ErrorActionPreference = "Stop"
 
-if (-not $InstallDir -or $InstallDir -eq "") {
-  if ($env:ZCODE_KIT_HOME) { $InstallDir = $env:ZCODE_KIT_HOME }
-  else { $InstallDir = Join-Path $env:LOCALAPPDATA "zcode-agent-kit" }
-}
+$Version = if ($env:ZCODE_KIT_VERSION) { $env:ZCODE_KIT_VERSION } else { "v0.2.0" }
+$InstallDir = ""
+if ($env:ZCODE_KIT_INSTALL_DIR) { $InstallDir = $env:ZCODE_KIT_INSTALL_DIR }
+elseif ($env:ZCODE_KIT_HOME) { $InstallDir = $env:ZCODE_KIT_HOME }
+else { $InstallDir = Join-Path $env:LOCALAPPDATA "zcode-agent-kit" }
 
 $Repo = "ZepiGit/ZCode-Agent-Kit"
 $Tarball = "$Version.tar.gz"
@@ -80,7 +84,7 @@ try {
   }
   Write-Host "archive hash verified ($($actual.Substring(0,16))...)"
 
-  # Safe extraction: tar with a structural check — the archive must contain
+  # Safe extraction: tar with a structural check -- the archive must contain
   # exactly ONE top-level directory (its name is not load-bearing; git-archive
   # prefixes differ between release tooling versions). Use the explicit
   # Windows tar: a GNU tar earlier on PATH (e.g. Git Bash) would mis-parse
@@ -99,9 +103,13 @@ try {
   $extracted = $top[0]
 
   # --- install ---------------------------------------------------------------
+  # /XF keeps machine-local runtime state across updates: the local proxy key
+  # and proxy/config.yaml (user settings) are never overwritten or deleted by
+  # the mirror; node_modules/backups/logs/generated are rebuilt or kept.
   if (Test-Path $InstallDir) {
-    Write-Host "existing install found - updating in place (config and .proxykey are preserved)"
-    robocopy $extracted.FullName $InstallDir /MIR /XF .proxykey /XD node_modules backups logs generated /NFL /NDL /NJH /NJS | Out-Null
+    Write-Host "existing install found - updating in place (.proxykey and proxy/config.yaml are preserved)"
+    robocopy $extracted.FullName $InstallDir /MIR /XF .proxykey config.yaml /XD node_modules backups logs generated /NFL /NDL /NJH /NJS | Out-Null
+    if ($LASTEXITCODE -ge 8) { Write-Error "update copy failed (robocopy exit $LASTEXITCODE) - aborting." }
   } else {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     Copy-Item -Path (Join-Path $extracted.FullName "*") -Destination $InstallDir -Recurse -Force
@@ -121,6 +129,8 @@ try {
   Write-Host "  cd $InstallDir"
   Write-Host "  node cli/zcode-kit.mjs status        # proxy status"
   Write-Host "  node cli/zcode-kit.mjs run omp -- ...  (or your harness's documented command)"
+  Write-Host ""
+  Write-Host "Thanks for your Trust, enjoy <3 -Github.com/ZepiGit - Instagram: Micheltie_"
 } finally {
   Remove-Item $tmp.FullName -Recurse -Force -ErrorAction SilentlyContinue
 }

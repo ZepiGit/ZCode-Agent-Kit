@@ -25,10 +25,16 @@ subscription, no API purchases.
 ## Install (Windows, PowerShell)
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1)))
+irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
 ```
 
-or from a repo checkout: `git clone` + `node setup.mjs`.
+Configuration via environment variables set in the same session:
+`ZCODE_KIT_VERSION` (release tag, default `v0.2.0`) and
+`ZCODE_KIT_INSTALL_DIR` (default `%LOCALAPPDATA%\zcode-agent-kit`).
+Running the saved `install.ps1` file also works. From a source checkout,
+`node setup.mjs` refuses to write user configs unless
+`ZCODE_KIT_ALLOW_CHECKOUT=1` opts in (a checkout must never silently become
+the machine's provider root).
 
 ## Install (macOS / Linux / WSL note)
 
@@ -68,6 +74,16 @@ refuses — the desktop app lives on Windows).
   The adapter now takes that legacy block over and refuses — still writing
   nothing — if it finds a hand-written `zcode` entry outside any managed
   block. Kit suite is 31/31 with two added regression tests.
+- Update-in-place no longer resets `proxy/config.yaml`: the mirror step now
+  excludes it (and `.proxykey`) from overwrite and deletion.
+- Windows one-liner is the conventional `irm ... | iex` again; the installer
+  takes no `param()` block (PowerShell 7's Invoke-Expression cannot parse
+  one) and reads `ZCODE_KIT_VERSION` / `ZCODE_KIT_INSTALL_DIR` environment
+  variables instead.
+- Source-checkout guard: `setup` / `integrate` refuse to write user configs
+  when run from a git checkout (no `.git` in tarball installs) unless
+  `ZCODE_KIT_ALLOW_CHECKOUT=1` is set — a checkout must never silently
+  become the machine's provider root.
 
 ## Security model
 

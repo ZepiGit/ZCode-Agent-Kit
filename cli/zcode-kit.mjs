@@ -122,6 +122,21 @@ function proxyFetch(path, init = {}, timeoutMs = 8000) {
 }
 
 // ------------------------------------------------------------------- setup
+
+// A tarball install carries no .git; a source checkout always does. Writing
+// user configs against a checkout root silently forks machine state when two
+// copies exist (install dir + checkout share one home), so it needs an
+// explicit opt-in. Read-only paths (doctor, status, --dry-run) stay open.
+function assertNotCheckoutWrite() {
+  if (ctx.dryRun) return;
+  if (!existsSync(join(ctx.root, ".git"))) return;
+  if (process.env.ZCODE_KIT_ALLOW_CHECKOUT === "1") return;
+  throw new Error(
+    `refusing to write user configs from a source checkout (${ctx.root}) — ` +
+      "run the installed copy instead, or set ZCODE_KIT_ALLOW_CHECKOUT=1 to proceed intentionally",
+  );
+}
+
 async function cmdSetup() {
   const harnessArg = flags.harness ?? "auto";
   const detected = detectHarnesses(ctx.home);
@@ -129,6 +144,7 @@ async function cmdSetup() {
     ? ADAPTER_IDS.filter((id) => detected[id])
     : String(harnessArg).split(",").map((s) => s.trim()).filter(Boolean);
   for (const t of targets) requireHarness(t);
+  assertNotCheckoutWrite();
 
   acquireLock(BACKUP_DIR);
   const tx = beginTransaction(BACKUP_DIR, `zcode-kit setup ${harnessArg}`);
@@ -224,6 +240,7 @@ async function cmdIntegrate() {
     adapter.apply(ctx, txNoop, (m) => console.log("  " + m));
     return 0;
   }
+  assertNotCheckoutWrite();
   acquireLock(BACKUP_DIR);
   const tx = beginTransaction(BACKUP_DIR, `zcode-kit integrate ${id}`);
   ctx.tx = tx;

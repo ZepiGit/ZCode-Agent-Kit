@@ -31,7 +31,7 @@
 管理者権限不要：
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1)))
+irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
 ```
 
 **macOS / Linux**：

@@ -56,6 +56,9 @@ function runSetup(home, args = []) {
       USERPROFILE: home,
       HOME: home,
       ZCODE_KIT_SKIP_DEPS: "1",
+      // The suite runs the kit from a source checkout (KIT has .git); tests
+      // intentionally write to the disposable fake home, so opt in.
+      ZCODE_KIT_ALLOW_CHECKOUT: "1",
       // Test isolation: hide the machine's real claude/codex/bun from PATH so
       // detection only sees the fake home (node.exe is spawned by absolute path).
       PATH: process.platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin:/bin",
@@ -109,6 +112,35 @@ test("setup applies, is idempotent, and rolls back exactly", () => {
   assert.equal(readFileSync(configYml, "utf8"), originalConfig, "config.yml byte-identical to pre-setup");
   assert.equal(existsSync(extFile), false, "kit-created extension removed");
   assert.equal(existsSync(join(home, ".omp", "agent", "mcp.json")), false, "kit-created mcp.json removed");
+});
+
+// Running setup from a source checkout would wire the user's harnesses to the
+// checkout root instead of the installed copy (two kits, one home) — it must
+// refuse unless ZCODE_KIT_ALLOW_CHECKOUT=1 opts in.
+test("setup refuses to write user configs from a checkout without opt-in", () => {
+  const { home } = fakeHome();
+  let failed = false;
+  try {
+    execFileSync(process.execPath, [join(KIT, "setup.mjs")], {
+      env: {
+        ...process.env,
+        USERPROFILE: home,
+        HOME: home,
+        ZCODE_KIT_SKIP_DEPS: "1",
+        // deliberately NO ZCODE_KIT_ALLOW_CHECKOUT here
+        PATH: process.platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin:/bin",
+      },
+      encoding: "utf8",
+    });
+    assert.fail("setup should have refused");
+  } catch (err) {
+    failed = true;
+    const out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
+    assert.match(out, /source checkout/);
+    assert.match(out, /ZCODE_KIT_ALLOW_CHECKOUT=1/);
+  }
+  assert.ok(failed);
+  assert.equal(existsSync(join(home, ".omp", "agent", "extensions")), false, "nothing written into the fake home");
 });
 
 test("yamlSingleQuoted escapes apostrophes (paths with quotes cannot break YAML)", () => {

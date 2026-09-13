@@ -8,7 +8,7 @@ set -eu
 
 VERSION="${ZCODE_KIT_VERSION:-v0.2.0}"
 REPO="ZepiGit/ZCode-Agent-Kit"
-INSTALL_DIR="${ZCODE_KIT_HOME:-$HOME/.local/share/zcode-agent-kit}"
+INSTALL_DIR="${ZCODE_KIT_INSTALL_DIR:-${ZCODE_KIT_HOME:-$HOME/.local/share/zcode-agent-kit}}"
 
 echo "== zcode-agent-kit installer ($VERSION) =="
 echo "install dir: $INSTALL_DIR"
@@ -72,9 +72,11 @@ fi
 
 mkdir -p "$INSTALL_DIR"
 if [ -d "$INSTALL_DIR/.git" ] || [ -f "$INSTALL_DIR/.proxykey" ]; then
-  echo "existing install found — updating in place (config and .proxykey preserved)"
-  rsync -a --delete --exclude '.proxykey' --exclude 'node_modules' --exclude 'backups' \
-        --exclude 'logs' --exclude 'generated' "$SRC/" "$INSTALL_DIR/"
+  echo "existing install found — updating in place (.proxykey and proxy/config.yaml preserved)"
+  # Excluded files are protected from --delete too (--delete-excluded is NOT
+  # set): the local proxy key and user proxy/config.yaml survive updates.
+  rsync -a --delete --exclude '.proxykey' --exclude 'config.yaml' --exclude 'node_modules' \
+        --exclude 'backups' --exclude 'logs' --exclude 'generated' "$SRC/" "$INSTALL_DIR/"
 else
   cp -R "$SRC/." "$INSTALL_DIR/"
 fi
@@ -86,3 +88,5 @@ echo ""
 echo "== done. Start using it =="
 echo "  cd $INSTALL_DIR"
 echo "  node cli/zcode-kit.mjs status"
+echo ""
+echo "Thanks for your Trust, enjoy <3 -Github.com/ZepiGit - Instagram: Micheltie_"
