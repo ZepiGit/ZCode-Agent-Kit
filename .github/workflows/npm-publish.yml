@@ -16,6 +16,9 @@ name: Node.js Package
 on:
   release:
     types: [created]
+  # Manual dispatch: deterministic way to run the publish pipeline (build +
+  # payload gate + dry-run) without depending on the release event delivery.
+  workflow_dispatch:
 
 jobs:
   build:
