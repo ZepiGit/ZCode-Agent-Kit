@@ -36,6 +36,10 @@ context), verified reasoning efforts **low / high / max** (default max).
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
 ```
 
+```continue with:
+node cli/zcode-kit.mjs setup
+```
+
 The installer downloads the pinned release archive, verifies its checksum,
 installs user-locally (default `%LOCALAPPDATA%\zcode-agent-kit` or
 `~/.local/share/zcode-agent-kit`, override with `ZCODE_KIT_HOME`), installs
