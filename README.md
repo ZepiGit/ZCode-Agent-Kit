@@ -208,4 +208,4 @@ npm run test:mcp      :: MCP bridge suite (36 tests incl. HTTP auth/origin gates
 - `MANIFEST.md` — vendored components, commits, licenses
 
 
-I am convinced no coder should be forced to use a different harness to from what he is used to, they get scared easily, so I build this
+I am convinced no coder should be forced to touch a unfamilliar harness. They get scared quiet easily, so I build this
