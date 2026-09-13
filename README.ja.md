@@ -46,11 +46,30 @@ curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/i
 `ZCODE_KIT_HOME` で上書き可能）。bun が無ければ v1.4.2 をユーザーローカルに
 導入し、ハーネス検出付きで setup を実行します。
 
+## 初回の使い方（この順番で）
+
+1. **インストール**（上のコマンド）。setup はインストール済みのハーネスを検出し、
+   検出したものだけを扱います — すべての書き込みはロールバック可能な
+   トランザクションに入ります。
+2. **一度ログイン**：ZCode Desktop アプリがインストール・ログイン済みであること。
+   setup はその認証情報を自動で取り込みます（不可能な場合は一回限りのログイン
+   コマンドを正確に表示します）。
+3. **確認**：`node cli\zcode-kit.mjs status`（プロキシは起動中か？クォータは？）と
+   `node cli\zcode-kit.mjs doctor`（完全な診断）。
+4. **使う** — 下の*ハーネス別の使い方*を参照。プロキシは必要に応じて自動起動します：
+   OMP は拡張経由で自動起動し、キットのラッパー（`bin\zcode-claude`、
+   `bin\zcode-codex`、`bin\zcode-aider`、`zcode-kit run ...`）は起動前にプロキシの
+   起動を保証します。それ以外（pi、Continue、Goose、素の API クライアント）は
+   一度自分で起動してください：`node proxy\zcode-proxy-manager.mjs start`
+5. **その後**：`zcode-kit update` で更新、`zcode-kit rollback` で直前のステップを
+   取り消し、`zcode-kit uninstall` でキット所有のものをすべて削除します。
+
 **リポジトリのチェックアウトから**（開発・手動インストール）：
 
 ```powershell
 git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
 cd zcode-agent-kit
+$env:ZCODE_KIT_ALLOW_CHECKOUT = "1"     # 明示的な同意：チェックアウトが黙って provider ルートになることはない
 node setup.mjs                          # または: node cli\zcode-kit.mjs setup --harness auto
 node cli\zcode-kit.mjs doctor
 ```

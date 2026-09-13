@@ -43,11 +43,28 @@ curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/i
 可用 `ZCODE_KIT_HOME` 覆盖），如缺少 bun 则自动在用户目录安装 v1.4.2，
 然后运行带 harness 检测的 setup。
 
+## 首次使用，按顺序进行
+
+1. **安装**（上方命令）。setup 会检测你安装的 harness，并只改动检测到的
+   部分——所有写入都处于可回滚的事务中。
+2. **登录一次**：确保 ZCode Desktop 已安装并已登录；setup 会自动导入该
+   凭据（否则会打印出准确的一次性登录命令）。
+3. **检查**：`node cli\zcode-kit.mjs status`（代理是否在运行？配额？）和
+   `node cli\zcode-kit.mjs doctor`（完整诊断）。
+4. **使用**——见下方*各 harness 用法*。代理按需自动启动：OMP 通过其扩展
+   自动启动，kit 启动器（`bin\zcode-claude`、`bin\zcode-codex`、
+   `bin\zcode-aider` 或 `zcode-kit run ...`）会在启动前确保代理运行。其他
+   方式（pi、Continue、Goose、直接 API 客户端）请自行启动一次：
+   `node proxy\zcode-proxy-manager.mjs start`
+5. **之后**：`zcode-kit update` 升级，`zcode-kit rollback` 撤销最近一步，
+   `zcode-kit uninstall` 移除所有 kit 拥有的内容。
+
 **从仓库检出安装**（开发或手动安装）：
 
 ```powershell
 git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
 cd zcode-agent-kit
+$env:ZCODE_KIT_ALLOW_CHECKOUT = "1"     # 显式选择：仓库检出绝不应默默成为 provider 根目录
 node setup.mjs                          # 或：node cli\zcode-kit.mjs setup --harness auto
 node cli\zcode-kit.mjs doctor
 ```

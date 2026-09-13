@@ -43,11 +43,30 @@ installs user-locally (default `%LOCALAPPDATA%\zcode-agent-kit` or
 bun v1.4.2 user-locally if it is missing, and runs setup with harness
 detection.
 
+## First run, in order
+
+1. **Install** (commands above). Setup detects your harnesses and wires only
+   those — every write lands in a transaction you can roll back.
+2. **One login**: have the ZCode Desktop app installed and logged in; setup
+   imports that credential automatically (otherwise it prints the exact
+   one-time login command to run).
+3. **Check**: `node cli\zcode-kit.mjs status` (proxy running? quota?) and
+   `node cli\zcode-kit.mjs doctor` (full diagnostics).
+4. **Use it** — see *Usage per harness* below. The proxy starts on demand:
+   OMP auto-starts it through its extension, and the kit wrappers
+   (`bin\zcode-claude`, `bin\zcode-codex`, `bin\zcode-aider` or
+   `zcode-kit run ...`) ensure it before launching. For everything else
+   (pi, Continue, Goose, raw API clients), start it once yourself:
+   `node proxy\zcode-proxy-manager.mjs start`
+5. **Later**: `zcode-kit update` upgrades, `zcode-kit rollback` undoes the
+   newest step, `zcode-kit uninstall` removes everything kit-owned.
+
 **From a repo checkout** (development or manual install):
 
 ```powershell
 git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
 cd zcode-agent-kit
+$env:ZCODE_KIT_ALLOW_CHECKOUT = "1"     # opt-in: a checkout must not silently become the provider root
 node setup.mjs                          # or: node cli\zcode-kit.mjs setup --harness auto
 node cli\zcode-kit.mjs doctor
 ```
