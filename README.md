@@ -1,5 +1,10 @@
 # ZCode Agent Kit
 
+[![CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)
+![Release](https://img.shields.io/github/v/release/ZepiGit/ZCode-Agent-Kit)
+
+**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+
 Model access from your own agent harness through **your own ZCode Desktop
 account** — no second subscription, no API purchases. Ten harness adapters,
 one local proxy, transparent rollback.
@@ -19,7 +24,25 @@ context), verified reasoning efforts **low / high / max** (default max).
 
 ## Quickstart
 
-**Windows (PowerShell, repo checkout):**
+**Windows (PowerShell)** — pinned installer, SHA256-verified, no admin rights:
+
+```powershell
+irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+```
+
+**macOS / Linux**:
+
+```sh
+curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
+```
+
+The installer downloads the pinned release archive, verifies its checksum,
+installs user-locally (default `%LOCALAPPDATA%\zcode-agent-kit` or
+`~/.local/share/zcode-agent-kit`, override with `ZCODE_KIT_HOME`), installs
+bun v1.4.2 user-locally if it is missing, and runs setup with harness
+detection.
+
+**From a repo checkout** (development or manual install):
 
 ```powershell
 git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
@@ -28,14 +51,11 @@ node setup.mjs                          # or: node cli\zcode-kit.mjs setup --har
 node cli\zcode-kit.mjs doctor
 ```
 
-**macOS / Linux:** identical, with `node cli/zcode-kit.mjs …`.
-
-Requirements: **Node ≥ 20** and **bun** on PATH; **ZCode Desktop installed and
-logged in** (the credential import reads your existing desktop login; the MCP
-bridge needs the desktop app *running* for model turns). Administrator rights
-are never required. `install.ps1` / `install.sh` automate this from a pinned
-release archive — they become usable once the first release is published
-(see `docs/RELEASE_CHECKLIST.md`).
+Requirements: **Node ≥ 20** (bun is only needed for a repo checkout — the
+installer brings its own) and **ZCode Desktop installed and logged in** (the
+credential import reads your existing desktop login; the MCP bridge needs the
+desktop app *running* for model turns). Administrator rights are never
+required. WSL is detected and refused — install on the Windows host.
 
 ## The zcode-kit CLI
 
