@@ -45,6 +45,21 @@ installiert benutzerlokal (Standard `%LOCALAPPDATA%\zcode-agent-kit` bzw.
 installiert bun v1.4.2 benutzerlokal, falls es fehlt, und führt das Setup mit
 Harness-Erkennung aus.
 
+**npm / npx:**
+
+```sh
+npm install -g zcode-agent-kit
+zcode-kit setup
+
+# Oder ohne globale Installation:
+npx --yes zcode-agent-kit setup
+```
+
+Das npm-Paket stellt die Befehle `zcode-kit` und `zcode-agent-kit` bereit. Der
+Postinstall-Schritt führt dasselbe transaktionale Setup aus; ein erneuter
+`setup`-Aufruf ist sicher und idempotent. Für npm werden **Node ≥ 20** und die
+vom Setup verwalteten bun-Abhängigkeiten benötigt.
+
 ## Erste Nutzung — in dieser Reihenfolge
 
 1. **Installieren** (Befehle oben). Das Setup erkennt deine Harnesses und
@@ -241,13 +256,13 @@ Proxy ist gepinnt (siehe `MANIFEST.md`); lokale Patches liegen in `patches/`.
 
 ```bat
 npm run test          :: Kit-Suite (node --test): Transaktionen, Manager-Safety, Adapter, Regressionen
-npm run test:proxy    :: 858 Bun-Tests inkl. Protokoll-Contract-Tests (SSE-Grenzen, Tool-Args, Abbruch, Usage)
-npm run test:mcp      :: MCP-Bridge-Suite (36 Tests inkl. HTTP-Auth/Origin-Gates, Allowlist-Escapes)
+npm run test:proxy    :: 872 Bun-Tests inkl. Protokoll-Contract-Tests (SSE-Grenzen, Tool-Args, Abbruch, Usage)
+npm run test:mcp      :: MCP-Bridge-Suite (42 Tests inkl. HTTP-Auth/Origin-Gates, Allowlist-Escapes)
 ```
 
 ## Dokumente
 
-- `SUPPORT_MATRIX.json` / `.md` — ehrlicher Zustand je Adapter
+- `SUPPORT_MATRIX.json` — ehrlicher Zustand je Adapter
 - `EFFORT_MAPPING.md` / `.json` — wie low/high/max auf Upstream-Parameter abgebildet werden
 - `SETUP_REPORT.md`, `TEST_REPORT.md` — Testbelege mit exakten Befehlen
 - `IMPLEMENTATION_STATUS.md` — Entscheidungen und offene Punkte

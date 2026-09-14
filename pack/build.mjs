@@ -99,7 +99,10 @@ function main() {
     description: rootPkg.description,
     license: "MIT",
     type: "module",
-    bin: { "zcode-kit": "cli/zcode-kit.mjs" },
+    // Keep the source checkout (`npm link`) and generated publish package on
+    // exactly the same command surface. `zcode-agent-kit` makes the package
+    // name directly executable; `zcode-kit` remains the concise primary CLI.
+    bin: rootPkg.bin,
     engines: { node: ">=20" },
     // Fail closed at the package level, not only in CI (ZAK-012): a generated
     // package stays private unless pack/ALLOW_PUBLISH existed at build time

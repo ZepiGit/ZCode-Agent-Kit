@@ -4,11 +4,17 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { saveCredential, loadCredential, clearCredential, getStorePath } from "./store.js";
-import { writeFileSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Credential } from "./types.js";
 
 const TEST_SECRET = "test-encryption-secret-for-zcode-proxy";
+// Audit H6 regression guard: this suite runs against an injected temp store
+// (ZCODE_PROXY_CREDENTIALS_PATH) so it can never wipe a real login at
+// ~/.zcode-proxy/credentials.json.
+const TEST_STORE_DIR = join(tmpdir(), `zcode-proxy-store-test-${Date.now()}-${process.pid}`);
+const TEST_STORE = join(TEST_STORE_DIR, "credentials.json");
 
 /** Legacy XOR-fold key + AES-GCM encrypt (pre-SHA-256 store format). */
 async function legacyEncrypt(plaintext: string): Promise<string> {
@@ -30,17 +36,31 @@ async function legacyEncrypt(plaintext: string): Promise<string> {
 describe("credential store", () => {
   beforeEach(() => {
     process.env.ZCODE_PROXY_CREDENTIAL_SECRET = TEST_SECRET;
+    process.env.ZCODE_PROXY_CREDENTIALS_PATH = TEST_STORE;
+    // The injected store dir is recreated each case: tests write the store
+    // file directly (no saveCredential), and a prior afterEach may have
+    // removed the dir — the real ~/.zcode-proxy always existed, temp does not.
+    mkdirSync(TEST_STORE_DIR, { recursive: true });
     clearCredential();
   });
 
   afterEach(() => {
     clearCredential();
     delete process.env.ZCODE_PROXY_CREDENTIAL_SECRET;
+    delete process.env.ZCODE_PROXY_CREDENTIALS_PATH;
+    rmSync(TEST_STORE_DIR, { recursive: true, force: true });
   });
 
   it("returns null when no credential stored", async () => {
     const loaded = await loadCredential();
     expect(loaded).toBeNull();
+  });
+
+  it("isolates the store via ZCODE_PROXY_CREDENTIALS_PATH (H6: suites never touch the real login)", () => {
+    expect(getStorePath()).toBe(TEST_STORE);
+    delete process.env.ZCODE_PROXY_CREDENTIALS_PATH;
+    expect(getStorePath()).toBe(join(homedir(), ".zcode-proxy", "credentials.json"));
+    process.env.ZCODE_PROXY_CREDENTIALS_PATH = TEST_STORE;
   });
 
   it("roundtrips: save → load → matches original", async () => {
@@ -93,12 +113,19 @@ describe("credential store", () => {
 describe("credential store — SHA-256 KDF migration (R2-13)", () => {
   beforeEach(() => {
     process.env.ZCODE_PROXY_CREDENTIAL_SECRET = TEST_SECRET;
+    process.env.ZCODE_PROXY_CREDENTIALS_PATH = TEST_STORE;
+    // The injected store dir is recreated each case: tests write the store
+    // file directly (no saveCredential), and a prior afterEach may have
+    // removed the dir — the real ~/.zcode-proxy always existed, temp does not.
+    mkdirSync(TEST_STORE_DIR, { recursive: true });
     clearCredential();
   });
 
   afterEach(() => {
     clearCredential();
     delete process.env.ZCODE_PROXY_CREDENTIAL_SECRET;
+    delete process.env.ZCODE_PROXY_CREDENTIALS_PATH;
+    rmSync(TEST_STORE_DIR, { recursive: true, force: true });
   });
 
   it("migrates a legacy XOR-fold-encrypted file: loads AND re-stores under the new KDF", async () => {

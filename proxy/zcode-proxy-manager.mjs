@@ -17,7 +17,7 @@
 //     verified-own processes.
 //   - No component is a hard requirement: doctor checks only what is
 //     installed on this machine and separates auth validity from token age.
-import { spawn, execSync } from "node:child_process";
+import { spawn, spawnSync, execSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, openSync, closeSync, readSync } from "node:fs";
 import { existsSync, readFileSync, statSync, renameSync, writeFileSync, unlinkSync } from "node:fs";

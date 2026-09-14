@@ -2,10 +2,10 @@
 // run 1 applies, run 2 is a no-op, rollback undoes run 1 exactly.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, cpSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { yamlSingleQuoted } from "../cli/adapters/omp.mjs";
 import { createCtx, ensureRuntimeFiles } from "../cli/context.mjs";
 
@@ -141,6 +141,57 @@ test("setup refuses to write user configs from a checkout without opt-in", () =>
   }
   assert.ok(failed);
   assert.equal(existsSync(join(home, ".omp", "agent", "extensions")), false, "nothing written into the fake home");
+});
+
+// Audit H3: `zcode-kit update` ends with a re-setup, which used to die on the
+// checkout-write guard — update requires a checkout, yet could never finish on
+// one. Explicitly running `update` is itself the opt-in, so cmdUpdate sets
+// ZCODE_KIT_ALLOW_CHECKOUT=1 for its own re-setup step. Proven end-to-end
+// against a minimal fixture kit inside a real (local, offline) git repo.
+test("update from a checkout completes — re-setup implies the checkout opt-in (H3)", () => {
+  const gitProbe = spawnSync("git", ["--version"]);
+  if (gitProbe.status !== 0) {
+    console.warn("git not on PATH — skipping the update e2e test (update itself requires git)");
+    return;
+  }
+  const base = join(TMP, `update-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  const origin = join(base, "origin.git");
+  const checkout = join(base, "checkout");
+  const home = join(base, "home");
+  mkdirSync(join(home, ".omp", "agent"), { recursive: true }); // fake home, no harness configs
+  mkdirSync(join(checkout, "proxy"), { recursive: true });
+  // Minimal runnable kit: the fixture copy is the code under test, so a
+  // regression of the fix fails here immediately. The live proxy/config.yaml
+  // (real key) is deliberately NOT copied — only the example scaffold.
+  cpSync(join(KIT, "cli"), join(checkout, "cli"), { recursive: true });
+  cpSync(join(KIT, "lib"), join(checkout, "lib"), { recursive: true });
+  cpSync(join(KIT, "proxy", "config.example.yaml"), join(checkout, "proxy", "config.example.yaml"));
+  const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8" });
+  try {
+    git(["init", "-b", "main"], checkout);
+    git(["-c", "core.autocrlf=false", "add", "-A"], checkout);
+    git(["-c", "user.email=kit@test", "-c", "user.name=kit", "commit", "-m", "fixture"], checkout);
+    git(["init", "--bare", "-b", "main", origin], base);
+    git(["remote", "add", "origin", origin], checkout);
+    git(["push", "-u", "origin", "main"], checkout);
+
+    const out = execFileSync(process.execPath, [join(checkout, "cli", "zcode-kit.mjs"), "update"], {
+      env: {
+        ...process.env,
+        USERPROFILE: home,
+        HOME: home,
+        ZCODE_KIT_SKIP_DEPS: "1",
+        // deliberately NOT opted in at the env level — update must imply it
+        ZCODE_KIT_ALLOW_CHECKOUT: "0",
+      },
+      encoding: "utf8",
+    });
+    assert.match(out, /re-applying integrations for detected harnesses/);
+    assert.doesNotMatch(out, /refusing to write user configs from a source checkout/);
+    assert.ok(existsSync(join(checkout, ".proxykey")), "re-setup must have bootstrapped from the checkout root");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test("yamlSingleQuoted escapes apostrophes (paths with quotes cannot break YAML)", () => {

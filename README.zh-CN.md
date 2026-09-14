@@ -43,6 +43,20 @@ curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/i
 可用 `ZCODE_KIT_HOME` 覆盖），如缺少 bun 则自动在用户目录安装 v1.4.2，
 然后运行带 harness 检测的 setup。
 
+**npm / npx：**
+
+```sh
+npm install -g zcode-agent-kit
+zcode-kit setup
+
+# 或者无需全局安装：
+npx --yes zcode-agent-kit setup
+```
+
+npm 包提供 `zcode-kit` 和 `zcode-agent-kit` 两个命令。postinstall 会执行同一个
+事务性 setup；再次运行 `setup` 是安全且幂等的。npm 用法需要 **Node ≥ 20**，
+setup 会管理所需的 bun 依赖。
+
 ## 首次使用，按顺序进行
 
 1. **安装**（上方命令）。setup 会检测你安装的 harness，并只改动检测到的
@@ -219,13 +233,13 @@ node proxy\zcode-proxy-manager.mjs stop
 
 ```bat
 npm run test          :: kit 套件（node --test）：事务、管理器安全、适配器、回归
-npm run test:proxy    :: 858 个 bun 测试，含协议契约测试（SSE 边界、工具参数、中止、用量）
-npm run test:mcp      :: MCP 桥套件（36 个测试，含 HTTP 认证/来源门、Allowlist 逃逸）
+npm run test:proxy    :: 872 个 bun 测试，含协议契约测试（SSE 边界、工具参数、中止、用量）
+npm run test:mcp      :: MCP 桥套件（42 个测试，含 HTTP 认证/来源门、Allowlist 逃逸）
 ```
 
 ## 文档
 
-- `SUPPORT_MATRIX.json` / `.md` —— 每个适配器的真实状态（已实现 / 配置已测 /
+- `SUPPORT_MATRIX.json` —— 每个适配器的真实状态（已实现 / 配置已测 /
   已实测 / 需手动确认）
 - `EFFORT_MAPPING.md` / `.json` —— low/high/max 如何映射到上游参数
 - `SETUP_REPORT.md`、`TEST_REPORT.md` —— 带确切命令的测试证据

@@ -46,6 +46,20 @@ curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/i
 `ZCODE_KIT_HOME` で上書き可能）。bun が無ければ v1.4.2 をユーザーローカルに
 導入し、ハーネス検出付きで setup を実行します。
 
+**npm / npx：**
+
+```sh
+npm install -g zcode-agent-kit
+zcode-kit setup
+
+# グローバルインストールを使わない場合：
+npx --yes zcode-agent-kit setup
+```
+
+npm パッケージは `zcode-kit` と `zcode-agent-kit` の両方のコマンドを提供します。
+postinstall は同じトランザクション型 setup を実行します。`setup` の再実行は安全で
+冪等です。npm 版には **Node ≥ 20** と、setup が管理する bun 依存関係が必要です。
+
 ## 初回の使い方（この順番で）
 
 1. **インストール**（上のコマンド）。setup はインストール済みのハーネスを検出し、
@@ -235,13 +249,13 @@ Desktop のログイン・データを削除しません。`zcode-kit auth logou
 
 ```bat
 npm run test          :: kit スイート（node --test）：トランザクション、マネージャ安全性、アダプター
-npm run test:proxy    :: 858 件の bun テスト（SSE 境界、ツール引数、中断、usage などの契約テスト含む）
-npm run test:mcp      :: MCP ブリッジスイート（36 件、HTTP 認証/オリジンゲート、アローリスト脱出を含む）
+npm run test:proxy    :: 872 件の bun テスト（SSE 境界、ツール引数、中断、usage などの契約テスト含む）
+npm run test:mcp      :: MCP ブリッジスイート（42 件、HTTP 認証/オリジンゲート、アローリスト脱出を含む）
 ```
 
 ## ドキュメント
 
-- `SUPPORT_MATRIX.json` / `.md` — アダプターごとの正確な状態
+- `SUPPORT_MATRIX.json` — アダプターごとの正確な状態
 - `EFFORT_MAPPING.md` / `.json` — low/high/max のアップストリームパラメータへの対応
 - `SETUP_REPORT.md`、`TEST_REPORT.md` — 実行コマンド付きのテスト証跡
 - `IMPLEMENTATION_STATUS.md` — 決定事項と未解決点

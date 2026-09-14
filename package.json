@@ -5,16 +5,21 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "zcode-kit": "cli/zcode-kit.mjs",
+    "zcode-agent-kit": "cli/zcode-kit.mjs"
+  },
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/transaction.test.mjs tests/setup-regressions.test.mjs tests/manager-safety.test.mjs tests/cli-kit.test.mjs tests/release-marker.test.mjs",
+    "test": "node --test tests/transaction.test.mjs tests/setup-regressions.test.mjs tests/manager-safety.test.mjs tests/cli-kit.test.mjs tests/release-marker.test.mjs tests/installer.test.mjs",
     "test:proxy": "cd zcode-proxy-src && bun test",
     "test:mcp": "cd mcp/zcode-harness-mcp && npm test",
     "test:all": "npm run test && npm run test:proxy && npm run test:mcp",
     "setup": "node cli/zcode-kit.mjs setup",
-    "kit": "node cli/zcode-kit.mjs"
+    "kit": "node cli/zcode-kit.mjs",
+    "zcode-kit": "node cli/zcode-kit.mjs"
   },
   "repository": {
     "type": "git",

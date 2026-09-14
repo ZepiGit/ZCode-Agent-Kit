@@ -46,6 +46,21 @@ instala a nivel de usuario (por defecto `%LOCALAPPDATA%\zcode-agent-kit` o
 `~/.local/share/zcode-agent-kit`, configurable con `ZCODE_KIT_HOME`), instala
 bun v1.4.2 localmente si falta y ejecuta setup con detección de harnesses.
 
+**npm / npx:**
+
+```sh
+npm install -g zcode-agent-kit
+zcode-kit setup
+
+# O sin instalación global:
+npx --yes zcode-agent-kit setup
+```
+
+El paquete npm expone los comandos `zcode-kit` y `zcode-agent-kit`. Su paso de
+postinstall ejecuta el mismo setup transaccional; volver a ejecutar `setup` es
+seguro e idempotente. El uso con npm requiere **Node ≥ 20** y las dependencias
+bun gestionadas por setup.
+
 ## Primera ejecución, en orden
 
 1. **Instala** (comandos de arriba). El setup detecta tus harnesses y solo
@@ -243,13 +258,13 @@ está fijado (ver `MANIFEST.md`); los parches locales viven en `patches/`.
 
 ```bat
 npm run test          :: suite del kit (node --test): transacciones, seguridad del manager, adaptadores
-npm run test:proxy    :: 858 pruebas bun incl. tests de contrato de protocolo (límites SSE, tool args, abort)
-npm run test:mcp      :: suite del puente MCP (36 pruebas incl. gates de auth/origin HTTP, escapes de allowlist)
+npm run test:proxy    :: 872 pruebas bun incl. tests de contrato de protocolo (límites SSE, tool args, abort)
+npm run test:mcp      :: suite del puente MCP (42 pruebas incl. gates de auth/origin HTTP, escapes de allowlist)
 ```
 
 ## Documentos
 
-- `SUPPORT_MATRIX.json` / `.md` — estado real por adaptador
+- `SUPPORT_MATRIX.json` — estado real por adaptador
 - `EFFORT_MAPPING.md` / `.json` — cómo low/high/max se mapean a parámetros upstream
 - `SETUP_REPORT.md`, `TEST_REPORT.md` — evidencia de pruebas con comandos exactos
 - `IMPLEMENTATION_STATUS.md` — decisiones y puntos abiertos

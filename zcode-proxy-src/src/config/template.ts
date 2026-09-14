@@ -9,7 +9,7 @@
 
 export const EXAMPLE_CONFIG_YAML: string = `server:
   port: 8080
-  host: "0.0.0.0"
+  host: "127.0.0.1"
 
 auth:
   # Key that clients must provide to use the proxy.

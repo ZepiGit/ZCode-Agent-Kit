@@ -43,6 +43,21 @@ installs user-locally (default `%LOCALAPPDATA%\zcode-agent-kit` or
 bun v1.4.2 user-locally if it is missing, and runs setup with harness
 detection.
 
+**npm / npx:**
+
+```sh
+npm install -g zcode-agent-kit
+zcode-kit setup
+
+# Or run the published CLI without a global install:
+npx --yes zcode-agent-kit setup
+```
+
+The npm package exposes both `zcode-kit` and `zcode-agent-kit` commands. Its
+postinstall lifecycle runs the same transactional setup; re-running `setup` is
+safe and idempotent. npm usage still requires **Node ≥ 20**, and setup installs
+or verifies the pinned bun dependencies.
+
 ## First run, in order
 
 1. **Install** (commands above). Setup detects your harnesses and wires only
@@ -237,13 +252,13 @@ proxy is pinned (see `MANIFEST.md`); local patches live in `patches/`.
 
 ```bat
 npm run test          :: kit suite (node --test): transactions, manager safety, adapters, regressions
-npm run test:proxy    :: 858 bun tests incl. protocol contract tests (SSE boundaries, tool args, abort, usage)
-npm run test:mcp      :: MCP bridge suite (36 tests incl. HTTP auth/origin gates, allowlist escapes)
+npm run test:proxy    :: 872 bun tests incl. protocol contract tests (SSE boundaries, tool args, abort, usage)
+npm run test:mcp      :: MCP bridge suite (42 tests incl. HTTP auth/origin gates, allowlist escapes)
 ```
 
 ## Documents
 
-- `SUPPORT_MATRIX.json` / `.md` — honest per-adapter state (implemented /
+- `SUPPORT_MATRIX.json` — honest per-adapter state (implemented /
   config-tested / live-tested / manual-confirmation-required)
 - `EFFORT_MAPPING.md` / `.json` — how low/high/max map to upstream parameters
 - `SETUP_REPORT.md`, `TEST_REPORT.md` — test evidence with exact commands

@@ -7,6 +7,7 @@ import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadConfig } from "./loader.js";
+import { EXAMPLE_CONFIG_YAML } from "./template.js";
 
 const TMP = join(tmpdir(), `zcode-proxy-test-${Date.now()}`);
 
@@ -35,6 +36,17 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(TMP, { recursive: true, force: true });
+});
+
+describe("vendored template vs loader (H4)", () => {
+  it("the bundled first-run template parses AND passes validate() — no 0.0.0.0 startup death", () => {
+    // The template ships inside the compiled binary and is written out on
+    // first run; if it violates a loader invariant (notably the loopback
+    // binding rule that rejects 0.0.0.0), first-run serve dies immediately.
+    const path = writeYaml(EXAMPLE_CONFIG_YAML);
+    const cfg = loadConfig(path);
+    expect(["127.0.0.1", "::1", "localhost"]).toContain(cfg.server.host);
+  });
 });
 
 describe("identity.deviceMid", () => {

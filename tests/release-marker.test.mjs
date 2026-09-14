@@ -18,8 +18,15 @@ test("pack build keeps the generated package private when the marker names anoth
   try {
     const res = spawnSync(process.execPath, [join(KIT, "pack", "build.mjs")], { encoding: "utf8" });
     assert.equal(res.status, 0, `build should succeed (stderr: ${res.stderr})`);
-    const pkg = JSON.parse(readFileSync(join(KIT, "pack", "dist", "package.json"), "utf8"));
+    const dist = join(KIT, "pack", "dist");
+    const pkg = JSON.parse(readFileSync(join(dist, "package.json"), "utf8"));
     assert.equal(pkg.private, true, "mismatched marker version must keep the package private");
+    assert.deepEqual(pkg.bin, {
+      "zcode-kit": "cli/zcode-kit.mjs",
+      "zcode-agent-kit": "cli/zcode-kit.mjs",
+    }, "generated npm package must expose both documented CLI names");
+    assert.equal(pkg.scripts.postinstall, "node setup.mjs --postinstall-hint");
+    assert.match(readFileSync(join(dist, "cli", "zcode-kit.mjs"), "utf8"), /^#!\/usr\/bin\/env node/);
   } finally {
     if (existed) writeFileSync(MARKER, prev);
     else rmSync(MARKER);

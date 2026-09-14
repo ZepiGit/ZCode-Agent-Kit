@@ -461,6 +461,11 @@ async function cmdUpdate() {
     return merge.status ?? 1;
   }
   console.log("update: re-applying integrations for detected harnesses...");
+  // Audit H3: update only ever reaches this point from a checkout (the tarball
+  // path returns above), and explicitly running `update` IS the opt-in the
+  // checkout-write guard asks for. Without this, the re-setup step always died
+  // on the guard and update could never finish by design.
+  process.env.ZCODE_KIT_ALLOW_CHECKOUT = "1";
   return cmdSetup();
 }
 

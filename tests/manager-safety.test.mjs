@@ -6,7 +6,7 @@
 //   - doctor/logs survive a missing config without crashing
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import http from "node:http";
@@ -65,6 +65,23 @@ afterEach(() => {
   if (server) {
     server.close();
     server = null;
+  }
+});
+
+test("manager imports every child_process helper it calls (H2a: darwin spawnSync)", () => {
+  // The darwin branch of the process-start-time probe calls spawnSync; a
+  // missing import throws a ReferenceError that the surrounding catch swallows,
+  // so stop/restart would silently refuse on macOS. Enforce import coverage.
+  const src = readFileSync(join(import.meta.dirname, "..", "proxy", "zcode-proxy-manager.mjs"), "utf8");
+  const imported = new Set(
+    [...src.matchAll(/import\s*\{([^}]+)\}\s*from\s*"node:child_process"/g)]
+      .flatMap((m) => m[1].split(",").map((s) => s.trim()))
+      .filter(Boolean),
+  );
+  const used = new Set([...src.matchAll(/\b(spawnSync|spawn|execSync|execFile|exec)\s*\(/g)].map((m) => m[1]));
+  assert.ok(used.has("spawnSync"), "expected the darwin spawnSync call to exist in the manager");
+  for (const fn of used) {
+    assert.ok(imported.has(fn), `${fn} is called but not imported from node:child_process`);
   }
 });
 

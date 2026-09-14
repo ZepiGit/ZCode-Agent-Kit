@@ -42,6 +42,20 @@ test("persistence: task survives bridge restart as interrupted, results stay rea
   }
 });
 
+test("read-only invoke gate: session/goal is not invocable via zcode_operation_invoke (H5)", async () => {
+  // Audit H5: the invoke allowlist contained session/goal, whose action enum
+  // includes mutating verbs (set/replace/pause/resume/clear) — so --read-only
+  // was bypassable. Mutating access must go through zcode_session_goal, which
+  // enforces requireWritable.
+  const c = await startBridge();
+  try {
+    const err = await c.expectToolError("zcode_operation_invoke", { method: "session/goal", params: { sessionId: "sess_probe", action: "show" } });
+    assert.match(err, /operation not invocable/);
+  } finally {
+    await c.stop();
+  }
+});
+
 test("concurrency limit: queued read-only tasks run when capacity frees; parallel write tasks blocked", async () => {
   const c = await startBridge({ maxConcurrentTasks: "2", env: { FAKE_SLOW_CREATE_MS: "400" } });
   try {
