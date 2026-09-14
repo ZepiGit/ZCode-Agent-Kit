@@ -5,7 +5,7 @@
 
 **English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [sprich Deutsch du H******](README.de.md)
 
-Model access from your own agent harness through **your own ZCode Desktop
+Model access from your own agent harness through **your ZCode Desktop
 account** — no second subscription, no API purchases. Ten harness adapters,
 one local proxy, transparent rollback.
 
