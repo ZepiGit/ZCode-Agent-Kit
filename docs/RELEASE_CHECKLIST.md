@@ -42,8 +42,9 @@ not provenance; verify the tag commit for provenance.)
 
 ## Automated releases (v0.2.2 and later) — push the tag, that's all
 
-Since the v0.2.1 follow-up the release pipeline is tag-triggered
-(`.github/workflows/release.yml`):
+Since the v0.2.1 follow-up the release pipeline is a single tag-triggered
+workflow (`.github/workflows/release.yml`; the old `npm-publish.yml` was
+removed — its `release: created` trigger never worked):
 
 1. Bump `package.json` + `package-lock.json` to the new version, set
    `pack/ALLOW_PUBLISH` to the same version, and (optionally) write
@@ -53,22 +54,25 @@ Since the v0.2.1 follow-up the release pipeline is tag-triggered
 3. The workflow runs the full test matrix on ubuntu + windows, gates the tag
    against `package.json` and the committed `ALLOW_PUBLISH` marker, builds the
    assets (git-archive tarball + installers + checksums.txt), creates the
-   GitHub release and publishes `pack/dist` to npm via the `NPM_TOKEN` secret.
+   GitHub release and publishes `pack/dist` to npm.
 
-Known gap (observed on v0.2.0 and v0.2.1): the `release: created` event of
-`npm-publish.yml` was delivered by GitHub but never started a run (zero runs
-with `event=release`) — do not rely on it. A tag push via `release.yml` is the
-reliable trigger. To re-publish npm after a failed publish step, dispatch
-`npm-publish.yml` manually (`gh workflow run npm-publish.yml --ref main`) or
-run `npm publish` from a freshly built `pack/dist`.
+Known gap (observed on v0.2.0 and v0.2.1): the `release: created` event was
+delivered by GitHub but never started a run (zero runs with
+`event=release`) — do not rely on release-event triggers. A tag push is the
+reliable signal. To re-publish npm after a failed publish step, dispatch
+`release.yml` manually (`gh workflow run release.yml --ref main`); a dispatch
+runs build + verify + publish from main without creating a release.
 
-npm token requirement: the `NPM_TOKEN` repository secret must be a **Granular
-Access Token with "Bypass two-factor authentication for API and CI"**
-(packages: read/write, scoped to `zcode-agent-kit`). A token created before
-TOTP was enabled on the npm account fails the CI publish with `EOTP`
-(observed on the v0.2.1 dispatch: build matrix green, publish 403/EOTP).
-Update the secret with `gh secret set NPM_TOKEN` (interactive paste — never
-via shell history or a committed file).
+npm publishing — **Trusted Publishing (OIDC), no token**: the publish step
+authenticates via GitHub OIDC (`id-token: write` + `npm publish
+--provenance`, npm >= 11.5 installed in the job). One-time prerequisite on
+npmjs.com: package `zcode-agent-kit` → Settings → **Trusted Publisher** →
+repository `ZepiGit/ZCode-Agent-Kit`, workflow `release.yml`, environment
+empty. History that led here: the `NPM_TOKEN` secret failed with `EOTP` on
+three dispatches (0.2.1) — classic tokens and granular tokens without the
+"bypass 2FA" entitlement cannot publish once TOTP is enabled on the account.
+With Trusted Publishing the token question disappears entirely; revoke all
+npm tokens after it is verified.
 
 ## npm publication — still gated (deliberate)
 

@@ -3,21 +3,28 @@
 # (git-archive tarball + installers + checksums), creates the GitHub release
 # and publishes the launcher package to npm.
 #
+# npm auth is OIDC-based Trusted Publishing (no NPM_TOKEN secret, immune to
+# the account's 2FA policy): the runner exchanges a GitHub OIDC token with the
+# registry. Prerequisite configured once on npmjs.com: package Settings →
+# Trusted Publisher → ZepiGit/ZCode-Agent-Kit + workflow `release.yml`.
+# Requires npm >= 11.5 (installed in the publish job; Node 20 ships npm 10).
+#
 # Why a tag push instead of the `release` event: GitHub delivered the
 # ReleaseEvent for v0.2.0/v0.2.1 but never started the release-triggered
 # workflow (zero runs with event=release) — a tag push is the reliable signal.
-# Because the release below is created with GITHUB_TOKEN, that token's release
-# event does not re-trigger npm-publish.yml (no double publish). Manually
-# created releases still go through npm-publish.yml; dispatch that workflow to
-# re-publish npm after a failed publish step.
+# The release below is created with GITHUB_TOKEN, whose events do not trigger
+# other workflows (no double publish). `workflow_dispatch` re-runs the build +
+# verify + publish path from main — the re-publish lever after a failed step.
 name: release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -61,10 +68,14 @@ jobs:
         with:
           node-version: 20
           registry-url: https://registry.npmjs.org/
-      # Version-bound gate: the tag, package.json and the committed
-      # ALLOW_PUBLISH marker must all name the same version (ZAK-013: assets
-      # must never disagree about what they are).
+      # Trusted Publishing (OIDC) needs npm >= 11.5; Node 20 ships npm 10.
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
+      # Version-bound gate, tag pushes only: the tag, package.json and the
+      # committed ALLOW_PUBLISH marker must all name the same version
+      # (ZAK-013: assets must never disagree about what they are).
       - name: Gate tag against package version and publish marker
+        if: github.ref_type == 'tag'
         run: |
           TAG="${GITHUB_REF_NAME}"
           VERSION=$(node -p "require('./package.json').version")
@@ -78,6 +89,7 @@ jobs:
       - name: Dry-run publish (fails on payload problems, publishes nothing)
         run: node pack/build.mjs --dry-run-publish
       - name: Build release assets (git-archive tarball, installers, checksums)
+        if: github.ref_type == 'tag'
         run: |
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
@@ -86,6 +98,7 @@ jobs:
           cp install.ps1 install.sh release/
           (cd release && sha256sum "v$VERSION.tar.gz" install.ps1 install.sh > checksums.txt)
       - name: Create the GitHub release
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -97,7 +110,5 @@ jobs:
           else
             gh release create "$TAG" $ASSETS --title "zcode-agent-kit $TAG" --generate-notes
           fi
-      - name: Publish to npm (only when the committed marker allows this version)
-        run: cd pack/dist && npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm via OIDC trusted publishing
+        run: cd pack/dist && npm publish --provenance
