@@ -62,6 +62,14 @@ reliable trigger. To re-publish npm after a failed publish step, dispatch
 `npm-publish.yml` manually (`gh workflow run npm-publish.yml --ref main`) or
 run `npm publish` from a freshly built `pack/dist`.
 
+npm token requirement: the `NPM_TOKEN` repository secret must be a **Granular
+Access Token with "Bypass two-factor authentication for API and CI"**
+(packages: read/write, scoped to `zcode-agent-kit`). A token created before
+TOTP was enabled on the npm account fails the CI publish with `EOTP`
+(observed on the v0.2.1 dispatch: build matrix green, publish 403/EOTP).
+Update the secret with `gh secret set NPM_TOKEN` (interactive paste — never
+via shell history or a committed file).
+
 ## npm publication — still gated (deliberate)
 
 1. Confirm the package name, add the `npm_token` repository secret.
