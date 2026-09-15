@@ -124,11 +124,22 @@ try {
     Pop-Location
   }
 
+  # User-scope `zcode-kit` command: %LOCALAPPDATA%\Microsoft\WindowsApps is on
+  # the user PATH by default; writing the shim there needs no admin rights and
+  # no PATH changes. Delete the file (or run zcode-kit uninstall) to undo.
+  $shim = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\zcode-kit.cmd"
+  try {
+    New-Item -ItemType Directory -Path (Split-Path $shim -Parent) -Force | Out-Null
+    Set-Content -Path $shim -Value "@echo off`r`nnode `"$InstallDir\cli\zcode-kit.mjs`" %*" -Encoding Ascii
+    Write-Host "  added zcode-kit command -> $shim"
+  } catch {
+    Write-Host "  note: could not create the zcode-kit shim ($($_.Exception.Message))"
+  }
+
   Write-Host ""
   Write-Host "== done. Start using it =="
-  Write-Host "  cd $InstallDir"
-  Write-Host "  node cli/zcode-kit.mjs status        # proxy status"
-  Write-Host "  node cli/zcode-kit.mjs run omp -- ...  (or your harness's documented command)"
+  Write-Host "  zcode-kit status                     # proxy status (or: node cli/zcode-kit.mjs status)"
+  Write-Host "  zcode-kit run omp -- ...             # (or your harness's documented command)"
   Write-Host ""
   Write-Host "Thanks for your Trust, enjoy <3 -Github.com/ZepiGit - Instagram: Micheltie_"
 } finally {

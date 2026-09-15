@@ -61,6 +61,10 @@ postinstall ejecuta el mismo setup transaccional; volver a ejecutar `setup` es
 seguro e idempotente. El uso con npm requiere **Node ≥ 20** y las dependencias
 bun gestionadas por setup.
 
+> El artefacto npm lo publica el mantenedor en cada release. Si `npm install`
+> devuelve 404, esta versión aún no está en el registro npm — usa los
+> instaladores de arriba o una build local: `npm install -g <repo>/pack/dist`.
+
 ## Primera ejecución, en orden
 
 1. **Instala** (comandos de arriba). El setup detecta tus harnesses y solo

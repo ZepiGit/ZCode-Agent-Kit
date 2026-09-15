@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,34 @@ test("pack build keeps the generated package private when the marker names anoth
   } finally {
     if (existed) writeFileSync(MARKER, prev);
     else rmSync(MARKER);
+  }
+});
+
+test("CLI entry guard survives npm-style path forms (casing/symlink/junction)", () => {
+  // npm exposes global bins through paths that differ from the realized
+  // module URL: differently-cased argv (Windows shims), symlinks (POSIX bins),
+  // junctions (`npm i -g <folder>`). The entry check must canonicalize via
+  // realpath or the installed CLI silently no-ops.
+  const distCli = join(KIT, "pack", "dist", "cli", "zcode-kit.mjs");
+  const cased = process.platform === "win32" ? distCli.replace(/^C:/i, "c:") : distCli;
+  const res = spawnSync(process.execPath, [cased, "--help"], { encoding: "utf8", cwd: tmpdir() });
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /zcode-kit/, "CLI must answer --help through a non-canonical argv path");
+  if (process.platform !== "win32") {
+    const linkDir = mkdtempSync(join(tmpdir(), "zcode-entry-"));
+    try {
+      const link = join(linkDir, "zcode-kit");
+      try {
+        symlinkSync(distCli, link);
+      } catch {
+        return; // unprivileged sandbox without symlink rights: skip this leg
+      }
+      const viaLink = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8" });
+      assert.equal(viaLink.status, 0, viaLink.stderr);
+      assert.match(viaLink.stdout, /zcode-kit/, "CLI must answer --help through a symlinked bin");
+    } finally {
+      rmSync(linkDir, { recursive: true, force: true });
+    }
   }
 });
 

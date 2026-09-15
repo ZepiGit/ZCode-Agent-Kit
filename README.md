@@ -58,6 +58,10 @@ postinstall lifecycle runs the same transactional setup; re-running `setup` is
 safe and idempotent. npm usage still requires **Node ≥ 20**, and setup installs
 or verifies the pinned bun dependencies.
 
+> The npm artifact is published per release by the maintainer. If `npm install`
+> reports 404, this version is not on the npm registry (yet) — use the
+> installers above, or install a local build: `npm install -g <repo>/pack/dist`.
+
 ## First run, in order
 
 1. **Install** (commands above). Setup detects your harnesses and wires only

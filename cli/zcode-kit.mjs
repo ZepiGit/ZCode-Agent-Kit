@@ -21,7 +21,7 @@ import { beginTransaction, acquireLock, releaseLock, rollbackTransaction, listTr
 import { detectHarnesses } from "../lib/detect.mjs";
 import { createCtx, bootstrap, kitRoot } from "./context.mjs";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -507,6 +507,20 @@ async function cmdUninstall() {
   // Kit-owned generated artifacts (recorded in transactions; delete leftovers too).
   if (existsSync(ctx.generated)) rmSync(ctx.generated, { recursive: true, force: true });
   console.log("generated/ removed. The proxy key (.proxykey) and logs stay; delete manually if desired.");
+  // The installers leave a user-scope `zcode-kit` command shim behind; remove
+  // it only when it points at THIS root — a shim owned by another install
+  // (or unreadable) is never touched.
+  const shimPaths = process.platform === "win32"
+    ? (process.env.LOCALAPPDATA ? [join(process.env.LOCALAPPDATA, "Microsoft", "WindowsApps", "zcode-kit.cmd")] : [])
+    : [join(ctx.home, ".local", "bin", "zcode-kit")];
+  for (const shim of shimPaths) {
+    try {
+      if (existsSync(shim) && readFileSync(shim, "utf8").includes(join(ctx.root, "cli", "zcode-kit.mjs"))) {
+        rmSync(shim);
+        console.log(`removed kit-owned command shim: ${shim}`);
+      }
+    } catch { /* unreadable shim is not ours to delete */ }
+  }
   if (!externalUndone) {
     console.error("uninstall incomplete: at least one external registration could not be removed (see output above).");
     return 1;
@@ -514,7 +528,17 @@ async function cmdUninstall() {
   return 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1].replace(/\\/g, "/")).href) {
+// Entry check, realpath-canonical: npm exposes global bins as symlinks
+// (POSIX) or junctions (`npm i -g <folder>` on Windows), and argv[1] can carry
+// arbitrary casing. import.meta.url is the realized path, so comparing it
+// against the raw argv form silently no-ops the whole CLI. Compare realized
+// against realized instead; a vanished entry falls through fail-closed.
+const entryArg = process.argv[1] ?? "";
+let entryReal = "";
+try {
+  entryReal = entryArg ? realpathSync(entryArg) : "";
+} catch { /* nonexistent entry: nothing to run */ }
+if (entryReal && import.meta.url === pathToFileURL(entryReal).href) {
   main().then((code) => process.exit(code ?? 0)).catch((err) => {
     console.error(`zcode-kit: ${err.message}`);
     process.exit(2);

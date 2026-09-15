@@ -60,6 +60,11 @@ Postinstall-Schritt führt dasselbe transaktionale Setup aus; ein erneuter
 `setup`-Aufruf ist sicher und idempotent. Für npm werden **Node ≥ 20** und die
 vom Setup verwalteten bun-Abhängigkeiten benötigt.
 
+> Das npm-Artefakt wird pro Release vom Maintainer veröffentlicht. Meldet
+> `npm install` einen 404, ist diese Version noch nicht in der npm-Registry —
+> nutze die Installer oben oder einen lokalen Build:
+> `npm install -g <repo>/pack/dist`.
+
 ## Erste Nutzung — in dieser Reihenfolge
 
 1. **Installieren** (Befehle oben). Das Setup erkennt deine Harnesses und

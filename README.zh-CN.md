@@ -57,6 +57,10 @@ npm 包提供 `zcode-kit` 和 `zcode-agent-kit` 两个命令。postinstall 会�
 事务性 setup；再次运行 `setup` 是安全且幂等的。npm 用法需要 **Node ≥ 20**，
 setup 会管理所需的 bun 依赖。
 
+> npm 包由维护者按版本发布。如果 `npm install` 返回 404，说明该版本尚未发布到
+> npm 仓库——请使用上方的安装器，或从本地构建安装：
+> `npm install -g <repo>/pack/dist`。
+
 ## 首次使用，按顺序进行
 
 1. **安装**（上方命令）。setup 会检测你安装的 harness，并只改动检测到的

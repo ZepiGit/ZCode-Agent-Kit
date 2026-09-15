@@ -101,9 +101,23 @@ fi
 cd "$INSTALL_DIR"
 node cli/zcode-kit.mjs setup --harness auto
 
+# User-scope `zcode-kit` command in ~/.local/bin (conventionally on PATH).
+# Delete the file (or run zcode-kit uninstall) to undo.
+SHIM="$HOME/.local/bin/zcode-kit"
+if mkdir -p "$HOME/.local/bin" 2>/dev/null \
+   && printf '#!/usr/bin/env sh\nexec node "%s/cli/zcode-kit.mjs" "$@"\n' "$INSTALL_DIR" > "$SHIM" 2>/dev/null \
+   && chmod +x "$SHIM" 2>/dev/null; then
+  echo "  added zcode-kit command -> $SHIM"
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) : ;;
+    *) echo "  note: $HOME/.local/bin is not on your PATH - add it to use zcode-kit from anywhere" ;;
+  esac
+else
+  echo "  note: could not create the zcode-kit shim - use: node $INSTALL_DIR/cli/zcode-kit.mjs"
+fi
+
 echo ""
 echo "== done. Start using it =="
-echo "  cd $INSTALL_DIR"
-echo "  node cli/zcode-kit.mjs status"
+echo "  zcode-kit status                     # proxy status (or: node cli/zcode-kit.mjs status)"
 echo ""
 echo "Thanks for your Trust, enjoy <3 -Github.com/ZepiGit - Instagram: Micheltie_"
