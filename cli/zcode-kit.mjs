@@ -304,13 +304,14 @@ async function cmdDoctor() {
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
   const managerPath = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
   const core = spawnSync(process.execPath, [managerPath, "doctor"], { encoding: "utf8" });
-  if (flags.json) {
-    const lines = (core.stdout ?? "").split("\n");
-    for (const line of lines) {
-      const m = line.match(/^(PASS|FAIL|SKIP)\s+(.+?)(?:\s+—\s+(.*))?$/);
-      if (m) checks.push({ name: m[2], ok: m[1] === "PASS" ? true : m[1] === "FAIL" ? false : null, detail: m[3] ?? "" });
-    }
-  } else {
+  // Parse the manager doctor output in BOTH modes: the text summary and exit
+  // code must count the same FAILs the user is shown, not only adapter checks.
+  const lines = (core.stdout ?? "").split("\n");
+  for (const line of lines) {
+    const m = line.match(/^(PASS|FAIL|SKIP)\s+(.+?)(?:\s+—\s+(.*))?$/);
+    if (m) checks.push({ name: m[2], ok: m[1] === "PASS" ? true : m[1] === "FAIL" ? false : null, detail: m[3] ?? "" });
+  }
+  if (!flags.json) {
     process.stdout.write(core.stdout ?? "");
   }
 
@@ -351,11 +352,13 @@ async function cmdStatus() {
 // ------------------------------------------------------------------ models
 async function cmdModels() {
   let list = null;
+  let fromProxy = false;
   try {
     const res = await proxyFetch("/v1/models");
     if (res.ok) {
       const body = await res.json();
       list = (body.data ?? []).map((m) => m.id);
+      fromProxy = true;
     }
   } catch {}
   if (!list) {
@@ -364,7 +367,9 @@ async function cmdModels() {
     list = registry;
   }
   if (flags.json) {
-    console.log(JSON.stringify({ models: list, source: list ? "proxy" : "registry" }, null, 2));
+    // source must reflect where the list actually came from — a registry
+    // fallback is NOT a proxy answer and must not be labeled as one.
+    console.log(JSON.stringify({ models: list, source: fromProxy ? "proxy" : "registry" }, null, 2));
   } else {
     console.log(list.join("\n"));
   }
@@ -406,8 +411,19 @@ async function cmdAuth() {
   if (sub === "status") {
     try {
       const res = await proxyFetch("/quota");
-      const body = await res.json();
-      console.log(JSON.stringify({ logged_in: res.ok || body?.code !== 3012, errors: body?.errors ?? [], jwt: body?.jwt ?? null }, null, 2));
+      const body = await res.json().catch(() => null);
+      // logged_in must mean "proven": only a real quota snapshot counts.
+      // A 401, 5xx, malformed body or upstream 3012 reports false plus the
+      // actual error — never a misleading default true.
+      const upstreamNotLoggedIn = body?.code === 3012;
+      const loggedIn = res.ok && !upstreamNotLoggedIn && body !== null && typeof body === "object";
+      const errors = Array.isArray(body?.errors) ? body.errors : [];
+      if (!loggedIn && errors.length === 0) {
+        if (upstreamNotLoggedIn) errors.push("upstream reports not logged in (code 3012)");
+        else if (!res.ok) errors.push(`proxy responded HTTP ${res.status} (${body?.error?.type ?? "unknown"})`);
+        else errors.push("unexpected quota response shape");
+      }
+      console.log(JSON.stringify({ logged_in: loggedIn, errors, jwt: body?.jwt ?? null }, null, 2));
       return 0;
     } catch (err) {
       console.log(JSON.stringify({ logged_in: false, error: String(err.message) }, null, 2));

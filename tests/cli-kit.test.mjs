@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
+import { execFileSync, execFile } from "node:child_process";
 import { parseJsonc, setTopLevelKey } from "../lib/jsonc.mjs";
 import { createCtx, ensureRuntimeFiles } from "../cli/context.mjs";
 
@@ -526,5 +526,216 @@ test("shipped proxy configs keep claim disabled (no auto-trial-claiming)", async
     const text = readFileSync(join(KIT, "bin", f), "utf8");
     assert.doesNotMatch(text, /ZCODE_CLAIM_ENABLED\s*=\s*true/, `${f} must not enable claiming`);
     assert.doesNotMatch(text, /ZCODE_CLAIM_AUTO\s*=\s*true/, `${f} must not enable auto-claiming`);
+  }
+});
+
+// ------------------------------------------------------- proxy-reporting CLI
+// cmdModels/cmdAuth contract tests: spawn the real CLI against a mock proxy so
+// the reported source/auth state is proven, not assumed. A minimal kit copy
+// keeps ctx.port()/ctx.key() pointed at the mock without touching the real one.
+import { cpSync } from "node:fs";
+import { createServer } from "node:http";
+
+function makeMiniKit() {
+  const root = mkdtempSync(join(tmpdir(), "zk-mini-"));
+  mkdirSync(join(root, "proxy"), { recursive: true });
+  mkdirSync(join(root, "zcode-proxy-src", "src", "provider"), { recursive: true });
+  cpSync(join(KIT, "cli"), join(root, "cli"), { recursive: true });
+  cpSync(join(KIT, "lib"), join(root, "lib"), { recursive: true });
+  writeFileSync(join(root, ".proxykey"), "kit-test-proxy-key\n");
+  writeFileSync(join(root, "proxy", "config.yaml"), "provider: zai\nserver:\n  port: 1\n");
+  writeFileSync(
+    join(root, "zcode-proxy-src", "src", "provider", "models.ts"),
+    'export const MODELS = [{ id: "glm-5.3" }, { id: "glm-5.3-flash" }];\n',
+  );
+  return root;
+}
+
+// execFile (NOT execFileSync): the mock proxy lives in THIS process — a sync
+// spawn would block the event loop and starve the mock of responses.
+function miniSpawn(root, args, extraEnv) {
+  return new Promise((resolveRej, rejectRej) => {
+    execFile(process.execPath, [join(root, "cli", "zcode-kit.mjs"), ...args], { encoding: "utf8", timeout: 30000, env: { ...process.env, ...(extraEnv ?? {}) } }, (err, stdout, stderr) => {
+      if (err) {
+        err.stdout = stdout;
+        err.stderr = stderr;
+        rejectRej(err);
+      } else resolveRej(stdout);
+    });
+  });
+}
+
+function withMockProxy(root, handler, run) {
+  const server = createServer(handler);
+  return new Promise((resolveRun, rejectRun) => {
+    server.listen(0, "127.0.0.1", () => {
+      const port = server.address().port;
+      writeFileSync(join(root, "proxy", "config.yaml"), `provider: zai\nserver:\n  port: ${port}\n`);
+      Promise.resolve()
+        .then(run)
+        .then(resolveRun, rejectRun)
+        .finally(() => server.close());
+    });
+    server.on("error", rejectRun);
+  });
+}
+
+test("models --json reports source proxy only when the proxy actually answers", async () => {
+  const root = makeMiniKit();
+  try {
+    await withMockProxy(
+      root,
+      (req, res) => {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ data: [{ id: "mock-model-a" }, { id: "mock-model-b" }] }));
+      },
+      async () => {
+        const out = JSON.parse(await miniSpawn(root, ["models", "--json"]));
+        assert.equal(out.source, "proxy");
+        assert.deepEqual(out.models, ["mock-model-a", "mock-model-b"]);
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("models --json admits the registry fallback when the proxy is down (no fake 'source: proxy')", async () => {
+  const root = makeMiniKit();
+  try {
+    const server = createServer(() => {});
+    const freePort = await new Promise((res) => {
+      server.listen(0, "127.0.0.1", () => res(server.address().port));
+    });
+    server.close();
+    writeFileSync(join(root, "proxy", "config.yaml"), `provider: zai\nserver:\n  port: ${freePort}\n`);
+    const out = JSON.parse(await miniSpawn(root, ["models", "--json"]));
+    assert.equal(out.source, "registry", "registry fallback must not be labeled as 'proxy'");
+    assert.ok(out.models.includes("glm-5.3"), "fallback list comes from the MODELS registry");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("auth status must not claim logged_in on a proxy auth error (401)", async () => {
+  const root = makeMiniKit();
+  try {
+    await withMockProxy(
+      root,
+      (req, res) => {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { type: "authentication_error", message: "Invalid or missing proxy API key" } }));
+      },
+      async () => {
+        const out = JSON.parse(await miniSpawn(root, ["auth", "status"]));
+        assert.equal(out.logged_in, false, "401 from the proxy must mean logged_in:false");
+        assert.ok(Array.isArray(out.errors) && out.errors.length > 0, "the error must be reported");
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("auth status reports logged_in false when z.ai answers with code 3012", async () => {
+  const root = makeMiniKit();
+  try {
+    await withMockProxy(
+      root,
+      (req, res) => {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ code: 3012, errors: ["not logged in upstream"] }));
+      },
+      async () => {
+        const out = JSON.parse(await miniSpawn(root, ["auth", "status"]));
+        assert.equal(out.logged_in, false);
+        assert.ok(out.errors.includes("not logged in upstream"));
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("auth status reports logged_in true only on a real quota snapshot", async () => {
+  const root = makeMiniKit();
+  try {
+    await withMockProxy(
+      root,
+      (req, res) => {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ provider: "zai", balances: [{ plan: "glm-coding-plan", used: 1 }], serverTime: 1 }));
+      },
+      async () => {
+        const out = JSON.parse(await miniSpawn(root, ["auth", "status"]));
+        assert.equal(out.logged_in, true);
+        assert.deepEqual(out.errors, []);
+      },
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// BUG: doctor --harness <id> printed the manager's FAIL lines but its text
+// summary ("0 failed — OK") and exit code only counted the adapter checks.
+test("doctor --harness text summary counts manager FAIL lines (no false OK, exit 1)", async () => {
+  const root = makeMiniKit();
+  try {
+    // makeMiniKit ships no manager: install a deterministic stub whose doctor
+    // output contains a FAIL line the text summary must count (and it must
+    // flip the exit code to 1 even when --harness filters the adapter checks).
+    writeFileSync(
+      join(root, "proxy", "zcode-proxy-manager.mjs"),
+      'console.log("FAIL  credentials store — no credentials present");\nconsole.log("PASS  config exists — ok");\n',
+    );
+    let captured;
+    try {
+      const out = await miniSpawn(root, ["doctor", "--harness", "omp"]);
+      captured = { code: 0, stdout: out, stderr: "" };
+    } catch (e) {
+      captured = { code: e.code ?? 1, stderr: e.stderr ?? "", stdout: e.stdout ?? "" };
+    }
+    const text = `${captured.stdout}\n${captured.stderr}`;
+    assert.doesNotMatch(text, /0 failed — OK/, "summary must not say OK while FAIL lines are printed");
+    assert.match(text, /check\(s\) failed/, "summary must report the failing checks");
+    assert.equal(captured.code, 1, "doctor must exit 1 when checks failed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// BUG: integrate continue crashed with a raw ENOENT when ~/.continue/config.yaml
+// does not exist, instead of skipping like the omp adapter does.
+test("integrate continue skips cleanly when ~/.continue/config.yaml is absent", async () => {
+  const root = makeMiniKit();
+  try {
+    const home = mkdtempSync(join(tmpdir(), "zk-continue-missing-"));
+    const { code, text } = await new Promise((resolveP) => {
+      execFile(
+        process.execPath,
+        [join(root, "cli", "zcode-kit.mjs"), "integrate", "continue", "--scope", "user"],
+        {
+          encoding: "utf8",
+          timeout: 60000,
+          env: {
+            ...process.env,
+            USERPROFILE: home,
+            HOME: home,
+            APPDATA: join(home, "AppData", "Roaming"),
+            LOCALAPPDATA: join(home, "AppData", "Local"),
+            ZCODE_KIT_ALLOW_CHECKOUT: "1",
+            ZCODE_KIT_SKIP_DEPS: "1",
+          },
+        },
+        (err, stdout, stderr) => resolveP({ code: err ? (err.code ?? -1) : 0, text: `${stdout}\n${stderr}` }),
+      );
+    });
+    assert.match(text, /skipped \(no .*\.continue[\\/]config\.yaml\)/, "absent config must be a clean skip, not a crash");
+    assert.doesNotMatch(text, /ENOENT/, "raw ENOENT must not leak to the user");
+    assert.equal(code, 0, "a clean skip must exit 0, not 2 (runtime error)");
+    rmSync(home, { recursive: true, force: true });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

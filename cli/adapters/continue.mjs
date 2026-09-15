@@ -89,7 +89,14 @@ export default {
 
   apply(ctx, tx, log) {
     const configYaml = join(ctx.home, ".continue", "config.yaml");
-    const text = existsSync(configYaml) ? readFileSync(configYaml, "utf8") : "";
+    if (!existsSync(configYaml)) {
+      // Mirror the omp adapter: an absent config means the harness is not
+      // installed — do not create foreign directories on the user's machine
+      // (a raw ENOENT from staging into a missing ~/.continue leaked here).
+      log("  continue: skipped (no ~/.continue/config.yaml)");
+      return { changed: false };
+    }
+    const text = readFileSync(configYaml, "utf8");
     const updated = upsertModels(text, ctx);
     if (updated === text) {
       log("  continue: already up to date");
