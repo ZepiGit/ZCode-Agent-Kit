@@ -705,39 +705,34 @@ test("doctor --harness text summary counts manager FAIL lines (no false OK, exit
   }
 });
 
-// Self-heal chain: verify() must detect when the managed block's !node key
-// resolver points at ANOTHER kit copy (copy switches leave a stale resolver
-// whose key the running proxy rejects with 401); integrate/setup repairs it
-// automatically by rebuilding the block from this copy.
-test("omp adapter self-check: detects resolver drift to another copy, integrate repairs it", async () => {
+// F11: omp 18+ no longer evaluates the `!node` YAML tag — the managed block
+// must carry a LITERAL key, and verify() must flag stale/mismatched keys
+// (copy switches, rotations) so `zcode-kit setup` repairs them.
+test("omp adapter writes literal key (omp 18+ ignores !node), self-checks staleness, integrates repair it", async () => {
   const omp = (await import("../cli/adapters/omp.mjs")).default;
-  const home = fakeHome("omp-drift");
-  const agentDir = join(home, ".omp", "agent");
+  const { ctx } = ctxWithAppData(fakeHome("omp-literal"));
+  const agentDir = join(ctx.home, ".omp", "agent");
   mkdirSync(agentDir, { recursive: true });
-  // the "foreign copy" resolver must EXIST so the drift check (not the
-  // missing-file check) fires — build it in the temp dir
-  const foreignCopy = mkdtempSync(join(tmpdir(), "zk-foreign-copy-"));
-  const foreignResolver = `${foreignCopy.replace(/\\/g, "/")}/proxy/resolve-zcode-proxy-key.mjs`;
-  mkdirSync(join(foreignCopy, "proxy"), { recursive: true });
-  writeFileSync(foreignResolver, "");
   writeFileSync(
     join(agentDir, "models.yml"),
-    `providers:\n# >>> zcode-kit (managed block) — do not edit inside\n  zcode:\n    name: ZCode\n    apiKey: !node '${foreignResolver}'\n# <<< zcode-kit\n`,
+    `providers:\n# >>> zcode-kit (managed block) — do not edit inside\n  zcode:\n    name: ZCode\n    apiKey: "stale-key-from-another-copy-Aaa111"\n# <<< zcode-kit\n`,
   );
-  const { ctx } = ctxWithAppData(home);
   try {
     const before = omp.verify(ctx).find((c) => c.name === "omp key resolver");
-    assert.equal(before?.ok, false, "verify must flag a resolver pointing at another copy");
-    assert.match(String(before?.detail ?? ""), /another copy/);
+    assert.equal(before?.ok, false, "verify must flag a stale/mismatched key");
+    assert.match(String(before?.detail ?? ""), /rerun zcode-kit setup/);
     const res = omp.apply(ctx, noopTx(), () => {});
-    assert.equal(res.changed, true, "integrate must repair the drifted block");
+    assert.equal(res.changed, true, "integrate must repair the block");
+    const written = readFileSync(join(agentDir, "models.yml"), "utf8");
+    assert.doesNotMatch(written, /!node/, "omp 18+ ignores !node — block must use a literal key");
+    assert.ok(written.includes(`apiKey: "${ctx.key()}"`), "block must embed this copy's current key");
     const after = omp.verify(ctx).find((c) => c.name === "omp key resolver");
     assert.equal(after?.ok, true, "verify passes after the automatic repair");
   } finally {
-    rmSync(home, { recursive: true, force: true });
-    rmSync(foreignCopy, { recursive: true, force: true });
+    rmSync(ctx.home, { recursive: true, force: true });
   }
 });
+
 // BUG: integrate continue crashed with a raw ENOENT when ~/.continue/config.yaml
 // does not exist, instead of skipping like the omp adapter does.
 test("integrate continue skips cleanly when ~/.continue/config.yaml is absent", async () => {

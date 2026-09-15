@@ -92,7 +92,7 @@ test("setup applies, is idempotent, and rolls back exactly", () => {
   assert.ok(existsSync(extFile), "extension installed");
   assert.ok(existsSync(join(home, ".omp", "agent", "mcp.json")), "mcp.json created");
   const apiKeyLine = models1.split("\n").find((l) => l.includes("apiKey:"));
-  assert.match(apiKeyLine, /apiKey: !node '/, "apiKey uses a quoted !node resolver");
+  assert.match(apiKeyLine, /apiKey: "[A-Za-z0-9_-]+"/, "apiKey is a literal key (omp 18+ ignores !node)");
   const txId = out1.match(/transaction (\S+) recorded/)[1];
 
   // ---- run 2: idempotent (no file changes, no new transaction)
@@ -239,7 +239,7 @@ test("omp adapter takes over legacy zcode-omp-integration managed block", () => 
   assert.match(models1, /# >>> zcode-kit \(managed block\)/, "kit block present");
   assert.equal((models1.match(/^  zcode:$/gm) ?? []).length, 1, "exactly one zcode provider entry");
   assert.match(models1, /LiteLLMFree:/, "unrelated provider preserved");
-  assert.match(models1, /apiKey: !node '/, "kit resolver in place (old root path gone)");
+  assert.match(models1, /apiKey: "[A-Za-z0-9_-]+"/, "literal key in place (old root path gone)");
 
   // second run: byte-identical, no new transaction
   const sha1 = sha(modelsYml);
