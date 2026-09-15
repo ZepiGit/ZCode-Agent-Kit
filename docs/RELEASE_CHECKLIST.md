@@ -40,6 +40,28 @@ not GitHub's auto-generated archive. Provenance note is part of the release
 notes: checksums.txt lives on the same host as the artifacts — integrity,
 not provenance; verify the tag commit for provenance.)
 
+## Automated releases (v0.2.2 and later) — push the tag, that's all
+
+Since the v0.2.1 follow-up the release pipeline is tag-triggered
+(`.github/workflows/release.yml`):
+
+1. Bump `package.json` + `package-lock.json` to the new version, set
+   `pack/ALLOW_PUBLISH` to the same version, and (optionally) write
+   `docs/RELEASE_NOTES_vX.Y.Z.md` — without it the release falls back to
+   GitHub's generated notes.
+2. Commit, then: `git push origin main && git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. The workflow runs the full test matrix on ubuntu + windows, gates the tag
+   against `package.json` and the committed `ALLOW_PUBLISH` marker, builds the
+   assets (git-archive tarball + installers + checksums.txt), creates the
+   GitHub release and publishes `pack/dist` to npm via the `NPM_TOKEN` secret.
+
+Known gap (observed on v0.2.0 and v0.2.1): the `release: created` event of
+`npm-publish.yml` was delivered by GitHub but never started a run (zero runs
+with `event=release`) — do not rely on it. A tag push via `release.yml` is the
+reliable trigger. To re-publish npm after a failed publish step, dispatch
+`npm-publish.yml` manually (`gh workflow run npm-publish.yml --ref main`) or
+run `npm publish` from a freshly built `pack/dist`.
+
 ## npm publication — still gated (deliberate)
 
 1. Confirm the package name, add the `npm_token` repository secret.

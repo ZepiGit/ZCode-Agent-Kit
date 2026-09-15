@@ -353,7 +353,16 @@ describe("sendWithClientSigning", () => {
   it("re-handshakes and retries once after a VERIFY 401", async () => {
     const fixture = await buildHandshakeFixture();
     const calls: MockCalls = { gate: 0, handshakes: [] };
-    const manager = new ClientSigningManager({ identity, fetchImpl: signingFetchFixture(fixture, calls) });
+    // Deterministic clock: the header timestamp is clock-derived and a fast
+    // retry can legitimately land in the same real millisecond, so asserting
+    // on raw Date.now() values was a CI flake. The injected clock advances
+    // every read, making the two sends provably different.
+    let tick = 0;
+    const manager = new ClientSigningManager({
+      identity,
+      fetchImpl: signingFetchFixture(fixture, calls),
+      now: () => (tick += 5),
+    });
     const sends: UpstreamHeaderPair[][] = [];
     const resp = await sendWithClientSigning(manager, {
       url: LLM_URL,

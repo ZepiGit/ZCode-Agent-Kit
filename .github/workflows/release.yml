@@ -1,0 +1,103 @@
+# Release pipeline: pushing a vX.Y.Z tag is the single trigger for an
+# automatic release. It runs the full test matrix, builds the release assets
+# (git-archive tarball + installers + checksums), creates the GitHub release
+# and publishes the launcher package to npm.
+#
+# Why a tag push instead of the `release` event: GitHub delivered the
+# ReleaseEvent for v0.2.0/v0.2.1 but never started the release-triggered
+# workflow (zero runs with event=release) — a tag push is the reliable signal.
+# Because the release below is created with GITHUB_TOKEN, that token's release
+# event does not re-trigger npm-publish.yml (no double publish). Manually
+# created releases still go through npm-publish.yml; dispatch that workflow to
+# re-publish npm after a failed publish step.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # The proxy + MCP bridge suites need bun (their vendored toolchain).
+      # Pinned to the version the test evidence was produced with (1.4.2);
+      # older bun (e.g. 1.2.20) rejects the mcp bridge's lockfileVersion 2.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install bridge/proxy dependencies
+        run: |
+          cd zcode-proxy-src && bun install --frozen-lockfile
+          cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile
+      - name: Kit tests (node:test)
+        run: npm run test
+      - name: Proxy tests (bun test)
+        run: npm run test:proxy
+      - name: MCP bridge tests
+        run: npm run test:mcp
+
+  release-and-publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org/
+      # Version-bound gate: the tag, package.json and the committed
+      # ALLOW_PUBLISH marker must all name the same version (ZAK-013: assets
+      # must never disagree about what they are).
+      - name: Gate tag against package version and publish marker
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION=$(node -p "require('./package.json').version")
+          echo "tag=$TAG version=$VERSION"
+          [ "v$VERSION" = "$TAG" ] || { echo "tag $TAG does not match package.json $VERSION"; exit 1; }
+          grep -qx "$VERSION" pack/ALLOW_PUBLISH || { echo "pack/ALLOW_PUBLISH does not allow $VERSION"; exit 1; }
+      - name: Assemble launcher package
+        run: node pack/build.mjs
+      - name: Verify package payload (no secrets, no vendored trees)
+        run: node pack/verify-payload.mjs
+      - name: Dry-run publish (fails on payload problems, publishes nothing)
+        run: node pack/build.mjs --dry-run-publish
+      - name: Build release assets (git-archive tarball, installers, checksums)
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          mkdir -p release
+          git archive --format=tar.gz --prefix="zcode-agent-kit-$VERSION/" -o "release/v$VERSION.tar.gz" HEAD
+          cp install.ps1 install.sh release/
+          (cd release && sha256sum "v$VERSION.tar.gz" install.ps1 install.sh > checksums.txt)
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          ASSETS="release/v$VERSION.tar.gz release/install.ps1 release/install.sh release/checksums.txt"
+          if [ -f "docs/RELEASE_NOTES_${TAG}.md" ]; then
+            gh release create "$TAG" $ASSETS --title "zcode-agent-kit $TAG" --notes-file "docs/RELEASE_NOTES_${TAG}.md"
+          else
+            gh release create "$TAG" $ASSETS --title "zcode-agent-kit $TAG" --generate-notes
+          fi
+      - name: Publish to npm (only when the committed marker allows this version)
+        run: cd pack/dist && npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
