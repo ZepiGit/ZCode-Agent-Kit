@@ -64,13 +64,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The publish job alone runs on Node 24: Trusted Publishing (OIDC)
+      # needs npm >= 11.5, which is installed below. The test matrix above
+      # intentionally stays on Node 20 (the documented engines floor).
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           registry-url: https://registry.npmjs.org/
-      # Trusted Publishing (OIDC) needs npm >= 11.5; Node 20 ships npm 10.
+      # Trusted Publishing (OIDC) needs npm >= 11.5; Node 24 ships npm 11.3.
+      # npm@11 supports Node 24; npm@12 would need >= 22.22 / 24.15 / 26.
       - name: Upgrade npm for OIDC trusted publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
       # Version-bound gate, tag pushes only: the tag, package.json and the
       # committed ALLOW_PUBLISH marker must all name the same version
       # (ZAK-013: assets must never disagree about what they are).
