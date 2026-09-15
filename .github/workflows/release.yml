@@ -75,6 +75,19 @@ jobs:
       # npm@11 supports Node 24; npm@12 would need >= 22.22 / 24.15 / 26.
       - name: Upgrade npm for OIDC trusted publishing
         run: npm install -g npm@11
+      # A dispatch whose version is already on npm has nothing to publish —
+      # skipping keeps the re-publish lever green instead of dying on the
+      # registry's version-conflict check.
+      - name: Determine whether this version is already published
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "zcode-agent-kit@$VERSION" version >/dev/null 2>&1; then
+            echo "SKIP_PUBLISH=1" >> "$GITHUB_ENV"
+            echo "zcode-agent-kit@$VERSION is already published — publish steps will be skipped."
+          else
+            echo "SKIP_PUBLISH=0" >> "$GITHUB_ENV"
+            echo "zcode-agent-kit@$VERSION is not on npm yet — publish will proceed."
+          fi
       # Version-bound gate, tag pushes only: the tag, package.json and the
       # committed ALLOW_PUBLISH marker must all name the same version
       # (ZAK-013: assets must never disagree about what they are).
@@ -91,6 +104,7 @@ jobs:
       - name: Verify package payload (no secrets, no vendored trees)
         run: node pack/verify-payload.mjs
       - name: Dry-run publish (fails on payload problems, publishes nothing)
+        if: env.SKIP_PUBLISH != '1'
         run: node pack/build.mjs --dry-run-publish
       - name: Build release assets (git-archive tarball, installers, checksums)
         if: github.ref_type == 'tag'
@@ -115,4 +129,5 @@ jobs:
             gh release create "$TAG" $ASSETS --title "zcode-agent-kit $TAG" --generate-notes
           fi
       - name: Publish to npm via OIDC trusted publishing
+        if: env.SKIP_PUBLISH != '1'
         run: cd pack/dist && npm publish --provenance
