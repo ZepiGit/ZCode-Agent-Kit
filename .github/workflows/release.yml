@@ -147,6 +147,14 @@ jobs:
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v$VERSION"; fi
           VERSION="${TAG#v}"
+          # Idempotent: a retry (dispatch or a later main push auto-releasing
+          # the same version) must reach the npm publish step instead of dying
+          # on an already-existing release. ZAK-013: never replace assets
+          # under an existing tag — keep it as-is.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — keeping it, continuing to publish"
+            exit 0
+          fi
           ASSETS="release/v$VERSION.tar.gz release/install.ps1 release/install.sh release/checksums.txt"
           if [ -f "docs/RELEASE_NOTES_${TAG}.md" ]; then
             gh release create "$TAG" $ASSETS --title "zcode-agent-kit $TAG" --notes-file "docs/RELEASE_NOTES_${TAG}.md"
