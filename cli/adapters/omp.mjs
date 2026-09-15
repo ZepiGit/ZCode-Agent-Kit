@@ -214,6 +214,22 @@ export default {
     }
     const models = readFileSync(modelsYml, "utf8");
     checks.push({ name: "omp provider registered", ok: models.includes("zcode:"), detail: "zcode block in models.yml" });
+    // Self-check: the managed block resolves its key via a !node script whose
+    // path must belong to THIS copy. After a copy switch (reinstall elsewhere,
+    // npm-global vs. installer) an old path keeps yielding the OTHER copy's
+    // key — the running proxy rejects requests with 401. Detect the drift so
+    // the user is pointed at `zcode-kit setup`, which rebuilds the block.
+    const resolver = models.match(/apiKey: !node '([^']+resolve-zcode-proxy-key\.mjs)'/);
+    const expectedResolver = join(ctx.root, "proxy", "resolve-zcode-proxy-key.mjs").replace(/\\/g, "/");
+    if (!resolver) {
+      checks.push({ name: "omp key resolver", ok: false, detail: "no !node resolve-zcode-proxy-key line in the managed block — rerun zcode-kit integrate omp" });
+    } else if (!existsSync(resolver[1])) {
+      checks.push({ name: "omp key resolver", ok: false, detail: `resolver file missing: ${resolver[1]}` });
+    } else if (resolver[1] !== expectedResolver) {
+      checks.push({ name: "omp key resolver", ok: false, detail: `resolver points to another copy (${resolver[1]}) — rerun zcode-kit setup from this copy to repair; then restart omp` });
+    } else {
+      checks.push({ name: "omp key resolver", ok: true, detail: "resolver current" });
+    }
     checks.push({ name: "omp extension installed", ok: existsSync(join(agentDir, "extensions", EXT_ENTRY_NAME)) });
     return checks;
   },
