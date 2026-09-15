@@ -27,21 +27,23 @@ context), verified reasoning efforts **low / high / max** (default max).
 **Windows (PowerShell)**
 
 ```powershell
-irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 ```
 
 **macOS / Linux**:
 
 ```sh
-curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
+curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
 
-The installer downloads the pinned release archive, verifies its checksum,
-installs user-locally (default `%LOCALAPPDATA%\zcode-agent-kit` or
-`~/.local/share/zcode-agent-kit`, override with `ZCODE_KIT_HOME`), installs
-bun v1.4.2 user-locally if it is missing, and runs setup with harness
-detection.
+The one-liners fetch the installer from the **latest published release**; the
+installer then resolves that release automatically (pin any version with
+`ZCODE_KIT_VERSION`, e.g. `$env:ZCODE_KIT_VERSION = "v0.2.0"`). It downloads
+the release archive, verifies its checksum, installs user-locally (default
+`%LOCALAPPDATA%\zcode-agent-kit` or `~/.local/share/zcode-agent-kit`, override
+with `ZCODE_KIT_HOME`), installs bun v1.4.2 user-locally if it is missing, and
+runs setup with harness detection.
 
 **npm / npx:**
 

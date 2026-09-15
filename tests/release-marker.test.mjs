@@ -3,7 +3,7 @@
 // verifier must reject a version changed after the build.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,21 @@ test("pack build keeps the generated package private when the marker names anoth
   } finally {
     if (existed) writeFileSync(MARKER, prev);
     else rmSync(MARKER);
+  }
+});
+
+test("pack build tolerates a process holding pack/dist as its CWD (Windows EPERM)", () => {
+  // Windows cannot remove a directory that is any process's working directory
+  // (an open shell inside pack/dist is enough). The build must recover by
+  // emptying the directory in place instead of failing the release pipeline.
+  const dist = join(KIT, "pack", "dist");
+  mkdirSync(dist, { recursive: true });
+  const holder = spawn(process.execPath, ["-e", "setInterval(()=>{},1e6)"], { cwd: dist, stdio: "ignore" });
+  try {
+    const res = spawnSync(process.execPath, [join(KIT, "pack", "build.mjs")], { encoding: "utf8" });
+    assert.equal(res.status, 0, `build should recover from a locked dist (stderr: ${res.stderr})`);
+  } finally {
+    holder.kill();
   }
 });
 

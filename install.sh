@@ -1,14 +1,24 @@
 #!/usr/bin/env sh
 # zcode-agent-kit installer (POSIX: macOS / Linux / WSL).
-# See install.ps1 header for the security model: pinned release tarball,
-# SHA256 verified against the release's checksums.txt, no admin rights.
+# See install.ps1 header for the security model: release tarball (latest
+# published release by default, pin via ZCODE_KIT_VERSION), SHA256 verified
+# against the release's checksums.txt, no admin rights.
 # WSL note: the ZCode Desktop app must run on the Windows host; the proxy
 # inside WSL cannot drive it — install on Windows instead (detected, refused).
 set -eu
 
-VERSION="${ZCODE_KIT_VERSION:-v0.2.0}"
 REPO="ZepiGit/ZCode-Agent-Kit"
 INSTALL_DIR="${ZCODE_KIT_INSTALL_DIR:-${ZCODE_KIT_HOME:-$HOME/.local/share/zcode-agent-kit}}"
+
+# Latest published release by default; ZCODE_KIT_VERSION pins one (recommended
+# for reproducible installs). Never a branch: releases only.
+if [ -n "${ZCODE_KIT_VERSION:-}" ]; then
+  VERSION="$ZCODE_KIT_VERSION"
+else
+  VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+    | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)
+  [ -n "$VERSION" ] || { echo "ERROR: could not resolve the latest release (offline? rate-limited?) - pin one with ZCODE_KIT_VERSION=vX.Y.Z"; exit 2; }
+fi
 
 echo "== zcode-agent-kit installer ($VERSION) =="
 echo "install dir: $INSTALL_DIR"

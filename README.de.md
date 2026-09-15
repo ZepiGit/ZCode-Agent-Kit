@@ -26,24 +26,26 @@ Kontext), verifizierte Reasoning-Stufen **low / high / max** (Standard max).
 
 ## Schnellstart
 
-**Windows (PowerShell)** — gepinnter Installer, SHA256-verifiziert, ohne
-Adminrechte:
+**Windows (PowerShell)** — Installer lädt das neueste Release, SHA256-verifiziert,
+ohne Adminrechte:
 
 ```powershell
-irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 ```
 
 **macOS / Linux**:
 
 ```sh
-curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
+curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
-Der Installer lädt das gepinnte Release-Archiv, prüft dessen Prüfsumme,
-installiert benutzerlokal (Standard `%LOCALAPPDATA%\zcode-agent-kit` bzw.
-`~/.local/share/zcode-agent-kit`, überschreibbar mit `ZCODE_KIT_HOME`),
-installiert bun v1.4.2 benutzerlokal, falls es fehlt, und führt das Setup mit
-Harness-Erkennung aus.
+Die Einzeiler laden den Installer aus dem **neuesten veröffentlichten
+Release**; der Installer löst dieses Release automatisch auf (eine Version
+pinnen mit `ZCODE_KIT_VERSION`, z. B. `$env:ZCODE_KIT_VERSION = "v0.2.0"`).
+Er lädt das Release-Archiv, prüft dessen Prüfsumme, installiert benutzerlokal
+(Standard `%LOCALAPPDATA%\zcode-agent-kit` bzw. `~/.local/share/zcode-agent-kit`,
+überschreibbar mit `ZCODE_KIT_HOME`), installiert bun v1.4.2 benutzerlokal,
+falls es fehlt, und führt das Setup mit Harness-Erkennung aus.
 
 **npm / npx:**
 

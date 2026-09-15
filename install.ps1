@@ -1,22 +1,24 @@
 # zcode-agent-kit installer (Windows).
 #
-# One-command install (once a release tag exists -- see docs/RELEASE_CHECKLIST.md):
-#   irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+# One-command install (installs the LATEST published release by default; pin
+# a version with $env:ZCODE_KIT_VERSION -- see docs/RELEASE_CHECKLIST.md):
+#   irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 #
 # This works in Windows PowerShell 5.1 and PowerShell 7+. The script takes no
 # param() block on purpose: Invoke-Expression parses its input in expression
 # mode, where param() is a parse error in PowerShell 7. Configuration goes
 # through environment variables instead (set them in the SAME line or session):
 #
-#   $env:ZCODE_KIT_VERSION     = "v0.2.0"                              # release tag to install
+#   $env:ZCODE_KIT_VERSION     = "v0.2.0"                              # pin a release tag (default: latest published release)
 #   $env:ZCODE_KIT_INSTALL_DIR = "D:\tools\zcode-agent-kit"            # install location
 #
 # Running the saved file also works and reads the same variables:
 #   .\install.ps1
 #
 # Security notes (stated honestly):
-# - The script downloads a PINNED release tarball (never main) and verifies its
-#   SHA256 against the checksums file in the same release.
+# - The script downloads a RELEASE tarball (the latest published release by
+#   default, a pinned one via ZCODE_KIT_VERSION - never a branch) and verifies
+#   its SHA256 against the checksums file in the same release.
 # - A hash published next to the archive protects against corruption, not
 #   against a compromised release host. Verify the hash against a second
 #   channel (repo commit history / signed tag) if you need provenance.
@@ -28,13 +30,24 @@
 
 $ErrorActionPreference = "Stop"
 
-$Version = if ($env:ZCODE_KIT_VERSION) { $env:ZCODE_KIT_VERSION } else { "v0.2.0" }
+$Repo = "ZepiGit/ZCode-Agent-Kit"
 $InstallDir = ""
 if ($env:ZCODE_KIT_INSTALL_DIR) { $InstallDir = $env:ZCODE_KIT_INSTALL_DIR }
 elseif ($env:ZCODE_KIT_HOME) { $InstallDir = $env:ZCODE_KIT_HOME }
 else { $InstallDir = Join-Path $env:LOCALAPPDATA "zcode-agent-kit" }
 
-$Repo = "ZepiGit/ZCode-Agent-Kit"
+# Latest published release by default; ZCODE_KIT_VERSION pins one (recommended
+# for reproducible installs). Never a branch: releases only.
+if ($env:ZCODE_KIT_VERSION) {
+  $Version = $env:ZCODE_KIT_VERSION
+} else {
+  try {
+    $latest = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers @{ "User-Agent" = "zcode-agent-kit-installer" }
+    $Version = $latest.tag_name
+  } catch {
+    throw "could not resolve the latest release from the GitHub API - pin one with `$env:ZCODE_KIT_VERSION (e.g. 'v0.2.0'). Detail: $($_.Exception.Message)"
+  }
+}
 $Tarball = "$Version.tar.gz"
 $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
 

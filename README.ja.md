@@ -27,21 +27,23 @@
 
 ## クイックスタート
 
-**Windows（PowerShell）** — バージョン固定インストーラー、SHA256 検証済み、
+**Windows（PowerShell）** — 最新リリースを取得、SHA256 検証済み、
 管理者権限不要：
 
 ```powershell
-irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 ```
 
 **macOS / Linux**：
 
 ```sh
-curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
+curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
-インストーラーは固定バージョンのリリースアーカイブをダウンロードしてチェックサムを
-検証し、ユーザーローカルにインストールします（既定は
+ワンライナーは**最新の公開リリース**からインストーラーを取得します。インストーラーは
+そのリリースを自動的に解決します（`ZCODE_KIT_VERSION` でバージョン固定可能、例:
+`$env:ZCODE_KIT_VERSION = "v0.2.0"`）。リリースアーカイブをダウンロードして
+チェックサムを検証し、ユーザーローカルにインストールします（既定は
 `%LOCALAPPDATA%\zcode-agent-kit` または `~/.local/share/zcode-agent-kit`、
 `ZCODE_KIT_HOME` で上書き可能）。bun が無ければ v1.4.2 をユーザーローカルに
 導入し、ハーネス検出付きで setup を実行します。

@@ -26,19 +26,21 @@
 
 ## 快速开始
 
-**Windows（PowerShell）**——固定版本安装器，SHA256 校验，无需管理员权限：
+**Windows（PowerShell）**——安装器自动获取最新 Release，SHA256 校验，无需管理员权限：
 
 ```powershell
-irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.ps1 | iex
+irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 ```
 
 **macOS / Linux**：
 
 ```sh
-curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/download/v0.2.0/install.sh | sh
+curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
-安装器会下载固定版本的发布包并校验校验和，安装到用户目录
+单行命令会从**最新发布的 Release** 获取安装器；安装器会自动解析该 Release
+（可用 `ZCODE_KIT_VERSION` 固定版本，例如 `$env:ZCODE_KIT_VERSION = "v0.2.0"`）。
+安装器下载该发布包并校验校验和，安装到用户目录
 （默认 `%LOCALAPPDATA%\zcode-agent-kit` 或 `~/.local/share/zcode-agent-kit`，
 可用 `ZCODE_KIT_HOME` 覆盖），如缺少 bun 则自动在用户目录安装 v1.4.2，
 然后运行带 harness 检测的 setup。

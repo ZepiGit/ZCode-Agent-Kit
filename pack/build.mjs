@@ -7,7 +7,7 @@
 // Usage: node pack/build.mjs [--dry-run-publish]
 import { spawnSync } from "node:child_process";
 import {
-  cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,
+  cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -67,9 +67,28 @@ function trackedFiles() {
   return res.stdout.split("\n").filter(Boolean);
 }
 
+function resetDist() {
+  try {
+    rmSync(DIST, { recursive: true, force: true });
+  } catch (err) {
+    // Windows cannot remove a directory that is any process's working
+    // directory (an open shell or Explorer window inside pack/dist is enough).
+    // Fall back to emptying it in place — same end state for the assembly.
+    try {
+      for (const entry of readdirSync(DIST)) {
+        rmSync(join(DIST, entry), { recursive: true, force: true });
+      }
+    } catch {
+      throw new Error(
+        `cannot reset ${DIST} (${err.code}) — close any shell or Explorer window sitting inside it and re-run`,
+      );
+    }
+  }
+}
+
 function main() {
   const dryRunPublish = process.argv.includes("--dry-run-publish");
-  rmSync(DIST, { recursive: true, force: true });
+  resetDist();
   mkdirSync(DIST, { recursive: true });
 
   const files = trackedFiles().filter((f) => {
