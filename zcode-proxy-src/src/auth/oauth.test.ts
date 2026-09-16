@@ -178,6 +178,7 @@ describe("BigmodelOAuthClient (auth-code flow)", () => {
     const mockFetch = (async (_input: RequestInfo | URL): Promise<Response> => {
       return envelopeResponse({
         token: "jwt_zcode",
+        // mimosa-ignore synthetic local test fixture value, never a real credential
         bigmodel: { access_token: "bm_access_123" },
         user: { user_id: "u1", name: "test" },
       });
@@ -215,6 +216,7 @@ describe("BigmodelOAuthClient (auth-code flow)", () => {
       expect(url).toBe("https://zcode.z.ai/api/v1/oauth/token");
       return envelopeResponse({
         token: "jwt_full",
+        // mimosa-ignore synthetic local test fixture value, never a real credential
         bigmodel: { access_token: "resolved_token" },
         user: { user_id: "user_42" },
       });
@@ -291,6 +293,7 @@ describe("parsePastedCallbackUrl (headless paste login)", () => {
     const { impl, calls } = scriptedFetch([
       () => envelopeResponse({
         token: "jwt_paste",
+        // mimosa-ignore synthetic local test fixture value, never a real credential
         bigmodel: { access_token: "bm_paste" },
         user: { user_id: "u9" },
       }),

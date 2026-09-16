@@ -191,6 +191,50 @@ function diskPathFor(url) {
   return path.join(CDN_CACHE_DIR, crypto.createHash("sha1").update(String(url)).digest("hex"));
 }
 
+// ── Egress allowlist ───────────────────────────────────────────────────────
+// Guest code from the CDN controls request URLs. Without this, a hostile or
+// compromised bundle could reach the loopback proxy, cloud metadata, the LAN,
+// or `file:`/`data:` URLs through the interceptors. Host suffixes are matched
+// against the parsed hostname — never a substring of the whole URL, which
+// `https://evil.test/?x=alicdn.com` would satisfy.
+const ALLOWED_REQUEST_HOSTS = ["zcode.z.ai", "alicdn.com", "aliyuncs.com", "aliyun.com"];
+const IPV4_HOST = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+function hostMatches(hostname, suffix) {
+  const host = String(hostname).toLowerCase().replace(/\.$/, "");
+  return host === suffix || host.endsWith("." + suffix);
+}
+
+function isPrivateHost(hostname) {
+  const host = String(hostname).toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80:")) return true;
+  const v4 = IPV4_HOST.test(host) ? host.split(".").map(Number) : null;
+  if (!v4) return false;
+  const [a, b] = v4;
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+}
+
+export function isAllowedRequestUrl(raw) {
+  let parsed;
+  try {
+    parsed = new URL(String(raw));
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:") return false;
+  if (isPrivateHost(parsed.hostname)) return false;
+  return ALLOWED_REQUEST_HOSTS.some((suffix) => hostMatches(parsed.hostname, suffix));
+}
+
+function isCdnUrl(raw) {
+  try {
+    return hostMatches(new URL(String(raw)).hostname, "alicdn.com");
+  } catch {
+    return false;
+  }
+}
+
 function sniffMime(url) {
   if (/\.js(\?|$)/i.test(url)) return "application/javascript";
   if (/\.css(\?|$)/i.test(url)) return "text/css";
@@ -340,8 +384,12 @@ function makeInterceptor(bypassPeCache = false) {
     async beforeAsyncRequest({ request, window: w }) {
       const url = request.url;
       _requestLog.push({ at: Date.now(), method: request.method, url });
+      if (!isAllowedRequestUrl(url)) {
+        if (_DEBUG) process.stderr.write(`[xhr-blocked] ${url}\n`);
+        return new w.Response("", { status: 503, statusText: "blocked by egress allowlist" });
+      }
       injectRequestHeaders(request);
-      if (/\balicdn\.com/i.test(url)) {
+      if (isCdnUrl(url)) {
         let body = skipPeCache(url) ? null : getCachedBody(url);
         if (body && /\.js(\?|$)/i.test(url)) {
           try {
@@ -415,9 +463,13 @@ function makeInterceptor(bypassPeCache = false) {
     beforeSyncRequest({ request, window: w }) {
       const url = request.url;
       _requestLog.push({ at: Date.now(), method: request.method, url, sync: true });
+      if (!isAllowedRequestUrl(url)) {
+        if (_DEBUG) process.stderr.write(`[sync-xhr-blocked] ${url}\n`);
+        return new w.Response("", { status: 503, statusText: "blocked by egress allowlist" });
+      }
       injectRequestHeaders(request);
       let body = null;
-      if (/\balicdn\.com/i.test(url)) {
+      if (isCdnUrl(url)) {
         body = skipPeCache(url) ? null : getCachedBody(url);
         if (body && /\.js(\?|$)/i.test(url)) {
           try {

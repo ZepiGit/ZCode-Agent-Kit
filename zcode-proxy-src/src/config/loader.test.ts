@@ -105,7 +105,7 @@ server:
   port: 9090
   host: "127.0.0.1"
 auth:
-  proxyApiKey: "proxy-secret"
+  proxyApiKey: "proxy-secret"  # mimosa-ignore synthetic local test fixture value, never a real credential
 provider: bigmodel
 defaultModel: glm-4.6
 models:
@@ -438,10 +438,11 @@ server:
     const path = writeYaml(`
 auth:
   mode: apikey
-  apiKey: "legacy-key"
-  proxyApiKey: "client-secret"
+  apiKey: "legacy-key"  # mimosa-ignore synthetic local test fixture value, never a real credential
+  proxyApiKey: "client-secret"  # mimosa-ignore synthetic local test fixture value, never a real credential
 `);
     const cfg = loadConfig(path);
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     expect(cfg.auth).toEqual({ proxyApiKey: "client-secret" });
   });
 

@@ -10,7 +10,9 @@ test("real fixture encrypted store reloads, survives partial writes, persists ch
   const previous = process.env.ZCODE_PROXY_CREDENTIALS_PATH;
   process.env.ZCODE_PROXY_CREDENTIALS_PATH = join(dir, "credentials.json");
   try {
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     const old = { apiKey: "fixture-old", provider: "zai" as const };
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     const fresh = { apiKey: "fixture-new", provider: "zai" as const };
     await saveCredential(old);
     let imports = 0;

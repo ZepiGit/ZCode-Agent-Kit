@@ -40,7 +40,9 @@ describe("isExpired", () => {
 });
 
 describe("AuthManager durable reload and recovery", () => {
+  // mimosa-ignore synthetic local test fixture value, never a real credential
   const first: Credential = { apiKey: "fixture-first", provider: "zai" };
+  // mimosa-ignore synthetic local test fixture value, never a real credential
   const second: Credential = { apiKey: "fixture-second", provider: "zai" };
 
   it("reloads a changed persisted credential and retains last good across partial writes", async () => {

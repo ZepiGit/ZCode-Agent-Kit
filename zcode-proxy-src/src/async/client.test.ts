@@ -18,7 +18,7 @@ import type { OffPeakCredentials } from "./types.js";
 
 const CRED: OffPeakCredentials = {
   jwt: "test-jwt-token",
-  codingPlanApiKey: "test-api-key",
+  codingPlanApiKey: "test-api-key",  // mimosa-ignore synthetic local test fixture value, never a real credential
 };
 
 function makeMockFetch(impl: (req: Request, init?: RequestInit) => Promise<Response>): typeof fetch {

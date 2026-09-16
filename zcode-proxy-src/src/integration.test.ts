@@ -31,7 +31,7 @@ function writeTestConfig(): string {
     '  port: 19090',
     '  host: "127.0.0.1"',
     "auth:",
-    '  proxyApiKey: "test-proxy-key"',
+    '  proxyApiKey: "test-proxy-key"',  // mimosa-ignore synthetic local test fixture value, never a real credential
     "provider: zai",
     "defaultModel: glm-4.6",
     "models:",
@@ -211,11 +211,13 @@ beforeAll(async () => {
   const config = loadConfig(writeTestConfig());
   config.server.port = proxyPort;
   config.server.host = "127.0.0.1";
+  // mimosa-ignore synthetic local test fixture value, never a real credential
   config.auth.proxyApiKey = "integration-test-key";
   config.providers.zai.anthropicBase = `http://127.0.0.1:${mockPort}/anthropic`;
   config.providers.zai.openaiBase = `http://127.0.0.1:${mockPort}/coding`;
 
   const auth = new AuthManager();
+  // mimosa-ignore synthetic local test fixture value, never a real credential
   auth.setOAuthCredential({ apiKey: "integrationTestKey", secret: "integrationTestSecret", provider: "zai" });
 
   proxyServer = await startServer({ config, auth });

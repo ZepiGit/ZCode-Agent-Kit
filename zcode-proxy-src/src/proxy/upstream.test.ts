@@ -420,6 +420,7 @@ describe("buildUpstreamRequest", () => {
   });
 
   it("strips client x-api-key header", () => {
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     const clientReq = makeClientReq("{}", { "x-api-key": "client-key" });
     const upstream = buildUpstreamRequest(clientReq, "openai", ZAI_PROVIDER, ZAI_CRED, "{}", IDENTITY);
     // For OpenAI format, auth goes in Authorization header; client's x-api-key should be stripped

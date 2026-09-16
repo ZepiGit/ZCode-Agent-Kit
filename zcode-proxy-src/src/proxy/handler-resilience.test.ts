@@ -99,6 +99,7 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
     });
 
     const auth = new AuthManager();
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     auth.setOAuthCredential({ apiKey: "key-mock", provider: "zai", jwt: "jwt-mock" });
     const clientReq = new Request("http://localhost:8080/v1/chat/completions", {
       method: "POST",
@@ -140,6 +141,7 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
     });
 
     const auth = new AuthManager();
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     auth.setOAuthCredential({ apiKey: "key-mock", provider: "zai", jwt: "jwt-mock" });
     const clientReq = new Request("http://localhost:8080/v1/chat/completions", {
       method: "POST",

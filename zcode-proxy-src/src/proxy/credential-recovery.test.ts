@@ -15,7 +15,9 @@ const config = {
   endpointRouting: { enabled: false, origin: "https://fixture.invalid" }, clientSigning: { enabled: false, origin: "https://fixture.invalid" },
   mcp: { enabled: false }, async: { enabled: false }, claim: { enabled: false }, logging: { level: "error" },
 } as ProxyConfig;
+// mimosa-ignore synthetic local test fixture value, never a real credential
 const first = { apiKey: "fixture-old", provider: "zai" as const };
+// mimosa-ignore synthetic local test fixture value, never a real credential
 const fresh = { apiKey: "fixture-fresh", provider: "zai" as const };
 const ok = () => Response.json({ id: "msg_fixture", type: "message", role: "assistant", model: "fixture", content: [{ type: "text", text: "one reply" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 2 } });
 function request(route: string, stream = false) {

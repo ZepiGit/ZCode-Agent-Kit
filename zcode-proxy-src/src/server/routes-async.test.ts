@@ -57,6 +57,7 @@ function makeConfig(overrides: Partial<ProxyConfig> = {}): ProxyConfig {
 
 function makeOauthAuth(jwt: string = "the-jwt"): AuthManager {
   const auth = new AuthManager();
+  // mimosa-ignore synthetic local test fixture value, never a real credential
   const cred: Credential = { apiKey: "key-x.secret-y", provider: "zai", jwt };
   auth.setOAuthCredential(cred);
   return auth;

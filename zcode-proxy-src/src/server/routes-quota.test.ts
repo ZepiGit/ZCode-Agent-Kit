@@ -57,6 +57,7 @@ function makeJwt(): string {
   return `h.${payload}.s`;
 }
 
+// mimosa-ignore synthetic local test fixture value, never a real credential
 const fakeCred: Credential = { apiKey: "key-x.secret-y", provider: "zai", jwt: makeJwt() };
 const loadFake = async (): Promise<Credential> => fakeCred;
 const loadNone = async (): Promise<Credential | null> => null;

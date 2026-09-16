@@ -37,7 +37,7 @@ describe("KeyResolver", () => {
   it("resolveZaiBizToken exchanges access token for biz token", async () => {
     const fetchImpl = mockFetch({
       "/auth/z/login": () => new Response(JSON.stringify({
-        access_token: "biz_token_123",
+        access_token: "biz_token_123",  // mimosa-ignore synthetic local test fixture value, never a real credential
       }), { status: 200, headers: { "content-type": "application/json" } }),
     });
     const resolver = new KeyResolver(fetchImpl);
@@ -103,6 +103,7 @@ describe("KeyResolver", () => {
       "api_keys": (body) => {
         if (body) {
           createdKey = true;
+          // mimosa-ignore synthetic local test fixture value, never a real credential
           return bizResponse({ apiKey: "newApiKey123" });
         }
         return bizResponse([]);
@@ -132,6 +133,7 @@ describe("KeyResolver", () => {
       "api_keys": (body) => {
         if (body) {
           created = true;
+          // mimosa-ignore synthetic local test fixture value, never a real credential
           return bizResponse({ apiKey: "freshlyCreated" });
         }
         return bizResponse([{ name: "zcode-api-key", apiKey: "" }]);
@@ -145,6 +147,7 @@ describe("KeyResolver", () => {
 
   it("getSecretKey retrieves secret via apiKey value", async () => {
     const fetchImpl = mockFetch({
+      // mimosa-ignore synthetic local test fixture value, never a real credential
       "copy/": () => bizResponse({ secretKey: "theSecretKey" }),
     });
     const resolver = new KeyResolver(fetchImpl);
@@ -160,8 +163,10 @@ describe("KeyResolver", () => {
       "getCustomerInfo": () => bizResponse({
         organizations: [{ organizationId: "o1", organizationName: "默认机构", projects: [{ projectId: "p1", projectName: "默认项目" }] }],
       }),
+      // mimosa-ignore synthetic local test fixture value, never a real credential
       "api_keys/copy": () => bizResponse({ secretKey: "mySecret" }),
       "api_keys": (body) => {
+        // mimosa-ignore synthetic local test fixture value, never a real credential
         if (body) return bizResponse({ apiKey: "myApiKey" });
         return bizResponse([]);
       },

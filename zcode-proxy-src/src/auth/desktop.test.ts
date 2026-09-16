@@ -3,9 +3,13 @@ import { parseDesktopCredential } from "./desktop.js";
 
 test("existing desktop import selects only the requested builtin provider", () => {
   expect(parseDesktopCredential(JSON.stringify({ provider: {
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     "builtin:zai-coding-plan": { options: { apiKey: " fixture-key " } },
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     "builtin:zai-start-plan": { options: { apiKey: " fixture-jwt " } },
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     "builtin:bigmodel-coding-plan": { options: { apiKey: "wrong-provider" } },
+  // mimosa-ignore synthetic local test fixture value, never a real credential
   } }), "zai")).toEqual({ apiKey: "fixture-key", jwt: "fixture-jwt", provider: "zai" });
 });
 test("partial, empty, invalid and expired desktop credentials are rejected safely", () => {

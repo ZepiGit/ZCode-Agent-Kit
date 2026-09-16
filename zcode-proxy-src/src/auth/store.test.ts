@@ -52,7 +52,9 @@ describe("credential store", () => {
   });
 
   it("conditionally persists recovered credentials without overwriting another login or logout", async () => {
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     const old: Credential = { apiKey: "fixture-old", provider: "zai" };
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     const fresh: Credential = { apiKey: "fixture-new", provider: "zai" };
     await saveCredential(old);
     const snapshot = readFileSync(TEST_STORE, "utf8");
@@ -79,7 +81,7 @@ describe("credential store", () => {
 
   it("roundtrips: save → load → matches original", async () => {
     const cred: Credential = {
-      apiKey: "testApiKey123",
+      apiKey: "testApiKey123",  // mimosa-ignore synthetic local test fixture value, never a real credential
       secret: "testSecret456",
       provider: "zai",
     };
@@ -93,7 +95,7 @@ describe("credential store", () => {
 
   it("roundtrips bigmodel credential (no secret)", async () => {
     const cred: Credential = {
-      apiKey: "bmKey789",
+      apiKey: "bmKey789",  // mimosa-ignore synthetic local test fixture value, never a real credential
       provider: "bigmodel",
     };
     await saveCredential(cred);
@@ -143,6 +145,7 @@ describe("credential store — SHA-256 KDF migration (R2-13)", () => {
   });
 
   it("migrates a legacy XOR-fold-encrypted file: loads AND re-stores under the new KDF", async () => {
+    // mimosa-ignore synthetic local test fixture value, never a real credential
     const cred: Credential = { apiKey: "legacyKey", provider: "zai" };
     const legacyPayload = await legacyEncrypt(JSON.stringify(cred));
     writeFileSync(getStorePath(), JSON.stringify({ encrypted: legacyPayload }), "utf-8");

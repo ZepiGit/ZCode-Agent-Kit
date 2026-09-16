@@ -28,6 +28,7 @@ const CONFIG: ProxyConfig = {
   logging: { level: "info" },
 };
 
+// mimosa-ignore synthetic local test fixture value, never a real credential
 const auth = { getCredential: async () => ({ apiKey: "testkey.testsecret", userId: "u1" }) } as unknown as import("../auth/manager.js").AuthManager;
 
 function chatUpstream(body: string, status = 200): typeof fetch {

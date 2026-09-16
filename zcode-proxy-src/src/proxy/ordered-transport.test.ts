@@ -139,6 +139,7 @@ describe("proxyRequest — ordered transport abort (CL-04, handler level)", () =
         logging: { level: "info" },
       };
       const auth = new AuthManager();
+      // mimosa-ignore synthetic local test fixture value, never a real credential
       auth.setOAuthCredential({ apiKey: "key-mock", provider: "zai" });
 
       const controller = new AbortController();
