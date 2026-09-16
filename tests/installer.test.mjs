@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join, delimiter } from "node:path";
+import { join } from "node:path";
 
 const KIT = join(import.meta.dirname, "..");
 const INSTALL = readFileSync(join(KIT, "install.sh"), "utf8");
@@ -39,9 +39,19 @@ printf 'fixture cli\\n' > "$4/kit/cli/zcode-kit.mjs"`);
   [ "$1" = "cli/zcode-kit.mjs" ] && [ "$2" = "setup" ] && [ "$3" = "--harness" ] && [ "$4" = "auto" ]
   printf 'setup completed\\n' > setup-ran
 fi`);
-      const res = spawnSync("sh", [join(KIT, "install.sh")], {
+      const res = spawnSync("sh", ["-c", `
+if command -v cygpath >/dev/null 2>&1; then
+  FIXTURE_BIN=$(cygpath -u "$FIXTURE_BIN")
+  HOME=$(cygpath -u "$HOME")
+  ZCODE_KIT_INSTALL_DIR=$(cygpath -u "$ZCODE_KIT_INSTALL_DIR")
+  set -- "$(cygpath -u "$1")"
+fi
+export HOME ZCODE_KIT_INSTALL_DIR
+export PATH="$FIXTURE_BIN:$PATH"
+exec sh "$1"
+`, "fixture", join(KIT, "install.sh")], {
         encoding: "utf8", timeout: 15_000,
-        env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, HOME: home,
+        env: { ...process.env, FIXTURE_BIN: bin, HOME: home,
           ZCODE_KIT_INSTALL_DIR: install, ZCODE_KIT_VERSION: "v1.2.3" },
       });
       assert.equal(res.status, validChecksum ? 0 : 1, `${res.stdout}\n${res.stderr}`);

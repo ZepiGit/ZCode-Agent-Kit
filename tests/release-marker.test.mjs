@@ -104,7 +104,8 @@ for (const notes of [false, true]) {
     const root = mkdtempSync(join(tmpdir(), "zcode-release-target-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     // Execute the workflow's real shell body with only remote GitHub replaced.
-    const workflow = readFileSync(join(KIT, ".github/workflows/release.yml"), "utf8");
+    // Windows CI checks out with CRLF; normalize or the step split finds nothing.
+    const workflow = readFileSync(join(KIT, ".github/workflows/release.yml"), "utf8").replace(/\r\n/g, "\n");
     const step = workflow.split("      - name: Create the GitHub release\n")[1]?.split("      - name:")[0];
     assert.ok(step, "release creation step must exist");
     const body = step.split("        run: |\n")[1].split("\n").map((line) => line.replace(/^          /, "")).join("\n");
