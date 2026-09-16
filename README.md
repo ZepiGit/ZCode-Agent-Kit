@@ -51,6 +51,20 @@ irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
+or
+
+**npm installation:**
+
+Requires both Node and Bun already on PATH. From any directory:
+
+```sh
+npm install -g zcode-agent-kit
+zcode-kit setup
+```
+In the current source, npm postinstall prints a hint; explicit setup performs integration. Older published packages may behave differently. The npm command names are `zcode-kit` and `zcode-agent-kit`. A 404 can mean the requested package/version is unavailable or inaccessible; it does not prove a local installation fault.
+
+Do not use a transient `npx ... setup` as a permanent installation: generated configurations refer to the package's filesystem location. Use a stable global install or the release installer.
+
 
 The installer verifies the release archive's SHA-256, installs locally, and runs setup. Defaults:
 
@@ -63,18 +77,6 @@ The installer verifies the release archive's SHA-256, installs locally, and runs
 
 For reproducibility, set `ZCODE_KIT_VERSION` to an existing release tag, including its `v` prefix, before running the installer. Remove the override when you want latest again. Changing that variable pins the archive; the one-liners above still fetch the installer script from the latest release.
 
-### Alternative: npm installation
-
-Requires both Node and Bun already on PATH. From any directory:
-
-```sh
-npm install -g zcode-agent-kit
-zcode-kit setup
-```
-
-In the current source, npm postinstall prints a hint; explicit setup performs integration. Older published packages may behave differently. The npm command names are `zcode-kit` and `zcode-agent-kit`. A 404 can mean the requested package/version is unavailable or inaccessible; it does not prove a local installation fault.
-
-Do not use a transient `npx ... setup` as a permanent installation: generated configurations refer to the package's filesystem location. Use a stable global install or the release installer.
 
 ## 3. Verify which installation you are using
 
