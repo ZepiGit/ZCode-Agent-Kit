@@ -4,6 +4,14 @@
  */
 import { describe, it, expect } from "bun:test";
 import { KeyResolver } from "./resolver.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const BIZ_TOKEN = fixtureSecret("resolver-biz-token");
+const CREATED_API_KEY = fixtureSecret("resolver-created-key");
+const FRESH_API_KEY = fixtureSecret("resolver-fresh-key");
+const COPY_SECRET_KEY = fixtureSecret("resolver-copy-secret");
+const FLOW_API_KEY = fixtureSecret("resolver-flow-key");
+const FLOW_SECRET = fixtureSecret("resolver-flow-secret");
 
 function bizResponse(data: unknown): Response {
   return new Response(JSON.stringify({ code: 0, data }), {
@@ -37,12 +45,12 @@ describe("KeyResolver", () => {
   it("resolveZaiBizToken exchanges access token for biz token", async () => {
     const fetchImpl = mockFetch({
       "/auth/z/login": () => new Response(JSON.stringify({
-        access_token: "biz_token_123",  // mimosa-ignore synthetic local test fixture value, never a real credential
+        access_token: BIZ_TOKEN,
       }), { status: 200, headers: { "content-type": "application/json" } }),
     });
     const resolver = new KeyResolver(fetchImpl);
     const bizToken = await resolver.resolveZaiBizToken("access_abc");
-    expect(bizToken).toBe("biz_token_123");
+    expect(bizToken).toBe(BIZ_TOKEN);
   });
 
   it("resolveCustomerInfo picks default org using bundle field names", async () => {
@@ -103,8 +111,7 @@ describe("KeyResolver", () => {
       "api_keys": (body) => {
         if (body) {
           createdKey = true;
-          // mimosa-ignore synthetic local test fixture value, never a real credential
-          return bizResponse({ apiKey: "newApiKey123" });
+          return bizResponse({ apiKey: CREATED_API_KEY });
         }
         return bizResponse([]);
       },
@@ -112,7 +119,7 @@ describe("KeyResolver", () => {
     const resolver = new KeyResolver(fetchImpl);
     const result = await resolver.findOrCreateApiKey("https://api.z.ai", "Bearer tok", "org1", "proj1");
     expect(createdKey).toBe(true);
-    expect(result.apiKey).toBe("newApiKey123");
+    expect(result.apiKey).toBe(CREATED_API_KEY);
   });
 
   it("findOrCreateApiKey THROWS when the create response loses apiKey (shape drift, CL-06)", async () => {
