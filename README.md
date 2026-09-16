@@ -10,7 +10,6 @@ Use **your own ZCode Desktop account** with a coding assistant of your choice. T
 - **Models:** `glm-5.3` (text) and `glm-5.3-flash` (text and images). Advertised context: 1M tokens; reasoning levels: `low`, `high`, `max`. Client support and account limits still apply.
 - **Optional MCP bridge:** exposes operations of your installed ZCode runtime. This is separate from model-provider configuration and requires the Desktop app running for model turns.
 
-> **Source versus release — checked 2026-09-16:** GitHub's latest release is **v0.2.2**, while npm's latest is **0.2.1**. The merged source contains newer Continue, credential-recovery, `doctor --fix`, and installer fixes that those packages do **not** all contain. Downloading “latest” does not install the current Git branch. Instructions below describe this source unless explicitly labeled as published-release installation. Check [release notes](https://github.com/ZepiGit/ZCode-Agent-Kit/releases) before relying on a newer feature; an older CLI accepting a flag is not proof that it implements it.
 
 ## 1. Before you install
 
