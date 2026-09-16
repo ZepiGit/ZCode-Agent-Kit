@@ -22,6 +22,10 @@ your harness (OMP / pi / Claude Code / Codex / OpenCode / Cline / Kilo Code /
 Models: **glm-5.3** (text, 1M context) and **glm-5.3-flash** (text+image, 1M
 context), verified reasoning efforts **low / high / max** (default max).
 
+> **Working-tree note (2026-09-15):** Repair/recovery and postinstall changes below
+> describe local source, not a verified published release. Final validation is pending;
+> no repair of the user's existing personal installation is claimed.
+
 ## Quickstart
 
 **Windows (PowerShell)**
@@ -56,9 +60,10 @@ npx --yes zcode-agent-kit setup
 ```
 
 The npm package exposes both `zcode-kit` and `zcode-agent-kit` commands. Its
-postinstall lifecycle runs the same transactional setup; re-running `setup` is
-safe and idempotent. npm usage still requires **Node ≥ 20**, and setup installs
-or verifies the pinned bun dependencies.
+postinstall only prints a setup hint; it does **not** install the runtime or
+change harness configuration. Run `zcode-kit setup` explicitly. Re-running setup
+is designed to be idempotent. npm requires **Node ≥ 20**; setup installs or
+verifies the pinned bun dependencies.
 
 > The npm artifact is published per release by the maintainer. If `npm install`
 > reports 404, this version is not on the npm registry (yet) — use the
@@ -67,7 +72,8 @@ or verifies the pinned bun dependencies.
 ## First run, in order
 
 1. **Install** (commands above). Setup detects your harnesses and wires only
-   those — every write lands in a transaction you can roll back.
+   those. Recorded configuration edits can be rolled back; credentials and
+   dependency installation are not covered (see below).
 2. **One login**: have the ZCode Desktop app installed and logged in; setup
    imports that credential automatically (otherwise it prints the exact
    one-time login command to run).
@@ -79,8 +85,9 @@ or verifies the pinned bun dependencies.
    `zcode-kit run ...`) ensure it before launching. For everything else
    (pi, Continue, Goose, raw API clients), start it once yourself:
    `node proxy\zcode-proxy-manager.mjs start`
-5. **Later**: `zcode-kit update` upgrades, `zcode-kit rollback` undoes the
-   newest step, `zcode-kit uninstall` removes everything kit-owned.
+5. **Later**: see *Updating* for your installation type. `zcode-kit rollback`
+   undoes recorded file changes from the newest transaction; `zcode-kit uninstall`
+   removes kit integrations without deleting shared credentials.
 
 **From a repo checkout** (development or manual install):
 
@@ -105,7 +112,7 @@ zcode-kit setup [--harness auto|omp,pi,...]   bootstrap + integrate detected har
 zcode-kit integrate <harness> --dry-run       preview exactly what would be written
 zcode-kit integrate <harness>                 apply one adapter (transactional)
 zcode-kit run <harness> -- <args>             launch claude-code/codex/aider/opencode wired to ZCode
-zcode-kit doctor [--harness <id>] [--json]    machine-readable diagnostics
+zcode-kit doctor [--fix] [--harness <id>] [--json]  diagnose; opt-in managed repair
 zcode-kit status                              proxy status + quota snapshot
 zcode-kit models [--json] [--show-key]        advertised models (from the running proxy)
 zcode-kit usage --json                        usage/quota from the account (never invented zeros)
@@ -115,9 +122,13 @@ zcode-kit rollback [tx-id]                    undo the newest (or named) transac
 zcode-kit uninstall                           remove kit integrations; never deletes shared credentials
 ```
 
-Every write is transactional: files are hashed and backed up first, and
-rollback is ownership-aware — later user changes are reported as conflicts,
-never clobbered.
+Recorded configuration edits use hash-based backups. For a finished transaction,
+rollback reports later user edits as conflicts instead of overwriting them.
+`setup` / `integrate` can fail after earlier steps succeeded: they record those
+partial changes and print a rollback command, rather than automatically undoing
+the whole setup. Local key creation, credentials, dependency installation and
+external CLI side effects are **not** all reversible; external registrations
+may require the printed undo command.
 
 ## How setup behaves
 
@@ -139,6 +150,18 @@ Claude-only user gets no OMP edits:
 
 On a machine with only OMP installed, exactly one adapter runs (OMP) plus the
 OMP MCP entry — nothing Claude- or Codex-related is created.
+
+**Continue YAML:** An existing `models: []` (including horizontal whitespace and
+an optional separated comment) is safely converted to a block list before adding
+the kit models. Existing indented or indentless lists retain user models first
+and preserve their default order; repeated integration is idempotent. Nonempty
+inline lists, duplicate `models` keys and unsupported forms are refused without
+changing that file. The adapter stores a JSON-quoted **local proxy key** in the
+managed section of `~/.continue/config.yaml`, not a Desktop credential, and never
+prints the key. Reintegrate after key rotation. The old `${ZCODE_PROXY_KEY}` string
+was not valid Continue secret interpolation; no extra env file is created.
+Continue is not installed in the validation environment: **live validation is
+blocked**; parser/config integration tests are not a real client session.
 
 ## Usage per harness
 
@@ -182,6 +205,38 @@ never touches VS Code's internal state.
 **Any other client** (OpenAI / Anthropic / Responses formats on
 `http://127.0.0.1:8457`, bearer token = content of `.proxykey`):
 see `harnesses/README.md`.
+
+## Diagnosis and bounded repair (current source; final verification pending)
+
+Use `zcode-kit doctor` for diagnostics and `zcode-kit doctor --fix` for explicit
+managed repair; `--harness <id>` restricts adapter selection and `--json` provides
+structured results. Repair does not run general setup or install dependencies.
+It reapplies selected adapters under the setup lock. Key drift is aligned only
+for an unambiguous kit-template proxy config while its port can be exclusively
+reserved; key alignment refuses custom/corrupt config or an occupied port. An
+already matching key needs no config rewrite. Checkout writes
+still require `ZCODE_KIT_ALLOW_CHECKOUT=1`. On repair failure, recorded file changes
+are rolled back; this differs from setup's retained partial changes. Credentials
+and external side effects are not covered by that rollback guarantee.
+
+The shared launch preflight safely starts/verifies the proxy, then makes one
+bounded quota check (no recurring poll/retry loop). Auth code `3012` is separate
+from balance/quota codes `1113` / `3001`; restarting cannot replenish quota.
+Upstream auth/balance findings and unavailable quota telemetry warn but permit
+use of a healthy local proxy so the model path can attempt bounded credential
+recovery. They do not prove usable quota or invent a zero balance; local
+identity/start failures still block wrapper launch. A foreign/unverifiable listener is left untouched;
+stale ownership locks are not automatically stolen. Logs in `logs/heal.log` use
+bounded, fixed-vocabulary cause/action/result fields rather than provider bodies.
+
+OMP caches local authenticated health for 60 seconds after preflight. A later
+request can recover a crashed proxy; failed starts have a one-minute cooldown.
+Normal healthy turns do not repeatedly query upstream quota.
+
+Normal setup also attempts one minimal live Flash request, which can consume
+account quota. `ZCODE_KIT_SKIP_SMOKE=1` opts out; CI/test modes skip it. A failed
+smoke reports failure without undoing already-saved integrations. Its presence
+in the code is not evidence that a live smoke was run for this source change.
 
 ## Proxy management
 
@@ -229,6 +284,27 @@ Stated plainly, so you can decide whether this tool is for you:
 
 ## Login renewal
 
+The runtime reloads its persisted proxy credential at request time. Partial or
+invalid store data does not replace the last good credential; an absent store
+(logout) clears it on reload, without cancelling already-running requests or
+revoking upstream tokens. Explicit/injected credentials remain isolated by default.
+Recovery tracks at most 128 failed-credential/source-revision pairs per process;
+at the cap, automatic reimport stops until restart. Persistence compares the store
+before replacing it but has no cross-process lock: a narrow competing-writer race
+remains, so this is not a general atomic compare-and-swap guarantee.
+
+Before any response output, selected non-streaming auth/balance failures may
+trigger one existing-Desktop reimport and one resend **only if the effective
+credential changes**. Concurrent requests share recovery; attempts are bounded
+per failed credential and Desktop source revision, so a later Desktop login can
+be noticed. A valid refreshed credential is saved to the proxy's encrypted store
+only if the observed store has not changed; no Desktop file is rewritten. No
+browser login, API-key creation, trial claim or endless retry is performed.
+SSE/in-stream errors are not replayed. If recovery fails, the request still fails;
+account permissions and quota cannot be repaired locally.
+
+For deliberate manual renewal:
+
 ```bash
 cd zcode-proxy-src
 ZCODE_PROXY_CONFIG="../proxy/config.yaml" bun run src/index.ts auth login zai --import
@@ -250,17 +326,41 @@ only the proxy's own stored credential and says so.
 
 ## Updating
 
-`zcode-kit update` refuses on a dirty tree, fast-forwards only (never
-force-updates), and re-applies the integrations transactionally. The vendored
-proxy is pinned (see `MANIFEST.md`); local patches live in `patches/`.
+For a source checkout, `zcode-kit update` refuses on a dirty tree, fast-forwards
+only (never force-updates), and re-applies integrations with the partial-setup
+behavior described above. A release/tarball installation has no `.git` and refuses
+this command: re-run the release installer instead. The vendored proxy is pinned
+(see `MANIFEST.md`); local patches live in `patches/`.
 
-## Tests
+### Release automation (maintainers)
 
-```bat
-npm run test          :: kit suite (node --test): transactions, manager safety, adapters, regressions
-npm run test:proxy    :: 872 bun tests incl. protocol contract tests (SSE boundaries, tool args, abort, usage)
-npm run test:mcp      :: MCP bridge suite (42 tests incl. HTTP auth/origin gates, allowlist escapes)
+`.github/workflows/release.yml` runs on pushes to `main`, `v*` tags and manual
+dispatch. After tests, a non-tag run reuses the current version only if it is
+absent from npm and its remote tag is absent or points to the exact current HEAD.
+Otherwise it selects the next patch free on both npm and remote tags (up to 100
+candidates), then pushes a version commit/tag. Dispatch is a same-version retry
+**only for that unpublished, absent-tag/exact-HEAD case**, not unconditionally
+idempotent. A missing npm version does not permit reusing another commit's old
+GitHub assets. Tag runs skip npm publish for an existing version; assets are never
+replaced. Registry errors fail closed. The workflow pins npm 11.19.1 and checks
+exact version visibility after publishing; this is not an artifact-content check.
+Version/marker gates and OIDC publication must succeed; local edits prove no release.
+
+## Tests and evidence
+
+```sh
+npm run test          # kit fixtures: transactions, manager safety, adapters
+npm run test:proxy    # proxy protocol and authentication fixtures
+npm run test:mcp      # MCP bridge suite
 ```
+
+Baseline before this repair work: **65 kit / 872 proxy / 42 MCP tests**. The MCP
+`wmic` kill path did **not execute**; the suite count does not validate that path.
+**Final verification is pending**; see `TEST_REPORT.md` for dated results.
+Source inspection, fixture/config checks, actual live model turns and published
+releases are distinct evidence. These local changes do not claim live verification
+or repairs to the user's personal installation; historical live results are not
+new results for this working tree.
 
 ## Documents
 

@@ -6,7 +6,7 @@
 //   zcode-kit setup [--harness auto|<list>]      bootstrap + integrate detected harnesses
 //   zcode-kit integrate <harness> [--dry-run] [--scope user]
 //   zcode-kit run <harness> -- <args>            launch a harness wired to ZCode
-//   zcode-kit doctor [--harness <id>] [--json]
+//   zcode-kit doctor [--fix] [--harness <id>] [--json]
 //   zcode-kit status
 //   zcode-kit models [--json] [--show-key]
 //   zcode-kit usage --json
@@ -20,6 +20,8 @@
 import { beginTransaction, acquireLock, releaseLock, rollbackTransaction, listTransactions } from "../lib/transaction.mjs";
 import { detectHarnesses } from "../lib/detect.mjs";
 import { createCtx, bootstrap, kitRoot } from "./context.mjs";
+import { repairManaged, setupSmoke, startupPreflight } from "./heal.mjs";
+import { diagnoseQuota, quotaAuthValid } from "./quota-diagnostics.mjs";
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
@@ -45,6 +47,7 @@ function parseArgs(argv) {
     if (a.startsWith("--")) {
       const eq = a.indexOf("=");
       if (eq !== -1) flags[a.slice(2, eq)] = a.slice(eq + 1);
+      else if (["fix", "json", "dry-run", "no-mcp", "yes", "help", "show-key"].includes(a.slice(2))) flags[a.slice(2)] = true;
       else flags[a.slice(2)] = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true;
     } else positional.push(a);
   }
@@ -85,7 +88,7 @@ function usage(code) {
   zcode-kit setup [--harness auto|omp,pi,...]   bootstrap + integrate (auto = detect)
   zcode-kit integrate <harness> [--dry-run] [--scope user]
   zcode-kit run <harness> -- <args>             launch harness wired to ZCode
-  zcode-kit doctor [--harness <id>] [--json]
+  zcode-kit doctor [--fix] [--harness <id>] [--json]
   zcode-kit status | models [--json] [--show-key] | usage --json
   zcode-kit auth status|login|logout
   zcode-kit update [--version <v>] | rollback [tx-id] | uninstall
@@ -173,7 +176,9 @@ async function cmdSetup() {
     if (finishErr) console.error(`WARN: recording the transaction failed (${finishErr.message})`);
     if (txId) console.log(`\ntransaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
   }
-  return 0;
+  const smoke = await setupSmoke(ctx);
+  console.log(smoke.detail);
+  return smoke.code;
 }
 
 /** MCP bridge registration (OMP mcp.json / claude mcp add) — additive, namespaced. */
@@ -266,7 +271,7 @@ async function cmdRun() {
   const args = passthrough ?? [];
   const key = ctx.key();
   const env = { ...process.env, ZCODE_PROXY_KEY: key };
-  ensureProxyRunning();
+  // Wrapped launchers own their preflight; do not run it twice here.
   let cmd, argv;
   if (id === "claude-code") {
     cmd = process.platform === "win32" ? join(ROOT, "bin", "zcode-claude.cmd") : join(ROOT, "bin", "zcode-claude.sh");
@@ -278,6 +283,9 @@ async function cmdRun() {
     cmd = process.platform === "win32" ? join(ROOT, "bin", "zcode-aider.cmd") : join(ROOT, "bin", "zcode-aider.sh");
     argv = args;
   } else if (id === "opencode") {
+    const ready = await startupPreflight(ctx);
+    console.error(ready.detail);
+    if (ready.code) return ready.code;
     cmd = "opencode";
     argv = args;
   } else {
@@ -288,22 +296,23 @@ async function cmdRun() {
   return res.status ?? 1;
 }
 
-function ensureProxyRunning() {
-  const manager = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
-  const res = spawnSync(process.execPath, [manager, "start"], { encoding: "utf8", timeout: 40000 });
-  if (res.status !== 0) {
-    console.error((res.stdout ?? "") + (res.stderr ?? ""));
-    console.error("ERROR: the local proxy could not be started/verified — see logs/proxy.log");
-    process.exit(3);
-  }
-}
-
 // ------------------------------------------------------------------ doctor
 async function cmdDoctor() {
+  const ids = flags.harness ? String(flags.harness).split(",").map(s => s.trim()).filter(Boolean) : [...ADAPTER_IDS];
+  for (const id of ids) requireHarness(id);
+  const detected = detectHarnesses(ctx.home);
+  if (flags.fix) {
+    assertNotCheckoutWrite();
+    const targets = ids.filter(id => flags.harness || detected[id]);
+    const adapters = await Promise.all(targets.map(async id => (await loadAdapter(id)).default));
+    const repaired = await repairManaged(ctx, adapters, flags.json ? () => {} : console.log);
+    if (repaired.id && !flags.json) console.log(`transaction ${repaired.id} recorded — undo with: zcode-kit rollback ${repaired.id}`);
+  }
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
   const managerPath = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
-  const core = spawnSync(process.execPath, [managerPath, "doctor"], { encoding: "utf8" });
+  const core = spawnSync(process.execPath, [managerPath, "doctor"], { encoding: "utf8", timeout: 25000 });
+  if (core.error || core.signal) add("manager doctor completed", false, "manager check failed or timed out");
   // Parse the manager doctor output in BOTH modes: the text summary and exit
   // code must count the same FAILs the user is shown, not only adapter checks.
   const lines = (core.stdout ?? "").split("\n");
@@ -315,10 +324,6 @@ async function cmdDoctor() {
     process.stdout.write(core.stdout ?? "");
   }
 
-  const ids = flags.harness ? [String(flags.harness)] : [];
-  if (flags.harness) requireHarness(String(flags.harness));
-  else ids.push(...ADAPTER_IDS);
-  const detected = detectHarnesses(ctx.home);
   for (const id of ids) {
     const { default: adapter } = await loadAdapter(id);
     if (!flags.harness && !detected[id]) {
@@ -412,18 +417,14 @@ async function cmdAuth() {
     try {
       const res = await proxyFetch("/quota");
       const body = await res.json().catch(() => null);
-      // logged_in must mean "proven": only a real quota snapshot counts.
-      // A 401, 5xx, malformed body or upstream 3012 reports false plus the
-      // actual error — never a misleading default true.
-      const upstreamNotLoggedIn = body?.code === 3012;
-      const loggedIn = res.ok && !upstreamNotLoggedIn && body !== null && typeof body === "object";
-      const errors = Array.isArray(body?.errors) ? body.errors : [];
-      if (!loggedIn && errors.length === 0) {
-        if (upstreamNotLoggedIn) errors.push("upstream reports not logged in (code 3012)");
-        else if (!res.ok) errors.push(`proxy responded HTTP ${res.status} (${body?.error?.type ?? "unknown"})`);
-        else errors.push("unexpected quota response shape");
-      }
-      console.log(JSON.stringify({ logged_in: loggedIn, errors, jwt: body?.jwt ?? null }, null, 2));
+      // Snapshot errors use billing prefixes, not a top-level code. A balance
+      // rejection is not a logout; unknown/partial errors are not auth proof.
+      const diagnostic = diagnoseQuota(res.status, body);
+      const loggedIn = quotaAuthValid(res.status, body, diagnostic);
+      const errors = diagnostic.cause === "healthy" ? [] : [diagnostic.detail];
+      const jwt = body?.jwt && Number.isFinite(body.jwt.ageHours) && Number.isFinite(body.jwt.issuedAt)
+        ? { ageHours: body.jwt.ageHours, issuedAt: body.jwt.issuedAt } : null;
+      console.log(JSON.stringify({ logged_in: loggedIn, errors, jwt }, null, 2));
       return 0;
     } catch (err) {
       console.log(JSON.stringify({ logged_in: false, error: String(err.message) }, null, 2));
@@ -435,16 +436,16 @@ async function cmdAuth() {
     return res.status ?? 1;
   }
   if (sub === "logout") {
-    console.log("This removes the kit proxy's OWN stored credential (~/.zcode-proxy/credentials.json).");
+    const credFile = process.env.ZCODE_PROXY_CREDENTIALS_PATH || join(ctx.home, ".zcode-proxy", "credentials.json");
+    console.log(`This removes the kit proxy's effective credential store: ${credFile}`);
     console.log("Your ZCode Desktop login and its data are NOT touched.");
     if (flags.yes !== true) {
       console.log("Re-run with --yes to confirm.");
       return 2;
     }
-    const credFile = join(ctx.home, ".zcode-proxy", "credentials.json");
     if (existsSync(credFile)) {
       rmSync(credFile);
-      console.log("removed ~/.zcode-proxy/credentials.json (proxy-only credential)");
+      console.log(`removed ${credFile} (proxy-only credential)`);
     } else {
       console.log("no proxy credential present");
     }

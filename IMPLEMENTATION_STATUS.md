@@ -1,5 +1,75 @@
 # IMPLEMENTATION_STATUS
 
+## Aktueller Arbeitsstand — 2026-09-16
+
+**Quellcode unabhängig freigegeben; isolierte Tests bestanden; Release extern blockiert.**
+Opus-5 (`max`) hat nach dem bestätigten Nutzungslimit von Fable 5.1 (`xhigh`)
+die abschließende Codeprüfung übernommen und `CODE APPROVE` erteilt.
+Implementierung, Fixture-Test, Live-Test und veröffentlichte Version sind getrennte Zustände.
+Die persönliche Installation wurde in diesem Auftrag nicht verändert; vorhandene
+Installationen erhalten diese Änderungen nicht allein durch eine Änderung im Checkout.
+
+- Continue: sichere leere YAML-Modelllisten (`models: []`), Kommentare und
+  einrückungslose Listen; Nutzermodelle/Default-Reihenfolge bleiben erhalten.
+  JSON-gequoteter lokaler Proxy-Key statt ungültiger Env-Interpolation; Drift-Prüfung
+  ohne Key-Ausgabe. Continue nicht installiert: echte Client-/Live-Prüfung blockiert.
+- Diagnose/Reparatur (`cli/heal.mjs`): ausgewählte Adapter unter Setup-Lock;
+  Key-Angleichung nur bei eindeutigem Kit-Template und exklusiv reservierbarem
+  Offline-Port. Fehler rollen erfasste Reparatur-Dateiänderungen zurück, anders
+  als Setup. Checkout-Opt-in bleibt nötig; kein allgemeines Bootstrap/Dependency-Install.
+- Start-Preflight: sicherer Manager-Start plus einmalige begrenzte Quota-Prüfung;
+  Auth `3012` getrennt von Balance `1113`/`3001`. Upstream-Befunde und fehlende
+  Telemetrie warnen, lassen aber den gesunden Proxy für begrenzte Modellpfad-Recovery
+  nutzbar; lokale Identitäts-/Startfehler blockieren. Kein Fremdprozess-Kill/Lock-Takeover.
+- Setup-Smoke: ein minimaler echter Flash-Aufruf, der Kontingent verbrauchen kann;
+  CI/Test oder `ZCODE_KIT_SKIP_SMOKE=1` überspringen ihn. Fehler lassen gespeicherte
+  Integrationen bestehen. Das ist Quellcodeverhalten, kein neuer Live-Beweis.
+- Credential-Recovery: Request-Reload bewahrt den letzten gültigen Wert bei
+  ungültigen/teilgeschriebenen Stores, löscht ihn aber bei fehlendem Store/Logout.
+  Ausgewählte nichtstreamende Auth-/Balance-Fehler: ein vorhandener Desktop-Import
+  und eine Wiederholung nur bei geändertem effektivem Credential. Parallele
+  Recovery geteilt, pro Credential/Quellrevision begrenzt; verschlüsselte Persistenz
+  nur bei unverändertem beobachtetem Proxy-Store. Keine Desktop-Schreibzugriffe,
+  Browser-Anmeldung, Trial-Aktivierung oder Wiederholung laufender SSE-Streams.
+- npm: `postinstall` zeigt nur einen Hinweis. Erst `zcode-kit setup` führt die
+  Installation/Integration aus.
+- `setup` / `integrate` behalten bei Fehlern bereits erfolgreiche Teilschritte
+  und protokollieren sie für einen expliziten Rollback. Kein globales All-or-nothing:
+  Credentials, lokale Schlüsselerstellung, Dependencies und externe CLI-Aktionen
+  sind nicht vollständig rückrollbar.
+- Baseline vor Änderungen: **65 Kit / 872 Proxy / 42 MCP**; damaliger MCP-`wmic`-Kill-Pfad
+  nicht ausgeführt. Finale isolierte Suiten: **150 Kit PASS + 1 Live-Opt-in SKIP,
+  946 Proxy PASS, 42 MCP PASS**, keine Fehler. Echter besitzgeprüfter Windows-
+  Fixture-Kill jetzt ausgeführt. OMP beide Modelle normal, nach eigenem Proxy-
+  Absturz und nach Offline-Key-Reparatur live mit exakt `52`; ein erster
+  Normalaufruf-Timeout bleibt dokumentiert. Echte isolierte npm- und PowerShell-
+  Installationsprüfungen bestanden; Details und Grenzen in `TEST_REPORT.md`.
+- Release-Workflow (bestehende Trigger-/Versionspolitik): Push auf `main`, `v*`-Tags und
+  manueller Dispatch lösen Tests aus. Nicht-Tag-Läufe verwenden die aktuelle Version
+  nur bei npm-E404 und fehlendem Remote-Tag oder Tag auf exakt demselben HEAD.
+  Sonst suchen sie maximal 100 Patch-Kandidaten, die auf npm und bei Remote-Tags
+  frei sind, und erzeugen Versions-Commit/Tag. Dispatch ist nur unter diesen
+  Bedingungen ein gleichversioniger Retry; ein fremder Tag-Commit blockiert
+  Versionswiederverwendung auch bei fehlender npm-Version. Vorhandene GitHub-Release-Assets bleiben erhalten;
+  Tag-Läufe überspringen npm-Publish bei bereits veröffentlichter Version.
+  Versions-Gate, Tests und OIDC-Publish bleiben erforderlich. Neue Workflow-Härtung:
+  npm 11.19.1, CI-Paketierung nur getrackter Dateien, nur strukturiertes Registry-E404
+  gilt als unveröffentlicht, begrenzte Prüfung der exakten Version nach Publish.
+  Das ist Quellcodeverhalten, kein Nachweis einer erfolgreichen Veröffentlichung.
+- Release-Gate: Upstream-README deklariert nachweislich MIT; separate LICENSE-/
+  Copyright-Notice-Datei nicht gefunden. Redistribution-/Notice-Prüfung bleibt
+  offen; kein pauschales „unlizenziert“, aber auch keine Freigabe behauptet.
+
+---
+
+## Archiv — frühere Implementierungs- und Installationsbeobachtungen
+
+Alle nachfolgenden Fertig-/Live-/Installations- und Release-Gate-Angaben beziehen
+sich ausschließlich auf den genannten historischen Stand. Sie wurden in diesem
+Auftrag nicht erneut verifiziert und belegen keine aktuelle persönliche Reparatur.
+Die damalige Aussage „alle Schreibvorgänge transaktional“ war zu weit gefasst;
+maßgeblich sind die oben dokumentierten Grenzen.
+
 Stand: **2026-09-13 (spät) — Audit-Remediation + zcode-kit CLI + Zehn-Adapter-Matrix + Release-Vorbereitung**
 
 ## Baustein-Status (Audit-Auftrag)
@@ -40,9 +110,9 @@ Stand: **2026-09-13 (spät) — Audit-Remediation + zcode-kit CLI + Zehn-Adapter
 | Bootstrap-Schlüssel-Substitution | Bug behoben: „GENERATE_ME" stand auch im Beispiel-Kommentar; Replace zielt jetzt auf denquoted Wert und validiert |
 |Geheimnisse | Kit-Ordner source-only: kein `.proxykey`, kein `proxy/config.yaml`, kein `generated/`, keine Logs/Backups — alles regeneriert setup.mjs |
 
-## Referenzinstallation (Separat, auf diesem Rechner)
+## Historische Referenzinstallation (damalige Beobachtung, 2026-09-13)
 
-`C:\Users\miche\zcode-omp-integration` — unverändert aktiv: doctor 9/9 PASS (nach Synchronisation
+`C:\Users\miche\zcode-omp-integration` — damals als aktiv protokolliert: doctor 9/9 PASS (nach Synchronisation
 des Manager-Hardening und Entfernen des versehentlich dorthin kopierten `mcp/`-Ordners),
 Proxy läuft, OMP-Smoke „BEREIT". Die beiden Installationen teilen Port 8457 nicht gleichzeitig —
 pro Rechner läuft genau eine Proxy-Instanz; das Kit erkennt auf Port 8457 eine fremde Instanz

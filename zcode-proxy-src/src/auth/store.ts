@@ -117,6 +117,16 @@ export async function saveCredential(cred: Credential): Promise<void> {
   atomicWriteStore(JSON.stringify({ encrypted }));
 }
 
+/** Compare again after async encryption; no await between comparison and atomic rename. */
+export async function saveCredentialIfUnchanged(cred: Credential, snapshot: string): Promise<boolean> {
+  const encrypted = await encrypt(JSON.stringify(cred));
+  try {
+    if (readFileSync(storeFile(), "utf8") !== snapshot) return false;
+    atomicWriteStore(JSON.stringify({ encrypted }));
+    return true;
+  } catch { return false; }
+}
+
 export async function loadCredential(): Promise<Credential | null> {
   if (!existsSync(storeFile())) return null;
   const raw = readFileSync(storeFile(), "utf-8");

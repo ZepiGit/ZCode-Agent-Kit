@@ -3,7 +3,7 @@
 # Credentials are NOT written here — this sources the kit-generated env file.
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 ROOT=$(dirname -- "$SCRIPT_DIR")
-node "$ROOT/proxy/zcode-proxy-manager.mjs" start >/dev/null 2>&1 || true
+node "$ROOT/cli/heal.mjs" || exit $?
 if [ ! -f "$ROOT/generated/aider-zcode.env" ]; then
   echo "zcode-aider: missing $ROOT/generated/aider-zcode.env — run: node cli/zcode-kit.mjs integrate aider" >&2
   exit 2

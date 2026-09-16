@@ -1,6 +1,69 @@
-# Security-Hinweise (Stand 2026-09-13)
+# Security-Hinweise
 
-## Politik-Entscheidungen (nach externem Audit, 2026-09-13)
+## Aktueller Arbeitsstand — 2026-09-15
+
+Die nachstehenden aktuellen Aussagen beschreiben den geprüften Quellcode, keine
+veröffentlichte Version und keine Reparatur der persönlichen Installation.
+Abschließende Testergebnisse stehen noch aus; historische Audit- und Live-Belege
+weiter unten sind kein neuer Sicherheitsaudit dieses Arbeitsstands.
+
+- **Continue-YAML:** Leere Flow-Listen (`models: []`, auch mit getrenntem Kommentar)
+  werden in eine Blockliste überführt. Nichtleere Inline-Werte, doppelte
+  Top-Level-Schlüssel und nicht sicher editierbare Formen werden verweigert,
+  nicht durch einen zweiten `models`-Schlüssel verdeckt. Nutzer-Modelle bleiben
+  zuerst, auch bei einrückungslosen Listen. Die verwaltete Continue-Konfiguration
+  enthält den JSON-gequoteten lokalen Proxy-Key, nicht die Desktop-Anmeldung;
+  Adapter-Logs geben ihn nicht aus. Config und Transaktionsbackups deshalb nicht
+  teilen oder veröffentlichen. Nach Key-Rotation erneut integrieren.
+- **Credentials:** Request-seitiges Nachladen unterscheidet einen fehlenden Store
+  (In-Memory-Credential wird gelöscht) von ungültigen/teilgeschriebenen Daten
+  (letzter gültiger Wert bleibt). Das stoppt keine bereits laufende Anfrage und
+  widerruft keinen Upstream-Token. Recovery liest nur die vorhandene eigene Desktop-
+  Anmeldung, startet keinen Browser-Login und aktiviert weder Trial noch Claim.
+  Versuche pro abgelehntem Credential und Desktop-Quellrevision sind begrenzt und
+  parallel zusammengeführt; eine spätere Desktop-Anmeldung kann erneut geprüft
+  werden. Neue gültige Werte werden nur bei unverändertem beobachtetem Proxy-Store
+  verschlüsselt persistiert; Desktop-Dateien werden nicht beschrieben. Ausgewählte
+  nichtstreamende Auth-/Balance-Fehler erlauben nur eine Wiederholung vor Ausgabe
+  und nur bei geändertem effektivem Credential. Kein SSE-/In-Stream-Replay.
+  Maximal 128 Fehler-Credential/Quellrevision-Paare pro Prozess, danach kein
+  automatischer Reimport bis zum Neustart. Die Store-Prüfung vor atomarem Rename
+  ist kein prozessübergreifender Lock: ein enges Rennen zwischen Vergleich und
+  Ersetzen bleibt. Keine allgemeine CAS-/Mehrprozess-Garantie behaupten.
+  Zugang, Berechtigung und Quota werden dadurch nicht garantiert.
+- **Prozessidentität:** Start-Preflight nutzt den sicheren Manager-Start; ein
+  fremder oder nicht sicher identifizierter Listener wird nicht gestoppt. Ein
+  belegter Port ist kein Besitznachweis, alte Locks werden nicht automatisch
+  übernommen. Einmalige Quota-Prüfung mit Timeout; keine dauernde Polling-Schleife.
+  Auth `3012` und Balance `1113`/`3001` bleiben getrennt. Diese Upstream-Befunde
+  sowie fehlende Telemetrie warnen, blockieren aber den gesunden lokalen Proxy
+  nicht: Der Modellpfad darf begrenzte Credential-Recovery versuchen. Lokale
+  Identitäts-/Startfehler blockieren weiter; es gibt keinen erfundenen Nullsaldo. `logs/heal.log` ist größenbegrenzt
+  und verwendet feste Kategorien statt Secrets oder Provider-Antworttext.
+- **Explizite Reparatur:** `doctor --fix` übernimmt nur eindeutige Kit-Template-
+  Key-Angleichung bei exklusiv reservierbarem Offline-Port sowie ausgewählte
+  Adapter. Bei nötiger Key-Angleichung werden eigene/defekte Configs und belegte
+  Ports verweigert; ein passender Key benötigt keine Config-Änderung. Setup-Lock
+  und Checkout-Opt-in bleiben aktiv. Bei Fehlern werden erfasste Dateiänderungen
+  dieser Reparatur zurückgerollt; das ist keine globale Rollback-Garantie.
+- **Setup-Live-Smoke:** Normaler Setup-Lauf versucht einen minimalen Flash-Aufruf
+  mit Timeout. Er kann Kontingent verbrauchen; CI/Test und `ZCODE_KIT_SKIP_SMOKE=1`
+  überspringen ihn. Ein Fehlschlag entfernt keine gespeicherten Integrationen.
+- **Rollback-Grenzen:** Erfasste Konfigurationsdateien haben Backups; bei
+  abgeschlossenen Transaktionen schützen Post-Hashes spätere Nutzeränderungen.
+  `setup` / `integrate` protokollieren Teiländerungen nach Fehlern, statt sie
+  automatisch vollständig zurückzunehmen. Crash-Recovery eines offenen Journals
+  stellt dessen Vorzustand wieder her und bietet nicht denselben Post-Hash-Schutz.
+  Credentials, lokale Schlüsselerstellung, Dependencies und externe CLI-Wirkungen
+  sind nicht vollständig transaktional; externe Registrierungen können manuelle
+  Undo-Kommandos benötigen.
+- **npm:** Der Postinstall-Hook zeigt nur einen Hinweis. Setup/Integration erfolgt
+  erst durch den expliziten Setup-Aufruf.
+
+## Historische Politik-Entscheidungen (nach externem Audit, 2026-09-13)
+
+Die damaligen Scan-Ergebnisse und Testzahlen gelten nur für den damaligen Stand;
+„keine Befunde“ bedeutet nicht, dass aktuelle Dateien nachweislich fehlerfrei sind.
 
 Ein externes Audit (14 Findings, „ZAK-001" bis „ZAK-014") führte zu diesen
 dokumentierten Entscheidungen und Code-Nachbesserungen. Ein zweiter,

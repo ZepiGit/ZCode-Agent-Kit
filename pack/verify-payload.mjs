@@ -26,6 +26,8 @@ const FORBIDDEN_FILES = [
 
 const REQUIRED_FILES = [
   "cli/zcode-kit.mjs",
+  "cli/heal.mjs",
+  "lib/transaction.mjs",
   "cli/adapters/omp.mjs",
   "cli/adapters/pi.mjs",
   "cli/adapters/goose.mjs",

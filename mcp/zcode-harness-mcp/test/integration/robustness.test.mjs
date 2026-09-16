@@ -5,12 +5,49 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { startBridge } from "./client.mjs";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
 const projectRoot = path.resolve(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]):/, "$1:"));
+const execFileAsync = promisify(execFile);
+
+async function crashOwnedFixture(client) {
+  const bridgePid = client.child.pid;
+  assert.ok(Number.isSafeInteger(bridgePid) && bridgePid > 0);
+  assert.equal(client.child.exitCode, null, "test-owned bridge must still be alive");
+  assert.equal(client.child.killed, false);
+  const fixturePath = path.join(projectRoot, "test", "fixture", "fake-harness.mjs");
+  const psLiteral = (value) => `'${value.replaceAll("'", "''")}'`;
+  const script = `
+    $ErrorActionPreference = 'Stop'
+    $bridge = Get-CimInstance Win32_Process -Filter "ProcessId=${bridgePid}"
+    if (!$bridge -or $bridge.ParentProcessId -ne ${process.pid}) {
+      throw 'Bridge is not a live child of this test process'
+    }
+    $fixturePattern = '(?:^|\\s|")' + [regex]::Escape(${psLiteral(fixturePath)}) + '"?\\s+app-server\\s+--stdio\\s*$'
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=${bridgePid}" |
+      Where-Object { $_.CommandLine -match $fixturePattern })
+    if ($children.Count -ne 1) { throw 'Expected exactly one owned fixture app-server' }
+    $target = $children[0]
+    $current = Get-CimInstance Win32_Process -Filter "ProcessId=$($target.ProcessId) AND ParentProcessId=${bridgePid}"
+    $owner = Get-CimInstance Win32_Process -Filter "ProcessId=${bridgePid}"
+    if (!$owner -or $owner.ParentProcessId -ne ${process.pid} -or $owner.CreationDate -ne $bridge.CreationDate -or
+        !$current -or $current.CreationDate -ne $target.CreationDate -or $current.CommandLine -notmatch $fixturePattern) {
+      throw 'Fixture ownership changed before termination'
+    }
+    $result = Invoke-CimMethod -InputObject $current -MethodName Terminate -Arguments @{ Reason = [uint32]1 }
+    if ($result.ReturnValue -ne 0) { throw 'Owned fixture termination failed' }
+    [int]$target.ProcessId
+  `;
+  const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+    encoding: "utf8", timeout: 15_000, windowsHide: true, shell: false,
+  });
+  assert.match(stdout.trim(), /^\d+$/, "inspection must confirm one terminated fixture PID");
+  return Number(stdout.trim());
+}
 
 test("persistence: task survives bridge restart as interrupted, results stay readable", async () => {
   const c1 = await startBridge();
@@ -100,40 +137,41 @@ test("parallel write tasks in DIFFERENT workspaces are allowed", async () => {
   }
 });
 
-test("harness crash: connection recovers on next call, tasks marked honestly", async () => {
+test("harness crash: connection recovers on next call, tasks marked honestly", { skip: process.platform !== "win32" }, async () => {
   const c = await startBridge();
+  let sibling;
   try {
+    sibling = await startBridge();
+    const siblingSession = await sibling.tool("zcode_session_create", { workspacePath: sibling.workspaceDir });
+    // A PID not parented by this test must be rejected before any termination.
+    await assert.rejects(
+      () => crashOwnedFixture({ child: { pid: process.pid, exitCode: null, killed: false } }),
+      /Bridge is not a live child of this test process/,
+    );
     const started = await c.tool("zcode_task_start", { workspacePath: c.workspaceDir, prompt: "crash test" });
     await c.tool("zcode_task_wait", { taskId: started.taskId, timeoutMs: 30_000 });
-    // Kill the harness child process (bridge keeps running).
-    // The harness is a grandchild; find it via the task record sessionId is
-    // not possible from outside — instead use zcode_operation_invoke to force
-    // a benign call and then kill the child by PID through the health tool
-    // (health exposes pid? no) — pragmatic approach: kill all fake-harness
-    // processes spawned after the bridge start.
-    const { execSync } = await import("node:child_process");
-    try {
-      // Windows: find node processes running the fake harness
-      const out = execSync("wmic process where \"commandline like '%fake-harness%' and name like 'node%'\" get processid", { encoding: "utf8" });
-      const pids = out.split(/\s+/).filter((s) => /^\d+$/.test(s));
-      for (const pid of pids) {
-        try {
-          execSync(`taskkill /PID ${pid} /F`);
-        } catch {
-          /* ignore */
-        }
-      }
-    } catch {
-      /* wmic may be unavailable; skip kill, still verify recovery */
+    const killedPid = await crashOwnedFixture(c);
+    assert.notEqual(killedPid, c.child.pid, "bridge itself must survive");
+    let stopped;
+    for (let i = 0; i < 40; i += 1) {
+      stopped = await c.tool("zcode_health", {});
+      if (stopped.runtime.running === false) break;
+      await new Promise((r) => setTimeout(r, 50));
     }
-    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(stopped.runtime.running, false, "crash injection must actually stop the fixture harness (F3)");
+    const siblingState = await sibling.tool("zcode_session_get", { sessionId: siblingSession.session.sessionId });
+    assert.equal(siblingState.projection.sessionId, siblingSession.session.sessionId, "other bridge's fixture session must survive");
     // Next harness-bound call must recover transparently (restart once).
     const health = await c.tool("zcode_health", {});
     assert.equal(health.degraded ?? false, false);
     const models = await c.tool("zcode_models_list", { workspacePath: c.workspaceDir });
     assert.ok(models.modelCatalog.available.length >= 2);
+    const recovered = await c.tool("zcode_health", {});
+    assert.equal(recovered.runtime.running, true);
+    const retained = await c.tool("zcode_task_get", { taskId: started.taskId });
+    assert.equal(retained.state, "completed", "completed task must not be changed by a later crash");
   } finally {
-    await c.stop();
+    await Promise.all([c.stop(), sibling?.stop()]);
   }
 });
 

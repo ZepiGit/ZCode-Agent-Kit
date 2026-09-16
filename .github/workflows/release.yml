@@ -75,18 +75,24 @@ jobs:
       # Trusted Publishing (OIDC) needs npm >= 11.5; Node 24 ships npm 11.3.
       # npm@11 supports Node 24; npm@12 would need >= 22.22 / 24.15 / 26.
       - name: Upgrade npm for OIDC trusted publishing
-        run: npm install -g npm@11
+        run: |
+          npm install -g npm@11.19.1
+          npm --version
       # AUTO-RELEASE POLICY (owner request): every run on main (push or
       # workflow_dispatch) must produce a NEW release number. If the checked-out
-      # package.json version is already on npm, bump the patch version, update
-      # ALLOW_PUBLISH, commit + tag — this same job then builds assets and
-      # publishes that exact version. A package.json version not yet on npm is
-      # released as-is. Tag pushes keep the classic gated path below.
-      - name: Resolve release version (auto-bump patch when already published)
+      # package.json version is on npm or its remote tag points to another
+      # commit, select an unused patch, update ALLOW_PUBLISH, commit + tag.
+      # Never publish changed code under a tag whose assets already exist.
+      # An unpublished exact-HEAD retry keeps its version and existing assets.
+      # Tag pushes keep the classic gated path below.
+      - name: Resolve release version (avoid occupied npm versions and tags)
         run: |
           CUR=$(node -p "require('./package.json').version")
-          if [ "${GITHUB_REF_TYPE}" != "tag" ] && npm view "zcode-agent-kit@$CUR" version >/dev/null 2>&1; then
-            NEW=$(node -e "const s='$CUR'.split('.'); s[2]=Number(s[2])+1; console.log(s.join('.'))")
+          NEW="$CUR"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            NEW=$(node scripts/registry-version.mjs resolve "$CUR")
+          fi
+          if [ "$NEW" != "$CUR" ]; then
             node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version='$NEW';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n')"
             node -e "const fs=require('fs');const l=JSON.parse(fs.readFileSync('package-lock.json','utf8'));l.version='$NEW';if(l.packages&&l.packages[''])l.packages[''].version='$NEW';fs.writeFileSync('package-lock.json',JSON.stringify(l,null,2)+'\n')"
             echo "$NEW" > pack/ALLOW_PUBLISH
@@ -109,7 +115,8 @@ jobs:
         if: github.ref_type == 'tag'
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          if npm view "zcode-agent-kit@$VERSION" version >/dev/null 2>&1; then
+          PUBLISHED=$(node scripts/registry-version.mjs check "$VERSION")
+          if [ "$PUBLISHED" = "present" ]; then
             echo "SKIP_PUBLISH=1" >> "$GITHUB_ENV"
             echo "zcode-agent-kit@$VERSION is already published — publish steps will be skipped."
           else
@@ -127,12 +134,12 @@ jobs:
           [ "v$VERSION" = "$TAG" ] || { echo "tag $TAG does not match package.json $VERSION"; exit 1; }
           grep -qx "$VERSION" pack/ALLOW_PUBLISH || { echo "pack/ALLOW_PUBLISH does not allow $VERSION"; exit 1; }
       - name: Assemble launcher package
-        run: node pack/build.mjs
+        run: node pack/build.mjs --tracked-only
       - name: Verify package payload (no secrets, no vendored trees)
         run: node pack/verify-payload.mjs
       - name: Dry-run publish (fails on payload problems, publishes nothing)
         if: env.SKIP_PUBLISH != '1'
-        run: node pack/build.mjs --dry-run-publish
+        run: node pack/build.mjs --tracked-only --dry-run-publish
       - name: Build release assets (git-archive tarball, installers, checksums)
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v$VERSION"; fi
@@ -157,10 +164,14 @@ jobs:
           fi
           ASSETS="release/v$VERSION.tar.gz release/install.ps1 release/install.sh release/checksums.txt"
           if [ -f "docs/RELEASE_NOTES_${TAG}.md" ]; then
-            gh release create "$TAG" $ASSETS --title "zcode-agent-kit $TAG" --notes-file "docs/RELEASE_NOTES_${TAG}.md"
+            gh release create "$TAG" $ASSETS --target "$(git rev-parse HEAD)" --title "zcode-agent-kit $TAG" --notes-file "docs/RELEASE_NOTES_${TAG}.md"
           else
-            gh release create "$TAG" $ASSETS --title "zcode-agent-kit $TAG" --generate-notes
+            gh release create "$TAG" $ASSETS --target "$(git rev-parse HEAD)" --title "zcode-agent-kit $TAG" --generate-notes
           fi
       - name: Publish to npm via OIDC trusted publishing
         if: env.SKIP_PUBLISH != '1'
         run: cd pack/dist && npm publish --provenance
+      - name: Verify exact published version is visible on npm
+        if: env.SKIP_PUBLISH != '1'
+        timeout-minutes: 3
+        run: node scripts/registry-version.mjs verify "$VERSION"

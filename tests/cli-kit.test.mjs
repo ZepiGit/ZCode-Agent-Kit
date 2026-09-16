@@ -265,7 +265,8 @@ test("continue adapter appends managed models block, keeps existing models", asy
   const text = readFileSync(join(cont, "config.yaml"), "utf8");
   assert.match(text, /name: GPT/, "existing model kept");
   assert.match(text, /ZCode GLM-5\.3/);
-  assert.match(text, /\$\{ZCODE_PROXY_KEY\}/);
+  assert.ok(text.includes(`apiKey: ${JSON.stringify(r1.ctx.key())}`), "managed models use the actual local proxy key");
+  assert.ok(!r1.logs.join("\n").includes(r1.ctx.key()), "local proxy key is never logged");
   assert.match(text, /# >>> zcode-kit managed models/);
 
   const r2 = await runAdapter("continue", home);
@@ -464,13 +465,13 @@ test("dry-run leaves preexisting staging sentinels untouched", async () => {
   assert.ok(!readdirSync(agent).some((f) => f.includes(".zcode-staging") && f !== "models.yml.zcode-staging"), "no new staging files");
 });
 
-// AUD-010: an inline `models:` value cannot be block-edited — the adapter
-// must refuse instead of appending a duplicate top-level key.
+// AUD-010: a nonempty inline `models:` value cannot be block-edited — the
+// adapter must refuse instead of appending a duplicate top-level key.
 test("continue adapter fails closed on inline models value, appends after commented header", async () => {
   const home = fakeHome("continue-inline");
   const cont = join(home, ".continue");
   mkdirSync(cont, { recursive: true });
-  const original = "name: t\nversion: 0.0.1\nschema: v1\nmodels: []\n";
+  const original = "name: t\nversion: 0.0.1\nschema: v1\nmodels: [{name: User, provider: openai, model: user-model}]\n";
   writeFileSync(join(cont, "config.yaml"), original);
   await assert.rejects(() => runAdapter("continue", home), /cannot safely edit/);
   assert.equal(readFileSync(join(cont, "config.yaml"), "utf8"), original, "nothing written on refusal");
@@ -649,7 +650,7 @@ test("auth status reports logged_in false when z.ai answers with code 3012", asy
       async () => {
         const out = JSON.parse(await miniSpawn(root, ["auth", "status"]));
         assert.equal(out.logged_in, false);
-        assert.ok(out.errors.includes("not logged in upstream"));
+        assert.ok(out.errors.some(error => error.includes("auth3012")), "fixed diagnostic identifies upstream auth code without echoing provider text");
       },
     );
   } finally {

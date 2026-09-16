@@ -1,11 +1,76 @@
 # TEST_REPORT — ZCode-Provider-Integration
 
+## Aktuelle Evidenz — 2026-09-16
+
+**Isolierte Gesamtsuiten bestanden; unabhängige Code-Abschlussreview freigegeben; Veröffentlichung extern blockiert.**
+Die Ergebnisse gelten für den geprüften Quellstand, nicht für ein bereits
+veröffentlichtes Release oder eine aktualisierte persönliche Installation.
+
+| Evidenz | Ergebnis / Grenze |
+|---|---|
+| Übergebene Baseline vor den aktuellen Änderungen | Kit **65**, Proxy **872**, MCP **42** Tests; keine Abschlusszahlen für den geänderten Stand |
+| MCP-Baseline | Der `wmic`-Kill-Pfad wurde **nicht ausgeführt**; die Suite-Zahl beweist diesen Windows-Prozesspfad nicht |
+| Abschließende isolierte Kit-Suite | **150 PASS, 0 FAIL, 1 SKIP**; übersprungen ist der ausdrücklich aktivierbare Live-Test |
+| Abschließende isolierte Proxy-Suite | **946 PASS, 0 FAIL** |
+| Abschließende isolierte MCP-Suite | **42 PASS, 0 FAIL**; Windows-Crash-Recovery führt jetzt den besitzgeprüften Fixture-Kill tatsächlich aus |
+| Live OMP, installierter Quellstand in isolierter Kopie | Beide Modelle antworten exakt `52`, Exit 0 |
+| Live OMP, reparierter Quellstand in isolierter Kopie | Beide Modelle normal, nach eigenem Proxy-Absturz und nach Offline-Key-Reparatur exakt `52`, Exit 0 |
+| Persönliche Installation | Nicht aktualisiert oder repariert; überwachte 304 Konfigurations-/Credential-Dateien in den QA-Messfenstern in Inhalt, Existenz und mtime unverändert |
+| Review / Veröffentlichung | Fables Befunde wurden nachgebessert; nach bestätigtem Fable-Nutzungslimit erteilte Opus-5 max **CODE APPROVE** für den Feature-Branch. npm-Owner-Zugriff und Upstream-Notice-Klärung blockieren die Veröffentlichung weiterhin. |
+
+Die drei Gesamtsuiten liefen auf derselben isolierten Quellkopie
+(`485c7d30038582a2135344c568137a2b9471d4698ea94272be9ea0d473700a76`,
+QA-Inhaltsdigest, kein Git-Commit). Ein normaler GLM-5.3-Live-Aufruf erreichte
+zunächst das 180-Sekunden-Limit; die gezielte Wiederholung mit beiden Modellen
+bestand. Der erste Timeout bleibt als Beobachtung erhalten.
+
+**Installationsnachweise:** Ein echtes `npm pack` mit anschließendem
+`npm install --prefix` in einem temporären Profil bestand, ebenso der echte
+PowerShell-Installer des veröffentlichten v0.2.2. Die aktuelle PowerShell-
+Installer-Fixture führte mit simuliertem Download die echte Prüfsumme,
+Extraktion, Setup, OMP-Integration und Wiederholungsinstallation aus.
+Dependency-Installation und Live-Smoke waren dabei ausdrücklich deaktiviert;
+dies ersetzt keinen sauberen Online-Neuinstallationsnachweis. Das alte
+veröffentlichte v0.2.2 enthält die neuen Reparaturen nicht.
+
+### Abgedeckte neue Prüfbereiche
+
+- `tests/continue-compatibility.test.mjs`: leere Flow-Listen, Kommentare, CRLF,
+  Idempotenz, vorhandene Modelle, Duplikat-/Inline-Verweigerung und Dry-Run.
+- `tests/auto-heal.test.mjs`: isolierte Fake-Homes, synthetische Credentials und
+  Listener; Preflight/Timeout, Fremdport, Repair-Rollback, Logs und Smoke-Opt-out.
+- `tests/postinstall-hint.test.mjs`: npm-Hinweis ohne Setup-Subprozess oder Änderungen.
+- Proxy-Auth-Fixtures: Reload, gleichzeitige Recovery, ungültige/teilgeschriebene
+  Stores versus Logout, Desktop-Quelländerung und begrenzte Wiederholung.
+- Release-Workflow/Resolver wurde gelesen, nicht ausgeführt: Main/Dispatch nutzen
+  die aktuelle Version nur bei npm-E404 plus fehlendem Tag oder Exact-HEAD-Tag;
+  sonst wird eine auf npm und bei Remote-Tags freie Patch-Version gesucht
+  (maximal 100 Kandidaten). Fehlerhafte Registry-/Tag-Lookups brechen ab.
+  Dispatch ist nicht bedingungslos ein gleichversioniger Retry.
+
+Die genannten Fixtures wurden in den oben angegebenen Gesamtsuiten ausgeführt.
+Ein echter Account-Logout/Re-Login wurde zum Schutz der laufenden Sitzung nicht
+erzwungen; dessen Heilpfad ist durch isolierte Credential-/Provider-Tests belegt.
+
+Evidenzstufen sind nicht austauschbar: **[SOURCE]** beschreibt gelesenen Code,
+**[FIXTURE]** isolierte Tests ohne echte Anmeldung/Quota, **[CFG]** Konfigurations-
+oder Prozesstests und **[LIVE]** echte Modellaufrufe. Ein existierender Test ist
+noch kein bestandener Test; Paketprüfung ist keine Veröffentlichung. Frühere
+Live-Ergebnisse gelten nur für den damals getesteten Stand.
+
+---
+
+## Archiv — Testergebnisse vom 2026-09-13 (nicht erneut ausgeführt)
+
+Die folgenden Zahlen, Kontingente und Installationsbeobachtungen sind historische
+Aufzeichnungen, keine Aussage über den aktuellen Arbeitsbaum oder Rechnerzustand.
+
 Stand: **2026-09-13 (Audit-Remediation + zcode-kit CLI + 10-Adapter-Matrix)** · OMP 18.1.18 · zcode-proxy v4.6.4 (Commit 9a5cebe) · Node 26.7.0 / Bun 1.4.2
 Testarten: **[FIXTURE]** = Mock/isoliert ohne Quota · **[LIVE]** = echte Inferenz über den ZCode-Zugang · **[CFG]** = Konfigurations-/Prozesstest
 
-## 0. Aktueller Gesamtstand (Audit-Auftrag, 2026-09-13)
+## 0. Damaliger Gesamtstand (Audit-Auftrag, 2026-09-13)
 
-Exakte Befehle und Ergebnisse (alle am heutigen Stand ausgeführt):
+Historisch aufgezeichnete Befehle und Ergebnisse (nicht im aktuellen Auftrag erneut ausgeführt):
 
 | Suite | Befehl | Ergebnis |
 |---|---|---|

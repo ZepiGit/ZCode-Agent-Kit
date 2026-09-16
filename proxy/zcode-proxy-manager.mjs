@@ -23,6 +23,7 @@ import { appendFileSync, mkdirSync, openSync, closeSync, readSync } from "node:f
 import { existsSync, readFileSync, statSync, renameSync, writeFileSync, unlinkSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { diagnoseQuota, quotaAuthValid } from "../cli/quota-diagnostics.mjs";
 
 // ------------------------------------------------------------------ factory
 export function createManager({ root, home, processStartMsImpl } = {}) {
@@ -505,8 +506,9 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
     add("config exists", existsSync(CONFIG), CONFIG);
     add("key file exists", existsSync(KEY_FILE), KEY_FILE);
     add("proxy source installed", existsSync(join(PROXY_SRC, "node_modules")), join(PROXY_SRC, "node_modules"));
-    if (HOME) {
-      add("credentials store", existsSync(join(HOME, ".zcode-proxy", "credentials.json")), "~/.zcode-proxy/credentials.json");
+    if (process.env.ZCODE_PROXY_CREDENTIALS_PATH || HOME) {
+      const credentials = process.env.ZCODE_PROXY_CREDENTIALS_PATH || join(HOME, ".zcode-proxy", "credentials.json");
+      add("credentials store", existsSync(credentials), process.env.ZCODE_PROXY_CREDENTIALS_PATH ? "ZCODE_PROXY_CREDENTIALS_PATH (explicit store)" : "~/.zcode-proxy/credentials.json");
     } else {
       add("credentials store", null, "USERPROFILE/HOME not set — skipped");
     }
@@ -568,25 +570,16 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
       const key = readKey();
       const q = await fetch(`${base()}/quota`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
       const j = await q.json().catch(() => null);
-      if (q.ok) {
-        const issuedAt = j?.jwt?.issuedAt;
-        const exhausted = (j?.balances ?? []).some((b) => Number(b.remainingUnits) === 0);
-        return {
-          valid: true,
-          detail: exhausted ? "valid — quota currently exhausted" : "valid",
-          ageHours: issuedAt ? (Date.now() / 1000 - issuedAt) / 3600 : null,
-        };
-      }
-      if (q.status === 401 || q.status === 403) {
-        return { valid: false, detail: `auth rejected (HTTP ${q.status}) — re-login required: bun run src/index.ts auth login zai`, ageHours: null };
-      }
-      const code = j?.code;
-      if (code === 1005 || code === 1113) {
-        return { valid: true, detail: "valid — quota exhausted (code " + code + ")", ageHours: null };
-      }
-      return { valid: true, detail: `valid — unexpected quota response (HTTP ${q.status}, code ${code ?? "?"})`, ageHours: null };
-    } catch (err) {
-      return { valid: false, detail: `auth check unreachable (${err.message})`, ageHours: null };
+      const diagnostic = diagnoseQuota(q.status, j);
+      const valid = quotaAuthValid(q.status, j, diagnostic);
+      const issuedAt = j?.jwt?.issuedAt;
+      return {
+        valid,
+        detail: diagnostic.cause === "healthy" ? "valid" : diagnostic.detail,
+        ageHours: Number.isFinite(issuedAt) ? (Date.now() / 1000 - issuedAt) / 3600 : null,
+      };
+    } catch {
+      return { valid: false, detail: "auth check unreachable; quota authentication not proven", ageHours: null };
     }
   }
 
