@@ -154,7 +154,15 @@ test('hung quota request is bounded without retry', async t => {
   assert.equal(hits.filter(p => p === '/quota').length, 1);
 });
 test('repair aligns only an offline template-owned config and journals adapter changes', async t => {
-  const ctx = fixture(t); writeConfig(ctx, 1, 'old-synthetic-key');
+  const ctx = fixture(t);
+  // A real unprivileged free port: Linux (unlike Windows) refuses unprivileged
+  // binds to privileged ports, and key alignment must be able to reserve it.
+  const freePort = await new Promise((resolve, reject) => {
+    const probe = http.createServer();
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', () => { const p = probe.address().port; probe.close(() => resolve(p)); });
+  });
+  writeConfig(ctx, freePort, 'old-synthetic-key');
   const { repairManaged } = await api();
   const target = join(ctx.root, 'generated', 'managed.json');
   const adapter = { apply(c, tx) { mkdirSync(c.generated, { recursive: true }); tx.touch(target); writeFileSync(target, c.key()); } };

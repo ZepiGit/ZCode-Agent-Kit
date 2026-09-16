@@ -1,357 +1,318 @@
-# ZCode Agent Kit（日本語）
+# ZCode Agent Kit
 
 [![CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)
-![Release](https://img.shields.io/github/v/release/ZepiGit/ZCode-Agent-Kit)
 
 [English](README.md) | [中文](README.zh-CN.md) | [Español](README.es.md) | **日本語** | [Deutsch](README.de.md)
 
-> 本ドキュメントは英語原文の翻訳です。相違がある場合は英語版が正となります。
+**自分の ZCode Desktop アカウント**を、好みのコーディングアシスタントから利用するためのキットです。対応クライアントをローカルプロキシへ接続します。アシスタント自体のインストール、アカウント作成、利用枠の購入は行わず、無料・無制限のアクセスも提供しません。
 
-**自分の ZCode Desktop アカウント**を使って、お使いのエージェントハーネスから
-モデルへアクセス——追加サブスクリプションも API 購入も不要。ハーネスアダプター
-10 種、ローカルプロキシ 1 つ、透過的なロールバック。
+- **モデルプロキシ:** OpenAI Chat Completions、Responses、Anthropic Messages 形式。既定の接続先は `http://127.0.0.1:8457`。
+- **モデル:** `glm-5.3`（テキスト）、`glm-5.3-flash`（テキスト・画像）。公称コンテキストは 1M トークン、推論レベルは `low` / `high` / `max`。クライアントの対応状況とアカウント制限は引き続き適用されます。
+- **任意の MCP ブリッジ:** インストール済み ZCode ランタイムの操作を公開します。モデルプロバイダー設定とは別機能で、モデル応答には Desktop アプリの起動が必要です。
 
+> **ソースと公開版の違い（2026-09-16 確認）:** GitHub の最新公開版は **v0.2.2**、npm は **0.2.1** です。マージ済みソースにある Continue、認証回復、`doctor --fix`、インストーラーの新しい修正は、これらの公開パッケージには**まだすべて含まれていません**。「latest」の取得は Git ブランチのインストールではありません。公開版の導入と明記した箇所以外は現在のソースの説明です。[リリース情報](https://github.com/ZepiGit/ZCode-Agent-Kit/releases)を確認してください。古い CLI がオプションを受け付けることは、実装済みの証拠になりません。
+
+## 1. インストール前の準備
+
+1. **ZCode Desktop:** 自分のアカウントでログイン済み、モデル利用枠があること。
+2. **Node.js 20 以上:** ターミナルの PATH から使えること。[nodejs.org](https://nodejs.org/)
+3. **Bun:** 永続的な PATH 設定が必要です。[導入手順](https://bun.sh/docs/installation)。検証版は **1.4.2**。npm・ソースの setup が導入するのは Bun を使う依存関係であり、Bun 本体ではありません。
+4. OMP、pi、Claude Code、Codex、OpenCode、Cline、Kilo Code、Aider、Continue、Goose のうち、使うアシスタントを別途インストールしてください。
+
+**新しいターミナル**で確認します。
+
+```sh
+node --version
+bun --version
 ```
-お使いのハーネス (OMP / pi / Claude Code / Codex / OpenCode / Cline / Kilo Code /
-              Aider / Continue / Goose / MCP・OpenAI・Anthropic 対応クライアント全般)
-        │
-        ├─► ローカル zcode-proxy  http://127.0.0.1:8457（OpenAI + Anthropic + Responses 形式）
-        │         └─► zcode.z.ai（start-plan：ZCode Desktop と同じクォータ）
-        │
-        └─► zcode-harness-mcp (stdio) ──► インストール済みの ZCode Desktop（実デスクトップセッション）
-```
 
-モデル：**glm-5.3**（テキスト、コンテキスト 1M）と **glm-5.3-flash**
-（テキスト+画像、コンテキスト 1M）。検証済みの推論レベルは
-**low / high / max**（デフォルトは max）。
+PowerShell と POSIX シェルで使えます。見つからない場合は先に PATH を直してください。リリース用インストーラーは不足する Bun を取得できますが、PATH 追加は**永続的ではありません**。新しい Windows ターミナルには引き継がれず、`curl | sh` は親シェルの PATH を変更できません。既存の Bun は自動更新せず再利用します。
 
-> **作業ツリーの注記（2026-09-15）：** 修復・認証回復・postinstall の変更はローカル
-> ソースの説明で、公開済み版の検証結果ではありません。最終検証は未完了で、
-> 既存の個人インストールを修復したとは主張しません。
+**Windows:** 管理者権限なしの PowerShell を使用し、Git Bash や WSL から `install.sh` を実行しないでください。**macOS/Linux:** POSIX シェル、`curl`、`tar`、SHA-256 ツール、更新には `rsync` が必要です。Bun の導入には `unzip` も必要です。後述の Windows 検証は Linux/macOS の実クライアント検証を意味しません。
 
-## クイックスタート
+## 2. 一つの方法を選んでインストール
 
-**Windows（PowerShell）** — 最新リリースを取得、SHA256 検証済み、
-管理者権限不要：
+npm 版とリリースインストーラー版を混在させないことを推奨します。別々のキーを持ちながら、同じアシスタント設定を書き換える場合があります。
+
+### 推奨: 公開リリースのインストーラー
+
+**どのディレクトリからでも実行できます**。リポジトリのクローンや kit フォルダーへの移動は不要です。公開スクリプトをダウンロードして実行するため、組織の方針で必要なら先に内容を確認してください。
+
+**Windows — PowerShell:**
 
 ```powershell
 irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 ```
 
-**macOS / Linux**：
+**macOS/Linux — POSIX:**
 
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
-ワンライナーは**最新の公開リリース**からインストーラーを取得します。インストーラーは
-そのリリースを自動的に解決します（`ZCODE_KIT_VERSION` でバージョン固定可能、例:
-`$env:ZCODE_KIT_VERSION = "v0.2.0"`）。リリースアーカイブをダウンロードして
-チェックサムを検証し、ユーザーローカルにインストールします（既定は
-`%LOCALAPPDATA%\zcode-agent-kit` または `~/.local/share/zcode-agent-kit`、
-`ZCODE_KIT_HOME` で上書き可能）。bun が無ければ v1.4.2 をユーザーローカルに
-導入し、ハーネス検出付きで setup を実行します。
+インストーラーはアーカイブの SHA-256 を確認し、ユーザー領域に配置して setup を実行します。
 
-**npm / npx：**
+| OS | kit の場所 | コマンド用 shim |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\zcode-agent-kit` | `%LOCALAPPDATA%\Microsoft\WindowsApps\zcode-kit.cmd` |
+| macOS/Linux | `$HOME/.local/share/zcode-agent-kit` | `$HOME/.local/bin/zcode-kit` |
+
+優先順位は `ZCODE_KIT_INSTALL_DIR`、`ZCODE_KIT_HOME`、既定値です。**必ず専用の絶対パスを指定してください。ホーム、作業プロジェクト、ソースチェックアウトは指定しないでください。** 更新時に対象のファイルを置換・同期します。これらの変数はインストール先を選ぶもので、導入済み CLI の参照先を後から変更するものではありません。
+
+固定する場合は、実行前に `ZCODE_KIT_VERSION` を `v` を含む既存リリースタグに設定します。最新へ戻す際は設定を解除してください。固定されるのはアーカイブで、上のワンライナーはインストーラースクリプト自体を最新リリースから取得します。
+
+### 代替: npm
+
+Node と Bun を事前に PATH へ設定し、任意の場所で実行します。
 
 ```sh
 npm install -g zcode-agent-kit
 zcode-kit setup
-
-# グローバルインストールを使わない場合：
-npx --yes zcode-agent-kit setup
 ```
 
-npm パッケージは `zcode-kit` と `zcode-agent-kit` の両方のコマンドを提供します。
-postinstall は案内を表示するだけで、ランタイムの導入やハーネス設定の変更は
-**行いません**。`zcode-kit setup` を明示的に実行してください。setup は冪等性を
-意図して設計されています。npm には **Node ≥ 20** が必要で、setup が固定版の
-bun 依存関係を導入・確認します。
+現行ソースの postinstall は案内だけを表示し、統合は明示的な setup が行います。古い公開版は動作が異なる場合があります。コマンド名は `zcode-kit` と `zcode-agent-kit`。404 は対象の不存在やアクセス不可を示す場合があり、ローカルの故障を証明しません。
 
-> npm アーティファクトはメンテナーがリリースごとに公開します。`npm install` が
-> 404 を返す場合、このバージョンはまだ npm レジストリに存在しません — 上記の
-> インストーラーを使うか、ローカルビルドから
-> `npm install -g <repo>/pack/dist` で導入してください。
+一時的な `npx ... setup` を恒久的な導入に使わないでください。生成設定がパッケージの配置先を参照するため、安定したグローバル導入かインストーラーを使用します。
 
-## 初回の使い方（この順番で）
+## 3. 実際に使うインストールを確認
 
-1. **インストール**（上のコマンド）。setup はインストール済みのハーネスを検出し、
-   検出したものだけを扱います。記録された設定変更はロールバックできますが、
-   認証情報や依存関係の導入は対象外です（下記参照）。
-2. **一度ログイン**：ZCode Desktop アプリがインストール・ログイン済みであること。
-   setup はその認証情報を自動で取り込みます（不可能な場合は一回限りのログイン
-   コマンドを正確に表示します）。
-3. **確認**：`node cli\zcode-kit.mjs status`（プロキシは起動中か？クォータは？）と
-   `node cli\zcode-kit.mjs doctor`（完全な診断）。
-4. **使う** — 下の*ハーネス別の使い方*を参照。プロキシは必要に応じて自動起動します：
-   OMP は拡張経由で自動起動し、キットのラッパー（`bin\zcode-claude`、
-   `bin\zcode-codex`、`bin\zcode-aider`、`zcode-kit run ...`）は起動前にプロキシの
-   起動を保証します。それ以外（pi、Continue、Goose、素の API クライアント）は
-   一度自分で起動してください：`node proxy\zcode-proxy-manager.mjs start`
-5. **その後**：導入方法に応じた「更新」を参照。`zcode-kit rollback` は最新の
-   トランザクションに記録されたファイル変更を取り消します。`zcode-kit uninstall`
-   は統合を削除しますが、共有認証情報は削除しません。
+導入後、新しいターミナルを開きます。
 
-**リポジトリのチェックアウトから**（開発・手動インストール）：
+**PowerShell:**
 
 ```powershell
-git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
-cd zcode-agent-kit
-$env:ZCODE_KIT_ALLOW_CHECKOUT = "1"     # 明示的な同意：チェックアウトが黙って provider ルートになることはない
-node setup.mjs                          # または: node cli\zcode-kit.mjs setup --harness auto
-node cli\zcode-kit.mjs doctor
+Get-Command zcode-kit -All
+node --version
+bun --version
+zcode-kit help
 ```
 
-必要条件：**Node ≥ 20**（bun はリポジトリチェックアウト時のみ必要。インストーラーは
-自身で用意します）、**ZCode Desktop がインストール済みでログイン済み**であること
-（認証情報のインポートは既存のデスクトップログインから行います。MCP ブリッジによる
-モデル応答にはデスクトップアプリの起動が必要です）。管理者権限は一切不要です。
-WSL は検出して拒否します——Windows ホストにインストールしてください。
+**macOS/Linux:**
 
-## zcode-kit CLI
-
-```
-zcode-kit setup [--harness auto|omp,pi,...]   ブートストラップ + 検出済みハーネスの統合
-zcode-kit integrate <harness> --dry-run       書き込み内容の事前確認
-zcode-kit integrate <harness>                 アダプターを 1 つ適用（トランザクション）
-zcode-kit run <harness> -- <args>             ZCode 接続で claude-code/codex/aider/opencode を起動
-zcode-kit doctor [--fix] [--harness <id>] [--json]  診断・明示的な修復
-zcode-kit status                              プロキシ状態 + クォータスナップショット
-zcode-kit models [--json] [--show-key]        利用可能モデル一覧（稼働中プロキシから）
-zcode-kit usage --json                        アカウントの使用量/クォータ（値を捏造しない）
-zcode-kit auth status|login|logout            プロキシ資格情報のライフサイクル
-zcode-kit update                              チェックアウトを fast-forward し統合を再適用
-zcode-kit rollback [tx-id]                    最新（または指定）トランザクションを取り消し
-zcode-kit uninstall                           kit の統合を削除（共有資格情報は削除しない）
+```sh
+command -v zcode-kit
+node --version
+bun --version
+zcode-kit help
 ```
 
-記録された設定変更にはハッシュ付きバックアップを作成します。完了済みトランザクションの
-ロールバックでは、その後のユーザー変更を上書きせず競合として報告します。
-`setup` / `integrate` は途中まで成功してから失敗することがあります。その場合は
-部分的な変更を記録して rollback コマンドを表示し、全体を自動では取り消しません。
-ローカルキー作成、認証情報、依存関係の導入、外部 CLI の操作は**すべてが復元可能な
-わけではありません**。外部登録は表示された取り消しコマンドが必要な場合があります。
+`zcode-kit` が見つからなければ上記 shim のディレクトリをユーザー・シェルの PATH に追加して開き直します。複数のコピーがある場合は下記の**明示的なパス**を使ってください。Windows の PowerShell と Git Bash は別のコピーを選ぶ場合があります。
 
-## setup の挙動
+### 絶対パスなら作業ディレクトリに依存しない
 
-`setup --harness auto` はインストール済みハーネスのみを検出し、**その対象だけを
-変更します**——OMP しか無い環境に Claude/Codex の成果物は作られません：
+ターミナルごとに、**実際に選んだ導入先**を設定します。下記はリリースインストーラーの既定値で、**npm 用ではありません**。独自の場所や checkout なら代入値を変更してください。
 
-1. **bootstrap** — ローカルプロキシキー（`.proxykey`、排他的作成）と
-   `proxy/config.yaml` を生成し、`bun install --frozen-lockfile` で依存を導入
-   （失敗はハードエラー）、既存の ZCode Desktop ログインから資格情報をインポート。
-2. **10 個のアダプター**（検出または明示指定されたハーネスのみ）——
-   `harnesses/README.md` と `SUPPORT_MATRIX.json` を参照。
-3. **MCP ブリッジ** — 実在するハーネスにのみ `zcode-harness` stdio ブリッジを登録。
-   MCP 登録だけがモデル統合として数えられることはありません（Cline/Kilo は
-   manual-confirmation-required と明示）。
+**PowerShell:**
 
-OMP しか無いマシンでは、実行されるのは OMP アダプターと OMP の MCP エントリー
-だけで、Claude/Codex 関連は一切作られません。
+```powershell
+$KitRoot = Join-Path $env:LOCALAPPDATA 'zcode-agent-kit'
+if (-not (Test-Path (Join-Path $KitRoot 'cli/zcode-kit.mjs'))) { throw 'Wrong KitRoot: cli/zcode-kit.mjs not found' }
+node (Join-Path $KitRoot 'cli/zcode-kit.mjs') help
+```
 
-**Continue YAML:** 既存の `models: []`（水平空白や、空白で区切ったコメントも可）を
-ブロックリストへ変換してからモデルを追加します。インデントあり・なしのリストでも
-ユーザーのモデルを先頭に保ち、既定の順序を変えません。再実行は冪等です。空でない
-インラインリスト、重複 `models` キー、未対応形式はファイルを変更せず拒否します。
-`~/.continue/config.yaml` の管理領域には JSON 形式で引用した**ローカルプロキシキー**を
-保存します。Desktop 認証情報ではなく、ログにも出力しません。キー変更後は再統合して
-ください。旧 `${ZCODE_PROXY_KEY}` は Continue の有効な秘密値展開ではありません。
-追加の環境ファイルは作成しません。検証環境に Continue がないため、**実接続検証は
-ブロック中**です。パーサー・設定テストは実クライアントセッションの証明ではありません。
+**macOS/Linux:**
 
-## ハーネス別の使い方
+```sh
+KIT_ROOT="$HOME/.local/share/zcode-agent-kit"
+if [ -f "$KIT_ROOT/cli/zcode-kit.mjs" ]; then
+  node "$KIT_ROOT/cli/zcode-kit.mjs" help
+else
+  printf '%s\n' 'Wrong KIT_ROOT: cli/zcode-kit.mjs not found' >&2
+fi
+```
 
-**OMP**（追加型プロバイダー、thinking レベル込みの完全統合）：
+失敗したら先へ進まずパスを修正します。npm では `npm root -g` がグローバルモジュールの場所を示し、その `zcode-agent-kit` サブディレクトリが kit です。別方式のパスを流用しないでください。
 
-```bash
-omp --model zcode/glm-5.3-flash --thinking low -p "hi"
+**任意のフォルダーから `node cli/zcode-kit.mjs` を実行しないでください。** 相対パスの基準は現在地です。グローバルコマンドか絶対パスなら混同を防げます。
+
+## 4. 設定して最初のモデル呼び出しを行う
+
+Setup は実行ファイル・設定ディレクトリからアシスタントを検出してアダプターを適用します。検出だけで導入や動作の成功は証明できません。対象の指定・プレビュー例:
+
+```sh
+zcode-kit setup --harness omp
+zcode-kit integrate continue --dry-run
+```
+
+先にセクション 3 で呼び出すコピーを確認してください。Setup はユーザー設定や MCP 登録を変更できます。トランザクションを記録しますが、**全体を一括で元に戻す処理ではありません**。後半で失敗すると前半の変更は残り、rollback コマンドを表示します。
+
+現行 setup は利用枠を消費し得る小さな Flash 実リクエストも試みます。その実行で `ZCODE_KIT_SKIP_SMOKE=1` を設定すれば省略でき、CI/test も省略します。Smoke の失敗は設定を自動で取り消しません。`doctor --fix` は依存関係の導入や一般 setup を行いません。
+
+```sh
+zcode-kit status
+zcode-kit doctor
+zcode-kit auth status
+zcode-kit usage --json
+```
+
+プロキシ未起動なら失敗する場合があります。セクション 6 で起動するか、自動起動するアシスタントを使ってください。**ヘルス確認や終了コードだけではモデル利用を証明できません。** `logged_in`、利用枠の診断、実際の回答を確認します。
+
+### アシスタントは kit ではなく自分のプロジェクトで起動
+
+**編集してほしいプロジェクト**でターミナルを開くか、PowerShell の `Set-Location` / POSIX の `cd` で移動します。ランチャーはこの作業ディレクトリを保持します。
+
+**OMP は直接起動し、`zcode-kit run omp` は使いません:**
+
+```sh
+omp -p --model zcode/glm-5.3-flash "Reply with 52"
+omp -p --model zcode/glm-5.3 "Reply with 52"
+```
+
+期待結果は `52`、終了コード 0。遅延は変動し、タイムアウトは失敗として扱います。対話形式:
+
+```sh
 omp --model zcode/glm-5.3 --thinking max
 ```
 
-**pi**（`~/.pi/agent/models.json`、追加型プロバイダー `zcode`）：
-
-```bash
-pi --model zcode/glm-5.3
-```
-
-**Claude Code**（オプトインのラッパー、`~/.claude` は変更しません）：
-
-```bat
-bin\zcode-claude.cmd -p "hi" --model glm-5.3-flash
-```
-
-**Codex CLI**（オプトインのラッパー、隔離された CODEX_HOME）：
-
-```bat
-bin\zcode-codex.cmd exec "say hi" -m glm-5.3-flash
-```
-
-**Aider / OpenCode / Goose**（ランチャーはプロセスローカルの環境変数のみ設定）：
-
-```bat
-node cli\zcode-kit.mjs run aider -- --model openai\glm-5.3-flash
-node cli\zcode-kit.mjs run opencode -- .
-goose session --provider zcode
-```
-
-**Cline / Kilo Code**（GUI 設定）：kit は準備した値シートを `generated/` に書き、
-`manual-confirmation-required` として明示します——VS Code の内部状態には
-一切触れません。
-
-**その他のクライアント**（`http://127.0.0.1:8457` で OpenAI / Anthropic /
-Responses 形式、Bearer トークン = `.proxykey` の内容）：`harnesses/README.md`
-を参照。
-
-## 診断と限定的な修復（現在のソース、最終検証待ち）
-
-`zcode-kit doctor` は診断、`zcode-kit doctor --fix` は明示的な修復です。
-`--harness <id>` で対象を限定し、`--json` で構造化結果を得られます。修復は一般的な
-setup や依存関係の導入を行わず、setup ロック内で対象アダプターを再適用します。
-キーの不一致は、明確に kit テンプレートと一致し、ポートを排他的に確保できる場合のみ
-修正します。キー修正は独自・破損した設定や使用中ポートでは拒否します。一致済みの
-キーなら設定を書き換えません。チェックアウトには引き続き
-`ZCODE_KIT_ALLOW_CHECKOUT=1` が必要です。修復失敗時は記録されたファイル変更を
-ロールバックします。これは部分変更を残す setup と異なり、認証情報や外部操作は対象外です。
-
-共通の起動前チェックは安全にプロキシを起動・確認し、タイムアウト付きで一度だけクォータを
-確認します。定期ポーリング・再試行ループはありません。認証 `3012` と残高・クォータ
-`1113` / `3001` を区別し、再起動でクォータは増えません。上流の認証・残高異常や情報取得不能は警告しますが、モデル要求で限定的な認証回復を
-試せるよう正常なローカルプロキシの利用を継続します。利用可能クォータの証明でも
-残高ゼロの捏造でもありません。ローカルの識別・起動失敗はラッパーの起動を止めます。外部・識別不能のリスナーや古い所有権
-ロックを強制的に処理しません。`logs/heal.log` は容量制限付きの固定分類ログで、
-プロバイダーの応答本文は含めません。
-
-OMP は起動前チェック後、認証付きローカルヘルス確認を 60 秒間キャッシュします。
-後続要求で停止したプロキシを回復でき、起動失敗後は 1 分待ちます。正常な各ターンで
-上流クォータを繰り返し問い合わせることはありません。
-
-通常の setup は最小限の Flash 実リクエストも一度試みるため、クォータを消費する場合が
-あります。`ZCODE_KIT_SKIP_SMOKE=1` または CI/test では省略します。失敗を報告しても
-保存済み統合は取り消しません。この実装の存在だけでは実接続検証済みとはいえません。
-
-## プロキシ管理
-
-```bat
-node proxy\zcode-proxy-manager.mjs status
-node proxy\zcode-proxy-manager.mjs start
-node proxy\zcode-proxy-manager.mjs stop
-node proxy\zcode-proxy-manager.mjs restart
-node proxy\zcode-proxy-manager.mjs doctor
-node proxy\zcode-proxy-manager.mjs logs 50
-```
-
-安全性：127.0.0.1 のみにバインド。認証付きヘルス/識別チェック。fail-closed な停止
-（ポート上の身元不明・外部プロセスは**決して殺さない**。プロセス開始時刻で PID
-再利用を検出）。並列起動に対するロック。graceful→強制の二段階シャットダウン。ログ
-ローテーションと有界読み取り。トライアル請求・オフピークチャネルは無効。`doctor`
-は JWT 経過年齢と実際の認証有効性を分け、存在するコンポーネントだけを検査します。
-
-## セキュリティ & オートメーション方針
-
-率直に記載します。このツールがあなたに合うか判断する材料にしてください：
-
-- **CAPTCHA の扱い。** z.ai ゲートウェイは通常のクライアントプロトコルの一部
-  としてチャレンジページを返します — 公式 ZCode Desktop アプリはそれを自動的
-  かつ不可視に応答しています。同梱プロキシは**あなた自身のログイン済み
-  アカウント**に対してこの挙動をそのまま再現します：公式クライアントと同じ
-  方法でゲートウェイのチャレンジに応答します。人間による認証ゲートを迂回する
-  ものはなく（これらのチャレンジを人間が解くことはそもそもない）、他の
-  アカウントには触れず、CAPTCHA 代行サービスやサードパーティソルバーも
-  使用しません。
-- **トライアル自動化なし。** トライアル自動請求（claim）やオフピーク
-  スケジューリングは、kit が同梱する設定のどこにも存在せず、監査対応後は
-  基底のデフォルトも fail-closed（`false`）になりました：claim ブロックが
-  欠落・破損した設定で請求が有効化されることはありません。有効化には自身の
-  設定に明示的な `claim.enabled: true` が必要です。
-- **MCP スコープ。** `zcode-harness` ブリッジは意図的に**ユーザースコープ**で
-  登録されます：マシン全体の統合であり、プロジェクト単位ではありません。
-  取り消しは 1 コマンド（`claude mcp remove zcode-harness --scope user`）で、
-  ブリッジ自身は未認証・非ループバックの要求に一切応答しません。
-- **テンプレートではなくコードで強制**（監査対応）：プロキシはループバック
-  以外のバインドを拒否し、実際のベアラーキーなしでは起動しません。アダプター
-  は所有していない provider エントリの上書きを拒否し、setup はソース
-  チェックアウトからのユーザー設定書き込みを拒否します。
-
-## ログインの更新
-
-ランタイムは要求時に保存済みプロキシ認証情報を再読み込みします。不正・部分書き込み
-データは直前の有効値を置き換えません。ストアがない場合（logout）は再読み込みで
-消去しますが、実行中の要求の中断や上流トークンの失効は行いません。明示的に注入された
-認証情報は既定で隔離されたままです。プロセスごとの失敗認証値・ソース変更の組は
-最大 128 件で、上限後は再起動まで自動インポートを停止します。保存前にストアを比較
-しますが、プロセス間ロックはなく、他の書き込みとの短い競合可能性が残ります。
-一般的なアトミック compare-and-swap の保証ではありません。
-
-応答を出力する前の特定の非ストリーミング認証・残高エラーでは、既存 Desktop ログインを
-一度再インポートし、**有効な認証値が変わった場合のみ**一度再送できます。同時要求は回復を
-共有し、失敗した認証値と Desktop ファイルの変更ごとに試行を制限するため、後のログインを
-検出できます。有効な更新値は、観測済みストアに変更がない場合のみ暗号化してプロキシ側に
-保存します。Desktop ファイルの変更、ブラウザログイン、キー作成、trial 取得、無限再試行は
-ありません。SSE・ストリーム途中のエラーは再送しません。回復できなければ要求は失敗し、
-権限やクォータをローカルで修復することはできません。
-
-意図的に手動更新する場合：
-
-```bash
-cd zcode-proxy-src
-ZCODE_PROXY_CONFIG="../proxy/config.yaml" bun run src/index.ts auth login zai --import
-# またはブラウザログイン：
-ZCODE_PROXY_CONFIG="../proxy/config.yaml" bun run src/index.ts auth login zai
-```
-
-## アンインストール / ロールバック
-
-```bat
-node cli\zcode-kit.mjs rollback      :: 最新トランザクションを取り消し（1 回に 1 ステップ）
-node cli\zcode-kit.mjs uninstall     :: kit 所有分をロールバックし generated/ を削除
-node proxy\zcode-proxy-manager.mjs stop
-```
-
-`uninstall` は `~/.zcode-proxy/credentials.json`（他ツールと共有）や ZCode
-Desktop のログイン・データを削除しません。`zcode-kit auth logout` はプロキシ自身の
-保存資格情報のみを削除し、その旨を表示します。
-
-## 更新
-
-ソースチェックアウトでは `zcode-kit update` は変更のある作業ツリーを拒否し、
-fast-forward のみで更新します。統合の再適用には上記の部分的 setup の挙動が適用
-されます。`.git` がないリリース・tarball 導入では拒否するため、インストーラーを
-再実行してください。プロキシは固定版（`MANIFEST.md` 参照）で、パッチは `patches/`
-にあります。
-
-### リリース自動化（メンテナー向け）
-
-`.github/workflows/release.yml` は `main` push、`v*` タグ、dispatch で起動します。
-テスト後の非タグ実行では、npm 未公開かつリモートタグが存在しないか現在の HEAD と
-完全一致する場合だけ現行版を再利用します。それ以外は npm とリモートタグの両方で
-空いている次の patch（最大 100 候補）を選び commit/tag を push します。dispatch が
-同一版の再試行になるのは**この未公開・タグなし/同一 HEAD 条件だけ**です。npm にない
-ことだけを理由に別コミットの古い GitHub 資産を再利用しません。タグ実行は既存 npm 版の
-公開を省略し、資産は置き換えません。レジストリエラーでは停止します。npm 11.19.1 を
-固定し、公開後は版の存在を確認しますが、ダウンロード内容の検証ではありません。
-各ゲートと OIDC 公開の成功が必要で、ローカル変更は公開の証拠ではありません。
-
-## テストと証跡
+**その他の kit ランチャー:** `--` より後がアシスタントへの引数です。
 
 ```sh
-npm run test          # kit フィクスチャ：トランザクション、安全性、アダプター
-npm run test:proxy    # プロキシのプロトコル・認証フィクスチャ
-npm run test:mcp      # MCP ブリッジスイート
+zcode-kit run claude-code -- -p "Reply with 52" --model glm-5.3-flash
+zcode-kit run codex -- exec "Reply with 52" -m glm-5.3-flash
+zcode-kit run aider -- --model openai/glm-5.3-flash
+zcode-kit run opencode -- .
 ```
 
-今回の修正前の baseline は **kit 65 / proxy 872 / MCP 42** 件です。MCP の `wmic`
-終了処理パスは**未実行**であり、この件数で検証されたとはいえません。
-**最終検証は未完了**です。日付付き結果は `TEST_REPORT.md` を参照してください。
-ソース確認、フィクスチャ・設定テスト、実モデル呼び出し、公開済みリリースは別の証跡です。
-今回の変更について新たな実接続検証や個人インストールの修復を主張しません。
-過去の実接続結果は、この作業ツリーの検証結果ではありません。
+Windows でもモデル識別子は `/` を使います。`run` が対応するのは **`claude-code`、`codex`、`aider`、`opencode` のみ**。これらと OMP 拡張はプロキシを確認・起動します。それ以外は手動起動してください。
 
-## ドキュメント
+## 5. 各統合の内容
 
-- `SUPPORT_MATRIX.json` — アダプターごとの正確な状態
-- `EFFORT_MAPPING.md` / `.json` — low/high/max のアップストリームパラメータへの対応
-- `SETUP_REPORT.md`、`TEST_REPORT.md` — 実行コマンド付きのテスト証跡
-- `IMPLEMENTATION_STATUS.md` — 決定事項と未解決点
-- `harnesses/README.md` — ハーネスごとの詳細と手動統合スニペット
-- `MANIFEST.md` — 同梱コンポーネント、コミット、ライセンス
-- `docs/RELEASE_CHECKLIST.md` — リリース準備済みと要対応の区別
+| ID | 設定・使い方 |
+|---|---|
+| `omp` | プロバイダー、モデル、自動起動拡張、任意の MCP 登録。`omp` を直接実行。 |
+| `pi` | `~/.pi/agent/models.json` に `zcode` を追加。プロキシ起動後 `pi --model zcode/glm-5.3`。 |
+| `claude-code` | 生成設定と任意ランチャー。通常の Claude モデル設定を置換しませんが、setup はユーザー範囲に MCP を登録する場合があります。他社モデル接続はコミュニティ互換です。 |
+| `codex` | `generated/codex-home` の隔離された `CODEX_HOME`。個人設定・skills は自動で引き継がれません。 |
+| `opencode` | プロバイダー追加。`zcode-kit run opencode -- .` がプロセスにキーを渡します。 |
+| `aider` | 生成環境とランチャー。他の引数を渡すなら `--model openai/glm-5.3-flash` を指定。 |
+| `continue` | **既存の** `~/.continue/config.yaml` を更新。不在なら省略。Continue を先に設定して再統合し、UI でモデルを選択。 |
+| `goose` | キーヘルパー付きの永続的カスタムプロバイダー。プロキシ起動後 `goose session --provider zcode`。 |
+| `cline` | `generated/cline-zcode-values.md` の値を UI に手動入力。 |
+| `kilo-code` | `generated/kilo-zcode-values.md` の値を UI に手動入力。 |
+
+10 アダプターがあることと、10 クライアントの実接続検証は別です。日付付き [対応表](SUPPORT_MATRIX.json)と[テスト報告](TEST_REPORT.md)を参照。Cline/Kilo の確認は値シートの存在であり、**GUI 設定完了ではありません**。MCP 登録だけではモデルを利用できません。
+
+**現行 Continue:** `models: []`、コメント、ブロックリストの字下げを扱い、ユーザーモデルと既定順序を先頭に保ちます。非空インラインリスト、重複キー、危険な形式は拒否します。ローカルキーは YAML の引用値として保存し、`${ZCODE_PROXY_KEY}` という非対応の展開は使いません。キー更新後は再統合・対応修復を行ってください。Continue 本体の実接続テスト済みとは主張しません。
+
+## 6. プロキシを明示的に起動・確認・停止
+
+セクション 3 の変数を使えばプロジェクトに留まったまま操作できます。
+
+**PowerShell:**
+
+```powershell
+node (Join-Path $KitRoot 'proxy/zcode-proxy-manager.mjs') start
+node (Join-Path $KitRoot 'proxy/zcode-proxy-manager.mjs') status
+node (Join-Path $KitRoot 'proxy/zcode-proxy-manager.mjs') logs 50
+```
+
+**macOS/Linux:**
+
+```sh
+node "$KIT_ROOT/proxy/zcode-proxy-manager.mjs" start
+node "$KIT_ROOT/proxy/zcode-proxy-manager.mjs" status
+node "$KIT_ROOT/proxy/zcode-proxy-manager.mjs" logs 50
+```
+
+他の操作は `status` を `doctor`、`stop`、`restart` に置き換えます。**停止・再起動は接続クライアントを中断します。** 8457 を使用しているだけでプロセスを終了しないでください。管理器は外部・識別不能のプロセスを拒否し、自分のプロセスの識別情報・開始時刻を確認します。古いロックを自動で奪いません。
+
+## 7. トラブル対処と限定的な自動回復
+
+| 症状 | 確認・対処 |
+|---|---|
+| `zcode-kit` / `node` / `bun` がない | 新しいターミナルで PATH を確認。kit は絶対パスも使えます。npm/ソース setup は Bun 自体を導入しません。 |
+| `Cannot find module .../cli/zcode-kit.mjs` | 相対パスの現在地または導入先が誤っています。スクリプトをプロジェクトへコピーせず絶対パスを直してください。 |
+| Continue `models: []` で失敗 | 古い公開版には修正がありません。対応リリースまたは明示的なソース導入を利用し、`models` キーを重複追加しないでください。 |
+| 不明なコマンド・非対応 `run` | OMP/pi/Goose は直接実行。`run` は上記 4 種だけです。 |
+| `foreign` / ポート使用中 / HTTP 401 | 複数コピーとコマンド解決先を確認。キー削除、ロック奪取、外部プロセス終了は行わないでください。 |
+| Auth `3012` / `logged_in: false` | Desktop ログインを確認。現行版は限定回復を試みます。意図的なログインは `zcode-kit auth login`。 |
+| 残高・利用枠 `1113` / `3001` | アカウント・プランを確認。再起動やローカル修復で枠は増えません。 |
+| Setup 後半で失敗 | 前半の変更が残る場合あり。記録と表示された rollback を確認。 |
+| `doctor --fix` 後も終了 1 | プロキシ停止や手動作業が残る場合あり。個々の結果を読む。 |
+| 停止中でも `models --json` が成功 | レジストリへのフォールバックの可能性。`source` を確認。推論の証拠ではありません。 |
+
+現行ソースの管理対象修復:
+
+```sh
+zcode-kit doctor --harness continue --json
+zcode-kit doctor --fix --harness continue
+```
+
+対象アダプターをロック内で再適用します。Offline のキー整合には明確なテンプレートと確保可能なポートが必要です。独自・破損設定や使用中ポートは拒否し、キーが一致すれば設定を書き換えません。修復失敗時は記録済みファイル変更を戻しますが、通常 setup は部分変更を残します。認証、依存導入、外部登録すべてがファイル rollback の対象ではありません。
+
+起動前チェックは上流認証・枠エラーを警告してモデル側回復を許可し、ローカル識別・起動失敗ではラッパーを止めます。OMP はローカル health を 60 秒保持、失敗後は 1 分待機。毎ターン枠を照会しません。`logs/heal.log` は固定分類でサイズ制限があります。
+
+認証情報を要求ごとに再読み込みします。破損・途中書き込みでは最後の有効値を維持、ストアがなければ消去します。応答前の一部エラーで **既存 Desktop ログイン**を取り込み、実効認証が変わった場合のみ一度再送します。Desktop ファイル変更、API キー作成、購入、trial 取得はせず、進行中 SSE エラーは再送しません。回復・保存試行は有限で成功保証なし。同時書き込みやプロセス上限は [SECURITY.md](SECURITY.md) を参照。
+
+## 8. 更新・rollback・アンインストール
+
+**元の導入方法を維持してください。**
+
+- インストーラー: 同じ専用ディレクトリへ再実行。公開ファイルのみで、未公開 Git 変更ではありません。古いバージョン固定を解除してください。
+- npm: `npm install -g zcode-agent-kit@latest`、続いて同じ npm コピーで `zcode-kit setup`。
+- Checkout: **そのルートで** `node cli/zcode-kit.mjs update`。クリーンなツリーで fast-forward し、setup を再適用。リリースタグ選択ではありません。`.git` のない版は拒否します。
+
+記録された設定を戻す:
+
+```sh
+zcode-kit rollback
+```
+
+ID なしは最新、表示済み ID を指定すれば対象を選べます。後から編集した内容は競合として報告します。認証、依存、外部登録がすべて戻るとは限りません。
+
+先にセクション 6 の**絶対パスの管理器**で対象プロキシを止め、その後:
+
+```sh
+zcode-kit uninstall
+```
+
+Uninstall 自体はプロキシを止めず、導入フォルダー、依存、ログ、`.proxykey`、共有認証、Desktop データも削除しません。記録済み統合、生成ファイル、一致する installer shim を削除します。npm のパッケージ削除 `npm uninstall -g zcode-agent-kit` は**その後**に行います。残存フォルダーは内容確認後に手動削除してください。
+
+`zcode-kit auth logout` は対象パスを説明し、`zcode-kit auth logout --yes` は `ZCODE_PROXY_CREDENTIALS_PATH` も反映して削除します。Desktop ログアウトや上流トークン失効ではありません。通常の修復として logout を使わないでください。
+
+## 9. ソース導入・開発（上級者向け）
+
+現行ソースが必要な場合のみ選びます。Node、Bun、Git を先に導入し、編集対象プロジェクトではなく**新しい専用フォルダー**へ clone します。リリースインストーラーを checkout に実行しないでください。
+
+**PowerShell:**
+
+```powershell
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
+if ($LASTEXITCODE -ne 0) { throw 'Clone failed; stop here' }
+Set-Location zcode-agent-kit -ErrorAction Stop
+$env:ZCODE_KIT_ALLOW_CHECKOUT = '1'
+try { node cli/zcode-kit.mjs setup --harness omp }
+finally { Remove-Item Env:ZCODE_KIT_ALLOW_CHECKOUT -ErrorAction SilentlyContinue }
+```
+
+**macOS/Linux:**
+
+```sh
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit &&
+cd zcode-agent-kit &&
+ZCODE_KIT_ALLOW_CHECKOUT=1 node cli/zcode-kit.mjs setup --harness omp
+```
+
+Clone と移動が成功した場合のみ進み、失敗後は後続行を実行しないでください。例は `omp` に限定しています。使う対象または `auto` を指定できます。明示許可は意図しない別コピーへの設定変更を防ぎます。Checkout setup はグローバル shim を作らないため、後で絶対パスを使ってください。参照される checkout を移動せず、アシスタント開始前には**作業プロジェクト**へ戻ります。
+
+Proxy/MCP 依存を導入後、**checkout ルート**でテストします。Fixture・ビルドファイルを生成するため、厳密な隔離が必要なら使い捨てコピーを用意します。
+
+```sh
+npm run test
+npm run test:proxy
+npm run test:mcp
+```
+
+日付付き [TEST_REPORT.md](TEST_REPORT.md): kit 150 成功＋明示的 live opt-in 1 件省略、proxy 946 成功、MCP 42 成功。実 OMP の隔離試験では通常起動、自分のプロキシのクラッシュ、offline キー修復を検証し、初回 timeout と成功した再試行も記録しています。全クライアント・OS・長時間動作や最新公開パッケージの内容を保証しません。後続 CI の移植性問題はローカル試験と別であり、現在の badge・ログを確認してください。
+
+メンテナー向け: `main` push、`v*` タグ、dispatch は公開を起動し得ます。npm とリモートタグを照合して他コミットの資産再利用を防ぎ、未公開版の再試行は条件付きです。テスト、バージョン・パッケージゲート、OIDC、再配布条件は必要です。[公開チェックリスト](docs/RELEASE_CHECKLIST.md)を参照。ローカル成功は npm 公開成功ではありません。
+
+## セキュリティと関連文書
+
+認可された自分のアカウントのみ使用してください。`.proxykey`、生成設定・env、プロファイル内容を保護し、issue に貼らないでください。Proxy は loopback 専用・bearer 認証です。Gateway challenge 処理は同梱プロトコル実装で、提供元の承認や将来の互換性を保証しません。Trial 取得・off-peak 自動化は既定で無効です。設定変更・公開前に [SECURITY.md](SECURITY.md) を読んでください。
+
+- [クライアント詳細](harnesses/README.md)・[対応表](SUPPORT_MATRIX.json)
+- [推論レベル対応](EFFORT_MAPPING.md)
+- [テスト報告](TEST_REPORT.md)・[実装状況](IMPLEMENTATION_STATUS.md)
+- [同梱コンポーネントとライセンス](MANIFEST.md)
+- [公開チェックリスト](docs/RELEASE_CHECKLIST.md)

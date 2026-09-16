@@ -1,377 +1,320 @@
-# ZCode Agent Kit (Deutsch)
+# ZCode Agent Kit
 
 [![CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)
-![Release](https://img.shields.io/github/v/release/ZepiGit/ZCode-Agent-Kit)
 
 [English](README.md) | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | **Deutsch**
 
-> Übersetzung des englischen Originals; bei Abweichungen gilt das englische README.
+Nutze **deinen eigenen ZCode-Desktop-Account** mit einem Coding-Assistenten deiner Wahl. Das Kit verbindet unterstützte Assistenten mit einem lokalen Proxy. Es installiert die Assistenten nicht, erstellt keine Accounts, kauft kein Kontingent und bietet keinen kostenlosen oder unbegrenzten Zugang.
 
-Modellzugriff aus deinem eigenen Agent-Harness über **deinen eigenen
-ZCode-Desktop-Account** — kein zweites Abo, keine API-Käufe. Zehn
-Harness-Adapter, ein lokaler Proxy, transparentes Rollback.
+- **Modell-Proxy:** OpenAI Chat Completions, Responses und Anthropic Messages unter standardmäßig `http://127.0.0.1:8457`.
+- **Modelle:** `glm-5.3` (Text) und `glm-5.3-flash` (Text und Bilder). Angegebenes Kontextfenster: 1M Tokens; Denkstufen: `low`, `high`, `max`. Client-Unterstützung und Account-Limits gelten weiterhin.
+- **Optionale MCP-Bridge:** macht Funktionen deiner installierten ZCode-Runtime verfügbar. Das ist getrennt von der Modellanbindung; für Modellaufrufe über die Bridge muss die Desktop-App laufen.
 
+> **Quellstand und Release – geprüft am 16.09.2026:** Das neueste GitHub-Release ist **v0.2.2**, auf npm ist es **0.2.1**. Der gemergte Quellcode enthält neuere Continue-, Credential-Recovery-, `doctor --fix`- und Installer-Korrekturen, die diese Pakete **noch nicht vollständig enthalten**. „Latest“ installiert keinen aktuellen Git-Branch. Die Anleitung beschreibt den Quellstand, sofern sie nicht ausdrücklich die Installation eines veröffentlichten Releases nennt. Prüfe die [Release-Hinweise](https://github.com/ZepiGit/ZCode-Agent-Kit/releases), bevor du eine neue Funktion voraussetzt. Dass ein alter CLI eine Option akzeptiert, beweist nicht ihre Unterstützung.
+
+## 1. Voraussetzungen
+
+Du brauchst:
+
+1. **ZCode Desktop**, bereits mit deinem Account angemeldet und mit verfügbarem Modellkontingent.
+2. **Node.js ab Version 20** im Terminal-PATH: [nodejs.org](https://nodejs.org/).
+3. **Bun dauerhaft im PATH**: [Bun-Installation](https://bun.sh/docs/installation). Getestet wurde **1.4.2**. npm-/Quellcode-Setup installiert mit Bun die Abhängigkeiten, nicht Bun selbst.
+4. Deinen separat installierten Assistenten: OMP, pi, Claude Code, Codex, OpenCode, Cline, Kilo Code, Aider, Continue oder Goose.
+
+Öffne ein **neues Terminal** und prüfe:
+
+```sh
+node --version
+bun --version
 ```
-dein Harness (OMP / pi / Claude Code / Codex / OpenCode / Cline / Kilo Code /
-             Aider / Continue / Goose / jeder MCP- oder OpenAI-/Anthropic-fähige Client)
-        │
-        ├─► lokaler zcode-proxy  http://127.0.0.1:8457   (OpenAI + Anthropic + Responses-Formate)
-        │         └─► zcode.z.ai  (start-plan, dasselbe Kontingent wie dein ZCode Desktop)
-        │
-        └─► zcode-harness-mcp (stdio)  ─► dein installierter ZCode Desktop (echte Desktop-Sitzungen)
-```
 
-Modelle: **glm-5.3** (Text, 1M Kontext) und **glm-5.3-flash** (Text+Bild, 1M
-Kontext), verifizierte Reasoning-Stufen **low / high / max** (Standard max).
+Diese Befehle funktionieren in PowerShell und POSIX-Shells. Fehlt einer, korrigiere zuerst den PATH. Release-Installer können fehlendes Bun herunterladen, ihre PATH-Ergänzung ist aber **nicht dauerhaft**: Ein neues Windows-Terminal verliert sie; `curl | sh` kann die übergeordnete Shell nicht verändern. Vorhandenes Bun wird wiederverwendet, nicht automatisch aktualisiert.
 
-> **Arbeitsstand (2026-09-15):** Reparatur-/Recovery- und Postinstall-Änderungen
-> beschreiben lokalen Quellcode, kein verifiziertes Release. Abschlussprüfung offen;
-> eine Reparatur der bestehenden persönlichen Installation wird nicht behauptet.
+**Windows:** PowerShell ohne Administratorrechte verwenden; `install.sh` nicht in Git Bash oder WSL ausführen. **macOS/Linux:** POSIX-Shell mit `curl`, `tar`, SHA-256-Werkzeug und für Updates `rsync`; Bun-Bootstrap benötigt zusätzlich `unzip`. Die unten genannten Windows-Prüfungen bestätigen keine neuen Linux-/macOS-Live-Client-Tests.
 
-## Schnellstart
+## 2. Einmal installieren – eine Methode wählen
 
-**Windows (PowerShell)** — Installer lädt das neueste Release, SHA256-verifiziert,
-ohne Adminrechte:
+Mische npm- und Release-Installer-Kopien möglichst nicht. Sie können unterschiedliche Proxy-Schlüssel haben, bearbeiten aber dasselbe Assistentenprofil.
+
+### Empfohlen: Installer eines veröffentlichten Releases
+
+Aus **jedem Verzeichnis** ausführbar. Du musst das Repository weder klonen noch in einen Installationsordner wechseln. Die Befehle laden den veröffentlichten Installer herunter und führen ihn aus; prüfe das Skript vorher, falls deine Sicherheitsrichtlinie das verlangt.
+
+**Windows – PowerShell:**
 
 ```powershell
 irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 ```
 
-**macOS / Linux**:
+**macOS/Linux – POSIX-Shell:**
 
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
-Die Einzeiler laden den Installer aus dem **neuesten veröffentlichten
-Release**; der Installer löst dieses Release automatisch auf (eine Version
-pinnen mit `ZCODE_KIT_VERSION`, z. B. `$env:ZCODE_KIT_VERSION = "v0.2.0"`).
-Er lädt das Release-Archiv, prüft dessen Prüfsumme, installiert benutzerlokal
-(Standard `%LOCALAPPDATA%\zcode-agent-kit` bzw. `~/.local/share/zcode-agent-kit`,
-überschreibbar mit `ZCODE_KIT_HOME`), installiert bun v1.4.2 benutzerlokal,
-falls es fehlt, und führt das Setup mit Harness-Erkennung aus.
+Der Installer prüft die SHA-256-Prüfsumme des Archivs, installiert benutzerlokal und startet Setup.
 
-**npm / npx:**
+| System | Kit-Verzeichnis | Befehlsverknüpfung |
+|---|---|---|
+| Windows | `%LOCALAPPDATA%\zcode-agent-kit` | `%LOCALAPPDATA%\Microsoft\WindowsApps\zcode-kit.cmd` |
+| macOS/Linux | `$HOME/.local/share/zcode-agent-kit` | `$HOME/.local/bin/zcode-kit` |
+
+`ZCODE_KIT_INSTALL_DIR` hat Vorrang vor `ZCODE_KIT_HOME`, danach gilt der Standard. **Wähle immer einen eigenen absoluten Pfad. Niemals das Home-Verzeichnis, Arbeitsprojekt oder einen Source-Checkout verwenden:** Updates ersetzen/spiegeln dort Dateien. Diese Variablen bestimmen das Installer-Ziel; sie ändern nicht nachträglich das Ziel eines bereits installierten CLI.
+
+Für reproduzierbare Installation setze vor dem Installer `ZCODE_KIT_VERSION` auf einen vorhandenen Release-Tag inklusive `v`. Entferne diese Vorgabe, wenn du wieder „latest“ willst. Die Variable pinnt das Archiv; die obigen Einzeiler beziehen das Installer-Skript weiterhin aus dem neuesten Release.
+
+### Alternative: npm
+
+Node und Bun müssen bereits im PATH sein. Aus jedem Verzeichnis:
 
 ```sh
 npm install -g zcode-agent-kit
 zcode-kit setup
-
-# Oder ohne globale Installation:
-npx --yes zcode-agent-kit setup
 ```
 
-Das npm-Paket stellt die Befehle `zcode-kit` und `zcode-agent-kit` bereit. Der
-Postinstall-Schritt zeigt nur einen Setup-Hinweis; er installiert **keine** Runtime
-und ändert keine Harness-Konfiguration. Führe `zcode-kit setup` ausdrücklich aus.
-Wiederholtes Setup ist auf Idempotenz ausgelegt. npm benötigt **Node ≥ 20**;
-Setup installiert oder prüft die gepinnten bun-Abhängigkeiten.
+Im aktuellen Quellcode zeigt Postinstall nur einen Hinweis; explizites Setup konfiguriert die Integration. Ältere veröffentlichte Pakete können anders reagieren. npm stellt `zcode-kit` und `zcode-agent-kit` bereit. Ein 404 kann bedeuten, dass Paket/Version nicht verfügbar oder nicht zugänglich ist; er beweist keinen lokalen Installationsfehler.
 
-> Das npm-Artefakt wird pro Release vom Maintainer veröffentlicht. Meldet
-> `npm install` einen 404, ist diese Version noch nicht in der npm-Registry —
-> nutze die Installer oben oder einen lokalen Build:
-> `npm install -g <repo>/pack/dist`.
+Verwende kein flüchtiges `npx ... setup` als dauerhafte Installation: Generierte Konfigurationen verweisen auf den Paketpfad. Nutze eine stabile globale Installation oder den Release-Installer.
 
-## Erste Nutzung — in dieser Reihenfolge
+## 3. Die tatsächlich verwendete Installation prüfen
 
-1. **Installieren** (Befehle oben). Das Setup erkennt deine Harnesses und
-   fasst nur diese an. Erfasste Konfigurationsänderungen sind rückrollbar;
-   Credentials und Abhängigkeitsinstallationen nicht (siehe unten).
-2. **Einmalig angemeldet sein**: ZCode Desktop muss installiert und
-   angemeldet sein; das Setup importiert das Credential automatisch (sonst
-   gibt es den exakten einmaligen Login-Befehl aus).
-3. **Prüfen**: `node cli\zcode-kit.mjs status` (läuft der Proxy? Kontingent?)
-   und `node cli\zcode-kit.mjs doctor` (volle Diagnose).
-4. **Nutzen** — siehe *Nutzung je Harness* unten. Der Proxy startet bei
-   Bedarf selbst: OMP über seine Extension, die Kit-Wrapper
-   (`bin\zcode-claude`, `bin\zcode-codex`, `bin\zcode-aider` bzw.
-   `zcode-kit run ...`) stellen ihn vor dem Start sicher. Für alles andere
-   (pi, Continue, Goose, direkte API-Clients) einmal selbst starten:
-   `node proxy\zcode-proxy-manager.mjs start`
-5. **Später**: siehe *Aktualisieren* für deinen Installationstyp.
-   `zcode-kit rollback` nimmt erfasste Dateiänderungen der neuesten Transaktion
-   zurück; `zcode-kit uninstall` entfernt Integrationen, nicht geteilte Credentials.
+Öffne nach der Installation ein neues Terminal.
 
-**Aus einem Repo-Checkout** (Entwicklung oder manuelle Installation):
+**PowerShell:**
 
 ```powershell
-git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
-cd zcode-agent-kit
-$env:ZCODE_KIT_ALLOW_CHECKOUT = "1"     # Opt-in: ein Checkout wird nie stillschweigend zum Provider-Root
-node setup.mjs                          # oder: node cli\zcode-kit.mjs setup --harness auto
-node cli\zcode-kit.mjs doctor
+Get-Command zcode-kit -All
+node --version
+bun --version
+zcode-kit help
 ```
 
-Voraussetzungen: **Node ≥ 20** (bun nur beim Repo-Checkout — der Installer
-bringt sein eigenes mit) und **ZCode Desktop installiert und angemeldet** (der
-Credential-Import liest die bestehende Desktop-Anmeldung; die MCP-Bridge braucht
-die laufende Desktop-App für Modellaufrufe). Adminrechte werden nie benötigt.
-WSL wird erkannt und abgelehnt — installiere auf dem Windows-Host.
+**macOS/Linux:**
 
-## Die zcode-kit-CLI
-
-```
-zcode-kit setup [--harness auto|omp,pi,...]   Bootstrap + erkannte Harnesses integrieren
-zcode-kit integrate <harness> --dry-run       exakt anzeigen, was geschrieben würde
-zcode-kit integrate <harness>                 einen Adapter anwenden (transaktional)
-zcode-kit run <harness> -- <args>             claude-code/codex/aider/opencode mit ZCode starten
-zcode-kit doctor [--fix] [--harness <id>] [--json]  Diagnose; optionale Reparatur
-zcode-kit status                              Proxy-Status + Kontingent-Snapshot
-zcode-kit models [--json] [--show-key]        verfügbare Modelle (vom laufenden Proxy)
-zcode-kit usage --json                        Konto-Nutzung/Kontingent (niemals erfundene Werte)
-zcode-kit auth status|login|logout            Proxy-Credential-Lebenszyklus (rührt dein Desktop-Login nie an)
-zcode-kit update                              Checkout fast-forwarden, Integrationen erneut anwenden
-zcode-kit rollback [tx-id]                    neueste (oder benannte) Transaktion zurücknehmen
-zcode-kit uninstall                           Kit-Integrationen entfernen; löscht nie geteilte Credentials
+```sh
+command -v zcode-kit
+node --version
+bun --version
+zcode-kit help
 ```
 
-Erfasste Konfigurationsänderungen erhalten Hash-basierte Backups. Bei abgeschlossenen
-Transaktionen meldet Rollback spätere Nutzeränderungen als Konflikte, statt sie zu
-überschreiben. `setup` / `integrate` können nach erfolgreichen Teilschritten scheitern:
-Sie protokollieren Teiländerungen und geben einen Rollback-Befehl aus, statt das ganze
-Setup automatisch zurückzunehmen. Lokale Schlüsselerstellung, Credentials,
-Abhängigkeitsinstallation und externe CLI-Aktionen sind **nicht** vollständig
-rückrollbar; Registrierungen können den ausgegebenen Undo-Befehl benötigen.
+Fehlt `zcode-kit`, ist möglicherweise das oben genannte Verknüpfungsverzeichnis nicht im PATH. Ergänze den richtigen Shell-/Benutzer-PATH und öffne ein neues Terminal. Bei mehreren Kopien verwende den **expliziten Pfad** unten. PowerShell und Git Bash können unter Windows unterschiedliche Kopien auswählen.
 
-## Wie sich setup verhält
+### Explizite Pfade – unabhängig vom Arbeitsverzeichnis
 
-`setup --harness auto` erkennt die installierten Harnesses und **fasst nur die
-an** — ein OMP-only-Nutzer bekommt keine Claude/Codex-Artefakte:
+Setze einmal je Terminal den Pfad zu deiner **tatsächlich gewählten Installation**. Die Standards gelten für den Release-Installer, **nicht für npm**. Bei eigenem Ziel oder Source-Checkout die Zuweisung anpassen.
 
-1. **bootstrap** — erzeugt den lokalen Proxy-Schlüssel (`.proxykey`, exklusive
-   Erstellung) und `proxy/config.yaml` aus der Vorlage, installiert Abhängigkeiten
-   mit `bun install --frozen-lockfile` (ein Fehlschlag ist ein harter Fehler) und
-   importiert das Credential aus der bestehenden ZCode-Desktop-Anmeldung.
-2. **zehn Adapter** (jeweils nur für erkannte oder explizit angefragte
-   Harnesses) — siehe `harnesses/README.md` und `SUPPORT_MATRIX.json`.
-3. **MCP-Bridge** — registriert die `zcode-harness`-Stdio-Bridge nur bei
-   tatsächlich vorhandenen Harnesses. MCP allein zählt nie als Modellintegration
-   (Cline/Kilo weisen explizit manual-confirmation-required aus).
+**PowerShell:**
 
-Auf einer Maschine mit nur OMP läuft genau ein Adapter (OMP) plus der OMP-MCP-Eintrag —
-nichts Claude- oder Codex-bezogenes entsteht.
+```powershell
+$KitRoot = Join-Path $env:LOCALAPPDATA 'zcode-agent-kit'
+if (-not (Test-Path (Join-Path $KitRoot 'cli/zcode-kit.mjs'))) { throw 'Wrong KitRoot: cli/zcode-kit.mjs not found' }
+node (Join-Path $KitRoot 'cli/zcode-kit.mjs') help
+```
 
-**Continue-YAML:** Ein vorhandenes `models: []` (auch mit horizontalem Leerraum
-und getrenntem Kommentar) wird vor dem Einfügen in eine Blockliste umgewandelt.
-Eingerückte und einrückungslose Listen behalten Nutzermodelle zuerst und deren
-Default-Reihenfolge; erneute Integration ist idempotent. Nichtleere Inline-Listen,
-doppelte `models`-Schlüssel und uneditierbare Formen werden ohne Dateiänderung
-verweigert. Der Adapter speichert den JSON-gequoteten **lokalen Proxy-Key** im
-verwalteten Abschnitt von `~/.continue/config.yaml`, kein Desktop-Credential, und
-gibt ihn nicht aus. Nach Key-Rotation erneut integrieren. `${ZCODE_PROXY_KEY}` war
-keine gültige Continue-Secret-Interpolation; es entsteht keine zusätzliche Env-Datei.
-Continue fehlt in der Prüfumgebung: **Live-Verifikation blockiert**;
-Parser-/Config-Tests sind keine echte Client-Sitzung.
+**macOS/Linux:**
 
-## Nutzung je Harness
+```sh
+KIT_ROOT="$HOME/.local/share/zcode-agent-kit"
+if [ -f "$KIT_ROOT/cli/zcode-kit.mjs" ]; then
+  node "$KIT_ROOT/cli/zcode-kit.mjs" help
+else
+  printf '%s\n' 'Wrong KIT_ROOT: cli/zcode-kit.mjs not found' >&2
+fi
+```
 
-**OMP** (additiver Provider; vollständige TUI/CLI-Integration inkl. Denkebenen):
+Scheitert die Prüfung, zuerst den Pfad korrigieren. Bei npm zeigt `npm root -g` das globale Modulverzeichnis; das Kit liegt im Unterordner `zcode-agent-kit`. Ein Release-Installationspfad ist kein Ersatz für den npm-Pfad.
 
-```bash
-omp --model zcode/glm-5.3-flash --thinking low -p "hi"
+**`node cli/zcode-kit.mjs` nicht aus einem beliebigen Ordner ausführen.** Relative Pfade beziehen sich auf das aktuelle Verzeichnis, nicht auf das Kit. Globale Verknüpfung oder absoluter Skriptpfad verhindern diesen Fehler.
+
+## 4. Konfigurieren und den ersten Modellaufruf machen
+
+Setup erkennt Assistenten anhand von Programmen/Konfigurationsverzeichnissen und wendet ihre Adapter an. Erkennung beweist weder eine vollständige Installation noch einen funktionierenden Client. Ein Ziel auswählen oder eine Änderung vorab ansehen:
+
+```sh
+zcode-kit setup --harness omp
+zcode-kit integrate continue --dry-run
+```
+
+Vorher gemäß Abschnitt 3 sicherstellen, welche Kopie der Befehl aufruft. Setup kann benutzerweite Assistentenkonfiguration und MCP-Registrierungen ändern. Änderungen werden protokolliert, aber **nicht vollständig atomar** ausgeführt: Scheitert ein späterer Schritt, bleiben frühere Änderungen erhalten; ein Rollback-Befehl wird angezeigt.
+
+Setup im aktuellen Quellstand versucht zusätzlich einen kleinen echten Flash-Aufruf, der Kontingent verbrauchen kann. Mit `ZCODE_KIT_SKIP_SMOKE=1` für diesen Aufruf überspringen; CI/Test überspringt ihn ebenfalls. Ein Smoke-Fehler nimmt Konfiguration nicht automatisch zurück. `doctor --fix` installiert keine fehlenden Abhängigkeiten und ersetzt kein vollständiges Setup.
+
+```sh
+zcode-kit status
+zcode-kit doctor
+zcode-kit auth status
+zcode-kit usage --json
+```
+
+Ein noch gestoppter Proxy kann diese Prüfungen fehlschlagen lassen. Starte ihn gemäß Abschnitt 6 oder nutze einen automatisch startenden Assistenten. **Health-Check oder Exit-Code allein beweisen keinen Modellzugriff:** `logged_in`, Kontingentdiagnose und echte Modellantwort beachten.
+
+### Assistenten im Arbeitsprojekt starten – nicht im Kit-Verzeichnis
+
+Öffne das Terminal **im Projekt, das der Assistent bearbeiten soll**, oder wechsle mit `Set-Location` (PowerShell) / `cd` (POSIX) dorthin. Kit-Launcher behalten dieses Arbeitsverzeichnis bei.
+
+**OMP direkt starten, nicht mit `zcode-kit run omp`:**
+
+```sh
+omp -p --model zcode/glm-5.3-flash "Reply with 52"
+omp -p --model zcode/glm-5.3 "Reply with 52"
+```
+
+Erwartet: Modellantwort `52`, Exit 0. Die Antwortdauer schwankt; ein Timeout bleibt ein fehlgeschlagener Versuch. Interaktiv:
+
+```sh
 omp --model zcode/glm-5.3 --thinking max
 ```
 
-**pi** (`~/.pi/agent/models.json`, additiver Provider `zcode`):
-
-```bash
-pi --model zcode/glm-5.3
-```
-
-**Claude Code** (Opt-in-Wrapper; `~/.claude` bleibt unberührt):
-
-```bat
-bin\zcode-claude.cmd -p "hi" --model glm-5.3-flash
-```
-
-**Codex CLI** (Opt-in-Wrapper, isoliertes CODEX_HOME):
-
-```bat
-bin\zcode-codex.cmd exec "say hi" -m glm-5.3-flash
-```
-
-**Aider / OpenCode / Goose** (Launcher setzen nur prozesslokale Umgebungsvariablen):
-
-```bat
-node cli\zcode-kit.mjs run aider -- --model openai\glm-5.3-flash
-node cli\zcode-kit.mjs run opencode -- .
-goose session --provider zcode
-```
-
-**Cline / Kilo Code** (GUI-Konfiguration): das Kit schreibt ein vorbereitetes
-Werteblatt nach `generated/` und kennzeichnet den Schritt als
-`manual-confirmation-required` — VS-Code-Interna werden nie angefasst.
-
-**Andere Clients** (OpenAI / Anthropic / Responses-Formate auf
-`http://127.0.0.1:8457`, Bearer-Token = Inhalt von `.proxykey`):
-siehe `harnesses/README.md`.
-
-## Diagnose und begrenzte Reparatur (Quellstand; Abschlussprüfung ausstehend)
-
-`zcode-kit doctor` diagnostiziert; `zcode-kit doctor --fix` repariert ausdrücklich
-verwaltete Konfiguration. `--harness <id>` begrenzt die Adapterauswahl, `--json`
-liefert strukturierte Ergebnisse. Reparatur führt kein allgemeines Setup und keine
-Dependency-Installation aus; sie wendet ausgewählte Adapter unter dem Setup-Lock
-an. Key-Drift wird nur bei eindeutiger Kit-Template-Config und exklusiv reservierbarem
-Port angeglichen. Bei dieser Angleichung werden eigene/defekte Configs oder belegte
-Ports verweigert; ein bereits passender Key erfordert keine Config-Änderung.
-Checkout-Schreibzugriffe benötigen weiterhin `ZCODE_KIT_ALLOW_CHECKOUT=1`.
-Bei Reparaturfehlern werden erfasste Dateiänderungen zurückgerollt — anders als die
-Teiländerungen bei Setup. Credentials und externe Wirkungen fallen nicht darunter.
-
-Der gemeinsame Start-Preflight startet/verifiziert sicher den Proxy und prüft das
-Kontingent einmal mit Timeout, ohne Polling-/Retry-Schleife. Auth `3012` ist von
-Balance/Quota `1113` / `3001` getrennt; Neustarts füllen kein Kontingent auf.
-Upstream-Auth-/Balance-Befunde und fehlende Quota-Telemetrie warnen, lassen aber den
-gesunden lokalen Proxy nutzbar, damit der Modellpfad begrenzte Credential-Recovery
-versuchen kann. Das belegt kein verfügbares Kontingent und erfindet keine Nullwerte;
-lokale Identitäts-/Startfehler blockieren weiterhin den Wrapper-Start. Fremde/nicht verifizierbare Listener bleiben unberührt;
-alte Ownership-Locks werden nicht übernommen. `logs/heal.log` ist begrenzt und
-enthält feste Ursache/Aktion/Ergebnis-Felder, keine Provider-Antworttexte.
-
-OMP cached nach dem Preflight lokale authentifizierte Health-Checks für 60 Sekunden.
-Spätere Requests können einen abgestürzten Proxy wieder starten; Fehlstarts haben
-eine Minute Cooldown. Gesunde Modell-Turns fragen nicht ständig die Upstream-Quota ab.
-
-Normales Setup versucht außerdem einen minimalen Live-Flash-Aufruf, der Kontingent
-verbrauchen kann. `ZCODE_KIT_SKIP_SMOKE=1` deaktiviert ihn; CI/Test überspringt ihn.
-Ein fehlgeschlagener Smoke meldet Fehler, nimmt gespeicherte Integrationen aber
-nicht zurück. Der Code allein belegt keinen Live-Lauf dieses Arbeitsstands.
-
-## Proxy-Verwaltung
-
-```bat
-node proxy\zcode-proxy-manager.mjs status
-node proxy\zcode-proxy-manager.mjs start
-node proxy\zcode-proxy-manager.mjs stop
-node proxy\zcode-proxy-manager.mjs restart
-node proxy\zcode-proxy-manager.mjs doctor
-node proxy\zcode-proxy-manager.mjs logs 50
-```
-
-Sicherheitsmerkmale: bindet nur an 127.0.0.1; authentifizierte Health-/Identity-
-Checks; fail-closed-Stop (ein nicht verifizierbarer oder fremder Prozess auf dem
-Port wird **nie** getötet; PID-Reuse wird über Prozess-Startzeiten erkannt);
-Manager-Start-Lock gegen parallele Starts; graceful-then-forced-Herunterfahren;
-Logrotation und begrenzte Log-Lesezugriffe; Trial-Claim- und Off-Peak-Kanäle sind
-deaktiviert. `doctor` trennt echte Auth-Validität vom JWT-Alter und prüft nur
-vorhandene Komponenten.
-
-## Sicherheits- & Automatisierungs-Policy
-
-Klare Worte, damit du entscheiden kannst, ob dieses Tool etwas für dich ist:
-
-- **CAPTCHA-Behandlung.** Das z.ai-Gateway liefert Challenge-Seiten als Teil
-  seines normalen Client-Protokolls — die offizielle ZCode-Desktop-App
-  beantwortet sie automatisch und unsichtbar. Der vendored Proxy repliziert
-  exakt dieses Verhalten für **deinen eigenen angemeldeten Account**: Er löst
-  Gateway-Challenges so wie der offizielle Client. Keine
-  Mensch-Verifikations-Sperre wird umgangen (kein Mensch löst diese Challenges
-  jemals), kein fremder Account wird angerührt, kein CAPTCHA-Dienst oder
-  Fremd-Solver ist im Spiel.
-- **Keine Trial-Automatisierung.** Automatisches Trial-Claiming und
-  Off-Peak-Scheduling gibt es in keiner mitgelieferten Config, und seit der
-  Audit-Nachbesserung sind die zugrundeliegenden Defaults fail-closed
-  (`false`): Eine Config, die den claim-Block auslässt oder verstümmelt,
-  aktiviert KEIN Claiming. Zum Aktivieren ist ein explizites
-  `claim.enabled: true` in der eigenen Config nötig.
-- **MCP-Scope.** Die `zcode-harness`-Bridge wird bewusst im **User-Scope**
-  registriert: sie ist eine maschinenweite Integration, keine pro Projekt.
-  Rückgängig ist das ein Befehl (`claude mcp remove zcode-harness --scope
-  user`), und die Bridge beantwortet niemals unauthentifizierte oder
-  Nicht-Loopback-Anfragen.
-- **Im Code erzwungen, nicht nur per Vorlage** (Audit-Nachbesserung): Der
-  Proxy bindet ausschließlich Loopback und verweigert den Dienst ohne echten
-  Bearer-Key; Adapter überschreiben keine fremden Provider-Einträge; Setup
-  schreibt aus einem Source-Checkout keine Nutzer-Configs.
-
-## Login-Erneuerung
-
-Die Runtime lädt gespeicherte Proxy-Credentials pro Request nach. Ungültige oder
-teilgeschriebene Daten ersetzen nicht den letzten gültigen Wert; ein fehlender
-Store (Logout) löscht ihn beim Nachladen, ohne laufende Requests abzubrechen oder
-Upstream-Tokens zu widerrufen. Explizit injizierte Credentials bleiben standardmäßig isoliert.
-Pro Prozess werden höchstens 128 Fehler-Credential/Quellrevision-Paare erfasst;
-danach stoppt automatischer Reimport bis zum Neustart. Persistenz prüft den Store
-vor dem Ersetzen, hat aber keinen prozessübergreifenden Lock: ein enges Rennen
-mit anderen Schreibern bleibt, keine allgemeine atomare Compare-and-swap-Garantie.
-
-Vor der Antwortausgabe können ausgewählte nichtstreamende Auth-/Balance-Fehler
-einen Import der vorhandenen Desktop-Anmeldung und genau eine Wiederholung
-auslösen — **nur bei geändertem effektivem Credential**. Parallele Requests teilen
-die Recovery; Versuche sind pro Fehler-Credential und Desktop-Quellrevision
-begrenzt, sodass eine spätere Anmeldung erkannt werden kann. Der erneuerte gültige
-Wert wird nur bei unverändertem beobachtetem Store verschlüsselt im Proxy-Store
-gespeichert, nicht in Desktop-Dateien. Kein Browser-Login, keine Key-Erstellung,
-kein Trial-Claim, keine Endlosschleife. SSE-/In-Stream-Fehler werden nicht wiederholt.
-Scheitert Recovery, bleibt der Request fehlerhaft; Berechtigungen und Quota sind
-nicht lokal reparierbar.
-
-Bewusste manuelle Erneuerung:
-
-```bash
-cd zcode-proxy-src
-ZCODE_PROXY_CONFIG="../proxy/config.yaml" bun run src/index.ts auth login zai --import
-# oder Browser-Login:
-ZCODE_PROXY_CONFIG="../proxy/config.yaml" bun run src/index.ts auth login zai
-```
-
-## Deinstallation / Rollback
-
-```bat
-node cli\zcode-kit.mjs rollback      :: neueste Transaktion zurücknehmen (ein Schritt pro Lauf)
-node cli\zcode-kit.mjs uninstall     :: alles Kit-eigene zurücknehmen, generated/ entfernen
-node proxy\zcode-proxy-manager.mjs stop
-```
-
-`uninstall` löscht niemals `~/.zcode-proxy/credentials.json` (mit anderen
-Proxy-Tools geteilt) oder dein ZCode-Desktop-Login/Daten. `zcode-kit auth logout`
-entfernt nur das gespeicherte Credential des Proxys — und sagt das.
-
-## Aktualisieren
-
-Im Source-Checkout lehnt `zcode-kit update` bei geändertem Arbeitsbaum ab, macht
-nur Fast-Forward (nie Force) und wendet Integrationen mit dem oben beschriebenen
-Teil-Setup-Verhalten erneut an. Release-/Tarball-Installationen ohne `.git`
-verweigern diesen Befehl: stattdessen den Release-Installer erneut ausführen.
-Der Proxy ist gepinnt (siehe `MANIFEST.md`); lokale Patches liegen in `patches/`.
-
-### Release-Automatisierung (Maintainer)
-
-`.github/workflows/release.yml` läuft bei Push auf `main`, `v*`-Tags und Dispatch.
-Nach Tests nutzt ein Nicht-Tag-Lauf die aktuelle Version nur, wenn sie auf npm
-fehlt und ihr Remote-Tag fehlt oder auf exakt denselben HEAD zeigt. Sonst wählt er
-die nächste auf npm und bei Remote-Tags freie Patch-Version (maximal 100 Kandidaten)
-und pusht Versions-Commit/Tag. Dispatch ist **nur in diesem unveröffentlichten
-Absent-Tag/Exact-HEAD-Fall** ein gleichversioniger Retry. Fehlendes npm erlaubt
-nicht, alte GitHub-Assets eines anderen Commits wiederzuverwenden. Tag-Läufe
-überspringen vorhandene npm-Versionen; Assets werden nicht ersetzt. Registry-Fehler
-brechen ab. npm 11.19.1 ist gepinnt; nach Publish wird die exakte Version geprüft,
-nicht der heruntergeladene Paketinhalt. Gates/OIDC müssen erfolgreich sein;
-lokaler Quellcode belegt keine Veröffentlichung.
-
-## Tests und Evidenz
+**Andere Kit-Launcher:** Alles nach `--` geht an den Assistenten.
 
 ```sh
-npm run test          # Kit-Fixtures: Transaktionen, Manager-Sicherheit, Adapter
-npm run test:proxy    # Proxy-Protokoll- und Authentifizierungs-Fixtures
-npm run test:mcp      # MCP-Bridge-Suite
+zcode-kit run claude-code -- -p "Reply with 52" --model glm-5.3-flash
+zcode-kit run codex -- exec "Reply with 52" -m glm-5.3-flash
+zcode-kit run aider -- --model openai/glm-5.3-flash
+zcode-kit run opencode -- .
 ```
 
-Baseline vor dieser Reparaturarbeit: **65 Kit / 872 Proxy / 42 MCP Tests**.
-Der MCP-`wmic`-Kill-Pfad wurde **nicht ausgeführt**; die Anzahl belegt diesen Pfad
-nicht. **Abschlussprüfung ausstehend**; datierte Ergebnisse in `TEST_REPORT.md`.
-Quellcodeprüfung, Fixture-/Config-Tests, echte Modellaufrufe und Veröffentlichungen
-sind getrennte Evidenz. Diese lokalen Änderungen behaupten weder neue Live-Tests
-noch eine Reparatur der persönlichen Installation. Historische Live-Belege gelten
-nicht automatisch für diesen Arbeitsbaum.
+Modellnamen verwenden auch unter Windows `/`. `run` unterstützt **nur** `claude-code`, `codex`, `aider` und `opencode`. OMP-Erweiterung und diese Launcher starten/prüfen den Proxy; für andere Clients manuell starten.
 
-## Dokumente
+## 5. Was die Integrationen konfigurieren
 
-- `SUPPORT_MATRIX.json` — ehrlicher Zustand je Adapter
-- `EFFORT_MAPPING.md` / `.json` — wie low/high/max auf Upstream-Parameter abgebildet werden
-- `SETUP_REPORT.md`, `TEST_REPORT.md` — Testbelege mit exakten Befehlen
-- `IMPLEMENTATION_STATUS.md` — Entscheidungen und offene Punkte
-- `harnesses/README.md` — Details je Harness und manuelle Integrations-Snippets
-- `MANIFEST.md` — enthaltene Komponenten, Commits, Lizenzen
-- `docs/RELEASE_CHECKLIST.md` — vorbereitet vs. ausstehend für Veröffentlichungen
+| Adapter-ID | Konfiguration / Verwendung |
+|---|---|
+| `omp` | Provider, Modelle, Autostart-Erweiterung und optionaler MCP-Eintrag; `omp` direkt ausführen. |
+| `pi` | `zcode` in `~/.pi/agent/models.json`; Proxy starten, dann `pi --model zcode/glm-5.3`. |
+| `claude-code` | Generierte Einstellungen und optionaler Launcher; normale Claude-Modellkonfiguration wird nicht ersetzt. Setup kann MCP im User-Scope registrieren. Fremdmodell-Anbindung ist Community-Kompatibilität. |
+| `codex` | Isoliertes `CODEX_HOME` unter `generated/codex-home`; persönliche Codex-Konfiguration/Skills gelten dort nicht automatisch. |
+| `opencode` | Zusätzlicher Provider; `zcode-kit run opencode -- .` setzt den prozesslokalen Schlüssel. |
+| `aider` | Generierte Umgebung und Launcher; bei zusätzlichen Argumenten `--model openai/glm-5.3-flash` angeben. |
+| `continue` | Ändert eine **vorhandene** `~/.continue/config.yaml`; fehlende Datei wird übersprungen. Continue zuerst öffnen/einrichten, erneut integrieren und Modell in der UI auswählen. |
+| `goose` | Persistente Custom-Provider-Datei mit Schlüsselhelfer; Proxy starten, dann `goose session --provider zcode`. |
+| `cline` | `generated/cline-zcode-values.md`; Werte manuell in der Erweiterungsoberfläche eintragen. |
+| `kilo-code` | `generated/kilo-zcode-values.md`; Werte manuell in der Erweiterungsoberfläche eintragen. |
+
+Zehn Adapter sind nicht zehn live geprüfte Clients. Siehe datierte [Support-Matrix](SUPPORT_MATRIX.json) und [Testbericht](TEST_REPORT.md). Cline-/Kilo-Prüfungen bestätigen ein Werteblatt, **nicht** abgeschlossene GUI-Einrichtung. MCP-Registrierung allein ist kein Modellzugriff.
+
+**Continue im Quellstand:** Unterstützt `models: []`, Kommentare und Blocklisten-Einrückungen; Nutzermodelle und Default-Reihenfolge bleiben vorn. Nichtleere Inline-Listen, doppelte Schlüssel und unsichere Formen werden abgelehnt statt geraten. Im verwalteten YAML steht der lokale Proxy-Key als gequoteter Wert; `${ZCODE_PROXY_KEY}` ist keine gültige Continue-Interpolation. Nach Schlüsselrotation neu integrieren oder unterstützte Reparatur nutzen. Ein nativer Continue-Live-Test wird nicht behauptet.
+
+## 6. Proxy ausdrücklich starten, prüfen oder stoppen
+
+Verwende die Root-Variable aus Abschnitt 3; du kannst dabei im Arbeitsprojekt bleiben.
+
+**PowerShell:**
+
+```powershell
+node (Join-Path $KitRoot 'proxy/zcode-proxy-manager.mjs') start
+node (Join-Path $KitRoot 'proxy/zcode-proxy-manager.mjs') status
+node (Join-Path $KitRoot 'proxy/zcode-proxy-manager.mjs') logs 50
+```
+
+**macOS/Linux:**
+
+```sh
+node "$KIT_ROOT/proxy/zcode-proxy-manager.mjs" start
+node "$KIT_ROOT/proxy/zcode-proxy-manager.mjs" status
+node "$KIT_ROOT/proxy/zcode-proxy-manager.mjs" logs 50
+```
+
+Für weitere Aktionen `status` durch `doctor`, `stop` oder `restart` ersetzen. **Stop/Restart unterbricht verbundene Clients.** Einen Prozess nicht allein wegen Port 8457 beenden. Der Manager verweigert fremde/nicht verifizierbare Prozesse und prüft bei eigenen Prozessen Identität und Startzeit. Alte Ownership-Locks werden nicht automatisch übernommen.
+
+## 7. Fehlerbehebung und begrenzte Selbstheilung
+
+| Symptom | Prüfung / Maßnahme |
+|---|---|
+| `zcode-kit`, `node` oder `bun` nicht gefunden | PATH in neuem Terminal prüfen; für das Kit absoluten Pfad aus Abschnitt 3 verwenden. npm-/Source-Setup installiert Bun nicht selbst. |
+| `Cannot find module .../cli/zcode-kit.mjs` | Falsches Arbeitsverzeichnis bei relativem Pfad oder falscher Installationsroot. Keine Skripte ins Projekt kopieren; absoluten Pfad korrigieren. |
+| Setup scheitert an Continue `models: []` | Ältere Releases enthalten den Fix nicht. Passendes Release oder bewusste Source-Installation unten verwenden; keinen zweiten `models`-Schlüssel ergänzen. |
+| Unbekannter Befehl / nicht unterstütztes `run`-Ziel | OMP/pi/Goose direkt starten; `run` unterstützt nur die vier genannten Launcher. |
+| `foreign`, Port belegt oder HTTP 401 | Zuerst Mehrfachinstallation/Befehlsauflösung prüfen. Keine Keys löschen, Locks übernehmen oder Listener beenden. Gewünschte Kopie diagnostizieren. |
+| Auth `3012` / `logged_in: false` | Desktop-Anmeldung prüfen. Aktueller Quellstand versucht begrenzte Erneuerung; bewusster Browser-Login: `zcode-kit auth login`. |
+| Balance/Quota `1113` / `3001` | Account/Plan/Kontingent prüfen; lokale Reparatur oder Neustart füllt nichts auf. |
+| Setup scheitert nach erfolgreichen Teilschritten | Frühere Änderungen können bleiben; protokollierte Transaktion prüfen und bei Bedarf ausgegebenen Rollback-Befehl nutzen. |
+| `doctor --fix` repariert Dateien, liefert aber Exit 1 | Proxy möglicherweise gestoppt oder manueller Schritt offen. Einzelne Checks lesen, nicht nur Zusammenfassung. |
+| `models --json` geht bei gestopptem Proxy | Möglich ist Registry-Fallback; `source` prüfen. Modellliste beweist keine Inferenz. |
+
+Verwaltete Reparatur im aktuellen Quellstand:
+
+```sh
+zcode-kit doctor --harness continue --json
+zcode-kit doctor --fix --harness continue
+```
+
+Reparatur wendet ausgewählte Adapter unter Lock erneut an. Offline-Key-Angleichung verlangt eindeutiges Kit-Template und reservierbaren Port; eigene/defekte Configs oder belegte Ports werden abgelehnt. Passende Keys erfordern kein Rewrite. Fehler rollen erfasste Reparatur-Dateiänderungen zurück; normales Setup behält protokollierte Teiländerungen. Credentials, Abhängigkeitsinstallationen und externe Registrierungen fallen nicht vollständig unter Datei-Rollback.
+
+Start-Preflight warnt bei Upstream-Auth-/Kontingentbefunden, damit der Modellaufruf Recovery versuchen kann; lokale Identitäts-/Startfehler blockieren den Wrapper. OMP cached lokale Health 60 Sekunden; nach Fehler eine Minute Cooldown. Kein Kontingent-Polling bei jedem Turn. Begrenztes `logs/heal.log` enthält feste Diagnosekategorien.
+
+Credentials werden pro Request neu geladen. Defekte/teilgeschriebene Daten behalten den letzten gültigen Wert; fehlender Store löscht ihn beim Reload. Bei ausgewählten Fehlern vor Antwortausgabe kann die **vorhandene** Desktop-Anmeldung importiert und einmal mit geändertem effektivem Credential wiederholt werden. Kein Desktop-Rewrite, keine API-Key-Erstellung, Käufe oder Trial-Claims; keine Wiederholung laufender SSE-Streams. Recovery-/Persistenzversuche sind begrenzt und ohne Erfolgsgarantie. Details zu parallelen Schreibern und Prozesslimits stehen in [SECURITY.md](SECURITY.md).
+
+## 8. Aktualisieren, zurückrollen und deinstallieren
+
+**Dieselbe Installationsmethode weiterverwenden:**
+
+- Release-Installer erneut mit demselben eigenen Ziel ausführen; er liefert veröffentlichte Dateien, keine unveröffentlichten Git-Änderungen. Veraltete Versionsvorgabe zuvor entfernen.
+- npm: `npm install -g zcode-agent-kit@latest`, danach `zcode-kit setup` aus derselben npm-Kopie.
+- Source-Checkout: `node cli/zcode-kit.mjs update` **im Checkout-Root**. Benötigt sauberen Arbeitsbaum, aktualisiert nur per Fast-Forward und wendet Setup erneut an. Kein Release-Versionswähler; Release-/npm-Installationen ohne `.git` lehnen den Befehl ab.
+
+Protokollierte Konfiguration zurückrollen:
+
+```sh
+zcode-kit rollback
+```
+
+Ohne ID wird die neueste Transaktion gewählt; eine ausgegebene ID wählt eine bestimmte. Spätere Nutzeränderungen werden als Konflikte behandelt. Credentials, Abhängigkeiten und externe Registrierungen werden nicht automatisch vollständig zurückgenommen.
+
+Zum Entfernen zuerst den richtigen Proxy über den **absoluten Managerpfad** aus Abschnitt 6 stoppen. Dann:
+
+```sh
+zcode-kit uninstall
+```
+
+Uninstall stoppt den Proxy nicht selbst und löscht weder Installationsordner, Dependencies, Logs, `.proxykey`, geteilte Proxy-Credentials noch Desktop-Daten. Entfernt werden protokollierte Integrationen, generierte Dateien und die passende Installer-Verknüpfung. Bei npm **danach** das Paket mit `npm uninstall -g zcode-agent-kit` entfernen. Verbleibende Ordner vor manuellem Löschen prüfen.
+
+`zcode-kit auth logout` erklärt den tatsächlichen Credential-Pfad; `zcode-kit auth logout --yes` löscht ihn, einschließlich eines gesetzten `ZCODE_PROXY_CREDENTIALS_PATH`. Kein Desktop-Logout oder Upstream-Token-Widerruf. Logout nicht als routinemäßige Reparatur verwenden.
+
+## 9. Source-Installation und Entwicklung – fortgeschritten
+
+Nur für bewusst gewünschte aktuelle Quellen statt eines veröffentlichten Releases. Node, Bun und Git vorab installieren. In einen **neuen eigenen Ordner** klonen, nicht ins Arbeitsprojekt. Keinen Release-Installer in den Checkout laufen lassen.
+
+**PowerShell:**
+
+```powershell
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit
+if ($LASTEXITCODE -ne 0) { throw 'Clone failed; stop here' }
+Set-Location zcode-agent-kit -ErrorAction Stop
+$env:ZCODE_KIT_ALLOW_CHECKOUT = '1'
+try { node cli/zcode-kit.mjs setup --harness omp }
+finally { Remove-Item Env:ZCODE_KIT_ALLOW_CHECKOUT -ErrorAction SilentlyContinue }
+```
+
+**macOS/Linux:**
+
+```sh
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git zcode-agent-kit &&
+cd zcode-agent-kit &&
+ZCODE_KIT_ALLOW_CHECKOUT=1 node cli/zcode-kit.mjs setup --harness omp
+```
+
+Nur fortfahren, wenn Klonen und Verzeichniswechsel erfolgreich waren; nach einem Fehler keine Folgezeilen ausführen. `--harness omp` begrenzt das Beispiel bewusst; gewünschten Assistenten oder `auto` wählen. Schreibzugriffe aus Checkouts verlangen explizites Opt-in, damit Profile nicht versehentlich auf eine zweite Kopie zeigen. Checkout-Setup erstellt keinen globalen Shim; später absoluten CLI-Pfad verwenden. Checkout nicht verschieben, weil Integrationen darauf verweisen. Vor Assistentenstart zurück ins **Arbeitsprojekt** wechseln.
+
+Entwicklertests **im Checkout-Root** nach Installation der Proxy-/MCP-Abhängigkeiten ausführen. Sie erzeugen Fixture-/Build-Dateien; bei strikter Isolation eine wegwerfbare Entwicklungskopie verwenden.
+
+```sh
+npm run test
+npm run test:proxy
+npm run test:mcp
+```
+
+Datierte Prüfung in [TEST_REPORT.md](TEST_REPORT.md): 150 Kit-Tests bestanden plus ein Live-Opt-in-Skip, 946 Proxy- und 42 MCP-Tests bestanden. Echte isolierte OMP-Aufrufe prüften normalen Start, eigenen Proxy-Absturz und Offline-Key-Reparatur; ein erster Timeout und erfolgreicher Wiederholungslauf bleiben dokumentiert. Keine Garantie für alle Clients/Plattformen/Langzeitfälle oder Inhalt des neuesten veröffentlichten Pakets. Später gefundene CI-Portabilitätsfehler sind getrennt vom lokalen Lauf zu betrachten; aktuellen Badge/Workflow beachten.
+
+Maintainer: Push auf `main`, `v*`-Tag oder Dispatch kann ein Release auslösen. Die Versionswahl prüft npm/Remote-Tags gegen Wiederverwendung fremder Assets; gleichversionige unveröffentlichte Retries sind bedingt. Tests, Paket-/Versionsgates, OIDC und Redistributionsvoraussetzungen bleiben erforderlich. Siehe [Release-Checkliste](docs/RELEASE_CHECKLIST.md); lokale grüne Tests sind keine erfolgreiche npm-Veröffentlichung.
+
+## Sicherheit und weitere Dokumentation
+
+Nur den eigenen autorisierten Account verwenden. `.proxykey`, generierte Settings/Env-Dateien und Profilkonfiguration schützen; Inhalte niemals in Issues kopieren. Der Proxy ist Loopback-only und Bearer-authentifiziert. Gateway-Challenge-Behandlung gehört zur eingebundenen Protokollimplementierung und garantiert keine Anbieterfreigabe oder Verträglichkeit mit künftigen Änderungen. Trial-Claims und Off-Peak-Automatisierung sind standardmäßig deaktiviert. Vor Konfigurationsänderung oder Freigabe von Endpunkten [SECURITY.md](SECURITY.md) lesen.
+
+- [Harness-Details](harnesses/README.md) und [Support-Matrix](SUPPORT_MATRIX.json)
+- [Denkstufen-Zuordnung](EFFORT_MAPPING.md)
+- [Testbericht](TEST_REPORT.md) und [Implementierungsstand](IMPLEMENTATION_STATUS.md)
+- [Eingebundene Komponenten und Lizenzen](MANIFEST.md)
+- [Release-Checkliste](docs/RELEASE_CHECKLIST.md)
