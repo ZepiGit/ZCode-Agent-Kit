@@ -8,6 +8,12 @@ import { handleListModels } from "./routes-openai.js";
 import { handleMessages } from "./routes-anthropic.js";
 import type { ProxyConfig } from "../config/types.js";
 import { AuthManager } from "../auth/manager.js";
+import { fixtureSecret, wrongSecret } from "../test-fixtures.js";
+
+/** The configured proxy API key; requests presenting it must be accepted. */
+const PROXY_KEY = fixtureSecret("server-proxy-key");
+/** Guaranteed different from PROXY_KEY — requests with it must be rejected. */
+const WRONG_PROXY_KEY = wrongSecret("server-proxy-key");
 
 /** AuthManager with a preset oauth credential (replaces the removed apikey mode). */
 function oauthAuth(key = "testkey.testsecret"): AuthManager {
@@ -203,12 +209,11 @@ describe("server routing", () => {
 });
 
 describe("proxy API key auth", () => {
-  // Fake test key + config helpers assembled at runtime — no credential
-  // literals in source (security-scan friendly); these are throwaway values.
-  const TEST_KEY = ["proxy", "secret"].join("-");
+  // Synthetic key generated at runtime — no credential literals in source.
+  const TEST_KEY = PROXY_KEY;
   const withAuth = (value?: string): ProxyConfig => {
     const config = makeConfig({});
-    if (value !== undefined) (config.auth as Record<string, string>)["proxyApi" + "Key"] = value;
+    if (value !== undefined) (config.auth as Record<string, string>).proxyApiKey = value;
     return config;
   };
 
@@ -293,8 +298,7 @@ describe("proxy API key auth", () => {
   });
 
   it("rejects request without proxy API key when configured", async () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
     const auth = oauthAuth("test");
     const handler = createFetchHandler({ config, auth, fetchImpl: mockUpstream() });
 
@@ -303,43 +307,39 @@ describe("proxy API key auth", () => {
   });
 
   it("accepts request with correct Bearer proxy key", async () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
     const auth = oauthAuth("test");
     const handler = createFetchHandler({ config, auth, fetchImpl: mockUpstream() });
 
     const resp = await handler(
       new Request("http://localhost/v1/models", {
-        headers: { authorization: "Bearer proxy-secret" },
+        headers: { authorization: `Bearer ${PROXY_KEY}` },
       }),
     );
     expect(resp.status).toBe(200);
   });
 
   it("accepts request with correct x-api-key proxy key", async () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
     const auth = oauthAuth("test");
     const handler = createFetchHandler({ config, auth, fetchImpl: mockUpstream() });
 
     const resp = await handler(
       new Request("http://localhost/v1/models", {
-        // mimosa-ignore synthetic local test fixture value, never a real credential
-        headers: { "x-api-key": "proxy-secret" },
+        headers: { "x-api-key": PROXY_KEY },
       }),
     );
     expect(resp.status).toBe(200);
   });
 
   it("rejects request with wrong proxy key", async () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
     const auth = oauthAuth("test");
     const handler = createFetchHandler({ config, auth, fetchImpl: mockUpstream() });
 
     const resp = await handler(
       new Request("http://localhost/v1/models", {
-        headers: { authorization: "Bearer wrong-key" },
+        headers: { authorization: `Bearer ${WRONG_PROXY_KEY}` },
       }),
     );
     expect(resp.status).toBe(401);
@@ -371,8 +371,7 @@ describe("web UI", () => {
   it("GET /webui serves HTML without the proxy API key", async () => {
     // proxyApiKey is configured, yet /webui must load freely — it sits before
     // the auth gate by design so the page can present the key input.
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
     const auth = oauthAuth("test");
     const handler = createFetchHandler({ config, auth, fetchImpl: mockUpstream() });
 
@@ -384,8 +383,7 @@ describe("web UI", () => {
   });
 
   it("non-GET /webui is not served as the SPA", async () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const config = makeConfig({ auth: { proxyApiKey: "proxy-secret" } });
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
     const auth = oauthAuth("test");
     const handler = createFetchHandler({ config, auth, fetchImpl: mockUpstream() });
 

@@ -140,8 +140,7 @@ describe("KeyResolver", () => {
       "api_keys": (body) => {
         if (body) {
           created = true;
-          // mimosa-ignore synthetic local test fixture value, never a real credential
-          return bizResponse({ apiKey: "freshlyCreated" });
+          return bizResponse({ apiKey: FRESH_API_KEY });
         }
         return bizResponse([{ name: "zcode-api-key", apiKey: "" }]);
       },
@@ -149,17 +148,16 @@ describe("KeyResolver", () => {
     const resolver = new KeyResolver(fetchImpl);
     const result = await resolver.findOrCreateApiKey("https://api.z.ai", "Bearer tok", "org1", "proj1");
     expect(created).toBe(true);
-    expect(result.apiKey).toBe("freshlyCreated");
+    expect(result.apiKey).toBe(FRESH_API_KEY);
   });
 
   it("getSecretKey retrieves secret via apiKey value", async () => {
     const fetchImpl = mockFetch({
-      // mimosa-ignore synthetic local test fixture value, never a real credential
-      "copy/": () => bizResponse({ secretKey: "theSecretKey" }),
+      "copy/": () => bizResponse({ secretKey: COPY_SECRET_KEY }),
     });
     const resolver = new KeyResolver(fetchImpl);
-    const secret = await resolver.getSecretKey("https://api.z.ai", "Bearer tok", "org1", "proj1", "myApiKey123");
-    expect(secret).toBe("theSecretKey");
+    const secret = await resolver.getSecretKey("https://api.z.ai", "Bearer tok", "org1", "proj1", CREATED_API_KEY);
+    expect(secret).toBe(COPY_SECRET_KEY);
   });
 
   it("resolveCodingPlanCredential returns Z.AI credential with secret", async () => {
@@ -170,18 +168,16 @@ describe("KeyResolver", () => {
       "getCustomerInfo": () => bizResponse({
         organizations: [{ organizationId: "o1", organizationName: "默认机构", projects: [{ projectId: "p1", projectName: "默认项目" }] }],
       }),
-      // mimosa-ignore synthetic local test fixture value, never a real credential
-      "api_keys/copy": () => bizResponse({ secretKey: "mySecret" }),
+      "api_keys/copy": () => bizResponse({ secretKey: FLOW_SECRET }),
       "api_keys": (body) => {
-        // mimosa-ignore synthetic local test fixture value, never a real credential
-        if (body) return bizResponse({ apiKey: "myApiKey" });
+        if (body) return bizResponse({ apiKey: FLOW_API_KEY });
         return bizResponse([]);
       },
     });
     const resolver = new KeyResolver(fetchImpl);
     const cred = await resolver.resolveCodingPlanCredential("accessTok", "zai");
-    expect(cred.apiKey).toBe("myApiKey");
-    expect(cred.secret).toBe("mySecret");
+    expect(cred.apiKey).toBe(FLOW_API_KEY);
+    expect(cred.secret).toBe(FLOW_SECRET);
     expect(cred.provider).toBe("zai");
   });
 });

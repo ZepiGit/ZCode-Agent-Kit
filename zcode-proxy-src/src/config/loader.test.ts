@@ -8,8 +8,15 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadConfig } from "./loader.js";
 import { EXAMPLE_CONFIG_YAML } from "./template.js";
+import { fixtureSecret } from "../test-fixtures.js";
 
 const TMP = join(tmpdir(), `zcode-proxy-test-${Date.now()}`);
+
+const PROXY_KEY = fixtureSecret("loader-proxy-key");
+/** Legacy `auth.apiKey`, which the oauth-only loader must drop entirely. */
+const LEGACY_KEY = fixtureSecret("loader-legacy-key");
+const CLIENT_KEY = fixtureSecret("loader-client-key");
+const ENV_PROXY_KEY = fixtureSecret("loader-env-proxy-key");
 
 function writeYaml(content: string): string {
   mkdirSync(TMP, { recursive: true });
@@ -105,7 +112,7 @@ server:
   port: 9090
   host: "127.0.0.1"
 auth:
-  proxyApiKey: "proxy-secret"  # mimosa-ignore synthetic local test fixture value, never a real credential
+  proxyApiKey: "${PROXY_KEY}"
 provider: bigmodel
 defaultModel: glm-4.6
 models:
@@ -117,7 +124,7 @@ logging:
     const cfg = loadConfig(path);
     expect(cfg.server.port).toBe(9090);
     expect(cfg.server.host).toBe("127.0.0.1");
-    expect(cfg.auth.proxyApiKey).toBe("proxy-secret");
+    expect(cfg.auth.proxyApiKey).toBe(PROXY_KEY);
     expect(cfg.provider).toBe("bigmodel");
     expect(cfg.defaultModel).toBe("glm-4.6");
     expect(cfg.models).toEqual(["glm-4.6", "glm-4.5"]);
@@ -374,12 +381,12 @@ server:
 provider: zai
 `);
     process.env.ZCODE_PROXY_PORT = "3000";
-    process.env.ZCODE_PROXY_API_KEY = "fromenv-proxy";
+    process.env.ZCODE_PROXY_API_KEY = ENV_PROXY_KEY;
     process.env.ZCODE_PROVIDER = "bigmodel";
 
     const cfg = loadConfig(path);
     expect(cfg.server.port).toBe(3000);
-    expect(cfg.auth.proxyApiKey).toBe("fromenv-proxy");
+    expect(cfg.auth.proxyApiKey).toBe(ENV_PROXY_KEY);
     expect(cfg.provider).toBe("bigmodel");
   });
 
@@ -438,12 +445,11 @@ server:
     const path = writeYaml(`
 auth:
   mode: apikey
-  apiKey: "legacy-key"  # mimosa-ignore synthetic local test fixture value, never a real credential
-  proxyApiKey: "client-secret"  # mimosa-ignore synthetic local test fixture value, never a real credential
+  apiKey: "${LEGACY_KEY}"
+  proxyApiKey: "${CLIENT_KEY}"
 `);
     const cfg = loadConfig(path);
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    expect(cfg.auth).toEqual({ proxyApiKey: "client-secret" });
+    expect(cfg.auth).toEqual({ proxyApiKey: CLIENT_KEY });
   });
 
   it("throws when config file not found", () => {

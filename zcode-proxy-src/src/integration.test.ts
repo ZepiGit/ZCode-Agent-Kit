@@ -9,6 +9,16 @@ import { join } from "node:path";
 import { loadConfig } from "./config/loader.js";
 import { AuthManager } from "./auth/manager.js";
 import { startServer, type ProxyServer } from "./server/server.js";
+import { fixtureSecret, wrongSecret } from "./test-fixtures.js";
+
+/** Written into the on-disk YAML; overridden below before the server starts. */
+const YAML_PROXY_KEY = fixtureSecret("integration-yaml-key");
+/** The key the running proxy actually enforces. */
+const PROXY_KEY = fixtureSecret("integration-proxy-key");
+/** Guaranteed different from PROXY_KEY — requests with it must be rejected. */
+const WRONG_PROXY_KEY = wrongSecret("integration-proxy-key");
+const UPSTREAM_KEY = fixtureSecret("integration-upstream-key");
+const UPSTREAM_SECRET = fixtureSecret("integration-upstream-secret");
 
 let proxyServer: ProxyServer;
 let mockUpstreamServer: ReturnType<typeof Bun.serve>;
@@ -31,7 +41,7 @@ function writeTestConfig(): string {
     '  port: 19090',
     '  host: "127.0.0.1"',
     "auth:",
-    '  proxyApiKey: "test-proxy-key"',  // mimosa-ignore synthetic local test fixture value, never a real credential
+    `  proxyApiKey: "${YAML_PROXY_KEY}"`,
     "provider: zai",
     "defaultModel: glm-4.6",
     "models:",
@@ -211,14 +221,12 @@ beforeAll(async () => {
   const config = loadConfig(writeTestConfig());
   config.server.port = proxyPort;
   config.server.host = "127.0.0.1";
-  // mimosa-ignore synthetic local test fixture value, never a real credential
-  config.auth.proxyApiKey = "integration-test-key";
+  config.auth.proxyApiKey = PROXY_KEY;
   config.providers.zai.anthropicBase = `http://127.0.0.1:${mockPort}/anthropic`;
   config.providers.zai.openaiBase = `http://127.0.0.1:${mockPort}/coding`;
 
   const auth = new AuthManager();
-  // mimosa-ignore synthetic local test fixture value, never a real credential
-  auth.setOAuthCredential({ apiKey: "integrationTestKey", secret: "integrationTestSecret", provider: "zai" });
+  auth.setOAuthCredential({ apiKey: UPSTREAM_KEY, secret: UPSTREAM_SECRET, provider: "zai" });
 
   proxyServer = await startServer({ config, auth });
 });
@@ -235,7 +243,7 @@ function proxyUrl(path: string): string {
   return `http://127.0.0.1:${proxyPort}${path}`;
 }
 function authHeader(): Record<string, string> {
-  return { "Authorization": "Bearer integration-test-key", "Content-Type": "application/json" };
+  return { "Authorization": `Bearer ${PROXY_KEY}`, "Content-Type": "application/json" };
 }
 
 describe("integration: OpenAI clients (translated Anthropic upstream)", () => {
@@ -455,7 +463,7 @@ describe("integration: Anthropic clients (native passthrough)", () => {
 describe("integration: Models endpoint", () => {
   it("GET /v1/models returns model list", async () => {
     const resp = await fetch(proxyUrl("/v1/models"), {
-      headers: { Authorization: "Bearer integration-test-key" },
+      headers: { Authorization: `Bearer ${PROXY_KEY}` },
     });
     expect(resp.status).toBe(200);
     const body = await resp.json();
@@ -472,7 +480,7 @@ describe("integration: Auth", () => {
 
   it("rejects request with wrong proxy key", async () => {
     const resp = await fetch(proxyUrl("/v1/models"), {
-      headers: { Authorization: "Bearer wrong-key" },
+      headers: { Authorization: `Bearer ${WRONG_PROXY_KEY}` },
     });
     expect(resp.status).toBe(401);
   });
@@ -481,7 +489,7 @@ describe("integration: Auth", () => {
 describe("integration: Health", () => {
   it("GET /health returns ok", async () => {
     const resp = await fetch(proxyUrl("/health"), {
-      headers: { Authorization: "Bearer integration-test-key" },
+      headers: { Authorization: `Bearer ${PROXY_KEY}` },
     });
     expect(resp.status).toBe(200);
     const body = await resp.json();
@@ -492,7 +500,7 @@ describe("integration: Health", () => {
 describe("integration: Error handling", () => {
   it("unknown route returns 404", async () => {
     const resp = await fetch(proxyUrl("/unknown"), {
-      headers: { Authorization: "Bearer integration-test-key" },
+      headers: { Authorization: `Bearer ${PROXY_KEY}` },
     });
     expect(resp.status).toBe(404);
   });

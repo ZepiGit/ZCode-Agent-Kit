@@ -10,6 +10,11 @@
  */
 import { describe, it, expect } from "bun:test";
 import { ZaiOAuthClient, BigmodelOAuthClient, parsePastedCallbackUrl } from "./oauth.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const BM_EXCHANGE_TOKEN = fixtureSecret("oauth-bm-exchange");
+const BM_AUTHORIZE_TOKEN = fixtureSecret("oauth-bm-authorize");
+const BM_PASTE_TOKEN = fixtureSecret("oauth-bm-paste");
 
 /** Wrap data in the zcode.z.ai `{code, data, msg}` envelope as a JSON Response. */
 function envelopeResponse(data: Record<string, unknown>, status = 200): Response {
@@ -178,15 +183,14 @@ describe("BigmodelOAuthClient (auth-code flow)", () => {
     const mockFetch = (async (_input: RequestInfo | URL): Promise<Response> => {
       return envelopeResponse({
         token: "jwt_zcode",
-        // mimosa-ignore synthetic local test fixture value, never a real credential
-        bigmodel: { access_token: "bm_access_123" },
+        bigmodel: { access_token: BM_EXCHANGE_TOKEN },
         user: { user_id: "u1", name: "test" },
       });
     }) as typeof fetch;
 
     const client = new BigmodelOAuthClient(mockFetch);
     const result = await client.exchangeCode("code_xyz", "http://127.0.0.1:9/callback/bigmodel", "st");
-    expect(result.accessToken).toBe("bm_access_123");
+    expect(result.accessToken).toBe(BM_EXCHANGE_TOKEN);
     expect(result.jwt).toBe("jwt_zcode");
     expect(result.userId).toBe("u1");
   });
@@ -216,8 +220,7 @@ describe("BigmodelOAuthClient (auth-code flow)", () => {
       expect(url).toBe("https://zcode.z.ai/api/v1/oauth/token");
       return envelopeResponse({
         token: "jwt_full",
-        // mimosa-ignore synthetic local test fixture value, never a real credential
-        bigmodel: { access_token: "resolved_token" },
+        bigmodel: { access_token: BM_AUTHORIZE_TOKEN },
         user: { user_id: "user_42" },
       });
     }) as typeof fetch;
@@ -236,7 +239,7 @@ describe("BigmodelOAuthClient (auth-code flow)", () => {
     });
 
     expect(capturedUrl).toContain("bigmodel.cn/login");
-    expect(result.accessToken).toBe("resolved_token");
+    expect(result.accessToken).toBe(BM_AUTHORIZE_TOKEN);
     expect(result.provider).toBe("bigmodel");
     expect(result.userId).toBe("user_42");
     expect(result.jwt).toBe("jwt_full");
@@ -293,8 +296,7 @@ describe("parsePastedCallbackUrl (headless paste login)", () => {
     const { impl, calls } = scriptedFetch([
       () => envelopeResponse({
         token: "jwt_paste",
-        // mimosa-ignore synthetic local test fixture value, never a real credential
-        bigmodel: { access_token: "bm_paste" },
+        bigmodel: { access_token: BM_PASTE_TOKEN },
         user: { user_id: "u9" },
       }),
     ]);
