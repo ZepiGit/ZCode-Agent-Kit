@@ -4,7 +4,8 @@ rem Credentials are NOT written here - this reads the kit-generated env file.
 setlocal
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "ROOT=%%~fI"
-node "%ROOT%\proxy\zcode-proxy-manager.mjs" start >nul 2>&1
+node "%ROOT%\cli\heal.mjs"
+if errorlevel 1 exit /b %errorlevel%
 if not exist "%ROOT%\generated\aider-zcode.env" (
   echo zcode-aider: missing generated\aider-zcode.env - run: node cli/zcode-kit.mjs integrate aider 1>&2
   exit /b 2

@@ -14,7 +14,7 @@
  */
 import { loadConfig } from "../config/loader.js";
 import { updateConfigYaml, ensureConfigFile } from "../config/edit.js";
-import { AuthManager } from "../auth/manager.js";
+import { createStoredAuthManager } from "../auth/runtime.js";
 import { startServer, type ProxyServer } from "../server/server.js";
 import { buildServerOptions } from "../server/server-options.js";
 import { loadCredential, saveCredential, clearCredential } from "../auth/store.js";
@@ -60,7 +60,7 @@ export async function runTui(args: ServeArgs): Promise<void> {
     process.exit(1);
   }
 
-  const auth = new AuthManager();
+  const auth = createStoredAuthManager(config.plan);
   const pane = new LogPane(2000);
   const serverRef: { current: ProxyServer | null } = { current: null };
 

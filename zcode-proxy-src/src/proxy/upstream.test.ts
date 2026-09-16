@@ -603,7 +603,8 @@ describe("proxyRequest", () => {
     expect(resp.status).toBe(502);
     const body = await resp.json();
     expect(body.error.type).toBe("upstream_unreachable");
-    expect(body.error.message).toContain("ECONNREFUSED");
+    expect(body.error.message).toBe("Upstream request could not be completed.");
+    expect(body.error.message).not.toContain("ECONNREFUSED");
   });
 
   it("returns 503 when credential unavailable", async () => {
@@ -635,7 +636,8 @@ describe("proxyRequest", () => {
 
     expect(resp.status).toBe(400);
     const body = await resp.json();
-    expect(body.error.type).toBe("invalid_request_error");
+    expect(body.error.type).toBe("upstream_error");
+    expect(body.error.message).not.toContain("bad model");
   });
 });
 
@@ -877,7 +879,7 @@ describe("proxyRequest — OpenAI translation mode (coding-plan → Anthropic up
     expect(body.error.type).toBe("translation_failed");
   });
 
-  it("maps upstream non-2xx to 502 translation_failed for translated clients", async () => {
+  it("preserves upstream non-2xx status with sanitized errors for translated clients", async () => {
     const fetchMock = mock(async (): Promise<Response> => {
       return new Response('{"type":"error","error":{"type":"invalid_request_error","message":"bad request"}}', { status: 400, headers: { "content-type": "application/json" } });
     });
@@ -885,9 +887,10 @@ describe("proxyRequest — OpenAI translation mode (coding-plan → Anthropic up
     const clientReq = makeOpenAIReq('{"model":"glm-4.6","messages":[]}');
 
     const resp = await proxyRequest(clientReq, "openai", { config: testConfig, auth, fetchImpl: fetchMock as any });
-    expect(resp.status).toBe(502);
+    expect(resp.status).toBe(400);
     const body = await resp.json();
-    expect(body.error.type).toBe("translation_failed");
+    expect(body.error.type).toBe("upstream_error");
+    expect(body.error.message).not.toContain("bad request");
   });
 });
 
@@ -1371,12 +1374,12 @@ describe("proxyRequest — Anthropic compatibility mode (coding-plan)", () => {
 
       const resp = await proxyRequest(clientReq, "openai", { config: startPlanConfig, auth, fetchImpl: fetchMock as any });
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      // Upstream errors are wrapped: openai→anthropic translation mode reports
-      // them as 502 translation_failed (same convention as coding-plan).
-      expect(resp.status).toBe(502);
+      // Authorization remains non-retryable; upstream error text is never copied.
+      expect(resp.status).toBe(403);
       const body = await resp.json();
-      expect(body.error.type).toBe("translation_failed");
+      expect(body.error.type).toBe("permission_error");
       expect(body.error.message).toContain("403");
+      expect(body.error.message).not.toContain("not captcha");
     } finally {
       globalThis.fetch = originalFetch;
     }

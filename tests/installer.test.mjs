@@ -3,12 +3,61 @@
 // (native arm64 bun), and the checksum helper must actually fall back.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join, delimiter } from "node:path";
 
 const KIT = join(import.meta.dirname, "..");
 const INSTALL = readFileSync(join(KIT, "install.sh"), "utf8");
 const INSTALL_PS1 = readFileSync(join(KIT, "install.ps1"), "utf8");
+
+for (const validChecksum of [true, false]) {
+  test(`existing Bun installer ${validChecksum ? "verifies and installs" : "rejects a corrupt archive before extraction"}`, () => {
+    const dir = mkdtempSync(join(tmpdir(), "zcode-installer-"));
+    const bin = join(dir, "bin");
+    const home = join(dir, "home");
+    const install = join(home, "kit");
+    const hash = createHash("sha256").update("fixture archive\n").digest("hex");
+    const script = (name, body) => writeFileSync(join(bin, name), `#!/bin/sh\nset -eu\n${body}\n`, { mode: 0o755 });
+    try {
+      mkdirSync(bin);
+      mkdirSync(home);
+      script("uname", "printf 'Darwin\\n'");
+      script("bun", "exit 0");
+      script("curl", `case "$2" in
+  */v1.2.3.tar.gz) printf 'fixture archive\\n' > "$4" ;;
+  */checksums.txt) printf '${validChecksum ? hash : "0".repeat(64)}  v1.2.3.tar.gz\\n' > "$4" ;;
+  *) exit 91 ;;
+esac`);
+      // Extraction and setup are the only install side effects mocked. Hashing
+      // and the installer control flow execute for real, entirely under tmp.
+      script("tar", `mkdir -p "$4/kit/cli"
+printf 'fixture cli\\n' > "$4/kit/cli/zcode-kit.mjs"`);
+      script("node", `if [ "$1" = "--version" ]; then printf 'v20.19.0\\n'; else
+  [ "$1" = "cli/zcode-kit.mjs" ] && [ "$2" = "setup" ] && [ "$3" = "--harness" ] && [ "$4" = "auto" ]
+  printf 'setup completed\\n' > setup-ran
+fi`);
+      const res = spawnSync("sh", [join(KIT, "install.sh")], {
+        encoding: "utf8", timeout: 15_000,
+        env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, HOME: home,
+          ZCODE_KIT_INSTALL_DIR: install, ZCODE_KIT_VERSION: "v1.2.3" },
+      });
+      assert.equal(res.status, validChecksum ? 0 : 1, `${res.stdout}\n${res.stderr}`);
+      if (validChecksum) {
+        assert.match(res.stdout, /archive hash verified/);
+        assert.equal(readFileSync(join(install, "setup-ran"), "utf8"), "setup completed\n");
+        assert.ok(existsSync(join(home, ".local", "bin", "zcode-kit")));
+      } else {
+        assert.match(res.stdout, /archive hash mismatch/);
+        assert.equal(existsSync(install), false);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("install.sh verifies the release tarball through the sha256_bin helper", () => {
   assert.match(INSTALL, /ACTUAL=\$\(sha256_bin "\$TMP\/kit\.tar\.gz"\)/, "tarball checksum must use the fallback-aware helper");

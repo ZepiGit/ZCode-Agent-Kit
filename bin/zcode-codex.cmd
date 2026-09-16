@@ -3,7 +3,8 @@ rem ZCode kit: run Codex CLI in an isolated CODEX_HOME routed through the local
 rem zcode-proxy (opt-in wrapper). Your normal `codex` and ~/.codex are untouched.
 setlocal
 set "ROOT=%~dp0.."
-node "%ROOT%\proxy\zcode-proxy-manager.mjs" start >nul 2>&1
+node "%ROOT%\cli\heal.mjs"
+if errorlevel 1 exit /b %errorlevel%
 if not exist "%ROOT%\.proxykey" (
   echo [zcode-kit] missing %ROOT%\.proxykey — run: node "%ROOT%\setup.mjs" 1>&2
   exit /b 1

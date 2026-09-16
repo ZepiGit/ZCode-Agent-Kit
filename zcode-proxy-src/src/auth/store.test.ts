@@ -3,7 +3,7 @@
  * @see .omo/plans/zcode-proxy.md Task 14
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { saveCredential, loadCredential, clearCredential, getStorePath } from "./store.js";
+import { saveCredential, saveCredentialIfUnchanged, loadCredential, clearCredential, getStorePath } from "./store.js";
 import { writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -49,6 +49,20 @@ describe("credential store", () => {
     delete process.env.ZCODE_PROXY_CREDENTIAL_SECRET;
     delete process.env.ZCODE_PROXY_CREDENTIALS_PATH;
     rmSync(TEST_STORE_DIR, { recursive: true, force: true });
+  });
+
+  it("conditionally persists recovered credentials without overwriting another login or logout", async () => {
+    const old: Credential = { apiKey: "fixture-old", provider: "zai" };
+    const fresh: Credential = { apiKey: "fixture-new", provider: "zai" };
+    await saveCredential(old);
+    const snapshot = readFileSync(TEST_STORE, "utf8");
+    await saveCredential(fresh);
+    expect(await saveCredentialIfUnchanged(old, snapshot)).toBe(false);
+    expect(await loadCredential()).toEqual(fresh);
+    const current = readFileSync(TEST_STORE, "utf8");
+    expect(await saveCredentialIfUnchanged(old, current)).toBe(true);
+    clearCredential();
+    expect(await saveCredentialIfUnchanged(fresh, current)).toBe(false);
   });
 
   it("returns null when no credential stored", async () => {

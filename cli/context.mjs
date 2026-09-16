@@ -191,7 +191,7 @@ export function bootstrap(ctx) {
   ensureDeps(ctx, "proxy", ctx.proxySrc);
   ensureDeps(ctx, "mcp bridge", ctx.mcpDir);
 
-  const credStore = join(ctx.home, ".zcode-proxy", "credentials.json");
+  const credStore = process.env.ZCODE_PROXY_CREDENTIALS_PATH || join(ctx.home, ".zcode-proxy", "credentials.json");
   if (!existsSync(credStore)) {
     const desktopCfg = join(ctx.home, ".zcode", "v2", "config.json");
     if (existsSync(desktopCfg)) {
@@ -199,7 +199,8 @@ export function bootstrap(ctx) {
       try {
         execFileSync("bun", ["run", "src/index.ts", "auth", "login", "zai", "--import"], {
           cwd: ctx.proxySrc,
-          env: { ...process.env, ZCODE_PROXY_CONFIG: ctx.config },
+          env: { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home, ZCODE_PROXY_CONFIG: ctx.config, ZCODE_PROXY_CREDENTIALS_PATH: credStore },
+          timeout: 15000,
           stdio: ["ignore", "pipe", "pipe"],
         });
         console.log("  credential imported from the existing ZCode Desktop login");

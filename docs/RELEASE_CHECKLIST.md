@@ -1,98 +1,118 @@
-# Release checklist — status as of the v0.2.0 preparation
+# Release checklist — current source, 2026-09-15
 
-## Done (prepared and verified)
+**Release readiness is not established.** Local source changes, fixture passes,
+a successful package build, a GitHub release and npm publication are separate
+milestones. Final test/review results are pending in `TEST_REPORT.md`; no release
+or repair of the user's personal installation is claimed by this checklist.
 
-- [x] Bun checksums embedded: `install.ps1` carries the real SHA256 of
-  bun-v1.4.2 `bun-windows-x64.zip`; `install.sh` verifies linux-x64 and
-  darwin-x64 per-platform before unzip. `install.ps1` is ASCII-only with
-  UTF-8 BOM (Windows PowerShell 5.1 mis-parses BOM-less UTF-8 punctuation).
-- [x] Release notes: `docs/RELEASE_NOTES_v0.2.0.md` (honest claims, provenance
-  note included).
-- [x] `pack/build.mjs` assembles the npm launcher package (215 files,
-  allowlist-driven), `pack/verify-payload.mjs` gates on secrets/local state/
-  required files, `npm publish --dry-run` passes.
-- [x] `install.ps1` / `install.sh`: pinned-tag download, SHA256 verification
-  against the release `checksums.txt`, user-local install, ZCODE_KIT_HOME
-  override, WSL detection, atomic in-place update preserving `.proxykey`,
-  `proxy/config.yaml`, logs and generated state.
-- [x] Root `package.json` is `private: true` — `npm publish` at the repo root
-  is structurally impossible; CI runs the suites before any publish step.
-- [x] CI green on ubuntu-latest + windows-latest (kit 28/28, proxy 858/858,
-  MCP 36/36) at commit `447e5a8`.
+## Blocking gates before a release-triggering push or dispatch
 
-## The release itself (one command block, run by the maintainer)
+- [ ] **Vendored redistribution permission:** resolve the existing license gate
+  below with traceable upstream evidence. Do not infer permission from this kit's
+  root MIT license or a newly copied license file.
+- [ ] Complete the final source review and test matrix for the exact candidate
+  commit, including repair/preflight, Continue YAML/key handling, credential
+  reload/recovery, postinstall hint and installer regressions.
+- [ ] Verify the release payload includes the required license notices, CLI/runtime
+  sources and matching publish marker, and excludes real credentials, local
+  configs, generated state, logs and backups. Use `pack/build.mjs` and
+  `pack/verify-payload.mjs`; a dry-run publish does not publish anything.
+- [ ] Verify installer paths with and without an existing bun runtime. Check the
+  pinned bun version, platform checksums, archive checksum verification and
+  preservation of existing local state; do not equate fixture tests with a real
+  user installation.
+- [ ] Confirm version consistency across `package.json`, `package-lock.json`,
+  `pack/ALLOW_PUBLISH` and the intended release tag.
+- [ ] Confirm npm Trusted Publisher is configured for `ZepiGit/ZCode-Agent-Kit`,
+  workflow `release.yml`, with the environment matching the workflow. The job
+  needs `id-token: write`, Node 24 with pinned **npm 11.19.1**, and provenance
+  publishing; the test matrix remains on Node 20.
 
-```powershell
-cd C:\Users\miche\zcode-agent-kit
-git add -A
-git commit -m "release: v0.2.0 - embed bun v1.4.2 checksums, release notes"
-git push
-git tag v0.2.0
-git push origin v0.2.0
-git archive --format=tar.gz --prefix="zcode-agent-kit-0.2.0/" -o release/v0.2.0.tar.gz v0.2.0
-sha256sum release/v0.2.0.tar.gz release/install.ps1 release/install.sh > release/checksums.txt
-gh release create v0.2.0 release/v0.2.0.tar.gz release/install.ps1 release/install.sh release/checksums.txt --title "zcode-agent-kit v0.2.0" --notes-file docs/RELEASE_NOTES_v0.2.0.md
-```
+A release-triggering push is not merely a source backup: `.github/workflows/release.yml`
+can publish automatically. Resolve these gates before pushing to `main` or a
+matching tag, or manually dispatching that workflow. A version marker is an
+execution gate, **not** legal clearance or evidence that verification completed.
 
-(`release/` is git-excluded; the uploaded `v0.2.0.tar.gz` asset is a
-deterministic `git archive` of the tag — the installer downloads the ASSET,
-not GitHub's auto-generated archive. Provenance note is part of the release
-notes: checksums.txt lives on the same host as the artifacts — integrity,
-not provenance; verify the tag commit for provenance.)
+## Actual release workflow behavior
 
-## Automated releases (v0.2.2 and later) — push the tag, that's all
+Read `.github/workflows/release.yml`, not its older tag-only comments, as the
+source of truth. Its triggers are pushes to `main`, `v*` tags and manual dispatch.
+The workflow runs kit, proxy and MCP suites on Ubuntu and Windows before the
+release/publish job.
 
-Since the v0.2.1 follow-up the release pipeline is a single tag-triggered
-workflow (`.github/workflows/release.yml`; the old `npm-publish.yml` was
-removed — its `release: created` trigger never worked):
+- **Main push or non-tag dispatch:** reuse the current package version only if
+  npm reports it missing and its remote tag is absent or resolves to the exact
+  current HEAD (annotated tags are peeled to their commit). Otherwise scan up to
+  100 patch candidates for a version absent from both npm and remote tags, update
+  both manifests and `pack/ALLOW_PUBLISH`, then create/push the version commit/tag.
+  Registry/tag lookup errors fail closed. A version missing on npm but tagged to
+  older source is occupied, not an opportunity to reuse old GitHub assets.
+- **Dispatch retry:** the same-version path requires npm-unpublished status and
+  either no remote tag or an exact-HEAD tag. Dispatch is **not** unconditionally
+  idempotent; a published version or different-source tag forces a new free patch.
+- **Tag run:** the tag must agree with the package version and marker. If npm
+  already has that version, npm publication is skipped.
+- **Existing GitHub release:** its assets are preserved rather than replaced;
+  an incomplete npm publication can still proceed. Dispatch may create a GitHub
+  release if it does not exist—it is not an npm-only path.
+- **Publication:** build and verify `pack/dist`, perform a dry-run where applicable,
+  build the archive/installers/checksums, create the GitHub release if absent,
+  then publish through npm OIDC. CI builds with `--tracked-only`. Exact npm-version
+  lookup treats only structured `E404` as missing; timeouts, auth errors and
+  malformed responses fail closed rather than implying an unpublished version.
+  After publish, a bounded registry check verifies the exact version is visible.
+  This checks version visibility, not the downloaded artifact contents. Any step
+  can fail; a triggered run is not proof of a completed release.
 
-1. Bump `package.json` + `package-lock.json` to the new version, set
-   `pack/ALLOW_PUBLISH` to the same version, and (optionally) write
-   `docs/RELEASE_NOTES_vX.Y.Z.md` — without it the release falls back to
-   GitHub's generated notes.
-2. Commit, then: `git push origin main && git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. The workflow runs the full test matrix on ubuntu + windows, gates the tag
-   against `package.json` and the committed `ALLOW_PUBLISH` marker, builds the
-   assets (git-archive tarball + installers + checksums.txt), creates the
-   GitHub release and publishes `pack/dist` to npm.
+## npm authentication and payload gates
 
-Known gap (observed on v0.2.0 and v0.2.1): the `release: created` event was
-delivered by GitHub but never started a run (zero runs with
-`event=release`) — do not rely on release-event triggers. A tag push is the
-reliable signal. To re-publish npm after a failed publish step, dispatch
-`release.yml` manually (`gh workflow run release.yml --ref main`); a dispatch
-runs build + verify + publish from main without creating a release.
+The current release workflow uses **Trusted Publishing (OIDC)**, not an
+`NPM_TOKEN`/`npm_token` repository secret. Do not follow the obsolete token-based
+`npm-publish.yml` instructions. The root package remains `private: true`; the
+built publish package is authorized only by a matching, version-bound marker,
+which `scripts/verify-release-marker.mjs` checks again at publish time.
 
-npm publishing — **Trusted Publishing (OIDC), no token**: the publish step
-authenticates via GitHub OIDC (`id-token: write` + `npm publish
---provenance`, npm >= 11.5 installed in the job). One-time prerequisite on
-npmjs.com: package `zcode-agent-kit` → Settings → **Trusted Publisher** →
-repository `ZepiGit/ZCode-Agent-Kit`, workflow `release.yml`, environment
-empty. History that led here: the `NPM_TOKEN` secret failed with `EOTP` on
-three dispatches (0.2.1) — classic tokens and granular tokens without the
-"bypass 2FA" entitlement cannot publish once TOTP is enabled on the account.
-With Trusted Publishing the token question disappears entirely; revoke all
-npm tokens after it is verified.
+The built package's postinstall hook should only print `zcode-kit setup` guidance.
+It must not launch setup, install runtime dependencies, import credentials or
+change user harness files during npm installation. Test the hook itself, not
+just the string in `package.json`.
 
-## npm publication — still gated (deliberate)
+## Artifact integrity and post-publication evidence
 
-1. Confirm the package name, add the `npm_token` repository secret.
-2. Commit the marker file `pack/ALLOW_PUBLISH` containing one line with the
-   version to allow (e.g. `0.2.1`) — the marker is version-bound now: the
-   generated package is `private: true` without it, and a package-internal
-   `prepublishOnly` gate (`scripts/verify-release-marker.mjs`) re-checks the
-   shipped marker at publish time, so a manual `npm publish` from pack/dist
-   fails closed too.
-3. The next GitHub release then publishes `pack/dist` via CI (the
-   `npm-publish.yml` publish job is skipped without the marker).
+- Never replace assets under an existing tag. Fix forward with a new version and
+  build from its exact source commit.
+- The installer consumes the uploaded versioned archive, not GitHub's automatic
+  source archive. Verify its SHA256 against `checksums.txt`.
+- Checksums hosted beside the assets establish integrity relative to that file,
+  not independent provenance. Check the release/tag commit and npm provenance.
+- After publication, verify the registry's expected package version and download
+  the actual published artifact for payload/marker/license checks. Verify the
+  GitHub asset set and checksums separately. Do not infer npm success merely from
+  GitHub release creation or a locally successful dry-run.
+- Record exact tested commit/version, suite counts, skipped or unexecuted paths,
+  and live-test limitations. The baseline MCP suite did not execute its `wmic`
+  kill path; a test count alone cannot validate it.
 
-**Never replace release assets under an existing tag** (audit ZAK-013): fix
-forward — cut a fresh tag/version from the corrected commit and build the
-assets from that tag in CI. The v0.2.0 asset replacements of 2026-09-13 are
-documented in its release notes; subsequent releases must not repeat that.
+## Vendored license gate — unresolved pending upstream evidence
 
-**License gate before npm publication:** the vendored zcode-proxy
-(`zcode-proxy-src/`) states MIT in its upstream README but the upstream
-repository ships no LICENSE file. Do not publish the npm package before this
-is clarified (contact upstream or pin to an upstream release that includes a
-LICENSE). Do not re-label the vendored code as anything else.
+The upstream README's **MIT declaration has been verified**. A standalone upstream
+LICENSE/copyright-notice file was not found. The uncertainty concerns the
+redistribution basis and notice requirements for the vendored source/artifacts,
+not an assertion that upstream supplied no license declaration.
+**Do not publish a candidate containing that code until the redistribution
+basis and required notices are clarified and recorded.** Obtain traceable
+upstream evidence or explicit permission as needed; pin the corresponding
+source revision and retain the applicable notices. Do not re-label vendor code
+or assume the root project's license grants rights over it.
+
+Redistribution/notice review remains an explicit release gate despite the verified
+MIT declaration. This checklist does not claim that the gate has been resolved
+or that an existing published artifact establishes permission for a new one.
+
+## Historical context (not current verification)
+
+The v0.2.0/v0.2.1 preparation used different test counts and included manual
+release commands and an obsolete release-event/npm-token path. Those instructions
+are superseded here. The v0.2.0 asset-replacement history remains in its release
+notes; it is not a precedent for replacing assets again. Use dated evidence in
+`TEST_REPORT.md`, not old green checkboxes, for the next candidate.

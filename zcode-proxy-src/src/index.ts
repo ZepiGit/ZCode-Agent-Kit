@@ -3,7 +3,8 @@
  * @see .omo/plans/zcode-proxy.md Task 7
  */
 import { loadConfig } from "./config/loader.js";
-import { AuthManager } from "./auth/manager.js";
+import { createStoredAuthManager } from "./auth/runtime.js";
+import { importFromZCodeConfig } from "./auth/desktop.js";
 import { startServer, type ProxyServer } from "./server/server.js";
 import { startControlListener, LogBuffer, type ControlState } from "./android/control.js";
 import { loadCredential, saveCredential, clearCredential, getStorePath } from "./auth/store.js";
@@ -17,8 +18,6 @@ import { openBrowser } from "./runtime/open-browser.js";
 import { pasteLoginInstructions, readPastedLine, boldIfTTY } from "./runtime/paste-login.js";
 import { buildServerOptions } from "./server/server-options.js";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
 
@@ -171,7 +170,7 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   }
   const config = loadConfig(path);
 
-  const auth = new AuthManager();
+  const auth = createStoredAuthManager(config.plan);
   const cred = await loadCredential();
   if (!cred) {
     console.error("Not logged in. Run: zcode-proxy auth login " + config.provider);
@@ -254,7 +253,7 @@ async function runAndroid(): Promise<void> {
   console.error = (...args: unknown[]) => { logBuffer.push("[error] " + args.join(" ")); origErr(...args); };
   console.warn = (...args: unknown[]) => { logBuffer.push("[warn] " + args.join(" ")); origWarn(...args); };
 
-  const auth = new AuthManager();
+  const auth = createStoredAuthManager(config.plan);
 
   const serverRef: { current: ProxyServer | null } = { current: null };
 
@@ -561,36 +560,4 @@ async function runPasteLogin(oauth: BigmodelOAuthClient): Promise<OAuthResult> {
   } finally {
     await oauth.close();
   }
-}
-
-function importFromZCodeConfig(provider: ProviderId): Credential {
-  const configPath = join(homedir(), ".zcode", "v2", "config.json");
-  let raw: string;
-  try {
-    raw = readFileSync(configPath, "utf-8");
-  } catch {
-    console.error(`Cannot read ${configPath}.`);
-    console.error("Make sure ZCode is installed and you've logged in at least once.");
-    process.exit(1);
-  }
-
-  const config = JSON.parse(raw) as {
-    provider?: Record<string, { options?: { apiKey?: string }; enabled?: boolean }>;
-  };
-
-  const providerKey = `builtin:${provider}-coding-plan`;
-  const entry = config.provider?.[providerKey];
-  const apiKey = entry?.options?.apiKey?.trim();
-
-  if (!apiKey) {
-    console.error(`No API key for ${providerKey} in ZCode config.`);
-    process.exit(1);
-  }
-
-  const startPlanKey = `builtin:${provider}-start-plan`;
-  const jwt = config.provider?.[startPlanKey]?.options?.apiKey?.trim() || undefined;
-
-  console.log(`Imported from ${configPath}`);
-  if (jwt) console.log(`  Start-plan JWT: ${jwt.slice(0, 12)}...`);
-  return { apiKey, provider, jwt };
 }

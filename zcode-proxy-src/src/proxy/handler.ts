@@ -27,6 +27,8 @@ import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js
 import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
 import { gzipSync } from "node:zlib";
+import { recoverAndMapUpstream, parseGatewayErrorEnvelope } from "./upstream-errors.js";
+export { parseGatewayErrorEnvelope } from "./upstream-errors.js";
 
 // captcha.ts is loaded lazily inside the `startPlan` branch (only path that
 // touches it). The solver itself (captcha-happy.ts) is dynamically imported
@@ -63,6 +65,8 @@ export interface ProxyHandlerOptions {
   endpointRouting?: EndpointRoutingService | null;
   /** Override the process-wide client signing manager (for testing). `null` disables. */
   clientSigning?: ClientSigningManager | null;
+  /** Override captcha provider for isolated start-plan tests. */
+  captcha?: CaptchaModule;
 }
 
 /**
@@ -169,7 +173,7 @@ export async function proxyRequest(
   let captchaHeaders: Record<string, string> | undefined;
   if (startPlan) {
     try {
-      const captcha = await loadCaptcha();
+      const captcha = opts.captcha ?? await loadCaptcha();
       const token = await captcha.getCaptchaToken(config.identity.appVersion);
       captchaHeaders = { [captcha.RETRY_HEADERS.PARAM]: token.verifyParam, [captcha.RETRY_HEADERS.REGION]: token.region };
     } catch {
@@ -265,7 +269,7 @@ export async function proxyRequest(
   } catch (err) {
     if (debug) debugError(reqId, "upstream_unreachable", (err as Error).message);
     printRow(reqId, format, meta, 502, started, Date.now(), 0, 0, 0);
-    return errorResponse(502, "upstream_unreachable", (err as Error).message);
+    return errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.");
   }
   const headersAt = Date.now();
 
@@ -284,19 +288,13 @@ export async function proxyRequest(
     });
   }
 
-  if (upstreamResp.status === 401 && startPlan) {
-    if (debug) debugError(reqId, "start_plan_jwt_invalid", "JWT rejected upstream");
-    printRow(reqId, format, meta, 401, started, headersAt, 0, 0, 0);
-    return errorResponse(401, "start_plan_jwt_invalid", "Start-plan JWT was rejected. Re-run: zcode-proxy auth login");
-  }
-
   // start-plan: on explicit captcha challenge, retry once with a fresh
   // pooled token (the challenged token was already consumed by this request;
   // getCaptchaToken takes the next pre-solved one). Detection covers the
   // response-header variant AND the in-body `{"code":3007}` variant (observed
   // 2026-08-29 as HTTP 400 JSON with no captcha header) via the shared
   // captcha-retry seam (used by /v1/responses too).
-  const captcha = startPlan ? await loadCaptcha() : null;
+  const captcha = startPlan ? opts.captcha ?? await loadCaptcha() : null;
   const captchaChallenge = captcha ? await isCaptchaChallenged(upstreamResp, captcha) : false;
   if (captchaChallenge && captcha) {
     console.log(`${reqId} captcha challenge, re-solving...`);
@@ -322,21 +320,38 @@ export async function proxyRequest(
         }
         if (debug) debugError(reqId, "upstream_unreachable", err.message);
         printRow(reqId, format, meta, 502, started, Date.now(), 0, 0, 0);
-        return errorResponse(502, "upstream_unreachable", err.message);
+        return errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.");
       },
     });
     if (!outcome.ok) return outcome.resp;
     upstreamResp = outcome.resp;
   }
 
+  try {
+    upstreamResp = await recoverAndMapUpstream({
+      response: upstreamResp, auth, credential: cred, plan: config.plan, signal: clientReq.signal,
+      resend: async (fresh) => {
+        cred = fresh;
+        if (startPlan) {
+          const provider = opts.captcha ?? await loadCaptcha();
+          const token = await provider.getCaptchaToken(config.identity.appVersion);
+          captchaHeaders = { [provider.RETRY_HEADERS.PARAM]: token.verifyParam, [provider.RETRY_HEADERS.REGION]: token.region };
+        }
+        upstreamHeaderPairs = buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, config.identity, config.plan, captchaHeaders, clientSession);
+        upstreamReq = buildUpstreamRequest(clientReq, upstreamFormat, provider, cred, transformedBody, config.identity, config.plan, captchaHeaders, clientSession);
+        return dispatch(upstreamReq, upstreamHeaderPairs);
+      },
+    });
+  } catch {
+    return errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.");
+  }
+  if (!upstreamResp.ok) {
+    printRow(reqId, format, meta, upstreamResp.status, started, headersAt, 0, 0, 0);
+    return upstreamResp;
+  }
   const isSSE = upstreamResp.headers.get("content-type")?.includes("text/event-stream") ?? false;
 
   if (translateOpenAIToAnthropic) {
-    if (!upstreamResp.ok) {
-      const errBody = await upstreamResp.text().catch(() => "");
-      printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
-      return errorResponse(502, "translation_failed", `upstream returned ${upstreamResp.status}: ${errBody.slice(0, 200)}`);
-    }
     if (isSSE && upstreamResp.body) {
       const translated = anthropicSseToOpenaiSse(upstreamResp.body, meta.model);
       const [clientBody, statsBody] = translated.tee();
@@ -347,11 +362,6 @@ export async function proxyRequest(
   }
 
   if (translateAnthropicToOpenAI) {
-    if (!upstreamResp.ok) {
-      const errBody = await upstreamResp.text().catch(() => "");
-      printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
-      return errorResponse(502, "translation_failed", `upstream returned ${upstreamResp.status}: ${errBody.slice(0, 200)}`);
-    }
     if (isSSE && upstreamResp.body) {
       const translated = openaiSseToAnthropicSse(upstreamResp.body, meta.model);
       const [clientBody, statsBody] = translated.tee();
@@ -430,28 +440,6 @@ async function decodeBodyText(resp: Response): Promise<string> {
  * too low" 400 — instead of a retryable 429 that only provokes more
  * gateway anti-abuse (captcha) challenges.
  */
-export function parseGatewayErrorEnvelope(
-  body: string,
-): { status: number; type: string; message: string } | null {
-  if (!body || body.length > 4096) return null;
-  const trimmed = body.trim();
-  if (!trimmed.startsWith("{")) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null) return null;
-  const obj = parsed as Record<string, unknown>;
-  if (typeof obj.code !== "number" || typeof obj.msg !== "string") return null;
-  if (obj.content !== undefined || obj.choices !== undefined || obj.type === "message") return null;
-  const status = obj.code === 1005 || obj.code === 1113 ? 400
-    : obj.code === 3006 || obj.code === 3007 || obj.code === 3012 ? 403
-    : 502;
-  const type = status === 400 ? "invalid_request_error" : status === 403 ? "permission_error" : "upstream_error";
-  return { status, type, message: `[${obj.code}] ${obj.msg}` };
-}
 
 export function shouldUseOrderedTransport(config: ProxyConfig, clientSession: ClientSessionResult | undefined, hasCustomFetchImpl: boolean): boolean {
   if (hasCustomFetchImpl) return false;
@@ -721,11 +709,11 @@ async function translatedBatchResponse(
     parsedAnthropic = JSON.parse(raw) as AnthropicMessagesResponse;
   } catch (err) {
     printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
-    return errorResponse(502, "translation_failed", `upstream returned non-JSON body: ${(err as Error).message}`);
+    return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
   }
   if (!isAnthropicMessagesResponse(parsedAnthropic)) {
     printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
-    return errorResponse(502, "translation_failed", `upstream returned invalid Anthropic message: ${raw.slice(0, 200)}`);
+    return errorResponse(502, "translation_failed", "Upstream returned an invalid Anthropic message.");
   }
   const openaiResp = translateResponseAnthropicToOpenAI(parsedAnthropic, model);
   const json = JSON.stringify(openaiResp);
@@ -768,7 +756,7 @@ async function translatedOpenAIToAnthropicBatchResponse(
     parsedOpenAI = JSON.parse(raw) as OpenAIChatResponse;
   } catch (err) {
     printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
-    return errorResponse(502, "translation_failed", `upstream returned non-JSON body: ${(err as Error).message}`);
+    return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
   }
   const anthropicResp = translateResponseOpenAIToAnthropic(parsedOpenAI);
   const json = JSON.stringify(anthropicResp);

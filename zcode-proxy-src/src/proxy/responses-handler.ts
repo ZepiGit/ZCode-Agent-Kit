@@ -24,6 +24,7 @@ import type { AuthManager } from "../auth/manager.js";
 import { buildUpstreamRequest, buildUpstreamHeaderPairs, type UpstreamHeaderPair } from "./upstream.js";
 import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
 import { dispatchWithConnectRetry } from "./handler.js";
+import { recoverAndMapUpstream } from "./upstream-errors.js";
 import type * as CaptchaExports from "./captcha.js";
 
 // Lazy, runtime-gated module load (exception to the static-import rule, same
@@ -239,7 +240,7 @@ export async function handleResponses(
       isAborted: () => clientReq.signal.aborted,
     });
   } catch (err) {
-    return errorResponse(502, "upstream_unreachable", (err as Error).message);
+    return errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.");
   }
 
   // Captcha challenge retry (mirrors handler.ts via the shared captcha-retry
@@ -261,17 +262,30 @@ export async function handleResponses(
         mapError: (err, phase) =>
           phase === "solver"
             ? errorResponse(503, "captcha_solver_failed", err.message)
-            : errorResponse(502, "upstream_unreachable", err.message),
+            : errorResponse(502, "upstream_unreachable", "Upstream request could not be completed."),
       });
       if (!outcome.ok) return outcome.resp;
       upstreamResp = outcome.resp;
     }
   }
 
-  if (!upstreamResp.ok) {
-    const errText = await upstreamResp.text().catch(() => "");
-    return errorResponse(upstreamResp.status, "upstream_error", errText.slice(0, 500) || `upstream returned ${upstreamResp.status}`);
+  try {
+    upstreamResp = await recoverAndMapUpstream({
+      response: upstreamResp, auth: opts.auth, credential: cred, plan: opts.config.plan, signal: clientReq.signal,
+      resend: async (fresh) => {
+        cred = fresh;
+        if (startPlan) {
+          const captcha = opts.captcha ?? await loadCaptcha();
+          const token = await captcha.getCaptchaToken(opts.config.identity.appVersion);
+          captchaHeaders = { [captcha.RETRY_HEADERS.PARAM]: token.verifyParam, [captcha.RETRY_HEADERS.REGION]: token.region };
+        }
+        return dispatch(buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, opts.config.identity, opts.config.plan, captchaHeaders, undefined));
+      },
+    });
+  } catch {
+    return errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.");
   }
+  if (!upstreamResp.ok) return upstreamResp;
 
   if (upstreamFormat === "anthropic") {
     // normalize the Anthropic upstream response into the OpenAI Chat shape the
@@ -290,7 +304,7 @@ export async function handleResponses(
       try {
         parsedAnthropic = JSON.parse(rawAnthropic) as AnthropicMessagesResponse;
       } catch (err) {
-        return errorResponse(502, "translation_failed", `upstream returned non-JSON body: ${(err as Error).message}`);
+        return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
       }
       const openaiResp = translateResponseAnthropicToOpenAI(parsedAnthropic, req.model);
       upstreamResp = new Response(JSON.stringify(openaiResp), {
@@ -313,7 +327,7 @@ export async function handleResponses(
   try {
     chatRespJson = JSON.parse(rawChatResp);
   } catch (err) {
-    return errorResponse(502, "translation_failed", `upstream returned non-JSON body: ${(err as Error).message}`);
+    return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
   }
   const responsesResp = chatCompletionsToResponses(chatRespJson, req.model, {
     responseId,

@@ -4,7 +4,7 @@
 // `npm install -g zcode-agent-kit` then runs the kit's setup, which installs
 // the proxy/bridge dependencies with bun (versioned, frozen lockfile).
 //
-// Usage: node pack/build.mjs [--dry-run-publish]
+// Usage: node pack/build.mjs [--dry-run-publish] [--tracked-only]
 import { spawnSync } from "node:child_process";
 import {
   cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync,
@@ -27,6 +27,7 @@ const ALLOW_PREFIXES = [
   "bin/",
   "setup.mjs",
   "README.md",
+  "LICENSE",
   "SECURITY.md",
   "EFFORT_MAPPING.md",
   "EFFORT_MAPPING.json",
@@ -62,7 +63,11 @@ function trackedFiles() {
   // Tracked + untracked-but-not-ignored sources: a local build from a working
   // tree must include new files, while the ignore rules (info/exclude) keep
   // secrets, logs and generated state out.
-  const res = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: ROOT, encoding: "utf8" });
+  // --tracked-only reproduces CI selection without changing the index or
+  // moving new sources out of the working tree. Local builds keep new files.
+  const args = ["ls-files", "--cached", "--exclude-standard"];
+  if (!process.argv.includes("--tracked-only")) args.push("--others");
+  const res = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
   if (res.status !== 0) throw new Error("git ls-files failed — build the package from a git checkout");
   return res.stdout.split("\n").filter(Boolean);
 }
@@ -93,7 +98,7 @@ function main() {
 
   const files = trackedFiles().filter((f) => {
     if (FORBIDDEN.some((re) => re.test(f))) return false;
-    return ALLOW_PREFIXES.some((p) => f === p.replace(/\/$/, "") || f.startsWith(p));
+    return ALLOW_PREFIXES.some((p) => p.endsWith("/") ? f.startsWith(p) : f === p);
   });
   if (files.length === 0) throw new Error("allowlist matched no files — refusing to build an empty package");
 
@@ -134,7 +139,7 @@ function main() {
     repository: rootPkg.repository,
     bugs: rootPkg.bugs,
     homepage: rootPkg.homepage,
-    files: files.concat(["package.json"]),
+    files: files.concat(["package.json"], releaseMarker ? ["ALLOW_PUBLISH"] : []),
   };
   writeFileSync(join(DIST, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
 

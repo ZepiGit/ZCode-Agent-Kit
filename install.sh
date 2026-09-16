@@ -38,6 +38,16 @@ command -v node >/dev/null 2>&1 || { echo "ERROR: node >= 20 required (https://n
 NODE_MAJOR=$(node --version | sed 's/^v\([0-9]*\)\..*/\1/')
 [ "$NODE_MAJOR" -ge 20 ] || { echo "ERROR: node >= 20 required, found $(node --version)"; exit 2; }
 
+# Shared by Bun bootstrap and release verification, including existing Bun installs.
+# Probe explicitly: `sha256sum | awk || shasum` cannot reliably fall back.
+sha256_bin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
 if ! command -v bun >/dev/null 2>&1; then
   echo "bun not found — installing user-local, pinned bun v1.4.2 ..."
   BUN_DIR="$HOME/.bun"
@@ -57,16 +67,6 @@ if ! command -v bun >/dev/null 2>&1; then
   esac
   BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/$BUN_ASSET"
   curl -fsSL "$BUN_URL" -o /tmp/bun.zip
-  # Audit H2b: on stock macOS sha256sum does not exist. Note that the naive
-  # `sha256sum | awk || shasum` never falls back — awk exits 0 on empty input —
-  # so the tool must be probed explicitly.
-  sha256_bin() {
-    if command -v sha256sum >/dev/null 2>&1; then
-      sha256sum "$1" | awk '{print $1}'
-    else
-      shasum -a 256 "$1" | awk '{print $1}'
-    fi
-  }
   ACTUAL=$(sha256_bin /tmp/bun.zip)
   [ "$ACTUAL" = "$BUN_SHA" ] || { echo "ERROR: bun download hash mismatch\n  expected $BUN_SHA\n  actual   $ACTUAL"; exit 1; }
   unzip -o -q /tmp/bun.zip -d "$BUN_DIR"
