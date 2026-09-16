@@ -17,6 +17,10 @@ import { describe, it, expect, mock } from "bun:test";
 import { proxyRequest } from "./handler.js";
 import type { ProxyConfig, ProxyIdentity } from "../config/types.js";
 import { AuthManager } from "../auth/manager.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const PLAN_KEY = fixtureSecret("resilience-key");
+const PLAN_JWT = fixtureSecret("resilience-jwt");
 
 const IDENTITY: ProxyIdentity = {
   appVersion: "test-1.0.0",
@@ -99,8 +103,7 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
     });
 
     const auth = new AuthManager();
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    auth.setOAuthCredential({ apiKey: "key-mock", provider: "zai", jwt: "jwt-mock" });
+    auth.setOAuthCredential({ apiKey: PLAN_KEY, provider: "zai", jwt: PLAN_JWT });
     const clientReq = new Request("http://localhost:8080/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -141,8 +144,7 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
     });
 
     const auth = new AuthManager();
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    auth.setOAuthCredential({ apiKey: "key-mock", provider: "zai", jwt: "jwt-mock" });
+    auth.setOAuthCredential({ apiKey: PLAN_KEY, provider: "zai", jwt: PLAN_JWT });
     const clientReq = new Request("http://localhost:8080/v1/chat/completions", {
       method: "POST",
       headers: { "content-type": "application/json" },

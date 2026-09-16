@@ -19,6 +19,10 @@ function oauthAuth(key = "testkey.testsecret"): AuthManager {
   return auth;
 }
 import type { Credential } from "../auth/types.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const PLAN_KEY = `${fixtureSecret("async-key")}.${fixtureSecret("async-secret")}`;
+const PLAN_JWT = fixtureSecret("async-jwt");
 
 function makeConfig(overrides: Partial<ProxyConfig> = {}): ProxyConfig {
   return {
@@ -55,10 +59,9 @@ function makeConfig(overrides: Partial<ProxyConfig> = {}): ProxyConfig {
   };
 }
 
-function makeOauthAuth(jwt: string = "the-jwt"): AuthManager {
+function makeOauthAuth(jwt: string = PLAN_JWT): AuthManager {
   const auth = new AuthManager();
-  // mimosa-ignore synthetic local test fixture value, never a real credential
-  const cred: Credential = { apiKey: "key-x.secret-y", provider: "zai", jwt };
+  const cred: Credential = { apiKey: PLAN_KEY, provider: "zai", jwt };
   auth.setOAuthCredential(cred);
   return auth;
 }

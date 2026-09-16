@@ -188,7 +188,9 @@ const HTML = `<!DOCTYPE html><html><head></head><body>
 </body></html>`;
 
 function diskPathFor(url) {
-  return path.join(CDN_CACHE_DIR, crypto.createHash("sha1").update(String(url)).digest("hex"));
+  // Hex digest of the URL: also the reason attacker-controlled URL text can
+  // never become a path segment here.
+  return path.join(CDN_CACHE_DIR, crypto.createHash("sha256").update(String(url)).digest("hex"));
 }
 
 // ── Egress allowlist ───────────────────────────────────────────────────────
@@ -733,9 +735,9 @@ function installEvalInstrumentation(w) {
       try {
         const src = String(code || "");
         const filename = (options && options.filename) || "?";
-        const sha1 = crypto.createHash("sha1").update(src).digest("hex");
+        const digest = crypto.createHash("sha256").update(src).digest("hex");
         process.stderr.write(
-          `\n[EVAL-PARSE-FAIL] file=${filename} len=${src.length} sha1=${sha1}\n` +
+          `\n[EVAL-PARSE-FAIL] file=${filename} len=${src.length} sha256=${digest}\n` +
             `  head300: ${JSON.stringify(src.slice(0, 300))}\n` +
             `  tail100: ${JSON.stringify(src.slice(-100))}\n` +
             `  err: ${err && err.message}\n`,
@@ -746,7 +748,7 @@ function installEvalInstrumentation(w) {
               const res = await fetch(filename, { headers: { "user-agent": fp.userAgent } });
               const fresh = Buffer.from(await res.arrayBuffer());
               process.stderr.write(
-                `[EVAL-CACHE-COMPARE] cachedLen=${src.length} freshLen=${fresh.length} freshSha1=${crypto.createHash("sha1").update(fresh).digest("hex")} http=${res.status}\n`,
+                `[EVAL-CACHE-COMPARE] cachedLen=${src.length} freshLen=${fresh.length} freshSha256=${crypto.createHash("sha256").update(fresh).digest("hex")} http=${res.status}\n`,
               );
               if (fresh.length > 0 && fresh.length !== src.length) {
                 process.stderr.write(`[EVAL-CACHE-MISMATCH] deleting ${diskPathFor(filename)} (stale/truncated cache)\n`);
@@ -1931,9 +1933,9 @@ async function createDom(region, prefix) {
   w.__capDebugDump = (url, src, kind) => {
     try {
       const s = String(src || "");
-      const sha1 = crypto.createHash("sha1").update(s).digest("hex");
+      const digest = crypto.createHash("sha256").update(s).digest("hex");
       process.stderr.write(
-        `\n[${kind}] url=${url} len=${s.length} sha1=${sha1}\n` +
+        `\n[${kind}] url=${url} len=${s.length} sha256=${digest}\n` +
           `  head300: ${JSON.stringify(s.slice(0, 300))}\n` +
           `  tail100: ${JSON.stringify(s.slice(-100))}\n`,
       );
@@ -1943,7 +1945,7 @@ async function createDom(region, prefix) {
             const res = await fetch(url, { headers: { "user-agent": fp.userAgent } });
             const fresh = Buffer.from(await res.arrayBuffer());
             process.stderr.write(
-              `[${kind}-CACHE-COMPARE] cachedLen=${s.length} freshLen=${fresh.length} freshSha1=${crypto.createHash("sha1").update(fresh).digest("hex")} http=${res.status}\n`,
+              `[${kind}-CACHE-COMPARE] cachedLen=${s.length} freshLen=${fresh.length} freshSha256=${crypto.createHash("sha256").update(fresh).digest("hex")} http=${res.status}\n`,
             );
             if (fresh.length > 0 && fresh.length !== s.length) {
               process.stderr.write(`[${kind}-MISMATCH] deleting ${diskPathFor(url)} (stale/truncated cache)\n`);

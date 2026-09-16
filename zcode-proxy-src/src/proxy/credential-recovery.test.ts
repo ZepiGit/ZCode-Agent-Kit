@@ -4,6 +4,10 @@ import { proxyRequest } from "./handler.js";
 import { handleResponses } from "./responses-handler.js";
 import type { ProxyConfig } from "../config/types.js";
 import { gzipSync } from "node:zlib";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const OLD_KEY = fixtureSecret("recovery-old");
+const FRESH_KEY = fixtureSecret("recovery-fresh");
 
 // No store, desktop path, server, routing, signing, captcha or live fetch access.
 const config = {
@@ -15,10 +19,8 @@ const config = {
   endpointRouting: { enabled: false, origin: "https://fixture.invalid" }, clientSigning: { enabled: false, origin: "https://fixture.invalid" },
   mcp: { enabled: false }, async: { enabled: false }, claim: { enabled: false }, logging: { level: "error" },
 } as ProxyConfig;
-// mimosa-ignore synthetic local test fixture value, never a real credential
-const first = { apiKey: "fixture-old", provider: "zai" as const };
-// mimosa-ignore synthetic local test fixture value, never a real credential
-const fresh = { apiKey: "fixture-fresh", provider: "zai" as const };
+const first = { apiKey: OLD_KEY, provider: "zai" as const };
+const fresh = { apiKey: FRESH_KEY, provider: "zai" as const };
 const ok = () => Response.json({ id: "msg_fixture", type: "message", role: "assistant", model: "fixture", content: [{ type: "text", text: "one reply" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 2 } });
 function request(route: string, stream = false) {
   return new Request(`http://fixture.invalid/${route}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(route === "responses" ? { model: "fixture", input: "hi", stream } : { model: "fixture", messages: [{ role: "user", content: "hi" }], max_tokens: 32, stream }) });
@@ -80,7 +82,7 @@ for (const route of ["openai", "anthropic", "responses"]) describe(`${route} saf
     const auth = new AuthManager({ importCredential: async () => { imports++; await Promise.resolve(); return fresh; } }); auth.setOAuthCredential(first);
     const results = await Promise.all(Array.from({ length: 12 }, () => run(route, auth, async req => {
       calls++;
-      return (req.headers.get("authorization") ?? "").includes("fixture-fresh") ? ok() : Response.json({ code: 3012, msg: "PRIVATE_FIXTURE" });
+      return (req.headers.get("authorization") ?? "").includes(FRESH_KEY) ? ok() : Response.json({ code: 3012, msg: "PRIVATE_FIXTURE" });
     })));
     expect(results.every(r => r.status === 200)).toBe(true);
     expect(calls).toBe(24); expect(imports).toBe(1);

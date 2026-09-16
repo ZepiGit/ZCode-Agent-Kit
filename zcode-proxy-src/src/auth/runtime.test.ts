@@ -4,16 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { saveCredential, clearCredential, loadCredential } from "./store.js";
 import { createStoredAuthManager } from "./runtime.js";
+import { fixtureSecret } from "../test-fixtures.js";
 
 test("real fixture encrypted store reloads, survives partial writes, persists changed desktop import, and honors logout", async () => {
   const dir = mkdtempSync(join(tmpdir(), "proxy-recovery-fixture-"));
   const previous = process.env.ZCODE_PROXY_CREDENTIALS_PATH;
   process.env.ZCODE_PROXY_CREDENTIALS_PATH = join(dir, "credentials.json");
   try {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const old = { apiKey: "fixture-old", provider: "zai" as const };
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const fresh = { apiKey: "fixture-new", provider: "zai" as const };
+    const old = { apiKey: fixtureSecret("runtime-old"), provider: "zai" as const };
+    const fresh = { apiKey: fixtureSecret("runtime-new"), provider: "zai" as const };
     await saveCredential(old);
     let imports = 0;
     const auth = createStoredAuthManager("coding-plan", { importCredential: async () => { imports++; return fresh; }, importRevision: () => "fixture-revision" });

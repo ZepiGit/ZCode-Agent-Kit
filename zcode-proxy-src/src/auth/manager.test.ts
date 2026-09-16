@@ -6,6 +6,7 @@ import { describe, it, expect } from "bun:test";
 import { credentialString, isExpired } from "./types.js";
 import { AuthManager } from "./manager.js";
 import type { Credential } from "./types.js";
+import { fixtureSecret } from "../test-fixtures.js";
 
 describe("credentialString", () => {
   it("returns apiKey.secret when secret present", () => {
@@ -40,10 +41,8 @@ describe("isExpired", () => {
 });
 
 describe("AuthManager durable reload and recovery", () => {
-  // mimosa-ignore synthetic local test fixture value, never a real credential
-  const first: Credential = { apiKey: "fixture-first", provider: "zai" };
-  // mimosa-ignore synthetic local test fixture value, never a real credential
-  const second: Credential = { apiKey: "fixture-second", provider: "zai" };
+  const first: Credential = { apiKey: fixtureSecret("manager-first"), provider: "zai" };
+  const second: Credential = { apiKey: fixtureSecret("manager-second"), provider: "zai" };
 
   it("reloads a changed persisted credential and retains last good across partial writes", async () => {
     let stored: Credential | null = first;

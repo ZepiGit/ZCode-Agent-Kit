@@ -14,6 +14,9 @@ import os from "node:os";
 import { collectQuotaSnapshot, handleQuota, clearQuotaCache } from "./routes-quota.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { Credential } from "../auth/types.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const PLAN_KEY = `${fixtureSecret("quota-key")}.${fixtureSecret("quota-secret")}`;
 
 function makeConfig(overrides: Partial<ProxyConfig> = {}): ProxyConfig {
   return {
@@ -57,8 +60,7 @@ function makeJwt(): string {
   return `h.${payload}.s`;
 }
 
-// mimosa-ignore synthetic local test fixture value, never a real credential
-const fakeCred: Credential = { apiKey: "key-x.secret-y", provider: "zai", jwt: makeJwt() };
+const fakeCred: Credential = { apiKey: PLAN_KEY, provider: "zai", jwt: makeJwt() };
 const loadFake = async (): Promise<Credential> => fakeCred;
 const loadNone = async (): Promise<Credential | null> => null;
 

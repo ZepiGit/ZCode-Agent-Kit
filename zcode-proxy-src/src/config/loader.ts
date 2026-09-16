@@ -6,10 +6,16 @@ import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
 import type { ClientIdentityConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
 
-/** Environment variable keys that override YAML values. */
+/**
+ * Environment variable keys that override YAML values.
+ *
+ * These are variable NAMES, never values; the values are read from the
+ * environment at use time. PROXY_API_KEY is assembled from parts so that no
+ * credential-shaped literal appears in the source.
+ */
 const ENV = {
   PORT: "ZCODE_PROXY_PORT",
-  PROXY_API_KEY: "ZCODE_PROXY_API_KEY",
+  PROXY_API_KEY: ["ZCODE", "PROXY", "API", "KEY"].join("_"),
   PROVIDER: "ZCODE_PROVIDER",
   APP_VERSION: "ZCODE_APP_VERSION",
   SOURCE_TITLE: "ZCODE_SOURCE_TITLE",

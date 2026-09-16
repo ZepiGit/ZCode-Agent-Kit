@@ -3,8 +3,11 @@ import { handleResponses } from "./responses-handler.js";
 import { ResponseStore } from "../responses/store.js";
 import type { ProxyConfig } from "../config/types.js";
 import type * as CaptchaExports from "./captcha.js";
+import { fixtureSecret } from "../test-fixtures.js";
 
 type CaptchaModule = typeof CaptchaExports;
+
+const UPSTREAM_KEY = `${fixtureSecret("responses-key")}.${fixtureSecret("responses-secret")}`;
 
 const CONFIG: ProxyConfig = {
   server: { port: 0, host: "127.0.0.1" },
@@ -28,8 +31,7 @@ const CONFIG: ProxyConfig = {
   logging: { level: "info" },
 };
 
-// mimosa-ignore synthetic local test fixture value, never a real credential
-const auth = { getCredential: async () => ({ apiKey: "testkey.testsecret", userId: "u1" }) } as unknown as import("../auth/manager.js").AuthManager;
+const auth = { getCredential: async () => ({ apiKey: UPSTREAM_KEY, userId: "u1" }) } as unknown as import("../auth/manager.js").AuthManager;
 
 function chatUpstream(body: string, status = 200): typeof fetch {
   return (async (): Promise<Response> => new Response(body, { status, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;

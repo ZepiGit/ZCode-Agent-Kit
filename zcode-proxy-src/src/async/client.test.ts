@@ -15,10 +15,14 @@ import { describe, it, expect, mock, beforeEach } from "bun:test";
 import { createOffPeakClient } from "./client.js";
 import { OffPeakServerError } from "./types.js";
 import type { OffPeakCredentials } from "./types.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const PLAN_JWT = fixtureSecret("offpeak-jwt");
+const PLAN_API_KEY = fixtureSecret("offpeak-plan-key");
 
 const CRED: OffPeakCredentials = {
-  jwt: "test-jwt-token",
-  codingPlanApiKey: "test-api-key",  // mimosa-ignore synthetic local test fixture value, never a real credential
+  jwt: PLAN_JWT,
+  codingPlanApiKey: PLAN_API_KEY,
 };
 
 function makeMockFetch(impl: (req: Request, init?: RequestInit) => Promise<Response>): typeof fetch {
@@ -74,8 +78,8 @@ describe("createOffPeakClient — header composition", () => {
     });
     const client = createOffPeakClient({ origin: "https://zcode.z.ai", credentials: CRED, fetchImpl });
     await client.getAvailability();
-    expect(captured?.authHeader).toBe("Bearer test-jwt-token");
-    expect(captured?.apiKeyHeader).toBe("test-api-key");
+    expect(captured?.authHeader).toBe(`Bearer ${PLAN_JWT}`);
+    expect(captured?.apiKeyHeader).toBe(PLAN_API_KEY);
     expect(captured?.bigmodelOrg).toBeNull();
     expect(captured?.bigmodelProj).toBeNull();
   });

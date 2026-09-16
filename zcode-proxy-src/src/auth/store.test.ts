@@ -8,8 +8,17 @@ import { writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Credential } from "./types.js";
+import { fixtureSecret, wrongSecret } from "../test-fixtures.js";
 
-const TEST_SECRET = "test-encryption-secret-for-zcode-proxy";
+const TEST_SECRET = fixtureSecret("store-encryption-secret");
+const OLD_KEY = fixtureSecret("store-old");
+const NEW_KEY = fixtureSecret("store-new");
+const ROUNDTRIP_KEY = fixtureSecret("store-roundtrip-key");
+const ROUNDTRIP_SECRET = fixtureSecret("store-roundtrip-secret");
+const BIGMODEL_KEY = fixtureSecret("store-bigmodel");
+const LEGACY_KEY = fixtureSecret("store-legacy");
+/** Encryption secret that must NOT decrypt anything written under TEST_SECRET. */
+const FOREIGN_SECRET = wrongSecret("store-encryption-secret");
 // Audit H6 regression guard: this suite runs against an injected temp store
 // (ZCODE_PROXY_CREDENTIALS_PATH) so it can never wipe a real login at
 // ~/.zcode-proxy/credentials.json.
@@ -52,10 +61,8 @@ describe("credential store", () => {
   });
 
   it("conditionally persists recovered credentials without overwriting another login or logout", async () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const old: Credential = { apiKey: "fixture-old", provider: "zai" };
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const fresh: Credential = { apiKey: "fixture-new", provider: "zai" };
+    const old: Credential = { apiKey: OLD_KEY, provider: "zai" };
+    const fresh: Credential = { apiKey: NEW_KEY, provider: "zai" };
     await saveCredential(old);
     const snapshot = readFileSync(TEST_STORE, "utf8");
     await saveCredential(fresh);
@@ -81,27 +88,27 @@ describe("credential store", () => {
 
   it("roundtrips: save → load → matches original", async () => {
     const cred: Credential = {
-      apiKey: "testApiKey123",  // mimosa-ignore synthetic local test fixture value, never a real credential
-      secret: "testSecret456",
+      apiKey: ROUNDTRIP_KEY,
+      secret: ROUNDTRIP_SECRET,
       provider: "zai",
     };
     await saveCredential(cred);
     const loaded = await loadCredential();
     expect(loaded).not.toBeNull();
-    expect(loaded!.apiKey).toBe("testApiKey123");
-    expect(loaded!.secret).toBe("testSecret456");
+    expect(loaded!.apiKey).toBe(ROUNDTRIP_KEY);
+    expect(loaded!.secret).toBe(ROUNDTRIP_SECRET);
     expect(loaded!.provider).toBe("zai");
   });
 
   it("roundtrips bigmodel credential (no secret)", async () => {
     const cred: Credential = {
-      apiKey: "bmKey789",  // mimosa-ignore synthetic local test fixture value, never a real credential
+      apiKey: BIGMODEL_KEY,
       provider: "bigmodel",
     };
     await saveCredential(cred);
     const loaded = await loadCredential();
     expect(loaded).not.toBeNull();
-    expect(loaded!.apiKey).toBe("bmKey789");
+    expect(loaded!.apiKey).toBe(BIGMODEL_KEY);
     expect(loaded!.secret).toBeUndefined();
     expect(loaded!.provider).toBe("bigmodel");
   });
@@ -145,21 +152,20 @@ describe("credential store — SHA-256 KDF migration (R2-13)", () => {
   });
 
   it("migrates a legacy XOR-fold-encrypted file: loads AND re-stores under the new KDF", async () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const cred: Credential = { apiKey: "legacyKey", provider: "zai" };
+    const cred: Credential = { apiKey: LEGACY_KEY, provider: "zai" };
     const legacyPayload = await legacyEncrypt(JSON.stringify(cred));
     writeFileSync(getStorePath(), JSON.stringify({ encrypted: legacyPayload }), "utf-8");
 
     const loaded = await loadCredential();
     expect(loaded).not.toBeNull();
-    expect(loaded!.apiKey).toBe("legacyKey");
+    expect(loaded!.apiKey).toBe(LEGACY_KEY);
 
     // The file must now be re-encrypted under the NEW key: the legacy key can
     // no longer decrypt it.
     const restored = JSON.parse(readFileSync(getStorePath(), "utf-8"));
     expect(restored.encrypted).not.toBe(legacyPayload);
     const reLoaded = await loadCredential(); // second load goes through the new KDF directly
-    expect(reLoaded!.apiKey).toBe("legacyKey");
+    expect(reLoaded!.apiKey).toBe(LEGACY_KEY);
   });
 
   it("returns null for a file decryptable under NEITHER key (corrupt/foreign)", async () => {
@@ -171,7 +177,7 @@ describe("credential store — SHA-256 KDF migration (R2-13)", () => {
   it("returns null for valid-base64 but undecryptable ciphertext", async () => {
     // Encrypt under a DIFFERENT secret → both the new and legacy keys fail.
     const saved = process.env.ZCODE_PROXY_CREDENTIAL_SECRET;
-    process.env.ZCODE_PROXY_CREDENTIAL_SECRET = "a-totally-different-secret";
+    process.env.ZCODE_PROXY_CREDENTIAL_SECRET = FOREIGN_SECRET;
     const foreign = await legacyEncrypt(JSON.stringify({ apiKey: "x", provider: "zai" }));
     process.env.ZCODE_PROXY_CREDENTIAL_SECRET = saved;
 

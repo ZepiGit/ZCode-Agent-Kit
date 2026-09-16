@@ -11,6 +11,10 @@ import { buildZcodeTraceHeaders } from "./trace-headers.js";
 import { proxyRequest, errorResponse, shouldUseOrderedTransport, stripAutoDecodedEncoding } from "./handler.js";
 import { ZAI_PROVIDER, BIGMODEL_PROVIDER } from "../provider/providers.js";
 import type { Credential } from "../auth/types.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+/** A caller-supplied key the proxy must strip — never the injected credential. */
+const CLIENT_SUPPLIED_KEY = fixtureSecret("upstream-client-supplied");
 import type { ProxyConfig, ProxyIdentity } from "../config/types.js";
 import { AuthManager } from "../auth/manager.js";
 
@@ -420,8 +424,7 @@ describe("buildUpstreamRequest", () => {
   });
 
   it("strips client x-api-key header", () => {
-    // mimosa-ignore synthetic local test fixture value, never a real credential
-    const clientReq = makeClientReq("{}", { "x-api-key": "client-key" });
+    const clientReq = makeClientReq("{}", { "x-api-key": CLIENT_SUPPLIED_KEY });
     const upstream = buildUpstreamRequest(clientReq, "openai", ZAI_PROVIDER, ZAI_CRED, "{}", IDENTITY);
     // For OpenAI format, auth goes in Authorization header; client's x-api-key should be stripped
     expect(upstream.headers.get("authorization")).toBe("Bearer testkey.testsecret");

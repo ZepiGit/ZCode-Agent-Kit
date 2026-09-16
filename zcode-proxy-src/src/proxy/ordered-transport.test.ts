@@ -17,6 +17,9 @@ import { sendOrderedUpstreamRequest } from "./ordered-transport.js";
 import { proxyRequest } from "./handler.js";
 import { AuthManager } from "../auth/manager.js";
 import type { ProxyConfig, ProxyIdentity } from "../config/types.js";
+import { fixtureSecret } from "../test-fixtures.js";
+
+const PROXY_KEY = fixtureSecret("ordered-transport-key");
 
 interface SilentServer {
   server: Server;
@@ -139,8 +142,7 @@ describe("proxyRequest — ordered transport abort (CL-04, handler level)", () =
         logging: { level: "info" },
       };
       const auth = new AuthManager();
-      // mimosa-ignore synthetic local test fixture value, never a real credential
-      auth.setOAuthCredential({ apiKey: "key-mock", provider: "zai" });
+  auth.setOAuthCredential({ apiKey: PROXY_KEY, provider: "zai" });
 
       const controller = new AbortController();
       const clientReq = new Request("http://127.0.0.1:8080/v1/messages", {
