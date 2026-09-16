@@ -3,7 +3,7 @@
 [![CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml/badge.svg)](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)
 ![Release](https://img.shields.io/github/v/release/ZepiGit/ZCode-Agent-Kit)
 
-**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [sprich Deutsch du H******](README.de.md)
+**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
 
 Model access from your own agent harness through **your ZCode Desktop
 account** — no second subscription, no API purchases. Ten harness adapters,
