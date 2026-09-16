@@ -7,16 +7,25 @@ import { spawn, type SpawnOptions } from "node:child_process";
 
 export function openBrowser(url: string): void {
   try {
+    // Only ever hand a launcher an http(s) URL. Anything else — a `file:`
+    // target, or a string carrying quotes or shell metacharacters — is refused
+    // here; the URL is already on screen for the user to copy.
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return;
+    const safe = parsed.toString();
     if (process.platform === "win32") {
-      spawnDetached("cmd.exe", ["/c", `start "" "${url}"`], {
-        windowsHide: true, windowsVerbatimArguments: true,
+      // No shell involved: rundll32 receives the URL as its own argv entry, so
+      // quoting never applies to it. `cmd /c start "" "<url>"` spliced it into
+      // a command line instead, where a quote in the URL could break out.
+      spawnDetached("rundll32.exe", ["url.dll,FileProtocolHandler", safe], {
+        windowsHide: true,
       });
     } else if (process.platform === "darwin") {
-      spawnDetached("open", [url]);
+      spawnDetached("open", [safe]);
     } else {
-      spawnDetached("xdg-open", [url]);
+      spawnDetached("xdg-open", [safe]);
     }
-  } catch { /* user copies URL manually */ }
+  } catch { /* malformed URL or no launcher — user copies URL manually */ }
 }
 
 /**

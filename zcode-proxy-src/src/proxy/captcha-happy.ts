@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import vm from "node:vm";
 import { Worker } from "node:worker_threads";
 
 // ── Blocking fetch for sync XHR (self-contained builds) ────────────────────
@@ -237,6 +238,31 @@ function isCdnUrl(raw) {
   }
 }
 
+// Syntax check for cached CDN bundles: detects a truncated or corrupt entry so
+// it gets refetched. The parser below parses without executing the source or
+// capturing scope, unlike the `new Function` compile this replaced.
+//
+// node:vm rather than Bun's transpiler: it exists on both runtimes (the Android
+// build runs this module under Node via libnode), and it accepts the Annex B
+// HTML comments a browser bundle may legitimately contain. Bun's transpiler
+// rejects those, which would mark a valid entry corrupt and refetch it forever.
+// Takes the raw buffer, not a string: decoding is part of the check, so an
+// entry too large to decode counts as unusable instead of throwing at the
+// caller and escaping the interceptor.
+export function isParsableJs(buffer) {
+  try {
+    // Compile-only. A vm.Script constructor parses and compiles; nothing runs
+    // until .runInThisContext()/.runInContext(), which is deliberately never
+    // called here. Verified: a body that assigns a global and throws leaves the
+    // global untouched and does not throw at construction. Covered by
+    // captcha-cache-parse.test.ts.
+    new vm.Script(buffer.toString("utf8"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function sniffMime(url) {
   if (/\.js(\?|$)/i.test(url)) return "application/javascript";
   if (/\.css(\?|$)/i.test(url)) return "text/css";
@@ -393,15 +419,11 @@ function makeInterceptor(bypassPeCache = false) {
       injectRequestHeaders(request);
       if (isCdnUrl(url)) {
         let body = skipPeCache(url) ? null : getCachedBody(url);
-        if (body && /\.js(\?|$)/i.test(url)) {
-          try {
-            new Function(body.toString("utf8"));
-          } catch (parseErr) {
-            process.stderr.write(`[cache-bad-js] ${url} len=${body.length} ${parseErr.message} — refetch fresh\n`);
-            _memCdnCache.delete(url);
-            try { fs.unlinkSync(diskPathFor(url)); } catch (_) {}
-            body = null;
-          }
+        if (body && /\.js(\?|$)/i.test(url) && !isParsableJs(body)) {
+          process.stderr.write(`[cache-bad-js] ${url} len=${body.length} unparsable — refetch fresh\n`);
+          _memCdnCache.delete(url);
+          try { fs.unlinkSync(diskPathFor(url)); } catch (_) {}
+          body = null;
         }
         // sync interceptor serves only from cache; the async interceptor
         // above warms the cache on first load, so misses fall through to
@@ -473,15 +495,11 @@ function makeInterceptor(bypassPeCache = false) {
       let body = null;
       if (isCdnUrl(url)) {
         body = skipPeCache(url) ? null : getCachedBody(url);
-        if (body && /\.js(\?|$)/i.test(url)) {
-          try {
-            new Function(body.toString("utf8"));
-          } catch (parseErr) {
-            process.stderr.write(`[cache-bad-js:sync] ${url} len=${body.length} ${parseErr.message} — refetch fresh\n`);
-            _memCdnCache.delete(url);
-            try { fs.unlinkSync(diskPathFor(url)); } catch (_) {}
-            body = null;
-          }
+        if (body && /\.js(\?|$)/i.test(url) && !isParsableJs(body)) {
+          process.stderr.write(`[cache-bad-js:sync] ${url} len=${body.length} unparsable — refetch fresh\n`);
+          _memCdnCache.delete(url);
+          try { fs.unlinkSync(diskPathFor(url)); } catch (_) {}
+          body = null;
         }
         // sync interceptor serves only from cache; the async interceptor
         // above warms the cache on first load, so misses fall through to
@@ -646,6 +664,13 @@ function removeGuestScope(w) {
  * This variant re-wraps the generated body in the same `with` scope, so code
  * the pe bytecode VM generates at runtime inherits the window's timers too.
  * `eval` needs no equivalent: it inherits the caller's scope chain already.
+ *
+ * Static scanners flag the constructor call below as dynamic execution. It is
+ * deliberate, and it narrows scope rather than widening it: the guest bundle is
+ * already running by this point, and the only question is whether the code it
+ * generates lands in the window scope or the host's. Removing this hands that
+ * code the host scope back. What actually bounds the guest is the egress
+ * allowlist on both interceptors; see captcha-egress.test.ts.
  */
 function makeScopedFunction(w) {
   const Scoped = function (...args) {
