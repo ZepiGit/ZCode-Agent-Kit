@@ -315,6 +315,7 @@ async function runAndroid(): Promise<void> {
     proxyPort: serverRef.current?.port ?? 0,
   };
   const controlListener = await startControlListener({
+    capability: process.env.ZCODE_CONTROL_CAPABILITY,
     port: controlPort,
     state: controlState,
     logBuffer,
@@ -340,7 +341,7 @@ async function runAndroid(): Promise<void> {
 
 function printDebugBanner(config: ProxyConfig, path: string, cred: Credential | null): void {
   const credShape = cred
-    ? `${cred.apiKey.slice(0, 6)}...${cred.apiKey.slice(-4)} (${cred.apiKey.length} chars)`
+    ? `<redacted> (${cred.apiKey.length} chars)`
     : "(none)";
   const active = config.providers[config.provider];
   console.log("=== zcode-proxy DEBUG MODE ===");

@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+if (process.env.ZCODE_KIT_LIVE_TEST !== '1') throw new Error('Live quota-consuming test requires ZCODE_KIT_LIVE_TEST=1');
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const KEY = readFileSync(join(ROOT, ".proxykey"), "utf8").trim();
 const BASE = "http://127.0.0.1:8457";

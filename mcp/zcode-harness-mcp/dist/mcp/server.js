@@ -14,8 +14,9 @@ import { createServer as createHttpServer } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { buildTools, toolTextPayload } from "./tools.js";
 import { listResources, readResource } from "./resources.js";
+import { validateArguments } from "./validate.js";
 import { createLogger } from "../util/log.js";
-import { redactDeep } from "../security/redact.js";
+import { redactDeep, redactText } from "../security/redact.js";
 const log = createLogger("mcp");
 function buildServer(opts) {
     const tools = buildTools(opts.toolCtx);
@@ -46,15 +47,20 @@ function buildServer(opts) {
             };
         }
         try {
+            // D-09: enforce the declared inputSchema before the handler sees args.
+            validateArguments(tool.inputSchema, args);
             const result = await tool.handler(args);
             const text = toolTextPayload(result);
+            if (tool.mutating)
+                log.info("mutating tool call", { tool: name });
             return {
                 content: [{ type: "text", text }],
                 structuredContent: redactDeep(result),
             };
         }
         catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+            // D-10: error texts can echo harness payloads — redact them too.
+            const message = redactText(err instanceof Error ? err.message : String(err));
             log.warn("tool failed", { tool: name, error: message });
             return {
                 isError: true,
@@ -71,7 +77,7 @@ function buildServer(opts) {
             return await readResource(opts.resourceCtx, uri);
         }
         catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
+            const message = redactText(err instanceof Error ? err.message : String(err));
             throw Object.assign(new Error(message), { code: -32002 });
         }
     });
@@ -82,7 +88,7 @@ export async function serveStdio(opts) {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     log.info("bridge ready on stdio");
-    // Keep the process alive until stdin closes (transport handles it).
+    return () => server.close();
 }
 export async function serveHttp(opts, host, port, httpKey) {
     // Defense in depth: the config already rejects non-loopback hosts; assert

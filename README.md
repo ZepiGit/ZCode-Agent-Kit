@@ -8,7 +8,16 @@ Use **your own ZCode Desktop account** with a coding assistant of your choice. T
 
 - **Model proxy:** OpenAI Chat Completions, Responses, and Anthropic Messages formats at `http://127.0.0.1:8457` by default.
 - **Models:** `glm-5.3` (text) and `glm-5.3-flash` (text and images). Advertised context: 1M tokens; reasoning levels: `low`, `high`, `max`. Client support and account limits still apply.
-- **Optional MCP bridge:** exposes operations of your installed ZCode runtime. This is separate from model-provider configuration and requires the Desktop app running for model turns.
+- **Optional MCP bridge:** exposes operations of your installed ZCode runtime. This is separate from model-provider configuration. A running Desktop app does not guarantee standalone MCP model turns; the provider can reject them independently.
+
+## Unreleased audit hardening
+
+- **Model/setup evidence:** Standalone MCP model turns are not guaranteed by a running Desktop app; the provider can reject them independently. If setup saves configuration but its API attempt fails, setup reports a warning: configuration succeeded, model access did not.
+- **Bun and mutable state:** Release installers store Bun's absolute executable path in `.bun-path` and do not change global PATH; kit restarts use that recorded path. npm mutable state lives outside `node_modules`: `%LOCALAPPDATA%\zcode-agent-kit\installs\<root-hash>` on Windows, or `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>` on POSIX. `ZCODE_KIT_STATE_DIR` must be absolute and dedicated to that installation. Source/tarball installs keep mutable state in their root. Before an npm package update, run setup to migrate legacy state; old data remains in place, and already-lost legacy data cannot be reconstructed.
+- **MCP trust:** YOLO is enabled only by explicit `--allow-yolo`; workspace allowlists also constrain access through session IDs, logs are bounded, and every client using the same bridge shares one trust domain.
+- **CAPTCHA boundary:** Remote CAPTCHA JavaScript is not OS-isolated. `createDom` without injected local test fixtures is disabled by default. Standalone use can opt in only for trusted deployments with `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1`; kit `proxyEnv` removes that override and provides no opt-in. Start-plan requests can therefore fail closed; none of this bypasses provider blocks.
+- **Prompt/privacy:** Start-plan prepends vendored ZCode system blocks to client prompts and removes client `cache_control` markers. The kit uses the neutral CWD `/workspace`; platform, shell, OS version, locale, trace and device metadata may still reach the upstream. This is neither a provider-compatibility nor an access guarantee.
+- **Release automation:** `main` and workflow-dispatch release triggers are intentional. `ALLOW_PUBLISH` checks version consistency only; it is not human or legal approval.
 
 
 ## 1. Before you install
@@ -17,7 +26,7 @@ You need:
 
 1. **ZCode Desktop**, already signed in to your own account with available model quota.
 2. **Node.js 20 or newer**, installed and available in your terminal: [nodejs.org](https://nodejs.org/).
-3. **Bun on a persistent PATH**: [Bun installation](https://bun.sh/docs/installation). The tested version is **1.4.2**. npm/source setup uses Bun to install dependencies; it does not install Bun itself.
+3. **Bun for npm/source installs**, available on PATH: [Bun installation](https://bun.sh/docs/installation). The tested version is **1.4.2**. npm/source setup uses Bun to install dependencies; it does not install Bun itself. Release installers can bootstrap Bun and record its absolute path.
 4. Your chosen assistant, installed separately: OMP, pi, Claude Code, Codex, OpenCode, Cline, Kilo Code, Aider, Continue, or Goose.
 
 Open a **new terminal** and check:
@@ -27,7 +36,7 @@ node --version
 bun --version
 ```
 
-These checks work in PowerShell and POSIX shells. If either command is missing, fix PATH before proceeding. The release installers can download Bun when absent, but their PATH addition is **not persistent**: a new Windows terminal loses it, and `curl | sh` cannot update the parent shell. Existing Bun installations are reused, not automatically upgraded.
+These checks work in PowerShell and POSIX shells. Node must be available for every method; `bun --version` must work before npm/source setup. Release installers can download Bun when absent, save its absolute executable path in `.bun-path`, and reuse that path after restart without changing global PATH. Existing Bun installations are reused, not automatically upgraded.
 
 **Windows:** use PowerShell, without administrator rights. Do not run `install.sh` in Git Bash or WSL. **macOS/Linux:** use a POSIX shell; `curl`, `tar`, a SHA-256 utility, and `rsync` for updates are needed; Bun bootstrap also needs `unzip`. Linux/macOS live-client support has not been reverified in the Windows validation described below.
 
@@ -139,7 +148,7 @@ zcode-kit integrate continue --dry-run
 
 Use these only after verifying the command's installation in section 3. Setup can modify user-level assistant configuration and MCP registrations. It records configuration transactions, but **it is not an all-or-nothing operation**: a later failure leaves earlier successful changes in place and prints a rollback command.
 
-Current-source setup also makes one small live Flash request, which can consume quota. To skip it, set `ZCODE_KIT_SKIP_SMOKE=1` for that invocation; CI/test modes skip it too. A smoke failure does not automatically undo configuration. `doctor --fix` does not install missing dependencies or perform general setup.
+Current-source setup also makes one small live Flash request, which can consume quota. To skip it, set `ZCODE_KIT_SKIP_SMOKE=1` for that invocation; CI/test modes skip it too. If configuration was saved successfully but the API attempt fails, setup reports a warning and keeps the configuration success; that is not evidence of a successful model turn. `doctor --fix` does not install missing dependencies or perform general setup.
 
 ```sh
 zcode-kit status
@@ -252,7 +261,7 @@ The proxy reloads stored credentials per request. Corrupt/partial writes retain 
 **Update using the original installation method:**
 
 - Release installer: rerun it with the same dedicated destination. This updates published files, not unpublished Git changes. Remove an obsolete version pin first.
-- npm: `npm install -g zcode-agent-kit@latest`, then run `zcode-kit setup` from that same npm installation.
+- npm: before replacing the package, run `zcode-kit setup` from the current npm installation so legacy mutable state is migrated. Then run `npm install -g zcode-agent-kit@latest` and run setup again from the updated copy. Migration leaves old data in place; data already lost from an older `node_modules` cannot be reconstructed.
 - Source checkout: `node cli/zcode-kit.mjs update` **from the checkout root**. It requires a clean tree, fast-forwards only, and reapplies setup. This is not a release-version selector. Release/npm installations without `.git` refuse this command.
 
 Recorded configuration rollback:
@@ -308,11 +317,11 @@ npm run test:mcp
 
 See [TEST_REPORT.md](TEST_REPORT.md) for the dated validation: 150 kit tests passed plus one live opt-in skip, 946 proxy tests passed, and 42 MCP tests passed. Real isolated OMP model turns covered normal startup, own-proxy crash recovery and offline key-drift repair; one initial timeout and its successful recheck remain documented. These are not claims of every client/platform/long-running scenario passing, nor proof that the latest published package contains these changes. Subsequent CI portability findings are separate from that local run; consult the badge and current workflow logs.
 
-Maintainers: a push to `main`, a `v*` tag or workflow dispatch can trigger release automation. Main/dispatch version selection checks npm and remote tags to avoid reusing another commit's assets; exact unpublished retries are conditional. Tests, package/version gates, OIDC authorization and redistribution requirements still apply. See [release checklist](docs/RELEASE_CHECKLIST.md); a green local test is not a successful npm publication.
+Maintainers: release automation on `main` pushes and workflow dispatch is intentional; a `v*` tag can also trigger it. Main/dispatch version selection checks npm and remote tags to avoid reusing another commit's assets; exact unpublished retries are conditional. `ALLOW_PUBLISH` checks version consistency only and is not human, legal, or redistribution approval. Tests, package/version gates, OIDC authorization and redistribution requirements still apply. See [release checklist](docs/RELEASE_CHECKLIST.md); a green local test is not a successful npm publication.
 
 ## Security and further documentation
 
-Use only your own authorized account. Protect `.proxykey`, generated settings/env files and profile configurations; never paste their contents into issues. The proxy is loopback-only and bearer-authenticated. Gateway challenge handling is part of the vendored protocol implementation, not a guarantee of provider endorsement or compliance with future service changes. Trial-claiming and off-peak automation are disabled by default. Read [SECURITY.md](SECURITY.md) before changing these settings or exposing any endpoint.
+Use only your own authorized account. Protect `.proxykey`, generated settings/env files and profile configurations; never paste their contents into issues. The proxy is loopback-only and bearer-authenticated. Remote CAPTCHA JavaScript is not OS-isolated: `createDom` without injected local test fixtures is disabled by default, and only trusted standalone deployments may opt in with `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1`. Kit `proxyEnv` strips that override and offers no enablement; start-plan requests may therefore fail closed. Challenge handling does not bypass provider restrictions or guarantee provider endorsement or future compatibility. Trial-claiming and off-peak automation are disabled by default. Read [SECURITY.md](SECURITY.md) before changing settings or exposing any endpoint.
 
 - [Harness details](harnesses/README.md) and [support matrix](SUPPORT_MATRIX.json)
 - [Reasoning/effort mapping](EFFORT_MAPPING.md)

@@ -103,33 +103,36 @@ test("a deleted-after-transaction target is restored from backup", () => {
   assert.equal(readFileSync(file, "utf8"), "keep: me\n");
 });
 
-// AUD-004: the write-ahead journal makes a crash between rename and finish()
-// discoverable — the in-progress transaction restores the recorded pre-state.
-test("crash after rename is recoverable from the in-progress journal", () => {
+// A journal has no committed postHash. If the target differs from its known
+// pre-state, the writer may have changed it or an unrelated editor may have;
+// recovery therefore fails closed instead of guessing.
+test("crash journal without postHash does not clobber an ambiguous edit", () => {
   const backupDir = freshDir("journal");
   const tx = beginTransaction(backupDir, "journal test");
   const target = join(backupDir, "target.yml");
   writeFileSync(target, "original\n");
   tx.touch(target);
-  // simulate the crash: target mutated mid-flight, finish() never ran
-  writeFileSync(target, "mutated mid-flight\n");
+  writeFileSync(target, "ambiguous post-crash edit\n");
   const r = rollbackTransaction(backupDir, tx.id);
-  assert.equal(r.restored.length, 1, "mutation recovered");
-  assert.equal(readFileSync(target, "utf8"), "original\n", "original restored");
-  assert.equal(existsSync(join(backupDir, `tx-${tx.id}.manifest.in-progress.json`)), false, "journal consumed after recovery");
+  assert.equal(r.restored.length, 0);
+  assert.equal(r.conflicts.length, 1, "ambiguous mutation is reported");
+  assert.equal(readFileSync(target, "utf8"), "ambiguous post-crash edit\n", "unproven edit preserved");
+  assert.equal(existsSync(join(backupDir, `tx-${tx.id}.manifest.in-progress.json`)), true, "journal retained as evidence");
+  assert.deepEqual(listTransactions(backupDir), [tx.id], "incomplete recovery remains retryable");
 });
 
-test("untouched in-progress op is a no-op rollback", () => {
+test("untouched in-progress op is marked rolled back without deleting its journal", () => {
   const backupDir = freshDir("journal2");
   const tx = beginTransaction(backupDir, "j2");
   const target = join(backupDir, "t2.yml");
   writeFileSync(target, "stable\n");
   tx.touch(target);
-  // crash BEFORE the rename — the file still matches preHash
   const r = rollbackTransaction(backupDir, tx.id);
   assert.equal(r.restored.length, 0, "nothing to recover");
+  assert.equal(r.complete, true);
   assert.equal(readFileSync(target, "utf8"), "stable\n");
-  assert.equal(existsSync(join(backupDir, `tx-${tx.id}.manifest.in-progress.json`)), false);
+  assert.equal(existsSync(join(backupDir, `tx-${tx.id}.manifest.in-progress.json`)), true, "journal retained as evidence");
+  assert.deepEqual(listTransactions(backupDir), [], "fully recovered journal is no longer active");
 });
 
 // AUD-001: no automatic stale takeover — the unconditional unlink after a

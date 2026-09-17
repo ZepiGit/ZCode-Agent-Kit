@@ -13,7 +13,7 @@ export const EXAMPLE_CONFIG_YAML: string = `server:
 
 auth:
   # Key that clients must provide to use the proxy.
-  # Set to null/omit to disable client auth.
+  # Required for serving; generate a unique secret and replace the placeholder.
   proxyApiKey: "your-proxy-secret"
 
   # Upstream credentials come from the OAuth login flow — run this first:

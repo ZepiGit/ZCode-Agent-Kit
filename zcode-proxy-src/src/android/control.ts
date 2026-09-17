@@ -16,6 +16,7 @@
  * (provider/plan), poll logs, and shut down the Node process.
  */
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import type { ProviderId } from "../provider/types.js";
 import type { Credential } from "../auth/types.js";
 import {
@@ -87,6 +88,7 @@ export interface ControlState {
 }
 
 interface StartControlOpts {
+  capability?: string;
   port: number;
   state: ControlState;
   /** Start the proxy server. Returns the bound port on success. */
@@ -155,13 +157,17 @@ export function startControlListener(opts: StartControlOpts): Promise<{ close():
         onSetConfig: opts.onSetConfig,
         onShutdown: opts.onShutdown,
         logBuffer,
-      });
+      }, opts.capability);
+      if (result.status === 413) { res.setHeader("connection", "close"); res.once("finish", () => req.destroy()); }
       writeJson(res, result.status, result.body);
-    } catch (err) {
-      writeJson(res, 500, { ok: false, error: `internal_error: ${(err as Error).message}` });
+    } catch {
+      writeJson(res, 500, { ok: false, error: "internal_error" });
     }
   });
 
+  server.headersTimeout = 10_000;
+  server.requestTimeout = 15_000;
+  server.setTimeout(15_000, socket => socket.destroy());
   return new Promise((resolve, reject) => {
     server.on("error", reject);
     server.listen(opts.port, "127.0.0.1", () => resolve({
@@ -188,10 +194,11 @@ export function handleControlRequestForTest(
   req: IncomingMessage,
   state: ControlState,
   onShutdown?: () => Promise<void> | void,
+  capability?: string,
 ): Promise<ControlHandlerResult> {
   // Backwards-compatible shape: only `onShutdown` is wired.
   const ctx: HandlerContext = { onShutdown, logBuffer: new LogBuffer() };
-  return handleControlRequest(req, state, ctx);
+  return handleControlRequest(req, state, ctx, capability);
 }
 
 /**
@@ -202,14 +209,16 @@ export function handleControlRequestWithHooksForTest(
   req: IncomingMessage,
   state: ControlState,
   ctx: HandlerContext,
+  capability?: string,
 ): Promise<ControlHandlerResult> {
-  return handleControlRequest(req, state, ctx);
+  return handleControlRequest(req, state, ctx, capability);
 }
 
 async function handleControlRequest(
   req: IncomingMessage,
   state: ControlState,
   ctx: HandlerContext,
+  capability?: string,
 ): Promise<ControlHandlerResult> {
   if (!isLoopback(req.socket.remoteAddress)) {
     return { status: 403, body: { ok: false, error: "forbidden: non-loopback remote address" } };
@@ -220,7 +229,10 @@ async function handleControlRequest(
     return { status: 404, body: { ok: false, error: `not_found: ${req.method} ${parsed.pathname}` } };
   }
 
-  const body = await readBody(req);
+  let body: string;
+  try { body = await readBody(req); } catch {
+    return { status: 413, body: { ok: false, error: "request_body_too_large" } };
+  }
   let cmd: ControlCommand;
   try {
     cmd = JSON.parse(body) as ControlCommand;
@@ -228,6 +240,13 @@ async function handleControlRequest(
     return { status: 400, body: { ok: false, error: "invalid_json" } };
   }
 
+  if (!cmd || typeof cmd !== "object" || typeof cmd.cmd !== "string") return { status: 400, body: { ok: false, error: "invalid_command" } };
+  if (cmd.cmd !== "status") {
+    if (!capability) return { status: 503, body: { ok: false, error: "control_capability_unavailable" } };
+    const expected = Buffer.from(capability);
+    const given = Buffer.from(String(req.headers["x-zcode-control-capability"] ?? ""));
+    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return { status: 403, body: { ok: false, error: "forbidden: invalid control capability" } };
+  }
   const result = await dispatch(cmd, state, ctx);
   return { status: 200, body: result };
 }
@@ -381,8 +400,15 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
+    const max = 64 * 1024;
+    if (Number(req.headers["content-length"]) > max) { reject(new Error("too large")); return; }
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let bytes = 0;
+    req.on("data", (c: Buffer) => {
+      bytes += c.length;
+      if (bytes > max) { req.pause(); reject(new Error("too large")); return; }
+      chunks.push(c);
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
     req.on("error", reject);
   });

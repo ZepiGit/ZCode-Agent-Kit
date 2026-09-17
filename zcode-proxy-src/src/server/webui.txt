@@ -5,12 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>zcode-proxy</title>
-    <!-- Markdown + sanitize + code highlight. All optional: the UI degrades to
-         escaped plaintext if the CDN is unreachable. -->
-    <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js" defer></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js" defer></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" />
+    <!-- Render escaped text without third-party scripts in the credential origin. -->
     <style>
       :root {
         --accent: #6366f1;
@@ -398,7 +393,7 @@
           </div>
           <label for="s-mcp" style="margin-top:6px;">MCP servers (one per line)</label>
           <textarea id="s-mcp" placeholder="https://mcp.example.com/mcp&#10;https://mcp.github.com/mcp,ghp_xxx&#10;http://localhost:3001/mcp"></textarea>
-          <div class="hint">Format: <code>URL</code> or <code>URL,key</code> (comma-separated). Key sent as <code>Authorization: Bearer</code>. If a server needs the key in the URL, embed it there directly. Caution: keys are stored in plaintext in localStorage.</div>
+          <div class="hint">Format: <code>URL</code> or <code>URL,key</code> (comma-separated). Key sent as <code>Authorization: Bearer</code>. If a server needs the key in the URL, embed it there directly. Keys and MCP connection details remain in memory only and must be re-entered after reload.</div>
         </div>
 
         <div class="field">
@@ -487,6 +482,10 @@
           if (raw) {
             var s = JSON.parse(raw);
             s.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings || {});
+            s.settings.apiKey = "";
+            s.settings.mcpServers = [];
+            s.settings.mcpCorsProxy = "";
+            localStorage.setItem(STORE, JSON.stringify(s));
             s.conversations = Array.isArray(s.conversations) ? s.conversations : [];
             s.activeId = s.activeId || (s.conversations[0] && s.conversations[0].id) || null;
             return s;
@@ -495,7 +494,10 @@
         return { settings: Object.assign({}, DEFAULT_SETTINGS), conversations: [], activeId: null };
       }
       function saveState() {
-        try { localStorage.setItem(STORE, JSON.stringify(state)); }
+        try {
+          var saved = Object.assign({}, state, { settings: Object.assign({}, state.settings, { apiKey: "", mcpServers: [], mcpCorsProxy: "" }) });
+          localStorage.setItem(STORE, JSON.stringify(saved));
+        }
         catch (e) { toast("Storage full \u2014 older sessions not saved."); }
       }
       function activeConv() {
@@ -613,16 +615,10 @@
       // markdown
       // =========================================================
       function renderMarkdown(text) {
-        if (typeof marked === "undefined") return escapeHtml(text);
-        try {
-          marked.setOptions({ gfm: true, breaks: true, headerIds: false, mangle: false });
-          var html = marked.parse(text);
-          if (typeof DOMPurify !== "undefined") html = DOMPurify.sanitize(html);
-          return html;
-        } catch (e) { return escapeHtml(text); }
+        return escapeHtml(String(text)).replace(/\n/g, "<br>");
       }
       function escapeHtml(s) {
-        return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
       }
       // Tiny script appended to rendered HTML so the sandboxed iframe can tell
       // its parent how tall the content is (auto-height). Split "<script" so the

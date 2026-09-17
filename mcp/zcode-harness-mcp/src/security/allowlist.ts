@@ -127,6 +127,15 @@ export class WorkspaceAllowlist {
     return ok;
   }
 
+  /** Boolean form of check() for filtering listings. */
+  isAllowed(candidate: string): boolean {
+    try {
+      return this.check(candidate) !== null;
+    } catch {
+      return false;
+    }
+  }
+
   list(): string[] {
     return [...this.entries];
   }

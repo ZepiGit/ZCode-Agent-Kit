@@ -7,7 +7,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
-import { removeFromDisabledProviders } from "../../lib/config-edit.mjs";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 const BLOCK_NAME = "zcode-kit";
@@ -20,35 +19,138 @@ const LEGACY_BLOCK_NAME = "zcode-omp-integration";
 const EXT_ENTRY_NAME = "zcode-proxy-autostart.ts";
 
 function removeManagedBlock(text, name) {
-  const BEGIN = `# >>> ${name} (managed block)`;
-  const END = `# <<< ${name}`;
-  let out = text;
-  for (let removed = 0; ; removed++) {
-    const begin = out.indexOf(BEGIN);
-    if (begin === -1) return out;
-    if (removed >= 8) throw new Error(`models.yml: more than 8 "${name}" managed blocks — refusing to edit`);
-    const end = out.indexOf(END, begin);
-    if (end === -1) throw new Error(`managed block "${name}": begin marker without end marker`);
-    let cutEnd = end + END.length;
-    if (out[cutEnd] === "\n") cutEnd += 1;
-    out = out.slice(0, begin) + out.slice(cutEnd);
+  const beginMarker = `# >>> ${name} (managed block)`;
+  const endMarker = `# <<< ${name}`;
+  const begins = [...text.matchAll(new RegExp(`^[ \\t]*${escapeRegExp(beginMarker)}.*$`, "gm"))];
+  const ends = [...text.matchAll(new RegExp(`^[ \\t]*${escapeRegExp(endMarker)}[ \\t]*\\r?$`, "gm"))];
+  if (begins.length === 0 && ends.length === 0) return text;
+  if (begins.length !== 1 || ends.length !== 1) {
+    throw new Error(`models.yml: duplicate or unbalanced "${name}" managed block markers — refusing to edit`);
   }
+  const begin = begins[0].index;
+  const end = ends[0].index;
+  if (begin === undefined || end === undefined || end < begin) {
+    throw new Error(`managed block "${name}": end marker without matching begin marker`);
+  }
+  let cutEnd = end + ends[0][0].length;
+  if (text[cutEnd] === "\n") cutEnd += 1;
+  return text.slice(0, begin) + text.slice(cutEnd);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function loadYaml(ctx) {
+  const req = createRequire(join(ctx.proxySrc, "package.json"));
+  return req("yaml");
+}
+
+function parseYamlDocument(ctx, text, label) {
+  try {
+    const YAML = loadYaml(ctx);
+    const doc = YAML.parseDocument(text, { strict: true, uniqueKeys: true, prettyErrors: false });
+    if (doc.errors.length > 0) throw doc.errors[0];
+    return { YAML, doc };
+  } catch (err) {
+    throw new Error(`YAML validation failed for ${label}: ${err.message}`);
+  }
+}
+
+function topLevelPair(doc, key, label) {
+  const matches = doc.contents?.items?.filter((pair) => pair.key?.value === key) ?? [];
+  if (matches.length !== 1) throw new Error(`${label}: expected exactly one top-level \`${key}:\` key`);
+  return matches[0];
+}
+
+function leadingIndent(text, offset) {
+  const lineStart = text.lastIndexOf("\n", offset - 1) + 1;
+  return text.slice(lineStart, offset);
+}
+
+function providerLayout(text, providersPair) {
+  const value = providersPair.value;
+  const isImplicitEmpty = value?.constructor?.name === "Scalar"
+    && value.value === null
+    && value.source === "";
+  if (isImplicitEmpty) {
+    const lineEnd = text.indexOf("\n", providersPair.key.range[2]);
+    return { indent: "  ", insertAt: lineEnd === -1 ? text.length : lineEnd + 1 };
+  }
+  if (!value || value.constructor?.name !== "YAMLMap") {
+    throw new Error("models.yml: top-level `providers` must be a mapping");
+  }
+  if (value.flow) throw new Error("models.yml: top-level `providers` must use a block mapping");
+
+  if (value.items.length > 0) {
+    const indent = leadingIndent(text, value.items[0].key.range[0]);
+    if (!/^[ \t]+$/.test(indent)) throw new Error("models.yml: providers entries must be indented");
+    return { indent, insertAt: value.items[0].key.range[0] - indent.length };
+  }
+
+  const headerEnd = providersPair.key.range[2];
+  const lineEnd = text.indexOf("\n", headerEnd);
+  return { indent: "  ", insertAt: lineEnd === -1 ? text.length : lineEnd + 1 };
+}
+
+function editConfigYaml(ctx, text, extensionPath) {
+  const { YAML, doc } = parseYamlDocument(ctx, text, "config.yml");
+  if (!doc.contents || doc.contents.constructor?.name !== "YAMLMap") {
+    throw new Error("config.yml: top level must be a mapping");
+  }
+
+  const disabledPairs = doc.contents.items.filter((pair) => pair.key?.value === "disabledProviders");
+  const extensionPairs = doc.contents.items.filter((pair) => pair.key?.value === "extensions");
+  if (disabledPairs.length > 1 || extensionPairs.length > 1) {
+    throw new Error("config.yml: duplicate disabledProviders/extensions keys — refusing to edit");
+  }
+
+  let changed = false;
+  if (disabledPairs.length === 1) {
+    const seq = disabledPairs[0].value;
+    if (!seq || seq.constructor?.name !== "YAMLSeq") {
+      throw new Error("config.yml: disabledProviders must be a sequence");
+    }
+    const filtered = seq.items.filter((item) => item?.value !== "zcode");
+    if (filtered.length !== seq.items.length) {
+      seq.items = filtered;
+      changed = true;
+    }
+  }
+
+  if (extensionPairs.length === 1) {
+    const seq = extensionPairs[0].value;
+    if (!seq || seq.constructor?.name !== "YAMLSeq") {
+      throw new Error("config.yml: extensions must be a sequence");
+    }
+    if (!seq.items.some((item) => item?.value === extensionPath)) {
+      seq.add(extensionPath);
+      changed = true;
+    }
+  } else {
+    const seq = new YAML.YAMLSeq();
+    seq.add(extensionPath);
+    doc.set("extensions", seq);
+    changed = true;
+  }
+
+  return { text: changed ? String(doc) : text, changed };
 }
 
 export function yamlSingleQuoted(s) {
   return `'${s.replace(/'/g, "''")}'`;
 }
 
-function ompProviderBlock(ctx, port) {
+function ompProviderBlock(ctx, port, indent = "  ") {
   const rootPath = ctx.root.replace(/\\/g, "/");
-  return `${MARKER_BEGIN}
+  const block = `${MARKER_BEGIN}
 # Provider ZCode — GLM-5.3 / GLM-5.3-Flash via the local zcode-proxy
 # (start-plan access). Efforts low/high/max; default max. See EFFORT_MAPPING.md.
   zcode:
     name: ZCode
     baseUrl: http://127.0.0.1:${port}
     api: anthropic-messages
-    apiKey: "${ctx.key()}"
+    apiKey: ${JSON.stringify(ctx.key())}
     modelOverrides:
       glm-5.3:
         thinking:
@@ -105,15 +207,7 @@ function ompProviderBlock(ctx, port) {
           cacheRead: 0
           cacheWrite: 0
 ${MARKER_END}`;
-}
-
-function validateYaml(ctx, text, label) {
-  try {
-    const req = createRequire(join(ctx.proxySrc, "package.json"));
-    req("yaml").parse(text, { strict: false });
-  } catch (err) {
-    throw new Error(`YAML validation failed for ${label}: ${err.message}`);
-  }
+  return block.split("\n").map((line) => (line.startsWith("  ") ? indent + line.slice(2) : line)).join("\n");
 }
 
 export default {
@@ -134,50 +228,49 @@ export default {
     const port = ctx.port();
 
     const models = readFileSync(modelsYml, "utf8");
-    let newModels = models;
-    newModels = removeManagedBlock(newModels, BLOCK_NAME);
+    let newModels = removeManagedBlock(models, BLOCK_NAME);
     newModels = removeManagedBlock(newModels, LEGACY_BLOCK_NAME);
-    const m = newModels.match(/^providers:\s*$/m);
-    if (!m || m.index === undefined) throw new Error("top-level `providers:` key not found in models.yml");
-    const insertAt = m.index + m[0].length;
-    const rest = newModels.slice(insertAt);
-    const nextTop = rest.search(/^\S/m);
-    const providersRegion = nextTop === -1 ? rest : rest.slice(0, nextTop);
-    if (/^  zcode:(?:\s.*)?$/m.test(providersRegion)) {
+
+    const { YAML, doc } = parseYamlDocument(ctx, newModels, "models.yml");
+    if (!doc.contents || doc.contents.constructor?.name !== "YAMLMap") {
+      throw new Error("models.yml: top level must be a mapping");
+    }
+    const providersPair = topLevelPair(doc, "providers", "models.yml");
+    const providers = providersPair.value;
+    const providersImplicitlyEmpty = providers?.constructor?.name === "Scalar"
+      && providers.value === null
+      && providers.source === "";
+    if (!providersImplicitlyEmpty && (!providers || !YAML.isMap(providers))) {
+      throw new Error("models.yml: top-level `providers` must be a mapping");
+    }
+    if (!providersImplicitlyEmpty && providers.items.some((pair) => pair.key?.value === "zcode")) {
       throw new Error(
         "models.yml already has a hand-written `zcode` provider entry outside any managed block — " +
           "merge or rename it manually; nothing was changed (zcode-kit does not overwrite hand-written entries)",
       );
     }
-    newModels = newModels.slice(0, insertAt) + "\n" + ompProviderBlock(ctx, port) + newModels.slice(insertAt);
-    validateYaml(ctx, newModels, "models.yml (staged)");
+    const { indent, insertAt } = providerLayout(newModels, providersPair);
+    const block = ompProviderBlock(ctx, port, indent);
+    const separator = insertAt > 0 && newModels[insertAt - 1] !== "\n" ? "\n" : "";
+    newModels = newModels.slice(0, insertAt) + separator + block + "\n" + newModels.slice(insertAt);
+    parseYamlDocument(ctx, newModels, "models.yml (staged)");
 
     let newConfig = existsSync(configYml) ? readFileSync(configYml, "utf8") : null;
     let configChanged = false;
     if (newConfig) {
-      const scoped = removeFromDisabledProviders(newConfig, "zcode");
-      const cleaned = scoped.text;
-      const extEntry = `  - ${join(agentDir, "extensions", EXT_ENTRY_NAME).replace(/\\/g, "/")}`;
-      let withExt = cleaned;
-      if (!cleaned.includes(EXT_ENTRY_NAME)) {
-        const em = cleaned.match(/^extensions:\s*$/m);
-        withExt = em && em.index !== undefined
-          ? cleaned.slice(0, em.index + em[0].length) + `\n${extEntry}` + cleaned.slice(em.index + em[0].length)
-          : cleaned.replace(/\n*$/, "\n") + `extensions:\n${extEntry}\n`;
-      }
-      if (withExt !== newConfig) {
-        configChanged = true;
-        newConfig = withExt;
-        validateYaml(ctx, newConfig, "config.yml (staged)");
-      }
+      const extensionPath = join(agentDir, "extensions", EXT_ENTRY_NAME).replace(/\\/g, "/");
+      const edited = editConfigYaml(ctx, newConfig, extensionPath);
+      newConfig = edited.text;
+      configChanged = edited.changed;
     }
 
     const extSrc = join(ctx.root, "proxy", "zcode-proxy-autostart.ts");
     const extDst = join(agentDir, "extensions", EXT_ENTRY_NAME);
     ensureDir(ctx, dirname(extDst));
-    const rootLiteral = ctx.root.replace(/\\/g, "/").replace(/"/g, '\\"');
+    const literal = (p) => p.replace(/\\/g, "/").replace(/"/g, '\\"');
     const extContent = readFileSync(extSrc, "utf8")
-      .replaceAll("__ZCODE_OM_ROOT__", rootLiteral)
+      .replaceAll("__ZCODE_OM_ROOT__", literal(ctx.root))
+      .replaceAll("__ZCODE_OM_KEY_FILE__", literal(ctx.keyFile))
       .replaceAll("__ZCODE_OM_PORT__", String(port));
     if (!existsSync(extDst) || readFileSync(extDst, "utf8") !== extContent) {
       commitFile(ctx, tx, extDst, extContent, { log });
@@ -213,17 +306,28 @@ export default {
       return checks;
     }
     const models = readFileSync(modelsYml, "utf8");
-    checks.push({ name: "omp provider registered", ok: models.includes("zcode:"), detail: "zcode block in models.yml" });
+    let zcode;
+    try {
+      const { YAML, doc } = parseYamlDocument(ctx, models, "models.yml");
+      const providersPair = topLevelPair(doc, "providers", "models.yml");
+      zcode = YAML.isMap(providersPair.value) ? providersPair.value.get("zcode", true) : undefined;
+    } catch (err) {
+      checks.push({ name: "omp provider registered", ok: false, detail: err.message });
+      checks.push({ name: "omp key resolver", ok: false, detail: "cannot verify providers.zcode.apiKey because models.yml is invalid" });
+      checks.push({ name: "omp extension installed", ok: existsSync(join(agentDir, "extensions", EXT_ENTRY_NAME)) });
+      return checks;
+    }
+    checks.push({ name: "omp provider registered", ok: Boolean(zcode), detail: "providers.zcode in models.yml" });
     // Self-check (F11): the managed block carries a LITERAL key because omp
     // 18+ no longer evaluates the old `!node` resolver tag (requests then fail
     // with 401). The embedded key must equal THIS copy's proxy key — after a
     // copy switch or key rotation an old value keeps failing; detect it so the
     // user is pointed at `zcode-kit setup`, which rebuilds the block.
-    const keyLine = models.match(/apiKey: "?([A-Za-z0-9_-]+)"?/);
-    if (!keyLine) {
-      checks.push({ name: "omp key resolver", ok: false, detail: "managed block has no literal apiKey (old !node format — omp 18+ ignores it, requests fail with 401) — rerun zcode-kit setup; then restart omp" });
-    } else if (keyLine[1] !== ctx.key()) {
-      checks.push({ name: "omp key resolver", ok: false, detail: "apiKey does not match this copy's proxy key — rerun zcode-kit setup from this copy to repair; then restart omp" });
+    const apiKey = zcode?.get?.("apiKey");
+    if (typeof apiKey !== "string" || apiKey.length === 0) {
+      checks.push({ name: "omp key resolver", ok: false, detail: "providers.zcode has no literal apiKey (old !node format — omp 18+ ignores it, requests fail with 401) — rerun zcode-kit setup; then restart omp" });
+    } else if (apiKey !== ctx.key()) {
+      checks.push({ name: "omp key resolver", ok: false, detail: "providers.zcode.apiKey does not match this copy's proxy key — rerun zcode-kit setup from this copy to repair; then restart omp" });
     } else {
       checks.push({ name: "omp key resolver", ok: true, detail: "key current" });
     }

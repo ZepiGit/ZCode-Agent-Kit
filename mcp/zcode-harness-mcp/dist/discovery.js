@@ -35,9 +35,11 @@ export function fileFingerprint(filePath) {
 function runVersion(harnessPath, timeoutMs = 20_000) {
     return new Promise((resolve) => {
         let settled = false;
+        let timer;
         const done = (v) => {
             if (!settled) {
                 settled = true;
+                clearTimeout(timer);
                 resolve(v);
             }
         };
@@ -53,7 +55,7 @@ function runVersion(harnessPath, timeoutMs = 20_000) {
                 const m = out.match(/zcode\s+(\d+\.\d+\.\d+[^\s]*)/i) ?? out.match(/(\d+\.\d+\.\d+[^\s]*)/);
                 done(m ? m[1] : null);
             });
-            setTimeout(() => {
+            timer = setTimeout(() => {
                 try {
                     child.kill();
                 }

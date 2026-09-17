@@ -1,8 +1,8 @@
-import { resolveInsideWorkspace } from "../security/allowlist.js";
+import { readArtifact } from "../security/artifact.js";
+import { sessionInScope } from "../security/session.js";
 import { capabilitiesForMcp, BRIDGE_VERSION, TARGET_PROTOCOL } from "../capabilities/registry.js";
-import { redactDeep } from "../security/redact.js";
+import { safeJsonStringify } from "../security/redact.js";
 import { parseSessionId } from "../protocol/types.js";
-import fs from "node:fs";
 export const RESOURCE_ROOTS = [
     { uri: "zcode://capabilities", name: "Capability registry", description: "All known harness capabilities with status", mimeType: "application/json" },
 ];
@@ -33,10 +33,10 @@ export async function readResource(ctx, uri) {
             const rec = ctx.tasks.get(taskId);
             if (!rec)
                 throw new Error(`unknown task: ${taskId}`);
-            return send(JSON.stringify(rec, null, 2));
+            return send(safeJsonStringify(rec));
         }
         if (kind === "result") {
-            return send(JSON.stringify(await ctx.tasks.buildResult(taskId), null, 2));
+            return send(safeJsonStringify(await ctx.tasks.buildResult(taskId)));
         }
         const evs = ctx.tasks.events(taskId, -1, 100_000);
         return send(evs.items.map((e) => JSON.stringify(e)).join("\n"), "application/x-ndjson");
@@ -48,7 +48,8 @@ export async function readResource(ctx, uri) {
             throw new Error(`invalid session id in ${uri}`);
         const { RuntimeManagerHolder } = await import("./runtime-holder.js");
         const runtime = RuntimeManagerHolder.get();
-        return send(JSON.stringify(redactDeep(await runtime.ipcSessionRead(sessionId)), null, 2));
+        await sessionInScope(runtime, ctx.allowlist, sessionId);
+        return send(safeJsonStringify(await runtime.ipcSessionRead(sessionId)));
     }
     const mArtifact = uri.match(/^zcode:\/\/artifacts\/(.+)$/);
     if (mArtifact) {
@@ -57,22 +58,8 @@ export async function readResource(ctx, uri) {
         const canonical = ctx.allowlist.check(raw);
         if (!canonical)
             throw new Error(`artifact path not allowlisted: ${raw}`);
-        const abs = resolveInsideWorkspace(canonical, raw);
-        const st = fs.statSync(abs);
-        if (!st.isFile())
-            throw new Error(`not a file: ${abs}`);
-        const sizeCap = 1_048_576;
-        const len = Math.min(st.size, sizeCap);
-        const fd = fs.openSync(abs, "r");
-        const buf = Buffer.alloc(len);
-        try {
-            if (len > 0)
-                fs.readSync(fd, buf, 0, len, 0);
-        }
-        finally {
-            fs.closeSync(fd);
-        }
-        return send(JSON.stringify({ path: abs, size: st.size, truncated: st.size > len, contentBase64: buf.toString("base64") }, null, 2), "application/json");
+        const artifact = await readArtifact(canonical, raw, 0, 1_048_576, ctx.maxArtifactBytes);
+        return send(JSON.stringify(artifact), "application/json");
     }
     throw new Error(`unknown resource: ${uri}`);
 }

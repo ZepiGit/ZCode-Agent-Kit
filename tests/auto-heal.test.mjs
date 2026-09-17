@@ -239,7 +239,12 @@ test('manager doctor honors isolated ZCODE_PROXY_CREDENTIALS_PATH', async t => {
   const messages = []; const original = console.log; console.log = m => messages.push(String(m));
   try { await createManager({ root: ctx.root, home: ctx.home }).doctor(); }
   finally { console.log = original; if (previous === undefined) delete process.env.ZCODE_PROXY_CREDENTIALS_PATH; else process.env.ZCODE_PROXY_CREDENTIALS_PATH = previous; }
-  assert.ok(messages.some(m => /^PASS\s+credentials store/.test(m)), messages.join('\n'));
+  // The explicit store path is honored, and a file that merely exists is no
+  // longer reported as a working credential store (audit F-05).
+  const line = messages.find(m => /^\w+\s+credentials store/.test(m));
+  assert.ok(line, messages.join('\n'));
+  assert.match(line, /ZCODE_PROXY_CREDENTIALS_PATH \(explicit store\)/);
+  assert.doesNotMatch(line, /^PASS/);
 });
 test('bootstrap honors isolated credential store without importing desktop credentials', t => {
   const ctx = fixture(t); const store = join(ctx.home, 'custom-credentials.json'); writeFileSync(store, '{}');
@@ -292,11 +297,15 @@ test('OMP extension diagnostics use stderr without contaminating print-mode stdo
   assert.match(source, /console\.error\("\[zcode-autostart\] preflight failed/, 'startup failure belongs on stderr');
 });
 test('all shipped launchers and OMP share preflight rather than hidden or repeated starts', () => {
+  // Shell launchers only delegate to the JS launcher (no argument re-parsing
+  // by cmd.exe/sh); the JS launcher and the OMP extension share the preflight.
   for (const id of ['aider', 'claude', 'codex']) for (const ext of ['cmd', 'sh']) {
     const src = readFileSync(join(ROOT, 'bin', `zcode-${id}.${ext}`), 'utf8');
-    assert.match(src, /heal\.mjs/); assert.doesNotMatch(src, /manager\.mjs.*start/);
-    assert.match(src, ext === 'sh' ? /\|\| exit \$\?/ : /exit \/b %errorlevel%/i);
+    assert.match(src, /launch\.mjs/); assert.doesNotMatch(src, /manager\.mjs.*start/);
+    assert.doesNotMatch(src, /\bheal\.mjs\b/, 'preflight belongs to the JS launcher, not a second shell-level start');
   }
+  const launcher = readFileSync(join(ROOT, 'cli', 'launch.mjs'), 'utf8');
+  assert.match(launcher, /startupPreflight\(/); assert.doesNotMatch(launcher, /\.start\(/);
   const omp = readFileSync(join(ROOT, 'proxy', 'zcode-proxy-autostart.ts'), 'utf8');
   assert.match(omp, /heal\.mjs/);
 });

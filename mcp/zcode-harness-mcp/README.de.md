@@ -10,7 +10,8 @@ Die Bridge ist ein **Steuer-Layer**, kein Chat-Client und kein Prompt-Wrapper: A
 
 - Protokoll: MCP (offizielles SDK) nach außen, **ZCode Protocol v1** (NDJSON über stdio, live gegen 0.16.5 verifiziert) nach innen — siehe [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 - Umfang: 32 MCP-Tools + MCP-Resources; Capability-Registry mit 45 Einträgen ([`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)).
-- Getestet: 7 Unit- + 20 Integration-/Robustheitstests gegen einen deterministischen Fixture-Harness + 5 Live-Tests gegen die echte Installation ([`TEST_REPORT.md`](TEST_REPORT.md)).
+- `npm test` nutzt deterministische lokale Fixtures. Live-Tests benötigen Opt-in; alte Berichte sind keine aktuelle Abnahme.
+- Audit-Härtung: Session-IDs sind Workspace-gebunden; `yolo` benötigt `--allow-yolo`. Tool-Allowlist nutzt exakte Namen; Bash, PowerShell und Shell werden abgelehnt. Artefakte sind größenbegrenzt, JSONL behält zwei Dateien mit höchstens je 4 MiB. EOF unterbricht Aufgaben und beendet das Kind geordnet; Windows-Prozessbaum-Isolation ist nicht garantiert. `--runtime-path` führt Code aus: nur vertrauenswürdige Dateien verwenden.
 
 ## Voraussetzungen
 
@@ -61,7 +62,7 @@ Beispiel-Konfiguration (z. B. `claude_desktop_config.json` bzw. `.mcp.json`):
 ### 2) Streamable-HTTP-Modus (mehrere Clients, explizit aktiviert)
 
 ```powershell
-node dist\index.js --http --host 127.0.0.1 --port 3322 --allow-workspace "C:\Users\<you>\Projects"
+node dist\index.js --http --http-key "<random-local-secret>" --host 127.0.0.1 --port 3322 --allow-workspace "C:\Users\<you>\Projects"
 # MCP-Endpunkt: http://127.0.0.1:3322/mcp   (nur localhost; keine öffentliche Freigabe)
 ```
 
@@ -80,7 +81,7 @@ Der Demo-Client zeigt den kompletten Ablauf: Fähigkeiten entdecken → Workspac
 
 ```powershell
 npm test          # Build + Unit + Integration (Fixture-Harness, deterministisch)
-npm run test:live # Live-Tests gegen die echte Installation: $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+npm run test:live # Live-Tests nur mit ausdrücklichem Opt-in (echte Installation/Quota): $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
 ```
 
 ## Wichtigste Kommandozeilen-Flags
@@ -88,13 +89,13 @@ npm run test:live # Live-Tests gegen die echte Installation: $env:LIVE_TEST="1";
 | Flag | Bedeutung |
 | --- | --- |
 | `--stdio` | MCP über stdin/stdout (Standard) |
-| `--http --port N --host H` | Streamable-HTTP-Modus (Standard 127.0.0.1:3322) |
+| `--http --http-key KEY --port N --host H` | Streamable-HTTP-Modus mit Bearer-Key (Standard 127.0.0.1:3322) |
 | `--read-only` | Mutierende Tools werden abgewiesen (technisch enforced, nicht nur annotiert) |
 | `--allow-workspace P` | Workspace-Root freigeben (mehrfach möglich; `;`-Liste via `ZCODE_HARNESS_ALLOW_WORKSPACES`) |
 | `--runtime-path P` | Expliziter Pfad zu `zcode.cjs` |
 | `--data-dir D` | Persistenzverzeichnis (Standard `~/.zcode-harness-mcp`) |
 | `--interaction-policy deny\|allowlist\|ask` | Wie Berechtigungsanfragen beantwortet werden (Standard: `deny`) |
-| `--interaction-allowlist "Bash,Read"` | Präfix-Allowlist für Policy `allowlist` |
+| `--interaction-allowlist "Read,Glob"` | exakte Toolnamen für `allowlist` (Shell-Tools verweigert) |
 | `--max-concurrent-tasks N` | Parallelität (Standard 2; Überschüsse werden gequeued) |
 
 ## Sicherheitsmodell (Kurzfassung)

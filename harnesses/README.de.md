@@ -82,9 +82,10 @@ Reasoning/Thinking:
 }
 ```
 
-Der Bridge steuert den **echten installierten ZCode-Desktop** (App-Server-Protokoll:
-Sessions, Turns, Tasks). Einschränkungen: der Desktop muss laufen (er löst
-Z.AI-Captchas); Reasoning-Level über den Bridge-Katalog sind `low/high/max`;
+Die Bridge steuert den **lokal installierten ZCode-Harness** (App-Server-Protokoll:
+Sessions, Turns, Tasks). Ein laufender Desktop garantiert keine Modellantworten;
+der Provider kann eigenständige Turns unabhängig ablehnen. Reasoning-Level über den
+Bridge-Katalog sind `low/high/max`;
 im Desktop-Plan-Katalog steht GLM-5.3/GLM-5-Turbo — GLM-5.3-Flash läuft über den
 Proxy-Weg, nicht über den Desktop-Bridge. Details:
 [mcp/zcode-harness-mcp/README.md](../mcp/zcode-harness-mcp/README.md).

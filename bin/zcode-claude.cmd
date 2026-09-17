@@ -1,14 +1,8 @@
 @echo off
 rem ZCode kit: run Claude Code through the local zcode-proxy (opt-in wrapper).
-rem Your normal `claude` stays untouched — this wrapper injects the generated
-rem settings file (CLI --settings outranks user settings.json).
+rem Preflight, argument passing and the --settings injection happen in
+rem cli/launch.mjs (no cmd.exe argument re-parsing; paths with ) or % are safe).
 setlocal
 set "ROOT=%~dp0.."
-node "%ROOT%\cli\heal.mjs"
-if errorlevel 1 exit /b %errorlevel%
-set "SETTINGS=%ROOT%\generated\claude-zcode-settings.json"
-if not exist "%SETTINGS%" (
-  echo [zcode-kit] missing %SETTINGS% — run: node "%ROOT%\setup.mjs" 1>&2
-  exit /b 1
-)
-claude --settings "%SETTINGS%" %*
+node "%ROOT%\cli\launch.mjs" claude-code %*
+exit /b %errorlevel%

@@ -208,12 +208,7 @@ export class ZcodeConnection {
             }
         }, 3000);
         child.once("exit", () => clearTimeout(killTimer));
-        try {
-            child.kill();
-        }
-        catch {
-            /* ignore */
-        }
+        this.failAllPending(new ZcodeConnectionError("STOPPED", "harness connection was stopped"));
     }
     newId() {
         return randomUUID();

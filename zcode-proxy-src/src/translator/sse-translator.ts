@@ -66,6 +66,8 @@ export interface TranslationState {
   toolCallIndex: number;
   blockIndexToToolCallIndex: Map<number, number>;
   finishReasonSent: boolean;
+  stopped: boolean;
+  failed: boolean;
 }
 
 export function initState(model: string): TranslationState {
@@ -77,6 +79,8 @@ export function initState(model: string): TranslationState {
     toolCallIndex: 0,
     blockIndexToToolCallIndex: new Map(),
     finishReasonSent: false,
+    stopped: false,
+    failed: false,
   };
 }
 
@@ -128,14 +132,15 @@ export function anthropicSseToOpenaiSse(
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
+  const reader = upstream.getReader();
+  let cancelled = false;
 
   return new ReadableStream({
     async start(controller) {
-      const reader = upstream.getReader();
       let errored = false;
 
       try {
-        while (true) {
+        while (!cancelled && !state.failed) {
           const { done, value } = await reader.read();
           if (done) break;
 
@@ -163,8 +168,11 @@ export function anthropicSseToOpenaiSse(
           }
         }
 
-        // Emit [DONE]
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        if (!cancelled && !state.failed) {
+          controller.enqueue(encoder.encode(state.stopped
+            ? "data: [DONE]\n\n"
+            : `data: ${JSON.stringify({ error: { type: "upstream_incomplete", message: "Upstream stream ended before message_stop" } })}\n\n`));
+        }
       } catch (err) {
         errored = true;
         // error()/close() 互斥:errored 流上再 close() 会抛 TypeError,进而触发 Bun 引擎空指针崩溃。
@@ -173,14 +181,25 @@ export function anthropicSseToOpenaiSse(
         if (!errored) {
           try { controller.close(); } catch {}
         }
+        if (state.failed) void reader.cancel().catch(() => {});
         reader.releaseLock();
       }
+    },
+    cancel(reason) {
+      cancelled = true;
+      return reader.cancel(reason).catch(() => {});
     },
   });
 }
 
 export function translateEvent(state: TranslationState, sse: ParsedSSE): string | null {
+  if (state.failed) return null;
   const data = sse.data as AnthropicStreamEvent;
+  if ((data as { type: string }).type === "error") {
+    state.failed = true;
+    const error = (data as unknown as { error?: { type?: unknown; message?: unknown } }).error;
+    return `data: ${JSON.stringify({ error: { type: typeof error?.type === "string" ? error.type : "upstream_error", message: typeof error?.message === "string" ? error.message : "Upstream stream failed" } })}\n\n`;
+  }
 
   switch (data.type) {
     case "message_start": {
@@ -257,6 +276,7 @@ export function translateEvent(state: TranslationState, sse: ParsedSSE): string 
     }
 
     case "message_stop": {
+      state.stopped = true;
       if (state.finishReasonSent) return null;
       state.finishReasonSent = true;
       return makeChunk(state, {}, "stop", anthropicUsageToOpenAI(state.usage));
@@ -315,10 +335,12 @@ export function openaiSseToAnthropicSse(
   let messageDeltaSent = false;
   let messageStopped = false;
   const messageId = `msg_${Date.now()}`;
+  const reader = upstream.getReader();
+  let cancelled = false;
+  let failed = false;
 
   return new ReadableStream({
     async start(controller) {
-      const reader = upstream.getReader();
       let errored = false;
 
       const enqueueAnthropicEvent = (eventType: string, data: unknown) => {
@@ -497,9 +519,9 @@ export function openaiSseToAnthropicSse(
       };
 
       try {
-        while (true) {
+        while (!failed && !cancelled) {
           const { done, value } = await reader.read();
-          if (done) break;
+          if (done || cancelled) break;
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
@@ -515,7 +537,12 @@ export function openaiSseToAnthropicSse(
             }
 
             try {
-              const chunk = JSON.parse(dataStr) as OpenAIStreamChunk;
+              const chunk = JSON.parse(dataStr) as OpenAIStreamChunk & { error?: { type?: unknown; message?: unknown } };
+              if (chunk.error) {
+                failed = true;
+                enqueueAnthropicEvent("error", { type: "error", error: { type: "api_error", message: typeof chunk.error.message === "string" ? chunk.error.message : "Upstream stream failed" } });
+                break;
+              }
               const choice = chunk.choices?.[0];
 
               // Accumulate usage from every chunk that carries one. OpenAI's
@@ -586,10 +613,10 @@ export function openaiSseToAnthropicSse(
           }
         }
 
-        // Stream ended — emit the deferred message_delta (with full usage) and
-        // message_stop. Covers both explicit [DONE] already handled above and
-        // streams that terminate without one.
-        finalizeStream();
+        if (!failed && !cancelled) {
+          if (messageStopped || pendingStopReason) finalizeStream();
+          else enqueueAnthropicEvent("error", { type: "error", error: { type: "api_error", message: "Upstream stream ended before completion" } });
+        }
       } catch (err) {
         errored = true;
         // error()/close() 互斥:errored 流上再 close() 会抛 TypeError,进而触发 Bun 引擎空指针崩溃。
@@ -598,8 +625,13 @@ export function openaiSseToAnthropicSse(
         if (!errored) {
           try { controller.close(); } catch {}
         }
+        if (failed) void reader.cancel().catch(() => {});
         reader.releaseLock();
       }
+    },
+    cancel(reason) {
+      cancelled = true;
+      return reader.cancel(reason).catch(() => {});
     },
   });
 }

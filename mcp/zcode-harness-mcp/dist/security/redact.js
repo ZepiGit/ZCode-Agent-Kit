@@ -4,11 +4,16 @@
  *
  * Never construct output strings directly from provider configuration.
  */
-const SECRET_KEY_RE = /(api[-_]?key|auth[-_]?token|authorization|password|secret|credential|session\.?cookie|set-?cookie|x-aliyun-captcha-verify-param)/i;
+// D-10: token-style keys (access/refresh/id tokens, cookies, private keys,
+// client secrets, signatures) are covered too, not only "api_key"-like names.
+const SECRET_KEY_RE = /(api[-_]?key|auth[-_]?token|authorization|password|passwd|secret|credential|(?:access|refresh|id|bearer|session|csrf|xsrf)[-_]?token|^token$|cookie|set-?cookie|private[-_]?key|client[-_]?secret|signature|x-aliyun-captcha-verify-param|proxy[-_]?key)/i;
 /** Known bearer/API-key shapes inside free-form strings. */
 const SECRET_VALUE_RES = [
     /\bsk-[A-Za-z0-9_-]{8,}\b/g,
     /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+    /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, // JWTs
+    /\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b/g,
+    /\bAKIA[0-9A-Z]{16}\b/g,
     /\b[A-Za-z0-9._~+/=-]{200,}\b/g, // very long opaque tokens
 ];
 const MAX_DEEP = 12;
@@ -17,6 +22,10 @@ function redactString(s) {
     for (const re of SECRET_VALUE_RES)
         out = out.replace(re, (m) => `<redacted:${m.length}ch>`);
     return out;
+}
+/** Redact secret shapes in a free-form string (error texts, log lines). */
+export function redactText(s) {
+    return redactString(s);
 }
 export function redactDeep(value, depth = 0) {
     if (depth > MAX_DEEP)

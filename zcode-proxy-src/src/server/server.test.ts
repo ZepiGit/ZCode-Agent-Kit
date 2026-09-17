@@ -221,7 +221,7 @@ describe("proxy API key auth", () => {
   // bearer key — before binding. Without them it must refuse to serve.
   it("startServer refuses to bind without a proxy key or with the placeholder", async () => {
     const auth = oauthAuth("test");
-    for (const candidate of [undefined, "", "GENERATE_ME"]) {
+    for (const candidate of [undefined, "", "GENERATE_ME", "your-proxy-secret", "changeme"]) {
       const config = withAuth(candidate);
       await expect(
         startServer({ config, auth, fetchImpl: mockUpstream() }),
@@ -256,7 +256,10 @@ describe("proxy API key auth", () => {
       (config.server as Record<string, unknown>).host = host;
       const server = await startServer({ config, auth: oauthAuth("test"), fetchImpl: mockUpstream() });
       try {
-        expect(server.hostname).toBe(host);
+        expect(server.hostname).toBe(host === 'localhost' ? '127.0.0.1' : host);
+        const address = host === 'localhost' ? '127.0.0.1' : '[::1]';
+        const response = await fetch(`http://${address}:${server.port}/v1/models`, { headers: { authorization: `Bearer ${TEST_KEY}` } });
+        expect(response.status).toBe(200);
       } finally {
         server.stop();
       }

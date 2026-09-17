@@ -43,6 +43,9 @@ const SENSITIVE_HEADERS = new Set([
   "proxy-api-key",
   "x-zcode-captcha-verify-param",
   "x-zcode-captcha-verify-region",
+  "x-aliyun-captcha-verify-param",
+  "x-aliyun-captcha-verify-region",
+  "set-cookie",
   "cookie",
 ]);
 
@@ -92,7 +95,7 @@ export function dumpPhase(reqId: string, phase: string, data: Record<string, unk
       phase,
       ...data,
     };
-    appendFileSync(DUMP_PATH, JSON.stringify(line) + "\n", "utf-8");
+    appendFileSync(DUMP_PATH, JSON.stringify(line) + "\n", { encoding: "utf-8", mode: 0o600 });
   } catch {
     // intentional swallow — see header comment
   }

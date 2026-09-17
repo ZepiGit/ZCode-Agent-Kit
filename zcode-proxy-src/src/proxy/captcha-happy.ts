@@ -138,6 +138,13 @@ if (proxyUrl) {
 
 // ── Globals shared across solves ────────────────────────────────────────────
 const _requestLog = [];
+function recordRequest(entry) {
+  _requestLog.push(entry);
+  if (_requestLog.length > 256) _requestLog.splice(0, _requestLog.length - 256);
+}
+export const requestLogSizeForTest = () => _requestLog.length;
+export const resetRequestLogForTest = () => { _requestLog.length = 0; };
+export const recordRequestForTest = recordRequest;
 const solveTimes = [];
 // Consecutive-stall tracker per pe bundle URL: the same cached pe version
 // can stall every attempt (bad rotated VM variant / stale cache). After two
@@ -411,7 +418,7 @@ function makeInterceptor(bypassPeCache = false) {
   return {
     async beforeAsyncRequest({ request, window: w }) {
       const url = request.url;
-      _requestLog.push({ at: Date.now(), method: request.method, url });
+      recordRequest({ at: Date.now(), method: request.method, url });
       if (!isAllowedRequestUrl(url)) {
         if (_DEBUG) process.stderr.write(`[xhr-blocked] ${url}\n`);
         return new w.Response("", { status: 503, statusText: "blocked by egress allowlist" });
@@ -486,7 +493,7 @@ function makeInterceptor(bypassPeCache = false) {
     },
     beforeSyncRequest({ request, window: w }) {
       const url = request.url;
-      _requestLog.push({ at: Date.now(), method: request.method, url, sync: true });
+      recordRequest({ at: Date.now(), method: request.method, url, sync: true });
       if (!isAllowedRequestUrl(url)) {
         if (_DEBUG) process.stderr.write(`[sync-xhr-blocked] ${url}\n`);
         return new w.Response("", { status: 503, statusText: "blocked by egress allowlist" });
@@ -1810,10 +1817,16 @@ function waitFor(cond, timeoutMs = 15_000, intervalMs = 40) {
 }
 
 // ── createDom ──────────────────────────────────────────────────────────────
-async function createDom(region, prefix) {
+async function createDom(region, prefix, resources = undefined) {
+  if (!resources && process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== "1") {
+    throw new Error("Remote CAPTCHA JavaScript is disabled: this runtime does not provide an OS sandbox. Operator opt-in ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1 is required for trusted standalone use.");
+  }
   let cookies = [];
   const now = Date.now();
-  if (_cookieCache.ts > 0 && now - _cookieCache.ts < COOKIE_CACHE_TTL_MS) {
+  if (resources) {
+    if (typeof resources.primeCookies !== "function" || typeof resources.documentHtml !== "string") throw new Error("injected DOM resources require cookie priming and HTML");
+    cookies = await resources.primeCookies();
+  } else if (_cookieCache.ts > 0 && now - _cookieCache.ts < COOKIE_CACHE_TTL_MS) {
     cookies = _cookieCache.cookies;
   } else {
     try {
@@ -1831,30 +1844,11 @@ async function createDom(region, prefix) {
     } catch (_) {}
   }
 
-  const interceptor = makeInterceptor(_bypassPeCacheOnce);
+  const interceptor = resources ? {
+    beforeAsyncRequest: async ({ window: w }) => new w.Response("", { status: 503, statusText: "network disabled for injected fixtures" }),
+    beforeSyncRequest: ({ window: w }) => new w.Response("", { status: 503, statusText: "network disabled for injected fixtures" }),
+  } : makeInterceptor(_bypassPeCacheOnce);
   _bypassPeCacheOnce = false;
-  // Registered once per process — adding it inside createDom leaked a new
-  // EventEmitter listener per solve (MaxListenersExceededWarning + growth).
-  if (!process.__capUnhandledRejectionHooked) {
-    process.__capUnhandledRejectionHooked = true;
-    process.on("unhandledRejection", (reason) => {
-      if (!_DEBUG) return;
-      try {
-        const r = reason && reason.stack ? reason.stack : String(reason);
-        process.stderr.write(`[host-unhandledRejection] ${typeof reason} ${JSON.stringify(reason).slice(0, 200)} ${r}\n`);
-      } catch (_) {}
-    });
-    // Guest scripts (rotated pe/FeiLin bundles) can throw synchronous errors
-    // that surface as uncaughtExceptions. Without a handler, happy-dom's
-    // exception observer (or Bun's default) terminates the whole proxy —
-    // a single bad pe version must only fail that one solve, not the server.
-    process.on("uncaughtException", (err) => {
-      try {
-        const msg = err && err.message ? err.message : String(err);
-        process.stderr.write(`[captcha-guest-uncaught] ${msg}\n`);
-      } catch (_) {}
-    });
-  }
   // Guest console is silent unless CAPTCHA_DEBUG — piping every SDK log to
   // stderr spams journald and slows mints under systemd.
   const noop = () => {};
@@ -1989,7 +1983,7 @@ async function createDom(region, prefix) {
   w.eval(GUEST_EVAL_PATCH);
 
   // Write the page HTML (loads the SDK script)
-  w.document.write(HTML);
+  w.document.write(resources ? resources.documentHtml : HTML);
 
   w.AliyunCaptchaConfig = { region, prefix };
 

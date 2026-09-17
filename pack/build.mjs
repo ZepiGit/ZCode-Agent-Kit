@@ -37,6 +37,9 @@ const ALLOW_PREFIXES = [
   "mcp/zcode-harness-mcp/package.json",
   "mcp/zcode-harness-mcp/tsconfig.json",
   "mcp/zcode-harness-mcp/bun.lock",
+  "mcp/zcode-harness-mcp/LICENSE",
+  "zcode-proxy-src/LICENSE",
+  "zcode-proxy-src/README.md",
   "zcode-proxy-src/src/",
   "zcode-proxy-src/package.json",
   "zcode-proxy-src/tsconfig.json",
@@ -54,6 +57,8 @@ const FORBIDDEN = [
   /(^|\/)node_modules\//,
   /(^|\/)test\//,
   /(^|\/)tests\//,
+  /\.(?:test|spec)\.[cm]?[jt]sx?$/,
+  /(^|\/)(?:__fixtures__|_probes)\//,
   /config\.yaml$/, // real config with the key — only config.example.yaml ships
   /credentials\.json$/,
   /\.mimosa\//,
@@ -116,7 +121,7 @@ function main() {
   const markerVersions = releaseMarker
     ? readFileSync(join(ROOT, "pack", "ALLOW_PUBLISH"), "utf8").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
     : [];
-  const releaseAuthorized = markerVersions.includes(rootPkg.version);
+  const releaseVersionConsistent = markerVersions.includes(rootPkg.version);
   const pkg = {
     name: "zcode-agent-kit",
     version: rootPkg.version,
@@ -131,7 +136,7 @@ function main() {
     // Fail closed at the package level, not only in CI (ZAK-012): a generated
     // package stays private unless pack/ALLOW_PUBLISH existed at build time
     // AND names this exact version.
-    private: !releaseAuthorized,
+    private: !releaseVersionConsistent,
     scripts: {
       postinstall: "node setup.mjs --postinstall-hint",
       prepublishOnly: "node scripts/verify-release-marker.mjs",
@@ -143,7 +148,7 @@ function main() {
   };
   writeFileSync(join(DIST, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
 
-  // Ship the consent marker into the package when (and only when) it exists —
+  // Ship the version consistency marker when (and only when) it exists —
   // the package-internal prepublishOnly gate then re-checks it at publish time.
   const markerSrc = join(ROOT, "pack", "ALLOW_PUBLISH");
   if (releaseMarker) cpSync(markerSrc, join(DIST, "ALLOW_PUBLISH"));

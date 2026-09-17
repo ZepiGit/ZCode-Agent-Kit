@@ -41,7 +41,7 @@ import { getDefaultClientSigning, sendWithClientSigning, type ClientSigningManag
 import { buildAnthropicMetadataUserId } from "./trace-headers.js";
 import { credentialString } from "../auth/types.js";
 import { translateRequestOpenAIToAnthropic, translateResponseAnthropicToOpenAI } from "../translator/openai-to-anthropic.js";
-import { anthropicSseToOpenaiSse } from "../translator/sse-translator.js";
+import { anthropicSseToOpenaiSse, SSE_FRAME_SPLIT } from "../translator/sse-translator.js";
 import type { AnthropicMessagesRequest, AnthropicMessagesResponse } from "../translator/types.js";
 import type { ProviderDef } from "../provider/types.js";
 import {
@@ -306,6 +306,7 @@ export async function handleResponses(
       } catch (err) {
         return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
       }
+      if (!parsedAnthropic || !Array.isArray(parsedAnthropic.content)) return errorResponse(502, 'translation_failed', 'Upstream returned an invalid message shape');
       const openaiResp = translateResponseAnthropicToOpenAI(parsedAnthropic, req.model);
       upstreamResp = new Response(JSON.stringify(openaiResp), {
         status: upstreamResp.status,
@@ -328,6 +329,9 @@ export async function handleResponses(
     chatRespJson = JSON.parse(rawChatResp);
   } catch (err) {
     return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
+  }
+  if (!chatRespJson || typeof chatRespJson !== 'object' || !Array.isArray(chatRespJson.choices) || !chatRespJson.choices.every((c: unknown) => c && typeof c === 'object' && (c as { message?: unknown }).message && typeof (c as { message?: unknown }).message === 'object')) {
+    return errorResponse(502, 'translation_failed', 'Upstream returned an invalid completion shape');
   }
   const responsesResp = chatCompletionsToResponses(chatRespJson, req.model, {
     responseId,
@@ -369,42 +373,55 @@ function streamResponse(upstreamResp: Response, context: StreamResponseContext):
   }
   const state = newResponsesStreamState(context.model, { meta: context.meta, responseId: context.responseId });
 
+  const reader = upstreamResp.body.getReader();
+  let cancelled = false;
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const encoder = new TextEncoder();
       const send = (evt: ResponsesStreamEvent) => controller.enqueue(encoder.encode(responsesEventToSse(evt)));
+      const fail = (code: string, message: string) => {
+        send({ type: "response.failed", sequence_number: state.sequenceNumber++, response: {
+          id: state.responseId, object: "response", model: state.model, status: "failed", output: [],
+          error: { code, message },
+        } });
+      };
       try {
-        const reader = upstreamResp.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
-        let errored = false;
+        let doneSeen = false;
+        const processFrame = (frame: string): boolean => {
+          const data = extractSseData(frame);
+          if (!data) return true;
+          if (data === "[DONE]") { doneSeen = true; return true; }
+          const chunk = JSON.parse(data);
+          if (chunk.error) {
+            fail("upstream_error", typeof chunk.error.message === "string" ? chunk.error.message : "Upstream stream failed");
+            return false;
+          }
+          for (const evt of chatChunkToResponsesEvents(chunk, state)) send(evt);
+          return true;
+        };
         for (;;) {
-          if (errored) break;
           const { done, value } = await reader.read();
+          if (cancelled) return;
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
-          // SSE chunks are separated by `\n\n`; process complete frames.
-          let nl: number;
-          while ((nl = buffer.indexOf("\n\n")) >= 0) {
-            const frame = buffer.slice(0, nl);
-            buffer = buffer.slice(nl + 2);
-            const dataLine = extractSseData(frame);
-            if (!dataLine || dataLine === "[DONE]") continue;
-            try {
-              const chunk = JSON.parse(dataLine);
-              for (const evt of chatChunkToResponsesEvents(chunk, state)) send(evt);
-            } catch (err) {
-              errored = true;
-              // Release the upstream reader too — without the cancel the
-              // upstream connection lingers until GC. Fire-and-forget so a
-              // slow cancel never delays the client-visible error. The
-              // errored-flag + early-return semantics (anti-pattern #24) are
-              // unchanged: no further reads, no finalize, no close().
-              reader.cancel().catch(() => {});
-              controller.error(err);
+          const frames = buffer.split(SSE_FRAME_SPLIT);
+          buffer = frames.pop() ?? "";
+          for (const frame of frames) {
+            if (!processFrame(frame)) {
+              void reader.cancel().catch(() => {});
+              controller.close();
               return;
             }
           }
+        }
+        buffer += decoder.decode();
+        if (buffer.trim() && !processFrame(buffer)) { controller.close(); return; }
+        if (!doneSeen) {
+          fail("upstream_incomplete", "Upstream stream ended before its completion marker");
+          controller.close();
+          return;
         }
         const finalEvents = finalizeResponsesStream(state);
         for (const evt of finalEvents) send(evt);
@@ -412,14 +429,19 @@ function streamResponse(upstreamResp: Response, context: StreamResponseContext):
         if (finalEvent && context.request.store !== false && context.options.responseStore) {
           context.options.responseStore.set(buildStoredResponse(finalEvent.response, context.input, context.request.instructions));
         }
-        try { controller.close(); } catch {}
-      } catch (err) {
-        try { controller.error(err); } catch {}
+        controller.close();
+      } catch {
+        void reader.cancel().catch(() => {});
+        if (!cancelled) {
+          try { fail("upstream_stream_error", "Upstream stream failed or returned invalid data"); controller.close(); } catch {}
+        }
+      } finally {
+        reader.releaseLock();
       }
     },
     cancel(reason) {
-      context.options.debug === true && console.log(`[responses] stream cancelled: ${String(reason)}`);
-      try { upstreamResp.body?.cancel(); } catch {}
+      cancelled = true;
+      return reader.cancel(reason).catch(() => {});
     },
   });
 

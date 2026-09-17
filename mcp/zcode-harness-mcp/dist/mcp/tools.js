@@ -1,8 +1,8 @@
 import { capabilitiesForMcp, BRIDGE_VERSION, TARGET_PROTOCOL } from "../capabilities/registry.js";
-import { resolveInsideWorkspace } from "../security/allowlist.js";
-import { createHash } from "node:crypto";
-import fs from "node:fs";
-import { workspaceRef, parseSessionId } from "../protocol/types.js";
+import { readArtifact } from "../security/artifact.js";
+import { validateArguments } from "./validate.js";
+import { sessionInScope, sessionWorkspaceOf, workspaceIdentity } from "../security/session.js";
+import { workspaceRef } from "../protocol/types.js";
 import { redactDeep, safeJsonStringify } from "../security/redact.js";
 const log = {
     info: (msg, data) => {
@@ -48,6 +48,19 @@ function requireWritable(ctx, tool) {
     if (ctx.config.readOnly) {
         throw new Error(`READ_ONLY_MODE: tool ${tool} is not available while the bridge runs with --read-only`);
     }
+}
+/**
+ * D-02: the "yolo" permission mode disables the harness's permission
+ * prompts and therefore the bridge's interaction policy. Only an operator
+ * who started the bridge with --allow-yolo may enable it.
+ */
+function requireModeAllowed(ctx, mode) {
+    if (mode === "yolo" && !ctx.config.allowYolo) {
+        throw new Error("MODE_NOT_PERMITTED: mode \"yolo\" bypasses permission prompts and is not permitted; start the bridge with --allow-yolo to enable it deliberately");
+    }
+}
+function normPath(p) {
+    return p.replace(/[\\/]+$/, "");
 }
 /** Parse "providerId/modelId". */
 function parseModelRef(args) {
@@ -189,22 +202,39 @@ export function buildTools(ctx) {
                 throw new Error(`operation not invocable: ${method}. Allowed: ${[...INVOKE_ALLOWLIST].join(", ")}`);
             }
             const params = (optObj(args, "params") ?? {});
-            // Normalize workspace objects to allowlisted paths when present.
-            if (params.workspace && typeof params.workspace === "object") {
+            const sessionMethod = method.startsWith("session/");
+            const workspaceMethod = !sessionMethod && method !== "usage/stats";
+            const properties = sessionMethod && method !== "session/list"
+                ? { sessionId: { type: "string" } }
+                : workspaceMethod
+                    ? { workspace: { type: "object", properties: { workspacePath: { type: "string" }, workspaceKey: { type: "string" } }, required: ["workspacePath"], additionalProperties: false } }
+                    : method === "usage/stats" ? { range: { type: "string", enum: ["all", "7d", "30d"] } } : {};
+            if (method === "session/events") {
+                properties.afterSeq = { type: "integer", minimum: -1 };
+                properties.limit = { type: "integer", minimum: 1, maximum: 1000 };
+            }
+            validateArguments({ type: "object", properties, required: workspaceMethod ? ["workspace"] : sessionMethod && method !== "session/list" ? ["sessionId"] : [], additionalProperties: false }, params);
+            if (workspaceMethod) {
                 const w = params.workspace;
-                const p = typeof w.workspacePath === "string" ? w.workspacePath : typeof w.workspaceKey === "string" ? w.workspaceKey : null;
-                if (p) {
-                    const canonical = ctx.allowlist.enforce(p);
-                    params.workspace = workspaceRef(canonical);
-                }
+                params.workspace = workspaceRef(ctx.allowlist.enforce(String(w.workspacePath)));
             }
             if (typeof params.sessionId === "string") {
-                const sid = parseSessionId(params.sessionId);
-                if (!sid)
-                    throw new Error("invalid sessionId format");
-                params.sessionId = sid;
+                // D-01: session-scoped reads (messages/events/usage/...) are only
+                // allowed for sessions whose workspace is allowlisted.
+                const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, params.sessionId);
+                params.sessionId = sessionId;
             }
-            return await ctx.runtime.call(method, params);
+            else if (method.startsWith("session/") && method !== "session/list") {
+                throw new Error(`${method} requires params.sessionId`);
+            }
+            const result = await ctx.runtime.call(method, params);
+            if (method === "session/list") {
+                // Hide sessions of non-allowlisted workspaces from listings.
+                const r = (result ?? {});
+                const sessions = Array.isArray(r.sessions) ? r.sessions : [];
+                return { ...r, sessions: sessions.filter((s) => { const wp = sessionWorkspaceOf(s); return wp !== null && ctx.allowlist.isAllowed(wp); }) };
+            }
+            return result;
         },
     });
     // ---------------------------------------------------------------- models
@@ -233,6 +263,7 @@ export function buildTools(ctx) {
             type: "object",
             properties: {
                 scope: { type: "string", enum: ["session", "workspace"] },
+                expectedRevision: { type: "integer", minimum: 0 },
                 workspacePath: { type: "string", description: "Required for scope=workspace (and used for catalog validation)" },
                 sessionId: { type: "string", description: "Required for scope=session" },
                 model: { type: "string", description: "providerId/modelId, e.g. zai/GLM-5.3" },
@@ -249,6 +280,7 @@ export function buildTools(ctx) {
             const modelRef = parseModelRef(args);
             const thoughtLevel = optStr(args, "thoughtLevel");
             const mode = optStr(args, "mode");
+            requireModeAllowed(ctx, mode);
             const requested = {};
             if (modelRef)
                 requested.model = `${modelRef.providerId}/${modelRef.modelId}`;
@@ -257,9 +289,7 @@ export function buildTools(ctx) {
             if (mode)
                 requested.mode = mode;
             if (scope === "session") {
-                const sessionId = parseSessionId(str(args, "sessionId"));
-                if (!sessionId)
-                    throw new Error("invalid sessionId for scope=session");
+                const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
                 if (modelRef)
                     await ctx.runtime.ipcSessionSetModel(sessionId, modelRef.providerId, modelRef.modelId);
                 if (thoughtLevel)
@@ -359,6 +389,8 @@ export function buildTools(ctx) {
             const changes = optObj(args, "changes");
             if (!changes || Object.keys(changes).length === 0)
                 throw new Error("changes object required");
+            if (typeof changes.mode === "string")
+                requireModeAllowed(ctx, changes.mode);
             const expectedRevision = optNum(args, "expectedRevision");
             return await ctx.settings.update(workspacePath, changes, expectedRevision);
         },
@@ -393,7 +425,7 @@ export function buildTools(ctx) {
             try {
                 const listResult = await ctx.runtime.call("session/list", {});
                 for (const s of listResult?.sessions ?? []) {
-                    if (s.workspace?.workspacePath)
+                    if (s.workspace?.workspacePath && ctx.allowlist.isAllowed(s.workspace.workspacePath))
                         seen.add(s.workspace.workspacePath);
                 }
             }
@@ -438,13 +470,18 @@ export function buildTools(ctx) {
         mutating: false,
         handler: async (args) => {
             const listResult = await ctx.runtime.call("session/list", {});
-            const sessions = listResult?.sessions ?? [];
+            // D-01: the harness session store is shared with the desktop app; only
+            // sessions of allowlisted workspaces are visible through the bridge.
+            const sessions = (listResult?.sessions ?? []).filter((s) => {
+                const wp = sessionWorkspaceOf(s);
+                return wp !== null && ctx.allowlist.isAllowed(wp);
+            });
             const wp = optStr(args, "workspacePath");
             if (wp) {
-                const canonical = ctx.allowlist.enforce(wp).replace(/[\\/]+$/, "");
+                const canonical = normPath(ctx.allowlist.enforce(wp));
                 const filtered = sessions.filter((s) => {
-                    const rec = s;
-                    return rec.workspace?.workspacePath?.replace(/[\\/]+$/, "") === canonical;
+                    const p = sessionWorkspaceOf(s);
+                    return p !== null && normPath(ctx.allowlist.check(p) ?? p) === canonical;
                 });
                 return { sessions: redactDeep(filtered), workspacePath: canonical };
             }
@@ -466,7 +503,8 @@ export function buildTools(ctx) {
             requireWritable(ctx, "zcode_session_create");
             const { workspacePath } = ws(ctx, args);
             const mode = optStr(args, "mode");
-            const result = await ctx.runtime.ipcSessionCreate(workspacePath, mode);
+            requireModeAllowed(ctx, mode);
+            const result = await ctx.runtime.ipcSessionCreate(workspacePath, mode ?? (ctx.config.allowYolo ? null : "build"));
             return redactDeep(result);
         },
     });
@@ -482,9 +520,7 @@ export function buildTools(ctx) {
         },
         mutating: false,
         handler: async (args) => {
-            const sessionId = parseSessionId(str(args, "sessionId"));
-            if (!sessionId)
-                throw new Error("invalid sessionId");
+            const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
             return redactDeep(await ctx.runtime.ipcSessionRead(sessionId));
         },
     });
@@ -501,10 +537,8 @@ export function buildTools(ctx) {
         mutating: true,
         handler: async (args) => {
             requireWritable(ctx, "zcode_session_resume");
-            const sessionId = parseSessionId(str(args, "sessionId"));
-            if (!sessionId)
-                throw new Error("invalid sessionId");
-            return await ctx.runtime.call("session/resume", { sessionId });
+            const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
+            return redactDeep(await ctx.runtime.call("session/resume", { sessionId }));
         },
     });
     tools.push({
@@ -520,10 +554,8 @@ export function buildTools(ctx) {
         mutating: true,
         handler: async (args) => {
             requireWritable(ctx, "zcode_session_fork");
-            const sessionId = parseSessionId(str(args, "sessionId"));
-            if (!sessionId)
-                throw new Error("invalid sessionId");
-            return await ctx.runtime.call("session/fork", { sessionId, target: { kind: "latestCheckpoint" } });
+            const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
+            return redactDeep(await ctx.runtime.call("session/fork", { sessionId, target: { kind: "latestCheckpoint" } }));
         },
     });
     tools.push({
@@ -539,10 +571,8 @@ export function buildTools(ctx) {
         mutating: true,
         handler: async (args) => {
             requireWritable(ctx, "zcode_session_close");
-            const sessionId = parseSessionId(str(args, "sessionId"));
-            if (!sessionId)
-                throw new Error("invalid sessionId");
-            return await ctx.runtime.call("session/close", { sessionId });
+            const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
+            return redactDeep(await ctx.runtime.call("session/close", { sessionId }));
         },
     });
     tools.push({
@@ -558,11 +588,9 @@ export function buildTools(ctx) {
         mutating: true,
         handler: async (args) => {
             requireWritable(ctx, "zcode_session_compact");
-            const sessionId = parseSessionId(str(args, "sessionId"));
-            if (!sessionId)
-                throw new Error("invalid sessionId");
+            const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
             const instructions = optStr(args, "instructions");
-            return await ctx.runtime.call("session/compact", { sessionId, ...(instructions ? { instructions } : {}) });
+            return redactDeep(await ctx.runtime.call("session/compact", { sessionId, ...(instructions ? { instructions } : {}) }));
         },
     });
     tools.push({
@@ -582,12 +610,10 @@ export function buildTools(ctx) {
         mutating: true,
         handler: async (args) => {
             requireWritable(ctx, "zcode_session_goal");
-            const sessionId = parseSessionId(str(args, "sessionId"));
-            if (!sessionId)
-                throw new Error("invalid sessionId");
+            const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
             const action = str(args, "action");
             const value = optStr(args, "value");
-            return await ctx.runtime.call("session/goal", { sessionId, action, ...(value !== null ? { target: value } : {}) });
+            return redactDeep(await ctx.runtime.call("session/goal", { sessionId, action, ...(value !== null ? { target: value } : {}) }));
         },
     });
     // ----------------------------------------------------------------- tasks
@@ -615,9 +641,18 @@ export function buildTools(ctx) {
             requireWritable(ctx, "zcode_task_start");
             const { workspacePath, workspaceKey } = ws(ctx, args);
             const prompt = str(args, "prompt");
-            const sessionIdRaw = optStr(args, "sessionId");
-            if (sessionIdRaw && !parseSessionId(sessionIdRaw))
-                throw new Error("invalid sessionId format");
+            const mode = optStr(args, "mode");
+            requireModeAllowed(ctx, mode);
+            let sessionIdRaw = optStr(args, "sessionId");
+            if (sessionIdRaw) {
+                // D-01: a reused session must belong to the very workspace the task
+                // claims; otherwise the turn would run (and be attributed) elsewhere.
+                const scoped = await sessionInScope(ctx.runtime, ctx.allowlist, sessionIdRaw);
+                if (workspaceIdentity(scoped.workspacePath) !== workspaceIdentity(workspacePath)) {
+                    throw new Error(`WORKSPACE_MISMATCH: session ${scoped.sessionId} belongs to ${scoped.workspacePath}, not to ${workspacePath}`);
+                }
+                sessionIdRaw = scoped.sessionId;
+            }
             const modelRef = parseModelRef(args);
             // GLM-5.3-Flash preference guard: refuse silent model swaps.
             if (modelRef) {
@@ -641,7 +676,7 @@ export function buildTools(ctx) {
                 sessionId: sessionIdRaw,
                 model: modelRef,
                 thoughtLevel: optStr(args, "thoughtLevel"),
-                mode: optStr(args, "mode"),
+                mode,
                 readOnly: optBool(args, "readOnly") ?? undefined,
                 idempotencyKey: optStr(args, "idempotencyKey"),
             });
@@ -700,7 +735,7 @@ export function buildTools(ctx) {
         description: "Bounded wait until a task reaches a terminal state (or the timeout elapses). Returns the task record either way.",
         inputSchema: {
             type: "object",
-            properties: { taskId: { type: "string" }, timeoutMs: { type: "number", description: "Default 60000, capped at 120000" } },
+            properties: { taskId: { type: "string" }, timeoutMs: { type: "integer", minimum: 0, maximum: 120000, description: "Default 60000, maximum 120000" } },
             required: ["taskId"],
             additionalProperties: false,
         },
@@ -750,7 +785,7 @@ export function buildTools(ctx) {
         description: "Normalized + redacted harness events with cursor pagination (afterSeq), including gap detection metadata.",
         inputSchema: {
             type: "object",
-            properties: { taskId: { type: "string" }, afterSeq: { type: "number" }, limit: { type: "number", description: "Default 200" } },
+            properties: { taskId: { type: "string" }, afterSeq: { type: "integer", minimum: -1 }, limit: { type: "integer", minimum: 1, maximum: 1000, description: "Default 200" } },
             required: ["taskId"],
             additionalProperties: false,
         },
@@ -787,8 +822,8 @@ export function buildTools(ctx) {
             properties: {
                 workspacePath: { type: "string" },
                 path: { type: "string", description: "Absolute path inside the workspace or workspace-relative path" },
-                offset: { type: "number", description: "Byte offset (default 0)" },
-                length: { type: "number", description: "Max bytes to return (default 262144, capped)" },
+                offset: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER, description: "Byte offset (default 0)" },
+                length: { type: "integer", minimum: 1, maximum: 1048576, description: "Max bytes to return (default 262144)" },
             },
             required: ["workspacePath", "path"],
             additionalProperties: false,
@@ -797,35 +832,8 @@ export function buildTools(ctx) {
         handler: async (args) => {
             const { workspacePath } = ws(ctx, args);
             const rel = str(args, "path");
-            const abs = resolveInsideWorkspace(workspacePath, rel);
-            const st = fs.statSync(abs);
-            if (!st.isFile())
-                throw new Error(`not a file: ${rel}`);
-            const offset = Math.max(0, optNum(args, "offset") ?? 0);
-            const maxLen = Math.min(optNum(args, "length") ?? 262_144, 1_048_576);
-            const len = Math.min(maxLen, Math.max(0, st.size - offset));
-            const fd = fs.openSync(abs, "r");
-            const buf = Buffer.alloc(len);
-            try {
-                if (len > 0)
-                    fs.readSync(fd, buf, 0, len, offset);
-            }
-            finally {
-                fs.closeSync(fd);
-            }
-            const fullHash = createHash("sha256").update(fs.readFileSync(abs)).digest("hex");
-            const truncated = offset + len < st.size;
-            return {
-                path: abs,
-                size: st.size,
-                offset,
-                bytesReturned: len,
-                sha256: fullHash,
-                truncated,
-                encoding: "base64",
-                contentBase64: len > 0 ? buf.toString("base64") : "",
-                mimeType: guessMime(abs),
-            };
+            const artifact = await readArtifact(workspacePath, rel, optNum(args, "offset") ?? 0, optNum(args, "length") ?? 262_144, ctx.config.maxArtifactBytes);
+            return { ...artifact, mimeType: guessMime(artifact.path) };
         },
     });
     // ---------------------------------------------------------- interactions
@@ -841,7 +849,14 @@ export function buildTools(ctx) {
         mutating: false,
         handler: async (args) => {
             const status = (optStr(args, "status") ?? "all");
-            return { interactions: ctx.interactions.list(status) };
+            const visible = [];
+            for (const interaction of ctx.interactions.list(status)) {
+                if (interaction.workspace && ctx.allowlist.isAllowed(interaction.workspace))
+                    visible.push(interaction);
+                else if (interaction.taskId && ctx.tasks.get(interaction.taskId))
+                    visible.push(interaction);
+            }
+            return { interactions: visible };
         },
     });
     tools.push({
@@ -863,6 +878,15 @@ export function buildTools(ctx) {
         handler: async (args) => {
             requireWritable(ctx, "zcode_interaction_respond");
             const interactionId = str(args, "interactionId");
+            const interaction = ctx.interactions.get(interactionId);
+            if (!interaction)
+                throw new Error('unknown interaction');
+            if (interaction.sessionId)
+                await sessionInScope(ctx.runtime, ctx.allowlist, interaction.sessionId);
+            else if (interaction.workspace)
+                ctx.allowlist.enforce(interaction.workspace);
+            else
+                throw new Error('interaction workspace cannot be verified against the allowlist');
             const optionId = optStr(args, "optionId");
             const value = optObj(args, "value");
             const cancel = optBool(args, "cancel") ?? false;

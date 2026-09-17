@@ -4,6 +4,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { createCtx } from './context.mjs';
 import { diagnoseQuota } from './quota-diagnostics.mjs';
@@ -18,7 +19,7 @@ export function logHeal(ctx, { cause, action, result }) {
   // Allow-list, not redaction: provider text, paths and credentials can never
   // become log fields. A bounded second file is the only retained rotation.
   try {
-    const dir = join(ctx.root, 'logs'); mkdirSync(dir, { recursive: true });
+    const dir = ctx.logDir ?? join(ctx.root, 'logs'); mkdirSync(dir, { recursive: true, mode: 0o700 });
     const file = join(dir, 'heal.log');
     const line = `${new Date().toISOString()} cause=${CAUSES.has(cause) ? cause : 'unknown'} action=${ACTIONS.has(action) ? action : 'none'} result=${RESULTS.has(result) ? result : 'unknown'}\n`;
     if (existsSync(file) && statSync(file).size + Buffer.byteLength(line) > LOG_LIMIT) {
@@ -97,9 +98,9 @@ export async function setupSmoke(ctx, { env = process.env, timeoutMs = 90000 } =
     const diagnostic = diagnoseQuota(response.status, body);
     if (diagnostic.code) return outcome(ctx, diagnostic.code, diagnostic.cause, diagnostic.detail, 'smoke-check');
     const ok = response.ok && Array.isArray(body?.choices) && body.choices.length > 0;
-    return outcome(ctx, ok ? 0 : 1, 'smoke', ok ? 'Setup live smoke passed (one minimal model request).' : 'Setup live smoke failed; integrations were saved. Run zcode-kit doctor before retrying.', 'smoke-check');
+    return outcome(ctx, ok ? 0 : 1, 'smoke', ok ? 'Setup live smoke passed (one minimal model request).' : 'Setup live smoke failed; integrations were saved and remain configured. Run zcode-kit doctor before retrying.', 'smoke-check');
   } catch {
-    return outcome(ctx, 1, 'smoke', 'Setup live smoke timed out/unavailable; integrations were saved. No retry scheduled.', 'smoke-check');
+    return outcome(ctx, 1, 'smoke', 'Setup live smoke timed out/unavailable; integrations were saved and remain configured. No retry scheduled.', 'smoke-check');
   }
 }
 
@@ -129,8 +130,10 @@ async function alignOfflineKey(ctx, tx) {
   });
   try {
     if (readFileSync(ctx.config, 'utf8') !== text || ctx.key() !== key) throw new Error('runtime files changed concurrently; retry after inspecting ownership');
+    // AUD-005/B-12: unique staging name — a fixed name left by a crash would
+    // block every later repair with EEXIST.
     tx.touch(ctx.config);
-    const temp = ctx.config + '.zcode-staging';
+    const temp = `${ctx.config}.zcode-staging-${process.pid}-${randomBytes(6).toString('hex')}`;
     writeFileSync(temp, text.replace(keys[0][0], `  proxyApiKey: "${key}"`), { flag: 'wx', mode: 0o600 });
     try { renameSync(temp, ctx.config); } finally { rmSync(temp, { force: true }); }
   } finally { await new Promise(resolve => reservation.close(resolve)); }
@@ -150,8 +153,13 @@ export async function repairManaged(ctx, adapters, log = () => {}) {
   } catch (err) {
     // Commit post-hashes first so rollback remains conflict-aware, rather than
     // blindly restoring an in-progress journal over unrelated concurrent edits.
-    const id = tx.finish();
-    if (id) rollbackTransaction(ctx.backupDir, id);
+    // B-24: a failure here must not mask the original error or skip logging.
+    try {
+      const id = tx.finish();
+      if (id) rollbackTransaction(ctx.backupDir, id);
+    } catch (undoErr) {
+      err.message += ` (automatic rollback also failed: ${undoErr.message} — run zcode-kit rollback)`;
+    }
     logHeal(ctx, { cause: 'repair', action: 'reapply', result: 'refused' });
     throw err;
   } finally { ctx.tx = prior; releaseLock(lock); }

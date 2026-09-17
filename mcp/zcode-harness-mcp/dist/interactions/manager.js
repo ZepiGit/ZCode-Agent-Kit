@@ -108,7 +108,7 @@ export class InteractionManager {
             const result = kind === "permission" ? { decision: "deny", reason: "denied by bridge policy" } : { answers: [], cancelled: true, reason: "denied by bridge policy" };
             return { result };
         };
-        if (params.readOnlyMode) {
+        if (params.readOnlyMode || (record.toolName !== null && this.alwaysDenyTools.includes(record.toolName))) {
             this.finalize(record, "policy", denyNow().result);
             return { auto: denyNow(), needsAgent: false };
         }
@@ -118,7 +118,7 @@ export class InteractionManager {
         }
         if (this.policy === "allowlist" && kind === "permission" && record.toolName !== null) {
             const toolName = record.toolName;
-            const allowed = this.allowlist.some((prefix) => toolName === prefix || toolName.startsWith(prefix));
+            const allowed = this.allowlist.includes(toolName);
             if (allowed) {
                 const result = { decision: "allow", reason: "allowed by bridge allowlist" };
                 this.finalize(record, "policy", result);

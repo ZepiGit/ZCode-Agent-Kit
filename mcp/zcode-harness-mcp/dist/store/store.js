@@ -11,7 +11,7 @@ export class JsonStore {
     baseDir;
     constructor(baseDir) {
         this.baseDir = path.resolve(baseDir);
-        fs.mkdirSync(this.baseDir, { recursive: true });
+        fs.mkdirSync(this.baseDir, { recursive: true, mode: 0o700 });
     }
     get root() {
         return this.baseDir;
@@ -34,34 +34,25 @@ export class JsonStore {
     }
     ensureDir(rel) {
         const abs = this.resolveSafe(rel);
-        fs.mkdirSync(abs, { recursive: true });
+        fs.mkdirSync(abs, { recursive: true, mode: 0o700 });
         return abs;
     }
     /** Atomic write: temp file in the same directory, then rename. */
     writeJson(relPath, value) {
         const abs = this.resolveSafe(relPath);
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.mkdirSync(path.dirname(abs), { recursive: true, mode: 0o700 });
         const tmp = abs + ".tmp-" + randomUUID().slice(0, 8);
-        fs.writeFileSync(tmp, JSON.stringify(value, null, 2), "utf8");
+        fs.writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
         try {
             fs.renameSync(tmp, abs);
         }
         catch (err) {
-            // Windows rename over an existing file can fail on some FS states; retry once.
             try {
-                fs.rmSync(abs, { force: true });
-                fs.renameSync(tmp, abs);
+                fs.rmSync(tmp, { force: true });
             }
-            catch (err2) {
-                try {
-                    fs.rmSync(tmp, { force: true });
-                }
-                catch {
-                    /* ignore */
-                }
-                log.error("atomic write failed", { path: relPath, error: String(err2) });
-                throw err2;
-            }
+            catch { }
+            log.error("atomic write failed", { path: relPath, error: String(err) });
+            throw err;
         }
     }
     readJson(relPath) {
@@ -75,14 +66,41 @@ export class JsonStore {
     }
     appendLine(relPath, value) {
         const abs = this.resolveSafe(relPath);
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.appendFileSync(abs, JSON.stringify(value) + "\n", "utf8");
+        fs.mkdirSync(path.dirname(abs), { recursive: true, mode: 0o700 });
+        let line = JSON.stringify(value) + "\n";
+        const maxBytes = 4 * 1024 * 1024;
+        if (Buffer.byteLength(line) > maxBytes) {
+            const rawSeq = value?.seq;
+            const seq = typeof rawSeq === 'number' && Number.isFinite(rawSeq) ? rawSeq : undefined;
+            line = JSON.stringify({ seq, type: "bridge.record_truncated", payload: { reason: "record exceeded 4 MiB" } }) + "\n";
+        }
+        if (fs.existsSync(abs) && fs.statSync(abs).size + Buffer.byteLength(line) > maxBytes) {
+            fs.renameSync(abs, abs + ".previous");
+        }
+        fs.appendFileSync(abs, line, { encoding: "utf8", mode: 0o600 });
     }
     readLines(relPath) {
         const abs = this.resolveSafe(relPath);
         let text;
         try {
-            text = fs.readFileSync(abs, "utf8");
+            const maxBytes = 4 * 1024 * 1024;
+            const readBounded = (file) => {
+                if (!fs.existsSync(file))
+                    return "";
+                const fd = fs.openSync(file, "r");
+                try {
+                    const size = fs.fstatSync(fd).size;
+                    const start = Math.max(0, size - maxBytes);
+                    const buf = Buffer.alloc(Math.min(size, maxBytes));
+                    const length = fs.readSync(fd, buf, 0, buf.length, start);
+                    const raw = buf.subarray(0, length).toString("utf8");
+                    return start > 0 ? raw.slice(raw.indexOf("\n") + 1) : raw;
+                }
+                finally {
+                    fs.closeSync(fd);
+                }
+            };
+            text = readBounded(abs + ".previous") + readBounded(abs);
         }
         catch {
             return [];

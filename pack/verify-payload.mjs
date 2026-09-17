@@ -44,6 +44,8 @@ const REQUIRED_FILES = [
 const SECRET_PATTERNS = [
   /ey[J][A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/, // JWT-shaped strings
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /gh[pousr]_[A-Za-z0-9]{20,}/,
+  /xox[baprs]-[A-Za-z0-9-]{20,}/,
 ];
 
 function* walk(dir) {
@@ -68,8 +70,9 @@ for (const req of REQUIRED_FILES) {
   if (!existsSync(join(DIST, req))) fail(`required file missing: ${req}`);
 }
 
-const home = process.env.USERPROFILE ?? "";
-const homeName = home.split(/[\\/]/).pop() ?? "";
+const homes = [process.env.USERPROFILE, process.env.HOME].filter(Boolean).map(p => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase());
+const configTemplate = join(DIST, "proxy", "config.example.yaml");
+if (existsSync(configTemplate) && !/^\s*proxyApiKey:\s*["']?GENERATE_ME["']?\s*$/m.test(readFileSync(configTemplate, "utf8"))) fail("config template must retain GENERATE_ME");
 for (const file of walk(DIST)) {
   const rel = relative(DIST, file);
   if (statSync(file).size > 2 * 1024 * 1024) { fail(`oversized file: ${rel}`); continue; }
@@ -77,9 +80,8 @@ for (const file of walk(DIST)) {
   for (const re of SECRET_PATTERNS) {
     if (re.test(text)) fail(`secret-shaped content in ${rel} (pattern ${re})`);
   }
-  if (homeName && homeName.length > 3 && text.includes(homeName)) {
-    fail(`builder home name "${homeName}" leaks in ${rel}`);
-  }
+  const normalized = text.replace(/\\\\/g, "/").replace(/\\/g, "/").toLowerCase();
+  if (homes.some(home => home.length > 3 && normalized.includes(home))) fail(`builder home path leaks in ${rel}`);
 }
 
 if (failed > 0) {

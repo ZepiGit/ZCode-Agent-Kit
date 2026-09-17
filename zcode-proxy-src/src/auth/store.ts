@@ -2,10 +2,10 @@
  * Encrypted file-based credential store.
  * @see .omo/plans/zcode-proxy.md Task 14
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync, realpathSync } from "node:fs";
+import { join, dirname, win32 } from "node:path";
 import { homedir } from "node:os";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { Credential } from "./types.js";
 
 const STORE_FILE = join(homedir(), ".zcode-proxy", "credentials.json");
@@ -29,33 +29,79 @@ function storeFile(): string {
  * (`ZCODE_PROXY_CREDENTIAL_SECRET`) get real 32-byte diffusion, and the
  * misleading "KDF" is gone.
  */
-function getEncryptionKey(): Uint8Array {
-  const seed = process.env[ENV_SECRET] ?? `${homedir()}-${process.platform}-${process.arch}`;
+/**
+ * Canonical home for the machine seed. The kit's importer and the manager can
+ * present the same directory with different separators or letter case on
+ * Windows; the seed must not change with that spelling.
+ */
+function canonicalHome(): string {
+  const home = homedir();
+  if (process.platform !== "win32") return home;
+  let canonical = win32.resolve(home);
+  try { canonical = realpathSync.native(canonical); } catch {}
+  return canonical.replace(/[\\/]+$/, "").toLowerCase();
+}
+
+function machineSeed(home: string): string {
+  return `${home}-${process.platform}-${process.arch}`;
+}
+
+function sha256Key(seed: string): Uint8Array {
   return new Uint8Array(createHash("sha256").update(seed, "utf-8").digest());
 }
 
-/**
- * Legacy XOR-fold key (pre-SHA-256 store format). Kept ONLY for the one-shot
- * migration decrypt in {@link loadCredential} — never used for new writes.
- */
-function getLegacyEncryptionKey(): Uint8Array {
+function xorFoldKey(seed: string): Uint8Array {
   const hash = new Uint8Array(new ArrayBuffer(32));
-  const encoder = new TextEncoder();
-
-  const seed = process.env[ENV_SECRET] ?? `${homedir()}-${process.platform}-${process.arch}`;
-  const seedBytes = encoder.encode(seed);
+  const seedBytes = new TextEncoder().encode(seed);
   for (let i = 0; i < seedBytes.length; i++) {
     hash[i % 32] ^= seedBytes[i];
   }
   return hash;
 }
 
-/** Atomic store write: temp file (0o600) + rename over the target. */
+function getEncryptionKey(): Uint8Array {
+  const seed = process.env[ENV_SECRET] ?? machineSeed(canonicalHome());
+  return sha256Key(seed);
+}
+
+/**
+ * Keys that earlier proxy versions may have used for an existing store:
+ * the previous XOR-fold derivation and the machine seed built from the raw
+ * home spelling variants. Used only to migrate a store that the current key
+ * cannot open; never for new writes.
+ */
+function legacyEncryptionKeys(): Uint8Array[] {
+  const secret = process.env[ENV_SECRET];
+  if (secret !== undefined) return [xorFoldKey(secret)];
+  const raw = homedir();
+  const variants = new Set<string>([raw, raw.replace(/\\/g, "/"), raw.replace(/\//g, "\\")]);
+  if (process.platform === "win32") {
+    for (const variant of [...variants]) {
+      variants.add(variant.replace(/[\\/]+$/, ""));
+      variants.add(variant.toLowerCase());
+      variants.add(variant.replace(/^([a-z]):/i, (_, d) => `${d.toUpperCase()}:`));
+    }
+  }
+  const keys: Uint8Array[] = [];
+  for (const variant of variants) {
+    keys.push(sha256Key(machineSeed(variant)));
+    keys.push(xorFoldKey(machineSeed(variant)));
+  }
+  return keys;
+}
+
+/** Atomic store write: exclusive temp file (0o600) + rename over the target. */
 function atomicWriteStore(contents: string): void {
   const target = storeFile();
-  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmp, contents, { mode: 0o600 });
-  renameSync(tmp, target);
+  mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+  const tmp = `${target}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
+  writeFileSync(tmp, contents, { mode: 0o600, flag: "wx" });
+  try {
+    renameSync(tmp, target);
+  } catch (err) {
+    try { unlinkSync(tmp); } catch {}
+    throw err;
+  }
 }
 
 async function importAesKey(raw: Uint8Array): Promise<CryptoKey> {
@@ -111,7 +157,7 @@ async function encrypt(plaintext: string): Promise<string> {
 }
 
 export async function saveCredential(cred: Credential): Promise<void> {
-  mkdirSync(dirname(storeFile()), { recursive: true });
+  mkdirSync(dirname(storeFile()), { recursive: true, mode: 0o700 });
   const json = JSON.stringify(cred);
   const encrypted = await encrypt(json);
   atomicWriteStore(JSON.stringify({ encrypted }));
@@ -127,34 +173,50 @@ export async function saveCredentialIfUnchanged(cred: Credential, snapshot: stri
   } catch { return false; }
 }
 
-export async function loadCredential(): Promise<Credential | null> {
+export async function loadCredential({ migrate = true }: { migrate?: boolean } = {}): Promise<Credential | null> {
   if (!existsSync(storeFile())) return null;
-  const raw = readFileSync(storeFile(), "utf-8");
-  const parsed = JSON.parse(raw);
-  if (!parsed.encrypted) return null;
+  let raw: string;
+  let parsed: { encrypted?: unknown };
+  try {
+    raw = readFileSync(storeFile(), "utf-8");
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    console.warn(`Ignoring unreadable credential store at ${storeFile()}: ${(e as Error).message}`);
+    return null;
+  }
+  if (!parsed || typeof parsed.encrypted !== "string") return null;
 
   let json: string;
   try {
     json = await decryptWith(getEncryptionKey(), parsed.encrypted);
   } catch {
-    // Not decryptable under the new SHA-256 KDF — try the legacy XOR-fold key
-    // (one-shot migration), then transparently re-store under the new format.
-    try {
-      json = await decryptWith(getLegacyEncryptionKey(), parsed.encrypted);
-    } catch (e) {
+    // Not decryptable under the current key — try the keys earlier versions
+    // may have used (one-shot migration), then re-store under the current key.
+    json = "";
+    let migrated = false;
+    for (const key of legacyEncryptionKeys()) {
+      try {
+        json = await decryptWith(key, parsed.encrypted);
+        migrated = true;
+        break;
+      } catch {}
+    }
+    if (!migrated) {
       // Stale/corrupt credential file — key derivation is machine-specific
       // ({homedir}-{platform}-{arch}), so cross-machine copies or OS reinstalls
-      // produce undecryptable ciphertext. Silently treat as "not logged in".
-      console.warn(`Ignoring corrupted or stale credentials at ${storeFile()}: ${(e as Error).message}`);
+      // produce undecryptable ciphertext. Treat as "not logged in".
+      console.warn(`Ignoring corrupted or stale credentials at ${storeFile()}: not decryptable on this machine`);
       return null;
     }
-    // Re-store under the new KDF. Best-effort by design: the credential is
-    // already decrypted in memory, so a failed re-write (read-only dir, AV
-    // lock on Windows, ...) must NOT fail this load — it retries next boot.
+    // Re-store under the current key, but only while the file is still the
+    // one we read: a concurrent newer login must never be overwritten. A
+    // failed re-write (read-only dir, AV lock, ...) must NOT fail this load.
     try {
-      atomicWriteStore(JSON.stringify({ encrypted: await encrypt(json) }));
+      JSON.parse(json);
+      const encrypted = migrate ? await encrypt(json) : null;
+      if (encrypted && readFileSync(storeFile(), "utf-8") === raw) atomicWriteStore(JSON.stringify({ encrypted }));
     } catch (e) {
-      console.warn(`Credential re-encryption under the new key derivation failed (will retry on next load): ${(e as Error).message}`);
+      console.warn(`Credential re-encryption under the current key derivation failed (will retry on next load): ${(e as Error).message}`);
     }
   }
 

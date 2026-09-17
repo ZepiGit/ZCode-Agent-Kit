@@ -116,7 +116,15 @@ export class EndpointRoutingService {
     }
     const target = this.snapshot?.mapping.get(routingKey(parsed));
     if (!target) return { routed: false, url };
-    const rewritten = new URL(target);
+    let rewritten: URL;
+    try {
+      rewritten = new URL(target);
+      const configOrigin = new URL(this.configUrl).origin;
+      const allowedOrigins = new Set([parsed.origin, configOrigin, 'https://zcode.z.ai', 'https://api.z.ai', 'https://open.bigmodel.cn']);
+      if (!allowedOrigins.has(rewritten.origin)) return { routed: false, url };
+    } catch {
+      return { routed: false, url };
+    }
     rewritten.search = parsed.search;
     return { routed: true, url: rewritten.href };
   }

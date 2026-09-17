@@ -4,7 +4,8 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startBridge } from "./client.mjs";
+import { startBridge, isolatedTestEnv } from "./client.mjs";
+import net from "node:net";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
@@ -42,7 +43,7 @@ async function crashOwnedFixture(client) {
     if ($result.ReturnValue -ne 0) { throw 'Owned fixture termination failed' }
     [int]$target.ProcessId
   `;
-  const { stdout } = await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
+  const { stdout } = await execFileAsync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ["-NoProfile", "-NonInteractive", "-Command", script], {
     encoding: "utf8", timeout: 15_000, windowsHide: true, shell: false,
   });
   assert.match(stdout.trim(), /^\d+$/, "inspection must confirm one terminated fixture PID");
@@ -181,27 +182,30 @@ test("two clients over HTTP: independent sessions, same tasks visible", async ()
   const workspaceDir = path.join(dataDir, "ws");
   fs.mkdirSync(workspaceDir, { recursive: true });
 
+  const probe = net.createServer();
+  await new Promise(r => probe.listen(0, '127.0.0.1', r));
+  const port = probe.address().port;
+  await new Promise(r => probe.close(r));
   const server = spawn(process.execPath, [
     path.join(projectRoot, "dist", "index.js"),
     "--http",
     "--http-key", "test-key-robustness",
-    "--port", "3399",
+    "--port", String(port),
     "--host", "127.0.0.1",
     "--data-dir", dataDir,
     "--allow-workspace", workspaceDir,
   ], {
     stdio: ["ignore", "ignore", "pipe"],
-    env: {
-      ...process.env,
+    env: isolatedTestEnv(dataDir, {
       ZCODE_HARNESS_RUNTIME_PATH: path.join(projectRoot, "test", "fixture", "fake-harness.mjs"),
       ZCODE_HARNESS_LOG_LEVEL: "warn",
-    },
+    }),
   });
   // poll instead of a fixed sleep: the bridge must be listening before calls
   let serverUp = false;
   for (let i = 0; i < 20 && !serverUp; i += 1) {
     await new Promise((r) => setTimeout(r, 300));
-    serverUp = await fetch("http://127.0.0.1:3399/mcp", {
+    serverUp = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer test-key-robustness" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" }),
@@ -210,7 +214,7 @@ test("two clients over HTTP: independent sessions, same tasks visible", async ()
   assert.ok(serverUp, "bridge HTTP server did not come up in time");
 
   const mcpCall = async (body) => {
-    const res = await fetch("http://127.0.0.1:3399/mcp", {
+    const res = await fetch(`http://127.0.0.1:${port}/mcp`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: "Bearer test-key-robustness" },
       body: JSON.stringify(body),

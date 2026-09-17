@@ -40,7 +40,10 @@ account (start-plan, the same quota as ZCode Desktop).
   the audit remediation
 - **Vendoring exclusions**: `Android-APP/` (209 MB) and `node_modules/` are not
   vendored; `node_modules/` is installed by setup.mjs via `bun install
-  --frozen-lockfile`
+  --frozen-lockfile`. The Android build path (`scripts/build-android-apk.sh`,
+  the `build:android-*` npm scripts, the esbuild devDependency and the
+  `build-android` job in the vendored `.github/workflows/release.yml`) was
+  removed with it
 - Two upstream test files were added locally; all source modifications are in
   [`../patches/zcode-proxy-local-patches.patch`](../patches/zcode-proxy-local-patches.patch)
 

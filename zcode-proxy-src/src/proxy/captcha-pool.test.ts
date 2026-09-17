@@ -68,6 +68,20 @@ describe("CaptchaTokenPool", () => {
     expect(solveMock.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('provider rate limits stop retries and enforce cooldown even without a callback', async () => {
+    const limited = new CaptchaTokenPool({ poolSizeMin: 1, poolSizeMax: 1, solveRetries: 4, solveConcurrency: 1, emptyTakeRace: 1 });
+    solveMock.mockImplementation(async () => { throw new Error('HTTP 429 too many requests'); });
+    try {
+      await expect(limited.takeToken(CFG)).rejects.toThrow(/captcha failed/);
+      expect(solveMock).toHaveBeenCalledTimes(1);
+      await expect(limited.takeToken(CFG)).rejects.toThrow(/paused/);
+      expect(solveMock).toHaveBeenCalledTimes(1);
+    } finally {
+      limited.stopBackgroundRefill();
+      solveMock.mockImplementation(async () => 'x'.repeat(64));
+    }
+  });
+
   it("invalidate clears the pool", async () => {
     await pool.prefill(CFG, 2);
     pool.invalidate();

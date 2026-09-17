@@ -54,9 +54,11 @@ export function fileFingerprint(filePath: string): { sha256: string; bytes: numb
 function runVersion(harnessPath: string, timeoutMs = 20_000): Promise<string | null> {
   return new Promise((resolve) => {
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const done = (v: string | null): void => {
       if (!settled) {
         settled = true;
+        clearTimeout(timer);
         resolve(v);
       }
     };
@@ -72,7 +74,7 @@ function runVersion(harnessPath: string, timeoutMs = 20_000): Promise<string | n
         const m = out.match(/zcode\s+(\d+\.\d+\.\d+[^\s]*)/i) ?? out.match(/(\d+\.\d+\.\d+[^\s]*)/);
         done(m ? m[1]! : null);
       });
-      setTimeout(() => {
+      timer = setTimeout(() => {
         try {
           child.kill();
         } catch {

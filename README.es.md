@@ -8,9 +8,16 @@ Usa **tu propia cuenta de ZCode Desktop** con tu asistente de programación pref
 
 - **Proxy de modelos:** formatos OpenAI Chat Completions, Responses y Anthropic Messages; dirección predeterminada `http://127.0.0.1:8457`.
 - **Modelos:** `glm-5.3` (texto) y `glm-5.3-flash` (texto e imágenes); contexto anunciado de 1M tokens y razonamiento `low`, `high`, `max`. Siguen aplicándose la compatibilidad del cliente y los límites de la cuenta.
-- **Puente MCP opcional:** permite operar el runtime ZCode instalado. Es independiente de la configuración del proveedor de modelos y necesita Desktop ejecutándose para sus llamadas a modelos.
+- **Puente MCP opcional:** permite operar el runtime ZCode instalado. Es independiente del proveedor de modelos; Desktop en ejecución no garantiza que el proveedor acepte las llamadas del puente.
 
-> **Código y versión publicada, comprobados el 16-09-2026:** GitHub ofrece **v0.2.2** y npm **0.2.1**. El código integrado contiene correcciones más recientes de Continue, recuperación de credenciales, `doctor --fix` e instaladores que esos paquetes **todavía no incluyen por completo**. Descargar “latest” no instala una rama Git. Esta guía describe el código actual salvo cuando indica instalación de una versión publicada. Consulta las [notas de versión](https://github.com/ZepiGit/ZCode-Agent-Kit/releases); que un CLI antiguo acepte una opción no demuestra que la implemente.
+## Refuerzo de auditoría aún no publicado
+
+- Desktop en ejecución no garantiza llamadas MCP independientes; el proveedor puede rechazarlas. Si setup guarda la configuración pero falla su prueba de modelo, informa una advertencia, no acceso confirmado.
+- El instalador guarda la ruta absoluta de Bun en `.bun-path`, sin cambiar PATH global. El estado npm se guarda fuera de `node_modules`: `%LOCALAPPDATA%/zcode-agent-kit/installs/<root-hash>` o `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>`. `ZCODE_KIT_STATE_DIR` debe ser absoluto y exclusivo. Las instalaciones fuente/tarball conservan el estado en su raíz. Ejecuta setup para migrar antes de reemplazar un paquete npm antiguo; se conservan los originales, no se recuperan datos ya perdidos.
+- La allowlist MCP también se aplica a IDs de sesión; `yolo` requiere `--allow-yolo`. Los registros están limitados y los clientes de la misma bridge comparten confianza.
+- JavaScript CAPTCHA remoto no tiene sandbox del sistema operativo y está deshabilitado por defecto. Standalone puede aceptar explícitamente `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1` solo en entornos confiables; el kit elimina ese permiso. Start-plan puede fallar de forma cerrada, sin eludir bloqueos del proveedor.
+- Start-plan antepone bloques de sistema ZCode vendorizados y quita `cache_control` del cliente. CWD del kit es `/workspace`; plataforma, shell, versión del SO, locale, trazas y datos del dispositivo pueden enviarse al proveedor. No se garantiza compatibilidad ni acceso.
+- La publicación automática desde main/dispatch es intencional. `ALLOW_PUBLISH` comprueba consistencia de versión, no autorización humana o legal. Estos cambios no prueban que exista una versión publicada.
 
 ## 1. Requisitos
 
@@ -26,7 +33,7 @@ node --version
 bun --version
 ```
 
-Sirve tanto en PowerShell como en shells POSIX. Si falta un comando, corrige PATH antes de seguir. Los instaladores publicados pueden descargar Bun, pero su modificación de PATH **no persiste**: una nueva terminal Windows la pierde y `curl | sh` no puede modificar el shell padre. Si Bun ya existe, se reutiliza sin actualizarlo automáticamente.
+Sirve tanto en PowerShell como en shells POSIX. Si falta un comando, corrige PATH antes de seguir. Los instaladores pueden descargar Bun y guardar su ruta absoluta en `.bun-path`; el kit la reutiliza tras reiniciar, sin cambiar PATH global. Si Bun ya existe, se reutiliza sin actualizarlo automáticamente.
 
 **Windows:** PowerShell sin permisos de administrador; no ejecutes `install.sh` en Git Bash ni WSL. **macOS/Linux:** shell POSIX con `curl`, `tar`, herramienta SHA-256 y `rsync` para actualizaciones; instalar Bun también requiere `unzip`. Las comprobaciones Windows indicadas abajo no son una nueva validación de clientes reales Linux/macOS.
 

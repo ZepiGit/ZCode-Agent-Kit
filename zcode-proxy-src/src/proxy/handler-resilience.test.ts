@@ -14,7 +14,7 @@
  * `mock.module("./captcha.js")` (same technique as captcha-pool.test.ts).
  */
 import { describe, it, expect, mock } from "bun:test";
-import { proxyRequest } from "./handler.js";
+import { dispatchWithConnectRetry, proxyRequest } from "./handler.js";
 import type { ProxyConfig, ProxyIdentity } from "../config/types.js";
 import { AuthManager } from "../auth/manager.js";
 import { fixtureSecret } from "../test-fixtures.js";
@@ -61,6 +61,56 @@ const ANTHROPIC_OK = JSON.stringify({
   stop_reason: "end_turn",
   stop_sequence: null,
   usage: { input_tokens: 5, output_tokens: 3 },
+});
+
+describe("dispatchWithConnectRetry — replay safety (C1-02)", () => {
+  it("retries only allowlisted connect failure codes found on the error or cause", async () => {
+    for (const codedError of [
+      Object.assign(new Error("connect refused"), { code: "ECONNREFUSED" }),
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } }),
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "EAI_AGAIN" } }),
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_CONNECT_TIMEOUT" } }),
+    ]) {
+      let calls = 0;
+      const response = await dispatchWithConnectRetry(async () => {
+        calls += 1;
+        if (calls === 1) throw codedError;
+        return new Response("ok");
+      }, { retryDelayMs: 0 });
+
+      expect(response.status).toBe(200);
+      expect(calls).toBe(2);
+    }
+  });
+
+  it("does not retry an unknown fetch failure that may have happened after the POST body was sent", async () => {
+    let calls = 0;
+    const unknownReset = Object.assign(new TypeError("fetch failed"), {
+      cause: { code: "ECONNRESET" },
+    });
+
+    await expect(dispatchWithConnectRetry(async () => {
+      calls += 1;
+      throw unknownReset;
+    }, { retryDelayMs: 0 })).rejects.toBe(unknownReset);
+
+    expect(calls).toBe(1);
+  });
+
+  it("never retries an allowlisted error flagged postWrite", async () => {
+    let calls = 0;
+    const postWrite = Object.assign(new Error("connect refused after write"), {
+      code: "ECONNREFUSED",
+      postWrite: true,
+    });
+
+    await expect(dispatchWithConnectRetry(async () => {
+      calls += 1;
+      throw postWrite;
+    }, { retryDelayMs: 0 })).rejects.toBe(postWrite);
+
+    expect(calls).toBe(1);
+  });
 });
 
 describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
@@ -134,7 +184,7 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
       calls += 1;
       if (calls === 1) {
         firstReq = req;
-        throw new Error("Unable to connect. Is the computer able to access the url?");
+        throw Object.assign(new Error("connect refused"), { code: "ECONNREFUSED" });
       }
       // The freshness assertion: re-dispatching the SAME Request object
       // would fail this identity check.

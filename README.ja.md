@@ -8,9 +8,16 @@
 
 - **モデルプロキシ:** OpenAI Chat Completions、Responses、Anthropic Messages 形式。既定の接続先は `http://127.0.0.1:8457`。
 - **モデル:** `glm-5.3`（テキスト）、`glm-5.3-flash`（テキスト・画像）。公称コンテキストは 1M トークン、推論レベルは `low` / `high` / `max`。クライアントの対応状況とアカウント制限は引き続き適用されます。
-- **任意の MCP ブリッジ:** インストール済み ZCode ランタイムの操作を公開します。モデルプロバイダー設定とは別機能で、モデル応答には Desktop アプリの起動が必要です。
+- **任意の MCP ブリッジ:** インストール済み ZCode ランタイムの操作を公開します。モデルプロバイダー設定とは別機能で、Desktop アプリの起動だけではモデル応答を保証できません。
 
-> **ソースと公開版の違い（2026-09-16 確認）:** GitHub の最新公開版は **v0.2.2**、npm は **0.2.1** です。マージ済みソースにある Continue、認証回復、`doctor --fix`、インストーラーの新しい修正は、これらの公開パッケージには**まだすべて含まれていません**。「latest」の取得は Git ブランチのインストールではありません。公開版の導入と明記した箇所以外は現在のソースの説明です。[リリース情報](https://github.com/ZepiGit/ZCode-Agent-Kit/releases)を確認してください。古い CLI がオプションを受け付けることは、実装済みの証拠になりません。
+## 未公開の監査修正
+
+- Desktop の起動は独立した MCP モデル呼び出しの成功を保証しません。設定保存後に setup のモデルテストが失敗した場合は警告であり、モデル利用成功ではありません。
+- リリースインストーラーは Bun の絶対パスを `.bun-path` に保存し、グローバル PATH を変更しません。npm の状態は `node_modules` 外の `%LOCALAPPDATA%/zcode-agent-kit/installs/<root-hash>` または `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>` に保存します。`ZCODE_KIT_STATE_DIR` は絶対パスかつ当該インストール専用としてください。ソース/tarball はルート内を使います。古い npm パッケージを置換する前に setup で移行してください。元データは残りますが、既に失われたデータは復元できません。
+- MCP 許可リストはセッション ID 経由の操作にも適用され、`yolo` は `--allow-yolo` が必要です。ログは上限付きで、同じブリッジのクライアントは信頼境界を共有します。
+- リモート CAPTCHA JavaScript に OS サンドボックスはなく、既定で無効です。信頼できる standalone 環境のみ `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1` で明示許可できますが、キットはこの変数を除去します。Start-plan は安全側に拒否される場合があり、プロバイダーの制限は回避しません。
+- Start-plan は同梱 ZCode システムブロックを追加し、クライアントの `cache_control` を除去します。キット CWD は `/workspace` ですが、OS・シェル・バージョン・ロケール・トレース・機器情報は送信され得ます。互換性や利用権を保証しません。
+- main/dispatch の自動公開は意図した動作です。`ALLOW_PUBLISH` はバージョン整合性のみを確認し、人間の承認や法的許可ではありません。本修正は公開済みリリースの証拠ではありません。
 
 ## 1. インストール前の準備
 
@@ -26,7 +33,7 @@ node --version
 bun --version
 ```
 
-PowerShell と POSIX シェルで使えます。見つからない場合は先に PATH を直してください。リリース用インストーラーは不足する Bun を取得できますが、PATH 追加は**永続的ではありません**。新しい Windows ターミナルには引き継がれず、`curl | sh` は親シェルの PATH を変更できません。既存の Bun は自動更新せず再利用します。
+PowerShell と POSIX シェルで使えます。見つからない場合は先に PATH を直してください。リリース用インストーラーは Bun を取得して絶対パスを `.bun-path` に保存します。キットは再起動後もそのパスを使い、グローバル PATH は変更しません。既存の Bun は自動更新せず再利用します。
 
 **Windows:** 管理者権限なしの PowerShell を使用し、Git Bash や WSL から `install.sh` を実行しないでください。**macOS/Linux:** POSIX シェル、`curl`、`tar`、SHA-256 ツール、更新には `rsync` が必要です。Bun の導入には `unzip` も必要です。後述の Windows 検証は Linux/macOS の実クライアント検証を意味しません。
 

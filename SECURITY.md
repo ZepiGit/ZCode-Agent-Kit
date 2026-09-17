@@ -1,6 +1,33 @@
 # Security-Hinweise
 
-## Aktueller Arbeitsstand — 2026-09-15
+## Unveröffentlichte Audit-Reparaturen — 2026-09-17
+
+Dieser Arbeitsstand repariert die Windows-Argumentweitergabe, Session-Workspace-Prüfung,
+MCP-Task-Abbrüche, Streaming-Fehler, Adapter-Datenerhalt und Installer-Zielprüfungen.
+Tests verwenden isolierte Profile und synthetische Credentials; sie sind kein neuer
+Live-Modell-, Linux- oder macOS-Nachweis. Unabhängige Reviews sind bereichsweise erfolgt,
+eine pauschale Freigabe aller Änderungen ist daraus nicht ableitbar.
+
+- Remote CAPTCHA-JavaScript ist ohne ausdrückliches Standalone-Opt-in deaktiviert.
+  Es gibt **keine OS-Sandbox**; die Egress-Allowlist ist keine Prozessisolation.
+  Das Kit entfernt den unsicheren Opt-in aus seiner Proxy-Umgebung. Start-Plan-Anfragen
+  können deswegen verweigert werden. Lokale Testfixtures laden keine CDN-Skripte.
+- npm-Zustand wird außerhalb des austauschbaren Paketverzeichnisses gespeichert;
+  Quell-/Tarball-Kopien behalten ihren lokalen Zustand. Migration beim Setup durchführen,
+  bevor ein altes npm-Paket ersetzt wird. Bereits verlorene Daten werden nicht rekonstruiert.
+- Proxy-/MCP-Bearer-Keys sind eine gemeinsame Vertrauensdomäne, keine Benutzerisolation.
+  Der Proxy authentifiziert `/health` und API-Routen; WebUI und OPTIONS sind öffentlich.
+- Credentials und manche Adapterkonfigurationen/Backups enthalten sensible Daten.
+  Windows-Dateimodi ersetzen keine ACLs. Der ableitbare Standard-Credential-Schlüssel ist
+  keine starke Geheimnisbindung; `ZCODE_PROXY_CREDENTIAL_SECRET` ermöglicht einen separaten
+  stabilen geheimen Seed. Cross-Process-CAS und native Secret-Store-Integration bleiben offen.
+- ALLOW_PUBLISH ist eine Versionskonsistenzprüfung. Automatische Main-Releases sind gewollt;
+  weder Marker noch Workflow sind eine unabhängige rechtliche/Lizenzfreigabe.
+- Crash-Rollback verändert existierende Dateien nur bei passendem protokolliertem
+  Schreibhash. Unklare Änderungen bleiben als Konflikt erhalten. Nicht erfasste Codex-
+  Sitzungen und andere Nutzerdaten in generated werden beim Uninstall nicht pauschal gelöscht.
+
+## Historischer Arbeitsstand — 2026-09-15
 
 Die nachstehenden aktuellen Aussagen beschreiben den geprüften Quellcode, keine
 veröffentlichte Version und keine Reparatur der persönlichen Installation.
@@ -84,13 +111,11 @@ claude-MCP-Registrierung selbst, Continue-Adapter lehnt uneditierbare
 Release-Marker ist versionsgebunden, vendored Beispiel-Config auf
 fail-closed-Claim-Defaults.
 
-1. **CAPTCHA-Solver bleibt, Verhalten ist dokumentiert.** Der im vendored
-   Proxy enthaltene Solver beantwortet Gateway-Challenge-Seiten genau so wie
-   der offizielle ZCode-Desktop-Client: automatisch, unsichtbar, ausschließlich
-   für den lokal angemeldeten eigenen Account. Diese Challenges sind Teil des
-   normalen Client-Protokolls (kein Mensch löst sie jemals) — es wird keine
-   Mensch-Verifikations-Sperre umgangen, kein Fremd-Account berührt und kein
-   Drittanbieter-Solver benutzt. Wer das nicht akzeptiert, nutzt das Kit nicht.
+1. **Historische CAPTCHA-Entscheidung überholt.** Die frühere Behauptung,
+   automatisierte Challenge-Lösung sei keine Human-/Bot-Verifikationsumgehung,
+   war nicht belastbar. Der aktuelle Default blockiert die nicht isolierte
+   Ausführung fremder Skripte; es wird keine Freigabe oder Umgehung von
+   Provider-Sperren zugesagt.
 2. **Automatisches Trial-Claiming: fail-closed.** `CLAIM_ENABLED`/`CLAIM_AUTO`
    defaulten jetzt auf `false` (vorher `true`, wenn der claim-Block fehlte).
    Aktivierung erfordert explizit `claim.enabled: true` in der eigenen Config —

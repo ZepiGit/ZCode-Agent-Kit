@@ -10,11 +10,10 @@ import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 /** Platform-correct global config location (exported for tests). */
 export function configPath(home) {
-  if (process.platform === "win32") {
-    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
-    return join(appData, "opencode", "opencode.json");
-  }
-  return join(home, ".config", "opencode", "opencode.json");
+  if (process.env.OPENCODE_CONFIG) return process.env.OPENCODE_CONFIG;
+  const dir = process.env.OPENCODE_CONFIG_DIR ?? join(process.env.XDG_CONFIG_HOME ?? join(home, ".config"), "opencode");
+  const jsonc = join(dir, "opencode.jsonc");
+  return existsSync(jsonc) ? jsonc : join(dir, "opencode.json");
 }
 
 function zcodeProvider(ctx) {

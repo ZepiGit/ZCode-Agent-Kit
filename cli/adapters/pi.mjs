@@ -9,7 +9,7 @@
 // (documented in EFFORT_MAPPING.md); unverified capabilities are not claimed.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseJsonc } from "../../lib/jsonc.mjs";
+import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 
 const MANAGED_NOTE = "// zcode provider block managed by zcode-kit — GLM via local proxy";
@@ -68,9 +68,11 @@ export default {
         throw new Error(`~/.pi/agent/models.json is not valid JSON/JSONC: ${err.message} — refusing to edit`);
       }
     }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc) || (doc.providers != null && (typeof doc.providers !== 'object' || Array.isArray(doc.providers)))) throw new Error('pi: models.json and providers must be objects; refusing to edit');
     doc.providers = doc.providers ?? {};
     if (doc.providers.zcode) {
       const current = doc.providers.zcode;
+      if (typeof current !== 'object' || Array.isArray(current)) throw new Error('pi: foreign zcode provider is not a mapping; refusing to edit');
       const wanted = zcodeProvider(ctx);
       const owned = current["x-zcode-agent-kit"]?.managed === true;
       const legacyKitEntry = !current["x-zcode-agent-kit"]
@@ -85,7 +87,7 @@ export default {
           "Rename your entry or add the marker to hand ownership to the kit.",
         );
       }
-      if (JSON.stringify(current.models?.map((m) => m.id)) === JSON.stringify(wanted.models.map((m) => m.id)) && current.baseUrl === wanted.baseUrl) {
+      if (JSON.stringify(current) === JSON.stringify(wanted)) {
         log('  pi: "zcode" provider already current');
         return { changed: false };
       }
@@ -121,10 +123,7 @@ export default {
  * full comment preservation is out of scope for the managed file.)
  */
 function setManagedProvider(original, doc) {
-  const lines = original.split("\n");
-  const header = lines.filter((l) => l.trim().startsWith("//")).slice(0, 2);
-  const keepHeader = header.filter((l) => !l.includes("managed by zcode-kit"));
-  return [...keepHeader, MANAGED_NOTE, JSON.stringify(doc, null, 2)].join("\n") + "\n";
+  return setTopLevelKey(original, 'providers', doc.providers);
 }
 
 import { execFileSync } from "node:child_process";

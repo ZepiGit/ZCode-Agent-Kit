@@ -17,8 +17,8 @@
   NDJSON，已针对 0.16.5 做过实机验证）——见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)。
 - 规模：32 个 MCP 工具 + MCP 资源；包含 45 个条目的能力注册表
   （[`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)）。
-- 测试：针对确定性 fixture harness 的 7 个单元测试 + 20 个集成/健壮性
-  测试 + 针对真实安装的 5 个实机测试（[`TEST_REPORT.md`](TEST_REPORT.md)）。
+- `npm test` 使用确定性本地 fixtures。实机测试必须显式启用；历史报告不是当前验收证据。
+- 审计加固：会话 ID 同样受工作区限制，`yolo` 需要 `--allow-yolo`。工具允许列表采用精确名称，拒绝 Bash、PowerShell 和 Shell。产物读取有大小上限，JSONL 保留两个各不超过4 MiB的文件。EOF 中断任务并正常关闭子进程，但不保证 Windows 进程树隔离。`--runtime-path` 会执行代码，只能指定可信文件。
 
 ## 前提条件
 
@@ -71,7 +71,7 @@ npm run probe:runtime
 ### 2) Streamable-HTTP 模式（多客户端，需显式启用）
 
 ```powershell
-node dist\index.js --http --host 127.0.0.1 --port 3322 --allow-workspace "C:\Users\<you>\Projects"
+node dist\index.js --http --http-key "<random-local-secret>" --host 127.0.0.1 --port 3322 --allow-workspace "C:\Users\<you>\Projects"
 # MCP 端点： http://127.0.0.1:3322/mcp（仅限 localhost；不要公开暴露）
 ```
 
@@ -92,7 +92,7 @@ GLM-5.3-Flash 检查（不会静默切换模型）→ 修改设置 → 启动任
 
 ```powershell
 npm test          # 构建 + 单元 + 集成（fixture harness，确定性）
-npm run test:live # 针对真实安装的实机测试： $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+npm run test:live # 仅显式 opt-in（真实安装/配额）： $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
 ```
 
 ## 最重要的命令行参数
@@ -100,13 +100,13 @@ npm run test:live # 针对真实安装的实机测试： $env:LIVE_TEST="1"; $en
 | 参数 | 含义 |
 | --- | --- |
 | `--stdio` | 通过 stdin/stdout 的 MCP（默认） |
-| `--http --port N --host H` | Streamable-HTTP 模式（默认 127.0.0.1:3322） |
+| `--http --http-key KEY --port N --host H` | 带 Bearer 密钥的 Streamable-HTTP 模式（默认 127.0.0.1:3322） |
 | `--read-only` | 拒绝变更类工具（技术上强制，而非仅注记） |
 | `--allow-workspace P` | 放行工作区根目录（可多次；可用 `ZCODE_HARNESS_ALLOW_WORKSPACES` 传 `;` 分隔列表） |
 | `--runtime-path P` | `zcode.cjs` 的显式路径 |
 | `--data-dir D` | 持久化目录（默认 `~/.zcode-harness-mcp`） |
 | `--interaction-policy deny\|allowlist\|ask` | 如何应答权限请求（默认： `deny`） |
-| `--interaction-allowlist "Bash,Read"` | `allowlist` 策略的前缀允许列表 |
+| `--interaction-allowlist "Read,Glob"` | `allowlist` 精确工具名（拒绝 shell） |
 | `--max-concurrent-tasks N` | 并行度（默认 2；超出部分排队） |
 
 ## 安全模型（简述）

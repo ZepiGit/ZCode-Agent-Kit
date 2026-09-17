@@ -27,7 +27,7 @@ let mockPort: number;
 let capturedUpstreamBodies: string[] = [];
 
 function findFreePort(): number {
-  return 18000 + Math.floor(Math.random() * 1000);
+  return 0;
 }
 
 // The former config.test.yaml fixture (removed in f6aa147) inlined as a temp
@@ -218,6 +218,7 @@ beforeAll(async () => {
     },
   });
 
+  mockPort = mockUpstreamServer.port!;
   const config = loadConfig(writeTestConfig());
   config.server.port = proxyPort;
   config.server.host = "127.0.0.1";
@@ -229,6 +230,7 @@ beforeAll(async () => {
   auth.setOAuthCredential({ apiKey: UPSTREAM_KEY, secret: UPSTREAM_SECRET, provider: "zai" });
 
   proxyServer = await startServer({ config, auth });
+  proxyPort = proxyServer.port;
 });
 
 afterAll(() => {

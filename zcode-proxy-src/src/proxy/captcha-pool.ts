@@ -235,6 +235,7 @@ export class CaptchaTokenPool {
   }
 
   async takeToken(cfg: CaptchaConfig): Promise<string> {
+    if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
     this.cfg = cfg;
 
     const readyBefore = this.tokens.length;
@@ -265,6 +266,7 @@ export class CaptchaTokenPool {
         ),
       ]);
     } catch (err) {
+      if (Date.now() < this.pausedUntil) throw err;
       // Mints fail in clusters (pe-stall storms, F008 velocity). Background
       // refill waves keep retrying — give them a short window to land a
       // token before surfacing a failure to the client. This converts most
@@ -291,6 +293,7 @@ export class CaptchaTokenPool {
     this.cfg = cfg;
     const target = Math.min(count ?? this.effectiveTarget, this.effectiveTarget);
     while (this.tokens.length + this.activeSolves < target) {
+      if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
       const need = target - this.tokens.length - this.activeSolves;
       if (need <= 0) break;
       const concurrency = this.governor?.enabled
@@ -564,6 +567,7 @@ export class CaptchaTokenPool {
   }
 
   private async solveFresh(cfg: CaptchaConfig): Promise<string> {
+    if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
     this.activeSolves += 1;
     this.lastSolveAt = Date.now();
     try {
@@ -571,6 +575,7 @@ export class CaptchaTokenPool {
       let sawIpBlock = false;
       for (let attempt = 1; attempt <= this.opts.solveRetries; attempt += 1) {
         try {
+          if (Date.now() < this.pausedUntil) break;
           const param = await runCaptchaSolve(cfg.sceneId, cfg.region, cfg.prefix);
           if (!param) {
             lastErr = "solver returned empty";
@@ -586,16 +591,17 @@ export class CaptchaTokenPool {
           lastErr = err instanceof Error ? err.message : String(err);
           if (isCaptchaDuplicateError(lastErr)) {
             lastErr = `duplicate certifyId (F008)`;
-          } else if (isCaptchaIpBlockError(lastErr)) {
+          } else if (isCaptchaIpBlockError(lastErr) || /(?:^|\D)429(?:\D|$)/.test(lastErr)) {
             sawIpBlock = true;
+            this.pausedUntil = Math.max(this.pausedUntil, Date.now() + 300_000);
+            break;
           }
           this.noteMintFailure(lastErr);
         }
       }
-      // All retries failed. If any failure was an IP-level block, ask the
-      // caller to rotate the egress (Telegram network reset) so the next
-      // mint has a fresh IP instead of being stuck unable to mint.
-      if (sawIpBlock && this.opts.onCaptchaIpBlock) {
+      // Notify the caller while keeping further requests paused; do not change
+      // network identity or retry around provider rate limits.
+      if (sawIpBlock && this.opts.onCaptchaIpBlock && !/429/.test(lastErr ?? '')) {
         try {
           this.opts.onCaptchaIpBlock(lastErr ?? "captcha ip block");
         } catch (_) {
