@@ -15,7 +15,7 @@
     "start": "node dist/index.js",
     "start:stdio": "node dist/index.js --stdio",
     "start:http": "node dist/index.js --http --port 3322 --host 127.0.0.1",
-    "test": "npm run build && node --test test/unit/security.test.mjs test/integration/bridge.test.mjs test/integration/robustness.test.mjs test/integration/http-gate.test.mjs",
+    "test": "npm run build && node --test test/unit/security.test.mjs test/unit/schema-audit.test.mjs test/unit/store-audit.test.mjs test/integration/bridge.test.mjs test/integration/robustness.test.mjs test/integration/http-gate.test.mjs test/integration/security-audit.test.mjs test/integration/lifecycle-audit.test.mjs",
     "test:live": "npm run build && node --test test/live/live.test.mjs",
     "probe:runtime": "node -e \"import('./dist/discovery.js').then(m=>m.printDiscovery()).then(JSON.stringify).then(console.log)\""
   },

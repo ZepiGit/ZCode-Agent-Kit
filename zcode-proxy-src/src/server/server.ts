@@ -73,7 +73,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     if (method === "GET" && (path === "/webui" || path.startsWith("/webui/"))) {
       return new Response(webuiHtml, {
         status: 200,
-        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" },
+        headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https:; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'", "x-content-type-options": "nosniff" },
       });
     }
 
@@ -161,7 +161,7 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
     );
   }
   const key = (opts.config.auth.proxyApiKey ?? "").trim();
-  if (!key || key === "GENERATE_ME") {
+  if (!key || /^(?:GENERATE_ME|your-proxy-secret|change-?me|replace-?me)$/i.test(key)) {
     throw new Error(
       "auth.proxyApiKey is missing or still the placeholder — generate a local key before serving " +
         "(the kit's setup does this; manually: replace GENERATE_ME in proxy/config.yaml)",
@@ -169,7 +169,8 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
   }
 
   const handler = createFetchHandler(opts);
-  const { port: requestedPort, host: bindHost } = opts.config.server;
+  const requestedPort = opts.config.server.port;
+  const bindHost = host === 'localhost' ? '127.0.0.1' : host === '[::1]' ? '::1' : host;
 
   const server: Server = createServer(async (req, res) => {
     const abortController = new AbortController();
@@ -195,7 +196,7 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
       if (abortController.signal.aborted) return;
       if (!res.headersSent) {
         res.writeHead(500, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: { type: "internal_error", message: (err as Error).message } }));
+        res.end(JSON.stringify({ error: { type: "internal_error", message: "Request could not be completed" } }));
       } else {
         try { res.end(); } catch {}
       }
@@ -207,7 +208,8 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
   // be killed by Node's defaults.
   server.requestTimeout = 600_000;
   server.keepAliveTimeout = 120_000;
-  server.headersTimeout = 600_000;
+  server.headersTimeout = 15_000;
+  server.maxConnections = 128;
 
   return new Promise<ProxyServer>((resolve, reject) => {
     server.on("error", reject);

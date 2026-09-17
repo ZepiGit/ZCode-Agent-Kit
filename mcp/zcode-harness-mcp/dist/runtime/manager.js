@@ -52,6 +52,9 @@ export class RuntimeManager {
             onNotification: (method, params) => this.dispatchNotification(method, params),
             onReverseRequest: (ctx) => this.handleReverseRequest(ctx),
             onExit: () => {
+                if (this.connection !== conn)
+                    return;
+                this.connection = null;
                 log.warn("harness exited; notifying crash handler");
                 this.onCrash?.();
             },
@@ -140,11 +143,7 @@ export class RuntimeManager {
             this.restarting = null;
         }
     }
-    /**
-     * Call a harness method over the stdio protocol (internal IPC, not HTTP),
-     * transparently restarting the harness once when the connection died
-     * between calls. Read-retries are the caller's choice.
-     */
+    /** Calls already dispatched may have taken effect even if their reply is lost. */
     async call(method, params, timeoutMs) {
         const conn = this.ensureConnection();
         if (!conn.running) {
@@ -154,13 +153,9 @@ export class RuntimeManager {
             return await conn.call(method, params, timeoutMs);
         }
         catch (err) {
-            if (err instanceof ZcodeConnectionError && (err.code === "NOT_RUNNING" || err.code === "HARNESS_EXITED")) {
-                log.info("harness was down; restarting once for retry", { method });
-                await this.restart();
-                const retryConn = this.ensureConnection();
-                if (!retryConn.running)
-                    await retryConn.start();
-                return await retryConn.call(method, params, timeoutMs);
+            if (err instanceof ZcodeConnectionError && err.code === "TIMEOUT" && this.connection === conn) {
+                this.stop();
+                this.onCrash?.();
             }
             throw err;
         }
@@ -232,8 +227,9 @@ export class RuntimeManager {
         return this.call("session/setThoughtLevel", { sessionId: sid, thoughtLevel });
     }
     stop() {
-        this.connection?.stop();
+        const conn = this.connection;
         this.connection = null;
+        conn?.stop();
     }
     /** Live diagnostics for zcode_health. */
     diagnostics() {

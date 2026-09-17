@@ -19,9 +19,17 @@ import { setLogLevel } from "./util/log.js";
 import { createLogger } from "./util/log.js";
 const log = createLogger("index");
 async function main() {
+    if (process.argv.slice(2).some(arg => arg === "--help" || arg === "-h")) {
+        process.stdout.write("Usage: zcode-harness-mcp [--stdio | --http --http-key KEY] [--allow-workspace PATH] [--data-dir PATH] [--runtime-path FILE] [--read-only] [--allow-yolo] [--interaction-policy deny|ask|allowlist] [--interaction-allowlist TOOL,TOOL]\n");
+        return;
+    }
     const config = parseConfig(process.argv.slice(2));
-    if (process.env.ZCODE_HARNESS_LOG_LEVEL)
-        setLogLevel(process.env.ZCODE_HARNESS_LOG_LEVEL);
+    const level = process.env.ZCODE_HARNESS_LOG_LEVEL;
+    if (level) {
+        if (!["debug", "info", "warn", "error"].includes(level))
+            throw new Error("invalid ZCODE_HARNESS_LOG_LEVEL");
+        setLogLevel(level);
+    }
     // Data dir + store
     const store = new JsonStore(config.dataDir);
     // Workspace allowlist: CLI/env entries plus the bridge-managed workspace dir.
@@ -71,9 +79,8 @@ async function main() {
         runtime.onEvent((evt) => wiring.onEvent(evt));
         runtime.onReverseRequest((ctx) => wiring.onReverseRequest(ctx));
         runtime.setCrashHandler(() => {
-            // Tasks stay as they are; next call re-establishes the connection and
-            // re-verifies. No invented terminal states.
-            log.warn("harness crash detected");
+            tasks?.stopAll("harness exited; unfinished work was interrupted");
+            log.warn("harness crash detected; active tasks interrupted");
         });
     }
     const toolCtx = {
@@ -105,14 +112,21 @@ async function main() {
         interactions,
         settings,
         allowlist,
+        maxArtifactBytes: config.maxArtifactBytes,
     };
     const opts = {
         toolCtx,
         resourceCtx,
         serverInfo: { name: "zcode-harness-mcp", version: "0.1.0" },
     };
+    let closeTransport;
+    let shuttingDown = false;
     const shutdown = () => {
+        if (shuttingDown)
+            return;
+        shuttingDown = true;
         log.info("shutting down");
+        void closeTransport?.().catch((err) => log.warn("transport close failed", { error: String(err) }));
         try {
             tasks?.stopAll();
         }
@@ -125,7 +139,7 @@ async function main() {
         catch {
             /* ignore */
         }
-        process.exit(0);
+        process.exitCode = 0;
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
@@ -134,10 +148,13 @@ async function main() {
         // this call site can never start an unauthenticated server.
         if (!config.httpKey)
             throw new Error("HTTP transport requires --http-key (refusing to serve unauthenticated)");
-        await serveHttp(opts, config.host, config.port, config.httpKey);
+        closeTransport = await serveHttp(opts, config.host, config.port, config.httpKey);
     }
     else {
-        await serveStdio(opts);
+        process.stdin.once("end", shutdown);
+        closeTransport = await serveStdio(opts);
+        if (process.stdin.readableEnded)
+            shutdown();
     }
 }
 main().catch((err) => {

@@ -58,7 +58,12 @@ export default {
       log("  goose: zcode provider already current");
       return { changed: false };
     }
-    commitFile(ctx, tx, file, JSON.stringify(provider, null, 2) + "\n");
+    if (existsSync(file) && (!current || current.name !== "zcode" || current.engine !== "openai" || current.display_name !== "ZCode (local proxy)" || current.auth?.command !== "node" || !Array.isArray(current.auth.args) || current.auth.args.length !== 1 || current.auth.args[0] !== resolver || !/^http:\/\/127\.0\.0\.1:\d+\/v1\/chat\/completions$/.test(current.base_url ?? ""))) {
+      throw new Error(`goose: ${file} is not owned by this kit; refusing to overwrite`);
+    }
+    const merged = { ...(current ?? {}), ...provider, auth: { ...(current?.auth ?? {}), ...provider.auth } };
+    if (current && JSON.stringify(current) === JSON.stringify(merged)) return { changed: false };
+    commitFile(ctx, tx, file, JSON.stringify(merged, null, 2) + "\n");
     log(`  goose: wrote ${file}`);
     log("  use via: goose session --provider zcode  (credential fetched through the kit's auth helper)");
     return { changed: true };

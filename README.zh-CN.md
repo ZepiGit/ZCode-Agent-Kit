@@ -8,9 +8,16 @@
 
 - **模型代理：**支持 OpenAI Chat Completions、Responses、Anthropic Messages，默认地址为 `http://127.0.0.1:8457`。
 - **模型：**`glm-5.3`（文本）、`glm-5.3-flash`（文本与图像）；标称上下文为 1M tokens，推理强度为 `low`、`high`、`max`。客户端兼容性和账号限制仍然适用。
-- **可选 MCP 桥：**提供已安装 ZCode 运行时的操作接口，与模型提供方配置是两件事；通过桥调用模型需要 Desktop 应用正在运行。
+- **可选 MCP 桥：**提供已安装 ZCode 运行时的操作接口，与模型提供方配置是两件事；Desktop 应用运行也不保证桥的模型调用获准。
 
-> **源码与发布版的区别（2026-09-16 核实）：**GitHub 最新发布为 **v0.2.2**，npm 为 **0.2.1**。已合并源码包含更新的 Continue、凭据恢复、`doctor --fix` 与安装器修复，这些已发布包**尚未全部包含**。下载“latest”不等于安装当前 Git 分支。除明确写明安装发布版的段落外，下文描述当前源码。使用新功能前请查阅[发布说明](https://github.com/ZepiGit/ZCode-Agent-Kit/releases)；旧 CLI 接受某个参数不证明它实现了该功能。
+## 尚未发布的审计修复
+
+- Desktop 正在运行并不保证独立 MCP 模型调用成功，提供方仍可能拒绝。setup 保存配置后若模型测试失败，会报告警告，而不是宣称模型访问成功。
+- 发布安装器将 Bun 绝对路径保存在 `.bun-path`，不修改全局 PATH。npm 状态移到 `node_modules` 之外：`%LOCALAPPDATA%/zcode-agent-kit/installs/<root-hash>` 或 `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>`。`ZCODE_KIT_STATE_DIR` 必须是该安装独占的绝对路径。源码/tarball 仍在根目录保存状态。替换旧 npm 包前先运行 setup 迁移；原数据保留，但已丢失的数据无法重建。
+- MCP 工作区允许列表也约束会话 ID；`yolo` 必须通过 `--allow-yolo` 显式启用。日志有容量限制，同一桥的客户端共享信任域。
+- 远程 CAPTCHA JavaScript 没有操作系统沙箱，默认禁用。仅可信 standalone 环境可显式设置 `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1`；Kit 会移除此开关。Start-plan 请求因此可能安全拒绝，不绕过提供方限制。
+- Start-plan 在客户端提示前加入随附的 ZCode 系统块并移除客户端 `cache_control`。Kit 使用中性 CWD `/workspace`，但平台、shell、系统版本、区域、追踪及设备元数据仍可能发送上游；不保证兼容性或访问权。
+- main/dispatch 自动发布是有意设计。`ALLOW_PUBLISH` 只验证版本一致性，不是人工或法律授权。这些源码改动不证明已有对应发布版。
 
 ## 1. 安装前准备
 
@@ -26,7 +33,7 @@ node --version
 bun --version
 ```
 
-PowerShell 与 POSIX shell 都能运行。若找不到命令，先修好 PATH。发布安装器可以下载缺失的 Bun，但 PATH 修改**不持久**：新开的 Windows 终端会丢失该设置，`curl | sh` 也不能改变父 shell 的 PATH。已有 Bun 会被复用，不会自动升级。
+PowerShell 与 POSIX shell 都能运行。若找不到命令，先修好 PATH。发布安装器可以下载 Bun 并将绝对路径保存至 `.bun-path`；Kit 重启后仍可使用，无需修改全局 PATH。已有 Bun 会被复用，不会自动升级。
 
 **Windows：**使用无需管理员权限的 PowerShell，不要在 Git Bash 或 WSL 中运行 `install.sh`。**macOS/Linux：**使用 POSIX shell，需要 `curl`、`tar`、SHA-256 工具，更新还需 `rsync`；引导安装 Bun 需 `unzip`。下述 Windows 验证不代表重新验证了 Linux/macOS 的真实客户端。
 

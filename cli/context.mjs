@@ -5,6 +5,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { resolveBun } from "../lib/process.mjs";
+import { proxyEnv } from "../lib/proxy-env.mjs";
+import { stateDirectory, ensureState } from "../lib/state.mjs";
+import { commitFile } from "../lib/edit.mjs";
 
 export function kitRoot() {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,20 +21,25 @@ export function homeDir() {
 }
 
 export function createCtx(root = kitRoot(), home = homeDir()) {
+  const stateDir = stateDirectory(root, home);
   const ctx = {
     root,
     home,
-    keyFile: join(root, ".proxykey"),
-    config: join(root, "proxy", "config.yaml"),
+    stateDir,
+    logDir: join(stateDir, "logs"),
+    keyFile: join(stateDir, ".proxykey"),
+    config: join(stateDir, "proxy", "config.yaml"),
     configExample: join(root, "proxy", "config.example.yaml"),
     proxySrc: join(root, "zcode-proxy-src"),
     mcpDir: join(root, "mcp", "zcode-harness-mcp"),
-    generated: join(root, "generated"),
-    backupDir: join(root, "backups"),
+    generated: join(stateDir, "generated"),
+    backupDir: join(stateDir, "backups"),
     port() {
+      if (ctx.dryRun && !existsSync(ctx.config)) return 8457;
       return Number((readFileSync(ctx.config, "utf8").match(/^  port:\s*(\d+)/m) ?? [])[1] ?? 8457);
     },
     key() {
+      if (ctx.dryRun && !existsSync(ctx.keyFile)) return "GENERATE_ME";
       return readFileSync(ctx.keyFile, "utf8").trim();
     },
   };
@@ -48,9 +57,12 @@ export function sha256File(file) {
  * without both; nothing else may depend on them existing beforehand.
  */
 export function ensureRuntimeFiles(ctx) {
+  ensureState(ctx);
+  mkdirSync(dirname(ctx.keyFile), { recursive: true, mode: 0o700 });
+  mkdirSync(dirname(ctx.config), { recursive: true, mode: 0o700 });
   if (!existsSync(ctx.keyFile)) {
     try {
-      const fd = openSync(ctx.keyFile, "wx");
+      const fd = openSync(ctx.keyFile, "wx", 0o600);
       writeFileSync(fd, randomBytes(32).toString("base64url") + "\n");
       closeSync(fd);
     } catch (err) {
@@ -62,7 +74,7 @@ export function ensureRuntimeFiles(ctx) {
     const filled = example.replace('proxyApiKey: "GENERATE_ME"', `proxyApiKey: "${ctx.key()}"`);
     if (/proxyApiKey: "GENERATE_ME"/.test(filled)) throw new Error("config template key substitution failed");
     try {
-      const fd = openSync(ctx.config, "wx");
+      const fd = openSync(ctx.config, "wx", 0o600);
       writeFileSync(fd, filled);
       closeSync(fd);
     } catch (err) {
@@ -142,7 +154,7 @@ function ensureDeps(ctx, label, dir) {
   console.log(`  installing ${label} dependencies (bun, frozen lockfile)...`);
   try {
     const args = lockfile ? ["install", "--frozen-lockfile"] : ["install"];
-    execFileSync("bun", args, { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
+    execFileSync(resolveBun(ctx.root), args, { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
   } catch (err) {
     const detail = (err.stderr ?? err.stdout ?? err.message ?? "").toString().split("\n").slice(0, 6).join("\n    ");
     throw new Error(
@@ -161,13 +173,15 @@ function ensureDeps(ctx, label, dir) {
 /** Bootstrap the kit's own runtime files. Idempotent; transaction-aware via ctx.tx. */
 export function bootstrap(ctx) {
   console.log("== bootstrap ==");
-  mkdirSync(join(ctx.root, "logs"), { recursive: true });
-  mkdirSync(ctx.generated, { recursive: true });
+  ensureState(ctx);
+  mkdirSync(ctx.logDir, { recursive: true, mode: 0o700 });
+  mkdirSync(ctx.generated, { recursive: true, mode: 0o700 });
+  mkdirSync(dirname(ctx.config), { recursive: true, mode: 0o700 });
   ensureLocalGitExclude(ctx);
 
   if (!existsSync(ctx.keyFile)) {
     try {
-      const fd = openSync(ctx.keyFile, "wx");
+      const fd = openSync(ctx.keyFile, "wx", 0o600);
       writeFileSync(fd, randomBytes(32).toString("base64url") + "\n");
       closeSync(fd);
       console.log("  generated local proxy key -> .proxykey (user-local secret, never committed)");
@@ -179,10 +193,7 @@ export function bootstrap(ctx) {
     const example = readFileSync(ctx.configExample, "utf8");
     const filled = example.replace('proxyApiKey: "GENERATE_ME"', `proxyApiKey: "${ctx.key()}"`);
     if (/proxyApiKey: "GENERATE_ME"/.test(filled)) throw new Error("config template key substitution failed");
-    ctx.tx?.touch(ctx.config);
-    const tmp = ctx.config + ".zcode-staging";
-    writeFileSync(tmp, filled);
-    renameSync(tmp, ctx.config);
+    commitFile(ctx, ctx.tx ?? { touch() {} }, ctx.config, filled);
     console.log("  wrote proxy/config.yaml from example");
   } else {
     console.log("  proxy/config.yaml already present — left untouched");
@@ -197,9 +208,9 @@ export function bootstrap(ctx) {
     if (existsSync(desktopCfg)) {
       console.log("  importing ZCode Desktop credential (start-plan)...");
       try {
-        execFileSync("bun", ["run", "src/index.ts", "auth", "login", "zai", "--import"], {
+        execFileSync(resolveBun(ctx.root), ["run", "src/index.ts", "auth", "login", "zai", "--import"], {
           cwd: ctx.proxySrc,
-          env: { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home, ZCODE_PROXY_CONFIG: ctx.config, ZCODE_PROXY_CREDENTIALS_PATH: credStore },
+          env: { ...proxyEnv(ctx), ZCODE_PROXY_CREDENTIALS_PATH: credStore },
           timeout: 15000,
           stdio: ["ignore", "pipe", "pipe"],
         });

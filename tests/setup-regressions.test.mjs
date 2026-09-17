@@ -126,6 +126,9 @@ test("setup refuses to write user configs from a checkout without opt-in", () =>
         ...process.env,
         USERPROFILE: home,
         HOME: home,
+        APPDATA: join(home, 'AppData', 'Roaming'),
+        LOCALAPPDATA: join(home, 'AppData', 'Local'),
+        XDG_CONFIG_HOME: join(home, '.config'),
         ZCODE_KIT_SKIP_DEPS: "1",
         // deliberately NO ZCODE_KIT_ALLOW_CHECKOUT here
         PATH: process.platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin:/bin",
@@ -180,6 +183,9 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
         ...process.env,
         USERPROFILE: home,
         HOME: home,
+        APPDATA: join(home, 'AppData', 'Roaming'),
+        LOCALAPPDATA: join(home, 'AppData', 'Local'),
+        XDG_CONFIG_HOME: join(home, '.config'),
         ZCODE_KIT_SKIP_DEPS: "1",
         // deliberately NOT opted in at the env level — update must imply it
         ZCODE_KIT_ALLOW_CHECKOUT: "0",

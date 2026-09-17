@@ -1,6 +1,14 @@
 # EFFORT_MAPPING — ZCode-Provider in OMP (GLM-5.3 / GLM-5.3-Flash)
 
-Stand: 2026-09-13 · Maschinenlesbar: [EFFORT_MAPPING.json](EFFORT_MAPPING.json)
+Historischer Live-Stand: 2026-09-13 · Maschinenlesbar: [EFFORT_MAPPING.json](EFFORT_MAPPING.json)
+
+**Abgrenzung (2026-09-17):** Diese Tabelle beschreibt ausschließlich den OMP-
+Anthropic-Passthrough. OpenAI-/Responses-Requests werden separat übersetzt und
+verwenden die vendorte Reasoning-Tabelle (8000/16000/32000; `medium` → `high`).
+Die Tabellen sind nicht austauschbar und kein aktueller Live-Nachweis. Nicht alle
+OpenAI-Felder haben ein Anthropic-Äquivalent; vollständige API-Parität wird nicht
+zugesagt. Der unisolierte Remote-CAPTCHA-Pfad ist im Kit inzwischen standardmäßig
+gesperrt; ältere Live-Ergebnisse garantieren keine aktuelle Start-Plan-Verfügbarkeit.
 
 ## Weg der Effort-Auswahl
 

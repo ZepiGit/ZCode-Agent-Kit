@@ -36,8 +36,13 @@ function noopTx() {
 function ctxWithAppData(home) {
   // Windows adapters derive paths from APPDATA — point it at the fake home.
   const prev = process.env.APPDATA;
+  const prevXdg = process.env.XDG_CONFIG_HOME;
   process.env.APPDATA = join(home, "AppData", "Roaming");
-  return { ctx: ctxFor(home), restore: () => { if (prev === undefined) delete process.env.APPDATA; else process.env.APPDATA = prev; } };
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
+  return { ctx: ctxFor(home), restore: () => {
+    if (prev === undefined) delete process.env.APPDATA; else process.env.APPDATA = prev;
+    if (prevXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = prevXdg;
+  } };
 }
 
 // --------------------------------------------------------------- jsonc
@@ -106,6 +111,7 @@ test("opencode adapter refuses a foreign provider.zcode byte-identically", async
   const home = fakeHome("opencode-foreign");
   const prevAppData = process.env.APPDATA;
   process.env.APPDATA = join(home, "AppData", "Roaming");
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
   try {
     const { configPath } = await import("../cli/adapters/opencode.mjs");
     const cfgFile = configPath(home);
@@ -231,6 +237,7 @@ test("opencode adapter writes JSONC-config and preserves comments", async () => 
   // real %APPDATA% (Windows) while the adapter writes into the fake home.
   const prevAppData = process.env.APPDATA;
   process.env.APPDATA = join(home, "AppData", "Roaming");
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
   try {
     const { configPath } = await import("../cli/adapters/opencode.mjs");
     const cfgFile = configPath(home);
@@ -305,9 +312,12 @@ test("aider adapter writes env file with the key (never logged)", async () => {
   assert.match(envText, /OPENAI_API_BASE=http:\/\/127\.0\.0\.1:\d+\/v1/);
   assert.match(envText, /OPENAI_API_KEY=/);
   assert.equal(r1.logs.join("\n").includes(r1.ctx.key()), false, "key must not appear in logs");
-  // launcher scripts exist and reference the env file
+  // launcher scripts exist and delegate to the JS launcher, which builds the
+  // process env itself (the shell never sources the env file — B-25)
   assert.ok(existsSync(join(KIT, "bin", "zcode-aider.cmd")));
-  assert.match(readFileSync(join(KIT, "bin", "zcode-aider.sh"), "utf8"), /aider-zcode\.env/);
+  const sh = readFileSync(join(KIT, "bin", "zcode-aider.sh"), "utf8");
+  assert.match(sh, /launch\.mjs/);
+  assert.doesNotMatch(sh, /^\s*\.\s+"/m, "the shell must not source the env file");
 });
 
 test("cline/kilo adapters produce manual-confirmation sheets, no VS Code state touched", async () => {
@@ -406,8 +416,8 @@ function seedDryRunFixture(id, home) {
       );
       break;
     case "opencode":
-      mkdirSync(join(home, "AppData", "Roaming", "opencode"), { recursive: true });
-      writeFileSync(join(home, "AppData", "Roaming", "opencode", "opencode.json"), '{\n  // mine\n  "theme": "dark"\n}');
+      mkdirSync(join(home, ".config", "opencode"), { recursive: true });
+      writeFileSync(join(home, ".config", "opencode", "opencode.json"), '{\n  // mine\n  "theme": "dark"\n}');
       break;
     // codex/claude-code/cline/kilo-code/aider write under ctx.generated —
     // nothing in the home to seed; goose/opencode need APPDATA only.
@@ -493,6 +503,7 @@ test("opencode adapter is byte-idempotent on a commented config", async () => {
   const home = fakeHome("opencode-idem");
   const prevAppData = process.env.APPDATA;
   process.env.APPDATA = join(home, "AppData", "Roaming");
+  process.env.XDG_CONFIG_HOME = join(home, '.config');
   try {
     const { configPath } = await import("../cli/adapters/opencode.mjs");
     const cfgFile = configPath(home);

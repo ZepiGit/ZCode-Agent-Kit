@@ -142,6 +142,92 @@ describe("handleResponses", () => {
     expect(text).toContain("response.output_text.delta");
   });
 
+  it("emits response.failed instead of response.completed for an Anthropic error event", async () => {
+    const upstream = [
+      `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { id: "msg_error", type: "message", role: "assistant", model: "glm-5.2", content: [], usage: { input_tokens: 3, output_tokens: 0 } } })}\n\n`,
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } })}\n\n`,
+      `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "upstream overloaded" } })}\n\n`,
+    ].join("");
+    const fetchImpl = (async (): Promise<Response> => new Response(upstream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    })) as unknown as typeof fetch;
+
+    const r = await handleResponses(makeReq({ model: "glm-5.2", input: "hi", stream: true }), {
+      config: CONFIG, auth, fetchImpl,
+    });
+    const text = await r.text();
+
+    expect(text).toContain("event: response.failed");
+    expect(text).toContain("upstream overloaded");
+    expect(text).not.toContain("event: response.completed");
+    expect(text).not.toContain("event: response.incomplete");
+  });
+
+  it("does not emit a success completion when the upstream stream is truncated", async () => {
+    const upstream = [
+      `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { id: "msg_truncated", type: "message", role: "assistant", model: "glm-5.2", content: [], usage: { input_tokens: 3, output_tokens: 0 } } })}\n\n`,
+      `event: content_block_delta\ndata: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } })}\n\n`,
+    ].join("");
+    const fetchImpl = (async (): Promise<Response> => new Response(upstream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    })) as unknown as typeof fetch;
+
+    const r = await handleResponses(makeReq({ model: "glm-5.2", input: "hi", stream: true }), {
+      config: CONFIG, auth, fetchImpl,
+    });
+    const text = await r.text();
+
+    expect(text).toContain("response.output_text.delta");
+    expect(text).toContain("event: response.failed");
+    expect(text).not.toContain("event: response.completed");
+    expect(text).not.toContain("event: response.incomplete");
+  });
+
+  it("cancels a locked upstream stream through its owning reader and handles cancel rejection", async () => {
+    const encoder = new TextEncoder();
+    let upstreamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const upstreamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        upstreamController = controller;
+        controller.enqueue(encoder.encode(
+          `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { id: "msg_cancel", type: "message", role: "assistant", model: "glm-5.2", content: [], usage: { input_tokens: 1, output_tokens: 0 } } })}\n\n`,
+        ));
+      },
+    });
+    const fetchImpl = (async (): Promise<Response> => new Response(upstreamBody, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    })) as unknown as typeof fetch;
+
+    const originalReaderCancel = ReadableStreamDefaultReader.prototype.cancel;
+    let readerCancelCalls = 0;
+    ReadableStreamDefaultReader.prototype.cancel = function (reason?: unknown): Promise<void> {
+      readerCancelCalls += 1;
+      const cancelled = originalReaderCancel.call(this, reason);
+      if (readerCancelCalls === 2) {
+        return cancelled.then(() => Promise.reject(new Error("synthetic reader cancel rejection")));
+      }
+      return cancelled;
+    };
+
+    try {
+      const r = await handleResponses(makeReq({ model: "glm-5.2", input: "hi", stream: true }), {
+        config: CONFIG, auth, fetchImpl,
+      });
+      const reader = r.body!.getReader();
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+
+      await expect(reader.cancel("client stopped")).resolves.toBeUndefined();
+      expect(readerCancelCalls).toBe(3);
+    } finally {
+      ReadableStreamDefaultReader.prototype.cancel = originalReaderCancel;
+      try { upstreamController?.close(); } catch {}
+    }
+  });
+
   it("stores a completed stream for previous_response_id continuation", async () => {
     const store = new ResponseStore();
     const streamFetch = (async (): Promise<Response> => new Response(anthropicSse("turn1"), { status: 200, headers: { "content-type": "text/event-stream" } })) as unknown as typeof fetch;
@@ -313,7 +399,7 @@ describe("handleResponses resilience (CL-08)", () => {
     let calls = 0;
     const fetchImpl = (async (): Promise<Response> => {
       calls += 1;
-      if (calls < 3) throw new Error("Unable to connect");
+      if (calls < 3) throw Object.assign(new Error("connect refused"), { code: "ECONNREFUSED" });
       return new Response(anthropicMsg("after retry"), { status: 200, headers: { "content-type": "application/json" } });
     }) as unknown as typeof fetch;
 
@@ -328,7 +414,7 @@ describe("handleResponses resilience (CL-08)", () => {
     let calls = 0;
     const fetchImpl = (async (): Promise<Response> => {
       calls += 1;
-      throw new Error("Unable to connect");
+      throw Object.assign(new Error("connect refused"), { code: "ECONNREFUSED" });
     }) as unknown as typeof fetch;
 
     const resp = await handleResponses(makeReq({ model: "glm-5.2", input: "hi" }), { config: CONFIG, auth, fetchImpl });
@@ -350,7 +436,7 @@ describe("handleResponses resilience (CL-08)", () => {
     const fetchImpl = (async (): Promise<Response> => {
       calls += 1;
       controller.abort(); // abort while the first attempt is "in flight"
-      throw new Error("Unable to connect");
+      throw Object.assign(new Error("connect refused"), { code: "ECONNREFUSED" });
     }) as unknown as typeof fetch;
 
     const resp = await handleResponses(req, { config: CONFIG, auth, fetchImpl });

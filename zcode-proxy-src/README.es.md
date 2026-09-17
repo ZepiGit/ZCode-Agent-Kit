@@ -46,7 +46,10 @@ Desktop).
   auditoría
 - **Exclusiones de vendoring**: `Android-APP/` (209 MB) y `node_modules/` no se
   incluyen; `node_modules/` lo instala setup.mjs con `bun install
-  --frozen-lockfile`
+  --frozen-lockfile`. La ruta de compilación de Android
+  (`scripts/build-android-apk.sh`, los scripts npm `build:android-*`, la
+  devDependency esbuild y el job `build-android` del workflow vendoreado
+  `.github/workflows/release.yml`) se eliminó junto con la app
 - Se añadieron localmente dos archivos de test del upstream; todas las
   modificaciones de fuente están en
   [`../patches/zcode-proxy-local-patches.patch`](../patches/zcode-proxy-local-patches.patch)

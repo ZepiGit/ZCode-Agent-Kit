@@ -55,6 +55,7 @@ async function fetchCaptchaConfig(appVersion: string): Promise<FetchedCaptchaCon
  * (ZCODE_CAPTCHA_RETRIES attempts with a fresh solve per retry).
  */
 export async function getCaptchaToken(appVersion: string): Promise<{ verifyParam: string; region: string }> {
+  if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== '1') throw new Error('Remote CAPTCHA execution is disabled without explicit standalone operator opt-in');
   const cfg = await fetchCaptchaConfig(appVersion);
   if (!cfg || !cfg.enabled || !cfg.prefix || !cfg.sceneId) throw new Error("Captcha config unavailable");
   // Pre-solved token pool: requests take an already-minted token (sub-ms)
@@ -73,6 +74,7 @@ export function shutdownCaptcha(): void {
  * Warms only the idle minimum; the pool grows on demand with traffic.
  */
 export async function startCaptchaPool(appVersion: string): Promise<void> {
+  if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== '1') return;
   const cfg = await fetchCaptchaConfig(appVersion);
   if (!cfg || !cfg.enabled) return;
   // Size the pool before prefill: the module-level pool defers sizing to the
@@ -87,6 +89,7 @@ export async function startCaptchaPool(appVersion: string): Promise<void> {
 
 /** Request an urgent refill burst (e.g. after a challenge/retry). */
 export function urgentCaptcha(): void {
+  if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== '1') return;
   urgentCaptchaRefill();
 }
 

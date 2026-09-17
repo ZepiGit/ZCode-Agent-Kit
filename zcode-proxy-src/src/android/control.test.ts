@@ -9,17 +9,27 @@ import {
   type HandlerContext,
 } from "./control.js";
 
+const CONTROL_CAPABILITY = "test-control-capability";
+
 function makeStubRequest(opts: {
   method?: string;
   url?: string;
   body?: string;
   remoteAddress?: string;
+  capability?: string | null;
+  contentLength?: number;
 }): import("node:http").IncomingMessage {
   const body = opts.body ?? "";
   const stream = Readable.from([Buffer.from(body, "utf-8")]) as unknown as import("node:http").IncomingMessage;
   stream.method = opts.method ?? "POST";
   stream.url = opts.url ?? "/control";
-  stream.headers = { "content-type": "application/json", "content-length": String(Buffer.byteLength(body)) };
+  stream.headers = {
+    "content-type": "application/json",
+    "content-length": String(opts.contentLength ?? Buffer.byteLength(body)),
+    ...(opts.capability === null
+      ? {}
+      : { "x-zcode-control-capability": opts.capability ?? CONTROL_CAPABILITY }),
+  };
   stream.socket = { remoteAddress: opts.remoteAddress ?? "127.0.0.1" } as never;
   return stream;
 }
@@ -27,8 +37,8 @@ function makeStubRequest(opts: {
 async function post(body: unknown, state: ControlState, ctx?: HandlerContext) {
   const req = makeStubRequest({ body: JSON.stringify(body) });
   return ctx
-    ? handleControlRequestWithHooksForTest(req, state, ctx)
-    : handleControlRequestForTest(req, state);
+    ? handleControlRequestWithHooksForTest(req, state, ctx, CONTROL_CAPABILITY)
+    : handleControlRequestForTest(req, state, undefined, CONTROL_CAPABILITY);
 }
 
 describe("android control listener", () => {
@@ -43,7 +53,7 @@ describe("android control listener", () => {
       body: JSON.stringify({ cmd: "status" }),
       remoteAddress: "127.0.0.1",
     });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(200);
     expect(result.body.ok).toBe(true);
     if (result.body.ok && "state" in result.body) {
@@ -59,7 +69,7 @@ describe("android control listener", () => {
       body: JSON.stringify({ cmd: "status" }),
       remoteAddress: "192.168.1.5",
     });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(403);
     expect(result.body.ok).toBe(false);
     if (!result.body.ok) {
@@ -72,7 +82,7 @@ describe("android control listener", () => {
       body: JSON.stringify({ cmd: "status" }),
       remoteAddress: "::ffff:8.8.8.8",
     });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(403);
   });
 
@@ -81,7 +91,7 @@ describe("android control listener", () => {
       body: JSON.stringify({ cmd: "status" }),
       remoteAddress: "::1",
     });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(200);
   });
 
@@ -90,20 +100,64 @@ describe("android control listener", () => {
       url: "/v1/chat/completions",
       body: JSON.stringify({ cmd: "status" }),
     });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(404);
   });
 
   it("returns 400 for malformed JSON body", async () => {
     const req = makeStubRequest({ body: "not-json{" });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(400);
     expect(result.body.ok).toBe(false);
   });
 
+  it("allows status without the capability", async () => {
+    const req = makeStubRequest({
+      body: JSON.stringify({ cmd: "status" }),
+      capability: null,
+    });
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
+    expect(result.status).toBe(200);
+    expect(result.body.ok).toBe(true);
+  });
+
+  it("rejects privileged commands without the per-instance capability", async () => {
+    const req = makeStubRequest({
+      body: JSON.stringify({ cmd: "shutdown" }),
+      capability: null,
+    });
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
+    expect(result.status).toBe(403);
+    expect(result.body).toEqual({ ok: false, error: "forbidden: invalid control capability" });
+  });
+
+  it("rejects privileged commands when no capability was configured", async () => {
+    const req = makeStubRequest({ body: JSON.stringify({ cmd: "logout" }) });
+    const result = await handleControlRequestForTest(req, baseState);
+    expect(result.status).toBe(503);
+    expect(result.body).toEqual({ ok: false, error: "control_capability_unavailable" });
+  });
+
+  it("rejects declared request bodies over 64 KiB before reading them", async () => {
+    const req = makeStubRequest({
+      body: JSON.stringify({ cmd: "status" }),
+      contentLength: 64 * 1024 + 1,
+    });
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
+    expect(result.status).toBe(413);
+    expect(result.body).toEqual({ ok: false, error: "request_body_too_large" });
+  });
+
+  it("rejects streamed request bodies that cross 64 KiB", async () => {
+    const req = makeStubRequest({ body: "x".repeat(64 * 1024 + 1), contentLength: 0 });
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
+    expect(result.status).toBe(413);
+    expect(result.body).toEqual({ ok: false, error: "request_body_too_large" });
+  });
+
   it("returns error for unknown cmd", async () => {
     const req = makeStubRequest({ body: JSON.stringify({ cmd: "bogus" }) });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(200);
     expect(result.body.ok).toBe(false);
     if (!result.body.ok) {
@@ -115,7 +169,7 @@ describe("android control listener", () => {
     const req = makeStubRequest({
       body: JSON.stringify({ cmd: "deliverOAuthCode", provider: "bigmodel", code: "x", state: "y" }),
     });
-    const result = await handleControlRequestForTest(req, baseState);
+    const result = await handleControlRequestForTest(req, baseState, undefined, CONTROL_CAPABILITY);
     expect(result.status).toBe(200);
     expect(result.body.ok).toBe(false);
     if (!result.body.ok) {

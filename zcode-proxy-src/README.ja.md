@@ -42,7 +42,9 @@ chat-completions・Anthropic messages・OpenAI Responses の各リクエスト�
   基盤のデフォルトは監査対応後 fail-closed（`false`）です
 - **vendoring からの除外**: `Android-APP/`（209 MB）と `node_modules/` は含まれ
   ません。`node_modules/` は setup.mjs が `bun install --frozen-lockfile` で
-  導入します
+  導入します。Android ビルド経路（`scripts/build-android-apk.sh`、
+  `build:android-*` npm スクリプト、esbuild devDependency、vendored 版
+  `.github/workflows/release.yml` の `build-android` ジョブ）も合わせて削除済みです
 - upstream のテストファイル 2 件をローカルで追加。ソース変更はすべて
   [`../patches/zcode-proxy-local-patches.patch`](../patches/zcode-proxy-local-patches.patch)
   にあります

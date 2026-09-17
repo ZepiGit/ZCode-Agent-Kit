@@ -76,6 +76,8 @@ export async function recoverAndMapUpstream(opts: {
   // Preserve retry guidance only when it is a bounded numeric delta, not arbitrary upstream data.
   const retryAfter = response.headers.get("retry-after");
   if (status === 429 && retryAfter && /^\d{1,6}$/.test(retryAfter)) result.headers.set("retry-after", retryAfter);
+  const requestId = response.headers.get('x-request-id');
+  if (requestId && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) result.headers.set('x-request-id', requestId);
   void response.body?.cancel().catch(() => {});
   return result;
 }

@@ -7,17 +7,18 @@ import type { TaskManager } from "../tasks/manager.js";
 import type { InteractionManager } from "../interactions/manager.js";
 import type { SettingsManager } from "../settings/manager.js";
 import type { WorkspaceAllowlist } from "../security/allowlist.js";
-import { resolveInsideWorkspace } from "../security/allowlist.js";
+import { readArtifact } from "../security/artifact.js";
+import { sessionInScope } from "../security/session.js";
 import { capabilitiesForMcp, BRIDGE_VERSION, TARGET_PROTOCOL } from "../capabilities/registry.js";
-import { redactDeep } from "../security/redact.js";
+import { safeJsonStringify } from "../security/redact.js";
 import { parseSessionId } from "../protocol/types.js";
-import fs from "node:fs";
 
 export interface ResourceContext {
   tasks: TaskManager;
   interactions: InteractionManager;
   settings: SettingsManager;
   allowlist: WorkspaceAllowlist;
+  maxArtifactBytes: number;
 }
 
 export const RESOURCE_ROOTS = [
@@ -53,10 +54,10 @@ export async function readResource(ctx: ResourceContext, uri: string): Promise<{
     if (kind === "status") {
       const rec = ctx.tasks.get(taskId);
       if (!rec) throw new Error(`unknown task: ${taskId}`);
-      return send(JSON.stringify(rec, null, 2));
+      return send(safeJsonStringify(rec));
     }
     if (kind === "result") {
-      return send(JSON.stringify(await ctx.tasks.buildResult(taskId), null, 2));
+      return send(safeJsonStringify(await ctx.tasks.buildResult(taskId)));
     }
     const evs = ctx.tasks.events(taskId, -1, 100_000);
     return send(evs.items.map((e) => JSON.stringify(e)).join("\n"), "application/x-ndjson");
@@ -68,7 +69,8 @@ export async function readResource(ctx: ResourceContext, uri: string): Promise<{
     if (!sessionId) throw new Error(`invalid session id in ${uri}`);
     const { RuntimeManagerHolder } = await import("./runtime-holder.js");
     const runtime = RuntimeManagerHolder.get();
-    return send(JSON.stringify(redactDeep(await runtime.ipcSessionRead(sessionId)), null, 2));
+    await sessionInScope(runtime, ctx.allowlist, sessionId);
+    return send(safeJsonStringify(await runtime.ipcSessionRead(sessionId)));
   }
 
   const mArtifact = uri.match(/^zcode:\/\/artifacts\/(.+)$/);
@@ -77,22 +79,8 @@ export async function readResource(ctx: ResourceContext, uri: string): Promise<{
     // artifact id format: <abs-path> registered by a task; enforce allowlist.
     const canonical = ctx.allowlist.check(raw);
     if (!canonical) throw new Error(`artifact path not allowlisted: ${raw}`);
-    const abs = resolveInsideWorkspace(canonical, raw);
-    const st = fs.statSync(abs);
-    if (!st.isFile()) throw new Error(`not a file: ${abs}`);
-    const sizeCap = 1_048_576;
-    const len = Math.min(st.size, sizeCap);
-    const fd = fs.openSync(abs, "r");
-    const buf = Buffer.alloc(len);
-    try {
-      if (len > 0) fs.readSync(fd, buf, 0, len, 0);
-    } finally {
-      fs.closeSync(fd);
-    }
-    return send(
-      JSON.stringify({ path: abs, size: st.size, truncated: st.size > len, contentBase64: buf.toString("base64") }, null, 2),
-      "application/json"
-    );
+    const artifact = await readArtifact(canonical, raw, 0, 1_048_576, ctx.maxArtifactBytes);
+    return send(JSON.stringify(artifact), "application/json");
   }
 
   throw new Error(`unknown resource: ${uri}`);

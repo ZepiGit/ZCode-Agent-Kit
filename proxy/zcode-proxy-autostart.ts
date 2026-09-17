@@ -3,9 +3,13 @@
 // later requests can recover a crashed proxy without recurring retry loops.
 // TEMPLATE: setup substitutes the owning installation root.
 const ROOT = "__ZCODE_OM_ROOT__";
+const KEY_FILE = "__ZCODE_OM_KEY_FILE__";
 const HEALTH_URL = "http://127.0.0.1:__ZCODE_OM_PORT__/health";
 const PREFLIGHT = ROOT + "/cli/heal.mjs";
-const START_TIMEOUT_MS = 90_000;
+// The preflight detaches the proxy and returns; a hard kill here could leave
+// a started proxy without its manager bookkeeping (audit F-10), so the
+// timeout stays well above the manager's own bounded start wait.
+const START_TIMEOUT_MS = 120_000;
 const HEALTH_TTL_MS = 60_000;
 
 interface ZcodeExtensionContext {
@@ -27,7 +31,7 @@ export default function (pi: {
         ttlMs: HEALTH_TTL_MS,
         health: async () => {
           try {
-            const key = readFileSync(ROOT + "/.proxykey", "utf8").trim();
+            const key = readFileSync(KEY_FILE, "utf8").trim();
             const res = await fetch(HEALTH_URL, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(800) });
             const body = await res.json() as { status?: string; provider?: string };
             return res.ok && body.status === "ok" && body.provider === "zai";

@@ -1,7 +1,7 @@
 // prepublishOnly gate inside the generated launcher package (ZAK-012): an
 // `npm publish` from the package must fail unless the shipped ALLOW_PUBLISH
-// marker explicitly names the version being published. Release consent thus
-// travels WITH the package instead of living only in one CI workflow.
+// marker names the version being published. This is a version consistency
+// check; the owner-authorized workflow creates the marker automatically.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,4 +26,4 @@ if (!allowed.includes(pkg.version)) {
   );
   process.exit(1);
 }
-console.log(`release marker OK for ${pkg.name}@${pkg.version}`);
+console.log(`release marker consistency OK for ${pkg.name}@${pkg.version}`);

@@ -1,5 +1,4 @@
-# Release pipeline: pushing a vX.Y.Z tag is the single trigger for an
-# automatic release. It runs the full test matrix, builds the release assets
+# Automatic releases run on main pushes, version tags and manual dispatch. It runs the full test matrix, builds the release assets
 # (git-archive tarball + installers + checksums), creates the GitHub release
 # and publishes the launcher package to npm.
 #
@@ -24,8 +23,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -33,6 +31,8 @@ concurrency:
 
 jobs:
   test:
+    permissions:
+      contents: read
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -61,6 +61,10 @@ jobs:
         run: npm run test:mcp
 
   release-and-publish:
+    if: ${{ github.ref == 'refs/heads/main' || github.ref_type == 'tag' }}
+    permissions:
+      contents: write
+      id-token: write
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -101,7 +105,7 @@ jobs:
             git add package.json package-lock.json pack/ALLOW_PUBLISH
             git commit -m "chore(release): v$NEW (auto-bump by release workflow) [skip ci]"
             git tag "v$NEW"
-            git push origin HEAD:"${GITHUB_REF_NAME#refs/heads/}" "v$NEW"
+            git push origin HEAD:main "v$NEW"
             echo "VERSION=$NEW" >> "$GITHUB_ENV"
             echo "auto-bumped $CUR -> $NEW"
           else

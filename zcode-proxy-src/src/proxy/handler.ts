@@ -106,6 +106,12 @@ export async function proxyRequest(
     return errorResponse(400, "invalid_request_error", (err as Error).message);
   }
 
+  if (body) {
+    try {
+      const parsed = JSON.parse(body);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse(400, 'invalid_request_error', 'Request body must be a JSON object');
+    } catch { return errorResponse(400, format === 'openai' ? 'translation_failed' : 'invalid_request_error', 'Request body is not valid JSON'); }
+  }
   const meta = peekBody(body);
 
   if (dumpEnabled()) {
@@ -240,10 +246,8 @@ export async function proxyRequest(
 
   let upstreamResp: Response;
   try {
-    // Transient connect failures (DNS blip, TLS reset, Bun "Unable to
-    // connect") happen a few times a day against the gateway. Retry the
-    // CONNECT twice with a short backoff before surfacing a 502 — the
-    // request never reached upstream, so resending is side-effect-free.
+    // Only explicit pre-connect errors establish that a POST was not sent.
+    // Generic resets may happen after the upstream has already accepted it.
     // Guard rails: skip retry when the client already aborted or the ordered
     // transport flagged the failure postWrite; re-dispatch a FRESH Request
     // each attempt — a reused Request has its body stream marked used after
@@ -451,9 +455,7 @@ export const MAX_CONNECT_ATTEMPTS = 3;
 
 /**
  * Connect-level retry ladder shared by the chat hot path and /v1/responses.
- * Transient connect failures (DNS blip, TLS reset, Bun "Unable to connect")
- * happen a few times a day against the gateway; the request never reached
- * upstream, so resending is side-effect-free.
+ * Only explicit pre-connect failure codes allow replay of a non-idempotent POST.
  *
  * Contract (review P1/P2, PR #34/#35):
  *   - `attemptDispatch` must dispatch a FRESH request each call — a reused
@@ -464,16 +466,24 @@ export const MAX_CONNECT_ATTEMPTS = 3;
  */
 export async function dispatchWithConnectRetry(
   attemptDispatch: () => Promise<Response>,
-  opts: { isAborted?: () => boolean; onRetry?: (attempt: number, err: Error) => void } = {},
+  opts: { isAborted?: () => boolean; onRetry?: (attempt: number, err: Error) => void; retryDelayMs?: number } = {},
 ): Promise<Response> {
   for (let attempt = 1; ; attempt++) {
     if (opts.isAborted?.()) throw new Error("client aborted before upstream connect");
     try {
       return await attemptDispatch();
     } catch (err) {
-      if ((err as { postWrite?: boolean }).postWrite) throw err;
-      if (attempt >= MAX_CONNECT_ATTEMPTS) throw err;
-      const backoffMs = 500 * attempt;
+      const chain: Array<{ code?: unknown; postWrite?: unknown; cause?: unknown }> = [];
+      let cause: unknown = err;
+      for (let depth = 0; depth < 5 && cause !== null && typeof cause === "object"; depth += 1) {
+        const detail = cause as { code?: unknown; postWrite?: unknown; cause?: unknown };
+        chain.push(detail);
+        cause = detail.cause;
+      }
+      const connectCodes = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
+      if (chain.some(e => e.postWrite) || !chain.some(e => typeof e.code === "string" && connectCodes.has(e.code))) throw err;
+      if (attempt >= MAX_CONNECT_ATTEMPTS || opts.isAborted?.()) throw err;
+      const backoffMs = (opts.retryDelayMs ?? 500) * attempt;
       opts.onRetry?.(attempt, err as Error);
       await new Promise((r) => setTimeout(r, backoffMs));
     }
@@ -562,8 +572,31 @@ async function sendUpstreamRequest(
  */
 export async function readBody(req: Request): Promise<string | undefined> {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
-  const bytes = new Uint8Array(await req.arrayBuffer());
-  if (bytes.byteLength === 0) return undefined;
+  const maxWireBytes = 32 * 1024 * 1024;
+  if (Number(req.headers.get('content-length')) > maxWireBytes) {
+    void req.body?.cancel().catch(() => {});
+    throw new InflatedBodyTooLargeError(maxWireBytes);
+  }
+  if (!req.body) return undefined;
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxWireBytes) {
+        void reader.cancel().catch(() => {});
+        throw new InflatedBodyTooLargeError(maxWireBytes);
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  if (size === 0) return undefined;
+  const bytes = new Uint8Array(size);
+  let position = 0;
+  for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength; }
   const encoding = req.headers.get("content-encoding")?.toLowerCase().trim() ?? "";
   if (encoding === "gzip" || encoding === "x-gzip") {
     return new TextDecoder().decode(await inflateGzipBody(bytes));
@@ -572,16 +605,14 @@ export async function readBody(req: Request): Promise<string | undefined> {
 }
 
 /**
- * Decompressed-size ceiling for gzip request bodies. Generous by design:
- * plain bodies on `/v1/*` routes are intentionally uncapped (long-context LLM
- * requests reach several MB), so this only rejects pathological amplification.
+ * Decompressed-size ceiling, separate from the 32 MiB wire-body limit.
  */
 const MAX_INFLATED_BODY_BYTES = 64 * 1024 * 1024;
 
 /** Thrown when a gzip request body expands past MAX_INFLATED_BODY_BYTES. */
 export class InflatedBodyTooLargeError extends Error {
   constructor(limit: number) {
-    super(`gzip request body exceeds ${limit} bytes after decompression`);
+    super(`request body exceeds ${limit} bytes`);
     this.name = "InflatedBodyTooLargeError";
   }
 }

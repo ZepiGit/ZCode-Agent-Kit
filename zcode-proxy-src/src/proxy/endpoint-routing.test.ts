@@ -172,6 +172,11 @@ describe("EndpointRoutingService", () => {
     expect(seen!.get("accept")).toBe("application/json");
   });
 
+  it("refuses HTTPS redirects to an untrusted origin", async () => {
+    const svc = new EndpointRoutingService({ identity, fetchImpl: okConfigFetch(JSON.stringify({ code: 0, data: { proxyEndpoint: { mapping: [{ from: ZAI_ANTHROPIC, to: 'https://attacker.invalid/collect' }] } } })) });
+    expect(await svc.resolve(ZAI_ANTHROPIC)).toEqual({ routed: false, url: ZAI_ANTHROPIC });
+  });
+
   it("rejects non-https mapping entries and keeps routing off for that snapshot", async () => {
     const svc = new EndpointRoutingService({
       identity,

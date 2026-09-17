@@ -22,7 +22,9 @@
 > 下文保留上游原版中文说明，描述**独立运行**时的行为；在 Kit 中使用时请以
 > [英文 README](README.md) 为准：Kit 中监听端口为 **8457**（非 8080）、需携带
 > `.proxykey` 的 Bearer 密钥、试用领取与错峰通道已禁用，`Android-APP/` 与
-> `node_modules/` 未随内嵌引入。
+> `node_modules/` 未随内嵌引入，Android 构建路径（`scripts/build-android-apk.sh`、
+> `build:android-*` npm 脚本、esbuild devDependency 及 vendored 版
+> `.github/workflows/release.yml` 中的 `build-android` 作业）也已一并移除。
 
 ## 它能帮你做什么
 

@@ -225,6 +225,38 @@ describe("anthropicSseToOpenaiSse", () => {
     expect(output).toContain("data: [DONE]");
   });
 
+  it("forwards Anthropic error events as OpenAI error payloads without appending [DONE]", async () => {
+    const sse = [
+      'event: message_start',
+      `data: ${JSON.stringify({ type: "message_start", message: { id: "msg_error", model: "glm-4.6" } })}`,
+      '',
+      'event: error',
+      `data: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "upstream overloaded" } })}`,
+      '',
+    ].join("\n");
+
+    const output = await collectStream(anthropicSseToOpenaiSse(makeStream(sse), "glm-4.6"));
+    expect(output).toContain('"error":{"type":"overloaded_error","message":"upstream overloaded"}');
+    expect(output).not.toContain("data: [DONE]");
+    expect(output).not.toContain('"finish_reason":"stop"');
+  });
+
+  it("does not append [DONE] when the Anthropic stream ends before message_stop", async () => {
+    const truncated = [
+      'event: message_start',
+      `data: ${JSON.stringify({ type: "message_start", message: { id: "msg_truncated", model: "glm-4.6" } })}`,
+      '',
+      'event: content_block_delta',
+      `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "partial" } })}`,
+      '',
+    ].join("\n");
+
+    const output = await collectStream(anthropicSseToOpenaiSse(makeStream(truncated), "glm-4.6"));
+    expect(output).toContain('"content":"partial"');
+    expect(output).not.toContain("data: [DONE]");
+    expect(output).not.toContain('"finish_reason":"stop"');
+  });
+
   it("emits usage on final chunk from input_tokens + output_tokens", async () => {
     const input = makeStream(ANTHROPIC_SSE);
     const output = await collectStream(anthropicSseToOpenaiSse(input, "glm-4.6"));
@@ -842,7 +874,7 @@ describe("openaiSseToAnthropicSse", () => {
     expect(textStopOrder).toBeLessThan(toolStartOrder);
   });
 
-  it("emits a well-formed message_stop when stream ends without [DONE]", async () => {
+  it("emits an error when stream ends without a finish reason or [DONE]", async () => {
     const sse = [
       'data: {"id":"c1","object":"chat.completion.chunk","created":1,"model":"glm-4.6","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}',
       '',
@@ -850,8 +882,9 @@ describe("openaiSseToAnthropicSse", () => {
 
     const output = await collectStream(openaiSseToAnthropicSse(makeStream(sse), "glm-4.6"));
     const events = parseAnthropicEvents(output);
-    expect(events.some((e) => e.event === "message_delta")).toBe(true);
-    expect(events.some((e) => e.event === "message_stop")).toBe(true);
+    expect(events.some((e) => e.event === "error")).toBe(true);
+    expect(events.some((e) => e.event === "message_delta")).toBe(false);
+    expect(events.some((e) => e.event === "message_stop")).toBe(false);
   });
 
   it("reports real input_tokens via message_delta when usage only arrives in the final chunk", async () => {

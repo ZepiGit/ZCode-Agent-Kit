@@ -11,12 +11,15 @@
  * typed IPC façade on RuntimeManager (local stdio IPC).
  */
 import { randomUUID } from "node:crypto";
+import { WorkspaceAllowlist } from "../security/allowlist.js";
+import { sessionInScope, workspaceIdentity } from "../security/session.js";
 import { safeJsonStringify } from "../security/redact.js";
 import { createLogger } from "../util/log.js";
 import { TaskIngress } from "./ingress.js";
 import { TaskRelay } from "./relay.js";
 const log = createLogger("tasks");
-export const TERMINAL_STATES = ["completed", "failed", "cancelled", "interrupted"];
+export const TERMINAL_STATES = ["completed", "failed", "cancelled", "interrupted", "unknown"];
+const READ_ONLY_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "BashOutput", "KillShell"];
 export class TaskError extends Error {
     code;
     constructor(code, message) {
@@ -30,17 +33,19 @@ export class TaskManager {
     interactions;
     store;
     config;
+    allowlist;
     ingress;
     relay;
     tasks = new Map();
     byIdempotency = new Map();
     bySession = new Map();
-    startQueue = [];
+    startQueue = new Map();
     constructor(runtime, interactions, store, config) {
         this.runtime = runtime;
         this.interactions = interactions;
         this.store = store;
         this.config = config;
+        this.allowlist = new WorkspaceAllowlist([...config.allowWorkspaces, store.ensureDir("workspaces")]);
         this.ingress = new TaskIngress(runtime, store);
         this.relay = new TaskRelay(interactions, this.ingress, config.interactionTimeoutSec);
     }
@@ -61,7 +66,7 @@ export class TaskManager {
             if (!/^task-[A-Za-z0-9-]+\.json$/.test(f))
                 continue;
             const rec = this.store.readJson(`tasks/${f}`);
-            if (!rec || rec.schemaVersion !== 1)
+            if (!rec || rec.schemaVersion !== 1 || !this.allowlist.isAllowed(rec.workspacePath))
                 continue;
             if (!TERMINAL_STATES.includes(rec.state)) {
                 rec.state = "interrupted";
@@ -85,6 +90,10 @@ export class TaskManager {
         const t = {
             record: rec,
             quietPolls: 0,
+            turnRevision: 0,
+            acceptingEvents: false,
+            inputPending: false,
+            pendingSend: null,
             accumulatedText: "",
             toolCalls: new Map(),
             artifacts: new Map(),
@@ -93,9 +102,7 @@ export class TaskManager {
             errors: rec.error ? [rec.error] : [],
             persist: () => this.store.writeJson(`tasks/${rec.taskId}.json`, rec),
             onTerminal: () => {
-                const next = this.startQueue.shift();
-                if (next)
-                    next();
+                this.drainQueue();
                 // Persist the structured result eagerly so it survives restarts.
                 void this.buildResult(rec.taskId).catch(() => {
                     /* best effort; buildResult can be retried via zcode_task_result */
@@ -147,16 +154,34 @@ export class TaskManager {
      * Start a task. Idempotent on idempotencyKey. When the concurrency limit is
      * reached the task is created as `queued` and promoted by the scheduler.
      */
+    async verifySessionWorkspace(sessionId, workspacePath) {
+        const actual = await sessionInScope(this.runtime, this.allowlist, sessionId);
+        const requested = this.allowlist.enforce(workspacePath);
+        if (workspaceIdentity(actual.workspacePath) !== workspaceIdentity(requested))
+            throw new TaskError("WORKSPACE_MISMATCH", "session belongs to a different workspace");
+    }
     async startTask(params) {
+        this.allowlist.enforce(params.workspacePath);
+        if (params.mode === "yolo" && !this.config.allowYolo)
+            throw new TaskError("MODE_NOT_PERMITTED", "yolo requires operator --allow-yolo");
+        if (params.sessionId)
+            await this.verifySessionWorkspace(params.sessionId, params.workspacePath);
         if (params.idempotencyKey) {
             const existing = this.byIdempotency.get(params.idempotencyKey);
             if (existing) {
                 const rec = this.get(existing);
-                if (rec)
+                if (rec) {
+                    this.allowlist.enforce(rec.workspacePath);
+                    if (workspaceIdentity(rec.workspacePath) !== workspaceIdentity(params.workspacePath))
+                        throw new TaskError("IDEMPOTENCY_CONFLICT", "idempotency key belongs to a different workspace");
                     return rec;
+                }
             }
         }
-        const activeCount = this.list().filter((t) => !TERMINAL_STATES.includes(t.state)).length;
+        if (params.sessionId && this.list().some(t => t.sessionId === params.sessionId && (!TERMINAL_STATES.includes(t.state) || t.state === "unknown"))) {
+            throw new TaskError("SESSION_BUSY", "session already has an active task");
+        }
+        const activeCount = this.list().filter((t) => !TERMINAL_STATES.includes(t.state) || t.state === "unknown").length;
         if (activeCount >= this.config.taskQueueLimit) {
             throw new TaskError("QUEUE_LIMIT", `task queue limit reached (${this.config.taskQueueLimit})`);
         }
@@ -165,7 +190,7 @@ export class TaskManager {
         // isolated workspaces, mark tasks readOnly, or wait for the running one).
         const requestedReadOnly = params.readOnly ?? this.config.readOnly;
         if (!requestedReadOnly) {
-            const conflicting = this.list().find((t) => t.workspacePath === params.workspacePath && !TERMINAL_STATES.includes(t.state) && !t.readOnly);
+            const conflicting = this.list().find((t) => workspaceIdentity(t.workspacePath) === workspaceIdentity(params.workspacePath) && (!TERMINAL_STATES.includes(t.state) || t.state === "unknown") && !t.readOnly);
             if (conflicting) {
                 throw new TaskError("WORKSPACE_BUSY", `WORKSPACE_BUSY: workspace already has a running write task (${conflicting.taskId}, state=${conflicting.state}); use isolated workspaces, readOnly:true, or cancel the running task first`);
             }
@@ -204,32 +229,42 @@ export class TaskManager {
         this.scheduleStart(t, params);
         return rec;
     }
+    activeCount() {
+        return this.list().filter((r) => r.state !== "queued" && (!TERMINAL_STATES.includes(r.state) || r.state === "unknown")).length;
+    }
     scheduleStart(t, params) {
-        const isActive = (r) => ["starting", "running", "waiting_for_input", "waiting_for_approval", "cancelling"].includes(r.state);
-        const active = this.list().filter(isActive).length;
-        if (active >= this.config.maxConcurrentTasks) {
-            log.info("task queued (concurrency limit)", { taskId: t.record.taskId, active });
-            const tryStart = () => {
-                if (this.list().filter(isActive).length < this.config.maxConcurrentTasks) {
-                    void this.startNow(t, params);
-                }
-                else {
-                    this.startQueue.push(tryStart);
-                }
-            };
-            this.startQueue.push(tryStart);
-            return;
+        this.startQueue.set(t.record.taskId, params);
+        this.drainQueue();
+    }
+    drainQueue() {
+        for (const [taskId, params] of this.startQueue) {
+            const t = this.tasks.get(taskId);
+            if (!t || t.record.state !== "queued") {
+                this.startQueue.delete(taskId);
+                continue;
+            }
+            if (this.activeCount() >= this.config.maxConcurrentTasks)
+                break;
+            this.startQueue.delete(taskId);
+            void this.startNow(t, params);
         }
-        void this.startNow(t, params);
     }
     async startNow(t, params) {
         const rec = t.record;
+        if (rec.state !== "queued")
+            return;
+        const stillStarting = () => this.get(rec.taskId)?.state === "starting";
         try {
             rec.state = "starting";
             t.persist();
             await this.runtime.start();
+            if (!stillStarting())
+                return;
             let sessionId = "";
             if (params.sessionId) {
+                await this.verifySessionWorkspace(params.sessionId, rec.workspacePath);
+                if (!stillStarting())
+                    return;
                 sessionId = params.sessionId;
             }
             else {
@@ -240,6 +275,11 @@ export class TaskManager {
                     throw new TaskError("CREATE_FAILED", `session/create returned no usable sessionId: ${safeJsonStringify(createResult).slice(0, 300)}`);
                 }
                 sessionId = id;
+            }
+            if (!stillStarting()) {
+                if (!params.sessionId)
+                    void this.runtime.call("session/close", { sessionId }).catch(() => { });
+                return;
             }
             rec.sessionId = sessionId;
             this.bySession.set(sessionId, rec.taskId);
@@ -261,14 +301,11 @@ export class TaskManager {
                     t.warnings.push(`setThoughtLevel failed: ${err instanceof Error ? err.message : String(err)}`);
                 }
             }
-            if (rec.readOnly) {
-                try {
-                    await this.runtime.ipcSessionSetMode(sessionId, "plan");
-                }
-                catch (err) {
-                    t.warnings.push(`plan mode (read-only) could not be set: ${err instanceof Error ? err.message : String(err)}`);
-                }
-            }
+            const mode = rec.readOnly ? "plan" : rec.mode ?? (this.config.allowYolo ? null : "build");
+            if (mode)
+                await this.runtime.ipcSessionSetMode(sessionId, mode);
+            if (!stillStarting())
+                return;
             // Read back the effective model (verification, not assumption).
             try {
                 const readBack = await this.runtime.ipcSessionRead(sessionId);
@@ -282,23 +319,29 @@ export class TaskManager {
             catch (err) {
                 t.warnings.push(`session read after start failed: ${err instanceof Error ? err.message : String(err)}`);
             }
-            try {
-                await this.runtime.ipcSessionSubscribe(sessionId);
-            }
-            catch (err) {
-                t.warnings.push(`subscribe failed: ${err instanceof Error ? err.message : String(err)}`);
-            }
-            const denylist = rec.readOnly
-                ? { toolDenylist: ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "BashOutput", "KillShell"] }
-                : {};
-            const sendResult = await this.runtime.ipcSessionSend(sessionId, params.prompt, denylist);
+            const subscription = await this.runtime.ipcSessionSubscribe(sessionId);
+            if (typeof subscription.eventSeq === 'number')
+                rec.lastSeq = Math.max(rec.lastSeq, subscription.eventSeq);
+            if (!stillStarting())
+                return;
+            const denylist = rec.readOnly ? { toolDenylist: READ_ONLY_TOOLS } : {};
+            t.turnRevision += 1;
+            t.acceptingEvents = true;
+            t.pendingSend = this.runtime.ipcSessionSend(sessionId, params.prompt, denylist);
+            const sendResult = await t.pendingSend.finally(() => { t.pendingSend = null; });
             if (sendResult?.accepted !== true) {
                 throw new TaskError("SEND_REJECTED", `prompt not accepted: ${safeJsonStringify(sendResult).slice(0, 300)}`);
             }
-            rec.state = "running";
-            t.persist();
+            if (stillStarting()) {
+                rec.state = "running";
+                t.persist();
+            }
         }
         catch (err) {
+            if (!stillStarting())
+                return;
+            if (rec.sessionOwnedByTask && rec.sessionId && this.runtime.running)
+                void this.runtime.call('session/close', { sessionId: rec.sessionId }).catch(() => { });
             rec.state = "failed";
             rec.error = err instanceof Error ? err.message : String(err);
             rec.finishedAt = new Date().toISOString();
@@ -315,20 +358,80 @@ export class TaskManager {
         const rec = t.record;
         if (!rec.sessionId)
             throw new TaskError("NO_SESSION", "task has no session yet");
-        if (rec.state === "cancelling")
-            throw new TaskError("CANCELLING", "task is being cancelled");
-        const sendResult = await this.runtime.ipcSessionSend(rec.sessionId, content);
-        if (sendResult?.accepted !== true) {
-            throw new TaskError("SEND_REJECTED", `prompt not accepted: ${safeJsonStringify(sendResult).slice(0, 300)}`);
+        if (t.inputPending || ["queued", "starting", "cancelling", "unknown"].includes(rec.state)) {
+            throw new TaskError("TASK_BUSY", "task cannot accept input in its current state");
         }
-        rec.followUpCount += 1;
-        if (TERMINAL_STATES.includes(rec.state)) {
-            rec.state = "running";
+        if (rec.mode === "yolo" && !this.config.allowYolo)
+            throw new TaskError("MODE_NOT_PERMITTED", "yolo requires operator --allow-yolo");
+        const restarting = TERMINAL_STATES.includes(rec.state);
+        if (restarting && this.activeCount() >= this.config.maxConcurrentTasks)
+            throw new TaskError("CONCURRENCY_LIMIT", "all task slots are in use");
+        if (restarting && !rec.readOnly && this.list().some(other => other.taskId !== taskId && workspaceIdentity(other.workspacePath) === workspaceIdentity(rec.workspacePath) && !other.readOnly && (!TERMINAL_STATES.includes(other.state) || other.state === "unknown"))) {
+            throw new TaskError("WORKSPACE_BUSY", "another write task is active in this workspace");
+        }
+        if (this.bySession.get(rec.sessionId) !== taskId)
+            throw new TaskError("SESSION_BUSY", "session is owned by a newer task");
+        const previousState = rec.state;
+        t.inputPending = true;
+        if (restarting)
+            rec.state = "starting";
+        const revision = ++t.turnRevision;
+        const canSend = () => t.turnRevision === revision && !["cancelling", "cancelled", "interrupted", "unknown"].includes(rec.state);
+        let dispatched = false;
+        try {
+            await this.verifySessionWorkspace(rec.sessionId, rec.workspacePath);
+            if (!canSend())
+                throw new TaskError("INTERRUPTED", "task interrupted before input was sent");
+            const mode = rec.readOnly ? "plan" : rec.mode ?? (this.config.allowYolo ? null : "build");
+            if (mode)
+                await this.runtime.ipcSessionSetMode(rec.sessionId, mode);
+            const subscription = await this.runtime.ipcSessionSubscribe(rec.sessionId);
+            if (typeof subscription.eventSeq === "number")
+                rec.lastSeq = Math.max(rec.lastSeq, subscription.eventSeq);
+            if (!canSend())
+                throw new TaskError("INTERRUPTED", "task interrupted before input was sent");
+            t.accumulatedText = "";
+            t.errors = [];
+            t.warnings = [];
+            t.toolCalls.clear();
+            t.artifacts.clear();
+            rec.fileChanges = { added: [], modified: [], deleted: [], source: "none", preExistingUncommitted: [] };
+            rec.usage = null;
             rec.finishedAt = null;
             rec.error = null;
+            rec.interruptionReason = null;
+            rec.state = "starting";
+            t.persist();
+            dispatched = true;
+            t.acceptingEvents = true;
+            t.pendingSend = this.runtime.ipcSessionSend(rec.sessionId, content, rec.readOnly ? { toolDenylist: READ_ONLY_TOOLS } : {});
+            const sendResult = await t.pendingSend.finally(() => { t.pendingSend = null; });
+            if (sendResult?.accepted !== true)
+                throw new TaskError("SEND_REJECTED", "follow-up prompt was not accepted");
+            if (canSend()) {
+                this.store.deleteFile(`tasks/${taskId}.result.json`);
+                rec.followUpCount += 1;
+                if (rec.state === "starting")
+                    rec.state = "running";
+                t.persist();
+            }
+            return rec;
         }
-        t.persist();
-        return rec;
+        catch (err) {
+            if (canSend()) {
+                rec.state = dispatched ? "unknown" : previousState;
+                if (dispatched) {
+                    rec.interruptionReason = "input acknowledgement failed; execution cannot be confirmed";
+                    rec.finishedAt = new Date().toISOString();
+                }
+                t.persist();
+                this.drainQueue();
+            }
+            throw err;
+        }
+        finally {
+            t.inputPending = false;
+        }
     }
     /** Cancel a task. The wish only counts as cancelled after verification. */
     async cancel(taskId) {
@@ -336,11 +439,28 @@ export class TaskManager {
         if (!t)
             throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
         const rec = t.record;
-        if (TERMINAL_STATES.includes(rec.state))
+        if (TERMINAL_STATES.includes(rec.state) && rec.state !== "unknown")
             return rec;
+        if (rec.state === "queued" || (rec.state === "starting" && !t.pendingSend)) {
+            this.startQueue.delete(taskId);
+            t.turnRevision += 1;
+            if (rec.sessionOwnedByTask && rec.sessionId)
+                void this.runtime.call("session/close", { sessionId: rec.sessionId }).catch(() => { });
+            rec.state = "cancelled";
+            rec.finishedAt = new Date().toISOString();
+            t.persist();
+            t.onTerminal();
+            return rec;
+        }
         rec.state = "cancelling";
+        t.turnRevision += 1;
         t.persist();
         try {
+            if (t.pendingSend)
+                await t.pendingSend.catch(() => { });
+            if (rec.state !== "cancelling")
+                return rec;
+            await this.verifySessionWorkspace(rec.sessionId, rec.workspacePath);
             await this.runtime.ipcSessionStop(rec.sessionId);
         }
         catch (err) {
@@ -348,7 +468,10 @@ export class TaskManager {
         }
         let stopped = false;
         for (let i = 0; i < 10 && !stopped; i += 1) {
-            await new Promise((r) => setTimeout(r, 500));
+            if (i > 0)
+                await new Promise((r) => setTimeout(r, 500));
+            if (rec.state !== "cancelling")
+                return rec;
             try {
                 const readBack = await this.runtime.ipcSessionRead(rec.sessionId);
                 const projection = (readBack?.projection ?? {});
@@ -361,6 +484,8 @@ export class TaskManager {
                 /* harness may be restarting; keep polling */
             }
         }
+        if (rec.state !== "cancelling")
+            return rec;
         rec.state = stopped ? "cancelled" : "unknown";
         rec.interruptionReason = stopped ? null : "cancel could not be verified against the harness";
         rec.finishedAt = new Date().toISOString();
@@ -377,20 +502,24 @@ export class TaskManager {
         const rec = t.record;
         // Terminal results are persisted once and served from the store so they
         // survive bridge restarts (harness transcripts may be gone by then).
+        const revision = t.turnRevision;
+        const state = rec.state;
         const cached = this.store.readJson(`tasks/${taskId}.result.json`);
-        if (cached && cached.schemaVersion === 1 && TERMINAL_STATES.includes(rec.state)) {
+        if (cached && cached.schemaVersion === 1 && cached.status === state && cached.finishedAt === rec.finishedAt && TERMINAL_STATES.includes(state)) {
             return cached;
         }
-        if (rec.usage === null && TERMINAL_STATES.includes(rec.state)) {
+        if (rec.sessionId && rec.usage === null && this.runtime.running && TERMINAL_STATES.includes(rec.state)) {
             await this.captureUsage(t);
         }
         let responseText = t.accumulatedText;
-        let completeness = { status: "full", explanation: "turn stream captured via session events" };
-        if (!responseText && rec.sessionId) {
+        let completeness = responseText && state === "completed"
+            ? { status: "full", explanation: "turn stream captured via session events" }
+            : { status: "unknown", explanation: "no completed assistant response has been captured" };
+        if (!responseText && rec.sessionId && rec.startedAt && this.runtime.running) {
             try {
                 // Local IPC read of the stored assistant turn for this session.
                 const transcript = await this.runtime.ipcSessionTranscript(rec.sessionId);
-                const entries = Array.isArray(transcript?.entries) ? transcript.entries : [];
+                const entries = Array.isArray(transcript?.messages) ? transcript.messages : [];
                 for (let i = entries.length - 1; i >= 0; i -= 1) {
                     const entry = entries[i];
                     const info = (entry.info ?? {});
@@ -398,7 +527,8 @@ export class TaskManager {
                         const parts = (entry.parts ?? entry.content ?? []);
                         const texts = parts.filter((pt) => String(pt.type ?? "") === "text").map((pt) => String(pt.text ?? ""));
                         responseText = texts.join("\n");
-                        completeness = { status: "full", explanation: "response recovered from stored transcript" };
+                        if (responseText && state === "completed")
+                            completeness = { status: "full", explanation: "response recovered from stored transcript" };
                         break;
                     }
                 }
@@ -406,6 +536,11 @@ export class TaskManager {
             catch (err) {
                 completeness = { status: "unknown", explanation: `transcript read failed: ${err instanceof Error ? err.message : String(err)}` };
             }
+        }
+        if (revision !== t.turnRevision || state !== rec.state)
+            throw new TaskError("TASK_CHANGED", "task changed while its result was being read; request the result again");
+        if (t.warnings.some((warning) => warning.startsWith("event gap detected:"))) {
+            completeness = { status: "partial", explanation: "session events were lost; captured output may be incomplete" };
         }
         if (["failed", "cancelled", "interrupted", "unknown"].includes(rec.state)) {
             completeness = { status: "partial", explanation: `task ended in state ${rec.state}` };
@@ -469,11 +604,13 @@ export class TaskManager {
             t.warnings.push(`usage read failed: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
-    stopAll() {
+    stopAll(reason = "bridge shutting down") {
+        this.startQueue.clear();
         for (const t of this.tasks.values()) {
-            if (!TERMINAL_STATES.includes(t.record.state)) {
+            if (!TERMINAL_STATES.includes(t.record.state) || t.record.state === "unknown") {
+                t.turnRevision += 1;
                 t.record.state = "interrupted";
-                t.record.interruptionReason = "bridge shutting down";
+                t.record.interruptionReason = reason;
                 t.record.finishedAt = t.record.finishedAt ?? new Date().toISOString();
                 t.persist();
             }

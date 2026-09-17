@@ -12,7 +12,6 @@
 import { spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { listTransactions } from "./lib/transaction.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -25,7 +24,9 @@ if (mode === "--postinstall-hint") {
   const res = spawnSync(process.execPath, [kit, "rollback", ...(argv[1] ? [argv[1]] : [])], { stdio: "inherit" });
   process.exit(res.status ?? 1);
 } else if (mode === "--list-transactions") {
-  const ids = listTransactions(join(ROOT, "backups"));
+  const { listTransactions } = await import('./lib/transaction.mjs');
+  const { createCtx } = await import('./cli/context.mjs');
+  const ids = listTransactions(createCtx(ROOT).backupDir);
   console.log(ids.length ? ids.join("\n") : "no transactions recorded");
 } else {
   const only = argv.find((a) => a.startsWith("--only="));

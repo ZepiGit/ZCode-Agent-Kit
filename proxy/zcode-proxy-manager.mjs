@@ -24,17 +24,23 @@ import { existsSync, readFileSync, statSync, renameSync, writeFileSync, unlinkSy
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnoseQuota, quotaAuthValid } from "../cli/quota-diagnostics.mjs";
+import { createCtx } from "../cli/context.mjs";
+import { resolveBun } from "../lib/process.mjs";
+import { proxyEnv } from "../lib/proxy-env.mjs";
 
 // ------------------------------------------------------------------ factory
-export function createManager({ root, home, processStartMsImpl } = {}) {
+export function createManager({ root, home, processStartMsImpl, bunResolver } = {}) {
   const ROOT = root ?? resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const HOME = (home ?? process.env.USERPROFILE ?? process.env.HOME ?? "").replace(/\\/g, "/");
+  const ctx = createCtx(ROOT, HOME || undefined);
   const OMP_AGENT = HOME ? HOME + "/.omp/agent" : null;
   const PROXY_SRC = join(ROOT, "zcode-proxy-src");
   const MCP_DIR = join(ROOT, "mcp", "zcode-harness-mcp");
-  const CONFIG = join(ROOT, "proxy", "config.yaml");
-  const KEY_FILE = join(ROOT, ".proxykey");
-  const LOG_DIR = join(ROOT, "logs");
+  const CONFIG = ctx.config;
+  const KEY_FILE = ctx.keyFile;
+  const LOG_DIR = ctx.logDir;
+  const GENERATED = ctx.generated;
+  const findBun = bunResolver ?? (() => resolveBun(ROOT));
   const LOG_FILE = join(LOG_DIR, "proxy.log");
   const PID_FILE = join(LOG_DIR, "proxy.pid");
   const LOCK_FILE = join(LOG_DIR, "manager.lock");
@@ -131,9 +137,18 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
   }
 
   function writePidFile(pid, startedMs) {
-    mkdirSync(LOG_DIR, { recursive: true });
-    const startedIso = new Date(startedMs ?? Date.now()).toISOString();
-    writeFileSync(PID_FILE, JSON.stringify({ pid, startedMs: startedMs ?? null, startedIso }) + "\n");
+    if (!Number.isInteger(pid) || pid <= 0) return;
+    mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
+    const startedIso = Number.isFinite(startedMs) ? new Date(startedMs).toISOString() : null;
+    writeFileSync(PID_FILE, JSON.stringify({ pid, startedMs: startedMs ?? null, startedIso }) + "\n", { mode: 0o600 });
+  }
+
+  /** Delete the PID file only while it still records the given pid. */
+  function removePidRecordFor(pid) {
+    const current = readPidFile();
+    if (current && current.pid === pid) {
+      try { unlinkSync(PID_FILE); } catch {}
+    }
   }
 
   function pidAlive(pid) {
@@ -151,19 +166,20 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
   // are locale-independent); POSIX reads /proc. null = not determinable here,
   // and the caller MUST treat that as fail-closed (never kill).
   let bootTimeMs = null;
-  function processStartMs(pid) {
+  function processStartMs(pid, { timeoutMs = 15000 } = {}) {
     if (!Number.isInteger(pid) || pid <= 0) return null;
     if (process.platform === "win32") {
       // Two attempts: PowerShell cold start on busy CI runners can exceed a
-      // single short timeout.
+      // single short timeout. Argument passing avoids shell interpolation.
       for (let attempt = 0; attempt < 2; attempt += 1) {
         try {
-          const out = execSync(
-            `powershell -NoProfile -Command "(Get-Process -Id ${pid}).StartTime.ToUniversalTime().Ticks"`,
-            { stdio: ["ignore", "pipe", "pipe"], timeout: 15000 },
-          ).toString().trim();
-          const ticks = Number(out);
-          if (Number.isFinite(ticks) && ticks > 0) return ticks / 10000 - 62135596800000;
+          const r = spawnSync(
+            "powershell",
+            ["-NoProfile", "-NonInteractive", "-Command", `(Get-Process -Id ${Number(pid)}).StartTime.ToUniversalTime().Ticks`],
+            { stdio: ["ignore", "pipe", "pipe"], timeout: timeoutMs, encoding: "utf8", windowsHide: true },
+          );
+          const ticks = Number((r.stdout ?? "").trim());
+          if (r.status === 0 && Number.isFinite(ticks) && ticks > 0) return ticks / 10000 - 62135596800000;
         } catch {}
       }
       return null;
@@ -211,9 +227,9 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
     if (liveStart === null) return "start-unknown"; // platform limitation
     const recorded = pidInfo.startedMs ?? parseIsoMs(pidInfo.startedIso);
     if (recorded === null) {
-      // Legacy pid file without a usable timestamp: the health identity check
-      // plus an existing pid is the best available evidence here.
-      return "match";
+      // Legacy pid file without a usable timestamp: PID reuse cannot be ruled
+      // out, so ownership stays unproven (fail-closed).
+      return "start-unknown";
     }
     return Math.abs(liveStart - recorded) <= 10_000 ? "match" : "reuse-suspect";
   }
@@ -250,8 +266,8 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
   }
 
   function openLogStream() {
-    mkdirSync(LOG_DIR, { recursive: true });
-    const fd = openSync(LOG_FILE, "a");
+    mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
+    const fd = openSync(LOG_FILE, "a", 0o600);
     return { fd, close: () => { try { closeSync(fd); } catch {} } };
   }
 
@@ -263,10 +279,10 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
   // file only when the on-disk nonce still matches our own acquisition.
   let startLockNonce = null;
   function acquireStartLock() {
-    mkdirSync(LOG_DIR, { recursive: true });
+    mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
     const nonce = randomBytes(8).toString("hex");
     try {
-      writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce }), { flag: "wx" });
+      writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce }), { flag: "wx", mode: 0o600 });
       startLockNonce = nonce;
       return;
     } catch (err) {
@@ -274,7 +290,9 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
       let holder = null;
       try { holder = JSON.parse(readFileSync(LOCK_FILE, "utf8")); } catch {}
       if (holder && typeof holder.pid === "number" && pidAlive(holder.pid)) {
-        throw new Error(`another manager start is in progress (pid ${holder.pid}, started ${holder.startedAt}). If that is wrong (e.g. pid reuse), remove ${LOCK_FILE}`);
+        const contention = new Error(`another manager start is in progress (pid ${holder.pid}, started ${holder.startedAt}). If that is wrong (e.g. pid reuse), remove ${LOCK_FILE}`);
+        contention.code = "START_IN_PROGRESS";
+        throw contention;
       }
       throw new Error(
         `stale or unreadable manager start lock at ${LOCK_FILE}` +
@@ -298,15 +316,8 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
   }
 
   // ------------------------------------------------------------------ start
-  async function start({ waitMs = 25000 } = {}) {
-    rotateLogIfNeeded();
-    let state;
-    try {
-      state = await healthIdentify();
-    } catch (err) {
-      logLine(`ERROR: ${err.message}`);
-      return 4;
-    }
+  // Maps an identity state to the start() outcome, or null when a start may proceed.
+  function preStartVerdict(state) {
     if (state === "ours") {
       const pidInfo = readPidFile();
       logLine("already running" + (pidInfo ? ` (pid ${pidInfo.pid})` : ""));
@@ -320,45 +331,106 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
       logLine(`ERROR: ${KEY_FILE} missing — cannot verify identity. Run setup first (node setup.mjs).`);
       return 5;
     }
-    acquireStartLock();
+    return null;
+  }
+
+  async function start({ waitMs = 25000 } = {}) {
+    rotateLogIfNeeded();
+    let state;
     try {
-      const stale = readPidFile();
-      if (stale && !pidAlive(stale.pid)) {
+      state = await healthIdentify();
+    } catch (err) {
+      logLine(`ERROR: ${err.message}`);
+      return 4;
+    }
+    const early = preStartVerdict(state);
+    if (early !== null) return early;
+    try {
+      acquireStartLock();
+    } catch (err) {
+      if (err.code !== "START_IN_PROGRESS") throw err;
+      // Another start holds the lock: wait (bounded) for its proxy instead of
+      // failing immediately. The lock is never taken over.
+      logLine("another start is in progress — waiting for it to finish");
+      const t0 = Date.now();
+      while (Date.now() - t0 < waitMs) {
+        await sleep(600);
+        const s = await healthIdentify(1500);
+        if (s === "ours") {
+          logLine("already running (started by a concurrent manager)");
+          return 0;
+        }
+        if (s === "foreign") return preStartVerdict(s);
+        if (!existsSync(LOCK_FILE)) break;
+      }
+      if (await healthIdentify(1500) === "ours") return 0;
+      logLine(`ERROR: concurrent start did not produce a healthy proxy within ${waitMs}ms. Run doctor; nothing was taken over.`);
+      return 4;
+    }
+    try {
+      // Re-verify under the lock: the state may have changed while acquiring it.
+      const locked = preStartVerdict(await healthIdentify());
+      if (locked !== null) return locked;
+      const recorded = readPidFile();
+      if (recorded && pidAlive(recorded.pid)) {
+        // A live process is recorded but does not answer as ours: it may be a
+        // starting/hung proxy or a reused pid. Never overwrite that record.
+        logLine(`ERROR: pid ${recorded.pid} from ${PID_FILE} is alive but the proxy is not answering on port ${loadPort()}. Refusing to start a second instance; inspect the process (or stop it) and retry.`);
+        return 4;
+      }
+      if (recorded) {
         try { unlinkSync(PID_FILE); } catch {}
       }
       if (!existsSync(join(PROXY_SRC, "node_modules"))) {
         logLine("ERROR: proxy dependencies missing. Run: cd zcode-proxy-src && bun install --frozen-lockfile");
         return 4;
       }
+      let bun;
+      try {
+        bun = findBun();
+      } catch (err) {
+        logLine(`ERROR: cannot start the proxy — ${err.message}`);
+        return 4;
+      }
       logLine("starting zcode-proxy ...");
       const out = openLogStream();
       let spawnError = null;
-      const child = spawn("bun", ["run", "src/index.ts", "serve"], {
-        cwd: PROXY_SRC,
-        env: { ...process.env, ZCODE_PROXY_CONFIG: CONFIG, ZCODE_LOG_FORMAT: "compact" },
-        detached: true,
-        stdio: ["ignore", out.fd, out.fd],
-      });
+      let child;
+      try {
+        child = spawn(bun, ["run", "src/index.ts", "serve"], {
+          cwd: PROXY_SRC,
+          env: { ...proxyEnv(ctx), ZCODE_LOG_FORMAT: "compact" },
+          detached: true,
+          stdio: ["ignore", out.fd, out.fd],
+        });
+      } catch (err) {
+        out.close();
+        logLine(`ERROR: failed to spawn bun (${err.message}).`);
+        return 4;
+      }
       child.on("error", (err) => { spawnError = err; });
       child.unref();
-      // Record start time as soon as it is queryable (may lag one loop tick).
-      let recordedStart = processStartMs(child.pid);
-      for (let i = 0; i < 10 && recordedStart === null; i++) {
+      // Record the pid immediately so a crash of this manager never leaves an
+      // unrecorded proxy; the start time is added as soon as it is queryable.
+      writePidFile(child.pid, null);
+      const probeDeadline = Date.now() + 5000;
+      let recordedStart = processStartMs(child.pid, { timeoutMs: 2500 });
+      while (recordedStart === null && Date.now() < probeDeadline && child.pid) {
         await sleep(300);
-        recordedStart = processStartMs(child.pid);
+        recordedStart = processStartMs(child.pid, { timeoutMs: 2500 });
       }
-      writePidFile(child.pid, recordedStart);
+      if (recordedStart !== null) writePidFile(child.pid, recordedStart);
       const t0 = Date.now();
       while (Date.now() - t0 < waitMs) {
         if (spawnError) {
           logLine(`ERROR: failed to spawn bun (${spawnError.message}). Is bun on PATH?`);
-          try { unlinkSync(PID_FILE); } catch {}
+          removePidRecordFor(child.pid);
           out.close();
           return 4;
         }
         if (child.exitCode !== null || child.signalCode !== null) {
           logLine(`ERROR: proxy exited immediately (code ${child.exitCode}). See ${LOG_FILE}`);
-          try { unlinkSync(PID_FILE); } catch {}
+          removePidRecordFor(child.pid);
           out.close();
           return 2;
         }
@@ -374,14 +446,14 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
           // own, so killing it is safe.
           logLine(`ERROR: port ${loadPort()} taken by a foreign service during startup (our pid ${child.pid}).`);
           await killOwned(child.pid);
-          try { unlinkSync(PID_FILE); } catch {}
+          removePidRecordFor(child.pid);
           out.close();
           return 3;
         }
       }
       logLine(`ERROR: proxy did not become healthy within ${waitMs}ms (pid ${child.pid}). See ${LOG_FILE}`);
       await killOwned(child.pid); // our own child — safe to kill on failure
-      try { unlinkSync(PID_FILE); } catch {}
+      removePidRecordFor(child.pid);
       out.close();
       return 2;
     } finally {
@@ -399,7 +471,13 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
       return 3;
     }
     if (state === "down") {
-      if (pidInfo && !pidAlive(pidInfo.pid)) {
+      if (pidInfo && pidAlive(pidInfo.pid)) {
+        // A live recorded process that does not answer cannot be verified as
+        // ours; report it instead of pretending nothing runs.
+        logLine(`ERROR: pid ${pidInfo.pid} from ${PID_FILE} is alive but nothing answers on port ${portStr} — cannot verify it is our proxy, refusing to kill. Inspect the process manually.`);
+        return 4;
+      }
+      if (pidInfo) {
         try { unlinkSync(PID_FILE); } catch {}
       }
       logLine("not running");
@@ -498,17 +576,60 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
     }
   }
 
+  /** Proves Bun can actually be started (a PATH hit alone is not startable). */
+  function bunStartable() {
+    let bun;
+    try {
+      bun = findBun();
+    } catch (err) {
+      return { ok: false, detail: err.message };
+    }
+    const r = spawnSync(bun, ["--version"], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: 10000, windowsHide: true });
+    if (r.error || r.status !== 0) return { ok: false, detail: `${bun} cannot be started (${r.error?.message ?? `exit ${r.status}`})` };
+    return { ok: true, detail: `${bun} (${(r.stdout ?? "").trim()})` };
+  }
+
+  /**
+   * Proves the credential store is decryptable by THIS runtime, offline: the
+   * proxy's own store module is loaded in a child that prints only a boolean.
+   */
+  function credentialStoreState(credentials) {
+    if (!existsSync(credentials)) return { ok: false, detail: "no credential store — run: zcode-kit auth login" };
+    let bun;
+    try {
+      bun = findBun();
+    } catch {
+      return { ok: null, detail: "store present; decryptability not checked (Bun unavailable)" };
+    }
+    const probe = 'import { loadCredential } from "./src/auth/store.ts"; const c = await loadCredential({ migrate: false }); console.log(c && typeof c.apiKey === "string" && c.apiKey.length > 0 ? "DECRYPTABLE" : "UNREADABLE");';
+    const r = spawnSync(bun, ["-e", probe], {
+      cwd: PROXY_SRC,
+      env: { ...proxyEnv(ctx), ZCODE_PROXY_CREDENTIALS_PATH: credentials },
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+      timeout: 20000,
+      windowsHide: true,
+    });
+    if (r.error || r.status !== 0) return { ok: null, detail: "store present; decryptability probe failed to run" };
+    const decryptable = (r.stdout ?? "").trim().split("\n").pop() === "DECRYPTABLE";
+    return { ok: decryptable, detail: decryptable ? "present and decryptable on this machine" : "present but NOT decryptable here — re-run: zcode-kit auth login" };
+  }
+
   async function doctor() {
     const checks = [];
     // ok: true|false|null (null = skip, not counted as failure)
     const add = (name, ok, detail) => checks.push({ name, ok, detail });
-    add("bun available", commandOnPath("bun") || commandOnPath("bun.exe"), "bun must be on PATH");
+    const bunState = bunStartable();
+    add("bun available", bunState.ok, bunState.detail);
     add("config exists", existsSync(CONFIG), CONFIG);
     add("key file exists", existsSync(KEY_FILE), KEY_FILE);
     add("proxy source installed", existsSync(join(PROXY_SRC, "node_modules")), join(PROXY_SRC, "node_modules"));
+    const overrides = Object.keys(process.env).filter((k) => /^ZCODE_(?:PROXY_PORT|PROXY_API_KEY|CLAIM_|ASYNC_|DUMP_)/.test(k));
+    if (overrides.length) add("proxy env overrides", false, `ignored by the kit-managed proxy (unset them): ${overrides.join(", ")}`);
     if (process.env.ZCODE_PROXY_CREDENTIALS_PATH || HOME) {
       const credentials = process.env.ZCODE_PROXY_CREDENTIALS_PATH || join(HOME, ".zcode-proxy", "credentials.json");
-      add("credentials store", existsSync(credentials), process.env.ZCODE_PROXY_CREDENTIALS_PATH ? "ZCODE_PROXY_CREDENTIALS_PATH (explicit store)" : "~/.zcode-proxy/credentials.json");
+      const cred = credentialStoreState(credentials);
+      add("credentials store", cred.ok, `${process.env.ZCODE_PROXY_CREDENTIALS_PATH ? "ZCODE_PROXY_CREDENTIALS_PATH (explicit store)" : "~/.zcode-proxy/credentials.json"}: ${cred.detail}`);
     } else {
       add("credentials store", null, "USERPROFILE/HOME not set — skipped");
     }
@@ -526,10 +647,10 @@ export function createManager({ root, home, processStartMsImpl } = {}) {
       add("mcp bridge installed", existsSync(join(MCP_DIR, "dist", "index.js")), join(MCP_DIR, "dist", "index.js"));
       add("mcp bridge deps", existsSync(join(MCP_DIR, "node_modules")), join(MCP_DIR, "node_modules"));
     }
-    if (existsSync(join(ROOT, "generated", "claude-zcode-settings.json"))) {
+    if (existsSync(join(GENERATED, "claude-zcode-settings.json"))) {
       add("claude adapter artifact", true, "generated/claude-zcode-settings.json");
     }
-    if (existsSync(join(ROOT, "generated", "codex-home", "config.toml"))) {
+    if (existsSync(join(GENERATED, "codex-home", "config.toml"))) {
       add("codex adapter artifact", true, "generated/codex-home/config.toml");
     }
 

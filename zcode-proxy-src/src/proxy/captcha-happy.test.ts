@@ -5,7 +5,53 @@ import {
   destroyDom,
   installGlobalWindowAlias,
   removeGlobalWindowAlias,
+  requestLogSizeForTest,
+  resetRequestLogForTest,
+  recordRequestForTest,
 } from "./captcha-happy.js";
+
+const HERMETIC_RESOURCES = {
+  primeCookies: async () => [],
+  documentHtml: "<!doctype html><html><body><div id=\"cap\"></div><button id=\"btn\"></button></body></html>",
+};
+
+describe("createDom resource injection", () => {
+  test("remote guest JavaScript is disabled without operator opt-in", async () => {
+    const before = process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA;
+    delete process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA;
+    try { await expect(createDom("sgp", "test")).rejects.toThrow(/OS sandbox/); }
+    finally { if (before === undefined) delete process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA; else process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA = before; }
+  });
+  test("uses injected cookie priming and HTML without reaching the network", async () => {
+    let primeCalls = 0;
+    const dom = await createDom("sgp", "no8xfe", {
+      primeCookies: async () => {
+        primeCalls += 1;
+        return [];
+      },
+      documentHtml: HERMETIC_RESOURCES.documentHtml,
+    });
+    try {
+      expect(primeCalls).toBe(1);
+      expect(dom.window.document.getElementById("cap")).not.toBeNull();
+      expect(dom.window.document.querySelectorAll("script[src]").length).toBe(0);
+    } finally {
+      destroyDom(dom.window);
+    }
+  });
+});
+
+describe("bounded captcha request diagnostics", () => {
+  test("keeps only the most recent request records", () => {
+    resetRequestLogForTest();
+    for (let i = 0; i < 2_000; i += 1) {
+      recordRequestForTest({ at: i, method: "GET", url: `https://zcode.z.ai/${i}` });
+    }
+    expect(requestLogSizeForTest()).toBeLessThan(2_000);
+    expect(requestLogSizeForTest()).toBeGreaterThanOrEqual(12);
+    resetRequestLogForTest();
+  });
+});
 
 // The guest-timer contract, stated behaviourally: a timer armed by guest code
 // MUST stop firing once its window is destroyed, and the host's own timers
@@ -37,7 +83,7 @@ describe("guest timer ownership (lexical scope)", () => {
    * than fixed guesses.
    */
   async function ticksAcrossTeardown(guestSource: string): Promise<{ before: number; after: number }> {
-    const dom = await createDom("sgp", "no8xfe");
+    const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
     const w = dom.window as unknown as Record<string | symbol, unknown>;
     let ticks = 0;
     (globalThis as Record<string, unknown>).__capTestTick = () => { ticks++; };
@@ -90,7 +136,7 @@ describe("guest timer ownership (lexical scope)", () => {
     // `var`/`function` declarations keep escaping. Wrapping in a function
     // swallowed them and `initAliyunCaptcha` never appeared — every solve
     // then timed out waiting for it.
-    const dom = await createDom("sgp", "no8xfe");
+    const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
     const w = dom.window as unknown as Record<string | symbol, unknown>;
     try {
       const sym = evaluateScriptSymbol(w)!;

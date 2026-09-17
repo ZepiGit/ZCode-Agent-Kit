@@ -9,11 +9,47 @@ import os from "node:os";
 
 const projectRoot = path.resolve(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]):/, "$1:"));
 
+export function isolatedTestEnv(rootDir, overrides = {}) {
+  const home = path.join(rootDir, "home");
+  const temp = path.join(rootDir, "temp");
+  const appData = path.join(home, "AppData", "Roaming");
+  const localAppData = path.join(home, "AppData", "Local");
+  const xdg = path.join(home, ".config");
+  const programFiles = path.join(rootDir, "program-files");
+  const programFilesX86 = path.join(rootDir, "program-files-x86");
+  for (const dir of [home, temp, appData, localAppData, xdg, programFiles, programFilesX86]) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  const nodeDir = path.dirname(process.execPath);
+  const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
+  return {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: appData,
+    LOCALAPPDATA: localAppData,
+    TEMP: temp,
+    TMP: temp,
+    TMPDIR: temp,
+    XDG_CONFIG_HOME: xdg,
+    ProgramFiles: programFiles,
+    "ProgramFiles(x86)": programFilesX86,
+    ProgramW6432: programFiles,
+    PATH: [nodeDir, path.join(systemRoot, "System32")].join(path.delimiter),
+    ZCODE_PROXY_CREDENTIALS_PATH: path.join(rootDir, "missing-proxy-credentials.json"),
+    ZCODE_KIT_SKIP_SMOKE: "1",
+    ZCODE_KIT_SKIP_DEPS: "1",
+    ZCODE_HARNESS_LOG_LEVEL: "warn",
+    ...overrides,
+  };
+}
+
 export async function startBridge(overrides = {}) {
   const dataDir = overrides.reuseDataDir ?? path.join(os.tmpdir(), `zcode-harness-test-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`);
   fs.mkdirSync(path.join(dataDir, "workspaces"), { recursive: true });
   const workspaceDir = overrides.workspaceDirOverride ?? path.join(dataDir, "ws");
   fs.mkdirSync(workspaceDir, { recursive: true });
+  const fixturePath = path.join(projectRoot, "test", "fixture", "fake-harness.mjs");
 
   const args = [
     path.join(projectRoot, "dist", "index.js"),
@@ -24,17 +60,18 @@ export async function startBridge(overrides = {}) {
     "--interaction-timeout-sec", overrides.interactionTimeoutSec ?? "4",
     "--max-concurrent-tasks", overrides.maxConcurrentTasks ?? "2",
   ];
+  if (!overrides.useRealRuntime) args.push("--runtime-path", fixturePath);
   if (overrides.readOnly) args.push("--read-only");
   if (overrides.extraArgs) args.push(...overrides.extraArgs);
 
   const child = spawn(process.execPath, args, {
     stdio: ["pipe", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      ...(overrides.useRealRuntime ? {} : { ZCODE_HARNESS_RUNTIME_PATH: path.join(projectRoot, "test", "fixture", "fake-harness.mjs") }),
-      ZCODE_HARNESS_LOG_LEVEL: "warn",
+    env: isolatedTestEnv(dataDir, {
+      ZCODE_HARNESS_RUNTIME_PATH: overrides.useRealRuntime
+        ? String(overrides.env?.ZCODE_HARNESS_RUNTIME_PATH ?? path.join(dataDir, "missing-runtime.cjs"))
+        : fixturePath,
       ...overrides.env,
-    },
+    }),
   });
 
   const client = {
@@ -62,7 +99,8 @@ export async function startBridge(overrides = {}) {
         continue;
       }
       if (msg.id !== undefined && msg.method === undefined && client.pending.has(msg.id)) {
-        const { resolve } = client.pending.get(msg.id);
+        const { resolve, timer } = client.pending.get(msg.id);
+        clearTimeout(timer);
         client.pending.delete(msg.id);
         resolve(msg);
       } else if (msg.method !== undefined) {
@@ -79,13 +117,13 @@ export async function startBridge(overrides = {}) {
   client.call = (method, params, timeoutMs = 30_000) => {
     const id = client.nextId++;
     return new Promise((resolve, reject) => {
-      client.pending.set(id, { resolve });
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (client.pending.has(id)) {
           client.pending.delete(id);
           reject(new Error(`timeout: ${method}`));
         }
       }, timeoutMs);
+      client.pending.set(id, { resolve, reject, timer });
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
     });
   };
@@ -131,12 +169,17 @@ export async function startBridge(overrides = {}) {
     } catch {
       /* ignore */
     }
-    await new Promise((r) => setTimeout(r, 200));
-    try {
-      child.kill();
-    } catch {
-      /* ignore */
+    if (child.exitCode === null && child.signalCode === null) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(() => { child.kill(); }, 5000);
+        child.once("exit", () => { clearTimeout(timer); resolve(); });
+      });
     }
+    for (const { reject, timer } of client.pending.values()) {
+      clearTimeout(timer);
+      reject(new Error("bridge stopped"));
+    }
+    client.pending.clear();
   };
 
   // initialize

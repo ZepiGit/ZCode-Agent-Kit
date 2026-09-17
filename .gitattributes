@@ -1,0 +1,10 @@
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+/tests/** export-ignore
+/.github/** export-ignore
+/pack/** export-ignore
+/zcode-proxy-src/.github/** export-ignore
+/zcode-proxy-src/docs/images/android/** export-ignore
+/zcode-proxy-src/scripts/** export-ignore
+/mcp/zcode-harness-mcp/_probes/** export-ignore

@@ -1,0 +1,14 @@
+# Graphify output (generated)
+graphify-out/
+
+# Local credentials, runtime state and generated builds
+.proxykey
+.bun-path
+proxy/config.yaml
+backups/
+generated/
+logs/
+node_modules/
+pack/dist/
+verification/
+*.zcode-staging-*

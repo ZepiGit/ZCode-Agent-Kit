@@ -42,7 +42,10 @@ ZCode-Desktop-Account (start-plan, dasselbe Kontingent wie ZCode Desktop).
   liegenden Defaults sind seit der Audit-Nachbesserung fail-closed (`false`)
 - **Vendoring-Ausschlüsse**: `Android-APP/` (209 MB) und `node_modules/` sind
   nicht enthalten; `node_modules/` installiert setup.mjs via `bun install
-  --frozen-lockfile`
+  --frozen-lockfile`. Der Android-Build-Pfad (`scripts/build-android-apk.sh`,
+  die `build:android-*`-npm-Scripts, die esbuild-Dev-Dependency und der
+  `build-android`-Job im vendorten `.github/workflows/release.yml`) wurde
+  mitsamt der App entfernt
 - Zwei Upstream-Testdateien wurden lokal ergänzt; alle Quell-Änderungen stehen in
   [`../patches/zcode-proxy-local-patches.patch`](../patches/zcode-proxy-local-patches.patch)
 

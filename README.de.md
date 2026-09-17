@@ -8,9 +8,16 @@ Nutze **deinen eigenen ZCode-Desktop-Account** mit einem Coding-Assistenten dein
 
 - **Modell-Proxy:** OpenAI Chat Completions, Responses und Anthropic Messages unter standardmäßig `http://127.0.0.1:8457`.
 - **Modelle:** `glm-5.3` (Text) und `glm-5.3-flash` (Text und Bilder). Angegebenes Kontextfenster: 1M Tokens; Denkstufen: `low`, `high`, `max`. Client-Unterstützung und Account-Limits gelten weiterhin.
-- **Optionale MCP-Bridge:** macht Funktionen deiner installierten ZCode-Runtime verfügbar. Das ist getrennt von der Modellanbindung; für Modellaufrufe über die Bridge muss die Desktop-App laufen.
+- **Optionale MCP-Bridge:** macht Funktionen deiner installierten ZCode-Runtime verfügbar. Das ist getrennt von der Modellanbindung; eine laufende Desktop-App garantiert keine Modellaufrufe über die Bridge.
 
-> **Quellstand und Release – geprüft am 16.09.2026:** Das neueste GitHub-Release ist **v0.2.2**, auf npm ist es **0.2.1**. Der gemergte Quellcode enthält neuere Continue-, Credential-Recovery-, `doctor --fix`- und Installer-Korrekturen, die diese Pakete **noch nicht vollständig enthalten**. „Latest“ installiert keinen aktuellen Git-Branch. Die Anleitung beschreibt den Quellstand, sofern sie nicht ausdrücklich die Installation eines veröffentlichten Releases nennt. Prüfe die [Release-Hinweise](https://github.com/ZepiGit/ZCode-Agent-Kit/releases), bevor du eine neue Funktion voraussetzt. Dass ein alter CLI eine Option akzeptiert, beweist nicht ihre Unterstützung.
+## Unveröffentlichte Audit-Härtung
+
+- Eine laufende Desktop-App garantiert keine eigenständigen MCP-Modellaufrufe; der Provider kann sie unabhängig davon ablehnen. Ist die Konfiguration gespeichert, bleibt ein fehlgeschlagener Setup-Modelltest eine Warnung, kein bestätigter Modellzugang.
+- Release-Installer speichern den absoluten Bun-Pfad in `.bun-path`, ohne globalen PATH zu ändern. npm-Zustand liegt außerhalb von `node_modules`: `%LOCALAPPDATA%/zcode-agent-kit/installs/<root-hash>` bzw. `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>`. `ZCODE_KIT_STATE_DIR` muss absolut und exklusiv für diese Installation sein. Source-/Tarball-Kopien behalten Zustand im Root. Vor dem Ersetzen eines alten npm-Pakets Setup zur Migration ausführen; Originale bleiben erhalten, bereits verlorene Daten nicht.
+- MCP-Allowlist gilt auch für Zugriffe über Session-IDs; `yolo` erfordert `--allow-yolo`. Logs sind begrenzt. Clients derselben Bridge teilen eine Vertrauensdomäne.
+- Remote CAPTCHA-JavaScript besitzt keine OS-Sandbox und ist standardmäßig gesperrt. Standalone ist ein ausdrückliches `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1` nur für vertrauenswürdige Umgebungen möglich; das Kit entfernt dieses Opt-in. Start-Plan-Anfragen können fail-closed scheitern; Provider-Sperren werden nicht umgangen.
+- Start-Plan setzt vendorte ZCode-Systemblöcke vor Clientprompts und entfernt deren `cache_control`. Kit-CWD ist `/workspace`; Plattform, Shell, OS-Version, Locale, Trace- und Gerätedaten können weiterhin upstream gelangen. Keine Kompatibilitäts- oder Zugangsgarantie.
+- Main-/Dispatch-Auto-Releases sind gewollt. `ALLOW_PUBLISH` prüft Versionskonsistenz, keine menschliche oder rechtliche Freigabe. Diese Änderungen sind kein Nachweis eines veröffentlichten Releases.
 
 ## 1. Voraussetzungen
 
@@ -28,7 +35,7 @@ node --version
 bun --version
 ```
 
-Diese Befehle funktionieren in PowerShell und POSIX-Shells. Fehlt einer, korrigiere zuerst den PATH. Release-Installer können fehlendes Bun herunterladen, ihre PATH-Ergänzung ist aber **nicht dauerhaft**: Ein neues Windows-Terminal verliert sie; `curl | sh` kann die übergeordnete Shell nicht verändern. Vorhandenes Bun wird wiederverwendet, nicht automatisch aktualisiert.
+Diese Befehle funktionieren in PowerShell und POSIX-Shells. Fehlt einer, korrigiere zuerst den PATH. Release-Installer können fehlendes Bun herunterladen und speichern dessen absoluten Pfad in `.bun-path`; das Kit nutzt ihn auch nach einem Neustart, ohne den globalen PATH zu ändern. Vorhandenes Bun wird wiederverwendet, nicht automatisch aktualisiert.
 
 **Windows:** PowerShell ohne Administratorrechte verwenden; `install.sh` nicht in Git Bash oder WSL ausführen. **macOS/Linux:** POSIX-Shell mit `curl`, `tar`, SHA-256-Werkzeug und für Updates `rsync`; Bun-Bootstrap benötigt zusätzlich `unzip`. Die unten genannten Windows-Prüfungen bestätigen keine neuen Linux-/macOS-Live-Client-Tests.
 

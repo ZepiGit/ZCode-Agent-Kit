@@ -28,7 +28,10 @@
 # NOTE: this file is intentionally ASCII-only (Windows PowerShell 5.1 parses
 # BOM-less UTF-8 as ANSI and smart-byte punctuation corrupts string parsing).
 
+& {
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
+$originalPath = $env:PATH
 
 $Repo = "ZepiGit/ZCode-Agent-Kit"
 $InstallDir = ""
@@ -36,8 +39,20 @@ if ($env:ZCODE_KIT_INSTALL_DIR) { $InstallDir = $env:ZCODE_KIT_INSTALL_DIR }
 elseif ($env:ZCODE_KIT_HOME) { $InstallDir = $env:ZCODE_KIT_HOME }
 else { $InstallDir = Join-Path $env:LOCALAPPDATA "zcode-agent-kit" }
 
-# Latest published release by default; ZCODE_KIT_VERSION pins one (recommended
-# for reproducible installs). Never a branch: releases only.
+if (Test-Path -LiteralPath (Join-Path $InstallDir '.git')) { throw 'Refusing to overwrite a checkout (.git).' }
+if (Test-Path -LiteralPath $InstallDir) {
+  $target = Get-Item -LiteralPath $InstallDir -Force
+  if (-not $target.PSIsContainer -or ($target.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Install target must be a directory, not a link.' }
+  if (@(Get-ChildItem -LiteralPath $InstallDir -Force).Count -gt 0) {
+    $package = Join-Path $InstallDir 'package.json'
+    if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'cli\zcode-kit.mjs')) -or -not (Test-Path -LiteralPath $package)) { throw 'Non-empty target is not a zcode-agent-kit install.' }
+    if ((Get-Content -LiteralPath $package -Raw | ConvertFrom-Json).name -ne 'zcode-agent-kit') { throw 'Non-empty target is a foreign installation.' }
+  }
+}
+if ($env:ZCODE_KIT_VERSION -and $env:ZCODE_KIT_VERSION -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release version: ZCODE_KIT_VERSION must be vX.Y.Z.' }
+$tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "zcode-kit-install-$([guid]::NewGuid().ToString('N'))")
+try {
+# Latest published release by default; explicit pins are validated before download.
 if ($env:ZCODE_KIT_VERSION) {
   $Version = $env:ZCODE_KIT_VERSION
 } else {
@@ -48,6 +63,7 @@ if ($env:ZCODE_KIT_VERSION) {
     throw "could not resolve the latest release from the GitHub API - pin one with `$env:ZCODE_KIT_VERSION (e.g. 'v0.2.0'). Detail: $($_.Exception.Message)"
   }
 }
+if ($Version -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release version returned by release metadata.' }
 $Tarball = "$Version.tar.gz"
 $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
 
@@ -67,7 +83,7 @@ if (-not (Test-Node)) {
 }
 if (-not (Test-Bun)) {
   Write-Host "bun not found - installing user-local, pinned bun v1.4.2 ..."
-  $bunZip = Join-Path $env:TEMP "bun-1.4.2.zip"
+  $bunZip = Join-Path $tmp.FullName "bun.zip"
   # SHA256 of bun-v1.4.2 bun-windows-x64.zip (upstream release artifact).
   $bunSha = "ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405"
   Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip" -OutFile $bunZip
@@ -82,15 +98,16 @@ if (-not (Test-Bun)) {
 }
 
 # --- download + verify -------------------------------------------------------
-$tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "zcode-kit-install-$(Get-Random)")
-try {
+$bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Source
   $archive = Join-Path $tmp.FullName "kit.tar.gz"
   $checksums = Join-Path $tmp.FullName "checksums.txt"
   Invoke-WebRequest -Uri "$BaseUrl/$Tarball" -OutFile $archive
   Invoke-WebRequest -Uri "$BaseUrl/checksums.txt" -OutFile $checksums
 
-  $expected = (Select-String -Path $checksums -Pattern ([regex]::Escape($Tarball))).Line -split "\s+" | Select-Object -First 1
-  if (-not $expected) { Write-Error "checksums.txt does not contain $Tarball - aborting." }
+  $checksumPattern = '^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($Tarball) + '$'
+  $checksumLines = @(Get-Content -LiteralPath $checksums | Where-Object { $_ -match $checksumPattern })
+  if ($checksumLines.Count -ne 1) { throw "checksums.txt must contain exactly one valid entry for $Tarball" }
+  $expected = [regex]::Match($checksumLines[0], $checksumPattern).Groups[1].Value
   $actual = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
   if ($actual -ne $expected.ToLower()) {
     Write-Error "release archive hash mismatch:`n  expected $expected`n  actual   $actual`nAborting."
@@ -119,15 +136,16 @@ try {
   # /XF keeps machine-local runtime state across updates: the local proxy key
   # and proxy/config.yaml (user settings) are never overwritten or deleted by
   # the mirror; node_modules/backups/logs/generated are rebuilt or kept.
-  if (Test-Path $InstallDir) {
+  if (Test-Path -LiteralPath $InstallDir) {
     Write-Host "existing install found - updating in place (.proxykey and proxy/config.yaml are preserved)"
-    robocopy $extracted.FullName $InstallDir /MIR /XF .proxykey config.yaml /XD node_modules backups logs generated /NFL /NDL /NJH /NJS | Out-Null
+    robocopy $extracted.FullName $InstallDir /MIR /XJ /XF .proxykey config.yaml .bun-path /XD node_modules backups logs generated /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) { Write-Error "update copy failed (robocopy exit $LASTEXITCODE) - aborting." }
   } else {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     Copy-Item -Path (Join-Path $extracted.FullName "*") -Destination $InstallDir -Recurse -Force
   }
 
+  [IO.File]::WriteAllText((Join-Path $InstallDir '.bun-path'), $bunExe, (New-Object System.Text.UTF8Encoding($false)))
   Write-Host "== running setup (detects your harnesses) =="
   Push-Location $InstallDir
   try {
@@ -143,7 +161,10 @@ try {
   $shim = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps\zcode-kit.cmd"
   try {
     New-Item -ItemType Directory -Path (Split-Path $shim -Parent) -Force | Out-Null
-    Set-Content -Path $shim -Value "@echo off`r`nnode `"$InstallDir\cli\zcode-kit.mjs`" %*" -Encoding Ascii
+    $launcher = Join-Path (Split-Path $shim -Parent) 'zcode-kit.ps1'
+    $entry = (Join-Path $InstallDir 'cli\zcode-kit.mjs').Replace("'", "''")
+    [IO.File]::WriteAllText($launcher, "& node '$entry' @args`r`nexit `$LASTEXITCODE`r`n", (New-Object System.Text.UTF8Encoding($true)))
+    Set-Content -LiteralPath $shim -Value '@echo off', 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0zcode-kit.ps1" %*', 'exit /b %errorlevel%' -Encoding Ascii
     Write-Host "  added zcode-kit command -> $shim"
   } catch {
     Write-Host "  note: could not create the zcode-kit shim ($($_.Exception.Message))"
@@ -156,5 +177,7 @@ try {
   Write-Host ""
   Write-Host "Thanks for your Trust, enjoy <3 -Github.com/ZepiGit - Instagram: Micheltie_"
 } finally {
-  Remove-Item $tmp.FullName -Recurse -Force -ErrorAction SilentlyContinue
+  $env:PATH = $originalPath
+  Remove-Item -LiteralPath $tmp.FullName -Recurse -Force -ErrorAction SilentlyContinue
+}
 }

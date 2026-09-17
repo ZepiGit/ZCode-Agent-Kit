@@ -36,6 +36,8 @@ export interface IngressTaskRecord {
 export interface IngressTask<R extends IngressTaskRecord = IngressTaskRecord> {
   record: R;
   quietPolls: number;
+  turnRevision: number;
+  acceptingEvents: boolean;
   accumulatedText: string;
   toolCalls: Map<string, string>;
   artifacts: Map<string, { path: string; bytes: number; sha256: string | null }>;
@@ -80,13 +82,14 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
     const taskId = this.bySession.get(sessionId);
     if (!taskId) return;
     const t = this.tasks.get(taskId);
-    if (!t) return;
+    if (!t || !t.acceptingEvents || ["completed", "failed", "cancelled", "interrupted", "unknown", "cancelling"].includes(t.record.state)) return;
     const seq = typeof p.seq === "number" ? p.seq : t.record.lastSeq + 1;
+    if (seq <= t.record.lastSeq) return;
     const type = typeof p.type === "string" ? p.type : "unknown";
     const payload = p.payload ?? {};
     // Gap detection: harness seq is monotonic per session; a jump means events
     // were lost (crash/reconnect) and replays must not look contiguous.
-    if (t.record.lastSeq >= 0 && seq > t.record.lastSeq + 1) {
+    if (t.record.lastSeq > 0 && seq > t.record.lastSeq + 1) {
       this.store.appendLine(`tasks/${taskId}.events.jsonl`, {
         seq: t.record.lastSeq + 1,
         ts: new Date().toISOString(),
@@ -106,7 +109,8 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
     });
 
     if (type === "turn.started") {
-      t.record.state = "running";
+      if (t.record.state !== "starting") t.record.state = "running";
+      t.persist();
       t.quietPolls = 0;
     } else if (type === "turn.failed") {
       const err = (payload as { error?: { message?: string } }).error;
@@ -169,9 +173,16 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
   /** After turn.completed: require a quiet projection, then complete. */
   private async checkQuiet(t: IngressTask<R>): Promise<void> {
     const rec = t.record;
+    const revision = t.turnRevision;
+    const startingDeadline = Date.now() + 120_000;
     for (let i = 0; i < 6; i += 1) {
       await new Promise((r) => setTimeout(r, 1500));
-      if (t.record.state !== "running") return; // failed/cancelled meanwhile
+      if (t.turnRevision !== revision) return;
+      if (t.record.state === 'starting') {
+        if (Date.now() >= startingDeadline) break;
+        i -= 1; continue;
+      }
+      if (t.record.state !== 'running') return;
       let projection: Record<string, unknown> = {};
       try {
         const readBack = await this.runtime.ipcSessionRead(rec.sessionId);
@@ -180,10 +191,11 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
         t.warnings.push(`quiet check failed: ${err instanceof Error ? err.message : String(err)}`);
         continue;
       }
+      if (t.record.state !== "running" || t.turnRevision !== revision) return;
       const active = Array.isArray(projection.activeToolCalls) ? (projection.activeToolCalls as unknown[]).length : 0;
       const jobs = Array.isArray(projection.backgroundJobs) ? (projection.backgroundJobs as unknown[]).length : 0;
       const perms = Array.isArray(projection.pendingPermissions) ? (projection.pendingPermissions as unknown[]).length : 0;
-      if (active === 0 && jobs === 0 && perms === 0) {
+      if (projection.status === "idle" && active === 0 && jobs === 0 && perms === 0) {
         rec.state = "completed";
         rec.finishedAt = new Date().toISOString();
         void this.captureUsage(t);

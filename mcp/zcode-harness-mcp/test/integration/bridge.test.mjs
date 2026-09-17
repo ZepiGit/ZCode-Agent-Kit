@@ -179,7 +179,7 @@ test("cancel: stop verified, partial results retained", async () => {
 });
 
 test("interactions: permission surfaced, answered, task resumes; timeout denies", async () => {
-  const c = await startBridge({ interactionPolicy: "ask", interactionTimeoutSec: 3, env: { FAKE_PERMISSION: "1" } });
+  const c = await startBridge({ interactionPolicy: "ask", interactionTimeoutSec: 3, env: { FAKE_PERMISSION: "1", FAKE_PERMISSION_TOOL: "Write" } });
   try {
     const started = await c.tool("zcode_task_start", { workspacePath: c.workspaceDir, prompt: "needs permission" });
     // wait for the interaction to appear
@@ -192,7 +192,7 @@ test("interactions: permission surfaced, answered, task resumes; timeout denies"
     assert.ok(interactions, "permission interaction should appear");
     const ia = interactions.interactions.find((i) => i.kind === "permission");
     assert.ok(ia);
-    assert.equal(ia.toolName, "Bash");
+    assert.equal(ia.toolName, "Write");
     assert.ok(ia.options.some((o) => o.id === "allow_once"));
 
     // invalid optionId rejected
@@ -209,7 +209,7 @@ test("interactions: permission surfaced, answered, task resumes; timeout denies"
   }
 
   // timeout path: unanswered permission expires and denies
-  const c2 = await startBridge({ interactionPolicy: "ask", interactionTimeoutSec: 2, env: { FAKE_PERMISSION: "1" } });
+  const c2 = await startBridge({ interactionPolicy: "ask", interactionTimeoutSec: 2, env: { FAKE_PERMISSION: "1", FAKE_PERMISSION_TOOL: "Write" } });
   try {
     const started = await c2.tool("zcode_task_start", { workspacePath: c2.workspaceDir, prompt: "permission timeout" });
     await c2.tool("zcode_task_wait", { taskId: started.taskId, timeoutMs: 30_000 });

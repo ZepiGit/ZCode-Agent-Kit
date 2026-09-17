@@ -22,9 +22,8 @@ contexto y sus permisos.
   [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 - Alcance: 32 herramientas MCP + recursos MCP; registro de capacidades con 45
   entradas ([`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)).
-- Probado: 7 tests unitarios + 20 de integración/robustez contra un harness
-  fixture determinista + 5 tests en vivo contra la instalación real
-  ([`TEST_REPORT.md`](TEST_REPORT.md)).
+- `npm test` ejecuta fixtures locales deterministas. Las pruebas reales requieren opt-in; informes históricos no son aceptación actual.
+- Refuerzo: IDs de sesión limitados al workspace; `yolo` requiere `--allow-yolo`. La allowlist usa nombres exactos; Bash, PowerShell y Shell se deniegan. Artefactos con límite de tamaño; JSONL conserva dos archivos de máximo 4 MiB cada uno. EOF interrumpe tareas y cierra el hijo; no se garantiza aislamiento del árbol de procesos Windows. `--runtime-path` ejecuta código: solo archivos confiables.
 
 ## Requisitos previos
 
@@ -78,7 +77,7 @@ Configuración de ejemplo (p. ej. `claude_desktop_config.json` o `.mcp.json`):
 ### 2) Modo Streamable-HTTP (varios clientes, activado explícitamente)
 
 ```powershell
-node dist\index.js --http --host 127.0.0.1 --port 3322 --allow-workspace "C:\Users\<you>\Projects"
+node dist\index.js --http --http-key "<random-local-secret>" --host 127.0.0.1 --port 3322 --allow-workspace "C:\Users\<you>\Projects"
 # Endpoint MCP: http://127.0.0.1:3322/mcp   (solo localhost; sin exposición pública)
 ```
 
@@ -101,7 +100,7 @@ artefactos → pedido de seguimiento en la misma sesión.
 
 ```powershell
 npm test          # build + unitarios + integración (harness fixture, determinista)
-npm run test:live # tests en vivo contra la instalación real: $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+npm run test:live # opt-in explícito (instalación/cuota real): $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
 ```
 
 ## Flags de línea de comandos más importantes
@@ -109,13 +108,13 @@ npm run test:live # tests en vivo contra la instalación real: $env:LIVE_TEST="1
 | Flag | Significado |
 | --- | --- |
 | `--stdio` | MCP por stdin/stdout (por defecto) |
-| `--http --port N --host H` | Modo Streamable-HTTP (por defecto 127.0.0.1:3322) |
+| `--http --http-key KEY --port N --host H` | Modo Streamable-HTTP con clave Bearer (por defecto 127.0.0.1:3322) |
 | `--read-only` | las herramientas mutantes se rechazan (aplicado técnicamente, no solo anotado) |
 | `--allow-workspace P` | liberar la raíz de un workspace (repetible; lista `;` vía `ZCODE_HARNESS_ALLOW_WORKSPACES`) |
 | `--runtime-path P` | ruta explícita a `zcode.cjs` |
 | `--data-dir D` | directorio de persistencia (por defecto `~/.zcode-harness-mcp`) |
 | `--interaction-policy deny\|allowlist\|ask` | cómo se responden las peticiones de permiso (por defecto: `deny`) |
-| `--interaction-allowlist "Bash,Read"` | allowlist de prefijos para la política `allowlist` |
+| `--interaction-allowlist "Read,Glob"` | nombres exactos para `allowlist` (shell denegado) |
 | `--max-concurrent-tasks N` | paralelismo (por defecto 2; el exceso se encola) |
 
 ## Modelo de seguridad (versión corta)

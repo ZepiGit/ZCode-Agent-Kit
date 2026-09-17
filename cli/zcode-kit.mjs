@@ -4,25 +4,32 @@
 //
 // Commands:
 //   zcode-kit setup [--harness auto|<list>]      bootstrap + integrate detected harnesses
-//   zcode-kit integrate <harness> [--dry-run] [--scope user]
+//   zcode-kit integrate <harness> [--dry-run]
 //   zcode-kit run <harness> -- <args>            launch a harness wired to ZCode
 //   zcode-kit doctor [--fix] [--harness <id>] [--json]
 //   zcode-kit status
 //   zcode-kit models [--json] [--show-key]
 //   zcode-kit usage --json
 //   zcode-kit auth status|login|logout
-//   zcode-kit update [--version <v>]
+//   zcode-kit update [--version vX.Y.Z]          checkout installs only; --version = release tag
 //   zcode-kit rollback [tx-id]
 //   zcode-kit uninstall
 //
 // Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
-// 5 auth/identity failure. Unknown harness names are errors, not no-ops.
+// 4 safe-start refused (lock/ownership) · 5 auth/identity failure. Unknown
+// harness names are errors, not no-ops. `setup` exits 0 once the integration
+// is saved even if the optional live smoke request fails (it prints a warning).
 import { beginTransaction, acquireLock, releaseLock, rollbackTransaction, listTransactions } from "../lib/transaction.mjs";
 import { detectHarnesses } from "../lib/detect.mjs";
 import { createCtx, bootstrap, kitRoot } from "./context.mjs";
 import { repairManaged, setupSmoke, startupPreflight } from "./heal.mjs";
 import { diagnoseQuota, quotaAuthValid } from "./quota-diagnostics.mjs";
 import { spawnSync } from "node:child_process";
+import { runCommandSync, resolveBun } from "../lib/process.mjs";
+import { proxyEnv } from "../lib/proxy-env.mjs";
+import { ensureState } from "../lib/state.mjs";
+import { commitFile, ensureDir } from "../lib/edit.mjs";
+import { launchHarness } from "./launch.mjs";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -57,12 +64,13 @@ function parseArgs(argv) {
 const { positional, flags, passthrough } = parseArgs(process.argv.slice(2));
 const command = positional[0] ?? "help";
 const ROOT = kitRoot();
-const BACKUP_DIR = join(ROOT, "backups");
+let BACKUP_DIR;
 let ctx;
 
 async function main() {
   if (command === "help" || flags.help) return usage(0);
   ctx = createCtx(ROOT);
+  BACKUP_DIR = ctx.backupDir;
 
   switch (command) {
     case "setup": return cmdSetup();
@@ -86,12 +94,16 @@ function usage(code) {
   console.log(`zcode-kit — local ZCode provider for your own agent harnesses
 
   zcode-kit setup [--harness auto|omp,pi,...]   bootstrap + integrate (auto = detect)
-  zcode-kit integrate <harness> [--dry-run] [--scope user]
+  zcode-kit integrate <harness> [--dry-run]
   zcode-kit run <harness> -- <args>             launch harness wired to ZCode
   zcode-kit doctor [--fix] [--harness <id>] [--json]
   zcode-kit status | models [--json] [--show-key] | usage --json
   zcode-kit auth status|login|logout
-  zcode-kit update [--version <v>] | rollback [tx-id] | uninstall
+  zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
+  (setup: --harness <list> limits adapters AND MCP registration; --no-mcp skips registration)
+
+Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
+4 safe-start refused · 5 auth/identity failure
 
 Harnesses: ${ADAPTER_IDS.join(", ")}`);
   return code;
@@ -105,9 +117,9 @@ function requireHarness(name) {
 }
 
 function runProxyCli(args, opts = {}) {
-  const res = spawnSync("bun", ["run", "src/index.ts", ...args], {
+  const res = spawnSync(resolveBun(ctx.root), ["run", "src/index.ts", ...args], {
     cwd: ctx.proxySrc,
-    env: { ...process.env, ZCODE_PROXY_CONFIG: ctx.config },
+    env: proxyEnv(ctx),
     encoding: "utf8",
     ...opts,
   });
@@ -149,6 +161,7 @@ async function cmdSetup() {
   for (const t of targets) requireHarness(t);
   assertNotCheckoutWrite();
 
+  ensureState(ctx);
   acquireLock(BACKUP_DIR);
   const tx = beginTransaction(BACKUP_DIR, `zcode-kit setup ${harnessArg}`);
   ctx.tx = tx;
@@ -178,7 +191,8 @@ async function cmdSetup() {
   }
   const smoke = await setupSmoke(ctx);
   console.log(smoke.detail);
-  return smoke.code;
+  if (smoke.code) console.warn("Configuration saved; model access is not confirmed. Run zcode-kit doctor for diagnostics.");
+  return 0;
 }
 
 /** MCP bridge registration (OMP mcp.json / claude mcp add) — additive, namespaced. */
@@ -190,44 +204,52 @@ async function integrateMcp(tx, detected, targets) {
     return;
   }
   console.log("== mcp: zcode-harness bridge ==");
-  if (targets.includes("omp") || detected.omp) {
+  if (targets.includes("omp") && detected.omp) {
     const ompMcp = join(ctx.home, ".omp", "agent", "mcp.json");
+    const entry = { type: "stdio", command: "node", args: [serverJs, "--stdio"] };
     if (existsSync(ompMcp)) {
       try {
         const j = JSON.parse(readFileSync(ompMcp, "utf8"));
-        if (!j.mcpServers?.["zcode-harness"]) {
+        const current = j.mcpServers?.["zcode-harness"];
+        // F-09: an entry pointing at ANOTHER kit copy is not "ours" — replace
+        // only when it is absent or already points at this installation.
+        const ours = !current || (Array.isArray(current.args) && current.args[0] === serverJs);
+        if (!current || (ours && JSON.stringify(current) !== JSON.stringify(entry))) {
           j.mcpServers = j.mcpServers ?? {};
-          j.mcpServers["zcode-harness"] = { type: "stdio", command: "node", args: [serverJs, "--stdio"] };
-          tx.touch(ompMcp);
-          writeFileSync(ompMcp, JSON.stringify(j, null, 2) + "\n");
+          j.mcpServers["zcode-harness"] = entry;
+          commitFile(ctx, tx, ompMcp, JSON.stringify(j, null, 2) + "\n");
           console.log("  omp: mcp.json updated (zcode-harness → stdio bridge)");
+        } else if (!ours) {
+          console.log(`  WARN: omp mcp.json "zcode-harness" points at another kit copy (${current.args?.[0] ?? "?"}) — left untouched`);
         } else {
           console.log('  omp: "zcode-harness" already registered');
         }
       } catch (err) {
         console.log(`  WARN: mcp.json is not valid JSON (${err.message}) — skipped`);
       }
-    } else if (detected.omp) {
-      tx.touch(ompMcp);
-      writeFileSync(ompMcp, JSON.stringify({ mcpServers: { "zcode-harness": { type: "stdio", command: "node", args: [serverJs, "--stdio"] } } }, null, 2) + "\n");
+    } else {
+      commitFile(ctx, tx, ompMcp, JSON.stringify({ mcpServers: { "zcode-harness": entry } }, null, 2) + "\n");
       console.log("  omp: created mcp.json with zcode-harness bridge");
     }
   }
-  if ((targets.includes("claude-code") || detected["claude-code"]) && detected["claude-code"]) {
-    const get = spawnSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
-    if (get.status === 0) {
+  if (targets.includes("claude-code") && detected["claude-code"]) {
+    const get = runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
+    if (get.status === 0 && !(get.stdout ?? "").includes(serverJs)) {
+      // F-09: registered by another kit copy — never silently adopt it.
+      console.log('  WARN: claude "zcode-harness" is registered by another kit copy — left untouched');
+    } else if (get.status === 0) {
       console.log('  claude: "zcode-harness" already registered');
     } else {
-      const add = spawnSync("claude", ["mcp", "add", "zcode-harness", "--scope", "user", "--", "node", serverJs, "--stdio"], { stdio: "pipe", encoding: "utf8" });
+      const add = runCommandSync("claude", ["mcp", "add", "zcode-harness", "--scope", "user", "--", "node", serverJs, "--stdio"], { stdio: "pipe", encoding: "utf8" });
       if (add.status === 0) {
         console.log('  claude: registered "zcode-harness" (user scope)');
         tx.external('claude MCP server "zcode-harness" registered (user scope)', "claude mcp remove zcode-harness --scope user");
       } else {
-        console.log(`  WARN: claude mcp add failed: ${(add.stderr ?? "").trim().slice(0, 200)}`);
+        console.log(`  WARN: claude mcp add failed: ${(add.error?.message || add.stderr || `exit ${add.status}`).trim().slice(0, 200)}`);
       }
     }
   }
-  console.log("  NOTE: model turns through the bridge require the ZCode Desktop app to be running.");
+  console.log("  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.");
 }
 
 // --------------------------------------------------------------- integrate
@@ -246,6 +268,7 @@ async function cmdIntegrate() {
     return 0;
   }
   assertNotCheckoutWrite();
+  ensureState(ctx);
   acquireLock(BACKUP_DIR);
   const tx = beginTransaction(BACKUP_DIR, `zcode-kit integrate ${id}`);
   ctx.tx = tx;
@@ -268,32 +291,7 @@ async function cmdIntegrate() {
 async function cmdRun() {
   const id = positional[1];
   requireHarness(id);
-  const args = passthrough ?? [];
-  const key = ctx.key();
-  const env = { ...process.env, ZCODE_PROXY_KEY: key };
-  // Wrapped launchers own their preflight; do not run it twice here.
-  let cmd, argv;
-  if (id === "claude-code") {
-    cmd = process.platform === "win32" ? join(ROOT, "bin", "zcode-claude.cmd") : join(ROOT, "bin", "zcode-claude.sh");
-    argv = args;
-  } else if (id === "codex") {
-    cmd = process.platform === "win32" ? join(ROOT, "bin", "zcode-codex.cmd") : join(ROOT, "bin", "zcode-codex.sh");
-    argv = args;
-  } else if (id === "aider") {
-    cmd = process.platform === "win32" ? join(ROOT, "bin", "zcode-aider.cmd") : join(ROOT, "bin", "zcode-aider.sh");
-    argv = args;
-  } else if (id === "opencode") {
-    const ready = await startupPreflight(ctx);
-    console.error(ready.detail);
-    if (ready.code) return ready.code;
-    cmd = "opencode";
-    argv = args;
-  } else {
-    console.error(`run: no launcher for "${id}" (use setup/integrate instead)`);
-    return 2;
-  }
-  const res = spawnSync(cmd, argv, { stdio: "inherit", env, shell: process.platform === "win32" && cmd.endsWith(".cmd") });
-  return res.status ?? 1;
+  return launchHarness(ctx, id, passthrough ?? []);
 }
 
 // ------------------------------------------------------------------ doctor
@@ -386,14 +384,6 @@ async function cmdModels() {
 }
 
 async function loadAdapterRegistrySnapshot() {
-  // Reads the proxy's own model list via the vendored source (single source of
-  // truth), falling back to the known pair when the source tree is absent.
-  try {
-    const dump = spawnSync("bun", ["-e", 'import { MODELS } from "./src/provider/models.ts"; console.log(JSON.stringify(MODELS.map(m=>m.id)))'], {
-      cwd: ctx.proxySrc, encoding: "utf8", timeout: 30000,
-    });
-    if (dump.status === 0) return JSON.parse(dump.stdout.trim().split("\n").pop());
-  } catch {}
   return ["glm-5.3", "glm-5.3-flash"];
 }
 
@@ -465,17 +455,42 @@ async function cmdUpdate() {
     return 2;
   }
   // Conservative by design: refuses on a dirty tree; fast-forward only.
-  const dirty = spawnSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" });
+  // V1-01: a missing git must be reported, not mistaken for a clean tree.
+  const dirty = runCommandSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" });
+  if (dirty.error || dirty.status !== 0) {
+    console.error(`update: cannot run git (${dirty.error?.message ?? `exit ${dirty.status}`}) — install git or re-run the installer.`);
+    return 2;
+  }
   if ((dirty.stdout ?? "").trim().length > 0) {
     console.error("update: working tree has changes — commit or stash first (refusing to mix user changes into an update).");
     return 2;
   }
-  const fetch = spawnSync("git", ["fetch", "origin"], { cwd: ROOT, stdio: "inherit" });
-  if (fetch.status !== 0) return fetch.status ?? 1;
-  const merge = spawnSync("git", ["merge", "--ff-only", `origin/${flags.version ?? "main"}`], { cwd: ROOT, stdio: "inherit" });
-  if (merge.status !== 0) {
+  // A-13/B-19: --version selects a release TAG (vX.Y.Z), never a branch; a
+  // bare --version has no value to select.
+  const wanted = flags.version === true ? "" : String(flags.version ?? "");
+  if (flags.version !== undefined && !/^v?\d+\.\d+\.\d+$/.test(wanted)) {
+    console.error(`update: --version expects a release tag like v0.2.11${wanted ? ` (got "${wanted}")` : ""}.`);
+    return 2;
+  }
+  const fetch = runCommandSync("git", ["fetch", "--tags", "origin"], { cwd: ROOT, stdio: "inherit" });
+  if (fetch.error || fetch.status !== 0) {
+    console.error(`update: git fetch failed${fetch.error ? ` (${fetch.error.message})` : ""}.`);
+    return fetch.status ?? 2;
+  }
+  let target = "origin/main";
+  if (wanted) {
+    const tag = wanted.startsWith("v") ? wanted : `v${wanted}`;
+    const known = runCommandSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], { cwd: ROOT, encoding: "utf8" });
+    if (known.error || known.status !== 0) {
+      console.error(`update: release tag ${tag} does not exist on origin.`);
+      return 2;
+    }
+    target = `refs/tags/${tag}`;
+  }
+  const merge = runCommandSync("git", ["merge", "--ff-only", target], { cwd: ROOT, stdio: "inherit" });
+  if (merge.error || merge.status !== 0) {
     console.error("update: fast-forward not possible (history diverged). Resolve manually — the kit never force-updates.");
-    return merge.status ?? 1;
+    return merge.status ?? 2;
   }
   console.log("update: re-applying integrations for detected harnesses...");
   // Audit H3: update only ever reaches this point from a checkout (the tarball
@@ -483,47 +498,73 @@ async function cmdUpdate() {
   // checkout-write guard asks for. Without this, the re-setup step always died
   // on the guard and update could never finish by design.
   process.env.ZCODE_KIT_ALLOW_CHECKOUT = "1";
-  return cmdSetup();
+  // Re-setup in a fresh process so the updated modules (not the ones already
+  // loaded by this process) apply the integrations.
+  const res = spawnSync(process.execPath, [join(ROOT, "cli", "zcode-kit.mjs"), "setup", ...(flags.harness ? ["--harness", String(flags.harness)] : []), ...(flags["no-mcp"] ? ["--no-mcp"] : [])], { cwd: ROOT, stdio: "inherit", env: process.env });
+  return res.status ?? 2;
 }
 
 // ---------------------------------------------------------------- rollback
 async function cmdRollback() {
   const id = positional[1] ?? null;
-  const r = rollbackTransaction(BACKUP_DIR, id);
+  // B-11: rollback mutates the same files as setup — serialize on the same lock.
+  ensureState(ctx);
+  acquireLock(BACKUP_DIR);
+  let r;
+  try {
+    r = rollbackTransaction(BACKUP_DIR, id);
+  } finally {
+    releaseLock(join(BACKUP_DIR, ".setup-lock"));
+  }
   if (!r.id) return console.log("nothing to roll back") ?? 0;
   for (const t of r.restored) console.log(`restored: ${t}`);
   for (const t of r.removed) console.log(`removed (kit-created): ${t}`);
   for (const c of r.conflicts) console.log(`CONFLICT (left untouched): ${c}`);
   for (const e of r.external) console.log(`manual undo required: ${e.description}\n  -> ${e.undoHint}`);
-  return 0;
+  return r.complete ? 0 : 1;
 }
 
 // --------------------------------------------------------------- uninstall
 async function cmdUninstall() {
   console.log("Scope: removes KIT-OWNED integrations and artifacts. Your ZCode Desktop login,");
   console.log("~/.zcode-proxy/credentials.json (shared credential store) and harness data are NOT deleted.");
-  const ids = listTransactions(BACKUP_DIR);
+  ensureState(ctx);
+  acquireLock(BACKUP_DIR);
   let externalUndone = true;
-  for (let i = ids.length - 1; i >= 0; i--) {
-    const r = rollbackTransaction(BACKUP_DIR, ids[i]);
-    console.log(`rollback ${ids[i]}: ${r.restored.length} restored, ${r.removed.length} removed, ${r.conflicts.length} conflict(s)`);
+  try {
+    const ids = listTransactions(BACKUP_DIR);
+    const serverJs = join(ctx.mcpDir, "dist", "index.js");
     // AUD-008: execute the KNOWN kit registrations' undo hints ourselves
     // (currently only the claude user-scope MCP registration); never run
     // arbitrary strings from manifests — only the exact undo command shape
-    // we issued.
-    for (const e of r.external) {
-      if (e.undoHint === 'claude mcp remove zcode-harness --scope user') {
-        const res = spawnSync("claude", ["mcp", "remove", "zcode-harness", "--scope", "user"], { stdio: "inherit" });
-        if (res.status !== 0) externalUndone = false;
-      } else {
+    // we issued. F-09: only remove a registration that points at THIS copy.
+    const undoExternal = (e) => {
+      if (e.undoHint !== 'claude mcp remove zcode-harness --scope user') return false;
+      const get = runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
+      if (get.error) { console.error(`claude mcp get failed: ${get.error.message}`); return false; }
+      if (get.status !== 0) return /not found|no.*server.*named/i.test(`${get.stdout ?? ''}\n${get.stderr ?? ''}`);
+      if (!(get.stdout ?? "").includes(serverJs)) {
+        console.log('claude "zcode-harness" is registered by another kit copy — left untouched');
+        return true;
+      }
+      const res = runCommandSync("claude", ["mcp", "remove", "zcode-harness", "--scope", "user"], { stdio: "inherit" });
+      if (res.error) console.error(`claude mcp remove failed: ${res.error.message}`);
+      return !res.error && res.status === 0;
+    };
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const r = rollbackTransaction(BACKUP_DIR, ids[i], { undoExternal });
+      if (!r.complete) externalUndone = false;
+      console.log(`rollback ${ids[i]}: ${r.restored.length} restored, ${r.removed.length} removed, ${r.conflicts.length} conflict(s)`);
+      for (const conflict of r.conflicts) console.log(`CONFLICT (left untouched): ${conflict}`);
+      for (const e of r.external) {
         console.log(`manual undo required: ${e.description}\n  -> ${e.undoHint}`);
         externalUndone = false;
       }
     }
+  } finally {
+    releaseLock(join(BACKUP_DIR, ".setup-lock"));
   }
-  // Kit-owned generated artifacts (recorded in transactions; delete leftovers too).
-  if (existsSync(ctx.generated)) rmSync(ctx.generated, { recursive: true, force: true });
-  console.log("generated/ removed. The proxy key (.proxykey) and logs stay; delete manually if desired.");
+  console.log("Recorded kit files were rolled back. Unrecorded generated data, Codex sessions, proxy key and logs are preserved.");
   // The installers leave a user-scope `zcode-kit` command shim behind; remove
   // it only when it points at THIS root — a shim owned by another install
   // (or unreadable) is never touched.
@@ -532,14 +573,18 @@ async function cmdUninstall() {
     : [join(ctx.home, ".local", "bin", "zcode-kit")];
   for (const shim of shimPaths) {
     try {
-      if (existsSync(shim) && readFileSync(shim, "utf8").includes(join(ctx.root, "cli", "zcode-kit.mjs"))) {
+      const companion = shim.replace(/\.cmd$/i, '.ps1');
+      if (process.platform === 'win32' && existsSync(shim) && existsSync(companion) && readFileSync(shim, 'utf8').includes('"%~dp0zcode-kit.ps1"') && readFileSync(companion, 'utf8').includes(join(ctx.root, 'cli', 'zcode-kit.mjs').replaceAll("'", "''"))) {
+        rmSync(shim); rmSync(companion);
+        console.log(`removed kit-owned command shims: ${shim}`);
+      } else if (existsSync(shim) && readFileSync(shim, "utf8").includes(join(ctx.root, "cli", "zcode-kit.mjs"))) {
         rmSync(shim);
         console.log(`removed kit-owned command shim: ${shim}`);
       }
     } catch { /* unreadable shim is not ours to delete */ }
   }
   if (!externalUndone) {
-    console.error("uninstall incomplete: at least one external registration could not be removed (see output above).");
+    console.error("uninstall incomplete: a file conflict or external registration remains (see output above).");
     return 1;
   }
   return 0;

@@ -80,7 +80,7 @@ export function chatCompletionsToResponses(
   return {
     id,
     object: "response",
-    created_at: Date.now(),
+    created_at: Math.floor(Date.now() / 1000),
     model: model || resp.model || "",
     status,
     output,
@@ -295,7 +295,7 @@ export function newResponsesStreamState(
   return {
     responseId: opts.responseId ?? generateResponsesId(),
     model,
-    createdAt: Date.now(),
+    createdAt: Math.floor(Date.now() / 1000),
     sequenceNumber: 0,
     createdSent: false,
     completedSent: false,

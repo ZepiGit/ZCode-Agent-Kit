@@ -23,8 +23,9 @@ import { createServer as createHttpServer, type IncomingMessage, type ServerResp
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { buildTools, type ToolContext, toolTextPayload } from "./tools.js";
 import { listResources, readResource, type ResourceContext } from "./resources.js";
+import { validateArguments } from "./validate.js";
 import { createLogger } from "../util/log.js";
-import { redactDeep } from "../security/redact.js";
+import { redactDeep, redactText } from "../security/redact.js";
 
 const log = createLogger("mcp");
 
@@ -65,14 +66,18 @@ function buildServer(opts: BridgeServerOptions): Server {
       };
     }
     try {
+      // D-09: enforce the declared inputSchema before the handler sees args.
+      validateArguments(tool.inputSchema, args);
       const result = await tool.handler(args);
       const text = toolTextPayload(result);
+      if (tool.mutating) log.info("mutating tool call", { tool: name });
       return {
         content: [{ type: "text", text }],
         structuredContent: redactDeep(result) as Record<string, unknown>,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      // D-10: error texts can echo harness payloads — redact them too.
+      const message = redactText(err instanceof Error ? err.message : String(err));
       log.warn("tool failed", { tool: name, error: message });
       return {
         isError: true,
@@ -90,7 +95,7 @@ function buildServer(opts: BridgeServerOptions): Server {
     try {
       return await readResource(opts.resourceCtx, uri);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = redactText(err instanceof Error ? err.message : String(err));
       throw Object.assign(new Error(message), { code: -32002 });
     }
   });
@@ -98,12 +103,12 @@ function buildServer(opts: BridgeServerOptions): Server {
   return server;
 }
 
-export async function serveStdio(opts: BridgeServerOptions): Promise<void> {
+export async function serveStdio(opts: BridgeServerOptions): Promise<() => Promise<void>> {
   const server = buildServer(opts);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   log.info("bridge ready on stdio");
-  // Keep the process alive until stdin closes (transport handles it).
+  return () => server.close();
 }
 
 export async function serveHttp(

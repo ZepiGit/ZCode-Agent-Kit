@@ -10,8 +10,14 @@
  *   FAKE_PERMISSION=0|1             raise interaction/requestPermission during turn
  *   FAKE_USERINPUT=0|1              raise interaction/requestUserInput during turn
  *   FAKE_SLOW_CREATE_MS=...         delay before session/create answers
+ *   FAKE_FOREIGN_WORKSPACE=...      seed one non-allowlisted session
+ *   FAKE_EXIT_ON_SEND=0|1           exit after accepting session/send
+ *   FAKE_HANG_AFTER_REQUESTS=N      stop answering after N requests
+ *   FAKE_NO_STREAM=0|1              omit model.streaming events
+ *   FAKE_RUNTIME_LOG=...            append received method/params as JSONL
  */
 import readline from "node:readline";
+import fs from "node:fs";
 
 // Discovery probe: answer `--version` like the real harness and exit.
 if (process.argv.includes("--version")) {
@@ -22,6 +28,7 @@ if (process.argv.includes("--version")) {
 const env = (k, d) => process.env[k] ?? d;
 let seq = 0;
 let serverReqCounter = 0;
+let requestCount = 0;
 const sessions = new Map();
 let workspaceRevision = 3;
 const wsDefaults = { mode: "build", model: { providerId: "fake", modelId: "FAKE-Main" }, thoughtLevel: "max" };
@@ -77,6 +84,26 @@ function sessionRecord(sessionId, workspacePath, mode) {
   };
 }
 
+const foreignWorkspace = env("FAKE_FOREIGN_WORKSPACE", "");
+if (foreignWorkspace) {
+  const sessionId = "sess_foreign-fixture";
+  sessions.set(sessionId, {
+    record: sessionRecord(sessionId, foreignWorkspace, "build"),
+    events: [],
+    stopped: false,
+    status: "idle",
+    transcript: [
+      { info: { role: "assistant", sessionId }, parts: [{ type: "text", text: "FOREIGN-SECRET-TRANSCRIPT" }] },
+    ],
+  });
+}
+
+function logRequest(method, params) {
+  const logPath = env("FAKE_RUNTIME_LOG", "");
+  if (!logPath) return;
+  fs.appendFileSync(logPath, JSON.stringify({ method, params }) + "\n", "utf8");
+}
+
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", async (line) => {
   if (!line.trim()) return;
@@ -102,6 +129,10 @@ rl.on("line", async (line) => {
   if (msg.id === undefined) return; // notification: ignore
 
   const { id, method, params = {} } = msg;
+  requestCount += 1;
+  logRequest(method, params);
+  const hangAfter = Number(env("FAKE_HANG_AFTER_REQUESTS", "0"));
+  if (hangAfter > 0 && requestCount > hangAfter) return;
   switch (method) {
     case "workspace/readState": {
       const wp = params.workspace?.workspacePath ?? "C:\\fake";
@@ -170,6 +201,7 @@ rl.on("line", async (line) => {
       return;
     }
     case "session/subscribe": {
+      if (env('FAKE_SUBSCRIBE_FAIL', '0') === '1') { write({ id, error: { code: -32603, message: 'fixture subscribe failure' } }); return; }
       if (!sessions.has(params.sessionId)) {
         write({ id, error: { code: -32602, message: "Session not found" } });
         return;
@@ -232,7 +264,14 @@ rl.on("line", async (line) => {
         write({ id, error: { code: -32602, message: "Invalid params — content: expected string" } });
         return;
       }
-      write({ id, result: { accepted: true, sessionId: params.sessionId, stateRevision: (s.stateRevision = (s.stateRevision ?? 0) + 1) } });
+      const acknowledge = () => write({ id, result: { accepted: true, sessionId: params.sessionId, stateRevision: (s.stateRevision = (s.stateRevision ?? 0) + 1) } });
+      const ackDelay = Number(env('FAKE_ACK_DELAY_MS', '0'));
+      if (ackDelay > 0) setTimeout(acknowledge, ackDelay);
+      else acknowledge();
+      if (env("FAKE_EXIT_ON_SEND", "0") === "1") {
+        setTimeout(() => process.exit(7), 20);
+        return;
+      }
       void runTurn(s, params.sessionId, params.content, params.toolDenylist);
       return;
     }
@@ -341,7 +380,7 @@ async function runTurn(s, sessionId, content, toolDenylist) {
   const turnNo = (s.turnCount = (s.turnCount ?? 0) + 1);
   s.status = "running";
   seq += 1;
-  notify("session/event", { sessionId, seq, type: "turn.started", payload: { turnNumber: turnNo, input: content } });
+  notify("session/event", { sessionId, seq, type: "turn.started", payload: { turnNumber: turnNo, input: content, toolDenylist: toolDenylist ?? null, workspacePath: s.record.workspace.workspacePath } });
 
   if (env("FAKE_PERMISSION", "0") === "1") {
     await new Promise((resolve) => {
@@ -349,7 +388,7 @@ async function runTurn(s, sessionId, content, toolDenylist) {
         "interaction/requestPermission",
         {
           sessionId,
-          toolName: "Bash",
+          toolName: env("FAKE_PERMISSION_TOOL", "Bash"),
           toolInput: { command: "echo hi" },
           reason: "fixture permission",
           options: [
@@ -380,10 +419,13 @@ async function runTurn(s, sessionId, content, toolDenylist) {
 
   // Stream a scripted answer.
   const mode = env("FAKE_TURN", "ok");
-  seq += 1;
-  notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text: "FA" } });
-  seq += 1;
-  notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text: "KE-OK" } });
+  if (mode === "hang") return;
+  if (env("FAKE_NO_STREAM", "0") !== "1") {
+    seq += 1;
+    notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text: "FA" } });
+    seq += 1;
+    notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text: "KE-OK" } });
+  }
   seq += 1;
   notify("session/event", { sessionId, seq, type: "tool.updated", payload: { toolCallId: "tc1", toolName: "Write", state: "completed", input: { file_path: "fixture-output.txt" } } });
   s.tokens = (s.tokens ?? 0) + 42;

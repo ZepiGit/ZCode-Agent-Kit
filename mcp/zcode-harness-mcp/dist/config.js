@@ -41,12 +41,13 @@ export function parseConfig(argv) {
         port: Number(process.env.ZCODE_HARNESS_HTTP_PORT ?? 3322),
         host: process.env.ZCODE_HARNESS_HTTP_HOST ?? "127.0.0.1",
         readOnly: false,
+        allowYolo: process.env.ZCODE_HARNESS_ALLOW_YOLO === "1",
         httpKey: process.env.ZCODE_HARNESS_HTTP_KEY ?? null,
         runtimePathOverride: process.env.ZCODE_HARNESS_RUNTIME_PATH ?? null,
         dataDir: defaultDataDir(),
         allowWorkspaces: splitList(process.env.ZCODE_HARNESS_ALLOW_WORKSPACES),
         interactionPolicy: process.env.ZCODE_HARNESS_INTERACTION_POLICY ?? "deny",
-        interactionAllowlist: splitList(process.env.ZCODE_HARNESS_INTERACTION_ALLOWLIST),
+        interactionAllowlist: splitList(process.env.ZCODE_HARNESS_INTERACTION_ALLOWLIST?.replace(/,/g, ";")),
         interactionTimeoutSec: Number(process.env.ZCODE_HARNESS_INTERACTION_TIMEOUT_SEC ?? 300),
         maxConcurrentTasks: Number(process.env.ZCODE_HARNESS_MAX_CONCURRENT_TASKS ?? 2),
         taskQueueLimit: Number(process.env.ZCODE_HARNESS_TASK_QUEUE_LIMIT ?? 50),
@@ -82,6 +83,9 @@ export function parseConfig(argv) {
                 break;
             case "--read-only":
                 config.readOnly = true;
+                break;
+            case "--allow-yolo":
+                config.allowYolo = true;
                 break;
             case "--http-key":
                 config.httpKey = next() || null;

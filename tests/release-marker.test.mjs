@@ -29,6 +29,7 @@ function packageFixture(t) {
     "cli/adapters/goose.mjs", "proxy/zcode-proxy-manager.mjs", "proxy/resolve-zcode-proxy-key.mjs",
     "proxy/config.example.yaml", "mcp/zcode-harness-mcp/dist/index.js", "setup.mjs",
     "bin/zcode-claude.cmd", "bin/zcode-codex.cmd", "lib/transaction.mjs", "scripts/verify-release-marker.mjs"]) put(path);
+  put('proxy/config.example.yaml', 'auth:\n  proxyApiKey: "GENERATE_ME"\n');
   for (const args of [["init", "--quiet"], ["add", "."]]) {
     const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
