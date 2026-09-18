@@ -70,9 +70,9 @@ test("post-publish verification stops after six misses and does not retry auth f
   let waits = 0;
   await assert.rejects(verifyPublished("1.2.3", {
     run: () => { calls++; return missing; }, sleep: async (ms) => { waits++; assert.equal(ms, 10_000); },
-  }), /not visible.*18 attempts/);
-  assert.equal(calls, 18);
-  assert.equal(waits, 17);
+  }), /not visible.*36 attempts/);
+  assert.equal(calls, 36);
+  assert.equal(waits, 35);
   calls = 0;
   await assert.rejects(verifyPublished("1.2.3", {
     run: () => { calls++; return { status: 1, stdout: '{"error":{"code":"E401"}}', stderr: "" }; },

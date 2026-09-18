@@ -75,7 +75,7 @@ export function lookupVersion(version, { run = runNpm } = {}) {
 export async function verifyPublished(version, { run = runNpm, sleep = setTimeout } = {}) {
   // npm trusted publishing may take several minutes to propagate. Keep each
   // lookup bounded but allow a realistic registry window before failing.
-  const attempts = 18;
+  const attempts = 36;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     if (lookupVersion(version, { run }) === "present") return version;
     if (attempt < attempts) await sleep(10_000);
