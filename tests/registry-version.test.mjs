@@ -61,7 +61,7 @@ test("post-publish verification retries propagation misses and returns the exact
   });
   assert.equal(version, "1.2.3");
   assert.equal(calls, 3);
-  assert.deepEqual(delays, [5000, 5000]);
+  assert.deepEqual(delays, [10_000, 10_000]);
 });
 
 test("post-publish verification stops after six misses and does not retry auth failures", async () => {
@@ -69,10 +69,10 @@ test("post-publish verification stops after six misses and does not retry auth f
   let calls = 0;
   let waits = 0;
   await assert.rejects(verifyPublished("1.2.3", {
-    run: () => { calls++; return missing; }, sleep: async () => { waits++; },
-  }), /not visible.*6 attempts/);
-  assert.equal(calls, 6);
-  assert.equal(waits, 5);
+    run: () => { calls++; return missing; }, sleep: async (ms) => { waits++; assert.equal(ms, 10_000); },
+  }), /not visible.*18 attempts/);
+  assert.equal(calls, 18);
+  assert.equal(waits, 17);
   calls = 0;
   await assert.rejects(verifyPublished("1.2.3", {
     run: () => { calls++; return { status: 1, stdout: '{"error":{"code":"E401"}}', stderr: "" }; },
