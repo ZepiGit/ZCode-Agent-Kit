@@ -10,15 +10,6 @@ Use **your own ZCode Desktop account** with a coding assistant of your choice. T
 - **Models:** `glm-5.3` (text) and `glm-5.3-flash` (text and images). Advertised context: 1M tokens; reasoning levels: `low`, `high`, `max`. Client support and account limits still apply.
 - **Optional MCP bridge:** exposes operations of your installed ZCode runtime. This is separate from model-provider configuration. A running Desktop app does not guarantee standalone MCP model turns; the provider can reject them independently.
 
-## Unreleased audit hardening
-
-- **Model/setup evidence:** Standalone MCP model turns are not guaranteed by a running Desktop app; the provider can reject them independently. If setup saves configuration but its API attempt fails, setup reports a warning: configuration succeeded, model access did not.
-- **Bun and mutable state:** Release installers store Bun's absolute executable path in `.bun-path` and do not change global PATH; kit restarts use that recorded path. npm mutable state lives outside `node_modules`: `%LOCALAPPDATA%\zcode-agent-kit\installs\<root-hash>` on Windows, or `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>` on POSIX. `ZCODE_KIT_STATE_DIR` must be absolute and dedicated to that installation. Source/tarball installs keep mutable state in their root. Before an npm package update, run setup to migrate legacy state; old data remains in place, and already-lost legacy data cannot be reconstructed.
-- **MCP trust:** YOLO is enabled only by explicit `--allow-yolo`; workspace allowlists also constrain access through session IDs, logs are bounded, and every client using the same bridge shares one trust domain.
-- **CAPTCHA boundary:** Remote CAPTCHA JavaScript is not OS-isolated. `createDom` without injected local test fixtures is disabled by default. Standalone use can opt in only for trusted deployments with `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1`; kit `proxyEnv` removes that override and provides no opt-in. Start-plan requests can therefore fail closed; none of this bypasses provider blocks.
-- **Prompt/privacy:** Start-plan prepends vendored ZCode system blocks to client prompts and removes client `cache_control` markers. The kit uses the neutral CWD `/workspace`; platform, shell, OS version, locale, trace and device metadata may still reach the upstream. This is neither a provider-compatibility nor an access guarantee.
-- **Release automation:** `main` and workflow-dispatch release triggers are intentional. `ALLOW_PUBLISH` checks version consistency only; it is not human or legal approval.
-
 
 ## 1. Before you install
 
