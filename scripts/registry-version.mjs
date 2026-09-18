@@ -73,12 +73,14 @@ export function lookupVersion(version, { run = runNpm } = {}) {
 }
 
 export async function verifyPublished(version, { run = runNpm, sleep = setTimeout } = {}) {
-  // Six 20-second process bounds plus five 5-second waits: at most ~145s.
-  for (let attempt = 1; attempt <= 6; attempt++) {
+  // npm trusted publishing may take several minutes to propagate. Keep each
+  // lookup bounded but allow a realistic registry window before failing.
+  const attempts = 18;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     if (lookupVersion(version, { run }) === "present") return version;
-    if (attempt < 6) await sleep(5000);
+    if (attempt < attempts) await sleep(10_000);
   }
-  throw new Error(`zcode-agent-kit@${version} not visible after 6 attempts`);
+  throw new Error(`zcode-agent-kit@${version} not visible after ${attempts} attempts`);
 }
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
