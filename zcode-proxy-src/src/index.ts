@@ -20,6 +20,7 @@ import { buildServerOptions } from "./server/server-options.js";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
+import { installGuestErrorBoundary } from "./runtime/guest-error.js";
 
 export const VERSION = "4.6.4";
 
@@ -162,6 +163,7 @@ Examples:
 }
 
 async function serve(configPath: string | undefined, debug: boolean): Promise<void> {
+  if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA === "1") installGuestErrorBoundary();
   const path = configPath ?? process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
   if (ensureConfigFile(path)) {
     ensureDeviceMidInConfig(path);
