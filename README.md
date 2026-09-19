@@ -1,12 +1,12 @@
 # ZCode Agent Kit
 
-Use your ZCode Desktop account with the coding assistant you already use.
+Use your ZCode account with the coding assistant you already use.
 
 ![ZCode Desktop connected through Agent Kit to coding assistants](zcode_agent_kit.png)
 
 *The kit runs locally; model requests go to ZCode. The illustration is not a promise of free tokens or offline models.*
 
-Keep your coding assistant. Use your existing ZCode models and quota through a local connection. You do not need to configure a separate model API by hand for the launchers below.
+Keep your coding assistant. Use your existing ZCode models and quota/tokens through a local connection.
 
 **The path:** prepare your account → install the kit → ask for one reply → start working.
 
