@@ -9,8 +9,8 @@
  * emulation gap must fail that one solve — the pool retries — while a genuine
  * fault in the proxy still terminates loudly.
  *
- * `serve` mode already draws that line (captcha-happy.ts logs and continues).
- * The TUI's own uncaughtException handler used to exit(1) for everything,
+ * Opted-in `serve` installs the process boundary below; the TUI classifies
+ * errors in its own handler. The TUI previously exited(1) for everything,
  * which turned a recoverable guest error into a dead proxy:
  *
  *     zcode-proxy: tui crashed: ReferenceError: moveBy is not defined
@@ -56,6 +56,29 @@ export function isGuestOriginError(err: unknown): boolean {
     if (typeof e.message === "string" && GUEST_SCRIPT_HOST.test(e.message)) return true;
   }
   return false;
+}
+
+let boundaryInstalled = false;
+
+/** Headless entry points have no TUI handler for out-of-band guest callbacks. */
+export function installGuestErrorBoundary(): void {
+  if (boundaryInstalled) return;
+  boundaryInstalled = true;
+  const handle = (err: unknown): void => {
+    const guestFrame = [...errorChain(err)].some((link) => {
+      const e = link as { stack?: unknown; sourceURL?: unknown };
+      return (typeof e.sourceURL === "string" && GUEST_SCRIPT_HOST.test(e.sourceURL)) ||
+        (typeof e.stack === "string" && e.stack.split("\n").some((line) => /^\s*at\s/.test(line) && GUEST_SCRIPT_HOST.test(line)));
+    });
+    if (guestFrame) {
+      process.stderr.write(`[captcha-guest-error] ${describeGuestError(err)}\n`);
+      return;
+    }
+    process.stderr.write(`zcode-proxy: uncaught error: ${String(err)}\n${(err as Error)?.stack ?? ""}\n`);
+    process.exit(1);
+  };
+  process.on("uncaughtException", handle);
+  process.on("unhandledRejection", handle);
 }
 
 /** One-line render of a guest error for the log pane / stderr. */

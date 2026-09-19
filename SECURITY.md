@@ -8,10 +8,15 @@ Tests verwenden isolierte Profile und synthetische Credentials; sie sind kein ne
 Live-Modell-, Linux- oder macOS-Nachweis. Unabhängige Reviews sind bereichsweise erfolgt,
 eine pauschale Freigabe aller Änderungen ist daraus nicht ableitbar.
 
-- Remote CAPTCHA-JavaScript ist ohne ausdrückliches Standalone-Opt-in deaktiviert.
-  Es gibt **keine OS-Sandbox**; die Egress-Allowlist ist keine Prozessisolation.
-  Das Kit entfernt den unsicheren Opt-in aus seiner Proxy-Umgebung. Start-Plan-Anfragen
-  können deswegen verweigert werden. Lokale Testfixtures laden keine CDN-Skripte.
+- Remote CAPTCHA-JavaScript besitzt **keine OS-Sandbox**; die Egress-Allowlist ist
+  keine Prozessisolation. Standalone-Installationen (Proxy direkt ohne Kit-Manager
+  gestartet) bleiben default gesperrt und erfordern das ausdrückliche Opt-in
+  `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1`. Seit dem Stand 2026-09-19 setzt
+  `proxyEnv` dieses Opt-in für den kit-verwalteten Dienst bewusst selbst: Start-Plan-
+  Endpunkte challengen Anfragen, und ohne Solver scheitern sie fail-closed mit
+  503 `captcha_solver_failed`. Das Opt-in gilt nur für den Loopback-only,
+  Bearer-authentifizierten Einzelplatzdienst des Kits; Challenge-Lösung ist keine
+  zugesagte Umgehung von Provider-Sperren. Lokale Testfixtures laden keine CDN-Skripte.
 - npm-Zustand wird außerhalb des austauschbaren Paketverzeichnisses gespeichert;
   Quell-/Tarball-Kopien behalten ihren lokalen Zustand. Migration beim Setup durchführen,
   bevor ein altes npm-Paket ersetzt wird. Bereits verlorene Daten werden nicht rekonstruiert.
@@ -115,7 +120,9 @@ fail-closed-Claim-Defaults.
    automatisierte Challenge-Lösung sei keine Human-/Bot-Verifikationsumgehung,
    war nicht belastbar. Der aktuelle Default blockiert die nicht isolierte
    Ausführung fremder Skripte; es wird keine Freigabe oder Umgehung von
-   Provider-Sperren zugesagt.
+   Provider-Sperren zugesagt. Stand 2026-09-19: der kit-verwaltete Dienst
+   optet über `proxyEnv` bewusst ein (siehe oben) — die Risikobeschreibung
+   (keine OS-Sandbox) bleibt unverändert gültig.
 2. **Automatisches Trial-Claiming: fail-closed.** `CLAIM_ENABLED`/`CLAIM_AUTO`
    defaulten jetzt auf `false` (vorher `true`, wenn der claim-Block fehlte).
    Aktivierung erfordert explizit `claim.enabled: true` in der eigenen Config —

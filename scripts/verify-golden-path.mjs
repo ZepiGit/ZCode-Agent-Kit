@@ -16,6 +16,7 @@ import { join, resolve, dirname } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { once } from 'node:events';
+import { proxyEnv as managedProxyEnv } from '../lib/proxy-env.mjs';
 
 export const MODELS = Object.freeze(['glm-5.3-flash', 'glm-5.3']);
 export const PROMPT = 'Antworte mit 52';
@@ -144,7 +145,7 @@ export async function runLiveGolden(options = {}) {
     if (!report.isolation.staticOverrideContract) throw new Error('OMP override contract not established');
     report.isolation.bunHome = probe(bun, `import {homedir} from 'node:os'; console.log(homedir()===${JSON.stringify(home)})`, env, root);
     report.isolation.ompDirs = probe(bun, `import {getAgentDir,getConfigRootDir} from ${JSON.stringify(pathToFileURL(dirs).href)}; console.log(getAgentDir()===${JSON.stringify(env.PI_CODING_AGENT_DIR)} && getConfigRootDir()===${JSON.stringify(join(home, '.omp'))})`, env, root);
-    const proxyEnv = { ...env, ZCODE_PROXY_CONFIG: config, ZCODE_PROXY_CREDENTIALS_PATH: credentials, ZCODE_PROXY_CREDENTIAL_SECRET: process.env.ZCODE_PROXY_CREDENTIAL_SECRET ?? `${originalHome}-${process.platform}-${process.arch}` };
+    const proxyEnv = managedProxyEnv({ config }, { ...env, ZCODE_PROXY_CREDENTIALS_PATH: credentials, ZCODE_PROXY_CREDENTIAL_SECRET: process.env.ZCODE_PROXY_CREDENTIAL_SECRET ?? `${originalHome}-${process.platform}-${process.arch}` });
     report.isolation.proxyStore = probe(bun, `import {getStorePath} from ${JSON.stringify(pathToFileURL(store).href)}; console.log(getStorePath()===${JSON.stringify(credentials)})`, proxyEnv, root);
     if (!report.isolation.bunHome || !report.isolation.ompDirs || !report.isolation.proxyStore) throw new Error('runtime path isolation probe failed');
     const mockKey = randomBytes(24).toString('hex');

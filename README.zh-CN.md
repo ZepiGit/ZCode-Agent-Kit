@@ -15,7 +15,7 @@
 - Desktop 正在运行并不保证独立 MCP 模型调用成功，提供方仍可能拒绝。setup 保存配置后若模型测试失败，会报告警告，而不是宣称模型访问成功。
 - 发布安装器将 Bun 绝对路径保存在 `.bun-path`，不修改全局 PATH。npm 状态移到 `node_modules` 之外：`%LOCALAPPDATA%/zcode-agent-kit/installs/<root-hash>` 或 `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>`。`ZCODE_KIT_STATE_DIR` 必须是该安装独占的绝对路径。源码/tarball 仍在根目录保存状态。替换旧 npm 包前先运行 setup 迁移；原数据保留，但已丢失的数据无法重建。
 - MCP 工作区允许列表也约束会话 ID；`yolo` 必须通过 `--allow-yolo` 显式启用。日志有容量限制，同一桥的客户端共享信任域。
-- 远程 CAPTCHA JavaScript 没有操作系统沙箱，默认禁用。仅可信 standalone 环境可显式设置 `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1`；Kit 会移除此开关。Start-plan 请求因此可能安全拒绝，不绕过提供方限制。
+- 远程 CAPTCHA JavaScript 没有操作系统沙箱，Kit 外部默认禁用：手动启动的代理需要显式设置 `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1`。Kit 托管的服务通过 `proxyEnv` 自动启用该开关并自动解决 Captcha 挑战（进程内执行、无 OS 沙箱）；这不会绕过提供方限制。
 - Start-plan 在客户端提示前加入随附的 ZCode 系统块并移除客户端 `cache_control`。Kit 使用中性 CWD `/workspace`，但平台、shell、系统版本、区域、追踪及设备元数据仍可能发送上游；不保证兼容性或访问权。
 - main/dispatch 自动发布是有意设计。`ALLOW_PUBLISH` 只验证版本一致性，不是人工或法律授权。这些源码改动不证明已有对应发布版。
 

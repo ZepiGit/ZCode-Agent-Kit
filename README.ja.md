@@ -15,7 +15,7 @@
 - Desktop の起動は独立した MCP モデル呼び出しの成功を保証しません。設定保存後に setup のモデルテストが失敗した場合は警告であり、モデル利用成功ではありません。
 - リリースインストーラーは Bun の絶対パスを `.bun-path` に保存し、グローバル PATH を変更しません。npm の状態は `node_modules` 外の `%LOCALAPPDATA%/zcode-agent-kit/installs/<root-hash>` または `${XDG_STATE_HOME:-$HOME/.local/state}/zcode-agent-kit/installs/<hash>` に保存します。`ZCODE_KIT_STATE_DIR` は絶対パスかつ当該インストール専用としてください。ソース/tarball はルート内を使います。古い npm パッケージを置換する前に setup で移行してください。元データは残りますが、既に失われたデータは復元できません。
 - MCP 許可リストはセッション ID 経由の操作にも適用され、`yolo` は `--allow-yolo` が必要です。ログは上限付きで、同じブリッジのクライアントは信頼境界を共有します。
-- リモート CAPTCHA JavaScript に OS サンドボックスはなく、既定で無効です。信頼できる standalone 環境のみ `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1` で明示許可できますが、キットはこの変数を除去します。Start-plan は安全側に拒否される場合があり、プロバイダーの制限は回避しません。
+- リモート CAPTCHA JavaScript に OS サンドボックスはなく、キット外部では既定で無効です。手動で起動したプロキシには明示的な `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1` が必要です。キット管理のサービスは `proxyEnv` 経由で自動的に許可し、CAPTCHA チャレンジを自動解決します（プロセス内、OS サンドボックスなし）。プロバイダーの制限を回避するものではありません。
 - Start-plan は同梱 ZCode システムブロックを追加し、クライアントの `cache_control` を除去します。キット CWD は `/workspace` ですが、OS・シェル・バージョン・ロケール・トレース・機器情報は送信され得ます。互換性や利用権を保証しません。
 - main/dispatch の自動公開は意図した動作です。`ALLOW_PUBLISH` はバージョン整合性のみを確認し、人間の承認や法的許可ではありません。本修正は公開済みリリースの証拠ではありません。
 
