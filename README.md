@@ -144,7 +144,7 @@ zcode-kit auth status
 
 ## Before you use real project data
 
-Use only an account you are authorized to use. Keep the proxy on localhost and never share `.proxykey`, credentials, or generated configuration files.
+Keep the proxy on localhost and never share `.proxykey`, credentials, or generated configuration files.
 
 **Read the [security policy (German)](SECURITY.md):** the managed proxy can execute vendor CAPTCHA JavaScript without an OS sandbox. It remains loopback-only and bearer-authenticated, but those controls are not process isolation. This does not bypass account restrictions or guarantee that every challenge succeeds.
 
