@@ -47,29 +47,29 @@ macOS/Linux also need `curl`, `tar`, and a SHA-256 utility; Bun bootstrap needs 
 
 </details>
 
-## Step 3 — Confirm it works
+## Step 3 — Use GLM-5.3(-flash) in your harness of choice
 
 Open a new terminal and run `zcode-kit help`. Then open a terminal **inside your own project**, not the kit folder. Choose the assistant you installed:
 
 **OMP:**
 
 ```sh
-omp -p --model zcode/glm-5.3-flash "Reply with 52"
+omp -p --model zcode/glm-5.3-flash "Reply with ok"
 ```
 
 **Claude Code:**
 
 ```sh
-zcode-kit run claude-code -- -p "Reply with 52" --model glm-5.3-flash
+zcode-kit run claude-code -- -p "Reply with ok" --model glm-5.3-flash
 ```
 
 **Codex:**
 
 ```sh
-zcode-kit run codex -- exec "Reply with 52" -m glm-5.3-flash
+zcode-kit run codex -- exec "Reply with ok" -m glm-5.3-flash
 ```
 
-These commands start/check the proxy automatically. A reply of `52` confirms the first model call. A successful setup message alone does not.
+These commands start/check the proxy automatically. A reply of `ok` confirms the first model call. A successful setup message alone does not.
 
 **Got the reply?** Your account, proxy, and selected assistant worked together for that request. You can now use that assistant in your project.
 
