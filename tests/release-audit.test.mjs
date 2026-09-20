@@ -60,7 +60,7 @@ test("release workflow keeps automatic main releases while isolating write and O
   assert.match(publishJob, /permissions:\n\s+contents: write\n\s+id-token: write/);
   assert.equal((workflow.match(/id-token:\s*write/g) ?? []).length, 1, "OIDC must exist only on the publish job");
   assert.match(publishJob, /if:\s*\$\{\{[^\n]*(refs\/heads\/main|github\.ref_type\s*==\s*'tag')[^\n]*\}\}/);
-  assert.match(publishJob, /git push origin HEAD:main "v\$NEW"/, "auto-bump may only update main");
+  assert.match(publishJob, /git push --atomic origin HEAD:main "v\$NEW"/, "auto-bump may only update main and must move commit and tag together");
   assert.match(publishJob, /echo "\$NEW" > pack\/ALLOW_PUBLISH/, "auto-version consistency marker remains intentional");
   assert.doesNotMatch(workflow, /^\s*environment:/m, "automatic releases must not gain a manual environment gate");
 });
