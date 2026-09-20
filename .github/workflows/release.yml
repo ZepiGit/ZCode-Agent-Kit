@@ -105,7 +105,23 @@ jobs:
             git add package.json package-lock.json pack/ALLOW_PUBLISH
             git commit -m "chore(release): v$NEW (auto-bump by release workflow) [skip ci]"
             git tag "v$NEW"
-            git push origin HEAD:main "v$NEW"
+            # The bump commit and its tag must land together: an interleaved
+            # main push previously rejected HEAD:main while the tag still went
+            # through, leaving an orphan tag with no release or npm version.
+            # Push atomically; if main moved ahead, rebase the version-only
+            # bump and retry a bounded number of times.
+            PUSHED=0
+            for attempt in 1 2 3; do
+              if git push --atomic origin HEAD:main "v$NEW"; then PUSHED=1; break; fi
+              echo "push attempt $attempt rejected; rebasing onto origin/main"
+              git fetch origin main
+              git rebase origin/main || break
+              git tag -f "v$NEW" HEAD
+            done
+            if [ "$PUSHED" != "1" ]; then
+              echo "release push failed after retries; no remote tag was left behind"
+              exit 1
+            fi
             echo "VERSION=$NEW" >> "$GITHUB_ENV"
             echo "auto-bumped $CUR -> $NEW"
           else
@@ -174,7 +190,18 @@ jobs:
           fi
       - name: Publish to npm via OIDC trusted publishing
         if: env.SKIP_PUBLISH != '1'
-        run: cd pack/dist && npm publish --provenance
+        run: |
+          cd pack/dist
+          # The registry occasionally answers publishes with transient 5xx
+          # (maintenance windows). Retry a bounded number of times before
+          # failing so short outages do not require a manual rerun.
+          PUBLISHED=0
+          for attempt in 1 2 3; do
+            if npm publish --provenance; then PUBLISHED=1; break; fi
+            echo "npm publish attempt $attempt failed"
+            if [ "$attempt" -lt 3 ]; then sleep 60; fi
+          done
+          [ "$PUBLISHED" = "1" ] || exit 1
       - name: Verify exact published version is visible on npm
         if: env.SKIP_PUBLISH != '1'
         timeout-minutes: 3
