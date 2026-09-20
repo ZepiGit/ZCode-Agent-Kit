@@ -4,19 +4,18 @@ Use your ZCode account with the coding assistant you already use.
 
 ![ZCode Desktop connected through Agent Kit to coding assistants](zcode_agent_kit.png)
 
-*The kit runs locally; model requests go to ZCode. The illustration is not a promise of free tokens or offline models.*
+*The kit runs locally; model requests go to ZCode.*
 
 Keep your coding assistant. Use your existing ZCode models and quota/tokens through a local connection.
 
-**The path:** prepare your account → install the kit → ask for one reply → start working.
+**The path:** prepare your account → install the kit → Use GLM-5.3(-flash) / start working.
 
 ## Step 1 — Check what you need
 
 - [ZCode Desktop](https://zcode.z.ai/en), signed in to your own account with available model quota.
 - [Node.js 20 or newer](https://nodejs.org/). Check with `node --version` in a new terminal.
-- A coding assistant installed separately. The kit connects it; it does not install it.
+- A coding assistant installed separately. The kit connects it to ZCode.
 
-The kit does not create an account, add quota, or grant unlimited model access. You only need one assistant to get started.
 
 ## Step 2 — Install the kit once
 
