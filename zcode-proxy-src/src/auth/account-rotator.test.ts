@@ -8,11 +8,16 @@ const accounts: AccountProfile[] = [
 ];
 
 describe("account rotator", () => {
-  it("selects deterministic least-recently-used credentials", () => {
+  it("keeps one account active until an explicit quota signal rotates it", () => {
     let now = 1000;
-    const rotator = createAccountRotator(accounts, { now: () => now });
+    const rotator = createAccountRotator(accounts, { now: () => now, cooldownMs: 10 });
     expect(rotator.getCredentialHandle().id).toBe("a");
+    expect(rotator.getCredentialHandle().id).toBe("a");
+    rotator.markExhausted("a", "1005");
     expect(rotator.getCredentialHandle().id).toBe("b");
+    expect(rotator.getCredentialHandle().id).toBe("b");
+    rotator.markExhausted("b", "1005");
+    now = 1011;
     expect(rotator.getCredentialHandle().id).toBe("a");
   });
 
@@ -23,6 +28,10 @@ describe("account rotator", () => {
     expect(rotator.getCredentialHandle().id).toBe("b");
     expect(rotator.list().find((a) => a.id === "a")?.state).toBe("exhausted");
     now = 1101;
+    // Reset makes A eligible again, but the currently active B remains
+    // sticky until B itself reports exhaustion.
+    expect(rotator.getCredentialHandle().id).toBe("b");
+    rotator.markExhausted("b", "1005", now + 100);
     expect(rotator.getCredentialHandle().id).toBe("a");
     expect(rotator.list().find((a) => a.id === "a")?.state).toBe("active");
   });
@@ -46,4 +55,3 @@ describe("account rotator", () => {
     expect(rotator.list().find((a) => a.id === "a")?.state).toBe("ready");
   });
 });
-
