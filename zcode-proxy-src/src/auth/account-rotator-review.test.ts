@@ -129,18 +129,23 @@ describe("account rotator review regressions", () => {
     process.env.ZCODE_PROXY_CREDENTIAL_SECRET = secret;
     try {
       await saveAccountStore([], { path });
-      const addInChild = (id: string): Promise<boolean> => {
-        const child = Bun.spawn([process.execPath, "-e", `const s = await import(${JSON.stringify(moduleUrl)}); await s.addAccount({id:${JSON.stringify(id)},credential:{provider:"zai",apiKey:${JSON.stringify(`child-key-${id}`)}}},{path:${JSON.stringify(path)}});`], {
+      const addInChild = (id: string): Promise<number> => {
+        const child = Bun.spawn([process.execPath, "-e", `const s = await import(${JSON.stringify(moduleUrl)}); try { await s.addAccount({id:${JSON.stringify(id)},credential:{provider:"zai",apiKey:${JSON.stringify(`child-key-${id}`)}}},{path:${JSON.stringify(path)}}); } catch (error) { if (error.code === "locked") process.exit(75); throw error; }`], {
           env: { ...process.env, ZCODE_PROXY_CREDENTIAL_SECRET: secret },
           stdout: "ignore",
           stderr: "ignore",
         });
-        return child.exited.then((code) => code === 0);
+        return child.exited;
       };
       const outcomes = await Promise.all([addInChild("child-a"), addInChild("child-b")]);
-      expect(outcomes.filter(Boolean).length).toBe(1);
-      if (!outcomes[0]) await addAccount({ id: "child-a", credential: { provider: "zai", apiKey: "child-key-child-a" } }, { path });
-      if (!outcomes[1]) await addAccount({ id: "child-b", credential: { provider: "zai", apiKey: "child-key-child-b" } }, { path });
+      expect(outcomes.every((code) => code === 0 || code === 75)).toBe(true);
+      const successfulIds = ["child-a", "child-b"].filter((_, index) => outcomes[index] === 0);
+      expect(successfulIds.length).toBeGreaterThanOrEqual(1);
+      // Both may succeed when their lock intervals do not overlap. Verify all
+      // successful writes before retrying only the child rejected by the lock.
+      expect((await loadAccountStoreSnapshot({ path })).accounts.map((account) => account.id).sort()).toEqual(successfulIds);
+      if (outcomes[0] === 75) await addAccount({ id: "child-a", credential: { provider: "zai", apiKey: "child-key-child-a" } }, { path });
+      if (outcomes[1] === 75) await addAccount({ id: "child-b", credential: { provider: "zai", apiKey: "child-key-child-b" } }, { path });
       expect((await loadAccountStoreSnapshot({ path })).accounts.map((account) => account.id).sort()).toEqual(["child-a", "child-b"]);
     } finally {
       if (previous === undefined) delete process.env.ZCODE_PROXY_CREDENTIAL_SECRET;
