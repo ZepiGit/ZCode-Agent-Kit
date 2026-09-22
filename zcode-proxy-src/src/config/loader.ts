@@ -4,7 +4,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
-import type { ClientIdentityConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
+import type { AccountsConfig, ClientIdentityConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
 
 /**
  * Environment variable keys that override YAML values.
@@ -30,6 +30,8 @@ const ENV = {
   CLAIM_POLL_INTERVAL_MS: "ZCODE_CLAIM_POLL_INTERVAL_MS",
   ENDPOINT_ROUTING_ENABLED: "ZCODE_ENDPOINT_ROUTING",
   CLIENT_SIGNING_ENABLED: "ZCODE_CLIENT_SIGNING",
+  ACCOUNTS_ENABLED: "ZCODE_ACCOUNTS_ENABLED",
+  ACCOUNTS_PATH: "ZCODE_PROXY_ACCOUNTS_PATH",
 } as const;
 
 const DEFAULTS = {
@@ -81,6 +83,7 @@ const DEFAULTS = {
   ENDPOINT_ROUTING_ORIGIN: "https://zcode.z.ai",
   CLIENT_SIGNING_ENABLED: true,
   CLIENT_SIGNING_ORIGIN: "https://zcode.z.ai",
+  ACCOUNTS_ENABLED: false,
 };
 
 /** Printable-ASCII gate copied from the ZCode bundle's `rYn` helper. */
@@ -105,6 +108,7 @@ export function loadConfig(path: string): ProxyConfig {
   // --- auth ---
   const proxyApiKey = process.env[ENV.PROXY_API_KEY] ?? parsed?.auth?.proxyApiKey;
   const oauthCredentialsPath = parsed?.auth?.oauthCredentialsPath;
+  const accounts = resolveAccountsConfig(parsed?.auth?.accounts);
 
   // --- provider ---
   const provider = resolveProvider(process.env[ENV.PROVIDER] ?? parsed?.provider);
@@ -148,7 +152,7 @@ export function loadConfig(path: string): ProxyConfig {
 
   const config: ProxyConfig = {
     server: { port, host },
-    auth: { proxyApiKey, oauthCredentialsPath },
+    auth: { proxyApiKey, oauthCredentialsPath, accounts },
     provider,
     plan,
     providers: { zai, bigmodel },
@@ -167,6 +171,21 @@ export function loadConfig(path: string): ProxyConfig {
 
   validate(config);
   return config;
+}
+
+/** Resolve the optional encrypted account pool configuration. */
+function resolveAccountsConfig(raw: unknown): AccountsConfig {
+  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const enabledEnv = process.env[ENV.ACCOUNTS_ENABLED];
+  const pathEnv = process.env[ENV.ACCOUNTS_PATH];
+  const rawPath = typeof obj.path === "string" ? obj.path.trim() : "";
+  const path = (pathEnv ?? rawPath).trim();
+  return {
+    enabled: enabledEnv !== undefined
+      ? resolveBool(enabledEnv, DEFAULTS.ACCOUNTS_ENABLED)
+      : resolveBool(obj.enabled, DEFAULTS.ACCOUNTS_ENABLED),
+    ...(path ? { path } : {}),
+  };
 }
 
 function resolveClientIdentity(raw: unknown): ClientIdentityConfig {
