@@ -11,6 +11,8 @@
 //   zcode-kit models [--json] [--show-key]
 //   zcode-kit usage --json
 //   zcode-kit auth status|login|logout
+//   zcode-kit accounts [--json]
+//   zcode-kit accounts remove ID [--yes]
 //   zcode-kit update [--version vX.Y.Z]          checkout installs only; --version = release tag
 //   zcode-kit rollback [tx-id]
 //   zcode-kit uninstall
@@ -81,6 +83,7 @@ async function main() {
     case "models": return cmdModels();
     case "usage": return cmdUsage();
     case "auth": return cmdAuth();
+    case "accounts": return cmdAccounts();
     case "update": return cmdUpdate();
     case "rollback": return cmdRollback();
     case "uninstall": return cmdUninstall();
@@ -99,6 +102,7 @@ function usage(code) {
   zcode-kit doctor [--fix] [--harness <id>] [--json]
   zcode-kit status | models [--json] [--show-key] | usage --json
   zcode-kit auth status|login|logout
+  zcode-kit accounts [--json] | accounts remove ID [--yes]
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
   (setup: --harness <list> limits adapters AND MCP registration; --no-mcp skips registration)
 
@@ -445,6 +449,32 @@ async function cmdAuth() {
   return 2;
 }
 
+// --------------------------------------------------------------- accounts
+// Offline account-pool wrapper. The proxy CLI owns encryption and redaction;
+// this command forwards directly to it and never starts a serving process.
+async function cmdAccounts() {
+  const sub = positional[1];
+  if (sub === "remove") {
+    const id = positional[2];
+    if (!id || id.startsWith("--")) {
+      console.error("Usage: zcode-kit accounts remove ID [--yes]");
+      return 2;
+    }
+    const args = ["auth", "accounts", "remove", id];
+    if (flags.yes === true) args.push("--yes");
+    const res = runProxyCli(args, { stdio: "inherit" });
+    return res.status ?? 1;
+  }
+  if (sub !== undefined && sub !== "--json") {
+    console.error("Usage: zcode-kit accounts [--json] | accounts remove ID [--yes]");
+    return 2;
+  }
+  const args = ["auth", "accounts"];
+  if (flags.json === true) args.push("--json");
+  const res = runProxyCli(args, { stdio: "inherit" });
+  return res.status ?? 1;
+}
+
 // ------------------------------------------------------------------ update
 async function cmdUpdate() {
   // AUD-009: a tarball install has no .git — the git flow below would fail
@@ -606,4 +636,3 @@ if (entryReal && import.meta.url === pathToFileURL(entryReal).href) {
     process.exit(2);
   });
 }
-
