@@ -10,6 +10,10 @@ Nutze **deinen eigenen ZCode-Desktop-Account** mit einem Coding-Assistenten dein
 - **Modelle:** `glm-5.3` (Text) und `glm-5.3-flash` (Text und Bilder). Angegebenes Kontextfenster: 1M Tokens; Denkstufen: `low`, `high`, `max`. Client-Unterstützung und Account-Limits gelten weiterhin.
 - **Optionale MCP-Bridge:** macht Funktionen deiner installierten ZCode-Runtime verfügbar. Das ist getrennt von der Modellanbindung; eine laufende Desktop-App garantiert keine Modellaufrufe über die Bridge.
 
+### Mehrere eigene Konten rotieren
+
+Der Proxy kann optional mehrere von dir autorisierte ZCode-Konten verwalten und bei den expliziten Kontingent-Signalen `1005`, `1113` und `3001` einmalig zum nächsten passenden Konto wechseln. Die Funktion ist standardmäßig ausgeschaltet, erstellt keine Konten und umgeht keine Limits. Aktiviere sie in `auth.accounts`, melde Profile mit `zcode-proxy auth login <provider> --account ID` an und verwalte sie mit `zcode-kit accounts`. Die Übersicht ist offline und redigiert alle Secrets. Siehe die vollständige [Dokumentation zum Account-Rotator](docs/ACCOUNT_ROTATOR.md).
+
 ## Unveröffentlichte Audit-Härtung
 
 - Eine laufende Desktop-App garantiert keine eigenständigen MCP-Modellaufrufe; der Provider kann sie unabhängig davon ablehnen. Ist die Konfiguration gespeichert, bleibt ein fehlgeschlagener Setup-Modelltest eine Warnung, kein bestätigter Modellzugang.
