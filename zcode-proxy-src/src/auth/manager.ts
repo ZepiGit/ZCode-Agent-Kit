@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { credentialString, isExpired, type Credential } from "./types.js";
+import type { AccountProfile } from "./account-store.js";
+import { AccountRotator, NoUsableAccountError } from "./account-rotator.js";
 
 export interface CredentialSource {
   plan?: string;
@@ -12,6 +14,11 @@ export interface CredentialSource {
   loadCredential?: () => Promise<Credential | null>;
   /** Read-only existing desktop import; never login, create keys, or claim. */
   importCredential?: (provider: Credential["provider"]) => Promise<Credential | null>;
+  /** Optional multi-account scheduler. When present it is authoritative and
+   * legacy single-credential reload/recovery is never used for requests. */
+  accountRotator?: AccountRotator;
+  /** Persist scheduler metadata (exhaustion/reset markers) after rotation. */
+  persistAccounts?: (accounts: readonly AccountProfile[]) => Promise<void>;
 }
 
 function valid(cred: Credential | null, allowExpired = false): cred is Credential {
@@ -36,7 +43,23 @@ export class AuthManager {
   // Hashes only; bounded memory. At capacity recovery fails closed until restart.
   private attempted = new Set<string>();
   private persistenceFailures = new Map<string, { count: number; retryAt: number }>();
+  private poolRecoveries = new Map<string, Promise<Credential | null>>();
+  private poolPersistence: Promise<void> | undefined;
+  private poolPersistenceDirty = false;
   constructor(private source: CredentialSource = {}) {}
+
+  /** True when an explicitly enabled account pool is authoritative. */
+  isAccountPoolEnabled(): boolean { return this.source.accountRotator !== undefined; }
+
+  /** Redacted scheduler view for callers that need to display account state. */
+  listAccounts(): ReturnType<AccountRotator["list"]> {
+    return this.source.accountRotator?.list() ?? [];
+  }
+
+  /** Resolve a credential returned by the pool to its redacted account id. */
+  accountIdForCredential(credential: Credential): string | undefined {
+    return this.source.accountRotator?.idForCredential(credential);
+  }
 
   private async reload(): Promise<void> {
     if (!this.source.loadCredential) return;
@@ -64,6 +87,16 @@ export class AuthManager {
   }
 
   async getCredential(): Promise<Credential> {
+    if (this.source.accountRotator) {
+      try {
+        return this.source.accountRotator.getCredential();
+      } catch (error) {
+        if (error instanceof NoUsableAccountError) {
+          throw new Error("No usable account is available — add an account or wait for quota reset");
+        }
+        throw error;
+      }
+    }
     await this.reload();
     if (this.oauthCred) {
       if (isExpired(this.oauthCred)) {
@@ -81,7 +114,12 @@ export class AuthManager {
   }
 
   /** At most one desktop read per rejected effective credential, shared by requests. */
-  async recoverCredential(failed: Credential, plan: string): Promise<Credential | null> {
+  async recoverCredential(failed: Credential, plan: string, reason?: string, resetAt?: number): Promise<Credential | null> {
+    if (this.source.accountRotator) return this.recoverFromAccountPool(failed, reason, resetAt);
+    // 1005 is an account quota signal, not a credential-refresh signal. A
+    // legacy single-account install has no alternate profile to use, so do
+    // not re-import and replay the same exhausted account.
+    if (reason === "1005") return null;
     const failedKey = fingerprint(failed, plan);
     const different = (): Credential | null => {
       const current = this.oauthCred;
@@ -129,7 +167,80 @@ export class AuthManager {
   }
 
   setOAuthCredential(cred: Credential): void {
+    // Pool mode is authoritative. Keeping this setter harmless lets the TUI,
+    // Android control path, and compatibility callers refresh the legacy
+    // credential without accidentally disabling account rotation.
+    if (this.source.accountRotator) return;
     this.oauthCred = { ...cred };
     this.revision++;
+  }
+
+  /** Clear a transient quota marker after a successful request. */
+  markCredentialHealthy(credential: Credential): void {
+    const rotator = this.source.accountRotator;
+    if (!rotator) return;
+    const id = rotator.idForCredential(credential);
+    if (!id) return;
+    if (rotator.clearFailure(id)) void this.persistAccounts();
+  }
+
+  /** Mark the selected pooled account exhausted after a final quota response. */
+  markCredentialExhausted(credential: Credential, reason: string, resetAt?: number): void {
+    const rotator = this.source.accountRotator;
+    if (!rotator) return;
+    const id = rotator.idForCredential(credential);
+    if (!id) return;
+    rotator.markExhausted(id, reason, resetAt);
+    void this.persistAccounts();
+  }
+
+  private persistAccounts(): Promise<void> {
+    const persist = this.source.persistAccounts;
+    const rotator = this.source.accountRotator;
+    if (!persist || !rotator) return Promise.resolve();
+    this.poolPersistenceDirty = true;
+    if (this.poolPersistence) return this.poolPersistence;
+    // One writer owns the store at a time. A failure/health change arriving
+    // while encryption or I/O is pending sets dirty again; the next pass uses
+    // the current snapshot rather than losing it to the sidecar's live lock.
+    // Queue the first pass so the shared promise is installed even when an
+    // injected writer throws synchronously. Clear it in the loop's own final
+    // microtask so no completed promise can absorb a later dirty update.
+    this.poolPersistence = Promise.resolve().then(async () => {
+      try {
+        do {
+          this.poolPersistenceDirty = false;
+          try { await persist(rotator.profiles()); } catch { /* state remains in memory */ }
+        } while (this.poolPersistenceDirty);
+      } finally { this.poolPersistence = undefined; }
+    });
+    return this.poolPersistence;
+  }
+
+  private recoverFromAccountPool(failed: Credential, reason?: string, resetAt?: number): Promise<Credential | null> {
+    const rotator = this.source.accountRotator!;
+    // Pool rotation is only authorized by an explicit balance/quota code. A
+    // caller without a reason must never turn a generic auth/model/transport
+    // failure into account churn.
+    if (reason === undefined || !["1005", "1113", "3001"].includes(String(reason))) {
+      return Promise.resolve(null);
+    }
+    const id = rotator.idForCredential(failed);
+    if (!id) return Promise.resolve(null);
+    const existing = this.poolRecoveries.get(id);
+    if (existing) return existing;
+    const recovery = (async () => {
+      // Pool rotation is deliberately limited to explicit quota/balance
+      // signals. `upstream-errors.ts` filters the code before entering here;
+      // the reason is retained only as a bounded local diagnostic.
+      rotator.markExhausted(id, reason ?? "quota exhausted", resetAt);
+      await this.persistAccounts();
+      try { return rotator.getCredential(); } catch { return null; }
+    })();
+    this.poolRecoveries.set(id, recovery);
+    void recovery.finally(() => {
+      if (this.poolRecoveries.get(id) === recovery) this.poolRecoveries.delete(id);
+    });
+    return recovery;
   }
 }
