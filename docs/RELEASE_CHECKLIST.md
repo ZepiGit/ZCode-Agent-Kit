@@ -33,10 +33,21 @@ can publish automatically. Resolve these gates before pushing to `main` or a
 matching tag, or manually dispatching that workflow. A version marker is an
 execution gate, **not** legal clearance or evidence that verification completed.
 
+The `feature/account-rotator` branch has a separate prerelease path. A push or
+manual dispatch runs the same `test` matrix, then derives
+`v<package-version>-account-rotator.<run_number>.<run_attempt>`. It builds a
+non-latest GitHub prerelease with no npm publication and no push to `main`.
+The package version, lockfile and `pack/ALLOW_PUBLISH` marker are staged into a
+throwaway index before `git archive`; this keeps the uploaded archive metadata
+identical to the package validation. The archive is versioned while the
+installer assets remain `install.ps1`, `install.sh` and `checksums.txt` so the
+installer URLs stay compatible.
+
 ## Actual release workflow behavior
 
 Read `.github/workflows/release.yml`, not its older tag-only comments, as the
-source of truth. Its triggers are pushes to `main`, `v*` tags and manual dispatch.
+source of truth. Its triggers are pushes to `main`,
+`feature/account-rotator`, `v*` tags and manual dispatch.
 The workflow runs kit, proxy and MCP suites on Ubuntu and Windows before the
 release/publish job.
 

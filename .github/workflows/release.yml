@@ -1,6 +1,7 @@
-# Automatic releases run on main pushes, version tags and manual dispatch. It runs the full test matrix, builds the release assets
-# (git-archive tarball + installers + checksums), creates the GitHub release
-# and publishes the launcher package to npm.
+# Stable releases run on main pushes, version tags and manual dispatch. Feature
+# branch dispatches/pushes run the same test matrix and create an isolated
+# GitHub prerelease (without npm publication). Both paths build release assets
+# (git-archive tarball + installers + checksums).
 #
 # npm auth is OIDC-based Trusted Publishing (no NPM_TOKEN secret, immune to
 # the account's 2FA policy): the runner exchanges a GitHub OIDC token with the
@@ -12,13 +13,14 @@
 # ReleaseEvent for v0.2.0/v0.2.1 but never started the release-triggered
 # workflow (zero runs with event=release) — a tag push is the reliable signal.
 # The release below is created with GITHUB_TOKEN, whose events do not trigger
-# other workflows (no double publish). `workflow_dispatch` re-runs the build +
-# verify + publish path from main — the re-publish lever after a failed step.
+# other workflows (no double publish). `workflow_dispatch` re-runs the stable
+# build + verify + publish path from main, or the isolated prerelease path when
+# dispatched on `feature/account-rotator`.
 name: release
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "feature/account-rotator"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -61,7 +63,9 @@ jobs:
         run: npm run test:mcp
 
   release-and-publish:
-    if: ${{ github.ref == 'refs/heads/main' || github.ref_type == 'tag' }}
+    # Generated account-rotator tags are prereleases. Keep even a manually
+    # pushed copy of one out of the stable npm publishing path.
+    if: ${{ (github.ref == 'refs/heads/main' || github.ref_type == 'tag') && !contains(github.ref_name, '-account-rotator.') }}
     permissions:
       contents: write
       id-token: write
@@ -206,3 +210,101 @@ jobs:
         if: env.SKIP_PUBLISH != '1'
         timeout-minutes: 3
         run: node scripts/registry-version.mjs verify "$VERSION"
+
+  # Feature validation is deliberately a separate path: it never mutates or
+  # pushes main, never publishes to npm, and creates a non-latest prerelease.
+  # The metadata edits below are staged into a throwaway index before creating
+  # the source archive. `git archive HEAD` would silently omit those edits.
+  feature-account-rotator-prerelease:
+    if: ${{ github.ref == 'refs/heads/feature/account-rotator' }}
+    permissions:
+      contents: write
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare exact prerelease metadata
+        run: |
+          set -euo pipefail
+          SOURCE_SHA=$(git rev-parse HEAD)
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          VERSION="${BASE_VERSION}-account-rotator.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
+          TAG="v${VERSION}"
+          node - "$VERSION" <<'NODE'
+          const fs = require('node:fs');
+          const version = process.argv[2];
+          const packageFile = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          packageFile.version = version;
+          fs.writeFileSync('package.json', JSON.stringify(packageFile, null, 2) + '\n');
+          const lockFile = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+          lockFile.version = version;
+          if (lockFile.packages?.['']) lockFile.packages[''].version = version;
+          fs.writeFileSync('package-lock.json', JSON.stringify(lockFile, null, 2) + '\n');
+          NODE
+          printf '%s\n' "$VERSION" > pack/ALLOW_PUBLISH
+          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+      - name: Assemble and validate prerelease package
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          test "$(node -p "require('./package-lock.json').version")" = "$VERSION"
+          grep -Fxq "$VERSION" pack/ALLOW_PUBLISH
+          node pack/build.mjs --tracked-only
+          node pack/verify-payload.mjs
+          node - "$VERSION" <<'NODE'
+          const fs = require('node:fs');
+          const version = process.argv[2];
+          const pkg = JSON.parse(fs.readFileSync('pack/dist/package.json', 'utf8'));
+          if (pkg.version !== version || pkg.private || !pkg.files.includes('ALLOW_PUBLISH')) {
+            throw new Error(`invalid prerelease package metadata: ${JSON.stringify(pkg)}`);
+          }
+          NODE
+          (cd pack/dist && npm pack --dry-run --ignore-scripts)
+      - name: Build versioned prerelease assets
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          INDEX_FILE=$(mktemp)
+          trap 'rm -f "$INDEX_FILE"' EXIT
+          rm -f "$INDEX_FILE"
+          GIT_INDEX_FILE="$INDEX_FILE" git read-tree HEAD
+          GIT_INDEX_FILE="$INDEX_FILE" git add package.json package-lock.json pack/ALLOW_PUBLISH
+          # The normal archive policy excludes all of pack/. Keep the
+          # version-bound marker in this release tree without changing the
+          # repository's export policy for ordinary source archives.
+          ATTR_BLOB=$({ cat .gitattributes; printf '\n/pack/ALLOW_PUBLISH -export-ignore\n'; } | git hash-object -w --stdin)
+          GIT_INDEX_FILE="$INDEX_FILE" git update-index --add --cacheinfo "100644,$ATTR_BLOB,.gitattributes"
+          TREE=$(GIT_INDEX_FILE="$INDEX_FILE" git write-tree)
+          git archive --format=tar.gz --prefix="zcode-agent-kit-${VERSION}/" -o "release/${TAG}.tar.gz" "$TREE"
+          cp install.ps1 install.sh release/
+          (cd release && sha256sum "${TAG}.tar.gz" install.ps1 install.sh > checksums.txt)
+          # The archive must contain the exact metadata used to validate the
+          # package, including the marker that prevents version drift.
+          tar -xOzf "release/${TAG}.tar.gz" "zcode-agent-kit-${VERSION}/package.json" \
+            | node -e 'const fs=require("node:fs"); const expected=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(0,"utf8")); if(pkg.version!==expected) throw new Error("archive package.json version mismatch");' "$VERSION"
+          tar -xOzf "release/${TAG}.tar.gz" "zcode-agent-kit-${VERSION}/pack/ALLOW_PUBLISH" \
+            | grep -Fxq "$VERSION"
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists; keeping its immutable assets"
+            exit 0
+          fi
+          gh release create "$TAG" \
+            "release/${TAG}.tar.gz" release/install.ps1 release/install.sh release/checksums.txt \
+            --target "$SOURCE_SHA" \
+            --title "zcode-agent-kit $TAG" \
+            --prerelease --latest=false \
+            --generate-notes

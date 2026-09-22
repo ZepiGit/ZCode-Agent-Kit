@@ -51,7 +51,7 @@ test("release workflow keeps automatic main releases while isolating write and O
   const top = workflow.split("jobs:\n")[0];
   const testJob = workflow.split("  test:\n")[1]?.split("  release-and-publish:\n")[0] ?? "";
   const publishJob = workflow.split("  release-and-publish:\n")[1] ?? "";
-  assert.match(workflow, /push:\n\s+branches: \["?main"?\]/, "main pushes must remain automatic release triggers");
+  assert.match(workflow, /push:\n\s+branches: \["?main"?(?:,\s*"feature\/account-rotator")?\]/, "main pushes must remain automatic release triggers");
   assert.match(workflow, /workflow_dispatch:/, "manual dispatch must remain available");
   assert.match(top, /permissions:\n\s+contents: read/);
   assert.doesNotMatch(top, /id-token:\s*write|contents:\s*write/);
@@ -60,9 +60,31 @@ test("release workflow keeps automatic main releases while isolating write and O
   assert.match(publishJob, /permissions:\n\s+contents: write\n\s+id-token: write/);
   assert.equal((workflow.match(/id-token:\s*write/g) ?? []).length, 1, "OIDC must exist only on the publish job");
   assert.match(publishJob, /if:\s*\$\{\{[^\n]*(refs\/heads\/main|github\.ref_type\s*==\s*'tag')[^\n]*\}\}/);
+  assert.match(publishJob, /!contains\(github\.ref_name, '-account-rotator\.'\)/, "feature prerelease tags must not enter stable npm publishing");
   assert.match(publishJob, /git push --atomic origin HEAD:main "v\$NEW"/, "auto-bump may only update main and must move commit and tag together");
   assert.match(publishJob, /echo "\$NEW" > pack\/ALLOW_PUBLISH/, "auto-version consistency marker remains intentional");
   assert.doesNotMatch(workflow, /^\s*environment:/m, "automatic releases must not gain a manual environment gate");
+});
+
+test("account-rotator feature releases are isolated prereleases built from the tested SHA", () => {
+  const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const featureJob = workflow.split("  feature-account-rotator-prerelease:\n")[1] ?? "";
+  assert.ok(featureJob, "feature prerelease job must exist");
+  assert.match(workflow, /branches: \["main", "feature\/account-rotator"\]/);
+  assert.match(featureJob, /if: \$\{\{ github\.ref == 'refs\/heads\/feature\/account-rotator' \}\}/);
+  assert.match(featureJob, /needs: test/);
+  assert.match(featureJob, /permissions:\n\s+contents: write/);
+  assert.doesNotMatch(featureJob, /id-token:\s*write/);
+  assert.match(featureJob, /-account-rotator\.\$\{GITHUB_RUN_NUMBER\}\.\$\{GITHUB_RUN_ATTEMPT\}/);
+  assert.match(featureJob, /GIT_INDEX_FILE=.*git read-tree HEAD/);
+  assert.match(featureJob, /GIT_INDEX_FILE=.*git write-tree/);
+  assert.match(featureJob, /pack\/ALLOW_PUBLISH -export-ignore/);
+  assert.match(featureJob, /git archive .*\$\{TAG\}\.tar\.gz.*\$TREE/);
+  assert.match(featureJob, /pack\/ALLOW_PUBLISH/);
+  assert.match(featureJob, /--prerelease --latest=false/);
+  assert.match(featureJob, /--target "\$SOURCE_SHA"/);
+  assert.doesNotMatch(featureJob, /npm publish/);
+  assert.doesNotMatch(featureJob, /git push/);
 });
 
 test("package build excludes source tests/fixtures and includes locally available license notices", (t) => {

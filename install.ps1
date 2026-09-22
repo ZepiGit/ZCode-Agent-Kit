@@ -1,7 +1,7 @@
 # zcode-agent-kit installer (Windows).
 #
 # One-command install (installs the LATEST published release by default; pin
-# a version with $env:ZCODE_KIT_VERSION -- see docs/RELEASE_CHECKLIST.md):
+# a version with $env:ZCODE_KIT_VERSION (vX.Y.Z or vX.Y.Z-prerelease) -- see docs/RELEASE_CHECKLIST.md):
 #   irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 #
 # This works in Windows PowerShell 5.1 and PowerShell 7+. The script takes no
@@ -9,7 +9,7 @@
 # mode, where param() is a parse error in PowerShell 7. Configuration goes
 # through environment variables instead (set them in the SAME line or session):
 #
-#   $env:ZCODE_KIT_VERSION     = "v0.2.0"                              # pin a release tag (default: latest published release)
+#   $env:ZCODE_KIT_VERSION     = "v0.2.22-account-rotator.123.2"    # pin a stable or prerelease tag (default: latest published release)
 #   $env:ZCODE_KIT_INSTALL_DIR = "D:\tools\zcode-agent-kit"            # install location
 #
 # Running the saved file also works and reads the same variables:
@@ -34,6 +34,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $originalPath = $env:PATH
 
 $Repo = "ZepiGit/ZCode-Agent-Kit"
+$VersionPattern = '^v\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
 $InstallDir = ""
 if ($env:ZCODE_KIT_INSTALL_DIR) { $InstallDir = $env:ZCODE_KIT_INSTALL_DIR }
 elseif ($env:ZCODE_KIT_HOME) { $InstallDir = $env:ZCODE_KIT_HOME }
@@ -49,7 +50,7 @@ if (Test-Path -LiteralPath $InstallDir) {
     if ((Get-Content -LiteralPath $package -Raw | ConvertFrom-Json).name -ne 'zcode-agent-kit') { throw 'Non-empty target is a foreign installation.' }
   }
 }
-if ($env:ZCODE_KIT_VERSION -and $env:ZCODE_KIT_VERSION -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release version: ZCODE_KIT_VERSION must be vX.Y.Z.' }
+if ($env:ZCODE_KIT_VERSION -and $env:ZCODE_KIT_VERSION -notmatch $VersionPattern) { throw 'Invalid release version: ZCODE_KIT_VERSION must be vX.Y.Z or vX.Y.Z-prerelease.' }
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "zcode-kit-install-$([guid]::NewGuid().ToString('N'))")
 try {
 # Latest published release by default; explicit pins are validated before download.
@@ -63,12 +64,12 @@ if ($env:ZCODE_KIT_VERSION) {
     throw "could not resolve the latest release from the GitHub API - pin one with `$env:ZCODE_KIT_VERSION (e.g. 'v0.2.0'). Detail: $($_.Exception.Message)"
   }
 }
-if ($Version -notmatch '^v\d+\.\d+\.\d+$') { throw 'Invalid release version returned by release metadata.' }
+if ($Version -notmatch $VersionPattern) { throw 'Invalid release version returned by release metadata.' }
 $Tarball = "$Version.tar.gz"
 $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
 
 Write-Host "== zcode-agent-kit installer ($Version) =="
-Write-Host "install dir: $InstallDir"
+Write-Host "  install dir: $InstallDir"
 
 # --- prerequisites -----------------------------------------------------------
 function Test-Node {
@@ -82,11 +83,11 @@ if (-not (Test-Node)) {
   Write-Error "node >= 20 is required but not found on PATH. Install from https://nodejs.org and re-run."
 }
 if (-not (Test-Bun)) {
-  Write-Host "bun not found - installing user-local, pinned bun v1.4.2 ..."
+  Write-Host "==> Downloading Bun v1.4.2 (bun-windows-x64.zip) =="
   $bunZip = Join-Path $tmp.FullName "bun.zip"
   # SHA256 of bun-v1.4.2 bun-windows-x64.zip (upstream release artifact).
   $bunSha = "ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405"
-  Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip" -OutFile $bunZip
+  try { Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip" -OutFile $bunZip } catch { throw "Bun download failed: $($_.Exception.Message)" }
   $actual = (Get-FileHash $bunZip -Algorithm SHA256).Hash.ToLower()
   if ($actual -ne $bunSha) {
     Write-Error "bun download hash mismatch:`n  expected $bunSha`n  actual   $actual`nAborting."
@@ -101,8 +102,9 @@ if (-not (Test-Bun)) {
 $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Source
   $archive = Join-Path $tmp.FullName "kit.tar.gz"
   $checksums = Join-Path $tmp.FullName "checksums.txt"
-  Invoke-WebRequest -Uri "$BaseUrl/$Tarball" -OutFile $archive
-  Invoke-WebRequest -Uri "$BaseUrl/checksums.txt" -OutFile $checksums
+  Write-Host "==> Downloading release archive =="
+  try { Invoke-WebRequest -Uri "$BaseUrl/$Tarball" -OutFile $archive } catch { throw "Release archive download failed: $($_.Exception.Message)" }
+  try { Invoke-WebRequest -Uri "$BaseUrl/checksums.txt" -OutFile $checksums } catch { throw "Checksum download failed: $($_.Exception.Message)" }
 
   $checksumPattern = '^([0-9a-fA-F]{64})\s+\*?' + [regex]::Escape($Tarball) + '$'
   $checksumLines = @(Get-Content -LiteralPath $checksums | Where-Object { $_ -match $checksumPattern })
@@ -139,18 +141,18 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
   if (Test-Path -LiteralPath $InstallDir) {
     Write-Host "existing install found - updating in place (.proxykey and proxy/config.yaml are preserved)"
     robocopy $extracted.FullName $InstallDir /MIR /XJ /XF .proxykey config.yaml .bun-path /XD node_modules backups logs generated /NFL /NDL /NJH /NJS | Out-Null
-    if ($LASTEXITCODE -ge 8) { Write-Error "update copy failed (robocopy exit $LASTEXITCODE) - aborting." }
+    if ($LASTEXITCODE -ge 8) { throw "update copy failed (robocopy exit $LASTEXITCODE) - aborting." }
   } else {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
     Copy-Item -Path (Join-Path $extracted.FullName "*") -Destination $InstallDir -Recurse -Force
   }
 
   [IO.File]::WriteAllText((Join-Path $InstallDir '.bun-path'), $bunExe, (New-Object System.Text.UTF8Encoding($false)))
-  Write-Host "== running setup (detects your harnesses) =="
+  Write-Host "==> Configuring detected harnesses =="
   Push-Location $InstallDir
   try {
     node cli/zcode-kit.mjs setup --harness auto
-    if ($LASTEXITCODE -ne 0) { Write-Error "setup failed (exit $LASTEXITCODE) - see output above" }
+    if ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE) - see output above" }
   } finally {
     Pop-Location
   }
@@ -171,11 +173,10 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
   }
 
   Write-Host ""
-  Write-Host "== done. Start using it =="
-  Write-Host "  zcode-kit status                     # proxy status (or: node cli/zcode-kit.mjs status)"
-  Write-Host "  zcode-kit run omp -- ...             # (or your harness's documented command)"
-  Write-Host ""
-  Write-Host "Thanks for your Trust, enjoy <3 -Github.com/ZepiGit - Instagram: Micheltie_"
+  Write-Host "Installation complete."
+  Write-Host "  zcode-kit status       # local proxy status"
+  Write-Host "  zcode-kit doctor       # diagnose integrations"
+  Write-Host "  zcode-kit auth status  # inspect account login"
 } finally {
   $env:PATH = $originalPath
   Remove-Item -LiteralPath $tmp.FullName -Recurse -Force -ErrorAction SilentlyContinue
