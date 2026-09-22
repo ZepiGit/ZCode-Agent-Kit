@@ -26,7 +26,8 @@ import {
   type OAuthFlowClient,
 } from "../auth/oauth.js";
 import { KeyResolver } from "../auth/resolver.js";
-import { saveCredential, clearCredential, loadCredential } from "../auth/store.js";
+import { clearCredential, loadCredential } from "../auth/store.js";
+import { saveLoginCredential } from "../auth/login-store.js";
 
 /** Supported plan tiers. Mirrors `ProxyConfig.plan`. */
 export type PlanTier = "coding-plan" | "start-plan";
@@ -88,6 +89,7 @@ export interface ControlState {
 }
 
 interface StartControlOpts {
+  onAuthStatus?: () => Promise<boolean>;
   capability?: string;
   port: number;
   state: ControlState;
@@ -152,6 +154,7 @@ export function startControlListener(opts: StartControlOpts): Promise<{ close():
   const server: Server = createServer(async (req, res) => {
     try {
       const result = await handleControlRequest(req, opts.state, {
+        onAuthStatus: opts.onAuthStatus,
         onStartProxy: opts.onStartProxy,
         onStopProxy: opts.onStopProxy,
         onSetConfig: opts.onSetConfig,
@@ -183,6 +186,7 @@ export interface ControlHandlerResult {
 
 /** Context passed to `handleControlRequest` for hook wiring + log access. */
 export interface HandlerContext {
+  onAuthStatus?: () => Promise<boolean>;
   onStartProxy?: () => Promise<LifecycleResult>;
   onStopProxy?: () => Promise<{ ok: true } | { ok: false; error: string }>;
   onSetConfig?: (changes: { provider?: ProviderId; plan?: PlanTier }) => Promise<ConfigUpdateResult>;
@@ -258,14 +262,16 @@ async function dispatch(
 ): Promise<ControlResponse> {
   switch (cmd.cmd) {
     case "status": {
-      const cred = await loadCredential().catch(() => null);
+      const loggedIn = ctx.onAuthStatus
+        ? await ctx.onAuthStatus().catch(() => false)
+        : (await loadCredential().catch(() => null)) != null;
       return {
         ok: true,
         state: "running",
         provider: state.provider,
         plan: state.plan,
         proxyPort: state.proxyPort,
-        loggedIn: cred != null,
+        loggedIn,
       };
     }
 
@@ -292,7 +298,7 @@ async function dispatch(
         const resolver = new KeyResolver();
         const cred: Credential = await resolver.resolveCodingPlanCredential(tokens.accessToken, cmd.provider, tokens.userId);
         if (tokens.jwt) cred.jwt = tokens.jwt;
-        await saveCredential(cred);
+        await saveLoginCredential(cred);
         console.log(`OAuth completed for ${cmd.provider}`);
       }).catch((err: unknown) => {
         // Timeouts / rejections are expected when the user abandons the
@@ -328,7 +334,7 @@ async function dispatch(
         const resolver = new KeyResolver();
         const cred: Credential = await resolver.resolveCodingPlanCredential(accessToken, cmd.provider, userId);
         if (jwt) cred.jwt = jwt;
-        await saveCredential(cred);
+        await saveLoginCredential(cred);
         state.activeOauth = undefined;
         await active.client.close().catch(() => {});
         return { ok: true, event: "loginOk", provider: cmd.provider };

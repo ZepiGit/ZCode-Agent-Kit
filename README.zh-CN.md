@@ -197,7 +197,7 @@ zcode-kit run opencode -- .
 | `cline` | 生成 `generated/cline-zcode-values.md`，需在扩展 UI 手动填入。 |
 | `kilo-code` | 生成 `generated/kilo-zcode-values.md`，需在扩展 UI 手动填入。 |
 
-十个适配器不等于十个客户端已实测。参阅带日期的[支持矩阵](SUPPORT_MATRIX.json)和[测试报告](TEST_REPORT.md)。Cline/Kilo 检查仅证明参数表存在，**不证明 GUI 已完成配置**；注册 MCP 也不等于模型访问。
+十个适配器不等于十个客户端已实测。参阅带日期的[支持矩阵](SUPPORT_MATRIX.json)和[CI 运行](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)。Cline/Kilo 检查仅证明参数表存在，**不证明 GUI 已完成配置**；注册 MCP 也不等于模型访问。
 
 **当前 Continue：**支持 `models: []`、注释及块列表缩进，用户模型和默认顺序保持在前。拒绝非空行内列表、重复键和不安全结构，不进行猜测。管理区域用带引号的 YAML 值保存本地代理密钥；`${ZCODE_PROXY_KEY}` 并非有效 Continue 插值。轮换密钥后重新集成或进行受支持修复。不声称完成原生 Continue 真实测试。
 
@@ -310,7 +310,7 @@ npm run test:proxy
 npm run test:mcp
 ```
 
-带日期的 [TEST_REPORT.md](TEST_REPORT.md) 记录：150 个 kit 测试通过、1 个 live opt-in 跳过，946 个 proxy 与 42 个 MCP 通过。隔离真实 OMP 覆盖正常启动、自有代理崩溃与离线密钥修复，保留了首次超时和成功复测。不能据此声称所有客户端/平台/长期场景通过或最新发布包已含改动。后续 CI 移植性问题与本地测试分开，需看当前 badge 和运行日志。
+最新测试结果见 [CI 运行](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)。本地测试输出不纳入版本控制。自动化测试不能确认真实账户登录或模型可用性。
 
 维护者注意：向 `main` 推送、推送 `v*` 标签或 dispatch 都可能触发发布。版本选择核对 npm/远程标签以避免复用其他提交的资产；未发布同版重试有条件。测试、包/版本关卡、OIDC 与再分发要求仍适用。参阅[发布清单](docs/RELEASE_CHECKLIST.md)；本地绿色不代表 npm 发布成功。
 
@@ -320,6 +320,6 @@ npm run test:mcp
 
 - [助手详情](harnesses/README.md)与[支持矩阵](SUPPORT_MATRIX.json)
 - [推理强度映射](EFFORT_MAPPING.md)
-- [测试报告](TEST_REPORT.md)与[实现状态](IMPLEMENTATION_STATUS.md)
+- [CI 运行](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)与[支持矩阵](SUPPORT_MATRIX.json)
 - [内嵌组件及许可证](MANIFEST.md)
 - [发布清单](docs/RELEASE_CHECKLIST.md)

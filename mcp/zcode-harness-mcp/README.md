@@ -109,7 +109,7 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) · Honest limits: [`docs/KNOWN_L
 
 ## Status
 
-Current implementation and verification status: [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) · Test evidence: [`TEST_REPORT.md`](TEST_REPORT.md) · API reference: [`docs/MCP_API.md`](docs/MCP_API.md)
+Current implementation and verification status: [`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · Test evidence: [CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · API reference: [`docs/MCP_API.md`](docs/MCP_API.md)
 
 ## License
 

@@ -127,7 +127,7 @@ npm run test:live # 仅显式 opt-in（真实安装/配额）： $env:LIVE_TEST=
 
 ## 状态
 
-当前实现与验证状态：[`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) · 测试证据：[`TEST_REPORT.md`](TEST_REPORT.md) · API 参考： [`docs/MCP_API.md`](docs/MCP_API.md)
+当前实现与验证状态：[`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · 测试证据：[CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · API 参考： [`docs/MCP_API.md`](docs/MCP_API.md)
 
 ## 许可证
 

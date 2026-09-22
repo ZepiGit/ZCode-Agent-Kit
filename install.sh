@@ -10,12 +10,13 @@ set -eu
 # Keep output readable in an interactive terminal while remaining plain text for
 # logs, CI and callers that set NO_COLOR.
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
-  C_BOLD=$(printf '\033[1m'); C_RESET=$(printf '\033[0m')
+  C_BOLD=$(printf '\033[1;36m'); C_RESET=$(printf '\033[0m'); C_OK=$(printf '\033[32m')
 else
-  C_BOLD=""; C_RESET=""
+  C_BOLD=""; C_RESET=""; C_OK=""
 fi
-step() { printf '%s%s%s\n' "$C_BOLD" "$1" "$C_RESET"; }
-die() { printf 'ERROR: %s\n' "$1" >&2; exit "${2:-1}"; }
+step() { printf '\n  %s%s%s\n' "$C_BOLD" "$1" "$C_RESET"; }
+ok() { printf '  %s[OK]%s   %s\n' "$C_OK" "$C_RESET" "$1"; }
+die() { printf '\n  [ERROR] %s\n' "$1" >&2; exit "${2:-1}"; }
 
 REPO="ZepiGit/ZCode-Agent-Kit"
 VERSION_PATTERN='^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
@@ -57,8 +58,11 @@ printf '%s\n' "$VERSION" | grep -Eq "$VERSION_PATTERN" || die "invalid release v
 if [ -f "$INSTALL_DIR/cli/zcode-kit.mjs" ]; then
   command -v rsync >/dev/null 2>&1 || die "rsync required for updates" 2
 fi
-step "== zcode-agent-kit installer ($VERSION) =="
-printf '  install dir: %s\n' "$INSTALL_DIR"
+printf '\n  %sZCODE  /  AGENT KIT%s\n' "$C_BOLD" "$C_RESET"
+printf '  %s\n' "$VERSION  |  Your local AI workspace"
+printf '  --------------------------------------------\n'
+printf '  Install to  %s\n' "$INSTALL_DIR"
+step "[1/4] Checking runtime"
 
 case "$(uname -s)" in
   Linux)
@@ -87,7 +91,7 @@ sha256_bin() {
 }
 
 if ! command -v bun >/dev/null 2>&1; then
-  echo "bun not found — installing user-local, pinned bun v1.4.2 ..."
+  printf '  Installing Bun v1.4.2 for your user...\n'
   BUN_DIR="$HOME/.bun"
   # SHA256 of the bun-v1.4.2 release artifacts (upstream SHASUMS256.txt).
   # Audit H2c: native arm64 assets so Apple Silicon / ARM Linux do not fall
@@ -105,7 +109,7 @@ if ! command -v bun >/dev/null 2>&1; then
   esac
   BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/$BUN_ASSET"
   command -v unzip >/dev/null 2>&1 || die "unzip required to install Bun" 2
-  step "==> Downloading Bun v1.4.2 ($BUN_ASSET) =="
+  printf '  Downloading %s\n' "$BUN_ASSET"
   curl -fsSL "$BUN_URL" -o "$TMP/bun.zip" || die "Bun download failed: $BUN_URL"
   ACTUAL=$(sha256_bin "$TMP/bun.zip")
   [ "$ACTUAL" = "$BUN_SHA" ] || die "Bun download hash mismatch\n  expected $BUN_SHA\n  actual   $ACTUAL" 1
@@ -114,15 +118,16 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 BUN_BIN=$(command -v bun)
+ok "Node.js and Bun available"
 BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
-step "==> Downloading release archive"
+step "[2/4] Downloading and verifying release"
 curl -fsSL "$BASE_URL/$VERSION.tar.gz" -o "$TMP/kit.tar.gz" || die "release archive download failed: $BASE_URL/$VERSION.tar.gz"
 curl -fsSL "$BASE_URL/checksums.txt" -o "$TMP/checksums.txt" || die "checksum download failed: $BASE_URL/checksums.txt"
 
 EXPECTED=$(awk -v name="$VERSION.tar.gz" '$2 == name && length($1) == 64 && $1 !~ /[^0-9a-fA-F]/ { print tolower($1); n++ } END { if (n != 1) exit 1 }' "$TMP/checksums.txt") || die "checksums.txt requires exactly one valid entry for $VERSION.tar.gz" 1
 ACTUAL=$(sha256_bin "$TMP/kit.tar.gz")
 [ "$ACTUAL" = "$EXPECTED" ] || die "archive hash mismatch\n  expected $EXPECTED\n  actual   $ACTUAL" 1
-printf 'archive hash verified (%.16s...)\n' "$ACTUAL"
+ok "Release archive hash verified (SHA-256)"
 
 # Extract into a dedicated subdirectory: the archive itself lives in $TMP and
 # would otherwise count as a second top-level entry. Then require exactly one
@@ -136,10 +141,11 @@ if [ "$TOP_COUNT" -ne 1 ] || [ -z "$SRC" ]; then
   die "unexpected archive layout" 1
 fi
 
+step "[3/4] Installing files"
 mkdir -p "$INSTALL_DIR"
 if [ -f "$INSTALL_DIR/cli/zcode-kit.mjs" ]; then
   command -v rsync >/dev/null 2>&1 || { echo "ERROR: rsync required to update an existing installation"; exit 2; }
-  echo "existing install found — updating in place (.proxykey and proxy/config.yaml preserved)"
+  printf '  Updating existing installation; keeping your configuration.\n'
   # Excluded files are protected from --delete too (--delete-excluded is NOT
   # set): the local proxy key and user proxy/config.yaml survive updates.
   if ! rsync -a --delete --exclude '.bun-path' --exclude '.proxykey' --exclude 'config.yaml' --exclude 'node_modules' \
@@ -152,8 +158,13 @@ fi
 
 printf '%s\n' "$BUN_BIN" > "$INSTALL_DIR/.bun-path"
 cd "$INSTALL_DIR"
-step "==> Configuring detected harnesses"
-if ! node cli/zcode-kit.mjs setup --harness auto; then
+ok "Application files installed"
+step "[4/4] Configuring your workspace"
+# curl | sh consumes stdin. Read answers from the controlling terminal instead.
+run_setup() { node cli/zcode-kit.mjs setup --harness auto --installer; }
+if [ -t 1 ] && [ -r /dev/tty ]; then
+  run_setup < /dev/tty || die "setup failed; see the diagnostics above" 1
+elif ! run_setup; then
   die "setup failed; see the diagnostics above" 1
 fi
 
@@ -163,7 +174,7 @@ SHIM="$HOME/.local/bin/zcode-kit"
 if mkdir -p "$HOME/.local/bin" 2>/dev/null \
    && printf '#!/usr/bin/env sh\nexec node "%s/cli/zcode-kit.mjs" "$@"\n' "$INSTALL_DIR" > "$SHIM" 2>/dev/null \
    && chmod +x "$SHIM" 2>/dev/null; then
-  echo "  added zcode-kit command -> $SHIM"
+  ok "zcode-kit command installed"
   case ":$PATH:" in
     *":$HOME/.local/bin:"*) : ;;
     *) echo "  note: $HOME/.local/bin is not on your PATH - add it to use zcode-kit from anywhere" ;;
@@ -172,7 +183,9 @@ else
   echo "  note: could not create the zcode-kit shim - use: node $INSTALL_DIR/cli/zcode-kit.mjs"
 fi
 
-printf '\n%s\n' "Installation complete."
-printf '  %s\n' "zcode-kit status       # local proxy status"
-printf '  %s\n' "zcode-kit doctor       # diagnose integrations"
-printf '  %s\n' "zcode-kit auth status  # inspect account login"
+printf '\n  %sInstallation complete.%s\n' "$C_OK" "$C_RESET"
+printf '  --------------------------------------------\n'
+printf '  %-27s %s\n' 'zcode-kit auth login zai' 'Sign in / add an account'
+printf '  %-27s %s\n' 'zcode-kit accounts' 'View saved accounts'
+printf '  %-27s %s\n' 'zcode-kit doctor' 'Check warnings and model access'
+printf '\n'

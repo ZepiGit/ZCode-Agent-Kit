@@ -23,7 +23,7 @@ import {
   decryptStorePayload,
   encryptStorePayload,
 } from "./store.js";
-import type { Credential } from "./types.js";
+import { credentialString, type Credential } from "./types.js";
 
 export const ACCOUNT_STORE_ENV = "ZCODE_PROXY_ACCOUNTS_PATH";
 export const ACCOUNT_STORE_DEFAULT_FILE = "accounts.json";
@@ -462,6 +462,38 @@ export async function updateAccountStore(
 }
 
 export interface AddAccountOptions extends AccountStoreOptions { replace?: boolean }
+
+/** A successful login adds a distinct account or refreshes its existing profile. */
+export async function rememberAccount(credential: Credential, options: AccountStoreOptions & { plan?: string } = {}): Promise<AccountProfile> {
+  if (!validCredential(credential)) throw new AccountStoreError("invalid", "invalid login credential");
+  const path = accountStorePath(options.path);
+  const release = acquireLock(path);
+  try {
+    const current = await readStoreSnapshot(path);
+    const prior = current.accounts.find(account => {
+      const old = account.credential;
+      if (old.provider !== credential.provider || (account.plan && options.plan && account.plan !== options.plan)) return false;
+      if (old.userId?.trim() && credential.userId?.trim()) return old.userId === credential.userId;
+      return credentialString(old) === credentialString(credential)
+        || (!!old.jwt && old.jwt === credential.jwt);
+    });
+    if (prior) {
+      // Preserve labels, pauses and quota state: logging in does not reset a limit.
+      const fresh = { ...credential, userId: credential.userId ?? prior.credential.userId };
+      if (["apiKey", "secret", "jwt", "userId", "expiresAt", "provider"].every(key =>
+        prior.credential[key as keyof Credential] === fresh[key as keyof Credential])) return prior;
+      prior.credential = fresh;
+      prior.credentialRevision = (prior.credentialRevision ?? 1) + 1;
+    } else {
+      let number = 1;
+      while (current.accounts.some(account => account.id === `${credential.provider}-${number}`)) number++;
+      current.accounts.push({ id: `${credential.provider}-${number}`, credential: { ...credential },
+        plan: options.plan, createdAt: Date.now(), credentialRevision: 1 });
+    }
+    await writeStore(path, current.accounts, current.revision + 1);
+    return prior ?? current.accounts[current.accounts.length - 1];
+  } finally { release(); }
+}
 
 /** Add a profile, or replace an existing id only when `replace` is explicit. */
 export async function addAccount(profile: AccountProfile, options: AddAccountOptions = {}): Promise<AccountProfile> {

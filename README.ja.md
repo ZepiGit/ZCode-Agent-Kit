@@ -197,7 +197,7 @@ Windows でもモデル識別子は `/` を使います。`run` が対応する�
 | `cline` | `generated/cline-zcode-values.md` の値を UI に手動入力。 |
 | `kilo-code` | `generated/kilo-zcode-values.md` の値を UI に手動入力。 |
 
-10 アダプターがあることと、10 クライアントの実接続検証は別です。日付付き [対応表](SUPPORT_MATRIX.json)と[テスト報告](TEST_REPORT.md)を参照。Cline/Kilo の確認は値シートの存在であり、**GUI 設定完了ではありません**。MCP 登録だけではモデルを利用できません。
+10 アダプターがあることと、10 クライアントの実接続検証は別です。日付付き [対応表](SUPPORT_MATRIX.json)と[CI 実行](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)を参照。Cline/Kilo の確認は値シートの存在であり、**GUI 設定完了ではありません**。MCP 登録だけではモデルを利用できません。
 
 **現行 Continue:** `models: []`、コメント、ブロックリストの字下げを扱い、ユーザーモデルと既定順序を先頭に保ちます。非空インラインリスト、重複キー、危険な形式は拒否します。ローカルキーは YAML の引用値として保存し、`${ZCODE_PROXY_KEY}` という非対応の展開は使いません。キー更新後は再統合・対応修復を行ってください。Continue 本体の実接続テスト済みとは主張しません。
 
@@ -310,7 +310,7 @@ npm run test:proxy
 npm run test:mcp
 ```
 
-日付付き [TEST_REPORT.md](TEST_REPORT.md): kit 150 成功＋明示的 live opt-in 1 件省略、proxy 946 成功、MCP 42 成功。実 OMP の隔離試験では通常起動、自分のプロキシのクラッシュ、offline キー修復を検証し、初回 timeout と成功した再試行も記録しています。全クライアント・OS・長時間動作や最新公開パッケージの内容を保証しません。後続 CI の移植性問題はローカル試験と別であり、現在の badge・ログを確認してください。
+最新のテスト結果は [CI 実行](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) を参照してください。ローカルの実行結果はコミットしません。自動テストは実アカウントやモデルへの接続を保証しません。
 
 メンテナー向け: `main` push、`v*` タグ、dispatch は公開を起動し得ます。npm とリモートタグを照合して他コミットの資産再利用を防ぎ、未公開版の再試行は条件付きです。テスト、バージョン・パッケージゲート、OIDC、再配布条件は必要です。[公開チェックリスト](docs/RELEASE_CHECKLIST.md)を参照。ローカル成功は npm 公開成功ではありません。
 
@@ -320,6 +320,6 @@ npm run test:mcp
 
 - [クライアント詳細](harnesses/README.md)・[対応表](SUPPORT_MATRIX.json)
 - [推論レベル対応](EFFORT_MAPPING.md)
-- [テスト報告](TEST_REPORT.md)・[実装状況](IMPLEMENTATION_STATUS.md)
+- [CI 実行](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml)・[対応表](SUPPORT_MATRIX.json)
 - [同梱コンポーネントとライセンス](MANIFEST.md)
 - [公開チェックリスト](docs/RELEASE_CHECKLIST.md)

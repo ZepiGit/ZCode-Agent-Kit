@@ -70,7 +70,7 @@ bzw. benötigen den laufenden Desktop; die Bridge schreibt die Datei nie. Steuer
 
 ## Nachweise (Auszug)
 
-- Live-Probes (echte Runtime): siehe `test/live/live.test.mjs` + `TEST_REPORT.md` §Live.
+- Live-Probes (echte Runtime): siehe `test/live/live.test.mjs` (lokale Ergebnisse nicht committen).
 - Fixture-Verifikation: `test/integration/bridge.test.mjs`, `test/integration/robustness.test.mjs`.
 - Entfernte Methoden: live `-32601` (`automation/list`), konsistent mit recheck-0.16.5.
 - `blocked_by_environment`: Provider-Risikokontrolle („captcha verify failed“) für Desktop-externe

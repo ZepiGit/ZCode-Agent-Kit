@@ -53,4 +53,3 @@
 | Model-Turns könnten trotzdem Dateien ändern, wenn Plan-Modus+Denylist im Harness umgangen werden | Teil-Enforcement; für harte Garantien `--read-only` **und** isolierte Workspace-Copies nutzen |
 | Workspace-Hooks (Plugins) können Code ausführen, sobald ein Task in einem Workspace läuft | `workspace/hooks/trustGrant` wird von der Bridge nie erteilt; Hook-Trust bleibt Desktop/Operator vorbehalten |
 | YAML/JSON-Injection über Task-Prompts | Prompts sind Modell-Kontext, keine Befehle; Interaktionen erweitern keine Rechte |
-| Mimosa Pre-Write-Hook (Sicherheits-Plugin) blockierte Quellcode-Write-Vorgänge während der Entwicklung | False Positives auf argument-array-`spawn` dokumentiert in `IMPLEMENTATION_STATUS.md`; finale Form entspricht exakt der vom Hook selbst geforderten Argumentlisten-Form |

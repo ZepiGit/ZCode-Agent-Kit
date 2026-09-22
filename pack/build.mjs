@@ -44,7 +44,6 @@ const ALLOW_PREFIXES = [
   "zcode-proxy-src/package.json",
   "zcode-proxy-src/tsconfig.json",
   "zcode-proxy-src/bun.lock",
-  "patches/",
   "scripts/verify-release-marker.mjs",
 ];
 

@@ -4,12 +4,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const KIT = join(import.meta.dirname, "..");
-const MARKER = join(KIT, "pack", "ALLOW_PUBLISH");
 
 function packageFixture(t) {
   const root = mkdtempSync(join(tmpdir(), "zcode-package-"));
@@ -20,7 +19,8 @@ function packageFixture(t) {
   };
   put("pack/build.mjs", readFileSync(join(KIT, "pack/build.mjs"), "utf8"));
   put("pack/verify-payload.mjs", readFileSync(join(KIT, "pack/verify-payload.mjs"), "utf8"));
-  put("package.json", JSON.stringify({ name: "zcode-agent-kit", version: "1.2.3" }));
+  put("package.json", JSON.stringify({ name: "zcode-agent-kit", version: "1.2.3",
+    bin: JSON.parse(readFileSync(join(KIT, "package.json"), "utf8")).bin }));
   put("LICENSE", "Fixture license text (not a license grant)\n");
   put("LICENSE.extra", "not allowlisted\n");
   put("setup.mjs.extra", "not allowlisted\n");
@@ -34,6 +34,7 @@ function packageFixture(t) {
     const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }
+  for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
   put("cli/local-only.mjs");
   const build = (...args) => {
     const result = spawnSync(process.execPath, [join(root, "pack/build.mjs"), ...args], { encoding: "utf8" });
@@ -141,49 +142,44 @@ ${body}`;
   });
 }
 
-test("pack build keeps the generated package private when the marker names another version", () => {
-  const existed = existsSync(MARKER);
-  const prev = existed ? readFileSync(MARKER, "utf8") : null;
-  writeFileSync(MARKER, "9.9.9\n"); // a version that is NOT the repo version
-  try {
-    const res = spawnSync(process.execPath, [join(KIT, "pack", "build.mjs")], { encoding: "utf8" });
-    assert.equal(res.status, 0, `build should succeed (stderr: ${res.stderr})`);
-    const dist = join(KIT, "pack", "dist");
-    const pkg = JSON.parse(readFileSync(join(dist, "package.json"), "utf8"));
-    assert.equal(pkg.private, true, "mismatched marker version must keep the package private");
-    assert.deepEqual(pkg.bin, {
-      "zcode-kit": "cli/zcode-kit.mjs",
-      "zcode-agent-kit": "cli/zcode-kit.mjs",
-    }, "generated npm package must expose both documented CLI names");
-    assert.equal(pkg.scripts.postinstall, "node setup.mjs --postinstall-hint");
-    assert.match(readFileSync(join(dist, "cli", "zcode-kit.mjs"), "utf8"), /^#!\/usr\/bin\/env node/);
-  } finally {
-    if (existed) writeFileSync(MARKER, prev);
-    else rmSync(MARKER);
-  }
+test("pack build keeps the generated package private when the marker names another version", (t) => {
+  const { root, build } = packageFixture(t);
+  writeFileSync(join(root, "pack/ALLOW_PUBLISH"), "9.9.9\n");
+  const pkg = build();
+  assert.equal(pkg.private, true, "mismatched marker version must keep the package private");
+  assert.deepEqual(pkg.bin, {
+    "zcode-kit": "cli/zcode-kit.mjs",
+    "zcode-agent-kit": "cli/zcode-kit.mjs",
+  }, "generated npm package must expose both documented CLI names");
+  assert.equal(pkg.scripts.postinstall, "node setup.mjs --postinstall-hint");
+  assert.match(readFileSync(join(root, "pack/dist/cli/zcode-kit.mjs"), "utf8"), /^#!\/usr\/bin\/env node/);
 });
 
-test("pack build tolerates a process holding pack/dist as its CWD (Windows EPERM)", () => {
+test("pack build tolerates a process holding pack/dist as its CWD (Windows EPERM)", (t) => {
+  const { root, build } = packageFixture(t);
+  build();
   // Windows cannot remove a directory that is any process's working directory
   // (an open shell inside pack/dist is enough). The build must recover by
   // emptying the directory in place instead of failing the release pipeline.
-  const dist = join(KIT, "pack", "dist");
+  const dist = join(root, "pack", "dist");
   mkdirSync(dist, { recursive: true });
   const holder = spawn(process.execPath, ["-e", "setInterval(()=>{},1e6)"], { cwd: dist, stdio: "ignore" });
   try {
-    const res = spawnSync(process.execPath, [join(KIT, "pack", "build.mjs")], { encoding: "utf8" });
+    const res = spawnSync(process.execPath, [join(root, "pack", "build.mjs")], { encoding: "utf8" });
     assert.equal(res.status, 0, `build should recover from a locked dist (stderr: ${res.stderr})`);
   } finally {
     holder.kill();
   }
 });
 
-test("CLI entry guard survives npm-style path forms (casing/symlink/junction)", () => {
+test("CLI entry guard survives npm-style path forms (casing/symlink/junction)", (t) => {
+  const { root, build } = packageFixture(t);
+  build();
   // npm exposes global bins through paths that differ from the realized
   // module URL: differently-cased argv (Windows shims), symlinks (POSIX bins),
   // junctions (`npm i -g <folder>`). The entry check must canonicalize via
   // realpath or the installed CLI silently no-ops.
-  const distCli = join(KIT, "pack", "dist", "cli", "zcode-kit.mjs");
+  const distCli = join(root, "pack", "dist", "cli", "zcode-kit.mjs");
   const cased = process.platform === "win32" ? distCli.replace(/^C:/i, "c:") : distCli;
   const res = spawnSync(process.execPath, [cased, "--help"], { encoding: "utf8", cwd: tmpdir() });
   assert.equal(res.status, 0, res.stderr);

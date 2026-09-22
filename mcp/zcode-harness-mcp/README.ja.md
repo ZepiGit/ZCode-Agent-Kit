@@ -136,7 +136,7 @@ npm run test:live # 明示 opt-in のみ（実インストール・Quota）： $
 
 ## 状態
 
-現在の実装および検証状況：[`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) · テスト証跡：[`TEST_REPORT.md`](TEST_REPORT.md) · API リファレンス： [`docs/MCP_API.md`](docs/MCP_API.md)
+現在の実装および検証状況：[`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · テスト証跡：[CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · API リファレンス： [`docs/MCP_API.md`](docs/MCP_API.md)
 
 ## ライセンス
 

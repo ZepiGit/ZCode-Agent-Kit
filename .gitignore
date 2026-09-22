@@ -8,7 +8,36 @@ proxy/config.yaml
 backups/
 generated/
 logs/
-node_modules/
+node_modules
 pack/dist/
 verification/
 *.zcode-staging-*
+
+# Machine-local accounts, tool settings and development output
+.zcode/
+.env
+.env.*
+!.env.example
+credentials.json
+accounts.json
+accounts.json.lock
+zcode-proxy-src/config.yaml
+zcode-proxy-src/zcode-proxy
+zcode-proxy-src/zcode-proxy.exe
+zcode-proxy-src/zcode-proxy-linux-*
+zcode-proxy-src/zcode-proxy-darwin-*
+tests/fakehome/
+coverage/
+test-results/
+playwright-report/
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+
+# One-off local reports and obsolete snapshots (not maintained project docs)
+TEST_REPORT*.md
+SETUP_REPORT*.md
+/IMPLEMENTATION_STATUS.md
+/mcp/zcode-harness-mcp/IMPLEMENTATION_STATUS.md
+/patches/zcode-proxy-local-patches.patch

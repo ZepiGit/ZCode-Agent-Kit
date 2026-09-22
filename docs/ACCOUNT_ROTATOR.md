@@ -6,7 +6,18 @@ Die Funktion erstellt keine Konten, kauft kein Kontingent, claimt keine Trials u
 
 ## Aktivieren und Schlüssel
 
-Der Pool ist standardmäßig ausgeschaltet. In der aktiven Konfiguration:
+Der Pool ist standardmäßig ausgeschaltet. Am Ende der Einrichtung fragen PowerShell- und Shell-Installer: **Do you want to activate the Account Rotator feature? [y/n]**. Leere oder andere Eingaben werden erneut abgefragt. `y` übernimmt den aktuell gespeicherten Einzelaccount und den verfügbaren Desktop-Login in den verschlüsselten Pool; `n` deaktiviert die Funktion, ohne gespeicherte Pool-Accounts zu löschen.
+
+Später aktivieren/deaktivieren:
+
+```sh
+zcode-kit accounts enable
+zcode-kit accounts disable
+```
+
+Ein verifiziert eigener laufender Proxy wird bei einer Änderung neu gestartet. Ohne Terminal/bei CI gibt es keine automatische Zustimmung: `ZCODE_KIT_ACCOUNT_ROTATOR=y|n` oder `zcode-kit setup --account-rotator y|n` legt die Entscheidung fest; sonst bleibt die Einstellung unverändert. Bereits überschriebene Einzelaccount-Logins können nicht rückwirkend rekonstruiert werden.
+
+Die entsprechende Einstellung in der aktiven Konfiguration:
 
 ```yaml
 auth:
@@ -40,7 +51,18 @@ Falscher Schlüssel, beschädigte Daten, aktive Locks oder ein Revisionskonflikt
 
 ## Konten einbinden
 
-Im `zcode-proxy-src`-Verzeichnis der Kit-Kopie (oder über den installierten Befehl):
+Bei aktiviertem Rotator genügt wiederholtes Anmelden über den Kit-Befehl:
+
+```sh
+zcode-kit auth login zai
+zcode-kit auth login bigmodel
+zcode-kit auth login zai --import
+zcode-kit accounts
+```
+
+Jeder unterschiedliche Account wird zusätzlich gespeichert. Ein erneuter Login derselben Provider-Benutzeridentität aktualisiert die Credentials im vorhandenen Profil. Ohne Benutzer-ID werden identische effektive Credentials erkannt. Label, Pause und Kontingentsperren bleiben erhalten; ein neuer Login setzt keine Quota zurück. Das aktive Konto bleibt aktiv, solange es geeignet ist. Änderungen am Desktop-Login werden mit `--import` übernommen; es gibt keinen Hintergrund-Watcher für die Desktop-Datei.
+
+Für eigene Account-IDs optional im `zcode-proxy-src`-Verzeichnis der Kit-Kopie (oder mit `zcode-kit auth login` und denselben Flags):
 
 ```sh
 zcode-proxy auth login zai --account privat
@@ -50,7 +72,7 @@ zcode-proxy auth login zai --import --account desktop-1
 zcode-proxy auth login zai --account arbeit --replace
 ```
 
-Jede ID ist lokal und stabil. `--replace` ist für eine Credential-Ersetzung erforderlich. Ein Login ohne `--account` bleibt der bisherige Einzelkonto-Pfad. Der Desktop-Import ist lesend; er ändert keinen Desktop-Login und erweitert keine Projekt- oder Kostenfreigabe.
+Jede ID ist lokal und stabil. Bei explizitem `--account` ist `--replace` für eine Credential-Ersetzung erforderlich. Ohne `--account` wird bei aktiviertem Rotator automatisch ergänzt/aktualisiert. Bei deaktiviertem Rotator bleibt es beim Einzelkonto-Pfad; die CLI weist darauf hin, dass der vorherige Login ersetzt wird. Der Desktop-Import ist lesend; er ändert keinen Desktop-Login und erweitert keine Projekt- oder Kostenfreigabe.
 
 ## Verwaltung und Status
 

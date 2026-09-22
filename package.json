@@ -13,7 +13,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test tests/transaction.test.mjs tests/setup-regressions.test.mjs tests/manager-safety.test.mjs tests/cli-kit.test.mjs tests/release-marker.test.mjs tests/installer.test.mjs tests/continue-compatibility.test.mjs tests/auto-heal.test.mjs tests/golden-path.test.mjs tests/postinstall-hint.test.mjs tests/registry-version.test.mjs tests/proxy-env.test.mjs tests/adapter-audit.test.mjs tests/cli-audit.test.mjs tests/installer-audit.test.mjs tests/manager-audit.test.mjs tests/omp-audit.test.mjs tests/process-audit.test.mjs tests/release-audit.test.mjs tests/state-audit.test.mjs tests/transaction-audit.test.mjs",
+    "test": "node --test tests/account-setup.test.mjs tests/transaction.test.mjs tests/setup-regressions.test.mjs tests/manager-safety.test.mjs tests/cli-kit.test.mjs tests/release-marker.test.mjs tests/installer.test.mjs tests/continue-compatibility.test.mjs tests/auto-heal.test.mjs tests/golden-path.test.mjs tests/postinstall-hint.test.mjs tests/registry-version.test.mjs tests/proxy-env.test.mjs tests/adapter-audit.test.mjs tests/cli-audit.test.mjs tests/installer-audit.test.mjs tests/manager-audit.test.mjs tests/omp-audit.test.mjs tests/process-audit.test.mjs tests/release-audit.test.mjs tests/state-audit.test.mjs tests/transaction-audit.test.mjs",
     "test:proxy": "cd zcode-proxy-src && bun test",
     "test:mcp": "cd mcp/zcode-harness-mcp && npm test",
     "test:all": "npm run test && npm run test:proxy && npm run test:mcp",

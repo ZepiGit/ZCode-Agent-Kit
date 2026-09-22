@@ -111,7 +111,7 @@ Details: [`docs/SECURITY.md`](docs/SECURITY.md) · Ehrliche Grenzen: [`docs/KNOW
 
 ## Status
 
-Aktueller Implementierungs- und Verifikationsstand: [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md) · Testnachweise: [`TEST_REPORT.md`](TEST_REPORT.md) · API-Referenz: [`docs/MCP_API.md`](docs/MCP_API.md)
+Aktueller Implementierungs- und Verifikationsstand: [`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · Testnachweise: [CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · API-Referenz: [`docs/MCP_API.md`](docs/MCP_API.md)
 
 ## Lizenz
 

@@ -148,9 +148,9 @@ function ensureLocalGitExclude(ctx) {
   console.log("  local git excludes installed (.git/info/exclude — never pushed)");
 }
 
-function ensureDeps(ctx, label, dir) {
+function ensureDeps(ctx, label, dir, log = console.log) {
   if (process.env.ZCODE_KIT_SKIP_DEPS === "1") {
-    console.log(`  ${label} dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)`);
+    log(`  ${label} dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)`);
     return;
   }
   const marker = join(dir, "node_modules", ".zcode-kit-installed");
@@ -160,12 +160,12 @@ function ensureDeps(ctx, label, dir) {
     try {
       const prev = JSON.parse(readFileSync(marker, "utf8"));
       if (prev.lockHash === lockHash && prev.tool === "bun") {
-        console.log(`  ${label} dependencies present and current`);
+        log(`  ${label} dependencies present and current`);
         return;
       }
     } catch {}
   }
-  console.log(`  installing ${label} dependencies (bun, frozen lockfile)...`);
+  log(`  installing ${label} dependencies (bun, frozen lockfile)...`);
   try {
     const args = lockfile ? ["install", "--frozen-lockfile"] : ["install"];
     execFileSync(resolveBun(ctx.root), args, { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
@@ -181,12 +181,12 @@ function ensureDeps(ctx, label, dir) {
   }
   mkdirSync(join(dir, "node_modules"), { recursive: true });
   writeFileSync(marker, JSON.stringify({ tool: "bun", lockHash, installedAt: new Date().toISOString() }) + "\n");
-  console.log(`  ${label} dependencies installed`);
+  log(`  ${label} dependencies installed`);
 }
 
 /** Bootstrap the kit's own runtime files. Idempotent; transaction-aware via ctx.tx. */
-export function bootstrap(ctx) {
-  console.log("== bootstrap ==");
+export function bootstrap(ctx, log = console.log) {
+  log("== bootstrap ==");
   ensureState(ctx);
   mkdirSync(ctx.logDir, { recursive: true, mode: 0o700 });
   mkdirSync(ctx.generated, { recursive: true, mode: 0o700 });
@@ -198,7 +198,7 @@ export function bootstrap(ctx) {
       const fd = openSync(ctx.keyFile, "wx", 0o600);
       writeFileSync(fd, randomBytes(32).toString("base64url") + "\n");
       closeSync(fd);
-      console.log("  generated local proxy key -> .proxykey (user-local secret, never committed)");
+      log("  generated local proxy key -> .proxykey (user-local secret, never committed)");
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
     }
@@ -208,19 +208,19 @@ export function bootstrap(ctx) {
     const filled = example.replace('proxyApiKey: "GENERATE_ME"', `proxyApiKey: "${ctx.key()}"`);
     if (/proxyApiKey: "GENERATE_ME"/.test(filled)) throw new Error("config template key substitution failed");
     commitFile(ctx, ctx.tx ?? { touch() {} }, ctx.config, filled);
-    console.log("  wrote proxy/config.yaml from example");
+    log("  wrote proxy/config.yaml from example");
   } else {
-    console.log("  proxy/config.yaml already present — left untouched");
+    log("  proxy/config.yaml already present — left untouched");
   }
 
-  ensureDeps(ctx, "proxy", ctx.proxySrc);
-  ensureDeps(ctx, "mcp bridge", ctx.mcpDir);
+  ensureDeps(ctx, "proxy", ctx.proxySrc, log);
+  ensureDeps(ctx, "mcp bridge", ctx.mcpDir, log);
 
   const credStore = process.env.ZCODE_PROXY_CREDENTIALS_PATH || join(ctx.home, ".zcode-proxy", "credentials.json");
   if (!existsSync(credStore)) {
     const desktopCfg = join(ctx.home, ".zcode", "v2", "config.json");
     if (existsSync(desktopCfg)) {
-      console.log("  importing ZCode Desktop credential (start-plan)...");
+      log("  importing ZCode Desktop credential (start-plan)...");
       try {
         execFileSync(resolveBun(ctx.root), ["run", "src/index.ts", "auth", "login", "zai", "--import"], {
           cwd: ctx.proxySrc,
@@ -228,19 +228,19 @@ export function bootstrap(ctx) {
           timeout: 15000,
           stdio: ["ignore", "pipe", "pipe"],
         });
-        console.log("  credential imported from the existing ZCode Desktop login");
+        log("  credential imported from the existing ZCode Desktop login");
       } catch {
-        console.log("  WARN: import failed. Manual options:");
-        console.log(`    cd ${ctx.proxySrc}`);
-        console.log(`    ZCODE_PROXY_CONFIG="${ctx.config}" bun run src/index.ts auth login zai --import`);
+        log("  WARN: import failed. Manual options:");
+        log(`    cd ${ctx.proxySrc}`);
+        log(`    ZCODE_PROXY_CONFIG="${ctx.config}" bun run src/index.ts auth login zai --import`);
       }
     } else {
-      console.log("  MANUAL STEP REQUIRED (once): log in with your ZCode account:");
-      console.log(`    cd ${ctx.proxySrc}`);
-      console.log(`    ZCODE_PROXY_CONFIG="${ctx.config}" bun run src/index.ts auth login zai`);
+      log("  MANUAL STEP REQUIRED (once): log in with your ZCode account:");
+      log(`    cd ${ctx.proxySrc}`);
+      log(`    ZCODE_PROXY_CONFIG="${ctx.config}" bun run src/index.ts auth login zai`);
     }
   } else {
-    console.log("  proxy credentials present");
+    log("  proxy credentials present");
   }
 }
 
