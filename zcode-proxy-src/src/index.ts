@@ -588,7 +588,7 @@ async function authAccounts(args: string[]): Promise<void> {
   if (sub === "migrate") {
     try {
       const result = await migrateAccountStore(accountStoreOptions());
-      console.log(JSON.stringify({ schemaVersion: 1, source: "offline", migrated: !result.migrated, revision: result.revision, accountCount: result.accounts.length }, null, 2));
+      console.log(JSON.stringify({ schemaVersion: 1, source: "offline", migrated: result.migrationPerformed, revision: result.revision, accountCount: result.accounts.length }, null, 2));
     } catch (err) {
       console.error(`Account store migration failed: ${safeAccountError(err)}`);
       process.exitCode = 1;
@@ -863,10 +863,11 @@ async function authStatus(): Promise<void> {
     if (existsSync(cfgPath)) {
       const config = loadConfig(cfgPath);
       if (config.auth.accounts?.enabled) {
-        const records = createAccountRotator(await loadAccountStore(accountStoreOptions()), {
-          plan: config.plan,
+        const auth = await createStoredAuthManagerWithAccounts(config.plan, {
+          ...config.auth.accounts,
           provider: config.provider,
-        }).list();
+        });
+        const records = auth.listAccounts();
         const usable = records.filter((record) => record.state === "ready" || record.state === "active");
         console.log(`Account pool: ${usable.length > 0 ? "logged in" : "not logged in"}`);
         console.log(`  Accounts: ${records.length} configured, ${usable.length} usable`);

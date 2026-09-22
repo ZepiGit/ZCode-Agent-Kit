@@ -87,7 +87,7 @@ Die Reihenfolge ist stabil zyklisch. Das aktive Profil bleibt aktiv, bis ein exp
 
 Ein HTTP-200-SSE-Header bestätigt keinen Modellabschluss. Streams bleiben inkrementell; nach begonnener Ausgabe gibt es kein transparentes Replay. Client-Abbruch beendet Wartequeue, Retry und Rotation. Alle Recovery-Schichten teilen ein Budget von höchstens einem zusätzlichen Account-Versuch und schließen bereits versuchte effektive Identitäten aus. Identische Credentials unter mehreren IDs zählen nicht als mehrere Kontingente.
 
-Für `inference`, `billing`, `quota` und `async` werden unterschiedliche Capability-Anforderungen berücksichtigt. `start-plan` benötigt für Billing/Quota/Async ein JWT. Unbekannte Kosten- oder Bucket-Zuordnungen werden nicht als kostenlos oder summierbar erfunden. Die modellgenaue Provider-Bucket-Zuordnung bleibt providerabhängig und wird nur verwendet, wenn sie bestätigt ist.
+Für `inference`, `billing`, `quota` und `async` werden unterschiedliche Capability-Anforderungen berücksichtigt. Billing/Quota/Async benötigen ein JWT. Auch der separat aktivierte Claim-Scheduler und `claim list|now` wählen einen JWT-fähigen Account unter denselben Pool-Richtlinien aus: Ein aktiver Account ohne JWT blockiert dadurch keine geeigneten späteren Accounts. Ein aktivierter Pool fällt dabei niemals auf den Legacy-Credential-Store zurück. Unbekannte Kosten- oder Bucket-Zuordnungen werden nicht als kostenlos oder summierbar erfunden. Die modellgenaue Provider-Bucket-Zuordnung bleibt providerabhängig und wird nur verwendet, wenn sie bestätigt ist.
 
 ## Poolweite Quota
 

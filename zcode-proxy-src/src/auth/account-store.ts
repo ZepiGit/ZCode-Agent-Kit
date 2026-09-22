@@ -72,6 +72,11 @@ export interface AccountStoreSnapshot {
   migrated: boolean;
 }
 
+export interface AccountStoreMigrationResult extends AccountStoreSnapshot {
+  /** True only when this call rewrote the store using the current key. */
+  migrationPerformed: boolean;
+}
+
 /** Failure labels accepted in redacted account overviews. */
 const SAFE_FAILURE_REASON = /^(?:1005|1113|3001|quota(?:[ _-]exhausted)?|insufficient(?:[ _-]balance)?|account(?:[ _-]rejected)?)$/i;
 
@@ -405,7 +410,7 @@ export async function loadAccountStoreSnapshot(options: AccountStoreOptions = {}
 }
 
 /** Explicitly migrate a legacy-key payload under the same mutation lock. */
-export async function migrateAccountStore(options: AccountStoreOptions = {}): Promise<AccountStoreSnapshot> {
+export async function migrateAccountStore(options: AccountStoreOptions = {}): Promise<AccountStoreMigrationResult> {
   const path = accountStorePath(options.path);
   const release = acquireLock(path);
   try {
@@ -413,10 +418,10 @@ export async function migrateAccountStore(options: AccountStoreOptions = {}): Pr
     if (options.expectedRevision !== undefined && options.expectedRevision !== current.revision) {
       throw new AccountStoreError("conflict", `account store revision conflict (expected ${options.expectedRevision}, found ${current.revision})`);
     }
-    if (!current.migrated) return current;
+    if (!current.migrated) return { ...current, migrationPerformed: false };
     const nextRevision = current.revision + 1;
     await writeStore(path, current.accounts, nextRevision);
-    return { accounts: current.accounts, revision: nextRevision, migrated: false };
+    return { accounts: current.accounts, revision: nextRevision, migrated: false, migrationPerformed: true };
   } finally { release(); }
 }
 

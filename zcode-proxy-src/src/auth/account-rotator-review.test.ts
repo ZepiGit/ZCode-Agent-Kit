@@ -163,9 +163,12 @@ describe("account rotator review regressions", () => {
       expect((await loadAccountStore({ path })).map((account) => account.id)).toEqual(["legacy"]);
       expect(readFileSync(path, "utf8")).toBe(before);
 
-      await migrateAccountStore({ path });
+      const migrated = await migrateAccountStore({ path });
+      expect(migrated.migrationPerformed).toBe(true);
       expect(readFileSync(path, "utf8")).not.toBe(before);
       expect((await loadAccountStore({ path })).map((account) => account.id)).toEqual(["legacy"]);
+      const unchanged = await migrateAccountStore({ path });
+      expect(unchanged.migrationPerformed).toBe(false);
     } finally {
       if (previous === undefined) delete process.env.ZCODE_PROXY_CREDENTIAL_SECRET;
       else process.env.ZCODE_PROXY_CREDENTIAL_SECRET = previous;

@@ -15,7 +15,7 @@ let fixtureRoot = "";
 let storePath = "";
 
 /** Run the actual Bun entry point in a child process, as an installed user would. */
-function runProxy(args: string[]) {
+function runProxy(args: string[], configPath = join(fixtureRoot, "missing-config.yaml")) {
   return spawnSync(
     process.execPath,
     ["run", "src/index.ts", "--cli", ...args],
@@ -29,7 +29,7 @@ function runProxy(args: string[]) {
         ZCODE_PROXY_ACCOUNTS_PATH: storePath,
         ZCODE_PROXY_CREDENTIAL_SECRET: secret,
         // Account listing is offline and must not need a config or proxy.
-        ZCODE_PROXY_CONFIG: join(fixtureRoot, "missing-config.yaml"),
+        ZCODE_PROXY_CONFIG: configPath,
       },
     },
   );
@@ -132,5 +132,34 @@ describe("zcode-proxy auth accounts CLI", () => {
     expect(body.error).toMatchObject({ code: "account_store_unavailable" });
     expect(body.error.message).toMatch(/account listing failed/i);
     expect(stdout(result) + stderr(result)).not.toContain("PRIVATE_CORRUPT_PAYLOAD");
+  });
+
+  it("auth status applies account allowlist and paid policy", async () => {
+    await addAccount({ id: "ready", plan: "coding-plan", credential: { provider: "zai", apiKey: "status-ready-secret" } }, { path: storePath });
+    await addAccount({ id: "paused", plan: "coding-plan", credential: { provider: "zai", apiKey: "status-paused-secret" } }, { path: storePath });
+    await addAccount({ id: "paid", plan: "paid-plan", credential: { provider: "zai", apiKey: "status-paid-secret" } }, { path: storePath });
+    await addAccount({ id: "blocked", plan: "coding-plan", credential: { provider: "zai", apiKey: "status-blocked-secret" } }, { path: storePath });
+    const configPath = join(fixtureRoot, "config.yaml");
+    writeFileSync(configPath, [
+      "provider: zai",
+      "auth:",
+      "  accounts:",
+      "    enabled: true",
+      "    allowedIds: [ready, paused, paid]",
+      "    pausedIds: [paused]",
+      "    allowPaid: false",
+    ].join("\n"), "utf8");
+    const result = runProxy(["auth", "status"], configPath);
+    expect(result.status).toBe(0);
+    expect(stdout(result)).toContain("Account pool: logged in");
+    expect(stdout(result)).toContain("Accounts: 4 configured, 1 usable");
+    expect(stdout(result)).not.toMatch(/status-(?:ready|paused|paid|blocked)-secret/);
+  });
+
+  it("reports a current-key migration as a no-op", async () => {
+    await addAccount({ id: "current", credential: { provider: "zai", apiKey: "migration-secret" } }, { path: storePath });
+    const result = runProxy(["auth", "accounts", "migrate"]);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(stdout(result))).toMatchObject({ migrated: false, accountCount: 1 });
   });
 });

@@ -74,4 +74,37 @@ describe("AuthManager account pool", () => {
     const legacy = new AuthManager({ loadCredential: async () => null });
     expect(await resolveClaimJwt(legacy, legacyLoader)).toBe("legacy-jwt");
   });
+
+  it("selects a JWT-capable pool account for claims when the active account only has an API key", async () => {
+    const rotator = createAccountRotator([
+      first,
+      { ...second, credential: { ...second.credential, jwt: "pool-two-jwt" } },
+    ], { plan: "coding-plan" });
+    const auth = new AuthManager({ accountRotator: rotator });
+    expect((await auth.getCredential()).apiKey).toBe("pool-one");
+    const legacyLoader = async () => { throw new Error("Pool claims must not read legacy credentials"); };
+
+    expect(await resolveClaimJwt(auth, legacyLoader)).toBe("pool-two-jwt");
+    expect(await resolveClaimJwt(auth, legacyLoader)).toBe("pool-two-jwt");
+    expect(rotator.getSelectedId()).toBe("two");
+    expect(rotator.list().every(account => account.state !== "exhausted")).toBe(true);
+  });
+
+  it("keeps pool policies authoritative when selecting a JWT-capable claim account", async () => {
+    const rotator = createAccountRotator([
+      first,
+      { ...second, credential: { ...second.credential, jwt: "pool-two-jwt" } },
+      { id: "three", credential: { provider: "zai", apiKey: "pool-three", jwt: "pool-three-jwt" } },
+    ], { plan: "coding-plan", pausedAccountIds: ["two"], allowedAccountIds: ["one", "two"] });
+    const auth = new AuthManager({ accountRotator: rotator });
+    let legacyReads = 0;
+    const legacyLoader = async () => {
+      legacyReads++;
+      return { provider: "zai" as const, apiKey: "legacy", jwt: "legacy-jwt" };
+    };
+
+    expect(await resolveClaimJwt(auth, legacyLoader)).toBeUndefined();
+    expect(legacyReads).toBe(0);
+    expect((await auth.getCredential()).apiKey).toBe("pool-one");
+  });
 });

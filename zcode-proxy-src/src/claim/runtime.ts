@@ -12,13 +12,17 @@ import { getCaptchaToken } from "../proxy/captcha.js";
 import { loadCredential } from "../auth/store.js";
 import { createStoredAuthManagerWithAccounts } from "../auth/runtime.js";
 
-/** Resolve the selected account without falling back outside an enabled pool. */
+/** Resolve a JWT-capable account without falling back outside an enabled pool. */
 export async function resolveClaimJwt(
   auth: AuthManager,
   loadStoredCredential: typeof loadCredential = loadCredential,
 ): Promise<string | undefined> {
   try {
-    const cred = await auth.getCredential();
+    // Claims use the same JWT capability as billing. Preserve compatibility
+    // with injected legacy AuthManager doubles that only expose getCredential.
+    const cred = auth.getCredentialHandle
+      ? (await auth.getCredentialHandle({ operation: "billing" })).credential
+      : await auth.getCredential();
     if (cred.jwt?.trim()) return cred.jwt;
   } catch { /* Only legacy mode may fall through to its compatibility store. */ }
   // Keep injected minimal AuthManager doubles from older integrations
