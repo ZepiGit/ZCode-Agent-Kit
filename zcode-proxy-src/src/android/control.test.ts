@@ -64,6 +64,15 @@ describe("android control listener", () => {
     }
   });
 
+  it("uses the runtime pool login status instead of a missing legacy credential", async () => {
+    const req = makeStubRequest({ body: JSON.stringify({ cmd: "status" }) });
+    const result = await handleControlRequestWithHooksForTest(req, baseState, {
+      logBuffer: new LogBuffer(), onAuthStatus: async () => true,
+    }, CONTROL_CAPABILITY);
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ loggedIn: true });
+  });
+
   it("rejects non-loopback remoteAddress with HTTP 403", async () => {
     const req = makeStubRequest({
       body: JSON.stringify({ cmd: "status" }),

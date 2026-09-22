@@ -69,6 +69,6 @@ an explicit unresolved release gate; this note is not publishing permission. See
 
 Baseline before these changes: **65 kit / 872 proxy / 42 MCP**. The baseline MCP
 `wmic` kill path did not execute; do not infer that coverage from the baseline
-count. Final dated results belong in `../TEST_REPORT.md`. Source inspection,
+count. Final dated results belong in CI logs or attached workflow artifacts. Source inspection,
 fixture checks, actual live model requests and published artifacts remain separate
 evidence; historical live results do not validate this candidate.

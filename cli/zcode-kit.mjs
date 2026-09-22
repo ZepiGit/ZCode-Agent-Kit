@@ -34,6 +34,8 @@ import { proxyEnv } from "../lib/proxy-env.mjs";
 import { ensureState } from "../lib/state.mjs";
 import { commitFile, ensureDir } from "../lib/edit.mjs";
 import { launchHarness } from "./launch.mjs";
+import { askAccountRotator, configureAccountRotator, restartForAccountChange, rotatorChoice } from "./account-setup.mjs";
+import { setupOutput } from "./setup-output.mjs";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
@@ -58,7 +60,7 @@ function parseArgs(argv) {
     if (a.startsWith("--")) {
       const eq = a.indexOf("=");
       if (eq !== -1) flags[a.slice(2, eq)] = a.slice(eq + 1);
-      else if (["fix", "json", "dry-run", "no-mcp", "yes", "help", "show-key"].includes(a.slice(2))) flags[a.slice(2)] = true;
+      else if (["fix", "json", "dry-run", "no-mcp", "yes", "help", "show-key", "installer", "verbose", "import", "paste", "replace", "live"].includes(a.slice(2))) flags[a.slice(2)] = true;
       else flags[a.slice(2)] = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true;
     } else positional.push(a);
   }
@@ -103,12 +105,14 @@ function usage(code) {
   zcode-kit run <harness> -- <args>             launch harness wired to ZCode
   zcode-kit doctor [--fix] [--harness <id>] [--json]
   zcode-kit status | models [--json] [--show-key] | usage --json
-  zcode-kit auth status|login|logout
+  zcode-kit auth status|login [zai|bigmodel] [--import] [--account ID] [--replace]|logout
+  zcode-kit accounts enable|disable
   zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes]
   zcode-kit accounts explain --model MODEL --operation OP
   zcode-kit accounts doctor [--json] | accounts quota
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
   (setup: --harness <list> limits adapters AND MCP registration; --no-mcp skips registration)
+  (setup: --account-rotator y|n for unattended installs; --verbose for full installer output)
 
 Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
 4 safe-start refused · 5 auth/identity failure
@@ -161,6 +165,7 @@ function assertNotCheckoutWrite() {
 }
 
 async function cmdSetup() {
+  const explicitChoice = rotatorChoice(flags["account-rotator"] ?? process.env.ZCODE_KIT_ACCOUNT_ROTATOR);
   const harnessArg = flags.harness ?? "auto";
   const detected = detectHarnesses(ctx.home);
   const targets = harnessArg === "auto"
@@ -170,48 +175,72 @@ async function cmdSetup() {
   assertNotCheckoutWrite();
 
   ensureState(ctx);
+  const compact = flags.installer === true && flags.verbose !== true && process.env.ZCODE_KIT_VERBOSE !== "1";
+  const ui = setupOutput(ctx, compact);
   acquireLock(BACKUP_DIR);
   const tx = beginTransaction(BACKUP_DIR, `zcode-kit setup ${harnessArg}`);
   ctx.tx = tx;
   let txId = null;
+  let accountChange = false;
   try {
-    bootstrap(ctx);
-    console.log(
+    ui.step("Runtime and configuration");
+    bootstrap(ctx, (...args) => ui.detail(...args));
+    ui.ok("Runtime ready");
+    ui.step("Assistant integrations");
+    ui.detail(
       "detected harnesses: " +
         (Object.entries(detected).filter(([, v]) => v).map(([k]) => k).join(", ") || "none") +
         " — adapters run only for detected or explicitly requested harnesses",
     );
     for (const id of targets) {
       const { default: adapter } = await loadAdapter(id);
-      console.log(`== ${id}: ${adapter.label} ==`);
-      adapter.apply(ctx, tx, (m) => console.log(m));
+      ui.detail(`== ${id}: ${adapter.label} ==`);
+      let skipped = false, warning = false;
+      adapter.apply(ctx, tx, (m) => { ui.detail(m); skipped ||= /\bskipped\b/i.test(m); warning ||= /\bWARN:/i.test(m); });
+      if (warning) ui.warn(`${adapter.label}: review the warning above`);
+      else if (skipped) ui.skip(adapter.label);
+      else ui.ok(adapter.label);
     }
-    await integrateMcp(tx, detected, targets);
-    console.log("\ndone. Quick checks:");
-    console.log("  node proxy/zcode-proxy-manager.mjs doctor");
-    console.log("  zcode-kit status");
+    await integrateMcp(tx, detected, targets, (...args) => ui.detail(...args));
+    ui.step("Account Rotator");
+    console.log("\n  Keep authorized logins as separate encrypted accounts.");
+    console.log("  New logins are saved automatically while the feature is enabled.");
+    const choice = explicitChoice ?? await askAccountRotator();
+    if (choice === undefined) {
+      console.log("  Account Rotator setting unchanged (no interactive answer).");
+      console.log("  Enable later: zcode-kit accounts enable");
+    } else {
+      const result = configureAccountRotator(ctx, tx, choice, runProxyCli);
+      accountChange = result.changed;
+      console.log(choice ? `  [OK] Account Rotator enabled (${result.accountCount} saved accounts).` : "  [OK] Account Rotator disabled. Saved accounts are kept.");
+      if (choice && result.accountCount === 0) console.log("  Add your first account: zcode-kit auth login zai");
+    }
   } finally {
     let finishErr = null;
     try { txId = tx.finish(); } catch (err) { finishErr = err; }
     releaseLock(join(BACKUP_DIR, ".setup-lock"));
     if (finishErr) console.error(`WARN: recording the transaction failed (${finishErr.message})`);
-    if (txId) console.log(`\ntransaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
+    if (txId) ui.detail(`\ntransaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
   }
+  if (accountChange) await restartForAccountChange(ctx);
+  console.log("\n  Configuration saved.");
+  ui.step("Connection check");
   const smoke = await setupSmoke(ctx);
-  console.log(smoke.detail);
-  if (smoke.code) console.warn("Configuration saved; model access is not confirmed. Run zcode-kit doctor for diagnostics.");
+  if (smoke.code) ui.warn(smoke.detail);
+  else console.log(`  [${smoke.cause === "skipped" ? "SKIP" : "OK"}] ${smoke.detail}`);
+  if (compact) console.log(`\n  Setup log: ${ui.logPath}`);
   return 0;
 }
 
 /** MCP bridge registration (OMP mcp.json / claude mcp add) — additive, namespaced. */
-async function integrateMcp(tx, detected, targets) {
+async function integrateMcp(tx, detected, targets, log = console.log) {
   if (flags["no-mcp"]) return;
   const serverJs = join(ctx.mcpDir, "dist", "index.js");
   if (!existsSync(serverJs)) {
-    console.log("== mcp: bridge dist missing — run setup again after install ==");
+    log("== mcp: bridge dist missing — run setup again after install ==");
     return;
   }
-  console.log("== mcp: zcode-harness bridge ==");
+  log("== mcp: zcode-harness bridge ==");
   if (targets.includes("omp") && detected.omp) {
     const ompMcp = join(ctx.home, ".omp", "agent", "mcp.json");
     const entry = { type: "stdio", command: "node", args: [serverJs, "--stdio"] };
@@ -226,38 +255,38 @@ async function integrateMcp(tx, detected, targets) {
           j.mcpServers = j.mcpServers ?? {};
           j.mcpServers["zcode-harness"] = entry;
           commitFile(ctx, tx, ompMcp, JSON.stringify(j, null, 2) + "\n");
-          console.log("  omp: mcp.json updated (zcode-harness → stdio bridge)");
+          log("  omp: mcp.json updated (zcode-harness → stdio bridge)");
         } else if (!ours) {
-          console.log(`  WARN: omp mcp.json "zcode-harness" points at another kit copy (${current.args?.[0] ?? "?"}) — left untouched`);
+          log(`  WARN: omp mcp.json "zcode-harness" points at another kit copy (${current.args?.[0] ?? "?"}) — left untouched`);
         } else {
-          console.log('  omp: "zcode-harness" already registered');
+          log('  omp: "zcode-harness" already registered');
         }
       } catch (err) {
-        console.log(`  WARN: mcp.json is not valid JSON (${err.message}) — skipped`);
+        log(`  WARN: mcp.json is not valid JSON (${err.message}) — skipped`);
       }
     } else {
       commitFile(ctx, tx, ompMcp, JSON.stringify({ mcpServers: { "zcode-harness": entry } }, null, 2) + "\n");
-      console.log("  omp: created mcp.json with zcode-harness bridge");
+      log("  omp: created mcp.json with zcode-harness bridge");
     }
   }
   if (targets.includes("claude-code") && detected["claude-code"]) {
     const get = runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
     if (get.status === 0 && !(get.stdout ?? "").includes(serverJs)) {
       // F-09: registered by another kit copy — never silently adopt it.
-      console.log('  WARN: claude "zcode-harness" is registered by another kit copy — left untouched');
+      log('  WARN: claude "zcode-harness" is registered by another kit copy — left untouched');
     } else if (get.status === 0) {
-      console.log('  claude: "zcode-harness" already registered');
+      log('  claude: "zcode-harness" already registered');
     } else {
       const add = runCommandSync("claude", ["mcp", "add", "zcode-harness", "--scope", "user", "--", "node", serverJs, "--stdio"], { stdio: "pipe", encoding: "utf8" });
       if (add.status === 0) {
-        console.log('  claude: registered "zcode-harness" (user scope)');
+        log('  claude: registered "zcode-harness" (user scope)');
         tx.external('claude MCP server "zcode-harness" registered (user scope)', "claude mcp remove zcode-harness --scope user");
       } else {
-        console.log(`  WARN: claude mcp add failed: ${(add.error?.message || add.stderr || `exit ${add.status}`).trim().slice(0, 200)}`);
+        log(`  WARN: claude mcp add failed: ${(add.error?.message || add.stderr || `exit ${add.status}`).trim().slice(0, 200)}`);
       }
     }
   }
-  console.log("  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.");
+  log("  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.");
 }
 
 // --------------------------------------------------------------- integrate
@@ -430,7 +459,14 @@ async function cmdAuth() {
     }
   }
   if (sub === "login") {
-    const res = runProxyCli(["auth", "login", "zai"], { stdio: "inherit" });
+    if (flags.account !== undefined && (typeof flags.account !== "string" || !flags.account.trim())) {
+      console.error("--account requires an account ID.");
+      return 2;
+    }
+    const args = ["auth", "login", positional[2] ?? "zai"];
+    for (const option of ["import", "paste", "replace"]) if (flags[option] === true) args.push(`--${option}`);
+    if (flags.account !== undefined) args.push("--account", String(flags.account));
+    const res = runProxyCli(args, { stdio: "inherit" });
     return res.status ?? 1;
   }
   if (sub === "logout") {
@@ -458,6 +494,18 @@ async function cmdAuth() {
 // this command forwards directly to it and never starts a serving process.
 async function cmdAccounts() {
   const sub = positional[1];
+  if (sub === "enable" || sub === "disable") {
+    assertNotCheckoutWrite();
+    ensureState(ctx);
+    const lock = acquireLock(BACKUP_DIR);
+    const tx = beginTransaction(BACKUP_DIR, `zcode-kit accounts ${sub}`);
+    let result;
+    try { result = configureAccountRotator(ctx, tx, sub === "enable", runProxyCli); }
+    finally { try { tx.finish(); } finally { releaseLock(lock); } }
+    if (result.changed) await restartForAccountChange(ctx);
+    console.log(sub === "enable" ? `Account Rotator enabled (${result.accountCount} saved accounts). New logins are added automatically.` : "Account Rotator disabled. Saved accounts are kept.");
+    return 0;
+  }
   if (["remove", "pause", "resume"].includes(sub)) {
     const id = positional[2];
     if (!id || id.startsWith("--")) {

@@ -8,7 +8,7 @@ Use your ZCode account with the coding assistant you already use.
 
 Keep your coding assistant. Use your existing ZCode models and quota/tokens through a local connection.
 
-**Optional account rotation:** Enable a pool of your own authorized ZCode accounts, add them with `zcode-proxy auth login <provider> --account ID`, and inspect or remove them with `zcode-kit accounts`. See the [account rotator documentation](docs/ACCOUNT_ROTATOR.md); listings are offline and redacted, and no account or quota limits are bypassed.
+**Optional account rotation:** The installer asks **"Do you want to activate the Account Rotator feature? [y/n]"**. With `y`, the current login is imported and later `zcode-kit auth login zai` logins are saved as additional accounts. Signing in again updates the same account. Enable later with `zcode-kit accounts enable`; inspect saved accounts with `zcode-kit accounts`. See the [account rotator documentation](docs/ACCOUNT_ROTATOR.md).
 
 **The path:** prepare your account → install the kit → Use GLM-5.3(-flash) / start working.
 
@@ -22,6 +22,8 @@ Keep your coding assistant. Use your existing ZCode models and quota/tokens thro
 ## Step 2 — Install the kit once
 
 Use the release installer below. It sets up detected assistants automatically, so there is no separate setup command to run afterward.
+
+The installer shows four numbered stages, compact assistant results and a connection check. Detailed setup output is saved to the displayed `install.log`; set `ZCODE_KIT_VERBOSE=1` for full output and `NO_COLOR=1` for plain text. Interactive installs require `y` or `n` for Account Rotator. For unattended installs, set `ZCODE_KIT_ACCOUNT_ROTATOR=y` or `n`; without an explicit answer the existing setting is preserved. A failed connection check remains a warning even when installation succeeds.
 
 > **Before you run the installer:** it downloads and executes a script, changes configuration for detected assistants, and may register MCP tools. Setup also attempts a small model request that can use quota. Changes are recorded, but a later failure can leave earlier changes in place. Inspect the installer if required by your security policy.
 

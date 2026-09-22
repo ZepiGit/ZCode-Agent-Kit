@@ -3,7 +3,7 @@
  * Skipped unless LIVE_TEST=1 is set. Usage:
  *   LIVE_TEST=1 node --test test/live/live.test.mjs
  *
- * Live reality (documented in TEST_REPORT.md): model turns from harness
+ * Live reality (see docs/KNOWN_LIMITATIONS.md): model turns from harness
  * processes outside the desktop currently fail with provider risk control
  * ("captcha verify failed"). These tests verify everything up to that
  * honest failure surface and never claim model output that did not happen.

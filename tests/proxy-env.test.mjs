@@ -12,6 +12,12 @@ test('managed proxies enable captcha solving without ambient opt-in', () => {
   assert.deepEqual(source, { PATH: 'keep-me' });
 });
 
+test('managed login and service retain the configured account encryption key', () => {
+  const key = 'synthetic-account-encryption-master-key';
+  const env = proxyEnv({ config: '/fixture/config.yaml' }, { ZCODE_PROXY_CREDENTIAL_MASTER_KEY: key });
+  assert.equal(env.ZCODE_PROXY_CREDENTIAL_MASTER_KEY, key);
+});
+
 test('managed env removes ambient solver overrides including Windows casing variants', () => {
   const source = {
     ZCODE_PROXY_CONFIG: 'ambient-config.yaml',

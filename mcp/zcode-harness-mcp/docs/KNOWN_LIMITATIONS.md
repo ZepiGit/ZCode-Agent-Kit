@@ -16,7 +16,7 @@ nicht zuverlässig.
 **Was die Bridge tut:** Sie beantwortet Header-Rückfragen niemals mit erfundenen Werten
 (`{headersApplied:false}`), umgeht die Risiko-Kontrolle **nicht** und meldet `turn.failed` mit der
 vollen Harness-Attribution. Alles vor dem Modellstream ist live verifiziert: Session-Setup, Hooks,
-`turn.started`, Event-Stream, Usage, Stop/Cancel, Settings — siehe TEST_REPORT.
+`turn.started`, Event-Stream, Usage, Stop/Cancel, Settings. Aktuelle lokale Nachweise separat aufbewahren.
 
 **Repro (exakt):**
 ```
@@ -67,4 +67,4 @@ Sobald der Plan Flash freischaltet, funktioniert die Auswahl ohne Code-Änderung
 - MCP-Tasks-Extension (io.modelcontextprotocol/tasks) ist nicht aktiviert; Polling über gewöhnliche
   MCP-Tools funktioniert unabhängig (so wie im Auftrag gefordert).
 - Getestete MCP-Clients: offizieller SDK-Client (Node 26), eigener HTTP-Client (`fetch`), MCP Inspector
-  nicht ausgeführt (nicht installiert) — Repro-Schritte in TEST_REPORT.
+  nicht ausgeführt (nicht installiert); bei Bedarf separat verifizieren.

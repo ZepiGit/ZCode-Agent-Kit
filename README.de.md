@@ -203,7 +203,7 @@ Modellnamen verwenden auch unter Windows `/`. `run` unterstützt **nur** `claude
 | `cline` | `generated/cline-zcode-values.md`; Werte manuell in der Erweiterungsoberfläche eintragen. |
 | `kilo-code` | `generated/kilo-zcode-values.md`; Werte manuell in der Erweiterungsoberfläche eintragen. |
 
-Zehn Adapter sind nicht zehn live geprüfte Clients. Siehe datierte [Support-Matrix](SUPPORT_MATRIX.json) und [Testbericht](TEST_REPORT.md). Cline-/Kilo-Prüfungen bestätigen ein Werteblatt, **nicht** abgeschlossene GUI-Einrichtung. MCP-Registrierung allein ist kein Modellzugriff.
+Zehn Adapter sind nicht zehn live geprüfte Clients. Siehe datierte [Support-Matrix](SUPPORT_MATRIX.json) und [CI-Läufe](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml). Cline-/Kilo-Prüfungen bestätigen ein Werteblatt, **nicht** abgeschlossene GUI-Einrichtung. MCP-Registrierung allein ist kein Modellzugriff.
 
 **Continue im Quellstand:** Unterstützt `models: []`, Kommentare und Blocklisten-Einrückungen; Nutzermodelle und Default-Reihenfolge bleiben vorn. Nichtleere Inline-Listen, doppelte Schlüssel und unsichere Formen werden abgelehnt statt geraten. Im verwalteten YAML steht der lokale Proxy-Key als gequoteter Wert; `${ZCODE_PROXY_KEY}` ist keine gültige Continue-Interpolation. Nach Schlüsselrotation neu integrieren oder unterstützte Reparatur nutzen. Ein nativer Continue-Live-Test wird nicht behauptet.
 
@@ -316,7 +316,7 @@ npm run test:proxy
 npm run test:mcp
 ```
 
-Datierte Prüfung in [TEST_REPORT.md](TEST_REPORT.md): 150 Kit-Tests bestanden plus ein Live-Opt-in-Skip, 946 Proxy- und 42 MCP-Tests bestanden. Echte isolierte OMP-Aufrufe prüften normalen Start, eigenen Proxy-Absturz und Offline-Key-Reparatur; ein erster Timeout und erfolgreicher Wiederholungslauf bleiben dokumentiert. Keine Garantie für alle Clients/Plattformen/Langzeitfälle oder Inhalt des neuesten veröffentlichten Pakets. Später gefundene CI-Portabilitätsfehler sind getrennt vom lokalen Lauf zu betrachten; aktuellen Badge/Workflow beachten.
+Die aktuellen Testergebnisse findest du in den [CI-Läufen](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml). Lokale Testausgaben werden nicht versioniert. Automatisierte Fixture-Tests bestätigen keine Live-Anmeldung oder Modellverfügbarkeit.
 
 Maintainer: Push auf `main`, `v*`-Tag oder Dispatch kann ein Release auslösen. Die Versionswahl prüft npm/Remote-Tags gegen Wiederverwendung fremder Assets; gleichversionige unveröffentlichte Retries sind bedingt. Tests, Paket-/Versionsgates, OIDC und Redistributionsvoraussetzungen bleiben erforderlich. Siehe [Release-Checkliste](docs/RELEASE_CHECKLIST.md); lokale grüne Tests sind keine erfolgreiche npm-Veröffentlichung.
 
@@ -326,6 +326,6 @@ Nur den eigenen autorisierten Account verwenden. `.proxykey`, generierte Setting
 
 - [Harness-Details](harnesses/README.md) und [Support-Matrix](SUPPORT_MATRIX.json)
 - [Denkstufen-Zuordnung](EFFORT_MAPPING.md)
-- [Testbericht](TEST_REPORT.md) und [Implementierungsstand](IMPLEMENTATION_STATUS.md)
+- [CI-Läufe](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) und [Support-Matrix](SUPPORT_MATRIX.json)
 - [Eingebundene Komponenten und Lizenzen](MANIFEST.md)
 - [Release-Checkliste](docs/RELEASE_CHECKLIST.md)

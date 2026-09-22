@@ -2,7 +2,7 @@
 
 **Release readiness is not established.** Local source changes, fixture passes,
 a successful package build, a GitHub release and npm publication are separate
-milestones. Final test/review results are pending in `TEST_REPORT.md`; no release
+milestones. Final test/review results must be attached to the matching CI run; no release
 or repair of the user's personal installation is claimed by this checklist.
 
 ## Blocking gates before a release-triggering push or dispatch
@@ -125,5 +125,4 @@ or that an existing published artifact establishes permission for a new one.
 The v0.2.0/v0.2.1 preparation used different test counts and included manual
 release commands and an obsolete release-event/npm-token path. Those instructions
 are superseded here. The v0.2.0 asset-replacement history remains in its release
-notes; it is not a precedent for replacing assets again. Use dated evidence in
-`TEST_REPORT.md`, not old green checkboxes, for the next candidate.
+notes; it is not a precedent for replacing assets again. Use the CI results for the exact candidate commit, not old green checkboxes.

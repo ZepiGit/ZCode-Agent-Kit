@@ -17,7 +17,8 @@ import { updateConfigYaml, ensureConfigFile } from "../config/edit.js";
 import { createStoredAuthManagerWithAccounts } from "../auth/runtime.js";
 import { startServer, type ProxyServer } from "../server/server.js";
 import { buildServerOptions } from "../server/server-options.js";
-import { loadCredential, saveCredential, clearCredential } from "../auth/store.js";
+import { loadCredential, clearCredential } from "../auth/store.js";
+import { saveLoginCredential } from "../auth/login-store.js";
 import { ZaiOAuthClient, BigmodelOAuthClient, LOGIN_TIMEOUT_MS, parsePastedCallbackUrl, type OAuthFlowClient, type OAuthFlowStart, type OAuthFlowTokens } from "../auth/oauth.js";
 import { KeyResolver } from "../auth/resolver.js";
 import { openBrowser } from "../runtime/open-browser.js";
@@ -238,6 +239,7 @@ export async function runTui(args: ServeArgs): Promise<void> {
   // --- auth ----------------------------------------------------------------
   async function refreshAuth(): Promise<void> {
     if (auth.isAccountPoolEnabled()) {
+      await auth.refreshAccountPool();
       const records = auth.listAccounts();
       const usable = records.filter((record) => record.state !== "invalid" && record.state !== "expired");
       state.loggedIn = usable.length > 0;
@@ -481,7 +483,7 @@ export async function runTui(args: ServeArgs): Promise<void> {
       const resolver = new KeyResolver();
       const cred = await resolver.resolveCodingPlanCredential(tokens.accessToken, provider, tokens.userId);
       if (tokens.jwt) cred.jwt = tokens.jwt;
-      await saveCredential(cred);
+      await saveLoginCredential(cred, config);
       if (serverRef.current) auth.setOAuthCredential(cred);
       console.log(`OAuth completed for ${provider}`);
       setToast("logged in", "ok");

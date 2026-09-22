@@ -5,9 +5,10 @@
 import { loadConfig } from "./config/loader.js";
 import { createStoredAuthManagerWithAccounts } from "./auth/runtime.js";
 import { importFromZCodeConfig } from "./auth/desktop.js";
+import { saveLoginCredential } from "./auth/login-store.js";
 import { startServer, type ProxyServer } from "./server/server.js";
 import { startControlListener, LogBuffer, type ControlState } from "./android/control.js";
-import { loadCredential, saveCredential, clearCredential, getStorePath } from "./auth/store.js";
+import { loadCredential, clearCredential, getStorePath } from "./auth/store.js";
 import { ZaiOAuthClient, BigmodelOAuthClient, LOGIN_TIMEOUT_MS, parsePastedCallbackUrl, type OAuthResult } from "./auth/oauth.js";
 import { KeyResolver } from "./auth/resolver.js";
 import type { Credential } from "./auth/types.js";
@@ -29,6 +30,7 @@ import {
   updateAccountStore,
   migrateAccountStore,
   duplicateCredentialGroups,
+  rememberAccount,
 } from "./auth/account-store.js";
 import { createAccountRotator } from "./auth/account-rotator.js";
 
@@ -395,6 +397,11 @@ async function runAndroid(): Promise<void> {
     port: controlPort,
     state: controlState,
     logBuffer,
+    onAuthStatus: async () => {
+      if (!auth.isAccountPoolEnabled()) return (await loadCredential()) != null;
+      await auth.refreshAccountPool();
+      return auth.listAccounts().some(account => account.state !== "invalid" && account.state !== "expired");
+    },
     onStartProxy: startProxy,
     onStopProxy: stopProxy,
     onSetConfig: setConfig,
@@ -495,6 +502,11 @@ async function authLogin(args: string[]): Promise<void> {
     console.error("--account requires an account ID.");
     process.exit(1);
   }
+  if (replaceAccount && !accountId) {
+    console.error("--replace requires --account ID.");
+    process.exitCode = 2;
+    return;
+  }
   if (pasteMode && provider !== "bigmodel") {
     console.error("--paste applies to the bigmodel auth-code flow only.");
     console.error("zai login is server-mediated (no localhost callback) and already works headless.");
@@ -544,10 +556,17 @@ async function authLogin(args: string[]): Promise<void> {
     return;
   }
 
-  await saveCredential(cred);
-  console.log(`\nLogged in as ${provider}.`);
+  let savedAccountId: string | undefined;
+  try { savedAccountId = await saveLoginCredential(cred); }
+  catch (err) {
+    console.error(`Login could not be saved: ${safeAccountError(err)}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`\nLogged in as ${provider}${savedAccountId ? ` (account ${savedAccountId})` : ""}.`);
   console.log("  Credential: stored (redacted)");
-  console.log(`  Stored:  ${getStorePath()}`);
+  console.log(`  Stored:  ${savedAccountId ? getAccountStorePath(accountStoreOptions().path) : getStorePath()}`);
+  if (!savedAccountId) console.log("  Account Rotator is disabled; this replaces the single-account login. Enable with: zcode-kit accounts enable");
 }
 
 /**
@@ -584,6 +603,26 @@ function safeAccountError(err: unknown): string {
 
 async function authAccounts(args: string[]): Promise<void> {
   const sub = args[0];
+
+  if (sub === "import-current") {
+    try {
+      const config = loadConfig(process.env.ZCODE_PROXY_CONFIG ?? "config.yaml");
+      const options = { ...accountStoreOptions(), plan: config.plan };
+      // Validate the pool before importing anything; corrupt stores stay untouched.
+      await loadAccountStore(options);
+      const legacy = await loadCredential();
+      if (!legacy && existsSync(getStorePath())) throw new Error("credential store unavailable");
+      if (legacy) await rememberAccount(legacy, options);
+      let desktop: Credential | undefined;
+      try { desktop = importFromZCodeConfig(config.provider, config.plan); } catch { /* no current Desktop login */ }
+      if (desktop) await rememberAccount(desktop, options);
+      console.log(JSON.stringify({ accountCount: (await loadAccountStore(options)).length }));
+    } catch (err) {
+      console.error(`Account import failed: ${safeAccountError(err)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   if (sub === "migrate") {
     try {

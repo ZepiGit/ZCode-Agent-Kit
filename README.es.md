@@ -197,7 +197,7 @@ Los identificadores usan `/` incluso en Windows. `run` admite **solo** `claude-c
 | `cline` | Genera `generated/cline-zcode-values.md`; introducir valores manualmente en la UI. |
 | `kilo-code` | Genera `generated/kilo-zcode-values.md`; introducir valores manualmente en la UI. |
 
-Diez adaptadores no equivalen a diez clientes probados en vivo. Consulta [matriz fechada](SUPPORT_MATRIX.json) e [informe](TEST_REPORT.md). En Cline/Kilo un check confirma la hoja de valores, **no** la configuración GUI completa. Registrar MCP no es acceso al modelo.
+Diez adaptadores no equivalen a diez clientes probados en vivo. Consulta [matriz fechada](SUPPORT_MATRIX.json) e [Ejecuciones de CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml). En Cline/Kilo un check confirma la hoja de valores, **no** la configuración GUI completa. Registrar MCP no es acceso al modelo.
 
 **Continue actual:** admite `models: []`, comentarios y sangrías de listas de bloque, conserva modelos/defaults del usuario primero. Rechaza listas inline no vacías, claves duplicadas y formas inseguras. Guarda la clave local entre comillas en YAML; `${ZCODE_PROXY_KEY}` no es interpolación válida de Continue. Tras rotación, reintegra o usa la reparación compatible. No se afirma prueba nativa de Continue en vivo.
 
@@ -310,7 +310,7 @@ npm run test:proxy
 npm run test:mcp
 ```
 
-Validación fechada en [TEST_REPORT.md](TEST_REPORT.md): 150 pruebas kit aprobadas y un live opt-in omitido, 946 proxy y 42 MCP aprobadas. OMP real aislado cubrió arranque normal, caída del proxy propio y reparación de claves offline; conserva un timeout inicial y su repetición exitosa. No demuestra todos los clientes/plataformas/casos prolongados ni el contenido del último paquete publicado. Los fallos posteriores de portabilidad CI son separados del resultado local; consulta badge y logs actuales.
+Los resultados actuales están en las [ejecuciones de CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml). Los resultados locales no se versionan. Las pruebas automatizadas no confirman acceso real a cuentas o modelos.
 
 Mantenedores: push a `main`, tag `v*` o dispatch puede activar publicación. La selección de versión consulta npm/tags para no reutilizar artefactos de otro commit; el retry de versión inédita es condicional. Siguen aplicándose pruebas, controles de paquete/versión, OIDC y redistribución. Consulta [checklist](docs/RELEASE_CHECKLIST.md): pruebas locales verdes no significan publicación npm exitosa.
 
@@ -320,6 +320,6 @@ Usa solo tu cuenta autorizada. Protege `.proxykey`, ajustes/env generados y perf
 
 - [Detalles de asistentes](harnesses/README.md) y [matriz de soporte](SUPPORT_MATRIX.json)
 - [Niveles de razonamiento](EFFORT_MAPPING.md)
-- [Pruebas](TEST_REPORT.md) y [estado de implementación](IMPLEMENTATION_STATUS.md)
+- [Ejecuciones de CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) y [Matriz de soporte](SUPPORT_MATRIX.json)
 - [Componentes incluidos y licencias](MANIFEST.md)
 - [Checklist de publicación](docs/RELEASE_CHECKLIST.md)

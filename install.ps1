@@ -32,6 +32,14 @@
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 $originalPath = $env:PATH
+$ProgressPreference = 'SilentlyContinue'
+$useColor = -not $env:NO_COLOR -and -not [Console]::IsOutputRedirected
+function Write-InstallLine([string]$Text, [string]$Color = 'Cyan') {
+  if ($useColor) { Write-Host $Text -ForegroundColor $Color }
+  else { Write-Host $Text }
+}
+function Write-InstallStep([string]$Text) { Write-Host ''; Write-InstallLine "  $Text" }
+function Write-InstallOk([string]$Text) { Write-InstallLine "  [OK]   $Text" 'Green' }
 
 $Repo = "ZepiGit/ZCode-Agent-Kit"
 $VersionPattern = '^v\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
@@ -68,8 +76,12 @@ if ($Version -notmatch $VersionPattern) { throw 'Invalid release version returne
 $Tarball = "$Version.tar.gz"
 $BaseUrl = "https://github.com/$Repo/releases/download/$Version"
 
-Write-Host "== zcode-agent-kit installer ($Version) =="
-Write-Host "  install dir: $InstallDir"
+Write-Host ''
+Write-InstallLine '  ZCODE  /  AGENT KIT'
+Write-Host "  $Version  |  Your local AI workspace"
+Write-Host '  --------------------------------------------'
+Write-Host "  Install to  $InstallDir"
+Write-InstallStep '[1/4] Checking runtime'
 
 # --- prerequisites -----------------------------------------------------------
 function Test-Node {
@@ -83,7 +95,7 @@ if (-not (Test-Node)) {
   Write-Error "node >= 20 is required but not found on PATH. Install from https://nodejs.org and re-run."
 }
 if (-not (Test-Bun)) {
-  Write-Host "==> Downloading Bun v1.4.2 (bun-windows-x64.zip) =="
+  Write-Host "  Downloading Bun v1.4.2 (bun-windows-x64.zip)..."
   $bunZip = Join-Path $tmp.FullName "bun.zip"
   # SHA256 of bun-v1.4.2 bun-windows-x64.zip (upstream release artifact).
   $bunSha = "ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405"
@@ -98,11 +110,13 @@ if (-not (Test-Bun)) {
   if (-not (Test-Bun)) { Write-Error "bun installed but not runnable - add it to PATH and re-run." }
 }
 
+Write-InstallOk "Node.js and Bun available"
+
 # --- download + verify -------------------------------------------------------
 $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Source
   $archive = Join-Path $tmp.FullName "kit.tar.gz"
   $checksums = Join-Path $tmp.FullName "checksums.txt"
-  Write-Host "==> Downloading release archive =="
+  Write-InstallStep "[2/4] Downloading and verifying release"
   try { Invoke-WebRequest -Uri "$BaseUrl/$Tarball" -OutFile $archive } catch { throw "Release archive download failed: $($_.Exception.Message)" }
   try { Invoke-WebRequest -Uri "$BaseUrl/checksums.txt" -OutFile $checksums } catch { throw "Checksum download failed: $($_.Exception.Message)" }
 
@@ -114,7 +128,7 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
   if ($actual -ne $expected.ToLower()) {
     Write-Error "release archive hash mismatch:`n  expected $expected`n  actual   $actual`nAborting."
   }
-  Write-Host "archive hash verified ($($actual.Substring(0,16))...)"
+  Write-InstallOk "Release archive hash verified (SHA-256)"
 
   # Safe extraction: tar with a structural check -- the archive must contain
   # exactly ONE top-level directory (its name is not load-bearing; git-archive
@@ -134,12 +148,13 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
   }
   $extracted = $top[0]
 
+  Write-InstallStep "[3/4] Installing files"
   # --- install ---------------------------------------------------------------
   # /XF keeps machine-local runtime state across updates: the local proxy key
   # and proxy/config.yaml (user settings) are never overwritten or deleted by
   # the mirror; node_modules/backups/logs/generated are rebuilt or kept.
   if (Test-Path -LiteralPath $InstallDir) {
-    Write-Host "existing install found - updating in place (.proxykey and proxy/config.yaml are preserved)"
+    Write-Host "  Updating existing installation; keeping your configuration."
     robocopy $extracted.FullName $InstallDir /MIR /XJ /XF .proxykey config.yaml .bun-path /XD node_modules backups logs generated /NFL /NDL /NJH /NJS | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "update copy failed (robocopy exit $LASTEXITCODE) - aborting." }
   } else {
@@ -148,10 +163,11 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
   }
 
   [IO.File]::WriteAllText((Join-Path $InstallDir '.bun-path'), $bunExe, (New-Object System.Text.UTF8Encoding($false)))
-  Write-Host "==> Configuring detected harnesses =="
+  Write-InstallOk "Application files installed"
+  Write-InstallStep "[4/4] Configuring your workspace"
   Push-Location $InstallDir
   try {
-    node cli/zcode-kit.mjs setup --harness auto
+    node cli/zcode-kit.mjs setup --harness auto --installer
     if ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE) - see output above" }
   } finally {
     Pop-Location
@@ -167,16 +183,18 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
     $entry = (Join-Path $InstallDir 'cli\zcode-kit.mjs').Replace("'", "''")
     [IO.File]::WriteAllText($launcher, "& node '$entry' @args`r`nexit `$LASTEXITCODE`r`n", (New-Object System.Text.UTF8Encoding($true)))
     Set-Content -LiteralPath $shim -Value '@echo off', 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0zcode-kit.ps1" %*', 'exit /b %errorlevel%' -Encoding Ascii
-    Write-Host "  added zcode-kit command -> $shim"
+    Write-InstallOk "zcode-kit command installed"
   } catch {
     Write-Host "  note: could not create the zcode-kit shim ($($_.Exception.Message))"
   }
 
   Write-Host ""
-  Write-Host "Installation complete."
-  Write-Host "  zcode-kit status       # local proxy status"
-  Write-Host "  zcode-kit doctor       # diagnose integrations"
-  Write-Host "  zcode-kit auth status  # inspect account login"
+  Write-InstallLine '  Installation complete.' 'Green'
+  Write-Host '  --------------------------------------------'
+  Write-Host '  zcode-kit auth login zai    Sign in / add an account'
+  Write-Host '  zcode-kit accounts          View saved accounts'
+  Write-Host '  zcode-kit doctor            Check warnings and model access'
+  Write-Host ''
 } finally {
   $env:PATH = $originalPath
   Remove-Item -LiteralPath $tmp.FullName -Recurse -Force -ErrorAction SilentlyContinue
