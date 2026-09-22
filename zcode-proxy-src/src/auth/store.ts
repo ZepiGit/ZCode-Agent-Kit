@@ -91,8 +91,7 @@ function legacyEncryptionKeys(): Uint8Array[] {
 }
 
 /** Atomic store write: exclusive temp file (0o600) + rename over the target. */
-function atomicWriteStore(contents: string): void {
-  const target = storeFile();
+export function atomicWriteStore(contents: string, target: string = storeFile()): void {
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
   const tmp = `${target}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
   writeFileSync(tmp, contents, { mode: 0o600, flag: "wx" });
@@ -154,6 +153,31 @@ async function decryptWith(key: Uint8Array, ciphertext: string): Promise<string>
 
 async function encrypt(plaintext: string): Promise<string> {
   return encryptWith(getEncryptionKey(), plaintext);
+}
+
+/**
+ * Encrypt an arbitrary JSON payload with the same key and AES-GCM format used
+ * by the legacy single-credential store. The account pool uses this helper so
+ * both stores have identical key derivation and migration behaviour.
+ */
+export async function encryptStorePayload(plaintext: string): Promise<string> {
+  return encrypt(plaintext);
+}
+
+/**
+ * Decrypt a payload written by this store. `migrated` is true when one of the
+ * pre-SHA-256 keys was needed; callers may atomically re-encrypt the payload
+ * under the current key after checking that the file has not changed.
+ */
+export async function decryptStorePayload(ciphertext: string): Promise<{ plaintext: string; migrated: boolean }> {
+  try {
+    return { plaintext: await decryptWith(getEncryptionKey(), ciphertext), migrated: false };
+  } catch {
+    for (const key of legacyEncryptionKeys()) {
+      try { return { plaintext: await decryptWith(key, ciphertext), migrated: true }; } catch {}
+    }
+    throw new Error("encrypted payload is not decryptable on this machine");
+  }
 }
 
 export async function saveCredential(cred: Credential): Promise<void> {
