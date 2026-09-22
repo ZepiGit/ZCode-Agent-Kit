@@ -4,7 +4,7 @@ import { parseGatewayErrorEnvelope } from "./handler.js";
 describe("parseGatewayErrorEnvelope", () => {
   test("maps quota envelope to non-retryable 400", () => {
     const r = parseGatewayErrorEnvelope('{"code":1005,"msg":"exceed quota limit"}');
-    expect(r).toEqual({ status: 400, type: "invalid_request_error", message: "[1005] exceed quota limit" });
+    expect(r).toEqual({ status: 400, type: "invalid_request_error", message: "[1005] exceed quota limit", code: 1005 });
   });
 
   test("maps balance envelope to non-retryable 400", () => {
@@ -14,12 +14,12 @@ describe("parseGatewayErrorEnvelope", () => {
 
   test("maps captcha failure to non-retryable 403", () => {
     const r = parseGatewayErrorEnvelope('{"code":3007,"msg":"captcha verify failed"}');
-    expect(r).toEqual({ status: 403, type: "permission_error", message: "[3007] captcha verify failed" });
+    expect(r).toEqual({ status: 403, type: "permission_error", message: "[3007] captcha verify failed", code: 3007 });
   });
 
   test("maps model-not-allowed to 403", () => {
     const r = parseGatewayErrorEnvelope('{"code":3006,"msg":"model not allowed"}');
-    expect(r).toEqual({ status: 403, type: "permission_error", message: "[3006] model not allowed" });
+    expect(r).toEqual({ status: 403, type: "permission_error", message: "[3006] model not allowed", code: 3006 });
   });
 
   test("maps unknown codes to 502", () => {
