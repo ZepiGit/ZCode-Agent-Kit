@@ -354,7 +354,7 @@ describe("handleQuota singleflight + cache", () => {
 });
 
 describe("GET /quota account pool", () => {
-  it("uses the selected pooled JWT and keeps account snapshots separate", async () => {
+  it("uses the sticky pooled JWT until an explicit quota signal rotates it", async () => {
     clearQuotaCache();
     const accounts = ["first", "second"].map(id => ({
       id,
@@ -373,12 +373,14 @@ describe("GET /quota account pool", () => {
     const second = await (await handler(new Request("http://localhost/quota"))).json();
     const cachedFirst = await (await handler(new Request("http://localhost/quota"))).json();
     expect(first.balances[0].remainingUnits).toBe(10);
-    expect(second.balances[0].remainingUnits).toBe(20);
+    // Quota reads do not rotate the active account by themselves. The pool
+    // remains sticky until a model request returns an explicit quota signal.
+    expect(second.balances[0].remainingUnits).toBe(10);
     expect(cachedFirst.balances[0].remainingUnits).toBe(10);
     expect(cachedFirst.cached).toBe(true);
-    expect(authorizations).toEqual(accounts.flatMap(account => [
-      `Bearer ${account.credential.jwt}`, `Bearer ${account.credential.jwt}`,
-    ]));
+    expect(authorizations).toEqual([
+      `Bearer ${accounts[0].credential.jwt}`, `Bearer ${accounts[0].credential.jwt}`,
+    ]);
     clearQuotaCache();
   });
 
