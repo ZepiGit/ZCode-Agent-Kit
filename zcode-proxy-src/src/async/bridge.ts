@@ -40,6 +40,9 @@ export interface BridgeOptions {
   /** Total wait cap across ALL retries (not per-ticket). 0 = unlimited. */
   maxWaitMs: number;
   clientSignal?: AbortSignal;
+  /** Immutable account context captured when the async job was created. */
+  accountId?: string;
+  credentialRevision?: number;
   fetchImpl?: (url: string | URL | Request, init?: RequestInit) => Promise<Response>;
   onTransition?: (info: BridgeTransition) => void;
 }

@@ -17,6 +17,14 @@ export interface AccountsConfig {
   enabled: boolean;
   /** Optional encrypted account-pool path. The environment override wins. */
   path?: string;
+  /** Explicit account allow-list. An empty list means no accounts are allowed. */
+  allowedIds?: string[];
+  /** Cost policy. When false, accounts known to be paid are excluded. Unknown cost remains excluded. */
+  allowPaid?: boolean;
+  /** Account ids paused by an operator; paused accounts cannot receive new requests. */
+  pausedIds?: string[];
+  /** Optional explicit browser origins for the authenticated local status UI. */
+  allowedOrigins?: string[];
 }
 
 /** Auth section of the proxy configuration. */

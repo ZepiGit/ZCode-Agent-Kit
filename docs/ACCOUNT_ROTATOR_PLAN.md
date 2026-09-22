@@ -1,4 +1,9 @@
-# Automatic Account Rotator – implementation plan
+# Automatic Account Rotator – historical implementation plan
+
+> This is the original design record. Current behavior and commands are
+> documented in [ACCOUNT_ROTATOR.md](ACCOUNT_ROTATOR.md). Live pool refresh,
+> `/accounts/quota`, pause/resume, explain, doctor, explicit migration and
+> versioned redacted JSON supersede older checkpoints below.
 
 ## Goal and scope
 

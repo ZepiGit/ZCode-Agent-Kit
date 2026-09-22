@@ -10,11 +10,13 @@
  *      zcode.z.ai desktop bundle `pio()` (identity header semantics).
  */
 import os from "node:os";
+import { createHash } from "node:crypto";
 import { loadCredential } from "../auth/store.js";
 import { buildIdentityHeaders, normalizePrintableHeaderValue } from "../proxy/identity.js";
 import { inspectJwt } from "../auth/jwt-age.js";
 import type { ProxyConfig } from "../config/types.js";
 import { errorResponse } from "../proxy/handler.js";
+import type { AccountProfile } from "../auth/account-store.js";
 
 export interface QuotaBalanceEntry {
   showName: string;
@@ -24,6 +26,8 @@ export interface QuotaBalanceEntry {
   usedUnits: number | null;
   unitType?: string;
   expiresAt?: number;
+  /** Provider-confirmed independence; absent means the bucket is not safely summable. */
+  independent?: boolean;
 }
 
 export interface QuotaPlanEntry {
@@ -52,6 +56,29 @@ export interface QuotaSnapshot {
   cached: boolean;
 }
 
+export interface PoolQuotaAccountSnapshot {
+  accountId: string;
+  provider: string;
+  plan: string | null;
+  /** Offline/live distinction is explicit for consumers rendering status. */
+  source: "live" | "error" | "duplicate";
+  asOf: string | null;
+  balances: QuotaBalanceEntry[];
+  errors: string[];
+}
+
+export interface PoolQuotaSnapshot {
+  schemaVersion: 1;
+  source: "live-runtime";
+  provider: string;
+  plan: string;
+  asOf: string;
+  accounts: PoolQuotaAccountSnapshot[];
+  /** Sums contain only comparable, independent buckets with known units. */
+  totals: QuotaBalanceEntry[];
+  errors: string[];
+}
+
 /** Billing calls are single-shot UI data: bound them hard. */
 const BILLING_TIMEOUT_MS = 10_000;
 /** Singleflight cache: parallel /quota hits reuse one billing round-trip. */
@@ -59,10 +86,127 @@ const QUOTA_CACHE_TTL_MS = 15_000;
 
 type QuotaCacheEntry = { snapshot: QuotaSnapshot | null; fetchedAtMs: number; promise: Promise<QuotaSnapshot> };
 const quotaCache = new Map<string, QuotaCacheEntry>();
+const poolQuotaCache = new Map<string, { snapshot: QuotaSnapshot; fetchedAtMs: number }>();
 
 /** Test hook: drop the /quota cache so tests are isolated from each other. */
 export function clearQuotaCache(): void {
   quotaCache.clear();
+  poolQuotaCache.clear();
+}
+
+/**
+ * Query all configured accounts with bounded concurrency. This is deliberately
+ * provider-agnostic: it reuses the same billing calls as /quota and never
+ * invents a balance for a provider that returns an unknown field. Cache keys
+ * include account id, credential revision and billing context; a stale reply
+ * therefore cannot populate a replacement account's entry.
+ */
+export async function collectPoolQuotaSnapshot(
+  config: ProxyConfig,
+  profiles: readonly AccountProfile[],
+  fetchImpl: typeof fetch = fetch,
+  options: { concurrency?: number; now?: () => number } = {},
+): Promise<PoolQuotaSnapshot> {
+  const concurrency = Math.max(1, Math.min(4, Math.floor(options.concurrency ?? 2)));
+  const now = options.now ?? (() => Date.now());
+  const liveIds = new Set(profiles.map((profile) => profile.id));
+  const liveCacheKeys = new Set<string>();
+  for (const profile of profiles) {
+    const revision = Number((profile as unknown as { credentialRevision?: number }).credentialRevision)
+      || profile.lastUsedAt || profile.createdAt || 0;
+    liveCacheKeys.add(`${profile.id}:${revision}:${profile.credential.provider}:${profile.plan ?? config.plan}:${config.claim.origin}:${config.identity.deviceMid ?? ""}:${config.identity.appVersion}`);
+  }
+  for (const key of poolQuotaCache.keys()) {
+    const separator = key.indexOf(":");
+    if (separator > 0 && (!liveIds.has(key.slice(0, separator) || "") || !liveCacheKeys.has(key))) poolQuotaCache.delete(key);
+  }
+  let inFlight = 0;
+  const waiters: Array<() => void> = [];
+  const fetchLimited: typeof fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    if (inFlight >= concurrency) await new Promise<void>((resolve) => waiters.push(resolve));
+    inFlight++;
+    try { return await fetchImpl(input, init); }
+    finally {
+      inFlight--;
+      waiters.shift()?.();
+    }
+  }) as typeof fetch;
+  const queue = profiles.slice();
+  const results: PoolQuotaAccountSnapshot[] = [];
+  const seenCredentials = new Set<string>();
+  const worker = async (): Promise<void> => {
+    while (queue.length > 0) {
+      const profile = queue.shift();
+      if (!profile) return;
+      const revision = Number((profile as unknown as { credentialRevision?: number }).credentialRevision)
+        || profile.lastUsedAt || profile.createdAt || 0;
+      const cacheKey = `${profile.id}:${revision}:${profile.credential.provider}:${profile.plan ?? config.plan}:${config.claim.origin}:${config.identity.deviceMid ?? ""}:${config.identity.appVersion}`;
+      liveCacheKeys.add(cacheKey);
+      const identityKey = createHash("sha256").update(JSON.stringify([
+        profile.credential.provider,
+        profile.plan ?? config.plan,
+        profile.credential.apiKey,
+        profile.credential.jwt ?? "",
+        profile.credential.secret ?? "",
+      ])).digest("hex");
+      if (seenCredentials.has(identityKey)) {
+        results.push({ accountId: profile.id, provider: profile.credential.provider, plan: profile.plan ?? null, source: "duplicate", asOf: null, balances: [], errors: ["duplicate_effective_credential"] });
+        continue;
+      }
+      seenCredentials.add(identityKey);
+      const cached = poolQuotaCache.get(cacheKey);
+      if (cached && now() - cached.fetchedAtMs < QUOTA_CACHE_TTL_MS) {
+        results.push({ accountId: profile.id, provider: profile.credential.provider, plan: profile.plan ?? null, source: "live", asOf: cached.snapshot.asOf, balances: cached.snapshot.balances, errors: cached.snapshot.errors });
+        continue;
+      }
+      try {
+        const snapshot = await collectQuotaSnapshot(config, fetchLimited, async () => profile.credential);
+        poolQuotaCache.set(cacheKey, { snapshot, fetchedAtMs: now() });
+        results.push({ accountId: profile.id, provider: profile.credential.provider, plan: profile.plan ?? null, source: "live", asOf: snapshot.asOf, balances: snapshot.balances, errors: snapshot.errors });
+      } catch (err) {
+        results.push({ accountId: profile.id, provider: profile.credential.provider, plan: profile.plan ?? null, source: "error", asOf: null, balances: [], errors: [safeQuotaError(err)] });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, queue.length || 1) }, () => worker()));
+  results.sort((a, b) => a.accountId.localeCompare(b.accountId));
+
+  const totals = new Map<string, QuotaBalanceEntry>();
+  for (const result of results) {
+    if (result.source !== "live") continue;
+    for (const balance of result.balances) {
+      // Unknown units and unknown remaining values cannot be safely summed.
+      if (balance.independent !== true || !balance.unitType || balance.remainingUnits === null || balance.totalUnits === null || balance.usedUnits === null) continue;
+      const key = `${balance.showName}\u0000${balance.unitType}`;
+      const prior = totals.get(key);
+      if (!prior) {
+        totals.set(key, { ...balance });
+      } else {
+        prior.remainingUnits = (prior.remainingUnits ?? 0) + balance.remainingUnits;
+        prior.totalUnits = (prior.totalUnits ?? 0) + balance.totalUnits;
+        prior.usedUnits = (prior.usedUnits ?? 0) + balance.usedUnits;
+        if (balance.expiresAt !== undefined) prior.expiresAt = Math.min(prior.expiresAt ?? balance.expiresAt, balance.expiresAt);
+      }
+    }
+  }
+  return {
+    schemaVersion: 1,
+    source: "live-runtime",
+    provider: config.provider,
+    plan: config.plan,
+    asOf: new Date(now()).toISOString(),
+    accounts: results,
+    totals: [...totals.values()],
+    errors: [
+      ...(profiles.length === 0 ? ["account_pool_empty"] : []),
+      ...results.flatMap((result) => result.errors.map((error) => `${result.accountId}: ${error}`)),
+    ].slice(0, 32),
+  };
+}
+
+function safeQuotaError(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err);
+  return text.replace(/[\r\n]+/g, " ").replace(/(?:Bearer\s+)[^\s]+/gi, "Bearer <redacted>").slice(0, 160);
 }
 
 /** Query one billing URL, tolerating per-endpoint failures. */
@@ -127,8 +271,10 @@ export async function collectQuotaSnapshot(
     fetchBilling(origin, `/api/v1/zcode-plan/billing/balance?app_version=${encodeURIComponent(appVersion)}&platform=${encodeURIComponent(platform)}`, headers, fetchImpl),
     fetchBilling(origin, `/api/v1/zcode-plan/billing/preview?app_version=${encodeURIComponent(appVersion)}&platform=${encodeURIComponent(platform)}`, headers, fetchImpl),
   ]);
-  if (balance && balance.code !== 0) errors.push(`balance: ${balance.code} ${balance.msg ?? ""}`.trim());
-  if (preview && preview.code !== 0) errors.push(`preview: ${preview.code} ${preview.msg ?? ""}`.trim());
+  // Keep diagnostics machine-readable and bounded; provider messages may
+  // contain request ids, URLs, or account metadata and are never forwarded.
+  if (balance && balance.code !== 0) errors.push(`balance: ${quotaErrorCode(balance.code)}`);
+  if (preview && preview.code !== 0) errors.push(`preview: ${quotaErrorCode(preview.code)}`);
 
   const balances: QuotaBalanceEntry[] = [];
   const balanceData = (balance?.data ?? {}) as { balances?: any[]; server_time?: number };
@@ -146,6 +292,7 @@ export async function collectQuotaSnapshot(
       usedUnits: toFiniteNumber(b.used_units ?? b.usedUnits) ?? null,
       ...(unitType ? { unitType: String(unitType) } : {}),
       ...(expiresAt !== undefined ? { expiresAt } : {}),
+      ...((b.independent === true || b.independent_bucket === true) ? { independent: true } : {}),
     });
   }
 
@@ -177,6 +324,11 @@ export async function collectQuotaSnapshot(
     asOf: new Date().toISOString(),
     cached: false,
   };
+}
+
+function quotaErrorCode(code: unknown): string {
+  if (typeof code === "number" && Number.isFinite(code)) return `provider_${Math.trunc(code)}`;
+  return "provider_unknown";
 }
 
 /** Handle GET /quota — JSON snapshot with the proxy error envelope on failure. `loadCredentialImpl` is injectable for tests. */

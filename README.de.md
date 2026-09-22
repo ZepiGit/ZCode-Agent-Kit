@@ -12,7 +12,7 @@ Nutze **deinen eigenen ZCode-Desktop-Account** mit einem Coding-Assistenten dein
 
 ### Mehrere eigene Konten rotieren
 
-Der Proxy kann optional mehrere von dir autorisierte ZCode-Konten verwalten und bei den expliziten Kontingent-Signalen `1005`, `1113` und `3001` einmalig zum nächsten passenden Konto wechseln. Die Funktion ist standardmäßig ausgeschaltet, erstellt keine Konten und umgeht keine Limits. Aktiviere sie in `auth.accounts`, melde Profile mit `zcode-proxy auth login <provider> --account ID` an und verwalte sie mit `zcode-kit accounts`. Die Übersicht ist offline und redigiert alle Secrets. Siehe die vollständige [Dokumentation zum Account-Rotator](docs/ACCOUNT_ROTATOR.md).
+Der Proxy kann optional mehrere von dir autorisierte ZCode-Konten verwalten und bei den expliziten Kontingent-Signalen `1005`, `1113` und `3001` einmalig zum nächsten passenden Konto wechseln. Die Funktion ist standardmäßig ausgeschaltet, erstellt keine Konten und umgeht keine Limits. Aktiviere sie in `auth.accounts`, melde Profile mit `zcode-proxy auth login <provider> --account ID` an und verwalte sie mit `zcode-kit accounts`. Neue Requests lesen den autoritativen Pool ohne Neustart; `pause`, `resume`, `accounts --live`, `explain`, `doctor` und `quota` stehen über das Proxy-CLI bereit. Offline- und Live-Ausgaben redigieren alle Secrets. Siehe die vollständige [Dokumentation zum Account-Rotator](docs/ACCOUNT_ROTATOR.md).
 
 ## Unveröffentlichte Audit-Härtung
 

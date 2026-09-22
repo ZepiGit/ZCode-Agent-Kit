@@ -25,6 +25,20 @@ export function updateConfigYaml(
   writeFileSync(path, String(doc), "utf-8");
 }
 
+/** Update account policy fields without round-tripping unrelated YAML. */
+export function updateAccountPolicyYaml(
+  path: string,
+  fields: { pausedIds?: string[]; allowedIds?: string[]; allowPaid?: boolean },
+): void {
+  const doc = parseDocument(readFileSync(path, "utf-8"));
+  const current = doc.getIn(["auth", "accounts"]);
+  if (!current || typeof current !== "object") doc.setIn(["auth", "accounts"], {});
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) doc.setIn(["auth", "accounts", key], value);
+  }
+  writeFileSync(path, String(doc), "utf-8");
+}
+
 /**
  * Create the config file from the bundled template when missing.
  * Shared by the CLI entries (serve / android / auth login) and the TUI —

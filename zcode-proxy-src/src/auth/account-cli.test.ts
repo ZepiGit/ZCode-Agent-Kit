@@ -64,7 +64,9 @@ describe("zcode-proxy auth accounts CLI", () => {
     expect(result.status).toBe(0);
     expect(stderr(result)).not.toMatch(/api[-_]?key|jwt|secret/i);
     const body = JSON.parse(stdout(result));
-    expect(body).toEqual({ accounts: [] });
+    expect(body.accounts).toEqual([]);
+    expect(body.schemaVersion).toBe(1);
+    expect(body.source).toBe("offline-config");
   });
 
   it("lists accounts in text and JSON with credentials redacted", async () => {
@@ -84,7 +86,7 @@ describe("zcode-proxy auth accounts CLI", () => {
     expect(stdout(text)).toContain("work");
     expect(stdout(text)).toContain("provider=zai");
     expect(stdout(text)).toContain("state=ready");
-    expect(stdout(text)).toContain("credential=supe…-001");
+    expect(stdout(text)).toContain("credential=redacted");
     expect(stdout(text)).not.toContain(apiKey);
     expect(stdout(text)).not.toContain(jwt);
     expect(stderr(text)).not.toContain(apiKey);
@@ -99,7 +101,7 @@ describe("zcode-proxy auth accounts CLI", () => {
       provider: "zai",
       plan: "coding-plan",
       state: "ready",
-      credentialPreview: "supe…-001",
+      credentialPreview: "redacted",
     });
     expect(JSON.stringify(body)).not.toContain(apiKey);
     expect(JSON.stringify(body)).not.toContain(jwt);
@@ -127,7 +129,8 @@ describe("zcode-proxy auth accounts CLI", () => {
     expect(result.status).toBe(1);
     const body = JSON.parse(stdout(result));
     expect(body.accounts).toEqual([]);
-    expect(body.error).toMatch(/account listing failed/i);
+    expect(body.error).toMatchObject({ code: "account_store_unavailable" });
+    expect(body.error.message).toMatch(/account listing failed/i);
     expect(stdout(result) + stderr(result)).not.toContain("PRIVATE_CORRUPT_PAYLOAD");
   });
 });

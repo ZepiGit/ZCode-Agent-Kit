@@ -131,6 +131,14 @@ describe("credential store", () => {
     const loaded = await loadCredential();
     expect(loaded!.expiresAt).toBe(9999999999999);
   });
+
+  it("rejects explicitly configured blank secrets and preserves valid whitespace", async () => {
+    process.env.ZCODE_PROXY_CREDENTIAL_SECRET = " \t ";
+    await expect(saveCredential({ apiKey: "x", provider: "zai" })).rejects.toThrow(/must contain/);
+    process.env.ZCODE_PROXY_CREDENTIAL_SECRET = `  ${TEST_SECRET}  `;
+    await saveCredential({ apiKey: "x", provider: "zai" });
+    expect((await loadCredential())?.apiKey).toBe("x");
+  });
 });
 
 describe("credential store — SHA-256 KDF migration (R2-13)", () => {

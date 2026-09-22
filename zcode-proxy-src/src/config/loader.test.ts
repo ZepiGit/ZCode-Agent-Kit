@@ -196,6 +196,25 @@ auth:
     expect(loadConfig(yaml).auth.accounts).toEqual({ enabled: false, path: "/tmp/zcode-pool.json" });
   });
 
+  it("auth.accounts policy accepts redacted allow/pause/cost/origin controls", () => {
+    const path = writeYaml(`
+auth:
+  accounts:
+    enabled: true
+    allowedIds: [work, personal]
+    pausedIds: [maintenance]
+    allowPaid: false
+    allowedOrigins: ["http://127.0.0.1:8080"]
+`);
+    expect(loadConfig(path).auth.accounts).toEqual({
+      enabled: true,
+      allowedIds: ["work", "personal"],
+      pausedIds: ["maintenance"],
+      allowPaid: false,
+      allowedOrigins: ["http://127.0.0.1:8080"],
+    });
+  });
+
   it("responses + mcp: YAML values override defaults", () => {
     const path = writeYaml(`
 responses:

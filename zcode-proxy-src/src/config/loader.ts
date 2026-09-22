@@ -180,11 +180,44 @@ function resolveAccountsConfig(raw: unknown): AccountsConfig {
   const pathEnv = process.env[ENV.ACCOUNTS_PATH];
   const rawPath = typeof obj.path === "string" ? obj.path.trim() : "";
   const path = (pathEnv ?? rawPath).trim();
+  const normalizeIds = (value: unknown, field: string): string[] | undefined => {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) throw new Error(`auth.accounts.${field} must be an array of account ids`);
+    const ids = value.map((id) => String(id).trim()).filter(Boolean);
+    if (ids.some((id) => !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id))) {
+      throw new Error(`auth.accounts.${field} contains an invalid account id`);
+    }
+    return [...new Set(ids)];
+  };
+  const allowedIds = normalizeIds(obj.allowedIds ?? obj.allowed_ids, "allowedIds");
+  const pausedIds = normalizeIds(obj.pausedIds ?? obj.paused_ids, "pausedIds");
+  const allowedOrigins = (() => {
+    const value = obj.allowedOrigins ?? obj.allowed_origins;
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) throw new Error("auth.accounts.allowedOrigins must be an array");
+    const origins = value.map((origin) => String(origin).trim()).filter(Boolean);
+    for (const origin of origins) {
+      try {
+        const parsed = new URL(origin);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+        if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) throw new Error();
+      } catch {
+        throw new Error(`auth.accounts.allowedOrigins contains an invalid origin: ${origin}`);
+      }
+    }
+    return [...new Set(origins)];
+  })();
   return {
     enabled: enabledEnv !== undefined
       ? resolveBool(enabledEnv, DEFAULTS.ACCOUNTS_ENABLED)
       : resolveBool(obj.enabled, DEFAULTS.ACCOUNTS_ENABLED),
     ...(path ? { path } : {}),
+    ...(allowedIds ? { allowedIds } : {}),
+    ...(pausedIds ? { pausedIds } : {}),
+    ...(obj.allowPaid !== undefined || obj.allow_paid !== undefined
+      ? { allowPaid: resolveBool(obj.allowPaid ?? obj.allow_paid, false) }
+      : {}),
+    ...(allowedOrigins ? { allowedOrigins } : {}),
   };
 }
 

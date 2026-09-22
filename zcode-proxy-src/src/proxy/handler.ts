@@ -16,11 +16,12 @@
 import type { Format } from "../translator/types.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";
+import type { AccountHandle } from "../auth/account-rotator.js";
 import { getProvider } from "../provider/providers.js";
 import { buildUpstreamHeaderPairs, buildUpstreamRequest, type UpstreamHeaderPair } from "./upstream.js";
 import { getDefaultEndpointRouting, type EndpointRoutingService } from "./endpoint-routing.js";
 import { getDefaultClientSigning, sendWithClientSigning, type ClientSigningManager } from "./client-signing.js";
-import { credentialString } from "../auth/types.js";
+import { credentialString, type Credential } from "../auth/types.js";
 import { sendOrderedUpstreamRequest } from "./ordered-transport.js";
 import { transformRequestBody } from "./body-transformer.js";
 import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
@@ -130,13 +131,29 @@ export async function proxyRequest(
     openaiBaseURL: config.providers[config.provider].openaiBase,
   };
 
-  let cred;
+  let cred: Credential;
+  let accountHandle: AccountHandle | undefined;
   try {
-    cred = await auth.getCredential();
+    const select = (auth as AuthManager & { getCredentialHandle?: () => Promise<AccountHandle> }).getCredentialHandle;
+    if (typeof select === "function") {
+      accountHandle = await select.call(auth);
+      cred = accountHandle.credential;
+    } else {
+      cred = await auth.getCredential();
+    }
   } catch (err) {
     if (debug) debugError(reqId, "credential_unavailable", (err as Error).message);
     printRow(reqId, format, meta, 503, started, Date.now(), 0, 0, 0);
     return errorResponse(503, "credential_unavailable", (err as Error).message);
+  }
+  // The selected account context and the configured transport must agree
+  // before constructing headers or a target URL. Never silently send a pooled
+  // credential to another provider/plan.
+  if (accountHandle && accountHandle.provider !== config.provider) {
+    return errorResponse(409, "account_provider_mismatch", "selected account is not enabled for the configured provider");
+  }
+  if (accountHandle?.plan && accountHandle.plan !== config.plan) {
+    return errorResponse(409, "account_plan_mismatch", "selected account is not enabled for the configured plan");
   }
 
   // v2.6: both plans use the Anthropic upstream. coding-plan mirrors the real
@@ -245,6 +262,15 @@ export async function proxyRequest(
   }
 
   let upstreamResp: Response;
+  if (accountHandle && typeof (auth as AuthManager & { validateAccountHandle?: unknown }).validateAccountHandle === "function") {
+    try {
+      if (!(await auth.validateAccountHandle(accountHandle))) {
+        return errorResponse(409, "account_context_changed", "account configuration changed before dispatch; retry the request");
+      }
+    } catch {
+      return errorResponse(503, "account_state_unavailable", "account state could not be verified before dispatch");
+    }
+  }
   try {
     // Only explicit pre-connect errors establish that a POST was not sent.
     // Generic resets may happen after the upstream has already accepted it.
@@ -333,9 +359,25 @@ export async function proxyRequest(
 
   try {
     upstreamResp = await recoverAndMapUpstream({
-      response: upstreamResp, auth, credential: cred, plan: config.plan, signal: clientReq.signal,
+      response: upstreamResp, auth, credential: cred, handle: accountHandle, plan: config.plan, signal: clientReq.signal,
+      attemptedIdentities: new Set(accountHandle ? [accountHandle.effectiveIdentity] : []),
       resend: async (fresh) => {
         cred = fresh;
+        if (startPlan) {
+          const provider = opts.captcha ?? await loadCaptcha();
+          const token = await provider.getCaptchaToken(config.identity.appVersion);
+          captchaHeaders = { [provider.RETRY_HEADERS.PARAM]: token.verifyParam, [provider.RETRY_HEADERS.REGION]: token.region };
+        }
+        upstreamHeaderPairs = buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, config.identity, config.plan, captchaHeaders, clientSession);
+        upstreamReq = buildUpstreamRequest(clientReq, upstreamFormat, provider, cred, transformedBody, config.identity, config.plan, captchaHeaders, clientSession);
+        return dispatch(upstreamReq, upstreamHeaderPairs);
+      },
+      resendHandle: async (freshHandle) => {
+        accountHandle = freshHandle;
+        cred = freshHandle.credential;
+        if (freshHandle.provider !== config.provider || (freshHandle.plan && freshHandle.plan !== config.plan)) {
+          throw new Error("selected account context does not match configured provider/plan");
+        }
         if (startPlan) {
           const provider = opts.captcha ?? await loadCaptcha();
           const token = await provider.getCaptchaToken(config.identity.appVersion);
@@ -421,10 +463,10 @@ async function decodeBodyText(resp: Response): Promise<string> {
     const buf = await resp.arrayBuffer();
     const raw = new TextDecoder().decode(buf);
     if (raw.trimStart().startsWith("{") || !encoding) return raw;
-    let stream = new Response(buf).body;
+    let stream: ReadableStream<any> | null = new Response(buf).body;
     for (const enc of encoding.split(",").map((e) => e.trim()).reverse()) {
       if (enc === "gzip" || enc === "deflate" || enc === "br") {
-        stream = stream!.pipeThrough(new DecompressionStream(enc) as unknown as ReadableWritablePair<Uint8Array, Uint8Array>);
+        stream = stream!.pipeThrough(new DecompressionStream(enc as unknown as CompressionFormat) as unknown as ReadableWritablePair<any, any>);
       }
     }
     return await new Response(stream).text();

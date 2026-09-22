@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { credentialString, isExpired, type Credential } from "./types.js";
 import type { AccountProfile } from "./account-store.js";
-import { AccountRotator, NoUsableAccountError } from "./account-rotator.js";
+import { AccountRotator, NoUsableAccountError, type AccountHandle, type AccountOperation } from "./account-rotator.js";
 
 export interface CredentialSource {
   plan?: string;
@@ -17,6 +17,8 @@ export interface CredentialSource {
   /** Optional multi-account scheduler. When present it is authoritative and
    * legacy single-credential reload/recovery is never used for requests. */
   accountRotator?: AccountRotator;
+  /** Refresh the authoritative account source before admitting a new request. */
+  refreshAccountPool?: () => Promise<void>;
   /** Persist scheduler metadata (exhaustion/reset markers) after rotation. */
   persistAccounts?: (accounts: readonly AccountProfile[]) => Promise<void>;
 }
@@ -43,9 +45,10 @@ export class AuthManager {
   // Hashes only; bounded memory. At capacity recovery fails closed until restart.
   private attempted = new Set<string>();
   private persistenceFailures = new Map<string, { count: number; retryAt: number }>();
-  private poolRecoveries = new Map<string, Promise<Credential | null>>();
+  private poolRecoveries = new Map<string, Promise<AccountHandle | null>>();
   private poolPersistence: Promise<void> | undefined;
   private poolPersistenceDirty = false;
+  private persistenceStatus: { state: "clean" | "dirty" | "error"; code?: string; at?: number; attempts: number } = { state: "clean", attempts: 0 };
   constructor(private source: CredentialSource = {}) {}
 
   /** True when an explicitly enabled account pool is authoritative. */
@@ -56,9 +59,42 @@ export class AuthManager {
     return this.source.accountRotator?.list() ?? [];
   }
 
+  /** Refresh the authoritative pool for status/diagnostic reads without selecting an account. */
+  async refreshAccountPool(): Promise<void> {
+    await this.source.refreshAccountPool?.();
+  }
+
   /** Resolve a credential returned by the pool to its redacted account id. */
   accountIdForCredential(credential: Credential): string | undefined {
     return this.source.accountRotator?.idForCredential(credential);
+  }
+
+  /** Select an immutable request context. New pooled call sites should use this. */
+  async getCredentialHandle(options: { operation?: AccountOperation; model?: string } = {}): Promise<AccountHandle> {
+    if (this.source.refreshAccountPool) await this.source.refreshAccountPool();
+    const rotator = this.source.accountRotator;
+    if (!rotator) {
+      const credential = await this.getCredential();
+      return {
+        id: "legacy",
+        credential: { ...credential },
+        credentialRevision: this.revision,
+        failureGeneration: 0,
+        quotaGeneration: 0,
+        provider: credential.provider,
+        ...(this.source.plan === undefined ? {} : { plan: this.source.plan }),
+        // Legacy requests do not participate in pool failover. Keep an opaque
+        // identity value without retaining the credential in diagnostics.
+        effectiveIdentity: "legacy",
+      };
+    }
+    try { return rotator.getCredentialHandle(options); }
+    catch (error) {
+      if (error instanceof NoUsableAccountError) {
+        throw new Error("No usable account is available — add an account or wait for quota reset");
+      }
+      throw error;
+    }
   }
 
   private async reload(): Promise<void> {
@@ -87,6 +123,7 @@ export class AuthManager {
   }
 
   async getCredential(): Promise<Credential> {
+    if (this.source.refreshAccountPool) await this.source.refreshAccountPool();
     if (this.source.accountRotator) {
       try {
         return this.source.accountRotator.getCredential();
@@ -113,9 +150,25 @@ export class AuthManager {
     throw new Error("OAuth credential not available — run: zcode-proxy auth login");
   }
 
+  /** Redacted machine-readable persistence state for doctor/live status. */
+  getPersistenceStatus(): Readonly<{ state: "clean" | "dirty" | "error"; code?: string; at?: number; attempts: number }> {
+    return { ...this.persistenceStatus };
+  }
+
+  /** Re-read the authoritative store and validate an admitted request handle. */
+  async validateAccountHandle(handle: AccountHandle): Promise<boolean> {
+    if (!this.source.accountRotator) return true;
+    if (this.source.refreshAccountPool) await this.source.refreshAccountPool();
+    return this.source.accountRotator.isHandleCurrent(handle);
+  }
+
   /** At most one desktop read per rejected effective credential, shared by requests. */
   async recoverCredential(failed: Credential, plan: string, reason?: string, resetAt?: number): Promise<Credential | null> {
-    if (this.source.accountRotator) return this.recoverFromAccountPool(failed, reason, resetAt);
+    if (this.source.accountRotator) {
+      const handle = this.source.accountRotator.handleForId(this.source.accountRotator.idForCredential(failed) ?? "");
+      const recovered = await this.recoverFromAccountPool(handle ?? failed, reason, resetAt);
+      return recovered?.credential ?? null;
+    }
     // 1005 is an account quota signal, not a credential-refresh signal. A
     // legacy single-account install has no alternate profile to use, so do
     // not re-import and replay the same exhausted account.
@@ -166,6 +219,18 @@ export class AuthManager {
     return different();
   }
 
+  /** Handle-preserving recovery for transport code that carries request context. */
+  async recoverCredentialHandle(
+    failed: AccountHandle,
+    plan: string,
+    reason?: string,
+    resetAt?: number,
+    attemptedIdentities?: ReadonlySet<string>,
+  ): Promise<AccountHandle | null> {
+    if (!this.source.accountRotator) return null;
+    return this.recoverFromAccountPool(failed, reason, resetAt, attemptedIdentities);
+  }
+
   setOAuthCredential(cred: Credential): void {
     // Pool mode is authoritative. Keeping this setter harmless lets the TUI,
     // Android control path, and compatibility callers refresh the legacy
@@ -176,21 +241,29 @@ export class AuthManager {
   }
 
   /** Clear a transient quota marker after a successful request. */
-  markCredentialHealthy(credential: Credential): void {
+  markCredentialHealthy(credentialOrHandle: Credential | AccountHandle): void {
     const rotator = this.source.accountRotator;
     if (!rotator) return;
-    const id = rotator.idForCredential(credential);
-    if (!id) return;
-    if (rotator.clearFailure(id)) void this.persistAccounts();
+    const changed = "id" in credentialOrHandle && "credentialRevision" in credentialOrHandle
+      ? rotator.clearFailure(credentialOrHandle)
+      : (() => {
+        const id = rotator.idForCredential(credentialOrHandle);
+        return id ? rotator.clearFailure(id) : false;
+      })();
+    if (changed) void this.persistAccounts();
   }
 
   /** Mark the selected pooled account exhausted after a final quota response. */
-  markCredentialExhausted(credential: Credential, reason: string, resetAt?: number): void {
+  markCredentialExhausted(credentialOrHandle: Credential | AccountHandle, reason: string, resetAt?: number): void {
     const rotator = this.source.accountRotator;
     if (!rotator) return;
-    const id = rotator.idForCredential(credential);
-    if (!id) return;
-    rotator.markExhausted(id, reason, resetAt);
+    if ("id" in credentialOrHandle && "credentialRevision" in credentialOrHandle) {
+      rotator.markExhausted(credentialOrHandle, reason, resetAt);
+    } else {
+      const id = rotator.idForCredential(credentialOrHandle);
+      if (!id) return;
+      rotator.markExhausted(id, reason, resetAt);
+    }
     void this.persistAccounts();
   }
 
@@ -199,6 +272,7 @@ export class AuthManager {
     const rotator = this.source.accountRotator;
     if (!persist || !rotator) return Promise.resolve();
     this.poolPersistenceDirty = true;
+    this.persistenceStatus = { state: "dirty", attempts: this.persistenceStatus.attempts };
     if (this.poolPersistence) return this.poolPersistence;
     // One writer owns the store at a time. A failure/health change arriving
     // while encryption or I/O is pending sets dirty again; the next pass uses
@@ -208,16 +282,32 @@ export class AuthManager {
     // microtask so no completed promise can absorb a later dirty update.
     this.poolPersistence = Promise.resolve().then(async () => {
       try {
+        let passes = 0;
         do {
+          passes += 1;
           this.poolPersistenceDirty = false;
-          try { await persist(rotator.profiles()); } catch { /* state remains in memory */ }
-        } while (this.poolPersistenceDirty);
+          try {
+            await persist(rotator.profiles());
+            this.persistenceStatus = { state: "clean", attempts: this.persistenceStatus.attempts };
+          } catch {
+            this.persistenceStatus = { state: "error", code: "ACCOUNT_STORE_PERSISTENCE_FAILED", at: Date.now(), attempts: this.persistenceStatus.attempts + 1 };
+            // Do not spin forever while a lock or disk is unavailable. The
+            // live state remains usable only after the next authoritative
+            // refresh succeeds; diagnostics expose this failure explicitly.
+            this.poolPersistenceDirty = false;
+          }
+        } while (this.poolPersistenceDirty && passes < 3);
       } finally { this.poolPersistence = undefined; }
     });
     return this.poolPersistence;
   }
 
-  private recoverFromAccountPool(failed: Credential, reason?: string, resetAt?: number): Promise<Credential | null> {
+  private recoverFromAccountPool(
+    failed: Credential | AccountHandle,
+    reason?: string,
+    resetAt?: number,
+    attemptedIdentities?: ReadonlySet<string>,
+  ): Promise<AccountHandle | null> {
     const rotator = this.source.accountRotator!;
     // Pool rotation is only authorized by an explicit balance/quota code. A
     // caller without a reason must never turn a generic auth/model/transport
@@ -225,21 +315,43 @@ export class AuthManager {
     if (reason === undefined || !["1005", "1113", "3001"].includes(String(reason))) {
       return Promise.resolve(null);
     }
-    const id = rotator.idForCredential(failed);
-    if (!id) return Promise.resolve(null);
-    const existing = this.poolRecoveries.get(id);
+    const failedHandle: AccountHandle | undefined = "id" in failed && "credentialRevision" in failed
+      ? failed
+      : (() => {
+        const id = rotator.idForCredential(failed);
+        return id ? rotator.handleForId(id) : undefined;
+      })();
+    if (!failedHandle) return Promise.resolve(null);
+    const id = failedHandle.id;
+    // A response that arrives after a newer quarantine or credential replace
+    // must not open another failover chain from stale state.
+    const currentHandle = rotator.handleForId(id);
+    if (!currentHandle
+      || currentHandle.credentialRevision !== failedHandle.credentialRevision
+      || currentHandle.failureGeneration !== failedHandle.failureGeneration
+      || currentHandle.quotaGeneration !== failedHandle.quotaGeneration
+      || currentHandle.effectiveIdentity !== failedHandle.effectiveIdentity) {
+      return Promise.resolve(null);
+    }
+    const existing = this.poolRecoveries.get(`${id}:${failedHandle.credentialRevision}:${failedHandle.quotaGeneration}`);
     if (existing) return existing;
     const recovery = (async () => {
       // Pool rotation is deliberately limited to explicit quota/balance
       // signals. `upstream-errors.ts` filters the code before entering here;
       // the reason is retained only as a bounded local diagnostic.
-      rotator.markExhausted(id, reason ?? "quota exhausted", resetAt);
+      rotator.markExhausted(failedHandle, reason ?? "quota exhausted", resetAt);
       await this.persistAccounts();
-      try { return rotator.getCredential(); } catch { return null; }
+      try {
+        return rotator.getCredentialHandle({
+          excludedIds: new Set([failedHandle.id]),
+          excludedIdentities: new Set([failedHandle.effectiveIdentity, ...(attemptedIdentities ?? [])]),
+        });
+      } catch { return null; }
     })();
-    this.poolRecoveries.set(id, recovery);
+    const key = `${id}:${failedHandle.credentialRevision}:${failedHandle.quotaGeneration}`;
+    this.poolRecoveries.set(key, recovery);
     void recovery.finally(() => {
-      if (this.poolRecoveries.get(id) === recovery) this.poolRecoveries.delete(id);
+      if (this.poolRecoveries.get(key) === recovery) this.poolRecoveries.delete(key);
     });
     return recovery;
   }

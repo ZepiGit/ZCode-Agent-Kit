@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { AuthManager } from "../auth/manager.js";
 import { createAccountRotator } from "../auth/account-rotator.js";
+import type { AccountHandle } from "../auth/account-rotator.js";
 import { recoverAndMapUpstream } from "./upstream-errors.js";
 
 const first = { apiKey: "pool-one", provider: "zai" as const };
@@ -58,5 +59,59 @@ describe("account-pool upstream recovery", () => {
     });
     expect(calls).toBe(1);
     expect(result.status).toBe(400);
+  });
+
+  it("does not mark a streaming 200 healthy from its header alone", async () => {
+    const auth = poolAuth();
+    auth.markCredentialExhausted(first, "1005", Date.now() + 60_000);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode("event: error\ndata: {\"error\":{}}\n\n")); controller.close(); },
+    });
+    const result = await recoverAndMapUpstream({
+      response: new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } }),
+      auth, credential: first, plan: "coding-plan", signal: new AbortController().signal,
+      resend: async () => Response.json({ ok: true }),
+    });
+    expect(result.status).toBe(200);
+    expect(auth.listAccounts().find((a) => a.id === "one")?.state).toBe("exhausted");
+  });
+
+  it("rejects a late response carrying an older handle generation", async () => {
+    const rotator = createAccountRotator([
+      { id: "one", credential: first },
+      { id: "two", credential: second },
+    ]);
+    const auth = new AuthManager({ accountRotator: rotator });
+    const handle = rotator.getCredentialHandle();
+    auth.markCredentialExhausted(handle, "1005", Date.now() + 60_000);
+    let calls = 0;
+    const result = await recoverAndMapUpstream({
+      response: Response.json({ code: 1005 }, { status: 400 }), auth,
+      credential: handle.credential, handle, plan: "coding-plan",
+      signal: new AbortController().signal,
+      resend: async () => { calls++; return Response.json({ ok: true }); },
+    });
+    expect(calls).toBe(0);
+    expect(result.status).toBe(400);
+  });
+
+  it("uses handle context for resend and never reverse maps duplicate credentials", async () => {
+    const rotator = createAccountRotator([
+      { id: "alias-a", credential: first },
+      { id: "alias-b", credential: first },
+      { id: "independent", credential: second },
+    ]);
+    const auth = new AuthManager({ accountRotator: rotator });
+    const handle = rotator.getCredentialHandle();
+    let selected: AccountHandle | undefined;
+    const result = await recoverAndMapUpstream({
+      response: Response.json({ code: 1005 }, { status: 400 }), auth,
+      credential: handle.credential, handle, plan: "coding-plan",
+      signal: new AbortController().signal,
+      resend: async () => { throw new Error("bare resend must not be used"); },
+      resendHandle: async (next) => { selected = next; return Response.json({ ok: true }); },
+    });
+    expect(result.status).toBe(200);
+    expect(selected?.id).toBe("independent");
   });
 });

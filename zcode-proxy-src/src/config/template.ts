@@ -30,6 +30,11 @@ auth:
   accounts:
     enabled: false
     # path: "~/.zcode-proxy/accounts.json"
+    # Optional operator policy (credentials never belong in config files):
+    # allowedIds: [work, personal]
+    # pausedIds: [maintenance]
+    # allowPaid: false
+    # allowedOrigins: ["http://127.0.0.1:8080"]
 
 # Which upstream provider to use: "zai" or "bigmodel"
 provider: zai

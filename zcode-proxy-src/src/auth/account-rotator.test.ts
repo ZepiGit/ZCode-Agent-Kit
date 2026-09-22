@@ -54,4 +54,41 @@ describe("account rotator", () => {
     rotator.clearFailure("a");
     expect(rotator.list().find((a) => a.id === "a")?.state).toBe("ready");
   });
+
+  it("binds health changes to the immutable request generation", () => {
+    let now = 1000;
+    const rotator = createAccountRotator(accounts, { now: () => now, cooldownMs: 100 });
+    const first = rotator.getCredentialHandle();
+    rotator.markExhausted(first, "1005", now + 1000);
+    // A late success from the request that caused the quarantine is stale and
+    // must not clear the newer quota generation.
+    expect(rotator.clearFailure(first)).toBe(false);
+    expect(rotator.list().find((a) => a.id === "a")?.state).toBe("exhausted");
+    const second = rotator.getCredentialHandle();
+    expect(second.id).toBe("b");
+    expect(second.failureGeneration).toBe(0);
+  });
+
+  it("does not treat duplicate effective credentials as independent quota", () => {
+    const rotator = createAccountRotator([
+      { id: "alias-a", credential: { provider: "zai", apiKey: "same" } },
+      { id: "alias-b", credential: { provider: "zai", apiKey: "same" } },
+      { id: "independent", credential: { provider: "zai", apiKey: "other" } },
+    ]);
+    expect(rotator.getCredentialHandle().id).toBe("alias-a");
+    rotator.markExhausted("alias-a", "1005");
+    expect(rotator.getCredentialHandle().id).toBe("independent");
+    // A bare duplicated credential cannot be mapped to an account.
+    expect(rotator.idForCredential({ provider: "zai", apiKey: "same" })).toBeUndefined();
+  });
+
+  it("applies allow and pause policy before selecting an account", () => {
+    const rotator = createAccountRotator(accounts, {
+      allowedAccountIds: ["b"],
+      pausedAccountIds: ["b"],
+    });
+    expect(() => rotator.getCredentialHandle()).toThrow(/No usable account/);
+    expect(rotator.list().find((a) => a.id === "a")?.state).toBe("paused");
+    expect(rotator.list().find((a) => a.id === "b")?.state).toBe("paused");
+  });
 });

@@ -11,13 +11,14 @@
  */
 import { describe, it, expect } from "bun:test";
 import os from "node:os";
-import { collectQuotaSnapshot, handleQuota, clearQuotaCache } from "./routes-quota.js";
+import { collectQuotaSnapshot, collectPoolQuotaSnapshot, handleQuota, clearQuotaCache } from "./routes-quota.js";
 import { createFetchHandler } from "./server.js";
 import { AuthManager } from "../auth/manager.js";
 import { createAccountRotator } from "../auth/account-rotator.js";
 import type { loadCredential } from "../auth/store.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { Credential } from "../auth/types.js";
+import type { AccountProfile } from "../auth/account-store.js";
 import { fixtureSecret } from "../test-fixtures.js";
 
 const PLAN_KEY = `${fixtureSecret("quota-key")}.${fixtureSecret("quota-secret")}`;
@@ -258,7 +259,7 @@ describe("handleQuota singleflight + cache", () => {
     const { fetchImpl, calls } = makeBillingFetch();
     await handleQuota(makeConfig(), fetchImpl, loadFake);
     const second = await handleQuota(makeConfig(), fetchImpl, loadFake);
-    expect(calls.length).toBe(2, "no additional billing calls within TTL");
+    expect(calls.length).toBe(2);
     const body = (await second.json()) as { cached: boolean; asOf: string };
     expect(body.cached).toBe(true);
     expect(typeof body.asOf).toBe("string");
@@ -283,13 +284,13 @@ describe("handleQuota singleflight + cache", () => {
     const base = makeBillingFetch();
     let releaseUpstream: (() => void) | null = null;
     const gate = new Promise<void>((resolve) => { releaseUpstream = resolve; });
-    const gated: typeof fetch = async (url, init) => {
+    const gated = (async (url: RequestInfo | URL, init?: RequestInit) => {
       await gate;
       return base.fetchImpl(url, init);
-    };
+    }) as typeof fetch;
     const first = handleQuota(makeConfig(), gated, loadFake); // starts the fetch, not awaited
     const second = handleQuota(makeConfig(), gated, loadFake); // joins the in-flight entry
-    releaseUpstream?.();
+    (releaseUpstream as (() => void) | null)?.();
     const [a, b] = await Promise.all([first, second]);
     expect(a.status).toBe(200);
     expect(b.status).toBe(200);
@@ -299,7 +300,7 @@ describe("handleQuota singleflight + cache", () => {
     expect(bodyA.asOf).toBeTruthy();
     expect(bodyB.asOf).toBeTruthy();
     expect(bodyB).toEqual(bodyA);
-    expect(base.calls.length).toBe(2, "singleflight still coalesces billing calls");
+    expect(base.calls.length).toBe(2);
     clearQuotaCache();
   });
 
@@ -328,10 +329,10 @@ describe("handleQuota singleflight + cache", () => {
     const base = makeBillingFetch();
     let releaseUpstream: (() => void) | null = null;
     const gate = new Promise<void>((resolve) => { releaseUpstream = resolve; });
-    const gated: typeof fetch = async (url, init) => {
+    const gated = (async (url: RequestInfo | URL, init?: RequestInit) => {
       await gate;
       return base.fetchImpl(url, init);
-    };
+    }) as typeof fetch;
     const realNow = Date.now;
     const skewMs = 20_000; // QUOTA_CACHE_TTL_MS is 15s — advance past it mid-flight
     let skew = 0;
@@ -339,17 +340,47 @@ describe("handleQuota singleflight + cache", () => {
     try {
       const first = handleQuota(makeConfig(), gated, loadFake); // starts, not awaited
       skew = skewMs; // clock advances while the collection is in flight
-      releaseUpstream?.();
+      (releaseUpstream as (() => void) | null)?.();
       await first;
       // if the TTL were anchored at request start, this call would refetch
       const second = await handleQuota(makeConfig(), base.fetchImpl, loadFake);
       const body = (await second.json()) as { cached: boolean };
-      expect(body.cached).toBe(true, "completed snapshot is still fresh right after completion");
-      expect(base.calls.length).toBe(2, "no refetch after completion despite in-flight clock skew");
+      expect(body.cached).toBe(true);
+      expect(base.calls.length).toBe(2);
     } finally {
       globalThis.Date.now = realNow;
       clearQuotaCache();
     }
+  });
+});
+
+describe("pool quota overview", () => {
+  it("uses bounded per-account queries, keeps duplicate identities separate, and sums only known buckets", async () => {
+    clearQuotaCache();
+    const accounts: AccountProfile[] = [
+      { id: "a", credential: { apiKey: "a-key", provider: "zai", jwt: "a-jwt" }, plan: "start-plan" },
+      { id: "b", credential: { apiKey: "b-key", provider: "zai", jwt: "b-jwt" }, plan: "start-plan" },
+      { id: "alias", credential: { apiKey: "a-key", provider: "zai", jwt: "a-jwt" }, plan: "start-plan" },
+    ];
+    let active = 0;
+    let maxActive = 0;
+    const fetchImpl = (async (url: string | URL, init?: RequestInit): Promise<Response> => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      const token = String((init?.headers as Record<string, string>)?.authorization ?? "");
+      const remain = token.includes("b-jwt") ? 20 : 10;
+      return new Response(JSON.stringify({ code: 0, data: { balances: [
+        { show_name: "Free", remaining_units: remain, total_units: 100, used_units: 100 - remain, unit_type: "token", independent: true },
+        { show_name: "Unknown", remaining_units: null, total_units: null, used_units: null },
+      ] } }), { status: 200 });
+    }) as typeof fetch;
+    const result = await collectPoolQuotaSnapshot(makeConfig(), accounts, fetchImpl, { concurrency: 2 });
+    expect(maxActive).toBeLessThanOrEqual(2);
+    expect(result.accounts.find((account) => account.accountId === "alias")?.source).toBe("duplicate");
+    expect(result.totals).toEqual([{ showName: "Free", remainingUnits: 30, totalUnits: 200, usedUnits: 170, unitType: "token", independent: true }]);
+    expect(result.totals.some((entry) => entry.showName === "Unknown")).toBe(false);
   });
 });
 

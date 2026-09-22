@@ -22,8 +22,17 @@ Anthropic messages and OpenAI Responses requests on **`http://127.0.0.1:8457`**
 and forwards them to the Z.AI gateway using your logged-in ZCode Desktop
 account (start-plan, the same quota as ZCode Desktop).
 
+The optional `auth.accounts.enabled` pool accepts multiple authorized
+accounts. New requests refresh the authoritative pool before dispatch and
+only explicit `1005`, `1113` or `3001` quota signals permit one sequential
+failover attempt. Use `zcode-proxy auth accounts` with `pause|resume`,
+`explain`, `doctor`, `quota` and `--live`; see
+[`../docs/ACCOUNT_ROTATOR.md`](../docs/ACCOUNT_ROTATOR.md) for key setup,
+migration and recovery rules.
+
 - Addresses/formats: `POST /v1/chat/completions`, `POST /v1/messages`,
-  `POST /v1/responses`, `GET /v1/models`, `GET /health`, `GET /quota`
+  `POST /v1/responses`, `GET /v1/models`, `GET /health`, `GET /quota`,
+  authenticated `GET /accounts/status` and `GET /accounts/quota`
 - Authentication: `Authorization: Bearer <contents of .proxykey>` — the key is
   generated locally by setup.mjs and never leaves your machine
 - Lifecycle: managed by `node proxy\zcode-proxy-manager.mjs start|stop|restart|status|doctor|logs`

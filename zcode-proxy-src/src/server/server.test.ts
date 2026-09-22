@@ -8,6 +8,7 @@ import { handleListModels } from "./routes-openai.js";
 import { handleMessages } from "./routes-anthropic.js";
 import type { ProxyConfig } from "../config/types.js";
 import { AuthManager } from "../auth/manager.js";
+import { createAccountRotator } from "../auth/account-rotator.js";
 import { fixtureSecret, wrongSecret } from "../test-fixtures.js";
 
 /** The configured proxy API key; requests presenting it must be accepted. */
@@ -244,8 +245,9 @@ describe("proxy API key auth", () => {
         headers: { authorization: `Bearer ${TEST_KEY}` },
       });
       expect(resp.status).toBe(200);
+      await resp.text();
     } finally {
-      server.stop();
+      await server.close();
     }
   });
 
@@ -260,8 +262,9 @@ describe("proxy API key auth", () => {
         const address = host === 'localhost' ? '127.0.0.1' : '[::1]';
         const response = await fetch(`http://${address}:${server.port}/v1/models`, { headers: { authorization: `Bearer ${TEST_KEY}` } });
         expect(response.status).toBe(200);
+        await response.text();
       } finally {
-        server.stop();
+        await server.close();
       }
     }
   });
@@ -367,6 +370,42 @@ describe("CORS", () => {
     const resp = await handler(new Request("http://localhost/v1/models", { method: "OPTIONS" }));
     expect(resp.status).toBe(204);
     expect(resp.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  it("rejects untrusted browser origins while allowing loopback origins", async () => {
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
+    const auth = oauthAuth("test");
+    const handler = createFetchHandler({ config, auth });
+    const denied = await handler(new Request("http://localhost/health", { headers: { origin: "https://evil.example", authorization: `Bearer ${PROXY_KEY}` } }));
+    expect(denied.status).toBe(403);
+    const allowed = await handler(new Request("http://localhost/health", { headers: { origin: "http://127.0.0.1:8080", authorization: `Bearer ${PROXY_KEY}` } }));
+    expect(allowed.status).toBe(200);
+  });
+
+  it("rejects non-loopback Host headers even when the listener is loopback-bound", async () => {
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY } });
+    const handler = createFetchHandler({ config, auth: oauthAuth("test") });
+    const response = await handler(new Request("http://localhost/health", {
+      headers: { host: "attacker.example", authorization: `Bearer ${PROXY_KEY}` },
+    }));
+    expect(response.status).toBe(421);
+  });
+});
+
+describe("authenticated live account status", () => {
+  it("returns redacted live status and never exposes credential previews", async () => {
+    const config = makeConfig({ auth: { proxyApiKey: PROXY_KEY, accounts: { enabled: true } } });
+    const auth = new AuthManager({ accountRotator: createAccountRotator([
+      { id: "one", credential: { apiKey: "secret-api-key", provider: "zai" }, plan: "coding-plan" },
+    ]) });
+    const handler = createFetchHandler({ config, auth });
+    const response = await handler(new Request("http://localhost/accounts/status", { headers: { authorization: `Bearer ${PROXY_KEY}` } }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.schemaVersion).toBe(1);
+    expect(body.source).toBe("live-runtime");
+    expect(JSON.stringify(body)).not.toContain("secret-api-key");
+    expect(body.accounts[0].credential).toBe("redacted");
   });
 });
 

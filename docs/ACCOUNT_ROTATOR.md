@@ -1,126 +1,102 @@
 # Automatischer Account-Rotator
 
-Der Account-Rotator ist eine optionale Pool-Funktion des lokalen ZCode-Proxys. Er verwendet mehrere von dir autorisierte ZCode-Konten und wechselt bei einem ausdrücklich gemeldeten Verbrauch des kostenlosen Kontingents oder des Builder-/Start-Plan-Kontingents zum nächsten passenden Konto.
+Der Rotator verwaltet mehrere von dir autorisierte ZCode-Konten in einem verschlüsselten Pool. Ein Konto bleibt aktiv, bis der Provider ein ausdrücklich klassifiziertes Kontingent-Signal meldet. Dann wird höchstens ein weiterer, passender Account-Versuch zugelassen. Es gibt kein zufälliges Round-Robin, kein stilles Modellwechseln und keinen Fallback auf nicht freigegebene oder kostenpflichtige Konten.
 
-Die Funktion erstellt keine Konten, kauft kein Kontingent, claimt keine Trials und umgeht keine Provider-Anmeldung oder Limits. Verwende sie nur mit Konten, die dir gehören oder deren Nutzung du ausdrücklich autorisiert hast.
+Die Funktion erstellt keine Konten, kauft kein Kontingent, claimt keine Trials und umgeht keine Provider-Limits. Verwende sie nur mit Konten, deren Nutzung du autorisiert hast.
 
-## Aktivieren
+## Aktivieren und Schlüssel
 
-Der Pool ist standardmäßig ausgeschaltet. Ergänze in der **tatsächlich verwendeten** Proxy-Konfiguration unter `auth`:
+Der Pool ist standardmäßig ausgeschaltet. In der aktiven Konfiguration:
 
 ```yaml
 auth:
   accounts:
     enabled: true
-    # Optional; Standard: ~/.zcode-proxy/accounts.json
     path: "~/.zcode-proxy/accounts.json"
+    # Optional: nur diese lokalen IDs verwenden
+    # allowedIds: [privat, arbeit]
+    # pausedIds: [vps]
+    # allowPaid: false
+    # allowedOrigins: ["http://localhost:8457"]
 ```
 
-Alternativ kannst du die Werte für den Prozess setzen:
+Alternativ gelten `ZCODE_ACCOUNTS_ENABLED=true` und `ZCODE_PROXY_ACCOUNTS_PATH`. Ein aktivierter leerer, beschädigter oder nicht entschlüsselbarer Pool ist ein Fehlerzustand; der Proxy fällt nicht still auf `credentials.json` zurück.
+
+Für neue Headless- oder CI-Installationen ist ein zufälliger Master-Key der bevorzugte Schlüssel:
 
 ```sh
-export ZCODE_ACCOUNTS_ENABLED=true
-export ZCODE_PROXY_ACCOUNTS_PATH="$HOME/.zcode-proxy/accounts.json"
+export ZCODE_PROXY_CREDENTIAL_MASTER_KEY="$(openssl rand -base64 32)"
 ```
 
-Unter Windows PowerShell heißen die entsprechenden Befehle `$env:ZCODE_ACCOUNTS_ENABLED = "true"` und `$env:ZCODE_PROXY_ACCOUNTS_PATH = "C:\Users\<Name>\.zcode-proxy\accounts.json"`.
+Der Wert muss mindestens 32 nicht-leere Zeichen enthalten und darf nicht in YAML, Logs oder Commits stehen. `ZCODE_PROXY_CREDENTIAL_SECRET` bleibt als explizit gesetztes Kompatibilitäts-Secret erhalten (mindestens 16 nicht-weiße Zeichen); gültige Werte werden nicht getrimmt. Ohne Secret nutzt die aktuelle Version weiterhin die historische maschinengebundene Ableitung, damit bestehende Einzelkonto-Installationen lesbar bleiben. Sie ist kein Ersatz für einen OS-Keyring oder einen Secret-Manager. Der Store wird mit AES-GCM, atomarem Schreiben und restriktiven Dateirechten angelegt.
 
-Der Pool wird beim Proxy-Start geladen. Starte den Proxy nach jeder Änderung an `auth.accounts`, nach dem Hinzufügen oder Entfernen eines Kontos und nach einer Änderung von Provider oder Plan neu, zum Beispiel:
+Normale Lesezugriffe schreiben nicht. Eine Legacy-Verschlüsselung wird ausschließlich mit dem ausdrücklichen Migrationsbefehl umgeschrieben:
 
 ```sh
-node /absoluter/pfad/zcode-agent-kit/proxy/zcode-proxy-manager.mjs restart
+zcode-proxy auth accounts migrate
 ```
 
-Ein aktivierter, aber leerer Pool ist absichtlich ein Fehlerzustand: Der Proxy fällt dann nicht still auf `credentials.json` zurück. Füge zuerst mindestens ein passendes Konto hinzu. Ein beschädigter oder nicht entschlüsselbarer Pool wird ebenfalls nicht als leerer, authentifizierter Pool behandelt.
+Falscher Schlüssel, beschädigte Daten, aktive Locks oder ein Revisionskonflikt führen zu einem redigierten Fehler und lassen den bisherigen Store unverändert. Lock-Recovery prüft Besitzer, PID und Nonce; ein Lock wird niemals nur wegen seines Alters gelöscht.
 
-Die Kontodatei liegt standardmäßig unter `~/.zcode-proxy/accounts.json`, wird verschlüsselt gespeichert und mit Dateirechten `0600` angelegt. Der Schlüssel ist an dieselbe lokale Maschinen-/Secret-Konfiguration wie der bestehende Credential-Store gebunden. Kopiere die Datei nicht unverschlüsselt und teile sie nicht mit anderen.
+## Konten einbinden
 
-## Konten hinzufügen
-
-Die Pool-Anmeldung läuft über das Proxy-CLI. Wechsel in das `zcode-proxy-src`-Verzeichnis deiner installierten Kit-Kopie und setze bei Bedarf den Pfad zur aktiven Konfiguration:
+Im `zcode-proxy-src`-Verzeichnis der Kit-Kopie (oder über den installierten Befehl):
 
 ```sh
-cd /absoluter/pfad/zcode-agent-kit/zcode-proxy-src
-export ZCODE_PROXY_CONFIG=/absoluter/pfad/zcode-agent-kit/proxy/config.yaml
+zcode-proxy auth login zai --account privat
+zcode-proxy auth login zai --account arbeit
+zcode-proxy auth login bigmodel --account zweitkonto
+zcode-proxy auth login zai --import --account desktop-1
+zcode-proxy auth login zai --account arbeit --replace
 ```
 
-Danach kannst du wiederholt Konten anmelden. Jede Anmeldung braucht eine stabile lokale ID:
+Jede ID ist lokal und stabil. `--replace` ist für eine Credential-Ersetzung erforderlich. Ein Login ohne `--account` bleibt der bisherige Einzelkonto-Pfad. Der Desktop-Import ist lesend; er ändert keinen Desktop-Login und erweitert keine Projekt- oder Kostenfreigabe.
+
+## Verwaltung und Status
 
 ```sh
-bun run src/index.ts auth login zai --account privat
-bun run src/index.ts auth login zai --account arbeit
-bun run src/index.ts auth login bigmodel --account zweitkonto
+zcode-proxy auth accounts                    # offline, redigierte Übersicht
+zcode-proxy auth accounts --json
+zcode-proxy auth accounts --live --json       # laufender, API-Key-geschützter Proxy
+zcode-proxy auth accounts pause arbeit
+zcode-proxy auth accounts resume arbeit
+zcode-proxy auth accounts remove arbeit --yes
+zcode-proxy auth accounts explain --model glm-5.3 --operation inference --json
+zcode-proxy auth accounts doctor --json
+zcode-proxy auth accounts quota --json
+zcode-proxy auth accounts migrate
 ```
 
-Die Befehle verwenden den normalen OAuth-Ablauf. Für eine bereits in ZCode Desktop vorhandene, lesbare Credential-Konfiguration kannst du den Import ohne erneuten OAuth-Ablauf verwenden:
+`zcode-kit accounts` und `zcode-kit accounts --json` sind Wrapper für die Offline-Übersicht; `zcode-kit accounts remove ID --yes` entfernt ein Profil. JSON-Ausgaben tragen `schemaVersion`, `source` und `asOf`. Sie enthalten keine Schlüssel, JWTs, Credential-Fingerprints, Prompts oder ungefilterte Provider-Fehler. `doctor` liest standardmäßig nur. Explain verwendet dieselben Provider-, Plan-, Allowlist-, Pause-, Kosten- und Capability-Prüfungen wie die Auswahl, verändert aber keinen aktiven Account, keine Sperre und kein `lastUsedAt`.
 
-```sh
-bun run src/index.ts auth login zai --import --account desktop-1
-```
+Der Live-Status wird erst nach einer Aktualisierung aus dem autoritativen Store erzeugt und zeigt Datenquelle, Aktualität, aktiven Account und Persistenzzustand. `/accounts/status` und `/accounts/quota` benötigen den Proxy-Bearer-Key, akzeptieren nur geschützte Loopback-/konfigurierte Origins und werden nicht durch eine bloße Loopback-Bindung authentifiziert.
 
-`--paste` ist nur für den Bigmodel-Auth-Code-Ablauf vorgesehen:
+## Laufzeit und Rotation
 
-```sh
-bun run src/index.ts auth login bigmodel --paste --account vps
-```
+Vor jedem neuen Sendeversuch lädt der laufende Proxy die aktuelle Store-Revision. Hinzufügen, Entfernen, Pause und Credential-Ersetzung wirken daher ohne Neustart; bereits gestartete Requests behalten ihren unveränderlichen Account-/Credential-Kontext und dürfen auslaufen. Vor dem Transport wird dieser Kontext nochmals gegen Provider, Plan, Credential-Revision und Generation geprüft. Ein entferntes oder pausiertes Konto erhält keinen neuen Sendeversuch.
 
-Eine bereits vorhandene ID wird aus Sicherheitsgründen nicht überschrieben. Verwende dafür ausdrücklich `--replace`:
+Die Reihenfolge ist stabil zyklisch. Das aktive Profil bleibt aktiv, bis ein explizites Kontingentsignal vorliegt:
 
-```sh
-bun run src/index.ts auth login zai --account arbeit --replace
-```
+| Signal | Wirkung |
+|---|---|
+| `1005`, `1113`, `3001` in einer strukturierten Provider-Antwort | Account sperren und höchstens einen nächsten passenden Account versuchen |
+| gleiche Codes in einer HTTP-200-Fehlerhülle | wie oben |
+| zukünftiger `resetAt` | bekannte Sperre wird niemals durch eine ältere/kürzere Information verkürzt |
+| kein `resetAt` | begrenztes exponentielles Backoff bis höchstens 15 Minuten |
+| allgemeine 401/403/429/5xx, Modell-, Captcha- oder Transportfehler | keine Pool-Rotation |
 
-`zcode-proxy auth login <provider>` ohne `--account` bleibt der bisherige Einzelkonto-Pfad und schreibt in den kompatiblen primären Credential-Store. Auch `zcode-kit auth login` ist weiterhin dieser Legacy-Pfad; für einen benannten Pool-Account verwende das Proxy-CLI wie oben. Der TUI-Login ist bei aktivem Pool gesperrt und verweist ebenfalls auf diesen Befehl, damit kein Login versehentlich den Einzelkonto-Store verändert.
+Ein HTTP-200-SSE-Header bestätigt keinen Modellabschluss. Streams bleiben inkrementell; nach begonnener Ausgabe gibt es kein transparentes Replay. Client-Abbruch beendet Wartequeue, Retry und Rotation. Alle Recovery-Schichten teilen ein Budget von höchstens einem zusätzlichen Account-Versuch und schließen bereits versuchte effektive Identitäten aus. Identische Credentials unter mehreren IDs zählen nicht als mehrere Kontingente.
 
-Eine Account-ID beginnt mit einem Buchstaben oder einer Ziffer und darf danach bis zu 63 Zeichen aus Buchstaben, Ziffern, `.`, `_` und `-` enthalten. Die ID ist nur eine lokale Bezeichnung; sie ist kein ZCode-Benutzername.
+Für `inference`, `billing`, `quota` und `async` werden unterschiedliche Capability-Anforderungen berücksichtigt. `start-plan` benötigt für Billing/Quota/Async ein JWT. Unbekannte Kosten- oder Bucket-Zuordnungen werden nicht als kostenlos oder summierbar erfunden. Die modellgenaue Provider-Bucket-Zuordnung bleibt providerabhängig und wird nur verwendet, wenn sie bestätigt ist.
 
-## Anzeigen und Entfernen
+## Poolweite Quota
 
-Die Übersicht arbeitet offline. Sie startet keine Modellanfrage und verbraucht kein Kontingent:
+`/quota` fragt im Pool den aktuell ausgewählten Account ab. `/accounts/quota` fragt passende Profile mit begrenzter Parallelität und Timeouts ab. Der Cache ist nach Account, Credential-Revision, Provider, Plan und Billing-Kontext getrennt und verwirft entfernte oder veraltete Profile. Nur Provider-bestätigte, unabhängige Buckets mit gleicher Einheit werden summiert; gemeinsam genutzte, unbekannte oder nicht vergleichbare Werte bleiben pro Account sichtbar. Fehler werden als stabile Codes ausgegeben.
 
-```sh
-zcode-kit accounts
-zcode-kit accounts --json
-zcode-kit accounts remove arbeit --yes
-```
+Globale Richtlinien (`allowedIds`, `pausedIds`, `allowPaid`) gelten vor der Auswahl. Projektdateien enthalten keine Credentials und dürfen diese Freigaben nicht erweitern. Projektbezogene Richtlinien mit eigener Prioritätsauflösung sind in dieser Version nicht enthalten; ein erlaubter Pool ohne verfügbares Konto endet eindeutig mit `NO_USABLE_ACCOUNT` bzw. `account_pool_empty`.
 
-Direkt über das Proxy-CLI sind dieselben Funktionen verfügbar:
+## Diagnose und Grenzen
 
-```sh
-bun run src/index.ts auth accounts
-bun run src/index.ts auth accounts --json
-bun run src/index.ts auth accounts remove arbeit --yes
-```
+`doctor` meldet Store-, Konfigurations-, Duplikat- und Provider-/Plan-Probleme, ohne Reparaturen auszuführen. Persistenzfehler werden begrenzt wiederholt und als maschinenlesbarer Zustand angezeigt; ein unsicherer Snapshot wird nicht als aktuelle Wahrheit weiterverwendet. Ein ausführliches, dauerhaftes Event-Journal ist noch nicht Bestandteil der Version; Status- und Log-Ausgaben bleiben größenbegrenzt und redigiert.
 
-Die Ausgabe enthält nur lokale Metadaten: ID, Provider, Plan, einen maskierten Credential-Hinweis und den Zustand. Mögliche Zustände sind `ready`, `active`, `exhausted`, `expired` und `invalid`. API-Keys, Secrets, JWTs, OAuth-Codes, Prompt-Inhalte und Provider-Fehlertexte werden nicht ausgegeben. Ohne `--yes` wird nichts entfernt. Das Entfernen löscht nur das Pool-Profil; der ZCode-Desktop-Login und andere Profile bleiben bestehen.
-
-`/quota` ist davon getrennt: Bei aktiviertem Pool wählt der Proxy für die Abfrage ein passendes Konto und partitioniert den kurzen Cache nach Konto-ID. Die Antwort ist daher eine Momentaufnahme dieses Kontos und keine Summe über den gesamten Pool. Eine `/quota`-Abfrage kann Providerdaten abrufen; die Account-Übersicht tut das nicht.
-
-## Auswahl und Rotation
-
-Der Rotator arbeitet sequenziell: Nach dem Start bleibt das erste passende Konto für alle Requests aktiv. Dadurch wird dessen Kontingent vollständig genutzt, bevor gewechselt wird. Erst ein explizites Kontingentsignal sperrt das aktive Konto und aktiviert das nächste passende Profil; danach bleibt dieses Profil aktiv. Die Reihenfolge ist stabil und zyklisch. Konten mit abgelaufenem Credential, falschem Provider, inkompatiblem Plan oder aktiver Sperrfrist werden übersprungen.
-
-Eine Rotation wird nur bei einem expliziten Upstream-Kontingentsignal ausgelöst:
-
-- `1005`: Kontingent erschöpft
-- `1113`: Guthaben/Kontingent nicht ausreichend
-- `3001`: Konto- oder Balance-Anfrage abgewiesen
-
-Das gilt auch für Fehlerhüllen mit HTTP 200. Der Proxy versucht höchstens einmal mit dem nächsten passenden Konto. Meldet auch dieses Konto eine Erschöpfung, wird es ebenfalls vorübergehend gesperrt und der gemappte Fehler zurückgegeben. Liefert der Provider eine zukünftige Reset-Zeit, wird sie verwendet; fehlt sie, beträgt die Standard-Cooldown-Zeit 60 Sekunden.
-
-401/403, 3012-Authentifizierungsfehler, 429, 5xx, Captcha-, Transport- und Modellfehler rotieren den Account-Pool nicht. Nach einer erfolgreichen Anfrage wird eine vorübergehende Erschöpfungsmarkierung entfernt.
-
-Die Auswahl bleibt für die gesamte Anfrage und den zugehörigen Stream fest. Es gibt keine Wiederholung eines bereits begonnenen SSE- oder sonstigen Mid-Streams. Der Off-Peak-/Async-Bridge-eigene Ticket-Ablauf darf entsprechend seiner Async-Konfiguration ein Ticket neu anfordern, wechselt dabei aber nicht wegen dieses Ticket-Ablaufs das Konto und sendet den begonnenen Modellstream nicht erneut. Die gewählte Credential-Kombination bleibt an diesen Async-Vorgang gebunden.
-
-## Provider und Plan
-
-Der aktive `provider` und `plan` in `config.yaml` begrenzen die Auswahl. Ein `zai`-Profil wird nicht verwendet, wenn der Proxy auf `bigmodel` steht, und umgekehrt. Für `start-plan` benötigt ein Profil ein JWT; für `coding-plan` muss ein gültiger API-Key vorhanden sein. Profile mit inkompatibler Provider-/Plan-Kombination erscheinen als `invalid` und werden übersprungen.
-
-Ändere Provider oder Plan erst in der Konfiguration, richte dafür passende Profile ein und starte den Proxy neu. Die Pool-Datei enthält mehrere Credentials verschlüsselt; Logs, Account-Listen und Statusmeldungen dürfen trotzdem niemals als Credential-Backup verwendet werden.
-
-## Wenn etwas nicht funktioniert
-
-- `No usable configured account`: Der Pool ist aktiviert, aber leer oder alle Profile sind abgelaufen, erschöpft oder inkompatibel. Prüfe `zcode-kit accounts --json`, Provider/Plan und die gespeicherte Reset-Zeit.
-- `account store is locked`: Eine andere Pool-Mutation läuft oder ein Lockfile ist übrig geblieben. Prüfe den Prozess und entferne ein Lockfile nicht blind, solange ein anderer Proxy noch arbeitet.
-- `account store is not decryptable on this machine`: Verwende dieselbe lokale Secret-/Maschinenkonfiguration oder melde die Profile auf dieser Maschine erneut an.
-- Kein Wechsel trotz Fehlermeldung: Prüfe, ob die Antwort wirklich Code `1005`, `1113` oder `3001` enthält. Eine allgemeine 401-, 429- oder Serverfehlermeldung ist absichtlich kein Rotationssignal.
+Wenn `No usable configured account` erscheint, ist der Pool leer, pausiert, abgelaufen, erschöpft oder durch Provider/Plan/Kostenrichtlinie ausgeschlossen. `account store is locked` bedeutet, dass eine Mutation läuft oder ein Besitzer noch lebt; Lockdateien nicht blind löschen. Bei einem nicht entschlüsselbaren Store dieselbe sichere Secret-Konfiguration verwenden oder kontrolliert migrieren. Die automatisierten Tests nutzen ausschließlich synthetische Credentials und kontrollierte Transporte; echte Accounts, kostenpflichtige Aufrufe und Android-Emulatorläufe sind nicht Teil des Testlaufs.
