@@ -21,7 +21,7 @@ Keep your coding assistant. Use your existing ZCode models and quota/tokens thro
 
 ## Step 2 — Install the kit once
 
-Use the release installer below. It sets up detected assistants automatically, so there is no separate setup command to run afterward.
+Choose the release installer or npm below. The release installer sets up detected assistants automatically, so there is no separate setup command to run afterward.
 
 The installer shows four numbered stages, compact assistant results and a connection check. Detailed setup output is saved to the displayed `install.log`; set `ZCODE_KIT_VERBOSE=1` for full output and `NO_COLOR=1` for plain text. Interactive installs require `y` or `n` for Account Rotator. For unattended installs, set `ZCODE_KIT_ACCOUNT_ROTATOR=y` or `n`; without an explicit answer the existing setting is preserved. A failed connection check remains a warning even when installation succeeds.
 
@@ -49,6 +49,17 @@ Defaults: `%LOCALAPPDATA%\zcode-agent-kit` on Windows; `$HOME/.local/share/zcode
 macOS/Linux also need `curl`, `tar`, and a SHA-256 utility; Bun bootstrap needs `unzip`, and updates need `rsync`. Current live-client validation is Windows-focused; see the dated [support matrix](SUPPORT_MATRIX.json).
 
 </details>
+
+**Alternative — npm (Windows, macOS and Linux):**
+
+Requires Node.js 20+ and [Bun](https://bun.sh/docs/installation) already installed and available in your terminal (`bun --version`; tested with Bun 1.4.2).
+
+```sh
+npm install -g zcode-agent-kit@latest
+zcode-kit setup --harness auto --installer
+```
+
+npm installs the `zcode-kit` and `zcode-agent-kit` commands. The second command installs the kit's dependencies, configures detected assistants and asks the Account Rotator y/n question. Run it after installing the npm package. Use one installation method to keep your command, configuration and proxy tied to the same kit copy.
 
 ## Step 3 — Use GLM-5.3(-flash) in your harness of choice
 
@@ -154,9 +165,16 @@ Keep the proxy on localhost and never share `.proxykey`, credentials, or generat
 <details>
 <summary>Update or remove the kit</summary>
 
-**Update:** rerun the same release installer using the same dedicated destination. Do not mix release and npm installations. Remove an old `ZCODE_KIT_VERSION` pin if you want the latest version.
+**Update:**
+
+- Release installation: rerun the same release installer using the same dedicated destination. Remove an old `ZCODE_KIT_VERSION` pin if you want the latest version.
+- npm installation: run `npm install -g zcode-agent-kit@latest`, then `zcode-kit setup --harness auto --installer` from that npm installation.
+
+Keep the same installation method when updating.
 
 **Remove integrations:** stop your proxy using the manager command above with `stop`, then run `zcode-kit uninstall`. This leaves the installation folder, dependencies, logs, proxy keys, and shared credentials behind; it does not log you out of Desktop. Inspect leftover files before deleting anything.
+
+For an npm installation, remove the global package afterward with `npm uninstall -g zcode-agent-kit`.
 
 </details>
 
