@@ -57,11 +57,12 @@ const BILLING_TIMEOUT_MS = 10_000;
 /** Singleflight cache: parallel /quota hits reuse one billing round-trip. */
 const QUOTA_CACHE_TTL_MS = 15_000;
 
-let quotaCache: { snapshot: QuotaSnapshot; fetchedAtMs: number; promise: Promise<QuotaSnapshot> } | null = null;
+type QuotaCacheEntry = { snapshot: QuotaSnapshot | null; fetchedAtMs: number; promise: Promise<QuotaSnapshot> };
+const quotaCache = new Map<string, QuotaCacheEntry>();
 
 /** Test hook: drop the /quota cache so tests are isolated from each other. */
 export function clearQuotaCache(): void {
-  quotaCache = null;
+  quotaCache.clear();
 }
 
 /** Query one billing URL, tolerating per-endpoint failures. */
@@ -183,6 +184,8 @@ export async function handleQuota(
   config: ProxyConfig,
   fetchImpl: typeof fetch = fetch,
   loadCredentialImpl: typeof loadCredential = loadCredential,
+  /** Cache partition. Pool callers pass the selected account id so one account never serves another's snapshot. */
+  cacheKey = "legacy",
 ): Promise<Response> {
   try {
     // Singleflight + short TTL: parallel UI probes (manager status, doctor,
@@ -192,26 +195,33 @@ export async function handleQuota(
     // completed snapshot. A completed entry is served only within its TTL;
     // afterwards a fresh fetch starts instead of serving stale data forever.
     const now = Date.now();
-    if (quotaCache?.snapshot && now - quotaCache.fetchedAtMs < QUOTA_CACHE_TTL_MS) {
-      const cached: QuotaSnapshot = { ...quotaCache.snapshot, cached: true };
+    for (const [key, entry] of quotaCache) {
+      if (entry.snapshot && now - entry.fetchedAtMs >= QUOTA_CACHE_TTL_MS) quotaCache.delete(key);
+    }
+    let entry = quotaCache.get(cacheKey);
+    if (entry?.snapshot) {
+      const cached: QuotaSnapshot = { ...entry.snapshot, cached: true };
       return new Response(JSON.stringify(cached, null, 1), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
-    if (!quotaCache || quotaCache.snapshot) {
+    if (!entry) {
       const promise = collectQuotaSnapshot(config, fetchImpl, loadCredentialImpl)
         .then((snapshot) => {
-          quotaCache = { snapshot, fetchedAtMs: Date.now(), promise: Promise.resolve(snapshot) };
+          if (quotaCache.get(cacheKey)?.promise === promise) {
+            quotaCache.set(cacheKey, { snapshot, fetchedAtMs: Date.now(), promise });
+          }
           return snapshot;
         })
         .catch((err) => {
-          quotaCache = null;
+          if (quotaCache.get(cacheKey)?.promise === promise) quotaCache.delete(cacheKey);
           throw err;
         });
-      quotaCache = { snapshot: null as unknown as QuotaSnapshot, fetchedAtMs: now, promise };
+      entry = { snapshot: null, fetchedAtMs: now, promise };
+      quotaCache.set(cacheKey, entry);
     }
-    const snapshot = await quotaCache.promise;
+    const snapshot = await entry.promise;
     return new Response(JSON.stringify(snapshot, null, 1), {
       status: 200,
       headers: { "content-type": "application/json" },
