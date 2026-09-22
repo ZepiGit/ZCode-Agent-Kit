@@ -1,7 +1,7 @@
 import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
 
-export function parseGatewayErrorEnvelope(body: string): { status: number; type: string; message: string; code?: number } | null {
+export function parseGatewayErrorEnvelope(body: string): { status: number; type: string; message: string; code?: number; resetAt?: number } | null {
   if (!body || body.length > 65536) return null;
   let obj: any;
   try { obj = JSON.parse(body); } catch { return null; }
@@ -13,8 +13,12 @@ export function parseGatewayErrorEnvelope(body: string): { status: number; type:
   const type = status === 400 ? "invalid_request_error" : status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : "upstream_error";
   const message = code === 1005 ? "exceed quota limit" : code === 1113 ? "Insufficient balance" : code === 3001 ? "upstream balance or request rejected"
     : code === 3007 ? "captcha verify failed" : code === 3006 ? "model not allowed" : code === 3012 ? "upstream authorization rejected" : code === 401 ? "upstream authentication rejected" : "upstream request failed";
+  const resetRaw = obj.resetAt ?? obj.reset_at ?? obj.data?.resetAt ?? obj.data?.reset_at;
+  const resetNumber = typeof resetRaw === "number" && Number.isFinite(resetRaw) && resetRaw > 0
+    ? (resetRaw < 1_000_000_000_000 ? resetRaw * 1000 : resetRaw)
+    : undefined;
   // Never echo upstream msg, error objects, URLs, cookies, or credentials.
-  return { status, type, message: `[${code}] ${message}` };
+  return { status, type, message: `[${code}] ${message}`, code, ...(resetNumber === undefined ? {} : { resetAt: resetNumber }) };
 }
 
 async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Uint8Array | null> {
@@ -33,7 +37,7 @@ async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Uint8Arr
   } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
-async function inspect(resp: Response): Promise<{ status: number; type: string; message: string; code?: number } | null> {
+async function inspect(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
   if (resp.headers.get("content-type")?.includes("text/event-stream")) return null;
   try {
     const copy = resp.clone();
@@ -57,18 +61,39 @@ export async function recoverAndMapUpstream(opts: {
   signal: AbortSignal; resend: (credential: Credential) => Promise<Response>;
 }): Promise<Response> {
   let response = opts.response;
+  let activeCredential = opts.credential;
   let envelope = await inspect(response);
-  const code = envelope ? Number(/^\[(\d+)\]/.exec(envelope.message)?.[1]) : undefined;
+  const code = envelope?.code;
   const streaming = response.headers.get("content-type")?.includes("text/event-stream");
-  if (!streaming && !opts.signal.aborted && (response.status === 401 || [3012, 401, 1113, 3001].includes(code!))) {
-    const fresh = await opts.auth.recoverCredential(opts.credential, opts.plan);
+  // Account-pool retries are limited to explicit balance/quota envelopes. The
+  // legacy single-account manager may still recover 401/3012 through its
+  // desktop-import path; pool mode itself rejects those signals in
+  // AuthManager, preventing accidental rotation on auth/model errors.
+  const rotationCode = response.status === 401 || [3012, 401, 1005, 1113, 3001].includes(code ?? -1)
+    ? (code ?? (response.status === 401 ? 401 : undefined))
+    : undefined;
+  if (!streaming && !opts.signal.aborted && rotationCode !== undefined) {
+    const fresh = await opts.auth.recoverCredential(opts.credential, opts.plan, String(rotationCode), envelope?.resetAt);
     if (fresh && !opts.signal.aborted) {
       void response.body?.cancel().catch(() => {});
+      activeCredential = fresh;
       response = await opts.resend(fresh); // Exactly one attempt, no nested connect/captcha retry.
       envelope = await inspect(response);
     }
   }
-  if (response.ok && !envelope) return response;
+  if (response.ok && !envelope) {
+    // Handlers in downstream integrations sometimes provide a minimal
+    // credential provider mock. Pool health bookkeeping is additive and must
+    // not turn an otherwise successful upstream response into a 502.
+    opts.auth.markCredentialHealthy?.(activeCredential);
+    return response;
+  }
+  if (envelope && [1005, 1113, 3001].includes(envelope.code ?? -1)) {
+    // If the one permitted failover request also reports exhaustion, quarantine
+    // that second account before returning the mapped error. This prevents the
+    // next request from selecting it repeatedly while the reset window lasts.
+    opts.auth.markCredentialExhausted?.(activeCredential, String(envelope.code), envelope.resetAt);
+  }
   const status = response.ok ? envelope!.status : response.status;
   const type = status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : response.ok ? envelope?.type ?? "upstream_error" : "upstream_error";
   const message = envelope?.message ?? `Upstream request failed (HTTP ${status}).`;
