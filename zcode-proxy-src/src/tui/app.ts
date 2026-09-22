@@ -14,7 +14,7 @@
  */
 import { loadConfig } from "../config/loader.js";
 import { updateConfigYaml, ensureConfigFile } from "../config/edit.js";
-import { createStoredAuthManager } from "../auth/runtime.js";
+import { createStoredAuthManagerWithAccounts } from "../auth/runtime.js";
 import { startServer, type ProxyServer } from "../server/server.js";
 import { buildServerOptions } from "../server/server-options.js";
 import { loadCredential, saveCredential, clearCredential } from "../auth/store.js";
@@ -60,7 +60,10 @@ export async function runTui(args: ServeArgs): Promise<void> {
     process.exit(1);
   }
 
-  const auth = createStoredAuthManager(config.plan);
+  const auth = await createStoredAuthManagerWithAccounts(config.plan, {
+    ...(config.auth.accounts ?? { enabled: false }),
+    provider: config.provider,
+  });
   const pane = new LogPane(2000);
   const serverRef: { current: ProxyServer | null } = { current: null };
 
@@ -234,6 +237,15 @@ export async function runTui(args: ServeArgs): Promise<void> {
 
   // --- auth ----------------------------------------------------------------
   async function refreshAuth(): Promise<void> {
+    if (auth.isAccountPoolEnabled()) {
+      const records = auth.listAccounts();
+      const usable = records.filter((record) => record.state !== "invalid" && record.state !== "expired");
+      state.loggedIn = usable.length > 0;
+      const active = records.find((record) => record.state === "active") ?? usable[0];
+      state.apiKeyPreview = active?.credentialPreview ?? "";
+      scheduleRender();
+      return;
+    }
     const cred = await loadCredential().catch(() => null);
     state.loggedIn = cred != null;
     state.apiKeyPreview = cred ? `${cred.apiKey.slice(0, 8)}…` : "";
@@ -246,13 +258,22 @@ export async function runTui(args: ServeArgs): Promise<void> {
     state.serverStatus = "starting";
     state.serverError = "";
     scheduleRender();
-    const cred = await loadCredential().catch(() => null);
-    if (!cred) {
-      state.serverStatus = "stopped";
-      setToast("not logged in — press l to login", "err");
-      return;
+    if (!auth.isAccountPoolEnabled()) {
+      const cred = await loadCredential().catch(() => null);
+      if (!cred) {
+        state.serverStatus = "stopped";
+        setToast("not logged in — press l to login", "err");
+        return;
+      }
+      auth.setOAuthCredential(cred);
+    } else {
+      try { await auth.getCredential(); }
+      catch {
+        state.serverStatus = "stopped";
+        setToast("no usable configured account — add one with auth login --account", "err");
+        return;
+      }
     }
-    auth.setOAuthCredential(cred);
     try {
       const s = await startServer(buildServerOptions(config, auth, args.debug));
       serverRef.current = s;
@@ -344,6 +365,10 @@ export async function runTui(args: ServeArgs): Promise<void> {
   let pasteSwitchBigmodel: (() => void) | null = null;
 
   async function startLogin(opts: { paste?: boolean } = {}): Promise<void> {
+    if (auth.isAccountPoolEnabled()) {
+      setToast("account pool active — add accounts with zcode-proxy auth login --account ID", "info");
+      return;
+    }
     if (state.loginInFlight) {
       setToast("login already in progress", "info");
       return;
