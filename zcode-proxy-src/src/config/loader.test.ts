@@ -39,6 +39,8 @@ beforeEach(() => {
   delete process.env.ZCODE_CLAIM_AUTO;
   delete process.env.ZCODE_CLAIM_ORIGIN;
   delete process.env.ZCODE_CLAIM_POLL_INTERVAL_MS;
+  delete process.env.ZCODE_ACCOUNTS_ENABLED;
+  delete process.env.ZCODE_PROXY_ACCOUNTS_PATH;
 });
 
 afterEach(() => {
@@ -140,6 +142,7 @@ logging:
     expect(cfg.provider).toBe("zai");
     expect(cfg.defaultModel).toBe("glm-4.6");
     expect(cfg.logging.level).toBe("info");
+    expect(cfg.auth.accounts).toEqual({ enabled: false });
     expect(cfg.providers.zai.anthropicBase).toBe("https://api.z.ai/api/anthropic");
     expect(cfg.providers.bigmodel.openaiBase).toBe("https://open.bigmodel.cn/api/coding/paas/v4");
     expect(cfg.clientIdentity).toEqual({ mode: "observe", ttlSeconds: 900, maxSessions: 1024 });
@@ -177,6 +180,39 @@ clientIdentity:
 `);
     const cfg = loadConfig(path);
     expect(cfg.clientIdentity).toEqual({ mode: "enforce", ttlSeconds: 60, maxSessions: 8 });
+  });
+
+  it("auth.accounts: YAML and environment values override the disabled default", () => {
+    const yaml = writeYaml(`
+auth:
+  accounts:
+    enabled: true
+    path: "~/pool/accounts.json"
+`);
+    expect(loadConfig(yaml).auth.accounts).toEqual({ enabled: true, path: "~/pool/accounts.json" });
+
+    process.env.ZCODE_ACCOUNTS_ENABLED = "false";
+    process.env.ZCODE_PROXY_ACCOUNTS_PATH = "/tmp/zcode-pool.json";
+    expect(loadConfig(yaml).auth.accounts).toEqual({ enabled: false, path: "/tmp/zcode-pool.json" });
+  });
+
+  it("auth.accounts policy accepts redacted allow/pause/cost/origin controls", () => {
+    const path = writeYaml(`
+auth:
+  accounts:
+    enabled: true
+    allowedIds: [work, personal]
+    pausedIds: [maintenance]
+    allowPaid: false
+    allowedOrigins: ["http://127.0.0.1:8080"]
+`);
+    expect(loadConfig(path).auth.accounts).toEqual({
+      enabled: true,
+      allowedIds: ["work", "personal"],
+      pausedIds: ["maintenance"],
+      allowPaid: false,
+      allowedOrigins: ["http://127.0.0.1:8080"],
+    });
   });
 
   it("responses + mcp: YAML values override defaults", () => {
@@ -449,7 +485,7 @@ auth:
   proxyApiKey: "${CLIENT_KEY}"
 `);
     const cfg = loadConfig(path);
-    expect(cfg.auth).toEqual({ proxyApiKey: CLIENT_KEY });
+    expect(cfg.auth).toEqual({ proxyApiKey: CLIENT_KEY, accounts: { enabled: false } });
   });
 
   it("throws when config file not found", () => {

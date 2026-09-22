@@ -10,6 +10,24 @@ import type { Credential } from "./types.js";
 
 const STORE_FILE = join(homedir(), ".zcode-proxy", "credentials.json");
 const ENV_SECRET = "ZCODE_PROXY_CREDENTIAL_SECRET";
+/** Optional high-entropy key material supplied by a secret manager. */
+const ENV_MASTER_KEY = "ZCODE_PROXY_CREDENTIAL_MASTER_KEY";
+export const CREDENTIAL_STORE_FORMAT_VERSION = 2;
+export const CREDENTIAL_MASTER_KEY_ENV = ENV_MASTER_KEY;
+
+/** Generate printable high-entropy key material for headless setup. */
+export function generateCredentialMasterKey(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export type CredentialKeySource = "master-key" | "explicit-secret" | "machine-compat";
+
+/** Redacted diagnostic describing where encryption material comes from. */
+export function credentialKeySource(): CredentialKeySource {
+  if (process.env[ENV_MASTER_KEY] !== undefined) return "master-key";
+  if (process.env[ENV_SECRET] !== undefined) return "explicit-secret";
+  return "machine-compat";
+}
 // Audit H6: test suites must never run against the real login store. The
 // store file path is injectable via env; when unset the historical location
 // is used and behavior is unchanged.
@@ -50,6 +68,15 @@ function sha256Key(seed: string): Uint8Array {
   return new Uint8Array(createHash("sha256").update(seed, "utf-8").digest());
 }
 
+function validateSecret(name: string, value: string, minimumLength = 1): string {
+  // Do not trim valid secrets: spaces can be intentional key material. Only
+  // reject an explicitly configured value that is empty/whitespace-only.
+  if (value.trim().length < minimumLength) {
+    throw new Error(`${name} must contain at least ${minimumLength} non-whitespace characters`);
+  }
+  return value;
+}
+
 function xorFoldKey(seed: string): Uint8Array {
   const hash = new Uint8Array(new ArrayBuffer(32));
   const seedBytes = new TextEncoder().encode(seed);
@@ -60,7 +87,16 @@ function xorFoldKey(seed: string): Uint8Array {
 }
 
 function getEncryptionKey(): Uint8Array {
-  const seed = process.env[ENV_SECRET] ?? machineSeed(canonicalHome());
+  const master = process.env[ENV_MASTER_KEY];
+  const configured = process.env[ENV_SECRET];
+  // A configured master key takes precedence and is required to be strong
+  // enough for headless deployments. The historical secret remains accepted
+  // for compatibility, but empty values fail closed.
+  const seed = master !== undefined
+    ? validateSecret(ENV_MASTER_KEY, master, 32)
+    : configured !== undefined
+      ? validateSecret(ENV_SECRET, configured, 16)
+      : machineSeed(canonicalHome());
   return sha256Key(seed);
 }
 
@@ -71,8 +107,9 @@ function getEncryptionKey(): Uint8Array {
  * cannot open; never for new writes.
  */
 function legacyEncryptionKeys(): Uint8Array[] {
+  if (process.env[ENV_MASTER_KEY] !== undefined) return [];
   const secret = process.env[ENV_SECRET];
-  if (secret !== undefined) return [xorFoldKey(secret)];
+  if (secret !== undefined) return [xorFoldKey(validateSecret(ENV_SECRET, secret, 16))];
   const raw = homedir();
   const variants = new Set<string>([raw, raw.replace(/\\/g, "/"), raw.replace(/\//g, "\\")]);
   if (process.platform === "win32") {
@@ -91,8 +128,7 @@ function legacyEncryptionKeys(): Uint8Array[] {
 }
 
 /** Atomic store write: exclusive temp file (0o600) + rename over the target. */
-function atomicWriteStore(contents: string): void {
-  const target = storeFile();
+export function atomicWriteStore(contents: string, target: string = storeFile()): void {
   mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
   const tmp = `${target}.tmp-${process.pid}-${randomBytes(6).toString("hex")}`;
   writeFileSync(tmp, contents, { mode: 0o600, flag: "wx" });
@@ -156,11 +192,39 @@ async function encrypt(plaintext: string): Promise<string> {
   return encryptWith(getEncryptionKey(), plaintext);
 }
 
+/**
+ * Encrypt an arbitrary JSON payload with the same key and AES-GCM format used
+ * by the legacy single-credential store. The account pool uses this helper so
+ * both stores have identical key derivation and migration behaviour.
+ */
+export async function encryptStorePayload(plaintext: string): Promise<string> {
+  return encrypt(plaintext);
+}
+
+/**
+ * Decrypt a payload written by this store. `migrated` is true when one of the
+ * pre-SHA-256 keys was needed; callers may atomically re-encrypt the payload
+ * under the current key after checking that the file has not changed.
+ */
+export async function decryptStorePayload(ciphertext: string): Promise<{ plaintext: string; migrated: boolean }> {
+  // Validate before entering the legacy fallback loop; an empty configured
+  // secret must never silently turn into a machine-derived/legacy key.
+  const currentKey = getEncryptionKey();
+  try {
+    return { plaintext: await decryptWith(currentKey, ciphertext), migrated: false };
+  } catch {
+    for (const key of legacyEncryptionKeys()) {
+      try { return { plaintext: await decryptWith(key, ciphertext), migrated: true }; } catch {}
+    }
+    throw new Error("encrypted payload is not decryptable on this machine");
+  }
+}
+
 export async function saveCredential(cred: Credential): Promise<void> {
   mkdirSync(dirname(storeFile()), { recursive: true, mode: 0o700 });
   const json = JSON.stringify(cred);
   const encrypted = await encrypt(json);
-  atomicWriteStore(JSON.stringify({ encrypted }));
+  atomicWriteStore(JSON.stringify({ version: CREDENTIAL_STORE_FORMAT_VERSION, encrypted }));
 }
 
 /** Compare again after async encryption; no await between comparison and atomic rename. */
@@ -168,12 +232,15 @@ export async function saveCredentialIfUnchanged(cred: Credential, snapshot: stri
   const encrypted = await encrypt(JSON.stringify(cred));
   try {
     if (readFileSync(storeFile(), "utf8") !== snapshot) return false;
-    atomicWriteStore(JSON.stringify({ encrypted }));
+    atomicWriteStore(JSON.stringify({ version: CREDENTIAL_STORE_FORMAT_VERSION, encrypted }));
     return true;
   } catch { return false; }
 }
 
 export async function loadCredential({ migrate = true }: { migrate?: boolean } = {}): Promise<Credential | null> {
+  // Fail closed for explicitly configured empty secrets instead of treating
+  // the value as if it had not been configured.
+  getEncryptionKey();
   if (!existsSync(storeFile())) return null;
   let raw: string;
   let parsed: { encrypted?: unknown };

@@ -21,6 +21,7 @@ import { transformRequestBody } from "./body-transformer.js";
 import { getProvider } from "../provider/providers.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";
+import type { AccountHandle } from "../auth/account-rotator.js";
 import { buildUpstreamRequest, buildUpstreamHeaderPairs, type UpstreamHeaderPair } from "./upstream.js";
 import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
 import { dispatchWithConnectRetry } from "./handler.js";
@@ -39,7 +40,7 @@ async function loadCaptcha(): Promise<CaptchaModule> {
 import { getDefaultEndpointRouting, type EndpointRoutingService } from "./endpoint-routing.js";
 import { getDefaultClientSigning, sendWithClientSigning, type ClientSigningManager } from "./client-signing.js";
 import { buildAnthropicMetadataUserId } from "./trace-headers.js";
-import { credentialString } from "../auth/types.js";
+import { credentialString, type Credential } from "../auth/types.js";
 import { translateRequestOpenAIToAnthropic, translateResponseAnthropicToOpenAI } from "../translator/openai-to-anthropic.js";
 import { anthropicSseToOpenaiSse, SSE_FRAME_SPLIT } from "../translator/sse-translator.js";
 import type { AnthropicMessagesRequest, AnthropicMessagesResponse } from "../translator/types.js";
@@ -152,11 +153,26 @@ export async function handleResponses(
   const { chatRequest, customToolNames, namespaceMap, hasToolSearch } = translated;
 
   // ── 4. credential + provider ──
-  let cred;
+  let cred: Credential;
+  let accountHandle: AccountHandle | undefined;
   try {
-    cred = await opts.auth.getCredential();
+    const select = (opts.auth as AuthManager & { getCredentialHandle?: () => Promise<AccountHandle> }).getCredentialHandle;
+    if (typeof select === "function") {
+      accountHandle = await select.call(opts.auth);
+      cred = accountHandle.credential;
+    } else {
+      // Compatibility with injected AuthManager doubles and the public legacy
+      // interface. Real pooled runtimes always provide a handle.
+      cred = await opts.auth.getCredential();
+    }
   } catch (err) {
     return errorResponse(503, "credential_unavailable", (err as Error).message);
+  }
+  if (accountHandle && accountHandle.provider !== opts.config.provider) {
+    return errorResponse(409, "account_provider_mismatch", "selected account is not enabled for the configured provider");
+  }
+  if (accountHandle?.plan && accountHandle.plan !== opts.config.plan) {
+    return errorResponse(409, "account_plan_mismatch", "selected account is not enabled for the configured plan");
   }
   const providerDef = resolveProviderDef(opts.config);
 
@@ -232,6 +248,15 @@ export async function handleResponses(
   };
 
   let upstreamResp: Response;
+  if (accountHandle && typeof (opts.auth as AuthManager & { validateAccountHandle?: unknown }).validateAccountHandle === "function") {
+    try {
+      if (!(await opts.auth.validateAccountHandle(accountHandle))) {
+        return errorResponse(409, "account_context_changed", "account configuration changed before dispatch; retry the request");
+      }
+    } catch {
+      return errorResponse(503, "account_state_unavailable", "account state could not be verified before dispatch");
+    }
+  }
   try {
     // Connect-retry ladder mirrors the chat hot path (handler.ts): 3 attempts,
     // fresh Request per dispatch (built inside `dispatch`), 500ms×attempt
@@ -271,9 +296,23 @@ export async function handleResponses(
 
   try {
     upstreamResp = await recoverAndMapUpstream({
-      response: upstreamResp, auth: opts.auth, credential: cred, plan: opts.config.plan, signal: clientReq.signal,
+      response: upstreamResp, auth: opts.auth, credential: cred, handle: accountHandle, plan: opts.config.plan, signal: clientReq.signal,
+      attemptedIdentities: new Set(accountHandle ? [accountHandle.effectiveIdentity] : []),
       resend: async (fresh) => {
         cred = fresh;
+        if (startPlan) {
+          const captcha = opts.captcha ?? await loadCaptcha();
+          const token = await captcha.getCaptchaToken(opts.config.identity.appVersion);
+          captchaHeaders = { [captcha.RETRY_HEADERS.PARAM]: token.verifyParam, [captcha.RETRY_HEADERS.REGION]: token.region };
+        }
+        return dispatch(buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, opts.config.identity, opts.config.plan, captchaHeaders, undefined));
+      },
+      resendHandle: async (freshHandle) => {
+        accountHandle = freshHandle;
+        cred = freshHandle.credential;
+        if (freshHandle.provider !== opts.config.provider || (freshHandle.plan && freshHandle.plan !== opts.config.plan)) {
+          throw new Error("selected account context does not match configured provider/plan");
+        }
         if (startPlan) {
           const captcha = opts.captcha ?? await loadCaptcha();
           const token = await captcha.getCaptchaToken(opts.config.identity.appVersion);

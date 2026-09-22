@@ -1,0 +1,25 @@
+# Account-Rotator-Review-Matrix
+
+Ausgangsstand: `6086275c25fe` (Feature-Branch vor dieser Härtung). Review-Referenz: `1cc15c6f082b16cd0604945886de568e2ca1a990`. Die isolierte Review-Suite reproduziert die damaligen Befunde; sie ist kein alleiniger Abnahmenachweis. Tests wurden in die echte Bun-Testumgebung übernommen.
+
+| Befund / Erweiterung | Ausgangsstatus | Endstatus | Dateien / Nachweis |
+|---|---|---|---|
+| AR-01 Veraltete Snapshots und Verwaltungsrace | bestätigt | **umgesetzt** | `auth/account-store.ts`, `auth/runtime.ts`, `auth/manager.ts`; revisionsgeschützte Mutation, autoritativer Refresh vor Auswahl, Merge ohne Credential-/Account-Verlust; `auth/account-rotator-review.test.ts`, `account-store.test.ts` |
+| AR-02 Verspätete Antworten und falsche Gesundheit | bestätigt | **umgesetzt** | `auth/account-rotator.ts`, `proxy/upstream-errors.ts`; Handle-, Credential-, Failure- und Quota-Generationen, SSE nicht als gesund; `account-rotator.test.ts`, `upstream-errors-pool.test.ts`, `credential-recovery.test.ts` |
+| AR-03 Doppelte Credentials / falsche ID | bestätigt | **umgesetzt** | Handle durch Handler, Responses, Async und Recovery; effektive Identität wird gehasht und nie ausgegeben; `account-rotator.test.ts`, `account-rotator-review.test.ts`, `routes-quota.test.ts` |
+| AR-04 Provider-/Planwechsel | bestätigt | **umgesetzt** | Admission-Prüfung vor Transport, Android stop/change/start baut Auth neu und stoppt/restartet Claim-Scheduler; `server.test.ts`, Handler-/Android-Control-Tests. Echter Android-Emulatorlauf: nicht verfügbar. |
+| AR-05 Migrationsrace | bestätigt | **teilweise umgesetzt** | Pool-Lesen ist schreibfrei; explizite `migrate`-Operation nutzt Lock/CAS; `account-rotator-review.test.ts`. Legacy-`credentials.json`-Kompatibilitätsmigration besitzt weiterhin einen separaten historischen Pfad und keinen vollständigen Mehrprozess-Test. |
+| AR-06 Schlüsselmanagement | bestätigt | **teilweise umgesetzt / offen** | Leere Secrets, versioniertes AES-GCM und zufälliger Master-Key (`auth/store.ts`), explizites `auth accounts migrate`, Recovery-Doku; OS-Keyring ist nicht integriert, maschinengebundener Legacy-Fallback bleibt für Einzelkonto-Kompatibilität. |
+| AR-07 Sperren und Reset-Informationen | bestätigt | **umgesetzt** | Monotones `resetAt`-Merge, injizierbare Uhr, exponentielles unbekanntes Backoff bis 15 Minuten; `account-rotator-review.test.ts`, `account-rotator.test.ts`. Provider-spezifische Reset-Semantik bleibt unbekannt, wenn der Provider sie nicht liefert. |
+| AR-08 Locks und Persistenzfehler | bestätigt | **umgesetzt** | Lock-Nonce/PID/Starttoken, sichere Recovery, begrenzte Persistenzwiederholung und maschinenlesbarer Status; `account-store.test.ts`, `account-rotator-review.test.ts`, `server.test.ts`. Harte Prozessabbruch-/PID-Reuse-Multiprozessläufe waren in dieser Umgebung nicht möglich. |
+| AR-09 Verlässliche Statusanzeige | bestätigt | **umgesetzt** | Authentifizierter `/accounts/status`, Host-/Origin-Gate, Offline/Live-Quellen, Refresh am Status-Lesepunkt, Redaction und Datenalter; `server.test.ts`, CLI-Tests. |
+| Modell-/Kontingentzustände | teilweise vorhanden | **teilweise umgesetzt / offen** | Capability-/Kosten-/Plan-Filter und unbekannte Quota-Werte in `account-rotator.ts`/`routes-quota.ts`; eine providerübergreifend bestätigte Modell→Bucket-Tabelle wird nicht erfunden. |
+| Operation/Capabilities | teilweise vorhanden | **umgesetzt** | `inference`, `billing`, `quota`, `async` werden vor Auswahl berücksichtigt; Async-Ticket bleibt an Handle gebunden; `routes-quota.test.ts`, Async-/Proxy-Regressionen. |
+| Verwaltung/Explain/Doctor | teilweise vorhanden | **umgesetzt** | `auth accounts pause|resume|explain|doctor|migrate`, Live-/Offline-JSON und zcode-kit-Wrapper; `account-cli.test.ts`, `server.test.ts`. |
+| Poolweite Quota-Übersicht | teilweise vorhanden | **umgesetzt** | `/accounts/quota`, begrenzte Parallelität, Singleflight/Cache-Schlüssel mit Revision und Billing-Kontext, Duplikat- und unabhängige Summenprüfung; `routes-quota.test.ts`. |
+| Projekt-/Kostenrichtlinien | nicht vorhanden | **teilweise umgesetzt / offen** | Globale `allowedIds`, `pausedIds`, `allowPaid`, Provider-/Plan-Filter; projektbezogene Prioritätsauflösung ist bewusst noch nicht implementiert und dokumentiert. |
+| Diagnose-/Ereignisprotokoll | teilweise vorhanden | **teilweise umgesetzt / offen** | Redigierte, versionierte Fehler-/Persistenzstatusfelder und begrenzte Logs; dauerhaftes strukturiertes Auswahl-/Sperr-Eventjournal fehlt. |
+| Performance/Queue | teilweise vorhanden | **teilweise umgesetzt** | Stable cyclic search, deduplizierte Identitäten, bounded quota workers und abortable waits; ID-Map sowie reproduzierbare große Pool-Benchmarkwerte fehlen noch. |
+| Regression/CI/Pack | teilweise vorhanden | **umgesetzt** | Review-Fälle in Root-/Proxy-Suites; Bun-Build und Root-Suites ausgeführt; CI-Workflow/Release-Smoke werden im Abschluss separat ausgewiesen. |
+
+`offen` beziehungsweise `teilweise umgesetzt / offen` kennzeichnet bewusst nicht gelieferte Provider-/Plattformfunktionen; sie sind nicht als bestanden dargestellt.

@@ -7,6 +7,15 @@ server:
 auth:
   # Key clients must provide; setup.mjs replaces GENERATE_ME with a random key.
   proxyApiKey: "GENERATE_ME"
+  # Optional encrypted account pool for automatic free/start-plan quota rotation.
+  # Disabled by default. The pool defaults to ~/.zcode-proxy/accounts.json (0600).
+  accounts:
+    enabled: false
+    # path: "~/.zcode-proxy/accounts.json"
+    # allowedIds: ["privat", "arbeit"]
+    # pausedIds: []
+    # allowPaid: false
+    # allowedOrigins: ["http://localhost:8457"]
 provider: zai
 plan: start-plan
 providers:

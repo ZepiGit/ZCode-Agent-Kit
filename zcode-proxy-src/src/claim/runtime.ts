@@ -10,6 +10,27 @@ import { createClaimClient, ClaimPreviewError } from "./client.js";
 import { ClaimScheduler } from "./scheduler.js";
 import { getCaptchaToken } from "../proxy/captcha.js";
 import { loadCredential } from "../auth/store.js";
+import { createStoredAuthManagerWithAccounts } from "../auth/runtime.js";
+
+/** Resolve a JWT-capable account without falling back outside an enabled pool. */
+export async function resolveClaimJwt(
+  auth: AuthManager,
+  loadStoredCredential: typeof loadCredential = loadCredential,
+): Promise<string | undefined> {
+  try {
+    // Claims use the same JWT capability as billing. Preserve compatibility
+    // with injected legacy AuthManager doubles that only expose getCredential.
+    const cred = auth.getCredentialHandle
+      ? (await auth.getCredentialHandle({ operation: "billing" })).credential
+      : await auth.getCredential();
+    if (cred.jwt?.trim()) return cred.jwt;
+  } catch { /* Only legacy mode may fall through to its compatibility store. */ }
+  // Keep injected minimal AuthManager doubles from older integrations
+  // compatible; a real AuthManager always exposes this method.
+  if (auth.isAccountPoolEnabled?.()) return undefined;
+  const stored = await loadStoredCredential().catch(() => null);
+  return stored?.jwt;
+}
 
 /** `${process.platform}-${process.arch}` — mirrors the client's `TH()`. */
 export function claimPlatform(): string {
@@ -18,16 +39,9 @@ export function claimPlatform(): string {
 
 export function startAutoClaim(config: ProxyConfig, auth: AuthManager): ClaimScheduler {
   const scheduler = new ClaimScheduler({
-    // AuthManager first (fresh), then the encrypted store — on Android the
-    // login can land in the store after boot while auth hasn't been reloaded.
-    getJwt: async () => {
-      try {
-        const cred = await auth.getCredential();
-        if (cred.jwt) return cred.jwt;
-      } catch { /* fall through to the store */ }
-      const stored = await loadCredential().catch(() => null);
-      return stored?.jwt;
-    },
+    // Android legacy logins may arrive after boot. Enabled pools remain
+    // authoritative even when exhausted, empty, or missing a JWT.
+    getJwt: () => resolveClaimJwt(auth),
     createClient: (jwt) =>
       createClaimClient({
         origin: config.claim.origin,
@@ -66,8 +80,11 @@ const FAILURE_LABELS: Record<string, string> = {
 
 /** One-shot CLI: `list` prints previews; `now` claims the target plan. */
 export async function runClaimCli(config: ProxyConfig, mode: "list" | "now"): Promise<void> {
-  const cred = await loadCredential();
-  const jwt = cred?.jwt;
+  const auth = await createStoredAuthManagerWithAccounts(config.plan, {
+    ...(config.auth.accounts ?? { enabled: false }),
+    provider: config.provider,
+  });
+  const jwt = await resolveClaimJwt(auth);
   if (!jwt) {
     console.error("Claim requires a logged-in oauth credential (no JWT stored). Run: zcode-proxy auth login <zai|bigmodel>");
     process.exit(1);

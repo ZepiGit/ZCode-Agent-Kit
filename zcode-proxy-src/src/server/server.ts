@@ -18,6 +18,8 @@ import { handleMessages } from "./routes-anthropic.js";
 import { handleResponsesRoute } from "./routes-responses.js";
 import { handleAsyncMessagesRoute, handleAsyncChatRoute, handleAsyncHealthRoute } from "./routes-async.js";
 import { handleQuota } from "./routes-quota.js";
+import { collectPoolQuotaSnapshot } from "./routes-quota.js";
+import { loadAccountStore } from "../auth/account-store.js";
 import { errorResponse } from "../proxy/handler.js";
 import type { ResponseStore } from "../responses/store.js";
 
@@ -65,11 +67,26 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     const path = url.pathname;
     const method = req.method;
 
-    // CORS preflight
-    if (method === "OPTIONS") {
-      return corsResponse();
+    const hostHeader = req.headers.get("host");
+    if (hostHeader && !isAllowedHostHeader(hostHeader)) {
+      return errorResponse(421, "host_not_allowed", "request host is not a loopback host");
     }
 
+    const origin = req.headers.get("origin");
+    if (origin && !isAllowedBrowserOrigin(origin, config)) {
+      return errorResponse(403, "origin_not_allowed", "browser origin is not allowed");
+    }
+
+    // CORS preflight. No wildcard is returned for browser origins; requests
+    // without an Origin retain the historical wildcard for non-browser CLI
+    // clients, while authenticated browser calls receive an explicit origin.
+    if (method === "OPTIONS") {
+      return corsResponse(origin, config);
+    }
+
+    // The static shell is intentionally public so it can render a login/key
+    // prompt, but every data endpoint it calls remains behind the API key.
+    // No account status or credential data is embedded in this HTML.
     if (method === "GET" && (path === "/webui" || path.startsWith("/webui/"))) {
       return new Response(webuiHtml, {
         status: 200,
@@ -82,6 +99,9 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       if (!authHeader || !checkProxyKey(authHeader, config.auth.proxyApiKey)) {
         return errorResponse(401, "authentication_error", "Invalid or missing proxy API key");
       }
+    }
+    if (path.startsWith("/accounts/") && !config.auth.proxyApiKey) {
+      return errorResponse(401, "authentication_error", "account status requires proxy API key authentication");
     }
 
     // --- Routing ---
@@ -97,7 +117,43 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     }
 
     if (path === "/quota" && method === "GET") {
+      // In pool mode the selected account is authoritative. Capture the
+      // credential once for this billing round and partition the short cache
+      // by its stable id so account A's snapshot cannot be served for B.
+      if (auth.isAccountPoolEnabled()) {
+        try {
+          const handle = await auth.getCredentialHandle({ operation: "quota" });
+          const credential = handle.credential;
+          const accountId = handle.id;
+          return handleQuota(config, opts.fetchImpl, async () => credential, `pool:${accountId}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "account credential unavailable";
+          return errorResponse(503, "quota_unavailable", `quota query failed: ${message}`);
+        }
+      }
       return handleQuota(config, opts.fetchImpl);
+    }
+
+    if (path === "/accounts/status" && method === "GET") {
+      return accountStatusResponse(config, auth);
+    }
+
+    if (path === "/accounts/quota" && method === "GET") {
+      if (!auth.isAccountPoolEnabled()) {
+        return errorResponse(409, "account_pool_disabled", "account pool is disabled");
+      }
+      try {
+        const policy = config.auth.accounts;
+        const profiles = (await loadAccountStore(policy?.path ? { path: policy.path } : {}))
+          .filter((profile) => profile.credential.provider === config.provider
+            && (!profile.plan || profile.plan === config.plan)
+            && isPolicyAllowed(profile.id, profile.plan, config)
+            && profile.paused !== true);
+        const snapshot = await collectPoolQuotaSnapshot(config, profiles, opts.fetchImpl);
+        return jsonResponse(snapshot);
+      } catch (err) {
+        return errorResponse(503, "quota_unavailable", `pool quota query failed: ${safeStatusError(err)}`);
+      }
     }
 
     if (path === "/v1/messages" && method === "POST") {
@@ -190,7 +246,7 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
 
     try {
       const webReq = nodeReqToWebRequest(req, abortController.signal);
-      const resp = await handler(webReq).then((r) => addCorsHeaders(r));
+      const resp = await handler(webReq).then((r) => addCorsHeaders(r, webReq.headers.get("origin"), opts.config));
       await writeWebResponseToNodeResp(resp, res, abortController.signal);
     } catch (err) {
       if (abortController.signal.aborted) return;
@@ -320,17 +376,17 @@ function checkProxyKey(authHeader: string, expected: string): boolean {
 }
 
 /** Build a CORS preflight response. */
-function corsResponse(): Response {
+function corsResponse(origin: string | null, config: ProxyConfig): Response {
   return new Response(null, {
     status: 204,
-    headers: corsHeaders(),
+    headers: corsHeaders(origin, config),
   });
 }
 
 /** Add CORS headers to an existing response (non-mutating). */
-function addCorsHeaders(resp: Response): Response {
+function addCorsHeaders(resp: Response, origin: string | null, config: ProxyConfig): Response {
   const headers = new Headers(resp.headers);
-  for (const [k, v] of Object.entries(corsHeaders())) {
+  for (const [k, v] of Object.entries(corsHeaders(origin, config))) {
     headers.set(k, v);
   }
   return new Response(resp.body, {
@@ -340,11 +396,95 @@ function addCorsHeaders(resp: Response): Response {
   });
 }
 
-function corsHeaders(): Record<string, string> {
+function corsHeaders(origin: string | null, config: ProxyConfig): Record<string, string> {
   return {
-    "access-control-allow-origin": "*",
+    "access-control-allow-origin": origin && isAllowedBrowserOrigin(origin, config) ? origin : "*",
     "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "Content-Type, Authorization, x-api-key, anthropic-version, anthropic-beta",
     "access-control-max-age": "86400",
   };
+}
+
+function isAllowedBrowserOrigin(origin: string, config: ProxyConfig): boolean {
+  const configured = config.auth.accounts?.allowedOrigins;
+  if (Array.isArray(configured) && configured.length > 0) return configured.includes(origin);
+  try {
+    const parsed = new URL(origin);
+    const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return (parsed.protocol === "http:" || parsed.protocol === "https:")
+      && (host === "localhost" || host === "127.0.0.1" || host === "::1");
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedHostHeader(value: string): boolean {
+  try {
+    const parsed = new URL(`http://${value}`);
+    const host = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function safeStatusError(err: unknown): string {
+  const code = typeof err === "object" && err && "code" in err
+    ? String((err as { code?: unknown }).code)
+    : "unavailable";
+  return ["invalid", "locked", "corrupt", "conflict"].includes(code) ? code : "unavailable";
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value, null, 1), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+
+async function accountStatusResponse(config: ProxyConfig, auth: AuthManager): Promise<Response> {
+  // Refresh the authoritative pool at the status read boundary. This keeps
+  // the live view distinct from the offline config and prevents a stale
+  // runtime snapshot from being reported as current after an admin edit.
+  try {
+    await auth.refreshAccountPool?.();
+  } catch {
+    return errorResponse(503, "account_status_unavailable", "account state could not be refreshed");
+  }
+  const accounts = auth.listAccounts().map((account) => ({
+    id: account.id,
+    provider: account.provider,
+    plan: account.plan ?? null,
+    state: account.provider === config.provider && (!account.plan || account.plan === config.plan)
+      && isPolicyAllowed(account.id, account.plan, config) ? account.state : "blocked",
+    // Never expose key prefixes/suffixes in a browser status response.
+    credential: "redacted",
+    lastUsedAt: account.lastUsedAt ?? null,
+    lastUsedAgeMs: account.lastUsedAt ? Math.max(0, Date.now() - account.lastUsedAt) : null,
+    exhaustedUntil: account.exhaustedUntil ?? null,
+    dataSource: "runtime",
+  }));
+  const active = accounts.find((account) => account.state === "active")?.id ?? null;
+  return jsonResponse({
+    schemaVersion: 1,
+    source: "live-runtime",
+    asOf: new Date().toISOString(),
+    dataAgeMs: 0,
+    provider: config.provider,
+    plan: config.plan,
+    activeAccountId: active,
+    persistence: typeof auth.getPersistenceStatus === "function" ? auth.getPersistenceStatus() : { state: "unknown" },
+    accounts,
+  });
+}
+
+function isPolicyAllowed(id: string, plan: string | undefined, config: ProxyConfig): boolean {
+  const policy = config.auth.accounts;
+  if (!policy) return true;
+  if (policy.allowedIds && !policy.allowedIds.includes(id)) return false;
+  if (policy.pausedIds?.includes(id)) return false;
+  // A free-only policy is fail-closed: an account with no plan metadata has
+  // unknown cost and cannot silently become a paid fallback.
+  if (policy.allowPaid === false && (!plan || (plan !== "coding-plan" && plan !== "start-plan"))) return false;
+  return true;
 }

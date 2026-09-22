@@ -24,8 +24,17 @@ Anthropic messages- und OpenAI Responses-Anfragen auf **`http://127.0.0.1:8457`*
 entgegen und leitet sie an das Z.AI-Gateway weiter — mit deinem angemeldeten
 ZCode-Desktop-Account (start-plan, dasselbe Kontingent wie ZCode Desktop).
 
+Optional kann `auth.accounts.enabled` einen verschlüsselten Pool mehrerer
+autorisierter Konten aktivieren. Neue Requests synchronisieren den Pool vor
+dem Versand; `1005`, `1113` und `3001` lösen höchstens einen sequenziellen
+Failover-Versuch aus. Verwaltung und Diagnose: `zcode-proxy auth accounts`,
+`pause|resume`, `explain`, `doctor`, `quota` und `--live`. Die vollständige
+Bedienungs-, Schlüssel- und Migrationsdokumentation steht in
+[`../docs/ACCOUNT_ROTATOR.md`](../docs/ACCOUNT_ROTATOR.md).
+
 - Adressen/Formate: `POST /v1/chat/completions`, `POST /v1/messages`,
-  `POST /v1/responses`, `GET /v1/models`, `GET /health`, `GET /quota`
+  `POST /v1/responses`, `GET /v1/models`, `GET /health`, `GET /quota`,
+  authentifiziert `GET /accounts/status` und `GET /accounts/quota`
 - Authentifizierung: `Authorization: Bearer <Inhalt von .proxykey>` — der
   Schlüssel wird lokal von setup.mjs erzeugt und verlässt nie deine Maschine
 - Lebenszyklus: verwaltet von `node proxy\zcode-proxy-manager.mjs start|stop|restart|status|doctor|logs`

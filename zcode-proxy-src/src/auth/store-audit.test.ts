@@ -12,7 +12,7 @@ test('Windows credential seed survives slash and case variants without a secret 
   const home = join(base, 'Home'); mkdirSync(home);
   const store = join(base, 'credential.json');
   function run(homePath: string, code: string) {
-    const env = { ...process.env, HOME: homePath, USERPROFILE: homePath, ZCODE_PROXY_CREDENTIALS_PATH: store };
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: homePath, USERPROFILE: homePath, ZCODE_PROXY_CREDENTIALS_PATH: store };
     delete env.ZCODE_PROXY_CREDENTIAL_SECRET;
     return spawnSync(process.execPath, ['-e', `const s = await import(${JSON.stringify(moduleUrl)}); ${code}`], { env, encoding: 'utf8' });
   }

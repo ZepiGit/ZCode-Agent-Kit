@@ -11,6 +11,10 @@
 //   zcode-kit models [--json] [--show-key]
 //   zcode-kit usage --json
 //   zcode-kit auth status|login|logout
+//   zcode-kit accounts [--json|--live]
+//   zcode-kit accounts remove|pause|resume ID [--yes]
+//   zcode-kit accounts explain --model MODEL --operation OP
+//   zcode-kit accounts doctor [--json] | accounts quota
 //   zcode-kit update [--version vX.Y.Z]          checkout installs only; --version = release tag
 //   zcode-kit rollback [tx-id]
 //   zcode-kit uninstall
@@ -81,6 +85,7 @@ async function main() {
     case "models": return cmdModels();
     case "usage": return cmdUsage();
     case "auth": return cmdAuth();
+    case "accounts": return cmdAccounts();
     case "update": return cmdUpdate();
     case "rollback": return cmdRollback();
     case "uninstall": return cmdUninstall();
@@ -99,6 +104,9 @@ function usage(code) {
   zcode-kit doctor [--fix] [--harness <id>] [--json]
   zcode-kit status | models [--json] [--show-key] | usage --json
   zcode-kit auth status|login|logout
+  zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes]
+  zcode-kit accounts explain --model MODEL --operation OP
+  zcode-kit accounts doctor [--json] | accounts quota
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
   (setup: --harness <list> limits adapters AND MCP registration; --no-mcp skips registration)
 
@@ -445,6 +453,47 @@ async function cmdAuth() {
   return 2;
 }
 
+// --------------------------------------------------------------- accounts
+// Offline account-pool wrapper. The proxy CLI owns encryption and redaction;
+// this command forwards directly to it and never starts a serving process.
+async function cmdAccounts() {
+  const sub = positional[1];
+  if (["remove", "pause", "resume"].includes(sub)) {
+    const id = positional[2];
+    if (!id || id.startsWith("--")) {
+      console.error(`Usage: zcode-kit accounts ${sub} ID [--yes]`);
+      return 2;
+    }
+    const args = ["auth", "accounts", sub, id];
+    if (flags.yes === true) args.push("--yes");
+    const res = runProxyCli(args, { stdio: "inherit" });
+    return res.status ?? 1;
+  }
+  if (sub === "explain") {
+    const args = ["auth", "accounts", "explain"];
+    if (flags.model !== undefined) args.push("--model", String(flags.model));
+    if (flags.operation !== undefined) args.push("--operation", String(flags.operation));
+    if (flags.json === true) args.push("--json");
+    const res = runProxyCli(args, { stdio: "inherit" });
+    return res.status ?? 1;
+  }
+  if (sub === "doctor" || sub === "quota") {
+    const args = ["auth", "accounts", sub];
+    if (flags.json === true) args.push("--json");
+    const res = runProxyCli(args, { stdio: "inherit" });
+    return res.status ?? 1;
+  }
+  if (sub !== undefined && sub !== "--json" && sub !== "--live") {
+    console.error("Usage: zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes]");
+    return 2;
+  }
+  const args = ["auth", "accounts"];
+  if (flags.json === true) args.push("--json");
+  if (flags.live === true) args.push("--live");
+  const res = runProxyCli(args, { stdio: "inherit" });
+  return res.status ?? 1;
+}
+
 // ------------------------------------------------------------------ update
 async function cmdUpdate() {
   // AUD-009: a tarball install has no .git — the git flow below would fail
@@ -606,4 +655,3 @@ if (entryReal && import.meta.url === pathToFileURL(entryReal).href) {
     process.exit(2);
   });
 }
-

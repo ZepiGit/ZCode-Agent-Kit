@@ -11,8 +11,24 @@ export interface ProviderEndpoints {
   openaiBase: string;
 }
 
+/** Optional encrypted account-pool configuration. */
+export interface AccountsConfig {
+  /** Enable request-time account selection/rotation. Disabled by default. */
+  enabled: boolean;
+  /** Optional encrypted account-pool path. The environment override wins. */
+  path?: string;
+  /** Explicit account allow-list. An empty list means no accounts are allowed. */
+  allowedIds?: string[];
+  /** Cost policy. When false, accounts known to be paid are excluded. Unknown cost remains excluded. */
+  allowPaid?: boolean;
+  /** Account ids paused by an operator; paused accounts cannot receive new requests. */
+  pausedIds?: string[];
+  /** Optional explicit browser origins for the authenticated local status UI. */
+  allowedOrigins?: string[];
+}
+
 /** Auth section of the proxy configuration. */
-interface AuthConfig {
+export interface AuthConfig {
   /**
    * Key that clients must provide to use the proxy (via `Authorization: Bearer {proxyApiKey}`).
    * If unset, the proxy does not require client auth.
@@ -20,6 +36,8 @@ interface AuthConfig {
   proxyApiKey?: string;
   /** Path to stored OAuth credentials created by `auth login`. */
   oauthCredentialsPath?: string;
+  /** Multi-account pool used by the optional account rotator. */
+  accounts?: AccountsConfig;
 }
 
 /**

@@ -3,7 +3,7 @@
  * @see .omo/plans/zcode-proxy.md Task 7
  */
 import { loadConfig } from "./config/loader.js";
-import { createStoredAuthManager } from "./auth/runtime.js";
+import { createStoredAuthManagerWithAccounts } from "./auth/runtime.js";
 import { importFromZCodeConfig } from "./auth/desktop.js";
 import { startServer, type ProxyServer } from "./server/server.js";
 import { startControlListener, LogBuffer, type ControlState } from "./android/control.js";
@@ -13,7 +13,7 @@ import { KeyResolver } from "./auth/resolver.js";
 import type { Credential } from "./auth/types.js";
 import type { ProviderId } from "./provider/types.js";
 import type { ProxyConfig } from "./config/types.js";
-import { updateConfigYaml, ensureConfigFile } from "./config/edit.js";
+import { updateConfigYaml, updateAccountPolicyYaml, ensureConfigFile } from "./config/edit.js";
 import { openBrowser } from "./runtime/open-browser.js";
 import { pasteLoginInstructions, readPastedLine, boldIfTTY } from "./runtime/paste-login.js";
 import { buildServerOptions } from "./server/server-options.js";
@@ -21,6 +21,16 @@ import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
 import { installGuestErrorBoundary } from "./runtime/guest-error.js";
+import {
+  addAccount,
+  getAccountStorePath,
+  loadAccountStore,
+  removeAccount,
+  updateAccountStore,
+  migrateAccountStore,
+  duplicateCredentialGroups,
+} from "./auth/account-store.js";
+import { createAccountRotator } from "./auth/account-rotator.js";
 
 export const VERSION = "4.6.4";
 
@@ -143,10 +153,27 @@ Usage:
   zcode-proxy --cli                 Classic CLI mode (bare --cli = serve)
   zcode-proxy android               Android entry: proxy + localhost control listener
   zcode-proxy auth login <provider> Login via OAuth (provider: zai | bigmodel)
+  zcode-proxy auth login <provider> --account ID [--replace]
   zcode-proxy auth login <provider> --import
                                     Import API key from ~/.zcode/v2/config.json
   zcode-proxy auth logout           Clear stored credentials
   zcode-proxy auth status           Show current authentication state
+  zcode-proxy auth accounts [--json]
+                                    List configured accounts (redacted, offline)
+  zcode-proxy auth accounts remove ID [--yes]
+                                    Remove one configured account
+  zcode-proxy auth accounts pause|resume ID
+                                    Pause/resume an account in the policy (live on next request)
+  zcode-proxy auth accounts explain --model MODEL --operation OP
+                                    Explain policy/provider/model selection (read-only)
+  zcode-proxy auth accounts doctor [--json]
+                                    Read-only encrypted-pool/config diagnostics
+  zcode-proxy auth accounts migrate
+                                    Explicitly migrate legacy encrypted pool data
+  zcode-proxy auth accounts quota
+                                    Live pool-wide quota overview (requires running proxy)
+  zcode-proxy auth accounts --live
+                                    Authenticated live runtime status (redacted)
   zcode-proxy claim [list|now]      List / claim weekend-plan trial packages
   zcode-proxy version               Show version
   zcode-proxy help                  Show this help
@@ -159,6 +186,7 @@ Examples:
   zcode-proxy auth login bigmodel --import
                                     Import existing key from ZCode config
   zcode-proxy auth status           Check if logged in
+  zcode-proxy auth accounts --json  List account ids and redacted state
 `);
 }
 
@@ -172,13 +200,26 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   }
   const config = loadConfig(path);
 
-  const auth = createStoredAuthManager(config.plan);
-  const cred = await loadCredential();
-  if (!cred) {
-    console.error("Not logged in. Run: zcode-proxy auth login " + config.provider);
-    process.exit(1);
+  let auth = await createStoredAuthManagerWithAccounts(config.plan, {
+    ...(config.auth.accounts ?? { enabled: false }),
+    provider: config.provider,
+  });
+  let cred: Credential | null = null;
+  if (!auth.isAccountPoolEnabled()) {
+    cred = await loadCredential();
+    if (!cred) {
+      console.error("Not logged in. Run: zcode-proxy auth login " + config.provider);
+      process.exit(1);
+    }
+    auth.setOAuthCredential(cred);
+  } else {
+    try { await auth.getCredential(); }
+    catch (err) {
+      console.error(`No usable configured account. Run: zcode-proxy auth login ${config.provider} --account ID`);
+      if (debug) console.error((err as Error).message);
+      process.exit(1);
+    }
   }
-  auth.setOAuthCredential(cred);
 
   if (debug) printDebugBanner(config, path, cred);
 
@@ -255,15 +296,24 @@ async function runAndroid(): Promise<void> {
   console.error = (...args: unknown[]) => { logBuffer.push("[error] " + args.join(" ")); origErr(...args); };
   console.warn = (...args: unknown[]) => { logBuffer.push("[warn] " + args.join(" ")); origWarn(...args); };
 
-  const auth = createStoredAuthManager(config.plan);
+  let auth = await createStoredAuthManagerWithAccounts(config.plan, {
+    ...(config.auth.accounts ?? { enabled: false }),
+    provider: config.provider,
+  });
+  let claimScheduler: { stop(): void } | null = null;
 
   const serverRef: { current: ProxyServer | null } = { current: null };
 
   async function startProxy(): Promise<{ ok: true; port: number } | { ok: false; error: string }> {
     if (serverRef.current) return { ok: false, error: "already_running" };
-    const cred = await loadCredential().catch(() => null);
-    if (!cred) return { ok: false, error: "not_logged_in" };
-    auth.setOAuthCredential(cred);
+    if (!auth.isAccountPoolEnabled()) {
+      const cred = await loadCredential().catch(() => null);
+      if (!cred) return { ok: false, error: "not_logged_in" };
+      auth.setOAuthCredential(cred);
+    } else {
+      try { await auth.getCredential(); }
+      catch { return { ok: false, error: "not_logged_in" }; }
+    }
     try {
       const s = await startServer(buildServerOptions(config, auth, false));
       serverRef.current = s;
@@ -292,9 +342,33 @@ async function runAndroid(): Promise<void> {
     plan?: "coding-plan" | "start-plan";
   }): Promise<{ ok: true; provider: ProviderId; plan: "coding-plan" | "start-plan" } | { ok: false; error: string }> {
     if (serverRef.current) return { ok: false, error: "stop_proxy_first" };
-    if (changes.provider) config.provider = changes.provider;
-    if (changes.plan) config.plan = changes.plan;
+    const nextProvider = changes.provider ?? config.provider;
+    const nextPlan = changes.plan ?? config.plan;
+    // Rebuild the selection filter atomically while the proxy is stopped. A
+    // subsequent start must never reuse credentials selected for the old
+    // provider/plan.
+    let nextAuth: typeof auth;
+    try {
+      nextAuth = await createStoredAuthManagerWithAccounts(nextPlan, {
+      ...(config.auth.accounts ?? { enabled: false }),
+        provider: nextProvider,
+      });
+    } catch (err) {
+      return { ok: false, error: `account_pool_unavailable: ${(err as Error).message}` };
+    }
+    claimScheduler?.stop();
+    claimScheduler = null;
+    config.provider = nextProvider;
+    config.plan = nextPlan;
+    auth = nextAuth;
     updateConfigYaml(path, { provider: config.provider, plan: config.plan });
+    controlState.provider = config.provider;
+    controlState.plan = config.plan;
+    if (config.claim.enabled && config.claim.auto) {
+      import("./claim/runtime.js").then((m) => {
+        claimScheduler = m.startAutoClaim(config, auth);
+      }).catch((err) => console.error(`[claim] scheduler restart failed: ${(err as Error).message}`));
+    }
     console.log(`config updated: provider=${config.provider} plan=${config.plan}`);
     return { ok: true, provider: config.provider, plan: config.plan };
   }
@@ -304,7 +378,7 @@ async function runAndroid(): Promise<void> {
   if (config.claim.enabled && config.claim.auto) {
     import("./claim/runtime.js")
       .then((m) => {
-        m.startAutoClaim(config, auth);
+        claimScheduler = m.startAutoClaim(config, auth);
         console.log(`[claim] auto ON (poll ${Math.round(config.claim.pollIntervalMs / 1000)}s; waits for login)`);
       })
       .catch((err) => console.error(`[claim] scheduler failed to start: ${(err as Error).message}`));
@@ -366,13 +440,15 @@ function authCommand(args: string[]): void {
   const sub = args[0];
 
   if (sub === "login") {
-    authLogin(args.slice(1));
+    void authLogin(args.slice(1));
   } else if (sub === "logout") {
     authLogout();
   } else if (sub === "status") {
-    authStatus();
+    void authStatus();
+  } else if (sub === "accounts") {
+    void authAccounts(args.slice(1));
   } else {
-    console.error("Usage: zcode-proxy auth <login|logout|status>");
+    console.error("Usage: zcode-proxy auth <login|logout|status|accounts>");
     process.exit(1);
   }
 }
@@ -404,12 +480,19 @@ async function claimCommand(args: string[]): Promise<void> {
 async function authLogin(args: string[]): Promise<void> {
   const provider = args[0] as ProviderId | undefined;
   const importMode = args.includes("--import");
+  const accountIndex = args.indexOf("--account");
+  const accountId = accountIndex >= 0 ? args[accountIndex + 1] : undefined;
+  const replaceAccount = args.includes("--replace");
   // Headless paste login: --paste flag or ZCODE_OAUTH_PASTE=1 (docker-friendly).
   const pasteMode =
     args.includes("--paste") || /^(1|true|yes)$/i.test(process.env.ZCODE_OAUTH_PASTE ?? "");
 
   if (!provider || (provider !== "zai" && provider !== "bigmodel")) {
-    console.error("Usage: zcode-proxy auth login <zai|bigmodel> [--import] [--paste]");
+    console.error("Usage: zcode-proxy auth login <zai|bigmodel> [--import] [--paste] [--account ID] [--replace]");
+    process.exit(1);
+  }
+  if (accountIndex >= 0 && (!accountId || accountId.startsWith("--"))) {
+    console.error("--account requires an account ID.");
     process.exit(1);
   }
   if (pasteMode && provider !== "bigmodel") {
@@ -435,11 +518,281 @@ async function authLogin(args: string[]): Promise<void> {
     if (jwt) cred.jwt = jwt;
   }
 
+  if (accountId) {
+    let accountOptions: { path?: string };
+    try {
+      accountOptions = accountStoreOptions();
+      const configuredPlan = (() => {
+        try {
+          const cfgPath = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
+          return existsSync(cfgPath) ? loadConfig(cfgPath).plan : undefined;
+        } catch { return undefined; }
+      })();
+      await addAccount({
+        id: accountId,
+        credential: cred,
+        createdAt: Date.now(),
+        plan: configuredPlan ?? (process.env.ZCODE_PROXY_PLAN === "start-plan" ? "start-plan" : "coding-plan"),
+      }, { ...accountOptions, replace: replaceAccount });
+    } catch (err) {
+      console.error(`Account login failed: ${safeAccountError(err)}`);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`\nLogged in as ${provider} (account ${accountId}).`);
+    console.log(`  Stored: ${getAccountStorePath(accountOptions.path)}`);
+    return;
+  }
+
   await saveCredential(cred);
   console.log(`\nLogged in as ${provider}.`);
-  console.log(`  API Key: ${cred.apiKey.substring(0, 12)}...`);
-  if (cred.userId) console.log(`  User ID: ${cred.userId}`);
+  console.log("  Credential: stored (redacted)");
   console.log(`  Stored:  ${getStorePath()}`);
+}
+
+/**
+ * Resolve an optional configured account-store path without starting the
+ * proxy or creating a config. Environment remains the authoritative override;
+ * the YAML path is only consulted when it is already present and valid.
+ */
+function accountStoreOptions(): { path?: string } {
+  if (process.env.ZCODE_PROXY_ACCOUNTS_PATH) return {};
+  const path = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
+  if (!existsSync(path)) return {};
+  try {
+    const configured = loadConfig(path).auth.accounts?.path;
+    if (!configured) return {};
+    // Leave tilde shorthand intact; account-store.ts owns its normalization
+    // so the special value "~" still resolves to the default accounts.json
+    // file rather than the home directory itself.
+    return { path: configured };
+  } catch {
+    // A present but malformed config must never make a mutating account
+    // command silently target the default store instead of the configured
+    // pool. Callers surface this as a bounded, secret-free error.
+    throw new Error("proxy config is unavailable; set ZCODE_PROXY_ACCOUNTS_PATH explicitly");
+  }
+}
+
+function safeAccountError(err: unknown): string {
+  // AccountStoreError messages are intentionally short, but never echo an
+  // arbitrary provider/error string in a CLI surface that promises redaction.
+  const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "";
+  if (["invalid", "locked", "corrupt", "conflict"].includes(code)) return (err as Error).message;
+  return "account store operation failed";
+}
+
+async function authAccounts(args: string[]): Promise<void> {
+  const sub = args[0];
+
+  if (sub === "migrate") {
+    try {
+      const result = await migrateAccountStore(accountStoreOptions());
+      console.log(JSON.stringify({ schemaVersion: 1, source: "offline", migrated: result.migrationPerformed, revision: result.revision, accountCount: result.accounts.length }, null, 2));
+    } catch (err) {
+      console.error(`Account store migration failed: ${safeAccountError(err)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (sub === "pause" || sub === "resume") {
+    const id = args[1];
+    if (!id || id.startsWith("--")) {
+      console.error(`Usage: zcode-proxy auth accounts ${sub} ID`);
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const options = accountStoreOptions();
+      const result = await updateAccountStore((accounts) => {
+        if (!accounts.some((account) => account.id === id)) throw new Error("account not found");
+        return accounts.map((account) => account.id === id ? { ...account, paused: sub === "pause" } : account);
+      }, options);
+      console.log(`${sub === "pause" ? "Paused" : "Resumed"} account: ${id}`);
+      console.log("Policy applies to new requests; an in-flight request keeps its original account context.");
+    } catch (err) {
+      console.error(`Account policy update failed: ${safeAccountError(err)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (sub === "explain") {
+    await explainAccounts(args.slice(1));
+    return;
+  }
+
+  if (sub === "doctor") {
+    await doctorAccounts(args.slice(1));
+    return;
+  }
+
+  if (sub === "quota") {
+    await liveAccountsRoute("/accounts/quota", args.includes("--json"));
+    return;
+  }
+
+  if (args.includes("--live")) {
+    await liveAccountsRoute("/accounts/status", args.includes("--json"));
+    return;
+  }
+
+  if (sub === "remove") {
+    const id = args[1];
+    if (!id || id.startsWith("--")) {
+      console.error("Usage: zcode-proxy auth accounts remove ID [--yes]");
+      process.exitCode = 2;
+      return;
+    }
+    if (!args.includes("--yes")) {
+      console.error(`This removes account \"${id}\" from the encrypted account pool.`);
+      console.error("Re-run with --yes to confirm. The account's Desktop login is not touched.");
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const options = accountStoreOptions();
+      const removed = await removeAccount(id, options);
+      if (!removed) {
+        console.error(`Account not found: ${id}`);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`Removed account: ${id}`);
+    } catch (err) {
+      console.error(`Account removal failed: ${safeAccountError(err)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (sub && sub.startsWith("-")) {
+    // `accounts --json` is the common spelling; all flags are handled below.
+  } else if (sub !== undefined) {
+    console.error("Usage: zcode-proxy auth accounts [--json] | auth accounts remove ID [--yes]");
+    process.exitCode = 2;
+    return;
+  }
+
+  try {
+    const options = accountStoreOptions();
+    // The rotator's bounded view includes local cooldown state (exhausted)
+    // while still omitting every credential field. Decrypting the pool here is
+    // offline only; no upstream/quota request is made.
+    const records = (createAccountRotator(await loadAccountStore(options)).list())
+      .map(({ lastFailureReason: _redacted, ...record }) => record);
+    if (args.includes("--json")) {
+      console.log(JSON.stringify({ schemaVersion: 1, source: "offline-config", asOf: new Date().toISOString(), accounts: records }, null, 2));
+      return;
+    }
+    if (records.length === 0) {
+      console.log("No accounts configured.");
+      console.log("Add one with: zcode-proxy auth login <zai|bigmodel> --account ID");
+      return;
+    }
+    console.log("Configured accounts:");
+    for (const account of records) {
+      const label = account.label ? ` (${account.label.replace(/[\r\n\t]+/g, " ").slice(0, 120)})` : "";
+      const plan = account.plan ? ` plan=${account.plan}` : "";
+      console.log(`  ${account.id}${label}  provider=${account.provider}${plan}  state=${account.state}  credential=${account.credentialPreview}`);
+    }
+    console.log(`  store: ${getAccountStorePath(options.path)}`);
+  } catch (err) {
+    const message = `Account listing failed: ${safeAccountError(err)}`;
+    if (args.includes("--json")) console.log(JSON.stringify({ schemaVersion: 1, source: "offline-config", asOf: new Date().toISOString(), accounts: [], error: { code: "account_store_unavailable", message } }, null, 2));
+    else console.error(message);
+    process.exitCode = 1;
+  }
+}
+
+function flagValue(args: string[], name: string): string | undefined {
+  const index = args.indexOf(name);
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  return value && !value.startsWith("--") ? value : undefined;
+}
+
+/** Explain account policy using the same static eligibility dimensions as the request path. */
+async function explainAccounts(args: string[]): Promise<void> {
+  const model = flagValue(args, "--model");
+  const operation = flagValue(args, "--operation") ?? "inference";
+  if (!model || !["inference", "billing", "quota", "async"].includes(operation)) {
+    console.error("Usage: zcode-proxy auth accounts explain --model MODEL --operation inference|billing|quota|async [--json]");
+    process.exitCode = 2;
+    return;
+  }
+  try {
+    const path = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
+    const config = loadConfig(path);
+    const records = await loadAccountStore(accountStoreOptions());
+    const policy = config.auth.accounts;
+    const modelAllowed = config.models.includes(model);
+    const candidates = records.map((record) => {
+      const reasons: string[] = [];
+      if (record.credential.provider !== config.provider) reasons.push("provider_mismatch");
+      if (record.plan && record.plan !== config.plan) reasons.push("plan_mismatch");
+      if (policy?.allowedIds && !policy.allowedIds.includes(record.id)) reasons.push("not_allowlisted");
+      if (record.paused === true || policy?.pausedIds?.includes(record.id)) reasons.push("paused");
+      if (policy?.allowPaid === false && (!record.plan || (record.plan !== "coding-plan" && record.plan !== "start-plan"))) reasons.push("cost_unknown_or_paid");
+      if (!modelAllowed) reasons.push("model_not_configured");
+      if (operation === "async" && config.plan !== "coding-plan") reasons.push("async_requires_coding_plan");
+      if (operation === "billing" || operation === "quota") {
+        if (!record.credential.jwt) reasons.push("billing_capability_unknown");
+      }
+      return { id: record.id, provider: record.credential.provider, plan: record.plan ?? null, decision: reasons.length ? "excluded" : "eligible", reasons };
+    });
+    const output = { schemaVersion: 1, source: "offline-config", asOf: new Date().toISOString(), model, operation, provider: config.provider, plan: config.plan, candidates };
+    console.log(JSON.stringify(output, null, 2));
+  } catch (err) {
+    const output = { schemaVersion: 1, source: "offline-config", error: { code: "accounts_explain_failed", message: safeAccountError(err) } };
+    console.log(JSON.stringify(output, null, 2));
+    process.exitCode = 1;
+  }
+}
+
+/** Read-only encrypted pool/config diagnostics with a stable redacted JSON contract. */
+async function doctorAccounts(args: string[]): Promise<void> {
+  const json = args.includes("--json");
+  const checks: Array<{ code: string; status: "ok" | "error" | "warning"; detail?: string }> = [];
+  try {
+    const path = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
+    const config = loadConfig(path);
+    checks.push({ code: "config_valid", status: "ok" });
+    const accounts = await loadAccountStore(accountStoreOptions());
+    checks.push({ code: "store_readable", status: "ok", detail: `${accounts.length} account(s)` });
+    const duplicateGroups = duplicateCredentialGroups(accounts);
+    if (duplicateGroups.length) checks.push({ code: "duplicate_effective_credentials", status: "warning", detail: `${duplicateGroups.length} alias group(s) are counted once` });
+    const invalidProvider = accounts.filter((account) => account.credential.provider !== config.provider).length;
+    if (invalidProvider) checks.push({ code: "provider_mismatch", status: "warning", detail: `${invalidProvider} account(s)` });
+    if (!config.auth.accounts?.enabled) checks.push({ code: "pool_disabled", status: "warning", detail: "legacy single-account mode is active" });
+  } catch (err) {
+    checks.push({ code: "doctor_unavailable", status: "error", detail: safeAccountError(err) });
+  }
+  const output = { schemaVersion: 1, source: "offline", asOf: new Date().toISOString(), checks };
+  if (json) console.log(JSON.stringify(output, null, 2));
+  else for (const check of checks) console.log(`${check.status.toUpperCase()} ${check.code}${check.detail ? `: ${check.detail}` : ""}`);
+  if (checks.some((check) => check.status === "error")) process.exitCode = 1;
+}
+
+async function liveAccountsRoute(route: string, json: boolean): Promise<void> {
+  try {
+    const configPath = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
+    const config = loadConfig(configPath);
+    const key = config.auth.proxyApiKey?.trim();
+    if (!key) throw new Error("proxy API key is not configured");
+    const host = config.server.host === "::1" ? "[::1]" : config.server.host;
+    const response = await fetch(`http://${host}:${config.server.port}${route}`, {
+      headers: { authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(5_000),
+    });
+    const body = await response.json().catch(() => ({ schemaVersion: 1, error: { code: "invalid_response" } }));
+    console.log(JSON.stringify(body, null, 2));
+    if (!response.ok) process.exitCode = 1;
+  } catch (err) {
+    console.log(JSON.stringify({ schemaVersion: 1, source: "live-runtime", error: { code: "live_status_unavailable", message: "proxy is not reachable" } }, null, 2));
+    process.exitCode = 1;
+  }
 }
 
 /**
@@ -502,6 +855,32 @@ function authLogout(): void {
 }
 
 async function authStatus(): Promise<void> {
+  // An enabled pool is authoritative. Do not report the legacy credentials
+  // file as logged out when the configured accounts are healthy (the pool may
+  // intentionally have no compatibility credentials.json at all).
+  try {
+    const cfgPath = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
+    if (existsSync(cfgPath)) {
+      const config = loadConfig(cfgPath);
+      if (config.auth.accounts?.enabled) {
+        const auth = await createStoredAuthManagerWithAccounts(config.plan, {
+          ...config.auth.accounts,
+          provider: config.provider,
+        });
+        const records = auth.listAccounts();
+        const usable = records.filter((record) => record.state === "ready" || record.state === "active");
+        console.log(`Account pool: ${usable.length > 0 ? "logged in" : "not logged in"}`);
+        console.log(`  Accounts: ${records.length} configured, ${usable.length} usable`);
+        console.log(`  Store:    ${getAccountStorePath(accountStoreOptions().path)}`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error(`Account pool status unavailable: ${safeAccountError(err)}`);
+    process.exitCode = 1;
+    return;
+  }
+
   const cred = await loadCredential();
   if (!cred) {
     console.log("Not logged in.");
@@ -509,7 +888,7 @@ async function authStatus(): Promise<void> {
     return;
   }
   console.log(`Logged in: ${cred.provider}`);
-  console.log(`  API Key: ${cred.apiKey.substring(0, 12)}...`);
+  console.log("  Credential: configured (redacted)");
   console.log(`  Store:   ${getStorePath()}`);
 }
 

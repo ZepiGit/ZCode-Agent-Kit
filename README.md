@@ -8,6 +8,8 @@ Use your ZCode account with the coding assistant you already use.
 
 Keep your coding assistant. Use your existing ZCode models and quota/tokens through a local connection.
 
+**Optional account rotation:** Enable a pool of your own authorized ZCode accounts, add them with `zcode-proxy auth login <provider> --account ID`, and inspect or remove them with `zcode-kit accounts`. See the [account rotator documentation](docs/ACCOUNT_ROTATOR.md); listings are offline and redacted, and no account or quota limits are bypassed.
+
 **The path:** prepare your account → install the kit → Use GLM-5.3(-flash) / start working.
 
 ## Step 1 — Check what you need

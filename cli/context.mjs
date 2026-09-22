@@ -1,6 +1,6 @@
 // Shared CLI context: paths, bootstrap (migrated from setup.mjs unchanged in
 // behavior, with the audit fixes).
-import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, closeSync, renameSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, closeSync, renameSync, statSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,8 +123,22 @@ mcp/zcode-harness-mcp/*.log
 `;
 
 function ensureLocalGitExclude(ctx) {
-  const gitDir = join(ctx.root, ".git");
-  if (!existsSync(gitDir)) return;
+  // A linked worktree stores `.git` as a text pointer rather than a
+  // directory. Resolve that pointer before writing the local exclude file so
+  // setup works from the worktree the kit is developed in as well as from a
+  // normal clone.
+  const gitEntry = join(ctx.root, ".git");
+  if (!existsSync(gitEntry)) return;
+  let gitDir = gitEntry;
+  try {
+    if (!statSync(gitEntry).isDirectory()) {
+      const pointer = readFileSync(gitEntry, "utf8").match(/^gitdir:\s*(.+)\s*$/mi);
+      if (!pointer) return;
+      gitDir = resolve(ctx.root, pointer[1]);
+    }
+  } catch {
+    return;
+  }
   const infoDir = join(gitDir, "info");
   const excludeFile = join(infoDir, "exclude");
   mkdirSync(infoDir, { recursive: true });
@@ -229,5 +243,4 @@ export function bootstrap(ctx) {
     console.log("  proxy credentials present");
   }
 }
-
 

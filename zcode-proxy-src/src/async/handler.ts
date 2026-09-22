@@ -22,6 +22,7 @@
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
+import type { AccountHandle } from "../auth/account-rotator.js";
 import { credentialString } from "../auth/types.js";
 import { errorResponse } from "../proxy/handler.js";
 import { transformRequestBody } from "../proxy/body-transformer.js";
@@ -122,12 +123,19 @@ async function readBody(req: Request): Promise<{ ok: true; body: string } | { ok
   return { ok: true, body };
 }
 
-async function resolveCredential(opts: AsyncHandlerOptions): Promise<{ ok: true; cred: Credential; credentials: OffPeakCredentials } | { ok: false; response: Response }> {
-  let cred: Credential;
+async function resolveCredential(opts: AsyncHandlerOptions): Promise<{ ok: true; cred: Credential; handle: AccountHandle; credentials: OffPeakCredentials } | { ok: false; response: Response }> {
+  let handle: AccountHandle;
   try {
-    cred = await opts.auth.getCredential();
+    handle = await opts.auth.getCredentialHandle({ operation: "async" });
   } catch (err) {
     return { ok: false, response: errorResponse(401, "authentication_error", `credential resolution failed: ${(err as Error).message}`) };
+  }
+  const cred = handle.credential;
+  if (handle.provider !== opts.config.provider) {
+    return { ok: false, response: errorResponse(409, "account_provider_mismatch", "selected account is not enabled for the configured provider") };
+  }
+  if (handle.plan && handle.plan !== opts.config.plan) {
+    return { ok: false, response: errorResponse(409, "account_plan_mismatch", "selected account is not enabled for the configured plan") };
   }
   if (!cred.jwt) {
     return {
@@ -139,7 +147,7 @@ async function resolveCredential(opts: AsyncHandlerOptions): Promise<{ ok: true;
       ),
     };
   }
-  return { ok: true, cred, credentials: buildCredentials(cred) };
+  return { ok: true, cred, handle, credentials: buildCredentials(cred) };
 }
 
 function buildClient(opts: AsyncHandlerOptions, credentials: OffPeakCredentials): OffPeakClient {
@@ -161,7 +169,7 @@ async function takeTicketOr502(client: OffPeakClient, taskId: string, opts: Asyn
   }
 }
 
-function buildBridge(opts: AsyncHandlerOptions, client: OffPeakClient, credentials: OffPeakCredentials, llmRequestBody: string, initialTicket: TakeTicketResult, taskId: string, req: Request) {
+function buildBridge(opts: AsyncHandlerOptions, client: OffPeakClient, credentials: OffPeakCredentials, llmRequestBody: string, initialTicket: TakeTicketResult, taskId: string, req: Request, handle?: AccountHandle) {
   return runAsyncBridge({
     client,
     credentials,
@@ -175,6 +183,8 @@ function buildBridge(opts: AsyncHandlerOptions, client: OffPeakClient, credentia
     maxRetries: opts.config.async.maxRetries,
     maxWaitMs: opts.config.async.maxWaitMs,
     clientSignal: req.signal,
+    accountId: handle?.id,
+    credentialRevision: handle?.credentialRevision,
     fetchImpl: opts.fetchImpl,
     onTransition: opts.debug
       ? (info) => {
@@ -228,12 +238,20 @@ export async function handleAsyncMessages(req: Request, opts: AsyncHandlerOption
   const upstreamBodyText = transformRequestBody(JSON.stringify(upstreamBody), { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) }) ?? JSON.stringify(upstreamBody);
 
   // Now we're safe to take a ticket
+  try {
+    if (typeof (opts.auth as AuthManager & { validateAccountHandle?: unknown }).validateAccountHandle === "function"
+      && !(await opts.auth.validateAccountHandle(cred.handle))) {
+      return errorResponse(409, "account_context_changed", "account configuration changed before ticket creation; retry the request");
+    }
+  } catch {
+    return errorResponse(503, "account_state_unavailable", "account state could not be verified before ticket creation");
+  }
   const client = buildClient(opts, cred.credentials);
   const taskId = generateTaskId();
   const ticket = await takeTicketOr502(client, taskId, opts, req.signal);
   if (!ticket.ok) return ticket.response;
 
-  const { stream, outcome } = buildBridge(opts, client, cred.credentials, upstreamBodyText, ticket.ticket, taskId, req);
+  const { stream, outcome } = buildBridge(opts, client, cred.credentials, upstreamBodyText, ticket.ticket, taskId, req, cred.handle);
   void outcome;
 
   if (clientWantsStream) {
@@ -278,12 +296,20 @@ export async function handleAsyncChat(req: Request, opts: AsyncHandlerOptions): 
   anthropicReq.stream = true;
   const upstreamBodyText = transformRequestBody(JSON.stringify(anthropicReq), { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) }) ?? JSON.stringify(anthropicReq);
 
+  try {
+    if (typeof (opts.auth as AuthManager & { validateAccountHandle?: unknown }).validateAccountHandle === "function"
+      && !(await opts.auth.validateAccountHandle(cred.handle))) {
+      return errorResponse(409, "account_context_changed", "account configuration changed before ticket creation; retry the request");
+    }
+  } catch {
+    return errorResponse(503, "account_state_unavailable", "account state could not be verified before ticket creation");
+  }
   const client = buildClient(opts, cred.credentials);
   const taskId = generateTaskId();
   const ticket = await takeTicketOr502(client, taskId, opts, req.signal);
   if (!ticket.ok) return ticket.response;
 
-  const { stream: rawStream, outcome } = buildBridge(opts, client, cred.credentials, upstreamBodyText, ticket.ticket, taskId, req);
+  const { stream: rawStream, outcome } = buildBridge(opts, client, cred.credentials, upstreamBodyText, ticket.ticket, taskId, req, cred.handle);
   void outcome;
 
   if (clientWantsStream) {

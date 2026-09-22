@@ -1817,7 +1817,12 @@ function waitFor(cond, timeoutMs = 15_000, intervalMs = 40) {
 }
 
 // ── createDom ──────────────────────────────────────────────────────────────
-async function createDom(region, prefix, resources = undefined) {
+interface DomResources {
+  primeCookies: () => Promise<string[]>;
+  documentHtml: string;
+}
+
+async function createDom(region: string, prefix: string, resources?: DomResources) {
   if (!resources && process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== "1") {
     throw new Error("Remote CAPTCHA JavaScript is disabled: this runtime does not provide an OS sandbox. Operator opt-in ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1 is required for trusted standalone use.");
   }

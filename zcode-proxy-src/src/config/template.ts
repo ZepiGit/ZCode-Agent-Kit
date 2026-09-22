@@ -22,6 +22,20 @@ auth:
   # ~/.zcode-proxy/credentials.json:
   # oauthCredentialsPath: "~/.zcode-proxy/credentials.json"
 
+  # Optional encrypted account pool for automatic free/start-plan quota rotation.
+  # Disabled by default; enable only after adding accounts with repeated logins:
+  #   bun run src/index.ts auth login <zai|bigmodel> --account NAME
+  # The pool is stored at ~/.zcode-proxy/accounts.json (0600). Set \`path\` or
+  # ZCODE_PROXY_ACCOUNTS_PATH to use a different location.
+  accounts:
+    enabled: false
+    # path: "~/.zcode-proxy/accounts.json"
+    # Optional operator policy (credentials never belong in config files):
+    # allowedIds: [work, personal]
+    # pausedIds: [maintenance]
+    # allowPaid: false
+    # allowedOrigins: ["http://127.0.0.1:8080"]
+
 # Which upstream provider to use: "zai" or "bigmodel"
 provider: zai
 

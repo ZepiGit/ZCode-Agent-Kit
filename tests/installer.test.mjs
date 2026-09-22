@@ -60,7 +60,7 @@ exec sh "$1"
         assert.equal(readFileSync(join(install, "setup-ran"), "utf8"), "setup completed\n");
         assert.ok(existsSync(join(home, ".local", "bin", "zcode-kit")));
       } else {
-        assert.match(res.stdout, /archive hash mismatch/);
+        assert.match(`${res.stdout}\n${res.stderr}`, /archive hash mismatch/);
         assert.equal(existsSync(install), false);
       }
     } finally {
@@ -107,4 +107,14 @@ test("installers resolve the latest release by default and keep the pin override
 
 test("bun PATH export covers the downloaded asset dir", () => {
   assert.match(INSTALL, /BUN_ASSET%\.zip/, "PATH must include the extracted dir of the chosen asset");
+});
+
+test("installers accept SemVer prerelease release pins", () => {
+  const prerelease = "v0.2.22-account-rotator.123.2";
+  assert.match(INSTALL, /VERSION_PATTERN=.*\(-\[0-9A-Za-z-\].*\)\?/, "POSIX installer must allow prerelease identifiers");
+  assert.match(INSTALL_PS1, /VersionPattern = .*\(-\[0-9A-Za-z-\].*\)\?/, "PowerShell installer must allow prerelease identifiers");
+  // Exercise the exact validator shape used by both scripts so a future
+  // tightening does not silently reject CI's unique prerelease tags.
+  assert.match(prerelease, /^v\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/);
+  assert.doesNotMatch("v0.2", /^v\d+\.\d+\.\d+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/);
 });
