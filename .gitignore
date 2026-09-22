@@ -36,6 +36,7 @@ playwright-report/
 Thumbs.db
 
 # One-off local reports and obsolete snapshots (not maintained project docs)
+mcp/zcode-harness-mcp/_probes/
 TEST_REPORT*.md
 SETUP_REPORT*.md
 /IMPLEMENTATION_STATUS.md

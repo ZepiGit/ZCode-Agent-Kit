@@ -9,7 +9,7 @@ Nutze dein ZCode-Konto mit dem Coding-Assistenten, den du bereits verwendest.
 
 Behalte deinen Coding-Assistenten. Nutze deine vorhandenen ZCode-Modelle und dein Kontingent über eine lokale Verbindung.
 
-**Optionale Kontorotation:** Der Installer fragt **"Do you want to activate the Account Rotator feature? [y/n]"**. Mit `y` wird der aktuelle Login übernommen; spätere Anmeldungen über `zcode-kit auth login zai` werden als zusätzliche Konten gespeichert. Eine erneute Anmeldung beim selben Konto aktualisiert dessen Eintrag. Später aktivieren mit `zcode-kit accounts enable`; gespeicherte Konten mit `zcode-kit accounts` anzeigen. Siehe die [Dokumentation zum Account Rotator](docs/ACCOUNT_ROTATOR.md).
+**Optionale Kontorotation:** Der Installer fragt **"Do you want to activate the Account Rotator feature? [y/n]"**. Mit `y` wird der aktuelle Login übernommen; spätere Anmeldungen über `zcode-kit auth login zai` werden als zusätzliche Konten gespeichert. Eine erneute Anmeldung beim selben Konto aktualisiert dessen Eintrag. Später aktivieren mit `zcode-kit accounts enable`; gespeicherte Konten mit `zcode-kit accounts` anzeigen. Siehe die [Dokumentation zum Account Rotator](docs/ACCOUNT_ROTATOR.de.md).
 
 **Der Ablauf:** Konto vorbereiten → Kit installieren → GLM-5.3(-flash) verwenden und loslegen.
 
@@ -161,7 +161,7 @@ zcode-kit auth status
 
 Lass den Proxy nur auf localhost laufen und gib `.proxykey`, Anmeldedaten oder generierte Konfigurationsdateien niemals weiter.
 
-**Lies die [Sicherheitsrichtlinie (Deutsch)](SECURITY.md):** Der verwaltete Proxy kann CAPTCHA-JavaScript des Anbieters ohne Betriebssystem-Sandbox ausführen. Er ist nur auf Loopback erreichbar und durch einen Bearer-Key geschützt, aber diese Maßnahmen isolieren den Prozess nicht. Damit werden keine Kontobeschränkungen umgangen und der Erfolg jeder Prüfung ist nicht garantiert.
+**Lies die [Sicherheitsrichtlinie (English)](SECURITY.md) und die [deutsche Übersetzung](SECURITY.de.md):** Der verwaltete Proxy kann CAPTCHA-JavaScript des Anbieters ohne Betriebssystem-Sandbox ausführen. Er ist nur auf Loopback erreichbar und durch einen Bearer-Key geschützt, aber diese Maßnahmen isolieren den Prozess nicht. Damit werden keine Kontobeschränkungen umgangen und der Erfolg jeder Prüfung ist nicht garantiert.
 
 <details>
 <summary>Kit aktualisieren oder entfernen</summary>
@@ -181,4 +181,4 @@ Bei einer npm-Installation anschließend das globale Paket mit `npm uninstall -g
 
 ## Weitere Informationen
 
-[Assistenten-Anleitungen](harnesses/README.de.md) · [Support-Matrix](SUPPORT_MATRIX.json) · [Sicherheit](SECURITY.md) · [Problem melden](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [Lizenzen und eingebundene Komponenten](MANIFEST.md)
+[Assistenten-Anleitungen](harnesses/README.de.md) · [Support-Matrix](SUPPORT_MATRIX.json) · [Sicherheitsrichtlinie (Deutsch)](SECURITY.de.md) · [Problem melden](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [Komponentenmanifest (Deutsch)](MANIFEST.de.md) · [English](MANIFEST.md)

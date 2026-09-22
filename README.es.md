@@ -9,7 +9,7 @@ Usa tu cuenta de ZCode con el asistente de programación que ya utilizas.
 
 Conserva tu asistente de programación. Usa tus modelos y tu cuota de ZCode mediante una conexión local.
 
-**Rotación de cuentas opcional:** El instalador pregunta **"Do you want to activate the Account Rotator feature? [y/n]"**. Si respondes `y`, se importa la sesión actual y los inicios de sesión posteriores con `zcode-kit auth login zai` se guardan como cuentas adicionales. Volver a iniciar sesión en la misma cuenta actualiza su registro. Puedes activarla más adelante con `zcode-kit accounts enable` y consultar las cuentas guardadas con `zcode-kit accounts`. Consulta la [documentación de Account Rotator (en alemán)](docs/ACCOUNT_ROTATOR.md).
+**Rotación de cuentas opcional:** El instalador pregunta **"Do you want to activate the Account Rotator feature? [y/n]"**. Si respondes `y`, se importa la sesión actual y los inicios de sesión posteriores con `zcode-kit auth login zai` se guardan como cuentas adicionales. Volver a iniciar sesión en la misma cuenta actualiza su registro. Puedes activarla más adelante con `zcode-kit accounts enable` y consultar las cuentas guardadas con `zcode-kit accounts`. Consulta la [documentación de Account Rotator (en inglés)](docs/ACCOUNT_ROTATOR.md).
 
 **El recorrido:** preparar tu cuenta → instalar el kit → usar GLM-5.3(-flash) y empezar a trabajar.
 
@@ -161,7 +161,7 @@ zcode-kit auth status
 
 Mantén el proxy en localhost y no compartas `.proxykey`, las credenciales ni los archivos de configuración generados.
 
-**Lee la [política de seguridad (en alemán)](SECURITY.md):** el proxy gestionado puede ejecutar JavaScript CAPTCHA del proveedor sin un entorno aislado del sistema operativo. Sigue limitado a loopback y protegido por clave bearer, pero estas medidas no aíslan el proceso. Esto no elude restricciones de cuentas ni garantiza que todos los desafíos se resuelvan.
+**Lee la [política de seguridad (en inglés)](SECURITY.md); también está disponible en [alemán](SECURITY.de.md):** el proxy gestionado puede ejecutar JavaScript CAPTCHA del proveedor sin un entorno aislado del sistema operativo. Sigue limitado a loopback y protegido por clave bearer, pero estas medidas no aíslan el proceso. Esto no elude restricciones de cuentas ni garantiza que todos los desafíos se resuelvan.
 
 <details>
 <summary>Actualizar o eliminar el kit</summary>
@@ -181,4 +181,4 @@ Si instalaste mediante npm, elimina después el paquete global con `npm uninstal
 
 ## Más información
 
-[Guías de asistentes](harnesses/README.es.md) · [Matriz de compatibilidad](SUPPORT_MATRIX.json) · [Seguridad](SECURITY.md) · [Informar de un problema](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [Licencias y componentes incluidos](MANIFEST.md)
+[Guías de asistentes](harnesses/README.es.md) · [Matriz de compatibilidad](SUPPORT_MATRIX.json) · [Política de seguridad (inglés)](SECURITY.md) · [Informar de un problema](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [Manifiesto de componentes (inglés)](MANIFEST.md)

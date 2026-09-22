@@ -9,7 +9,7 @@
 
 コーディングアシスタントはそのままに、ローカル接続を通じて既存の ZCode モデルと利用枠を使えます。
 
-**オプションのアカウントローテーション:** インストーラーは **"Do you want to activate the Account Rotator feature? [y/n]"** と尋ねます。`y` を選ぶと現在のログインが取り込まれ、その後の `zcode-kit auth login zai` による別アカウントのログインは追加のアカウントとして保存されます。同じアカウントで再ログインすると、その登録情報が更新されます。後から有効にするには `zcode-kit accounts enable`、保存済みアカウントの確認には `zcode-kit accounts` を使います。詳しくは [Account Rotator のドキュメント (ドイツ語)](docs/ACCOUNT_ROTATOR.md) を参照してください。
+**オプションのアカウントローテーション:** インストーラーは **"Do you want to activate the Account Rotator feature? [y/n]"** と尋ねます。`y` を選ぶと現在のログインが取り込まれ、その後の `zcode-kit auth login zai` による別アカウントのログインは追加のアカウントとして保存されます。同じアカウントで再ログインすると、その登録情報が更新されます。後から有効にするには `zcode-kit accounts enable`、保存済みアカウントの確認には `zcode-kit accounts` を使います。詳しくは [Account Rotator のドキュメント (英語)](docs/ACCOUNT_ROTATOR.md) を参照してください。
 
 **手順:** アカウントを準備 → kit をインストール → GLM-5.3(-flash) を使って作業開始。
 
@@ -161,7 +161,7 @@ zcode-kit auth status
 
 プロキシは localhost のみで動かし、`.proxykey`、認証情報、生成された設定ファイルを共有しないでください。
 
-**[セキュリティポリシー (ドイツ語)](SECURITY.md) を読んでください:** 管理されたプロキシは、OS のサンドボックスなしでベンダーの CAPTCHA JavaScript を実行する場合があります。接続はループバックに限定され、Bearer キーで認証されますが、プロセスの分離とは異なります。アカウントの制限を回避するものではなく、すべてのチャレンジの成功も保証しません。
+**[セキュリティポリシー (英語)](SECURITY.md) を読んでください（[ドイツ語版](SECURITY.de.md) もあります）:** 管理されたプロキシは、OS のサンドボックスなしでベンダーの CAPTCHA JavaScript を実行する場合があります。接続はループバックに限定され、Bearer キーで認証されますが、プロセスの分離とは異なります。アカウントの制限を回避するものではなく、すべてのチャレンジの成功も保証しません。
 
 <details>
 <summary>kit の更新または削除</summary>
@@ -181,4 +181,4 @@ npm インストールの場合は、その後 `npm uninstall -g zcode-agent-kit
 
 ## 詳細情報
 
-[アシスタントのガイド](harnesses/README.ja.md) · [サポートマトリクス](SUPPORT_MATRIX.json) · [セキュリティ](SECURITY.md) · [問題を報告](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [ライセンスと同梱コンポーネント](MANIFEST.md)
+[アシスタントのガイド](harnesses/README.ja.md) · [サポートマトリクス](SUPPORT_MATRIX.json) · [セキュリティポリシー（英語）](SECURITY.md) · [問題を報告](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [コンポーネントマニフェスト（英語）](MANIFEST.md)

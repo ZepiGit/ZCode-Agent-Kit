@@ -1,9 +1,9 @@
-# Release checklist — current source, 2026-09-15
+# Release checklist
 
-**Release readiness is not established.** Local source changes, fixture passes,
-a successful package build, a GitHub release and npm publication are separate
-milestones. Final test/review results must be attached to the matching CI run; no release
-or repair of the user's personal installation is claimed by this checklist.
+Use this reusable checklist for each release candidate; it is not a status report
+for the current branch. Verify the exact commit's CI run, release assets, and npm
+publication before reporting success. Main-branch pushes can trigger publication,
+so review these gates before initiating one.
 
 ## Blocking gates before a release-triggering push or dispatch
 

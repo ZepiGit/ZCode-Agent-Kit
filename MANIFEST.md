@@ -1,17 +1,20 @@
-# MANIFEST — eingebettete Komponenten und Herkunft
+# Manifest — bundled components and provenance
+**English (original)** · [Deutsch](MANIFEST.de.md)
 
-| Komponente | Quelle | Version/Commit | Lizenz | lokale Änderungen |
+**Snapshot:** This file describes the components and revisions actually present in this repository. It does not claim that every upstream project is at its latest release. External harness versions are recorded references, not versions installed or pinned by the Kit.
+
+| Component | Source | Bundled pin / recorded reference | License | Local changes |
 |---|---|---|---|---|
-| zcode-proxy | https://github.com/TriDefender/zcode-api | v4.6.4, Commit `9a5cebe07c5255faa675075fa37632d4dea733fa` (2026-09-11) | MIT (laut upstream README; upstream führt keine LICENSE-Datei) | Maßgeblich ist die Git-Historie des Verzeichnisses; aktuelle Audit-Reparaturen betreffen zusätzlich Credentials, Streaming, Kontrollport und Tests. Ursprünglicher Commit vor dem Entfernen des verschachtelten `.git` hier dokumentiert; `README.md` beschreibt den Kit-Kontext, die Fassungen `README.de.md`/`README.es.md`/`README.ja.md`/`README.zh-CN.md` sind Übersetzungen. Das Original-README bleibt im gepinnten Upstream-Commit einsehbar |
-| zcode-harness-mcp | eigenes Projekt (MCP-Bridge für den ZCode-Desktop, `app-server`-Protokoll) | 0.1.0 | MIT | eingebettet und lokal weiterentwickelt unter `mcp/zcode-harness-mcp/` (Audit-Reparaturen: Workspace-Scope, Task-Lebenszyklus, Argumentprüfung, Speichergrenzen) (dist committet; Laufzeit-Abhängigkeiten: `@modelcontextprotocol/sdk`, `zod`); README auf EN-Default umgestellt, Übersetzungen (de/es/ja/zh) ergänzt |
-| OMP (Ziel-Harness, Referenztest) | https://github.com/can1357/oh-my-pi | 18.1.18 (Canary) | — | keine Core-Änderungen; reine models.yml/config.yml/Extension-Integration |
-| Claude Code (Ziel-Harness, Wrapper) | Anthropic | 2.1.269 | — | keine Änderungen an `~/.claude`; opt-in Wrapper + generierte Settings-Datei |
-| Codex CLI (Ziel-Harness, Wrapper) | OpenAI | 0.153.4 | — | keine Änderungen an `~/.codex`; isoliertes `CODEX_HOME` unter `generated/` |
+| zcode-proxy | https://github.com/TriDefender/zcode-api | v4.6.4, commit `9a5cebe07c5255faa675075fa37632d4dea733fa` (2026-09-11) | MIT (declared in upstream README; upstream has no LICENSE file) | The vendored base is v4.6.4. At this snapshot (2026-09-22), upstream's latest published release was v4.6.9; it is not incorporated in this tree. The root Git history records local changes, including credential, streaming, control-port, and test fixes. `zcode-proxy-src/README.md` describes the Kit context; its `.de`, `.es`, `.ja`, and `.zh-CN` files are translations. The upstream README is available at the pinned commit. |
+| zcode-harness-mcp | This repository (MCP bridge for ZCode Desktop `app-server`) | 0.1.0 | MIT | Embedded and maintained locally in `mcp/zcode-harness-mcp/`. Audit fixes cover workspace scope, task lifecycle, argument validation, and storage limits. The compiled `dist/` output is committed; runtime dependencies are `@modelcontextprotocol/sdk` and `zod`. The English README is the original; German, Spanish, Japanese, and Simplified Chinese translations are included. |
+| OMP (target harness, reference check) | https://github.com/can1357/oh-my-pi | 18.1.18 (Canary) | — | No core changes; integration is limited to `models.yml`, `config.yml`, and an extension. |
+| Claude Code (target harness, wrapper) | Anthropic | 2.1.269 | — | No changes to `~/.claude`; opt-in wrapper and generated settings file. |
+| Codex CLI (target harness, wrapper) | OpenAI | 0.153.4 | — | No changes to `~/.codex`; isolated `CODEX_HOME` under `generated/`. |
 
-## Vom Vendor ausgeschlossene Verzeichnisse
+## Directories excluded from the vendor copy
 
-- `zcode-proxy-src/node_modules/` — installiert setup.mjs via `bun install`
-- `zcode-proxy-src/Android-APP/` (209 MB) — für die Desktop-/Harness-Integration nicht benötigt; zugehöriger Build-Pfad entfernt (`scripts/build-android-apk.sh`, `build:android-*`-npm-Scripts, esbuild-Dev-Dependency, `build-android`-Job im vendorten `.github/workflows/release.yml`)
-- `mcp/zcode-harness-mcp/node_modules/` — installiert setup.mjs
+- `zcode-proxy-src/node_modules/` — installed by `setup.mjs` with `bun install`.
+- `zcode-proxy-src/Android-APP/` (209 MB) — not needed for Desktop/harness integration; its build path was removed (`scripts/build-android-apk.sh`, `build:android-*` npm scripts, the esbuild dev dependency, and the vendored `.github/workflows/release.yml` Android build job).
+- `mcp/zcode-harness-mcp/node_modules/` — installed by `setup.mjs`.
 
-Aktuelle automatisierte Prüfläufe: [GitHub Actions](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml). Effort-Zuordnung: [EFFORT_MAPPING.md](EFFORT_MAPPING.md).
+Automated checks: [GitHub Actions](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml). Effort mapping: [EFFORT_MAPPING.md](EFFORT_MAPPING.md); its German snapshot is [EFFORT_MAPPING.de.md](EFFORT_MAPPING.de.md).

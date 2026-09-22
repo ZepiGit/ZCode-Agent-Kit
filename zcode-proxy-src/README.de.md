@@ -1,135 +1,27 @@
-# ZCode Proxy (Deutsch)
+# ZCode Proxy
 [English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-> Übersetzung des englischen Originals; bei Abweichungen gilt das englische README.
+Diese Komponente stellt den lokalen Modell-Proxy bereit, der mit dem ZCode
+Agent Kit gebündelt wird. Das Kit übernimmt Einrichtung und Integration mit
+Assistenten.
 
-Dieses Verzeichnis bettet den **zcode-proxy** aus
-[TriDefender/zcode-api](https://github.com/TriDefender/zcode-api) ein — gepinnt
-auf v4.6.4, Commit `9a5cebe07c5255faa675075fa37632d4dea733fa` (2026-09-11),
-MIT-Lizenz (upstream führt keine LICENSE-Datei). Version, Commit und lokale
-Änderungen sind in [`../MANIFEST.md`](../MANIFEST.md) dokumentiert; lokale
-Patches liegen in [`../patches/`](../patches/).
+## Mit dem ZCode Agent Kit verwenden
 
-Dieses README und seine [chinesische Übersetzung](README.zh-CN.md)
-beschreiben die Komponente, **wie sie im ZCode Agent Kit verwendet wird**.
-Das Upstream-Projekt dokumentiert außerdem eigenständige Funktionen wie
-Android, Docker, Off-Peak-Kanäle und Trial-Claiming, die das Kit nicht nutzt.
+Verwende die Setup- und Modellbefehle aus der [Haupt-README](../README.de.md).
+Die gebündelte Quellversion und lokale Änderungen stehen im
+[Komponentenmanifest](../MANIFEST.de.md).
 
-## Rolle im Kit
+## Sicherheit
 
-Der Proxy ist das Modell-Gateway des Kits. Er nimmt OpenAI chat-completions-,
-Anthropic messages- und OpenAI Responses-Anfragen auf **`http://127.0.0.1:8457`**
-entgegen und leitet sie an das Z.AI-Gateway weiter — mit deinem angemeldeten
-ZCode-Desktop-Account (start-plan, dasselbe Kontingent wie ZCode Desktop).
+Der Proxy ist für den vertrauenswürdigen lokalen Einsatz gedacht. Betreibe ihn
+nur auf dem lokalen Rechner und schütze Login- und Konfigurationsdaten. Einige
+Provider-Challenges können vom Provider bereitgestelltes JavaScript ohne
+Betriebssystem-Sandbox ausführen; die lokale Bindung isoliert diesen Code
+nicht. Lies die [Sicherheitsrichtlinie](../SECURITY.de.md) und mache den Dienst
+nicht außerhalb deines Rechners erreichbar.
 
-Optional kann `auth.accounts.enabled` einen verschlüsselten Pool mehrerer
-autorisierter Konten aktivieren. Neue Requests synchronisieren den Pool vor
-dem Versand; `1005`, `1113` und `3001` lösen höchstens einen sequenziellen
-Failover-Versuch aus. Bei aktiviertem Rotator speichert `zcode-kit auth login zai`
-neu autorisierte Konten zusätzlich; ein erneuter Login desselben Kontos
-aktualisiert dessen vorhandenen Eintrag. Verwaltung und Diagnose:
-`zcode-kit accounts` oder `zcode-proxy auth accounts` mit
-`pause|resume`, `explain`, `doctor`, `quota` und `--live`. Die vollständige
-Bedienungs-, Schlüssel- und Migrationsdokumentation steht in
-[`../docs/ACCOUNT_ROTATOR.md`](../docs/ACCOUNT_ROTATOR.md).
+## Lizenzierung
 
-- Adressen/Formate: `POST /v1/chat/completions`, `POST /v1/messages`,
-  `POST /v1/responses`, `GET /v1/models`, `GET /health`, `GET /quota`,
-  authentifiziert `GET /accounts/status` und `GET /accounts/quota`
-- Authentifizierung: `Authorization: Bearer <Inhalt von .proxykey>` — der
-  lokale Schlüssel wird von `zcode-kit setup` erzeugt (bei Release/Source im
-  Kit-Verzeichnis, bei npm in einem separaten Zustandsverzeichnis)
-- Lebenszyklus: verwaltet von `node proxy\zcode-proxy-manager.mjs start|stop|restart|status|doctor|logs`
-  (nur Loopback-Bind, fail-closed-Stop, Logrotation — siehe Root-README)
-- Login-Erneuerung: `zcode-kit auth login zai`; siehe [Haupt-README](../README.de.md)
-
-## Lokale Abweichungen vom Upstream
-
-- **Port 8457** statt dem Upstream-Standalone-Default 8080 (Kit-Konfigurations-
-  vorlage), nur Loopback, Bearer-Key Pflicht
-- **Trial-Claiming und Off-Peak-Kanäle deaktiviert**: Die mitgelieferte
-  Kit-Config nutzt die Upstream-Features `claim` (automatisches Greifen
-  limitierter Trial-Pakete) und `/async/*` (Off-Peak) nicht; die zugrunde
-  liegenden Defaults sind seit der Audit-Nachbesserung fail-closed (`false`)
-- **Vendoring-Ausschlüsse**: `Android-APP/` (209 MB) und `node_modules/` sind
-  nicht enthalten; `node_modules/` installiert setup.mjs via `bun install
-  --frozen-lockfile`. Der Android-Build-Pfad (`scripts/build-android-apk.sh`,
-  die `build:android-*`-npm-Scripts, die esbuild-Dev-Dependency und der
-  `build-android`-Job im vendorten `.github/workflows/release.yml`) wurde
-  mitsamt der App entfernt
-- Lokale Änderungen und Tests sind im Repository nachverfolgbar; der
-  [Vendor-Patch](../patches/zcode-proxy-local-patches.patch) ist ein historischer
-  Bezugspunkt, kein vollständiges Protokoll späterer Änderungen
-
-## Verfügbare Modelle
-
-Der Proxy listet folgende Modelle auf `/v1/models` (die Liste ist reine
-Anzeige — andere Modellnamen werden ganz normal weitergeleitet). Im Kit sind
-**glm-5.3** (Text, 1M Kontext) und **glm-5.3-flash** (Text+Bild, 1M Kontext)
-die verifizierten Modelle; siehe Root-README.
-
-| Modell | Kontext | Max. Ausgabe |
-|---|---|---|
-| `glm-4.5-air` | 131K | 96K |
-| `glm-4.6` | 200K | 131K |
-| `glm-4.6v` (Bild) | 131K | 32K |
-| `glm-4.7` | 200K | 131K |
-| `glm-5` / `glm-5-turbo` | 200K | 64K |
-| `glm-5v-turbo` (Bild) | 200K | 131K |
-| `glm-5.1` | 200K | 64K |
-| `glm-5.2` | 1M | 128K |
-| `glm-5.3` / `glm-5.3-flash` | 1M | 128K |
-
-## Konfiguration & Umgebungsvariablen
-
-Der Proxy liest standardmäßig `config.yaml`. Bei Release-/Source-Installationen
-zeigt `ZCODE_PROXY_CONFIG` auf `../proxy/config.yaml`; npm-Installationen
-speichern die Konfiguration im separaten Zustandsverzeichnis. Umgebungsvariablen
-haben Vorrang. Die wichtigsten:
-
-| Umgebungsvariable | Standard | Bedeutung |
-|---|---|---|
-| `ZCODE_PROXY_PORT` | `8080` | Listen-Port (die Kit-Vorlage nutzt 8457) |
-| `ZCODE_PROXY_API_KEY` | keine | Schlüssel, den Clients vorlegen müssen (im Kit: Inhalt der `.proxykey`) |
-| `ZCODE_PROVIDER` | `zai` | Anbieter `zai` / `bigmodel` |
-| `ZCODE_PROXY_CONFIG` | `config.yaml` | Pfad der Konfigurationsdatei |
-| `ZCODE_PROXY_CREDENTIAL_SECRET` | maschinenspezifisch | Verschlüsselungs-Seed des Login-Credentials (bei Migration/Docker fixieren) |
-| `ZCODE_LOG_FORMAT` | Desktop-Tabelle | `compact` für einzeilige Logs (schmale Terminals) |
-
-## Direkt aus dem Source starten / TUI
-
-Nach dem Setup einer Release-Installation oder eines Quellcode-Checkouts liegt
-`../proxy/config.yaml` vor. Ein direkter Start aus diesem Verzeichnis öffnet
-das interaktive Terminal-Panel:
-
-```powershell
-$env:ZCODE_PROXY_CONFIG = (Resolve-Path ..\proxy\config.yaml).Path
-bun run src/index.ts
-```
-
-<img src="docs/images/tui-annotated.png" alt="ZCode Proxy Terminal-Panel" width="980" />
-
-Das Panel hat drei Bereiche: **Login & Einstellungen** (Anbieter / Paket /
-Login), **Proxy-Dienst** (Start/Stopp, aktuelle Konfiguration) und **Logs**
-(eine Zeile pro Request, live). <kbd>s</kbd> startet den Proxy; `Status: running`
-heißt betriebsbereit. Buttons sind klickbar, und `bun run zcode-proxy --cli
-serve` läuft headless. Kürzel: <kbd>s</kbd> Start/Stopp · <kbd>l</kbd> Login ·
-<kbd>L</kbd> Paste-Link-Login · <kbd>o</kbd> Logout · <kbd>p</kbd>/<kbd>t</kbd>
-Anbieter/Paket wechseln · <kbd>↑</kbd><kbd>↓</kbd>/<kbd>PgUp</kbd>/<kbd>g</kbd>
-Logs scrollen · <kbd>c</kbd> leeren · <kbd>q</kbd> beenden.
-
-Kit-Nutzer brauchen das normalerweise nicht — `proxy/zcode-proxy-manager.mjs`
-hält den Proxy headless mit Logrotation am Laufen.
-
-## Vom Kit nicht genutzt
-
-Diese Upstream-Features existieren im Code, sind aber nicht Teil der
-mitgelieferten Kit-Konfiguration: die Android-App (vom Vendoring ausgeschlossen),
-Docker-Deployment, die `/async/*`-Off-Peak-Kanäle und automatisches
-Trial-Claiming (deaktiviert, fail-closed). Für die eigenständige Nutzung siehe
-das Upstream-Repository.
-
-## Lizenz
-
-MIT (laut Upstream-README; upstream führt keine LICENSE-Datei — siehe
-[`../MANIFEST.md`](../MANIFEST.md)).
+Für diese gebündelte Komponente können andere Bedingungen als für das Kit
+gelten. Prüfe vor einer Weiterverteilung das
+[Manifest](../MANIFEST.de.md) und die jeweils geltenden Upstream-Hinweise.

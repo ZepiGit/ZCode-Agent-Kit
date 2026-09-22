@@ -9,7 +9,7 @@
 
 继续使用熟悉的编程助手，通过本地连接使用现有的 ZCode 模型和额度。
 
-**可选的账号轮换：**安装器会询问 **"Do you want to activate the Account Rotator feature? [y/n]"**。回答 `y` 后，当前登录会被导入；以后通过 `zcode-kit auth login zai` 登录的新账号会作为额外账号保存。再次登录同一个账号会更新其记录。之后可以用 `zcode-kit accounts enable` 启用，用 `zcode-kit accounts` 查看保存的账号。详见[账号轮换文档（德语）](docs/ACCOUNT_ROTATOR.md)。
+**可选的账号轮换：**安装器会询问 **"Do you want to activate the Account Rotator feature? [y/n]"**。回答 `y` 后，当前登录会被导入；以后通过 `zcode-kit auth login zai` 登录的新账号会作为额外账号保存。再次登录同一个账号会更新其记录。之后可以用 `zcode-kit accounts enable` 启用，用 `zcode-kit accounts` 查看保存的账号。详见[账号轮换文档（英文）](docs/ACCOUNT_ROTATOR.md)。
 
 **使用流程：**准备账号 → 安装 Kit → 使用 GLM-5.3(-flash) 开始工作。
 
@@ -161,7 +161,7 @@ zcode-kit auth status
 
 让代理仅监听 localhost，不要分享 `.proxykey`、凭据或生成的配置文件。
 
-**阅读[安全政策（德语）](SECURITY.md)：**托管代理可能在没有操作系统沙箱的情况下执行供应商的 CAPTCHA JavaScript。代理仍仅限本机环回地址，并要求 Bearer 密钥，但这些措施不能隔离进程。它不会绕过账号限制，也无法保证所有验证都成功。
+**阅读[安全政策（英文）](SECURITY.md)（也提供[德文版](SECURITY.de.md)）：**托管代理可能在没有操作系统沙箱的情况下执行供应商的 CAPTCHA JavaScript。代理仍仅限本机环回地址，并要求 Bearer 密钥，但这些措施不能隔离进程。它不会绕过账号限制，也无法保证所有验证都成功。
 
 <details>
 <summary>更新或移除 Kit</summary>
@@ -181,4 +181,4 @@ zcode-kit auth status
 
 ## 更多信息
 
-[助手指南](harnesses/README.zh-CN.md) · [支持矩阵](SUPPORT_MATRIX.json) · [安全政策](SECURITY.md) · [报告问题](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [许可证与捆绑组件](MANIFEST.md)
+[助手指南](harnesses/README.zh-CN.md) · [支持矩阵](SUPPORT_MATRIX.json) · [安全政策（英文）](SECURITY.md) · [报告问题](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [组件清单（英文）](MANIFEST.md)

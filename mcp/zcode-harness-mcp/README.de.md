@@ -1,121 +1,45 @@
-# zcode-harness-mcp (Deutsch)
-[English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
+# zcode-harness-mcp
+[English (original)](README.md) · **Deutsch**
 
-> Übersetzung des englischen Originals; bei Abweichungen gilt das englische README.
-
-Ein MCP-Server (stdio **und** Streamable-HTTP), mit dem andere Modelle und Agents den **echten installierten ZCode-Harness** steuern können: Fähigkeiten entdecken, Modelle auswählen, Einstellungen lesen/ändern, Workspaces und Sessions verwalten, Aufgaben starten, Rückfragen beantworten, Fortschritt beobachten und vollständige Ergebnisse inklusive Dateiänderungen und Artefakte abrufen.
-
-Die Bridge ist ein **Steuer-Layer**, kein Chat-Client und kein Prompt-Wrapper: Alle Arbeit wird durch die originale ZCode-Runtime (`zcode.cjs app-server --stdio`, lokal installiert) mit deren Werkzeugen, Kontextverwaltung und Berechtigungen ausgeführt.
-
-- Protokoll: MCP (offizielles SDK) nach außen, **ZCode Protocol v1** (NDJSON über stdio, live gegen 0.16.5 verifiziert) nach innen — siehe [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
-- Umfang: 32 MCP-Tools + MCP-Resources; Capability-Registry mit 45 Einträgen ([`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)).
-- `npm test` nutzt deterministische lokale Fixtures. Live-Tests benötigen Opt-in; alte Berichte sind keine aktuelle Abnahme.
-- Audit-Härtung: Session-IDs sind Workspace-gebunden; `yolo` benötigt `--allow-yolo`. Tool-Allowlist nutzt exakte Namen; Bash, PowerShell und Shell werden abgelehnt. Artefakte sind größenbegrenzt, JSONL behält zwei Dateien mit höchstens je 4 MiB. EOF unterbricht Aufgaben und beendet das Kind geordnet; Windows-Prozessbaum-Isolation ist nicht garantiert. `--runtime-path` führt Code aus: nur vertrauenswürdige Dateien verwenden.
+Ein lokaler Model-Context-Protocol-Server, der einen MCP-Client mit einer
+ZCode-Desktop-Sitzung verbindet. Er bietet sitzungs- und taskbezogene
+Steuerung innerhalb konfigurierter Workspaces, Rückfragen und Zugriff auf
+Task-Ergebnisse.
 
 ## Voraussetzungen
 
-- Windows 10/11 (getestet); auf anderen Systemen `--runtime-path` angeben, falls die automatische Suche den installierten Harness nicht findet
-- Node.js ≥ 20 (`node --version`); das Skript startet den Harness mit dem festen Programmnamen `node`
-- Installierter ZCode (Desktop). Die Bridge findet `zcode.cjs` automatisch unter
-  - `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`
-  - `%ProgramFiles%\ZCode\resources\glm\zcode.cjs`
-  - alternativ das installierte Bundle mit `--runtime-path` oder `ZCODE_HARNESS_RUNTIME_PATH` angeben
-- Angemeldeter ZCode (der Harness nutzt die lokale Z.AI-OAuth-Anmeldung; die Bridge **verwaltet keine Zugangsdaten** und redigiert Geheimnisse in allen Ausgaben)
+- Node.js 20 oder neuer
+- Installiertes und angemeldetes ZCode Desktop
+- Ein MCP-Client mit Unterstützung für lokale stdio-Server
 
-## Installation (Windows / PowerShell)
+## Bauen und starten
 
-Release-Installer und npm-Setup enthalten die gebaute Bridge und installieren
-ihre Abhängigkeiten. Zum erneuten Bauen aus einem Quellcode-Checkout die
-folgenden Schritte nutzen; falls ein Checkout bereits vorhanden ist,
-das Klonen überspringen und in `mcp/zcode-harness-mcp` wechseln.
+Führe diese Befehle in diesem Verzeichnis aus:
 
-```powershell
-cd $HOME
-git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git
-cd ZCode-Agent-Kit\mcp\zcode-harness-mcp
+```sh
 npm install
 npm run build
-# Runtime-Erkennung prüfen:
-npm run probe:runtime
+npm run start:stdio
 ```
 
-## Quickstart
+Registriere den Befehl `start:stdio` in deinem MCP-Client. Das
+Konfigurationsformat ist je nach Client unterschiedlich. Falls ein absoluter
+Pfad nötig ist, verwende den Pfad zu diesem Paket.
 
-### 1) Als MCP-Server in einem MCP-Client (stdio) registrieren
+## Funktionen
 
-Beispiel-Konfiguration (z. B. `claude_desktop_config.json` bzw. `.mcp.json`):
+Die [Capability-Übersicht](CAPABILITY_MATRIX.de.md) beschreibt die
+nutzungsseitig sichtbaren Funktionen.
 
-```json
-{
-  "mcpServers": {
-    "zcode-harness": {
-      "command": "node",
-      "args": [
-        "C:\\path\\to\\zcode-agent-kit\\mcp\\zcode-harness-mcp\\dist\\index.js",
-        "--stdio",
-        "--allow-workspace", "C:\\Users\\<you>\\Projects",
-        "--interaction-policy", "ask"
-      ]
-    }
-  }
-}
-```
+## Sicherheit
 
-### 2) Streamable-HTTP-Modus (mehrere Clients, explizit aktiviert)
+Die Bridge arbeitet mit den Berechtigungen des lokalen Nutzers. Gib ihr nur
+Zugriff auf vertrauenswürdige Workspaces. Der Nur-Lese-Modus ist keine
+Betriebssystem-Sandbox. Beschränke den Netzwerkzugriff auf den lokalen Rechner
+und stelle den Dienst nicht in nicht vertrauenswürdigen Netzwerken bereit.
 
-```powershell
-node dist\index.js --http --http-key "<random-local-secret>" --host 127.0.0.1 --port 3322 --allow-workspace "C:\Users\<you>\Projects"
-# MCP-Endpunkt: http://127.0.0.1:3322/mcp   (nur localhost; keine öffentliche Freigabe)
-```
-
-### 3) Demo aus Sicht eines anderen Agents
-
-```powershell
-# gegen die echte Installation:
-node examples\demo-client.mjs --workspace "C:\Users\<you>\demo-workspace"
-# offline gegen den Fixture-Harness:
-node examples\demo-client.mjs --fixture
-```
-
-Der Demo-Client zeigt den kompletten Ablauf: Fähigkeiten entdecken → Workspace öffnen → echten Modellkatalog lesen → GLM-5.3-Flash-Prüfung (kein stiller Modellwechsel) → Einstellung ändern → Aufgabe starten → Fortschritt pollen → Rückfragen beantworten → Ergebnis + Artefakte lesen → Folgeauftrag in derselben Session.
-
-### 4) Tests
-
-```powershell
-npm test          # Build + Unit + Integration (Fixture-Harness, deterministisch)
-$env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\path\to\workspace"; $env:LIVE_DATA_DIR="C:\path\to\data"
-npm run test:live # ausdrückliches Opt-in: echte Installation und mögliche Quota-Nutzung
-```
-
-## Wichtigste Kommandozeilen-Flags
-
-| Flag | Bedeutung |
-| --- | --- |
-| `--stdio` | MCP über stdin/stdout (Standard) |
-| `--http --http-key KEY --port N --host H` | Streamable-HTTP-Modus mit Bearer-Key (Standard 127.0.0.1:3322) |
-| `--read-only` | Mutierende Tools werden abgewiesen (technisch enforced, nicht nur annotiert) |
-| `--allow-workspace P` | Workspace-Root freigeben (mehrfach möglich; `;`-Liste via `ZCODE_HARNESS_ALLOW_WORKSPACES`) |
-| `--runtime-path P` | Expliziter Pfad zu `zcode.cjs` |
-| `--data-dir D` | Persistenzverzeichnis (Standard `~/.zcode-harness-mcp`) |
-| `--interaction-policy deny\|allowlist\|ask` | Wie Berechtigungsanfragen beantwortet werden (Standard: `deny`) |
-| `--interaction-allowlist "Read,Glob"` | exakte Toolnamen für `allowlist` (Shell-Tools verweigert) |
-| `--max-concurrent-tasks N` | Parallelität (Standard 2; Überschüsse werden gequeued) |
-
-## Sicherheitsmodell (Kurzfassung)
-
-- Workspace-Allowlist mit echter Pfadauflösung (Symlinks/Junctions) für Tasks **und** Artefakt-Lesezugriffe
-- Read-only-Modus: mutierende Tools liefern Fehler; Task-`readOnly` setzt zusätzlich Harness-seitig Plan-Modus + Write-Tool-Denylist durch
-- Secret-Redaction in allen Tool-Ausgaben, Logs und Events; Credentials werden nie exponiert oder verwaltet
-- Prozessstart ausschließlich mit Argument-Arrays (`shell: false`), festes Programm (`node`), keine Shell-Strings
-- Rückfragen (Permissions/User-Input) werden nie automatisch erweitert: Policy `deny` (Standard), `allowlist` oder `ask` mit Timeout → sichere Default-Antwort (deny)
-- Kein Registrieren der Bridge in der eigenen ZCode-Runtime, keine öffentliche Netzwerkfreigabe, kein Auto-Plugin-Install
-
-Details: [`docs/SECURITY.md`](docs/SECURITY.md) · Ehrliche Grenzen: [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
-
-## Status
-
-Aktueller Implementierungs- und Verifikationsstand: [`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · Testnachweise: [CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · API-Referenz: [`docs/MCP_API.md`](docs/MCP_API.md)
+Siehe die [Sicherheitsrichtlinie](../../SECURITY.de.md).
 
 ## Lizenz
 
-MIT. Die Referenz-Repos [zcode-acp](https://github.com/william0wang/zcode-acp) (Apache-2.0) und [zcode-open-bridge](https://github.com/tizerluo/zcode-open-bridge) (MIT) wurden als Protokollquellen recherchiert (Commits dokumentiert in `docs/PROTOCOL.md`); übernommener Code: keiner.
+MIT; siehe das Repository-[LICENSE](../../LICENSE).

@@ -161,7 +161,7 @@ zcode-kit auth status
 
 Keep the proxy on localhost and never share `.proxykey`, credentials, or generated configuration files.
 
-**Read the [security policy (German)](SECURITY.md):** the managed proxy can execute vendor CAPTCHA JavaScript without an OS sandbox. It remains loopback-only and bearer-authenticated, but those controls are not process isolation. This does not bypass account restrictions or guarantee that every challenge succeeds.
+**Read the [security policy](SECURITY.md):** the managed proxy can execute vendor CAPTCHA JavaScript without an OS sandbox. It remains loopback-only and bearer-authenticated, but those controls are not process isolation. This does not bypass account restrictions or guarantee that every challenge succeeds.
 
 <details>
 <summary>Update or remove the kit</summary>
@@ -181,4 +181,4 @@ For an npm installation, remove the global package afterward with `npm uninstall
 
 ## More information
 
-[Assistant guides](harnesses/README.md) · [Support matrix](SUPPORT_MATRIX.json) · [Security](SECURITY.md) · [Report a problem](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [Licensing and bundled components](MANIFEST.md)
+[Assistant guides](harnesses/README.md) · [Support matrix](SUPPORT_MATRIX.json) · [Security policy](SECURITY.md) · [Report a problem](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [Licensing and bundled components](MANIFEST.md)
