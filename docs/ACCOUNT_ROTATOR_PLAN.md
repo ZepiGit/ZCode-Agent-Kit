@@ -26,7 +26,7 @@ The existing single-account credential store and commands remain valid. Users ca
 
 ## Selection and rotation semantics
 
-- `AccountRotator` owns an immutable snapshot of profiles plus in-memory scheduling state. Selection is deterministic round-robin among usable accounts, preferring the least recently used account and skipping expired, quarantined, provider-mismatched, or plan-incompatible profiles.
+- `AccountRotator` owns an immutable snapshot of profiles plus in-memory scheduling state. Selection is sticky and sequential: keep the active usable account for successive requests, then advance deterministically to the next usable account only after an explicit quota signal. Skip expired, quarantined, provider-mismatched, or plan-incompatible profiles.
 - Every request snapshots the selected `AccountHandle` before building upstream headers. The handle remains fixed for the request and its stream.
 - A response is eligible for rotation only when it is non-streaming / before output and its body contains one of the explicit account-balance codes `1005` (quota exhausted), `1113` (insufficient balance), or `3001` (account balance/request rejected). HTTP-200 envelopes are inspected as well as non-2xx responses. Generic 401/403/429/5xx, captcha errors, transport errors, model errors, and 3012 authentication failures do not rotate accounts.
 - On an eligible failure, mark the selected profile unavailable until the reported reset time when available, otherwise for a bounded cooldown. Singleflight ensures concurrent failures for one account do not create a retry storm. Retry at most once with the next usable account. If all profiles are unavailable, return the original mapped error.
