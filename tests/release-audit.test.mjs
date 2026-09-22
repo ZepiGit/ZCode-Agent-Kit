@@ -66,6 +66,24 @@ test("release workflow keeps automatic main releases while isolating write and O
   assert.doesNotMatch(workflow, /^\s*environment:/m, "automatic releases must not gain a manual environment gate");
 });
 
+test("release verification timeout covers the complete registry retry budget", async () => {
+  const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const step = workflow.split("      - name: Verify exact published version is visible on npm\n")[1]?.split("\n      - name:")[0] ?? "";
+  const timeoutMinutes = Number(step.match(/timeout-minutes:\s*(\d+)/)?.[1]);
+  assert.match(step, /run: node scripts\/registry-version\.mjs verify "\$VERSION"/);
+  const { verifyPublished } = await import("../scripts/registry-version.mjs");
+  let retryBudgetMs = 0;
+  await assert.rejects(verifyPublished("1.2.3", {
+    run: (_command, _args, options) => {
+      retryBudgetMs += options.timeout;
+      return { status: 1, stdout: '{"error":{"code":"E404"}}', stderr: "" };
+    },
+    sleep: async (delayMs) => { retryBudgetMs += delayMs; },
+  }), /not visible after/);
+  assert.ok(timeoutMinutes * 60_000 >= retryBudgetMs + 60_000,
+    `workflow timeout must cover the ${retryBudgetMs}ms retry budget plus runner overhead`);
+});
+
 test("account-rotator feature releases are isolated prereleases built from the tested SHA", () => {
   const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
   const featureJob = workflow.split("  feature-account-rotator-prerelease:\n")[1] ?? "";

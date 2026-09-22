@@ -208,7 +208,9 @@ jobs:
           [ "$PUBLISHED" = "1" ] || exit 1
       - name: Verify exact published version is visible on npm
         if: env.SKIP_PUBLISH != '1'
-        timeout-minutes: 3
+        # Allow the full bounded registry check: 36 x 20s lookups + 35 x 10s
+        # propagation waits = 17m 50s, plus process startup/runner overhead.
+        timeout-minutes: 20
         run: node scripts/registry-version.mjs verify "$VERSION"
 
   # Feature validation is deliberately a separate path: it never mutates or
