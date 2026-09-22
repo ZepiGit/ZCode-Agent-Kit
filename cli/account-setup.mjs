@@ -14,12 +14,13 @@ export function rotatorChoice(value) {
 
 export async function askAccountRotator({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
   if (!input.isTTY || !output.isTTY || (env.CI && !/^(0|false)$/i.test(env.CI))) return undefined;
-  const lines = createInterface({ input, output, terminal: true });
+  const lines = createInterface({ input, output, terminal: true, prompt: `${ACCOUNT_ROTATOR_QUESTION} [y/n] ` });
   try {
-    output.write(`${ACCOUNT_ROTATOR_QUESTION} [y/n] `);
+    lines.prompt();
     for await (const answer of lines) {
       if (/^[yn]$/i.test(answer.trim())) return answer.trim().toLowerCase() === "y";
-      output.write(`Please answer y or n.\n${ACCOUNT_ROTATOR_QUESTION} [y/n] `);
+      output.write("Please answer y or n.\n");
+      lines.prompt();
     }
     return undefined; // Closed input must never count as consent.
   } finally { lines.close(); }

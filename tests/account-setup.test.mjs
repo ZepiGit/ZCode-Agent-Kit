@@ -22,6 +22,34 @@ test("installer requires an explicit y/n answer and repeats invalid/empty answer
   }
 });
 
+test("terminal redraw keeps the y/n question visible before and during input", async () => {
+  for (const columns of [100, 36]) for (const answer of ["y", "n"]) {
+    const input = new PassThrough(), output = new PassThrough();
+    input.isTTY = output.isTTY = true;
+    output.columns = columns;
+    let transcript = "";
+    output.on("data", chunk => transcript += chunk);
+    const pending = askAccountRotator({ input, output, env: {} });
+    try {
+      const question = `${ACCOUNT_ROTATOR_QUESTION} [y/n] `;
+      assert.ok(transcript.includes(question));
+      transcript = "";
+      output.emit("resize");
+      assert.ok(transcript.includes(question), "redraw must not replace the question with the default > prompt");
+      input.write(answer);
+      transcript = "";
+      output.emit("resize");
+      assert.ok(transcript.includes(question + answer), "redraw must preserve the question and typed answer");
+      input.write("\n");
+      assert.equal(await pending, answer === "y");
+    } finally {
+      input.end();
+      await pending;
+      output.destroy();
+    }
+  }
+});
+
 test("headless install and closed terminal never silently opt in", async () => {
   const input = new PassThrough(), output = new PassThrough();
   assert.equal(await askAccountRotator({ input, output }), undefined);
