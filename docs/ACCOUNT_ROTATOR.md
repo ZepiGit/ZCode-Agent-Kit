@@ -98,7 +98,7 @@ Die Ausgabe enthält nur lokale Metadaten: ID, Provider, Plan, einen maskierten 
 
 ## Auswahl und Rotation
 
-Für jede Anfrage wählt der Rotator ein passendes Konto nach deterministischer Least-Recently-Used-Reihenfolge. Bei gleichem Nutzungszeitpunkt entscheidet ein stabiler Round-Robin-Zeiger. Konten mit abgelaufenem Credential, falschem Provider, inkompatiblem Plan oder aktiver Sperrfrist werden übersprungen.
+Der Rotator arbeitet sequenziell: Nach dem Start bleibt das erste passende Konto für alle Requests aktiv. Dadurch wird dessen Kontingent vollständig genutzt, bevor gewechselt wird. Erst ein explizites Kontingentsignal sperrt das aktive Konto und aktiviert das nächste passende Profil; danach bleibt dieses Profil aktiv. Die Reihenfolge ist stabil und zyklisch. Konten mit abgelaufenem Credential, falschem Provider, inkompatiblem Plan oder aktiver Sperrfrist werden übersprungen.
 
 Eine Rotation wird nur bei einem expliziten Upstream-Kontingentsignal ausgelöst:
 
