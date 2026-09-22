@@ -97,6 +97,19 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     }
 
     if (path === "/quota" && method === "GET") {
+      // In pool mode the selected account is authoritative. Capture the
+      // credential once for this billing round and partition the short cache
+      // by its stable id so account A's snapshot cannot be served for B.
+      if (auth.isAccountPoolEnabled()) {
+        try {
+          const credential = await auth.getCredential();
+          const accountId = auth.accountIdForCredential(credential) ?? "pool";
+          return handleQuota(config, opts.fetchImpl, async () => credential, `pool:${accountId}`);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "account credential unavailable";
+          return errorResponse(503, "quota_unavailable", `quota query failed: ${message}`);
+        }
+      }
       return handleQuota(config, opts.fetchImpl);
     }
 
