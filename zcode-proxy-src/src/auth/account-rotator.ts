@@ -93,7 +93,10 @@ export class AccountRotator {
   private readonly provider: Credential["provider"] | undefined;
   private readonly now: () => number;
   private readonly cooldownMs: number;
+  /** Next stable position to try after the current account is exhausted. */
   private cursor = 0;
+  /** Keep serving this account until an explicit quota signal quarantines it. */
+  private activeAccountId: string | undefined;
   private lastSelectedId: string | undefined;
 
   constructor(accounts: readonly AccountProfile[], options: AccountRotatorOptions = {}) {
@@ -130,7 +133,11 @@ export class AccountRotator {
     return true;
   }
 
-  /** Return the next account's credential, using least-recently-used ordering. */
+  /**
+   * Return the active account's credential. The active account remains sticky
+   * across requests, so configured quotas are consumed sequentially. The
+   * cursor advances only after an explicit exhaustion signal quarantines it.
+   */
   getCredential(): Credential {
     return this.getCredentialHandle().credential;
   }
@@ -142,18 +149,17 @@ export class AccountRotator {
     const candidates = this.accounts.filter((account) => this.isUsable(account, now, excluded));
     if (candidates.length === 0) throw new NoUsableAccountError();
     const total = this.accounts.length || 1;
-    candidates.sort((a, b) => {
-      const aUsed = a.lastUsedAt ?? Number.NEGATIVE_INFINITY;
-      const bUsed = b.lastUsedAt ?? Number.NEGATIVE_INFINITY;
-      if (aUsed !== bUsed) return aUsed - bUsed;
+    const active = this.activeAccountId
+      ? candidates.find((candidate) => candidate.id === this.activeAccountId)
+      : undefined;
+    const account = active ?? [...candidates].sort((a, b) => {
       const aDistance = (a.order - this.cursor + total) % total;
       const bDistance = (b.order - this.cursor + total) % total;
       if (aDistance !== bDistance) return aDistance - bDistance;
       return a.order - b.order;
-    });
-    const account = candidates[0];
+    })[0];
+    this.activeAccountId = account.id;
     account.lastUsedAt = now;
-    this.cursor = (account.order + 1) % total;
     this.lastSelectedId = account.id;
     return { id: account.id, credential: { ...account.credential } };
   }
@@ -188,6 +194,10 @@ export class AccountRotator {
       : now + this.cooldownMs;
     account.exhaustedUntil = requestedReset;
     account.lastFailureAt = now;
+    if (this.activeAccountId === id) {
+      this.activeAccountId = undefined;
+      this.cursor = (account.order + 1) % (this.accounts.length || 1);
+    }
     // Keep persisted failure details bounded and line-oriented. Callers should
     // pass a stable code (1005/1113/3001) rather than provider response text.
     account.lastFailureReason = safeFailureReason(reason);
