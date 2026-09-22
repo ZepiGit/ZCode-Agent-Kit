@@ -64,7 +64,7 @@ test("post-publish verification retries propagation misses and returns the exact
   assert.deepEqual(delays, [10_000, 10_000]);
 });
 
-test("post-publish verification stops after six misses and does not retry auth failures", async () => {
+test("post-publish verification stops at its bounded retry limit and does not retry auth failures", async () => {
   const { verifyPublished } = await load();
   let calls = 0;
   let waits = 0;
