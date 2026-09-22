@@ -15,13 +15,14 @@ HTTP 代理，支持三种标准格式：
 | `GET /v1/models` | 模型列表 | 发现 |
 | `GET /health`, `GET /quota` | 状态/配额（需认证） | 诊断 |
 
-认证：`Authorization: Bearer <.proxykey 的内容>`
-密钥只存在本地（`<clone>/.proxykey`），由 setup.mjs 生成。
+认证：`Authorization: Bearer <.proxykey 的内容>`。
+`zcode-kit setup` 在本地生成密钥。正式版和源码检出将 `.proxykey`
+保存在 Kit 目录；npm 安装则保存在 `node_modules` 之外的专用状态目录。
 
 ## 由 `zcode-kit setup` 自动配置（仅针对检测到的 harness）
 
-setup.mjs 检测已安装的 harness，并**只为这些**进行配置。只装 OMP 的
-用户不会得到任何 Claude/Codex 产物（也不会生成相关文件）。
+`zcode-kit setup --harness auto` 检测已安装的 harness，并**只配置这些**。
+如果只装了 OMP，就不会创建 Claude/Codex 的配置或生成包装器文件。
 
 | Harness | 机制 | 对现有配置的影响 |
 |---|---|---|
@@ -32,17 +33,20 @@ setup.mjs 检测已安装的 harness，并**只为这些**进行配置。只装 
 | OpenCode | `opencode.json` 中的 provider `zcode`（`@ai-sdk/openai-compatible`、apiKey `{env:ZCODE_PROXY_KEY}`） | 附加式；JSONC 注释保留 |
 | Aider | `generated/aider-zcode.env` + `bin/zcode-aider.cmd\|.sh`（进程本地，**不用 setx**） | 模型 `openai/glm-5.3[-flash]` |
 | Continue | `~/.continue/config.yaml` 中的受管块（schema v1） | 已有模型/角色保留 |
-| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` | 凭据通过文档化的 `auth.command` 助手（kit 密钥解析器，无 shell） |
+| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json`（Windows）或 `~/.config/goose/custom_providers/zcode.json`（macOS/Linux） | 凭据通过文档化的 `auth.command` 助手（kit 密钥解析器，无 shell） |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | kit 绝不触碰 VS Code 状态；在 UI 中手动录入一次即可 |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | 在 UI 中配置自定义 provider（Anthropic messages）；kit 有意不写 kilo.jsonc |
 | 支持 MCP 的 harness | stdio 服务器 `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：写入 `~/.omp/agent/mcp.json`；Claude Code：`claude mcp add`（仅在检测到时）；Codex：隔离 home 内。仅 MCP 不算作模型集成 |
+
+`generated/` 下的路径指向 Kit 状态：正式版/源码安装位于 Kit
+目录中；npm 安装位于单独的状态目录中。
 
 ## 可选启用的包装器（现有配置不受影响）
 
 | Harness | 包装器 | 作用 |
 |---|---|---|
-| Claude Code | `bin\zcode-claude.cmd` | 按需启动代理并调用 `claude --settings <clone>\generated\claude-zcode-settings.json`（CLI settings 优先于 user settings.json；你平时的 `claude` 照常运行） |
-| Codex CLI | `bin\zcode-codex.cmd` | 设置 `CODEX_HOME=<clone>\generated\codex-home` + `ZCODE_PROXY_KEY` 并按需启动代理；你平时的 `codex` 和 `~/.codex` 不受影响 |
+| Claude Code | `bin\zcode-claude.cmd` | 按需启动代理并调用 `claude --settings <Kit 状态>\generated\claude-zcode-settings.json`（CLI settings 优先于 user settings.json；你平时的 `claude` 照常运行） |
+| Codex CLI | `bin\zcode-codex.cmd` | 设置 `CODEX_HOME=<Kit 状态>\generated\codex-home` + `ZCODE_PROXY_KEY` 并按需启动代理；你平时的 `codex` 和 `~/.codex` 不受影响 |
 
 ## 手动接入（任何支持 OpenAI/Anthropic 的客户端）
 
@@ -75,26 +79,21 @@ model: glm-5.3
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<clone 绝对路径>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["<Kit 安装的绝对路径>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
 ```
 
-桥接控制的是**真实安装的 ZCode 桌面版**（app-server 协议：会话、回合、
-任务）。限制：桌面版必须处于运行状态（由它解决 Z.AI 验证码）；桥接目录中的
-推理级别为 `low/high/max`；桌面版套餐目录中列出 GLM-5.3/GLM-5-Turbo —— 
-GLM-5.3-Flash 走代理路径，不走桌面桥接。详情见
-[mcp/zcode-harness-mcp/README.md](../mcp/zcode-harness-mcp/README.md)。
+桥接控制的是**真实安装的 ZCode Harness**（app-server 协议：会话、回合、
+任务）。交互验证可能需要运行 Desktop；服务商仍可能拒绝模型请求。
+桥接支持 `low/high/max` 推理级别。实时模型目录可能与代理不同；
+GLM-5.3-Flash 已通过代理路径验证。详情见
+[MCP 桥接文档](../mcp/zcode-harness-mcp/README.zh-CN.md)。
 
 ## 配额与错误形态
 
 - `GET /quota`（需认证）显示各模型的令牌桶。
-- 配额耗尽 → HTTP 400 `[1005] exceed quota limit`（不可重试 —— 等待重置，
-  GLM-5.3：每天当地时间 18:00）。
+- 配额耗尽 → HTTP 400 `[1005] exceed quota limit`（不可重试；等待服务商恢复额度）。
 - `[3007] captcha verify failed` → 高频重试后的网关反滥用机制；请暂停片刻。
-- `401 start_plan_jwt_invalid` → 更新桌面登录
-  （[README.zh-CN.md](../README.zh-CN.md) →「登录续期」）。
-- Codex 路径：responses 处理器偶尔出现外观性错误
-  `OutputTextDelta without active item` —— 结果仍然正确
-  （已知的外观性问题）。
+- `401 start_plan_jwt_invalid` → 检查 Desktop 登录，并通过 `zcode-kit auth login zai` 更新。

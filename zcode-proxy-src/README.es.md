@@ -12,11 +12,10 @@ licencia MIT (el upstream no incluye archivo LICENSE). Versión, commit y
 modificaciones locales están documentados en [`../MANIFEST.md`](../MANIFEST.md);
 los parches locales viven en [`../patches/`](../patches/).
 
-Este README describe el componente **tal como se usa dentro del ZCode Agent
-Kit**. El README original del upstream (chino) se conserva como
-[README.zh-CN.md](README.zh-CN.md); documenta el proyecto upstream
-independiente (app Android, despliegue Docker, canales off-peak, reclamación de
-trials) que el kit no usa.
+Este README y su [traducción al chino](README.zh-CN.md) describen el componente
+**tal como se usa dentro del ZCode Agent Kit**. El proyecto upstream también
+documenta funciones independientes como Android, Docker, canales off-peak y
+reclamación de trials que el kit no utiliza.
 
 ## Papel dentro del kit
 
@@ -26,14 +25,25 @@ chat-completions, Anthropic messages y OpenAI Responses en
 con sesión iniciada de ZCode Desktop (start-plan, la misma cuota que ZCode
 Desktop).
 
+El conjunto opcional `auth.accounts.enabled` admite varias cuentas autorizadas.
+Las nuevas solicitudes actualizan el conjunto autoritativo antes de enviarse;
+solo las señales explícitas de cuota `1005`, `1113` o `3001` permiten un intento
+de cambio secuencial. Con la función habilitada, `zcode-kit auth login zai`
+guarda los inicios de sesión de cuentas nuevas como perfiles adicionales y
+actualiza el perfil existente al entrar de nuevo en la misma cuenta. Usa
+`zcode-kit accounts` o `zcode-proxy auth accounts` con `pause|resume`,
+`explain`, `doctor`, `quota` y `--live`. Consulta las reglas de claves,
+migración y recuperación en la [documentación de Account Rotator](../docs/ACCOUNT_ROTATOR.md).
+
 - Direcciones/formatos: `POST /v1/chat/completions`, `POST /v1/messages`,
-  `POST /v1/responses`, `GET /v1/models`, `GET /health`, `GET /quota`
+  `POST /v1/responses`, `GET /v1/models`, `GET /health`, `GET /quota`,
+  `GET /accounts/status` y `GET /accounts/quota` con autenticación
 - Autenticación: `Authorization: Bearer <contenido de .proxykey>` — la clave la
-  genera localmente setup.mjs y nunca sale de tu máquina
+  genera localmente `zcode-kit setup` (en el directorio del kit para Release/
+  Source, o en un directorio de estado aparte para npm)
 - Ciclo de vida: gestionado por `node proxy\zcode-proxy-manager.mjs start|stop|restart|status|doctor|logs`
   (bind solo loopback, stop fail-closed, rotación de logs — ver el README raíz)
-- Renovación de sesión: ver [README.es.md](../README.es.md) → «Renovación de
-  inicio de sesión»
+- Renovación de sesión: `zcode-kit auth login zai`; ver el [README principal](../README.es.md)
 
 ## Desviaciones locales respecto al upstream
 
@@ -50,9 +60,9 @@ Desktop).
   (`scripts/build-android-apk.sh`, los scripts npm `build:android-*`, la
   devDependency esbuild y el job `build-android` del workflow vendoreado
   `.github/workflows/release.yml`) se eliminó junto con la app
-- Se añadieron localmente dos archivos de test del upstream; todas las
-  modificaciones de fuente están en
-  [`../patches/zcode-proxy-local-patches.patch`](../patches/zcode-proxy-local-patches.patch)
+- Los cambios y pruebas locales quedan registrados en este repositorio; el
+  [parche del proveedor](../patches/zcode-proxy-local-patches.patch) es una
+  referencia histórica, no un registro completo de cambios posteriores
 
 ## Modelos disponibles
 
@@ -75,9 +85,10 @@ modelos verificados; ver el README raíz.
 
 ## Configuración y variables de entorno
 
-El proxy lee `config.yaml` (el kit lo apunta a `../proxy/config.yaml` vía
-`ZCODE_PROXY_CONFIG`). Las variables de entorno tienen prioridad. Las más
-comunes:
+El proxy lee `config.yaml` por defecto. En instalaciones publicadas o del
+código fuente, `ZCODE_PROXY_CONFIG` apunta a `../proxy/config.yaml`; npm
+guarda esta configuración en su directorio de estado independiente. Las
+variables de entorno tienen prioridad. Las más comunes:
 
 | Variable de entorno | Por defecto | Significado |
 |---|---|---|
@@ -90,11 +101,13 @@ comunes:
 
 ## Arrancar desde el código / TUI
 
-Arrancar el proxy directamente desde este directorio abre el panel interactivo
-de terminal (interfaz principal del upstream):
+Después de configurar una instalación publicada o una copia del código fuente
+se crea `../proxy/config.yaml`. Arrancar desde este directorio abre el panel
+interactivo de terminal:
 
 ```powershell
-ZCODE_PROXY_CONFIG="../proxy/config.yaml" bun run src/index.ts
+$env:ZCODE_PROXY_CONFIG = (Resolve-Path ..\proxy\config.yaml).Path
+bun run src/index.ts
 ```
 
 <img src="docs/images/tui-annotated.png" alt="Panel de terminal de ZCode Proxy" width="980" />

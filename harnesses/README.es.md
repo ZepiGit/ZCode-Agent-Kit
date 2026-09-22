@@ -16,14 +16,16 @@ El núcleo del kit es neutral respecto al harness: un proxy HTTP local en
 | `GET /v1/models` | lista de modelos | descubrimiento |
 | `GET /health`, `GET /quota` | estado/cuota (requiere auth) | diagnóstico |
 
-Autenticación: `Authorization: Bearer <contenido de .proxykey>`
-La clave vive solo localmente (`<clone>/.proxykey`) y la genera setup.mjs.
+Autenticación: `Authorization: Bearer <contenido de .proxykey>`.
+`zcode-kit setup` genera la clave localmente. En instalaciones publicadas y
+copias del código, `.proxykey` está en el directorio del kit; con npm se
+guarda fuera de `node_modules`, en el estado exclusivo de esa instalación.
 
 ## Configurado automáticamente por `zcode-kit setup` (solo para harnesses detectados)
 
-setup.mjs detecta qué harnesses están instalados y configura **solo esos**.
-Un usuario con solo OMP no recibe ningún artefacto de Claude/Codex (tampoco
-archivos generados).
+`zcode-kit setup --harness auto` detecta los harnesses instalados y configura
+**solo esos**. Si únicamente se detecta OMP, no se crean configuraciones ni
+wrappers de Claude/Codex.
 
 | Harness | Mecanismo | Impacto en la config existente |
 |---|---|---|
@@ -34,17 +36,20 @@ archivos generados).
 | OpenCode | provider `zcode` en `opencode.json` (`@ai-sdk/openai-compatible`, apiKey `{env:ZCODE_PROXY_KEY}`) | aditivo; los comentarios JSONC se conservan |
 | Aider | `generated/aider-zcode.env` + `bin/zcode-aider.cmd\|.sh` (local al proceso, **sin setx**) | modelo `openai/glm-5.3[-flash]` |
 | Continue | bloque gestionado en `~/.continue/config.yaml` (schema v1) | los modelos/roles existentes se quedan |
-| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` | credencial vía el helper documentado `auth.command` (resolver de clave del kit, sin shell) |
+| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` (Windows) o `~/.config/goose/custom_providers/zcode.json` (macOS/Linux) | credencial vía el helper documentado `auth.command` (resolver de clave del kit, sin shell) |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | el kit nunca toca el estado de VS Code; introduce los valores una vez en la UI |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | provider personalizado (Anthropic messages) en la UI; el kit deliberadamente no escribe kilo.jsonc |
 | Harnesses con MCP | servidor stdio `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entrada en `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (solo si se detecta); Codex: dentro del home aislado. MCP por sí solo NO cuenta como integración de modelo |
+
+Las rutas `generated/` indican el estado del kit: dentro del directorio del
+kit para versiones publicadas/código fuente y en un directorio aparte para npm.
 
 ## Wrappers opt-in (la config existente queda intacta)
 
 | Harness | Wrapper | Qué hace |
 |---|---|---|
-| Claude Code | `bin\zcode-claude.cmd` | arranca el proxy bajo demanda y llama a `claude --settings <clone>\generated\claude-zcode-settings.json` (los settings del CLI prevalecen sobre settings.json; tu `claude` normal sigue igual) |
-| Codex CLI | `bin\zcode-codex.cmd` | fija `CODEX_HOME=<clone>\generated\codex-home` + `ZCODE_PROXY_KEY` y arranca el proxy bajo demanda; tu `codex` normal y `~/.codex` quedan intactos |
+| Claude Code | `bin\zcode-claude.cmd` | arranca el proxy bajo demanda y llama a `claude --settings <estado-del-kit>\generated\claude-zcode-settings.json` (los settings del CLI prevalecen sobre settings.json; tu `claude` normal sigue igual) |
+| Codex CLI | `bin\zcode-codex.cmd` | fija `CODEX_HOME=<estado-del-kit>\generated\codex-home` + `ZCODE_PROXY_KEY` y arranca el proxy bajo demanda; tu `codex` normal y `~/.codex` quedan intactos |
 
 ## Conexión manual (cualquier cliente compatible OpenAI/Anthropic)
 
@@ -77,29 +82,24 @@ Razonamiento/thinking:
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<ruta-absoluta-del-clone>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["<ruta-absoluta-de-instalacion>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
 ```
 
-El puente controla el **ZCode Desktop real instalado** (protocolo app-server:
-sesiones, turns, tasks). Limitaciones: el desktop debe estar en marcha (él
-resuelve los CAPTCHA de Z.AI); los niveles de razonamiento vía el catálogo del
-puente son `low/high/max`; el catálogo de planes del desktop lista
-GLM-5.3/GLM-5-Turbo — GLM-5.3-Flash va por la vía del proxy, no por el puente
-del desktop. Detalles:
-[mcp/zcode-harness-mcp/README.md](../mcp/zcode-harness-mcp/README.md).
+El puente controla el **ZCode harness real instalado** (protocolo app-server:
+sesiones, turnos, tareas). Desktop puede ser necesario para una verificación
+interactiva; el proveedor aun así puede rechazar una solicitud al modelo.
+Los niveles de razonamiento del puente son `low/high/max`. Su catálogo de
+modelos en vivo puede diferir del del proxy; GLM-5.3-Flash se verificó a través
+del proxy. Detalles: [puente MCP](../mcp/zcode-harness-mcp/README.es.md).
 
 ## Cuota y modos de error
 
 - `GET /quota` (autenticado) muestra los buckets de tokens por modelo.
-- Cuota agotada → HTTP 400 `[1005] exceed quota limit` (no reintentable —
-  espera el reset, GLM-5.3: diario a las 18:00 hora local).
+- Cuota agotada → HTTP 400 `[1005] exceed quota limit` (no reintentable;
+  espera a que el proveedor restablezca la cuota).
 - `[3007] captcha verify failed` → anti-abuso del gateway tras reintentos
   intensos; haz una pausa.
-- `401 start_plan_jwt_invalid` → renueva el login del desktop
-  ([README.es.md](../README.es.md) → «Renovación de inicio de sesión»).
-- Vía Codex: error cosmético ocasional `OutputTextDelta without active item`
-  en el handler de responses — el resultado sigue siendo correcto (problema
-  cosmético conocido).
+- `401 start_plan_jwt_invalid` → comprueba la sesión de Desktop y renuévala con `zcode-kit auth login zai`.

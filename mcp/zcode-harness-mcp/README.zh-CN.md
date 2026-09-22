@@ -22,27 +22,28 @@
 
 ## 前提条件
 
-- Windows 10/11（已测试）或任何 PATH 中有 `node` 的操作系统
+- Windows 10/11（已测试）；其他系统无法自动发现已安装的 Harness 时，使用 `--runtime-path` 指定
 - Node.js ≥ 20（`node --version`）；脚本以固定的程序名 `node` 启动 harness
 - 已安装 ZCode（桌面版）。桥接会自动在以下位置查找 `zcode.cjs`：
   - `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`
   - `%ProgramFiles%\ZCode\resources\glm\zcode.cjs`
-  - 也可以显式指定：`--runtime-path` 或 `ZCODE_HARNESS_RUNTIME_PATH`
+  - 也可以用 `--runtime-path` 或 `ZCODE_HARNESS_RUNTIME_PATH` 指定已安装的文件
 - ZCode 已登录（harness 使用本地 Z.AI OAuth 登录；桥接**不管理任何凭据**，
   并在所有输出中对机密信息做脱敏）
 
 ## 安装（Windows / PowerShell）
 
-在 ZCode Agent Kit 的检出中，桥接已经位于 `mcp/zcode-harness-mcp/` ——
-无需克隆，直接进入该目录即可。
+正式版安装器和 npm 设置包含已构建的桥接，并会安装其依赖。
+如需从源码重新构建，请按下方步骤操作；如果已有检出目录，
+可跳过克隆，直接进入 `mcp/zcode-harness-mcp`。
 
 ```powershell
 cd $HOME
-git clone <本仓库> zcode-harness-mcp   # 或直接复制文件夹
-cd zcode-harness-mcp
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git
+cd ZCode-Agent-Kit\mcp\zcode-harness-mcp
 npm install
 npm run build
-# 运行时检测自检：
+# 检查运行时发现：
 npm run probe:runtime
 ```
 
@@ -58,7 +59,7 @@ npm run probe:runtime
     "zcode-harness": {
       "command": "node",
       "args": [
-        "C:\\Users\\<you>\\zcode-harness-mcp\\dist\\index.js",
+        "C:\\path\\to\\zcode-agent-kit\\mcp\\zcode-harness-mcp\\dist\\index.js",
         "--stdio",
         "--allow-workspace", "C:\\Users\\<you>\\Projects",
         "--interaction-policy", "ask"
@@ -92,7 +93,8 @@ GLM-5.3-Flash 检查（不会静默切换模型）→ 修改设置 → 启动任
 
 ```powershell
 npm test          # 构建 + 单元 + 集成（fixture harness，确定性）
-npm run test:live # 仅显式 opt-in（真实安装/配额）： $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+$env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\path\to\workspace"; $env:LIVE_DATA_DIR="C:\path\to\data"
+npm run test:live # 显式开启：真实安装，可能消耗额度
 ```
 
 ## 最重要的命令行参数

@@ -15,25 +15,28 @@ Die Bridge ist ein **Steuer-Layer**, kein Chat-Client und kein Prompt-Wrapper: A
 
 ## Voraussetzungen
 
-- Windows 10/11 (getestet) oder ein OS mit `node` im PATH
+- Windows 10/11 (getestet); auf anderen Systemen `--runtime-path` angeben, falls die automatische Suche den installierten Harness nicht findet
 - Node.js ≥ 20 (`node --version`); das Skript startet den Harness mit dem festen Programmnamen `node`
 - Installierter ZCode (Desktop). Die Bridge findet `zcode.cjs` automatisch unter
   - `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`
   - `%ProgramFiles%\ZCode\resources\glm\zcode.cjs`
-  - alternativ explizit: `--runtime-path` bzw. `ZCODE_HARNESS_RUNTIME_PATH`
+  - alternativ das installierte Bundle mit `--runtime-path` oder `ZCODE_HARNESS_RUNTIME_PATH` angeben
 - Angemeldeter ZCode (der Harness nutzt die lokale Z.AI-OAuth-Anmeldung; die Bridge **verwaltet keine Zugangsdaten** und redigiert Geheimnisse in allen Ausgaben)
 
 ## Installation (Windows / PowerShell)
 
-Im ZCode-Agent-Kit-Checkout liegt die Bridge bereits unter `mcp/zcode-harness-mcp/` — das Klonen entfällt, direkt in das Verzeichnis wechseln.
+Release-Installer und npm-Setup enthalten die gebaute Bridge und installieren
+ihre Abhängigkeiten. Zum erneuten Bauen aus einem Quellcode-Checkout die
+folgenden Schritte nutzen; falls ein Checkout bereits vorhanden ist,
+das Klonen überspringen und in `mcp/zcode-harness-mcp` wechseln.
 
 ```powershell
 cd $HOME
-git clone <dieses-repo> zcode-harness-mcp   # oder Ordner kopieren
-cd zcode-harness-mcp
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git
+cd ZCode-Agent-Kit\mcp\zcode-harness-mcp
 npm install
 npm run build
-# Selbsttest der Runtime-Erkennung:
+# Runtime-Erkennung prüfen:
 npm run probe:runtime
 ```
 
@@ -49,7 +52,7 @@ Beispiel-Konfiguration (z. B. `claude_desktop_config.json` bzw. `.mcp.json`):
     "zcode-harness": {
       "command": "node",
       "args": [
-        "C:\\Users\\<you>\\zcode-harness-mcp\\dist\\index.js",
+        "C:\\path\\to\\zcode-agent-kit\\mcp\\zcode-harness-mcp\\dist\\index.js",
         "--stdio",
         "--allow-workspace", "C:\\Users\\<you>\\Projects",
         "--interaction-policy", "ask"
@@ -81,7 +84,8 @@ Der Demo-Client zeigt den kompletten Ablauf: Fähigkeiten entdecken → Workspac
 
 ```powershell
 npm test          # Build + Unit + Integration (Fixture-Harness, deterministisch)
-npm run test:live # Live-Tests nur mit ausdrücklichem Opt-in (echte Installation/Quota): $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+$env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\path\to\workspace"; $env:LIVE_DATA_DIR="C:\path\to\data"
+npm run test:live # ausdrückliches Opt-in: echte Installation und mögliche Quota-Nutzung
 ```
 
 ## Wichtigste Kommandozeilen-Flags

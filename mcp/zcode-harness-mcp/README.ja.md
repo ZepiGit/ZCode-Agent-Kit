@@ -24,29 +24,30 @@ app-server --stdio`、ローカルインストール）が自身のツール・�
 
 ## 前提条件
 
-- Windows 10/11（動作確認済み）または PATH 上に `node` がある OS
+- Windows 10/11（動作確認済み）。他の OS で自動検出できない場合は `--runtime-path` でインストール済みハーネスを指定
 - Node.js ≥ 20（`node --version`）。スクリプトは固定のプログラム名 `node`
   でハーネスを起動します
 - ZCode（Desktop）インストール済み。ブリッジは `zcode.cjs` を自動検出：
   - `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`
   - `%ProgramFiles%\ZCode\resources\glm\zcode.cjs`
-  - または明示的に：`--runtime-path` ないし `ZCODE_HARNESS_RUNTIME_PATH`
+  - または `--runtime-path` / `ZCODE_HARNESS_RUNTIME_PATH` でインストール済みのファイルを指定
 - ZCode ログイン済み（ハーネスはローカルの Z.AI OAuth ログインを使用。
   ブリッジは**資格情報を管理せず**、すべての出力でシークレットを伏字に）
 
 ## インストール（Windows / PowerShell）
 
-ZCode Agent Kit のチェックアウト内では、ブリッジは既に
-`mcp/zcode-harness-mcp/` にあります — クローンは不要、そこへ直接 cd して
-ください。
+リリース版インストーラーと npm セットアップにはビルド済みのブリッジが
+含まれ、依存関係がインストールされます。ソースから再ビルドする場合は
+以下を実行します。既にチェックアウトがあれば、クローンを省略して
+`mcp/zcode-harness-mcp` に移動してください。
 
 ```powershell
 cd $HOME
-git clone <このリポジトリ> zcode-harness-mcp   # またはフォルダをコピー
-cd zcode-harness-mcp
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git
+cd ZCode-Agent-Kit\mcp\zcode-harness-mcp
 npm install
 npm run build
-# ランタイム検出のセルフテスト：
+# ランタイム検出の確認：
 npm run probe:runtime
 ```
 
@@ -62,7 +63,7 @@ npm run probe:runtime
     "zcode-harness": {
       "command": "node",
       "args": [
-        "C:\\Users\\<you>\\zcode-harness-mcp\\dist\\index.js",
+        "C:\\path\\to\\zcode-agent-kit\\mcp\\zcode-harness-mcp\\dist\\index.js",
         "--stdio",
         "--allow-workspace", "C:\\Users\\<you>\\Projects",
         "--interaction-policy", "ask"
@@ -98,7 +99,8 @@ node examples\demo-client.mjs --fixture
 
 ```powershell
 npm test          # ビルド + ユニット + 統合（フィクスチャハーネス、決定論的）
-npm run test:live # 明示 opt-in のみ（実インストール・Quota）： $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+$env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\path\to\workspace"; $env:LIVE_DATA_DIR="C:\path\to\data"
+npm run test:live # 明示的に有効化：実インストールと利用枠の消費可能性
 ```
 
 ## 主なコマンドラインフラグ

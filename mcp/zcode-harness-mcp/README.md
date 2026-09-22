@@ -13,25 +13,28 @@ The bridge is a **control layer**, not a chat client and not a prompt wrapper: a
 
 ## Prerequisites
 
-- Windows 10/11 (tested) or any OS with `node` on the PATH
+- Windows 10/11 (tested); on other systems provide a valid `--runtime-path` if automatic discovery cannot find the installed harness
 - Node.js ≥ 20 (`node --version`); the script starts the harness with the fixed program name `node`
 - ZCode (Desktop) installed. The bridge finds `zcode.cjs` automatically at
   - `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`
   - `%ProgramFiles%\ZCode\resources\glm\zcode.cjs`
-  - alternatively explicitly: `--runtime-path` or `ZCODE_HARNESS_RUNTIME_PATH`
+  - alternatively specify the installed bundle with `--runtime-path` or `ZCODE_HARNESS_RUNTIME_PATH`
 - ZCode logged in (the harness uses the local Z.AI OAuth login; the bridge **manages no credentials** and redacts secrets in all output)
 
 ## Installation (Windows / PowerShell)
 
-Inside a ZCode Agent Kit checkout the bridge already lives at `mcp/zcode-harness-mcp/` — skip the clone and `cd` there directly.
+The release installer and npm setup include the built bridge and install its
+dependencies. To rebuild from a source checkout, use the steps below. If you
+already have the checkout,
+skip the clone and change to its `mcp/zcode-harness-mcp` directory.
 
 ```powershell
 cd $HOME
-git clone <this-repo> zcode-harness-mcp   # or copy the folder
-cd zcode-harness-mcp
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git
+cd ZCode-Agent-Kit\mcp\zcode-harness-mcp
 npm install
 npm run build
-# self-test of the runtime detection:
+# Check runtime detection:
 npm run probe:runtime
 ```
 
@@ -47,7 +50,7 @@ Example configuration (e.g. `claude_desktop_config.json` or `.mcp.json`):
     "zcode-harness": {
       "command": "node",
       "args": [
-        "C:\\Users\\<you>\\zcode-harness-mcp\\dist\\index.js",
+        "C:\\path\\to\\zcode-agent-kit\\mcp\\zcode-harness-mcp\\dist\\index.js",
         "--stdio",
         "--allow-workspace", "C:\\Users\\<you>\\Projects",
         "--interaction-policy", "ask"
@@ -79,7 +82,8 @@ The demo client shows the complete flow: discover capabilities → open workspac
 
 ```powershell
 npm test          # build + unit + integration (fixture harness, deterministic)
-npm run test:live # explicit opt-in only (real installation/quota): $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+$env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\path\to\workspace"; $env:LIVE_DATA_DIR="C:\path\to\data"
+npm run test:live # explicit opt-in: real installation and possible quota usage
 ```
 
 ## Most important CLI flags

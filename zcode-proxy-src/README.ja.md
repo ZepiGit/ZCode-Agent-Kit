@@ -11,11 +11,10 @@
 変更は [`../MANIFEST.md`](../MANIFEST.md) に、ローカルパッチは
 [`../patches/`](../patches/) にあります。
 
-本 README は、このコンポーネントが **ZCode Agent Kit 内でどのように使われるか**
-を説明します。upstream のオリジナル README（中国語）は
-[README.zh-CN.md](README.zh-CN.md) として保存されており、スタンドアロン版の
-upstream プロジェクト（Android アプリ、Docker デプロイ、オフピークチャネル、
-トライアル請求）について記載しています —— kit はそれらを使いません。
+本 README と[中国語訳](README.zh-CN.md)は、このコンポーネントが
+**ZCode Agent Kit 内でどのように使われるか**を説明します。upstream には
+Android、Docker、オフピークチャネル、トライアル請求など独立運用向けの
+機能もありますが、kit では使用しません。
 
 ## kit 内での役割
 
@@ -24,14 +23,26 @@ chat-completions・Anthropic messages・OpenAI Responses の各リクエスト�
 ログイン済みの ZCode Desktop アカウント（start-plan、ZCode Desktop と同じ
 クォータ）で Z.AI ゲートウェイへ転送します。
 
+オプションの `auth.accounts.enabled` は、複数の認証済みアカウントを
+暗号化されたプールに保持します。新しいリクエストは送信前に最新の
+プール状態を読み、明示的なクォータ信号 `1005`、`1113`、`3001` の場合のみ、
+次の適切なアカウントへ 1 回だけ順番に切り替えます。有効な間、
+`zcode-kit auth login zai` での別アカウントへのログインは追加保存され、
+同じアカウントでの再ログインは既存の情報を更新します。
+`zcode-kit accounts` または `zcode-proxy auth accounts` の
+`pause|resume`、`explain`、`doctor`、`quota`、`--live` が使えます。
+鍵、移行、復旧については [Account Rotator のドキュメント](../docs/ACCOUNT_ROTATOR.md) を参照してください。
+
 - アドレス/形式： `POST /v1/chat/completions`、`POST /v1/messages`、
-  `POST /v1/responses`、`GET /v1/models`、`GET /health`、`GET /quota`
-- 認証： `Authorization: Bearer <.proxykey の内容>` — 鍵は setup.mjs がローカルで
-  生成し、マシンの外へ出ることはありません
+  `POST /v1/responses`、`GET /v1/models`、`GET /health`、`GET /quota`、
+  認証が必要な `GET /accounts/status` と `GET /accounts/quota`
+- 認証： `Authorization: Bearer <.proxykey の内容>` — `zcode-kit setup` が
+  ローカルで鍵を生成します。リリース版/ソースでは kit 内、npm では
+  別の状態ディレクトリに保存されます
 - ライフサイクル： `node proxy\zcode-proxy-manager.mjs start|stop|restart|status|doctor|logs`
   が管理（ループバックのみのバインド、fail-closed 停止、ログローテーション —
   ルート README 参照）
-- ログイン更新： [README.ja.md](../README.ja.md) →「ログインの更新」を参照
+- ログイン更新： `zcode-kit auth login zai`。 [メイン README](../README.ja.md) を参照
 
 ## upstream からのローカル差分
 
@@ -45,9 +56,9 @@ chat-completions・Anthropic messages・OpenAI Responses の各リクエスト�
   導入します。Android ビルド経路（`scripts/build-android-apk.sh`、
   `build:android-*` npm スクリプト、esbuild devDependency、vendored 版
   `.github/workflows/release.yml` の `build-android` ジョブ）も合わせて削除済みです
-- upstream のテストファイル 2 件をローカルで追加。ソース変更はすべて
-  [`../patches/zcode-proxy-local-patches.patch`](../patches/zcode-proxy-local-patches.patch)
-  にあります
+- ローカルの変更とテストはこのリポジトリで管理されています。
+  [ベンダーパッチ](../patches/zcode-proxy-local-patches.patch)は履歴上の
+  参考資料であり、後続の変更の完全な記録ではありません
 
 ## 利用可能なモデル
 
@@ -70,8 +81,9 @@ chat-completions・Anthropic messages・OpenAI Responses の各リクエスト�
 
 ## 設定と環境変数
 
-プロキシは `config.yaml` を読みます（kit は `ZCODE_PROXY_CONFIG` で
-`../proxy/config.yaml` を指します）。環境変数が優先されます。よく使うもの：
+プロキシは通常 `config.yaml` を読みます。リリース版/ソースでは
+`ZCODE_PROXY_CONFIG` が `../proxy/config.yaml` を指しますが、npm では
+別の状態ディレクトリに設定が保存されます。環境変数が優先されます：
 
 | 環境変数 | デフォルト | 意味 |
 |---|---|---|
@@ -84,11 +96,13 @@ chat-completions・Anthropic messages・OpenAI Responses の各リクエスト�
 
 ## ソースから直接起動 / TUI
 
-このディレクトリからプロキシを直接起動すると、対話型ターミナルパネル
-（upstream のメイン UI）が開きます：
+リリース版またはソースのチェックアウトを設定して
+`../proxy/config.yaml` が作成された後、このディレクトリから直接
+起動すると対話型ターミナルパネルが開きます：
 
 ```powershell
-ZCODE_PROXY_CONFIG="../proxy/config.yaml" bun run src/index.ts
+$env:ZCODE_PROXY_CONFIG = (Resolve-Path ..\proxy\config.yaml).Path
+bun run src/index.ts
 ```
 
 <img src="docs/images/tui-annotated.png" alt="ZCode Proxy ターミナルパネル" width="980" />

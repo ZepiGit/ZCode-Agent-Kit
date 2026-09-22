@@ -27,28 +27,30 @@ contexto y sus permisos.
 
 ## Requisitos previos
 
-- Windows 10/11 (probado) o cualquier SO con `node` en el PATH
+- Windows 10/11 (probado); en otros sistemas indica `--runtime-path` si la búsqueda automática no encuentra el harness instalado
 - Node.js ≥ 20 (`node --version`); el script arranca el harness con el nombre
   de programa fijo `node`
 - ZCode (Desktop) instalado. El puente encuentra `zcode.cjs` automáticamente en
   - `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`
   - `%ProgramFiles%\ZCode\resources\glm\zcode.cjs`
-  - alternativamente explícito: `--runtime-path` o `ZCODE_HARNESS_RUNTIME_PATH`
+  - también puedes indicar el archivo instalado con `--runtime-path` o `ZCODE_HARNESS_RUNTIME_PATH`
 - ZCode con sesión iniciada (el harness usa el login OAuth local de Z.AI; el
   puente **no gestiona credenciales** y redacta secretos en todas las salidas)
 
 ## Instalación (Windows / PowerShell)
 
-Dentro de un checkout del ZCode Agent Kit el puente ya vive en
-`mcp/zcode-harness-mcp/` — sáltate el clon y haz `cd` directamente allí.
+El instalador publicado y la configuración npm incluyen el puente compilado
+e instalan sus dependencias. Para volver a compilarlo desde el código fuente,
+sigue estos pasos; si ya tienes una copia del código,
+omite el clon y entra en `mcp/zcode-harness-mcp`.
 
 ```powershell
 cd $HOME
-git clone <este-repo> zcode-harness-mcp   # o copia la carpeta
-cd zcode-harness-mcp
+git clone https://github.com/ZepiGit/ZCode-Agent-Kit.git
+cd ZCode-Agent-Kit\mcp\zcode-harness-mcp
 npm install
 npm run build
-# autocomprobación de la detección de runtime:
+# comprobar la detección de runtime:
 npm run probe:runtime
 ```
 
@@ -64,7 +66,7 @@ Configuración de ejemplo (p. ej. `claude_desktop_config.json` o `.mcp.json`):
     "zcode-harness": {
       "command": "node",
       "args": [
-        "C:\\Users\\<you>\\zcode-harness-mcp\\dist\\index.js",
+        "C:\\path\\to\\zcode-agent-kit\\mcp\\zcode-harness-mcp\\dist\\index.js",
         "--stdio",
         "--allow-workspace", "C:\\Users\\<you>\\Projects",
         "--interaction-policy", "ask"
@@ -100,7 +102,8 @@ artefactos → pedido de seguimiento en la misma sesión.
 
 ```powershell
 npm test          # build + unitarios + integración (harness fixture, determinista)
-npm run test:live # opt-in explícito (instalación/cuota real): $env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\..."; $env:LIVE_DATA_DIR="C:\..."
+$env:LIVE_TEST="1"; $env:LIVE_WORKSPACE="C:\path\to\workspace"; $env:LIVE_DATA_DIR="C:\path\to\data"
+npm run test:live # habilitación explícita: instalación real y posible uso de cuota
 ```
 
 ## Flags de línea de comandos más importantes

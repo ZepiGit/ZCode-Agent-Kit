@@ -15,14 +15,16 @@
 | `GET /v1/models` | モデル一覧 | ディスカバリー |
 | `GET /health`, `GET /quota` | ステータス/クォータ（要認証） | 診断 |
 
-認証：`Authorization: Bearer <.proxykey の内容>`
-鍵はローカル（`<clone>/.proxykey`）にのみ置かれ、setup.mjs が生成します。
+認証：`Authorization: Bearer <.proxykey の内容>`。
+`zcode-kit setup` が鍵をローカルで生成します。リリース版とソースの
+チェックアウトでは kit 内に `.proxykey` を置きます。npm インストールでは
+`node_modules` の外にあるインストール固有の状態ディレクトリに保存します。
 
 ## `zcode-kit setup` による自動セットアップ（検出されたハーネスのみ）
 
-setup.mjs はインストール済みのハーネスを検出し、**その対象だけ**を設定します。
-OMP しかないユーザーの環境には Claude/Codex の成果物は一切作られません
-（生成ファイルも含む）。
+`zcode-kit setup --harness auto` はインストール済みのハーネスを検出し、
+**その対象だけ**を設定します。OMP しかない場合、Claude/Codex の設定や
+生成ラッパーは作られません。
 
 | ハーネス | 仕組み | 既存 config への影響 |
 |---|---|---|
@@ -33,17 +35,20 @@ OMP しかないユーザーの環境には Claude/Codex の成果物は一切�
 | OpenCode | `opencode.json` の provider `zcode`（`@ai-sdk/openai-compatible`、apiKey `{env:ZCODE_PROXY_KEY}`） | 追加型。JSONC コメントは保持される |
 | Aider | `generated/aider-zcode.env` + `bin/zcode-aider.cmd\|.sh`（プロセスローカル、**setx しない**） | モデル `openai/glm-5.3[-flash]` |
 | Continue | `~/.continue/config.yaml` の管理ブロック（schema v1） | 既存のモデル/ロールは保持 |
-| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` | 認証情報は文書化された `auth.command` ヘルパー経由（kit のキーリゾルバ、シェルなし） |
+| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json`（Windows）または `~/.config/goose/custom_providers/zcode.json`（macOS/Linux） | 認証情報は文書化された `auth.command` ヘルパー経由（kit のキーリゾルバ、シェルなし） |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | kit は VS Code の状態に一切触れない。UI で一度だけ値を入力する |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | UI でカスタム provider（Anthropic messages）を設定。kilo.jsonc は意図的に書かない |
 | MCP 対応ハーネス | stdio サーバー `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：`~/.omp/agent/mcp.json` にエントリー。Claude Code：`claude mcp add`（検出時のみ）。Codex：隔離 home 内。MCP 単体はモデル統合としてカウントされない |
+
+`generated/` 以下のパスは kit の状態を指します。リリース版/ソースでは
+kit ディレクトリ内、npm では別の状態ディレクトリ内です。
 
 ## オプトインのラッパー（既存 config は変更されない）
 
 | ハーネス | ラッパー | 動作 |
 |---|---|---|
-| Claude Code | `bin\zcode-claude.cmd` | 必要時にプロキシを起動し、`claude --settings <clone>\generated\claude-zcode-settings.json` を呼び出す（CLI settings は user settings.json より優先。通常の `claude` はそのまま動く） |
-| Codex CLI | `bin\zcode-codex.cmd` | `CODEX_HOME=<clone>\generated\codex-home` + `ZCODE_PROXY_KEY` を設定し、必要時にプロキシを起動。通常の `codex` と `~/.codex` は変更されない |
+| Claude Code | `bin\zcode-claude.cmd` | 必要時にプロキシを起動し、`claude --settings <kit の状態>\generated\claude-zcode-settings.json` を呼び出す（CLI settings は user settings.json より優先。通常の `claude` はそのまま動く） |
+| Codex CLI | `bin\zcode-codex.cmd` | `CODEX_HOME=<kit の状態>\generated\codex-home` + `ZCODE_PROXY_KEY` を設定し、必要時にプロキシを起動。通常の `codex` と `~/.codex` は変更されない |
 
 ## 手動での接続（OpenAI/Anthropic 対応の任意のクライアント）
 
@@ -76,29 +81,24 @@ model: glm-5.3
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<clone の絶対パス>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["<kit の絶対インストールパス>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
 ```
 
-ブリッジは**実インストールの ZCode Desktop** を制御します（app-server
-プロトコル：セッション、ターン、タスク）。制限事項：デスクトップが起動して
-いる必要がある（Z.AI の CAPTCHA はデスクトップが解決）。ブリッジの
-カタログ経由の推論レベルは `low/high/max`。デスクトップのプランカタログには
-GLM-5.3/GLM-5-Turbo が載る — GLM-5.3-Flash はプロキシ経由で動き、
-デスクトップブリッジでは使えない。詳細：
-[mcp/zcode-harness-mcp/README.md](../mcp/zcode-harness-mcp/README.md)。
+ブリッジは**実際にインストールされた ZCode ハーネス**を制御します
+（app-server プロトコル：セッション、ターン、タスク）。対話的な認証には
+Desktop が必要な場合がありますが、プロバイダーがモデル呼び出しを拒否
+することもあります。ブリッジの推論レベルは `low/high/max` です。
+ライブのモデル一覧はプロキシ側と異なる場合があり、GLM-5.3-Flash
+はプロキシ経由で検証されています。詳細：[MCP ブリッジ](../mcp/zcode-harness-mcp/README.ja.md)。
 
 ## クォータとエラーの型
 
 - `GET /quota`（認証付き）はモデルごとのトークンバケットを表示します。
-- クォータ消費済み → HTTP 400 `[1005] exceed quota limit`（再試行不可 —
-  リセットを待つ。GLM-5.3 は毎日現地時間 18:00）。
+- クォータ消費済み → HTTP 400 `[1005] exceed quota limit`（再試行せず、
+  プロバイダーによる利用枠の回復を待つ）。
 - `[3007] captcha verify failed` → 激しい再試行の後のゲートウェイ側
   アンチアビューズ。しばらく休憩する。
-- `401 start_plan_jwt_invalid` → デスクトップのログインを更新
-  （[README.ja.md](../README.ja.md) →「ログインの更新」）。
-- Codex 経由：responses ハンドラでまれに化粧的なエラー
-  `OutputTextDelta without active item` が出る — 結果は正しい
-  （既知の見た目上の問題）。
+- `401 start_plan_jwt_invalid` → Desktop のログインを確認し、`zcode-kit auth login zai` で更新。
