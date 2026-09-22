@@ -12,6 +12,10 @@
 import { describe, it, expect } from "bun:test";
 import os from "node:os";
 import { collectQuotaSnapshot, handleQuota, clearQuotaCache } from "./routes-quota.js";
+import { createFetchHandler } from "./server.js";
+import { AuthManager } from "../auth/manager.js";
+import { createAccountRotator } from "../auth/account-rotator.js";
+import type { loadCredential } from "../auth/store.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { Credential } from "../auth/types.js";
 import { fixtureSecret } from "../test-fixtures.js";
@@ -213,6 +217,25 @@ describe("collectQuotaSnapshot response mapping", () => {
 });
 
 describe("handleQuota singleflight + cache", () => {
+  it("partitions concurrent billing snapshots and singleflight by account", async () => {
+    clearQuotaCache();
+    const first = makeBillingFetch({ body: { balances: [{ show_name: "first", remaining_units: 10 }] } });
+    const second = makeBillingFetch({ body: { balances: [{ show_name: "second", remaining_units: 20 }] } });
+    const responses = await Promise.all([
+      handleQuota(makeConfig(), first.fetchImpl, loadFake, "pool:first"),
+      handleQuota(makeConfig(), second.fetchImpl, loadFake, "pool:second"),
+      handleQuota(makeConfig(), first.fetchImpl, loadFake, "pool:first"),
+    ]);
+    const bodies = await Promise.all(responses.map(response => response.json()));
+    expect(bodies.map(body => body.balances[0].remainingUnits)).toEqual([10, 20, 10]);
+    expect(first.calls.length).toBe(2);
+    expect(second.calls.length).toBe(2);
+    const cached = await handleQuota(makeConfig(), second.fetchImpl, loadFake, "pool:second");
+    expect((await cached.json()).cached).toBe(true);
+    expect(second.calls.length).toBe(2);
+    clearQuotaCache();
+  });
+
   it("parallel /quota calls share one billing round-trip (singleflight)", async () => {
     clearQuotaCache();
     const { fetchImpl, calls } = makeBillingFetch();
@@ -327,5 +350,48 @@ describe("handleQuota singleflight + cache", () => {
       globalThis.Date.now = realNow;
       clearQuotaCache();
     }
+  });
+});
+
+describe("GET /quota account pool", () => {
+  it("uses the selected pooled JWT and keeps account snapshots separate", async () => {
+    clearQuotaCache();
+    const accounts = ["first", "second"].map(id => ({
+      id,
+      credential: { apiKey: fixtureSecret(`quota-${id}`), provider: "zai" as const, jwt: `${makeJwt()}.${id}` },
+    }));
+    const auth = new AuthManager({ accountRotator: createAccountRotator(accounts) });
+    const authorizations: string[] = [];
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      const authorization = (init?.headers as Record<string, string>).authorization;
+      authorizations.push(authorization);
+      const remaining = authorization.endsWith(".first") ? 10 : 20;
+      return Response.json({ code: 0, data: { balances: [{ show_name: "Free", remaining_units: remaining }] } });
+    }) as typeof fetch;
+    const handler = createFetchHandler({ config: makeConfig(), auth, fetchImpl });
+    const first = await (await handler(new Request("http://localhost/quota"))).json();
+    const second = await (await handler(new Request("http://localhost/quota"))).json();
+    const cachedFirst = await (await handler(new Request("http://localhost/quota"))).json();
+    expect(first.balances[0].remainingUnits).toBe(10);
+    expect(second.balances[0].remainingUnits).toBe(20);
+    expect(cachedFirst.balances[0].remainingUnits).toBe(10);
+    expect(cachedFirst.cached).toBe(true);
+    expect(authorizations).toEqual(accounts.flatMap(account => [
+      `Bearer ${account.credential.jwt}`, `Bearer ${account.credential.jwt}`,
+    ]));
+    clearQuotaCache();
+  });
+
+  it("returns quota_unavailable for an empty enabled pool without legacy fallback", async () => {
+    clearQuotaCache();
+    const auth = new AuthManager({ accountRotator: createAccountRotator([]) });
+    auth.setOAuthCredential(fakeCred);
+    const { fetchImpl, calls } = makeBillingFetch();
+    const handler = createFetchHandler({ config: makeConfig(), auth, fetchImpl });
+    const response = await handler(new Request("http://localhost/quota"));
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.type).toBe("quota_unavailable");
+    expect(calls.length).toBe(0);
+    clearQuotaCache();
   });
 });
