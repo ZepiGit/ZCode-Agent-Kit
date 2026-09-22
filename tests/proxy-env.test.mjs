@@ -24,6 +24,7 @@ test('managed env removes ambient solver overrides including Windows casing vari
     Zcode_Proxy_Allow_Unsandboxed_Captcha: '0',
     ZCODE_PROXY_CREDENTIALS_PATH: 'C:/store/credentials.json',
     ZCODE_PROXY_CREDENTIAL_SECRET: 'keep',
+    ZCODE_PROXY_ACCOUNTS_PATH: 'C:/store/accounts.json',
     HTTPS_PROXY: 'http://corporate-proxy:8080',
   };
   const snapshot = { ...source };
@@ -34,6 +35,7 @@ test('managed env removes ambient solver overrides including Windows casing vari
   assert.equal(env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA, '1');
   assert.equal(env.ZCODE_PROXY_CREDENTIALS_PATH, source.ZCODE_PROXY_CREDENTIALS_PATH);
   assert.equal(env.ZCODE_PROXY_CREDENTIAL_SECRET, 'keep');
+  assert.equal(env.ZCODE_PROXY_ACCOUNTS_PATH, source.ZCODE_PROXY_ACCOUNTS_PATH);
   assert.equal(env.HTTPS_PROXY, source.HTTPS_PROXY);
   assert.deepEqual(source, snapshot);
 });
