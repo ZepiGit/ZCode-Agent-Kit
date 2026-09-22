@@ -1,6 +1,5 @@
 # zcode-harness-mcp
-
-**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+**English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 An MCP server (stdio **and** Streamable-HTTP) that lets other models and agents drive the **real installed ZCode harness**: discover capabilities, pick models, read/change settings, manage workspaces and sessions, start tasks, answer follow-up questions, watch progress, and retrieve complete results including file changes and artifacts.
 

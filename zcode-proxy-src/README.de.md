@@ -1,6 +1,5 @@
 # ZCode Proxy (Deutsch)
-
-[English](README.md) | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | **Deutsch**
+[English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 > Übersetzung des englischen Originals; bei Abweichungen gilt das englische README.
 

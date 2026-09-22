@@ -1,6 +1,5 @@
 # Harness Adapters — How Other Agent CLIs Use the Local Proxy
-
-**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+**English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 The core of the kit is harness-neutral: a local HTTP proxy at
 `http://127.0.0.1:8457` with three standard formats:

@@ -1,6 +1,5 @@
 # zcode-harness-mcp（中文）
-
-[English](README.md) | **中文** | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+[English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · **简体中文**
 
 > 本文为英文原文的翻译；如有出入，以英文原版为准。
 

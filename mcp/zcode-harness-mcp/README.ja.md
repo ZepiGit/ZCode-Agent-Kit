@@ -1,6 +1,5 @@
 # zcode-harness-mcp（日本語）
-
-[English](README.md) | [中文](README.zh-CN.md) | [Español](README.es.md) | **日本語** | [Deutsch](README.de.md)
+[English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · **日本語** · [简体中文](README.zh-CN.md)
 
 > 本ドキュメントは英語原文の翻訳です。相違がある場合は英語版が正となります。
 

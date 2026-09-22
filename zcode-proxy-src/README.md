@@ -1,6 +1,5 @@
 # ZCode Proxy
-
-**English** | [中文](README.zh-CN.md) | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+**English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 This directory vendors the **zcode-proxy** from
 [TriDefender/zcode-api](https://github.com/TriDefender/zcode-api) — pinned at

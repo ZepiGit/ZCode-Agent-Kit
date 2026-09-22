@@ -1,6 +1,5 @@
 # ZCode Proxy
-
-[English](README.md) | **中文** | [Español](README.es.md) | [日本語](README.ja.md) | [Deutsch](README.de.md)
+[English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · **简体中文**
 
 > 本文与英文版描述的是 ZCode Agent Kit 中的代理组件；如有差异，以英文版为准。
 

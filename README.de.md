@@ -1,4 +1,5 @@
 # ZCode Agent Kit
+[English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 Nutze dein ZCode-Konto mit dem Coding-Assistenten, den du bereits verwendest.
 
