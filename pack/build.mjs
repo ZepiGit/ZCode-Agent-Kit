@@ -40,6 +40,8 @@ const ALLOW_PREFIXES = [
   "mcp/zcode-harness-mcp/LICENSE",
   "zcode-proxy-src/LICENSE",
   "zcode-proxy-src/README.md",
+  "zcode-proxy-src/captcha-compatibility.mjs",
+  "zcode-proxy-src/captcha-compatibility.d.mts",
   "zcode-proxy-src/src/",
   "zcode-proxy-src/package.json",
   "zcode-proxy-src/tsconfig.json",

@@ -1,5 +1,5 @@
 /**
- * Live tests against the REAL installed ZCode harness (0.16.5).
+ * Live tests against the REAL installed ZCode harness (0.16.9 workspace contracts).
  * Skipped unless LIVE_TEST=1 is set. Usage:
  *   LIVE_TEST=1 node --test test/live/live.test.mjs
  *
@@ -20,10 +20,8 @@ test("live: runtime discovery finds the real installed harness", { skip: !enable
     const health = await c.tool("zcode_health", {});
     assert.equal(health.degraded ?? false, false);
     assert.match(String(health.runtime.harnessPath), /zcode\.cjs$/);
-    assert.equal(health.runtime.harnessVersion, "0.16.5");
     assert.ok(health.runtime.bundleFingerprint);
     assert.ok(health.runtime.bundleFingerprint.length === 16);
-    assert.equal(health.protocol, "ZCode Protocol v1 (zcode.cjs app-server --stdio, verified 0.16.5)");
   } finally {
     await c.stop();
   }
@@ -33,14 +31,15 @@ test("live: real workspace state, model catalog, settings schema", { skip: !enab
   const c = await startBridge({ reuseDataDir: process.env.LIVE_DATA_DIR, workspaceDirOverride: process.env.LIVE_WORKSPACE, useRealRuntime: true });
   try {
     const opened = await c.tool("zcode_workspace_open", { workspacePath: process.env.LIVE_WORKSPACE });
-    assert.ok(opened.revision >= 0);
+    assert.equal(opened.revision, null);
+    assert.equal(opened.settings.model, null);
+    assert.ok(Array.isArray(opened.presentation.slashCommands));
     const models = await c.tool("zcode_models_list", { workspacePath: process.env.LIVE_WORKSPACE });
     const ids = (models.modelCatalog.available ?? []).map((m) => `${m.ref.providerId}/${m.ref.modelId}`);
     assert.ok(ids.length >= 2, "live catalog should list models, got: " + JSON.stringify(ids));
     console.log("live catalog:", ids.join(", "));
-    assert.ok(!ids.includes("zai/GLM-5.3-Flash"), "GLM-5.3-Flash is not part of the local plan catalog; selection must fail with the catalog");
     const schema = await c.tool("zcode_settings_schema", { workspacePath: process.env.LIVE_WORKSPACE });
-    assert.ok(schema.settings.find((s) => s.path === "model").choices.length >= 2);
+    assert.equal(schema.settings.find((s) => s.path === "model").writable, false);
   } finally {
     await c.stop();
   }

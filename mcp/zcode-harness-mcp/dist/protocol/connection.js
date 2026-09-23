@@ -42,20 +42,30 @@ export class ZcodeConnection {
         await this.starting;
     }
     async spawnChild() {
-        const { harnessPath, cwd } = this.opts;
-        const child = spawnAppServer({ harnessPath, cwd });
+        const { harnessPath, cwd, bundledProviderConfigPath } = this.opts;
+        const child = spawnAppServer({ harnessPath, cwd, bundledProviderConfigPath });
         this.exited = false;
         this.child = child;
         child.stdout.setEncoding("utf8");
         child.stdout.on("data", (chunk) => this.onData(chunk));
+        // Classify the known bootstrap failure without forwarding upstream stderr,
+        // which may contain provider credentials or unrelated user data.
+        let stderrTail = "";
+        let providerConfigMissing = false;
+        const exitMessage = (code, signal) => `harness exited (code=${code}, signal=${signal})${providerConfigMissing
+            ? "; PROVIDER_CONFIG_MISSING: CLI could not locate its built-in provider configuration; check the installed resources/config/provider/zcode-builtin.json or ZCODE_BUILTIN_PROVIDER_CONFIG_FILE"
+            : ""}`;
         child.stderr.setEncoding("utf8");
         child.stderr.on("data", (chunk) => {
-            log.debug("harness stderr", { line: chunk.slice(0, 2000) });
+            const text = stderrTail + chunk;
+            if (text.includes("无法定位 CLI ZCode Built-in Provider Config"))
+                providerConfigMissing = true;
+            stderrTail = text.slice(-128);
         });
         child.on("exit", (code, signal) => {
             this.exited = true;
             this.lastExit = { code, signal };
-            this.failAllPending(new ZcodeConnectionError("HARNESS_EXITED", `harness exited (code=${code}, signal=${signal})`));
+            this.failAllPending(new ZcodeConnectionError("HARNESS_EXITED", exitMessage(code, signal)));
             this.child = null;
             this.opts.onExit?.(code, signal);
         });
@@ -69,9 +79,9 @@ export class ZcodeConnection {
         // short grace period.
         await new Promise((resolve, reject) => {
             const t = setTimeout(() => resolve(), 400);
-            child.once("exit", () => {
+            child.once("exit", (code, signal) => {
                 clearTimeout(t);
-                reject(new ZcodeConnectionError("HARNESS_EXITED", "harness exited during startup"));
+                reject(new ZcodeConnectionError("HARNESS_EXITED", exitMessage(code, signal)));
             });
             child.once("error", (err) => {
                 clearTimeout(t);

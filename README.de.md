@@ -95,16 +95,18 @@ Diese Befehle starten oder prüfen den Proxy automatisch. Eine Antwort mit `ok` 
 Für eine interaktive OMP-Sitzung:
 
 ```sh
-omp --model zcode/glm-5.3
+omp --model zcode/glm-5.3-flash
 ```
 
 Für eine interaktive Claude-Code-Sitzung:
 
 ```sh
-zcode-kit run claude-code -- --model glm-5.3
+zcode-kit run claude-code -- --model glm-5.3-flash
 ```
 
 Wähle `glm-5.3` für Text oder `glm-5.3-flash` für Text und Bilder. Die Bildunterstützung hängt auch von deinem Assistenten ab. Eine optionale MCP-Bridge stellt Werkzeuge der installierten ZCode-Laufzeit bereit; ihre Registrierung verbindet noch kein Modell.
+
+**Derzeit unveröffentlichte lokale Korrektur:** Flash verwendet immer Thinking. Anfragen mit deaktiviertem Thinking werden auf `low` normalisiert; ausdrücklich gewähltes `high` und `max` bleiben erhalten. In OMP wählst du die Stufe mit `--thinking low`, `--thinking high` oder `--thinking max`. Vollständig abgeschlossene Modellantworten mit Flash wurden über den direkten Proxy und Claude Code geprüft; das bedeutet nicht, dass jeder Assistent erfolgreich getestet wurde.
 
 <details>
 <summary>Weitere Assistenten und Grenzen der Integration</summary>
@@ -154,6 +156,8 @@ zcode-kit auth status
 
 - **Befehl nicht gefunden:** Terminal neu öffnen. Bei Release-Installationen prüfen, ob `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) oder `$HOME/.local/bin` (macOS/Linux) im PATH steht.
 - **Keine Modellantwort:** Desktop-Login und verfügbares Kontingent prüfen. Proxy starten, wenn dein Assistent ihn nicht startet. Eine lokale Gesundheitsprüfung beweist keinen Modellzugriff.
+- **OMP-Autostart (derzeit unveröffentlichte lokale Korrektur):** OMP direkt starten. Das Setup fixiert natives Node/Bun; die Erweiterung führt die Vorprüfung in einem neuen Kindprozess aus, statt Kit-Module in OMP zu importieren. Fehler melden Kategorien ohne Geheimnisse; der Kindprozess ist auf 120 Sekunden begrenzt. Ursache beheben und nach der sitzungsbezogenen Wartezeit von 60 Sekunden erneut versuchen; eine Wiederherstellung ist in derselben Sitzung möglich. Wurde die Laufzeit verschoben, `zcode-kit setup --harness auto` erneut ausführen und die Erweiterung neu laden. Unbekannte Portbesitzer bleiben unberührt.
+- **Desktop-Login importieren (derzeit unveröffentlichte lokale Korrektur):** Mit `zcode-kit auth login zai --import` den aktuell aktiven `zai`/`start-plan`-Login aus Desktop 0.16.9 importieren; ein ausdrücklich konfigurierter Plan ist erforderlich. Ist `credentials.json` vorhanden, ist diese Datei maßgeblich: Bei ungültigen Anmeldedaten erfolgt kein stiller Rückgriff auf die alte `config.json`. Moderne `coding-plan`-Logins verwenden stattdessen den normalen OAuth-Ablauf mit `zcode-kit auth login zai`; der Importer erstellt oder ermittelt keine API-Schlüssel.
 - **401 oder Port belegt:** Auf eine weitere Kit-Installation prüfen. Weder Schlüssel löschen noch einen unbekannten Prozess beenden.
 - **Setup teilweise fehlgeschlagen:** Den ausgegebenen Rollback-Befehl lesen, bevor du es erneut versuchst. Frühere Änderungen können noch vorhanden sein.
 

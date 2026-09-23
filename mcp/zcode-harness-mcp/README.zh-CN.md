@@ -13,8 +13,8 @@
 工具、上下文管理和权限来执行。
 
 - 协议：对外是 MCP（官方 SDK），对内是 **ZCode Protocol v1**（stdio 上的
-  NDJSON，已针对 0.16.5 做过实机验证）——见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)。
-- 规模：32 个 MCP 工具 + MCP 资源；包含 45 个条目的能力注册表
+  NDJSON；0.16.5 的实机验证仅为历史记录，当前契约为 0.16.9）——见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)。
+- 规模：32 个 MCP 工具 + MCP 资源；能力注册表随原生契约更新
   （[`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)）。
 - `npm test` 使用确定性本地 fixtures。实机测试必须显式启用；历史报告不是当前验收证据。
 - 审计加固：会话 ID 同样受工作区限制，`yolo` 需要 `--allow-yolo`。工具允许列表采用精确名称，拒绝 Bash、PowerShell 和 Shell。产物读取有大小上限，JSONL 保留两个各不超过4 MiB的文件。EOF 中断任务并正常关闭子进程，但不保证 Windows 进程树隔离。`--runtime-path` 会执行代码，只能指定可信文件。
@@ -29,6 +29,13 @@
   - 也可以用 `--runtime-path` 或 `ZCODE_HARNESS_RUNTIME_PATH` 指定已安装的文件
 - ZCode 已登录（harness 使用本地 Z.AI OAuth 登录；桥接**不管理任何凭据**，
   并在所有输出中对机密信息做脱敏）
+
+随附提供商配置的路径从已验证的运行时入口解析，而不是从工作目录查找。
+非空的 `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` 优先于
+`ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE`，最后才使用检测到的随附文件。
+仅调整子进程环境；保留 `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE`，不修改父进程环境。
+显式指定的种子配置无效时直接报错，不静默回退。原生配置的生成仍由供应商运行时负责；
+详见 [`docs/SECURITY.md`](docs/SECURITY.md)。
 
 ## 安装（Windows / PowerShell）
 
@@ -85,7 +92,7 @@ node examples\demo-client.mjs --fixture
 ```
 
 演示客户端展示完整流程：发现能力 → 打开工作区 → 读取真实模型目录 →
-GLM-5.3-Flash 检查（不会静默切换模型）→ 修改设置 → 启动任务 → 轮询进度 →
+GLM-5.3-Flash 检查（不会静默切换模型）→ 选择会话模型和模式 → 启动任务 → 轮询进度 →
 回答追问 → 读取结果 + 产物 → 在同一会话中下达后续任务。
 
 ### 4) 测试
@@ -127,6 +134,18 @@ npm run test:live # 显式开启：真实安装，可能消耗额度
 详情：[`docs/SECURITY.md`](docs/SECURITY.md) · 诚实的限制： [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
 
 ## 状态
+
+0.16.9 的 `workspace/readPresentation` 仅返回展示信息，不含默认设置、模型目录或设置修订号。
+`zcode_models_list` 会创建并关闭桥接自己拥有的延迟持久化会话，不发送提示词；
+此过程可能初始化运行时服务，因此在 `--read-only` 下被拒绝。仍支持通过原生方法选择
+会话的模型、模式和推理级别。持久化工作区默认设置的修改和重置不受支持，直接返回明确错误，
+不会伪造本地替代值。运行时偏好设置作用于共享的整个 app-server 进程；其响应只是原生确认，
+不是独立回读验证。
+
+已验证当前原生目录包含 `zai-api/GLM-5.3-Flash`。Windows 上使用 ZCode 0.16.9
+及 `low` 推理级别的实际请求被上游代码 `1113`（余额或资源包不足）阻止，
+不能宣称原生 Flash 已成功回复。
+代理成功不等于 MCP 模型成功；0.16.5 的观察结果仅为历史记录。
 
 当前实现与验证状态：[`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · 测试证据：[CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · API 参考： [`docs/MCP_API.md`](docs/MCP_API.md)
 

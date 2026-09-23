@@ -23,7 +23,7 @@ export default {
 # Your normal ~/.codex is untouched; use bin\\zcode-codex.cmd to enter this setup.
 model = "glm-5.3"
 model_provider = "zcode"
-
+${process.platform === 'win32' ? '\n# Native restricted-token sandbox; no admin setup or full-access bypass.\n[windows]\nsandbox = "unelevated"\n' : ''}
 [model_providers.zcode]
 name = "ZCode (local proxy)"
 base_url = "http://127.0.0.1:${port}/v1"

@@ -93,6 +93,7 @@ async function main() {
             bundleFingerprint: null,
             bundleBytes: null,
             desktopVersion: null,
+            bundledProviderConfigPath: null,
             source: "default-candidates",
             candidatesConsidered: [],
         },

@@ -7,7 +7,6 @@ const solveMock = mock(async (_scene: string, _region: string, _prefix: string) 
 mock.module("./captcha-solver.js", () => ({
   runCaptchaSolve: solveMock,
   shutdownCaptchaSolver: () => {},
-  setCaptchaSolverConcurrency: () => {},
   captchaSolverConcurrency: () => 2,
   CAPTCHA_NODE_DIR: "/tmp",
 }));
@@ -79,6 +78,32 @@ describe("CaptchaTokenPool", () => {
     } finally {
       limited.stopBackgroundRefill();
       solveMock.mockImplementation(async () => 'x'.repeat(64));
+    }
+  });
+
+  it('diagnostic hashes cannot pause ordinary solver failures', async () => {
+    const limited = new CaptchaTokenPool({ poolSizeMin: 1, poolSizeMax: 1, solveRetries: 1, solveConcurrency: 1, emptyTakeRace: 1 });
+    solveMock.mockImplementation(async () => { throw new Error('captcha solve stall | captchaMetadata={"sha256":"a429bf008"}'); });
+    try {
+      // Prefill surfaces the failed mint without the independent empty-take grace wait.
+      await limited.prefill(CFG);
+      expect(solveMock).toHaveBeenCalledTimes(1);
+      solveMock.mockImplementation(async () => 'x'.repeat(64));
+      expect(await limited.takeToken(CFG)).toBe('x'.repeat(64));
+    } finally { limited.stopBackgroundRefill(); solveMock.mockImplementation(async () => 'x'.repeat(64)); }
+  });
+
+  it("prefill stops after a failed batch exhausts its retry budget", async () => {
+    const limited = new CaptchaTokenPool({ poolSizeMin: 1, poolSizeMax: 1, solveRetries: 2, solveConcurrency: 1 });
+    solveMock.mockImplementation(async () => { throw new Error("synthetic solve failure"); });
+    try {
+      await limited.prefill(CFG);
+      expect(solveMock).toHaveBeenCalledTimes(2);
+      expect(limited.stats().ready).toBe(0);
+      expect(limited.stats().activeSolves).toBe(0);
+    } finally {
+      limited.stopBackgroundRefill();
+      solveMock.mockImplementation(async () => "x".repeat(64));
     }
   });
 

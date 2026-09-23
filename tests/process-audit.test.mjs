@@ -59,6 +59,18 @@ test('standard npm endlocal shim runs through native Node without cmd evaluation
   assert.deepEqual(JSON.parse(result.stdout), ['a&b', '%HOME%', 'x y']);
 });
 
+test('standard npm native executable shim runs exact argv without cmd evaluation', { skip: process.platform !== 'win32' }, async t => {
+  const { runCommandSync } = await import(helper);
+  const { root, bin } = fixture(t);
+  copyFileSync(process.execPath, join(bin, 'native.exe'));
+  writeFileSync(join(bin, 'opencode.cmd'), '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n"%dp0%\\native.exe"   %*\r\n');
+  const script = join(root, 'args.cjs'); writeFileSync(script, 'console.log(JSON.stringify(process.argv.slice(2)))');
+  const args = ['two words', 'x & echo not-a-command', '%USERPROFILE%', '日本'];
+  const result = runCommandSync('opencode', [script, ...args], { env: pathEnv(bin), encoding: 'utf8' });
+  assert.equal(result.status, 0, String(result.error ?? result.stderr));
+  assert.deepEqual(JSON.parse(result.stdout), args);
+});
+
 test('unknown batch commands fail closed instead of evaluating prompt metacharacters', { skip: process.platform !== 'win32' }, async t => {
   assert.ok(existsSync(helper));
   const { runCommandSync } = await import(helper);

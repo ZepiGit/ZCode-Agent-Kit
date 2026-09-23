@@ -7,6 +7,7 @@ import {
   finalizeResponsesStream,
 } from "./chat-to-responses.js";
 import type { OpenAIChatResponse, OpenAIStreamChunk } from "./types.js";
+import type { ResponsesOutputItem } from "./responses-types.js";
 
 function chatResp(overrides: Partial<OpenAIChatResponse> = {}): OpenAIChatResponse {
   return {
@@ -246,6 +247,60 @@ describe("streaming", () => {
     expect(completed).toBeDefined();
     const output = (completed as { response: { output: { type: string }[] } }).response.output;
     expect(output.some((o) => o.type === "function_call")).toBe(true);
+  });
+
+  it("keeps text deltas attached to items accepted by the Codex 0.155.1 consumer", () => {
+    const state = newResponsesStreamState("glm-5.2", {
+      meta: { customToolNames: new Set(), namespaceMap: new Map([["files__read", { namespace: "files", name: "read" }]]), hasToolSearch: false },
+    });
+    const events = [
+      ...chatChunkToResponsesEvents(chunk({ choices: [{ index: 0, delta: { reasoning_content: "Inspect first." } }] }), state),
+      ...chatChunkToResponsesEvents(chunk({ choices: [{ index: 0, delta: { content: "Reading " } }] }), state),
+      ...chatChunkToResponsesEvents(chunk({ choices: [{ index: 0, delta: {
+        tool_calls: [{ index: 0, id: "call_read", function: { name: "files__read", arguments: '{"path":' } }],
+      } }] }), state),
+      ...chatChunkToResponsesEvents(chunk({ choices: [{ index: 0, delta: {
+        content: "the file.", tool_calls: [{ index: 0, function: { arguments: '"x.txt"}' } }],
+      }, finish_reason: "tool_calls" }] }), state),
+      ...finalizeResponsesStream(state),
+    ];
+    // Codex's sse/responses.rs discards added items that fail ResponseItem
+    // deserialization. session/turn.rs tracks one NON-TOOL active item;
+    // function-call added events do not replace it. Any item.done clears it.
+    let active: string | undefined;
+    let visible = "";
+    const completedItems: ResponsesOutputItem[] = [];
+    for (const event of events) {
+      if (event.type === "response.output_item.added") {
+        const item = event.item;
+        if (item.type === "message") {
+          const content = item.content as { type: string; text?: string }[];
+          expect(content.every((part) => part.type === "output_text" && typeof part.text === "string")).toBe(true);
+          active = item.id;
+        } else if (item.type === "reasoning") {
+          expect(Array.isArray(item.summary)).toBe(true);
+          active = item.id;
+        } else if (item.type === "function_call") {
+          expect(typeof item.arguments).toBe("string");
+          expect(item).toMatchObject({ name: "read", namespace: "files", call_id: "call_read" });
+        }
+      } else if (event.type === "response.output_text.delta" || event.type === "response.reasoning_summary_text.delta") {
+        expect(active).toBe(event.item_id);
+        expect(active).toBeDefined();
+        if (event.type === "response.output_text.delta") visible += event.delta;
+      } else if (event.type === "response.output_item.done") {
+        active = undefined;
+        completedItems[event.output_index] = event.item;
+      } else if (event.type === "response.completed") {
+        expect(event.response.output).toEqual(completedItems);
+        expect(event.response.output[2]).toMatchObject({
+          type: "function_call", call_id: "call_read", name: "read", namespace: "files", arguments: '{"path":"x.txt"}',
+        });
+      }
+    }
+    expect(visible).toBe("Reading the file.");
+    expect(events.at(-1)?.type).toBe("response.completed");
+    expect(finalizeResponsesStream(state)).toEqual([]);
   });
 
   it("uses custom_tool_call_input events for custom tools", () => {

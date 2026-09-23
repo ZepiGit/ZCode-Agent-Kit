@@ -1,3 +1,4 @@
+import { decodeContentStream } from "./inflate.js";
 import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
@@ -7,6 +8,15 @@ export function parseGatewayErrorEnvelope(body: string): { status: number; type:
   let obj: any;
   try { obj = JSON.parse(body); } catch { return null; }
   if (!obj || typeof obj !== "object" || Array.isArray(obj) || obj.content !== undefined || obj.choices !== undefined || obj.type === "message") return null;
+  // Recognize only this verified Anthropic validation code, never arbitrary
+  // provider text (which may contain credentials, URLs, or request IDs).
+  if (obj.type === "error" && obj.error && typeof obj.error === "object" && !Array.isArray(obj.error)
+    && typeof obj.error.message === "string" && obj.error.message.startsWith("[1210]")) {
+    return {
+      status: 400, type: "invalid_request_error", code: 1210,
+      message: "[1210] Invalid thinking configuration. This model requires thinking; use effort low, high, or max.",
+    };
+  }
   if (!Number.isInteger(obj.code) || obj.code === 0 || obj.code === 200) return null;
   const code: number = obj.code;
   const status = code === 401 ? 401 : code === 1005 || code === 1113 || code === 3001 ? 400
@@ -49,9 +59,9 @@ async function inspect(resp: Response): Promise<{ status: number; type: string; 
     // Fetch may already decode while retaining Content-Encoding. Never inflate JSON twice.
     try { JSON.parse(raw); return parseGatewayErrorEnvelope(raw); } catch { /* compressed or malformed */ }
     const encoding = copy.headers.get("content-encoding")?.trim().toLowerCase();
-    if (encoding !== "gzip" && encoding !== "deflate") return null;
+    if (!encoding) return null;
     const source = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(bytes); controller.close(); } });
-    const decoded = await readBounded(source.pipeThrough(new DecompressionStream(encoding) as unknown as ReadableWritablePair<Uint8Array, Uint8Array>));
+    const decoded = await readBounded(decodeContentStream(source, encoding));
     return decoded ? parseGatewayErrorEnvelope(new TextDecoder().decode(decoded)) : null;
   } catch { return null; } // Unsupported/corrupt coding must not turn a valid response into 502.
 }
@@ -79,7 +89,7 @@ export async function recoverAndMapUpstream(opts: {
   // legacy single-account manager may still recover 401/3012 through its
   // desktop-import path; pool mode itself rejects those signals in
   // AuthManager, preventing accidental rotation on auth/model errors.
-  const rotationCode = response.status === 401 || [3012, 401, 1005, 1113, 3001].includes(code ?? -1)
+  const rotationCode = code !== 1210 && (response.status === 401 || [3012, 401, 1005, 1113, 3001].includes(code ?? -1))
     ? (code ?? (response.status === 401 ? 401 : undefined))
     : undefined;
   if (!streaming && !opts.signal.aborted && rotationCode !== undefined) {
@@ -125,7 +135,7 @@ export async function recoverAndMapUpstream(opts: {
     opts.auth.markCredentialExhausted?.(activeHandle ?? activeCredential, String(envelope.code), envelope.resetAt);
   }
   const status = response.ok ? envelope!.status : response.status;
-  const type = status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : response.ok ? envelope?.type ?? "upstream_error" : "upstream_error";
+  const type = status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : envelope?.code === 1210 || response.ok ? envelope?.type ?? "upstream_error" : "upstream_error";
   const message = envelope?.message ?? `Upstream request failed (HTTP ${status}).`;
   const result = Response.json({ error: { type, message } }, { status });
   // Preserve retry guidance only when it is a bounded numeric delta, not arbitrary upstream data.

@@ -220,11 +220,11 @@ function buildMessagesFromItems(items: ResponsesInputItem[]): OpenAIMessage[] {
       }
       case "function_call_output":
       case "custom_tool_call_output": {
-        const fco = item as { call_id: string; output?: string };
+        const fco = item as { call_id: string; output?: string | ResponsesContentPart[] };
         out.push({
           role: "tool",
           tool_call_id: fco.call_id,
-          content: fco.output ?? "",
+          content: toolOutputToChat(fco.output),
         });
         pendingReasoning = "";
         continue;
@@ -299,6 +299,23 @@ function extractReasoningText(item: ResponsesInputItem): string {
     .map((p) => (typeof p.text === "string" ? p.text : ""))
     .filter((t) => t.length > 0)
     .join("\n");
+}
+
+/** Tool results must not use the message converter's lossy non-user image fallback. */
+function toolOutputToChat(output: string | ResponsesContentPart[] | undefined): string | OpenAIContentPart[] {
+  if (output === undefined) return "";
+  if (typeof output === "string") return output;
+  if (!Array.isArray(output)) throw new ToolTranslationError("Tool output must be a string or content array");
+  return output.map<OpenAIContentPart>((part) => {
+    if (part && (part.type === "input_text" || part.type === "output_text" || part.type === "text") && typeof part.text === "string") {
+      return { type: "text", text: part.text };
+    }
+    if (part && (part.type === "input_image" || part.type === "image_url")) {
+      const url = typeof part.image_url === "string" ? part.image_url : part.image_url?.url;
+      if (url) return { type: "image_url", image_url: { url } };
+    }
+    throw new ToolTranslationError(`Unsupported tool output content part: ${part?.type ?? "unknown"}`);
+  });
 }
 
 /** Convert Responses content parts to a Chat `content` value (string or parts[]). */

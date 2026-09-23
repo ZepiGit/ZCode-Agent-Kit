@@ -20,6 +20,8 @@ import type {
 import { MODELS } from "../provider/models.js";
 import {
   isGlm53Model,
+  normalizeGlm53FlashThinking,
+  applyAnthropicThinkingCompat,
   normalizeGlm53Effort,
   buildGlm53Reasoning,
   clampGlm53BudgetToModel,
@@ -59,6 +61,7 @@ export function translateRequestOpenAIToAnthropic(req: OpenAIChatRequest): Anthr
     const thinking = translateThinking(req);
     if (thinking) result.thinking = thinking;
   }
+  normalizeGlm53FlashThinking(result, req.reasoning_effort);
   applyAnthropicThinkingCompat(result);
   if (req.tools?.length && req.tool_choice !== "none") {
     result.tools = req.tools.map(translateToolOpenAIToAnthropic);
@@ -69,42 +72,6 @@ export function translateRequestOpenAIToAnthropic(req: OpenAIChatRequest): Anthr
   }
 
   return result;
-}
-
-/**
- * Post-pass mirroring the bundle's anthropic request-builder compat rules
- * (applied AFTER thinking injection, exactly like the SDK does):
- *   - thinking enabled → `temperature`, `top_k`, `top_p` are VOIDED (the
- *     upstream rejects sampling params alongside extended thinking; the real
- *     client never sends the combination);
- *   - thinking enabled without a budget → default budget 1024;
- *   - thinking enabled → `max_tokens += budget`, clamped to the model's
- *     catalog maxOutputTokens (real traffic always carries the additive
- *     total — the budget is spent on top of the answer allowance);
- *   - no thinking + `temperature` + `top_p` both set → `top_p` voided
- *     (SDK: "topP is not supported when temperature is set").
- */
-function applyAnthropicThinkingCompat(result: AnthropicMessagesRequest): void {
-  const thinking = result.thinking;
-  const enabled = thinking?.type === "enabled" || thinking?.type === "adaptive";
-  if (!enabled || !thinking) {
-    if (result.temperature !== undefined && result.top_p !== undefined) {
-      delete result.top_p;
-    }
-    return;
-  }
-  let budget = thinking.budget_tokens;
-  if (thinking.type === "enabled" && (budget === undefined || !Number.isFinite(budget))) {
-    budget = GLM53_MIN_THINKING_BUDGET;
-    thinking.budget_tokens = budget;
-  }
-  delete result.temperature;
-  delete result.top_k;
-  delete result.top_p;
-  const effective = budget ?? 0;
-  result.max_tokens = result.max_tokens + effective;
-  const modelMax = MODELS.find((m) => m.id === result.model)?.maxOutputTokens;
-  if (modelMax !== undefined && result.max_tokens > modelMax) result.max_tokens = modelMax;
 }
 
 function translateThinking(req: OpenAIChatRequest): AnthropicThinkingConfig | undefined {
@@ -163,9 +130,9 @@ function resolveDefaultMaxTokens(model: string): number {
  * live testing), so routing it through the effort channel is the closer
  * approximation across the whole family.
  *
- * An explicit `req.thinking:{type:"disabled"}` is still forwarded as-is
- * (rather than overridden to an effort level) since it does work for
- * glm-5.3-flash, and is the closest available signal for plain glm-5.3.
+ * Explicit disabled thinking is preserved here. The shared Flash post-pass
+ * upgrades it to enabled low (or an explicit supported effort), since Flash
+ * rejects disabled with code 1210. Other models keep their existing behavior.
  * An explicit `req.thinking` budget is respected over the effort-level
  * default budget, but `output_config.effort` is still attached — without it
  * the upstream runs at its own near-zero default regardless of budget.

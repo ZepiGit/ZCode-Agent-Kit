@@ -18,6 +18,15 @@ test('managed login and service retain the configured account encryption key', (
   assert.equal(env.ZCODE_PROXY_CREDENTIAL_MASTER_KEY, key);
 });
 
+test('managed env retains only explicit CDN cache controls without widening solver overrides', () => {
+  const source = { CAPTCHA_CDN_CACHE_TTL_MS: '0', CAPTCHA_CDN_CACHE_DIR: 'C:/cache with spaces', CAPTCHA_DEBUG_BODIES: '1' };
+  const env = proxyEnv({ config: 'C:/kit/proxy/config.yaml' }, source);
+  assert.equal(env.CAPTCHA_CDN_CACHE_TTL_MS, '0');
+  assert.equal(env.CAPTCHA_CDN_CACHE_DIR, source.CAPTCHA_CDN_CACHE_DIR);
+  assert.equal(env.CAPTCHA_DEBUG_BODIES, undefined);
+  assert.equal(env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA, '1');
+});
+
 test('managed env removes ambient solver overrides including Windows casing variants', () => {
   const source = {
     ZCODE_PROXY_CONFIG: 'ambient-config.yaml',

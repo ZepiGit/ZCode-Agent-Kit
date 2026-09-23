@@ -70,9 +70,13 @@ function parseModelRef(args) {
     }
     const s = optStr(args, "model");
     if (s && s.includes("/")) {
-        const [providerId, modelId] = s.split("/", 2);
-        return { providerId: providerId ?? "", modelId: modelId ?? "" };
+        const slash = s.indexOf("/");
+        if (slash === 0 || slash === s.length - 1)
+            throw new Error("model must contain a nonempty providerId and modelId");
+        return { providerId: s.slice(0, slash), modelId: s.slice(slash + 1) };
     }
+    if (args.model !== undefined)
+        throw new Error("model must be providerId/modelId");
     return null;
 }
 /** Invoke a whitelisted read-only native operation. */
@@ -86,7 +90,8 @@ const INVOKE_ALLOWLIST = new Set([
     "session/events",
     "session/usage",
     "session/subagents",
-    "workspace/readState",
+    "workspace/readPresentation",
+    "runtime/capabilities",
     "mcp/list",
     "plugins/list",
     "plugins/overview",
@@ -203,7 +208,7 @@ export function buildTools(ctx) {
             }
             const params = (optObj(args, "params") ?? {});
             const sessionMethod = method.startsWith("session/");
-            const workspaceMethod = !sessionMethod && method !== "usage/stats";
+            const workspaceMethod = !sessionMethod && method !== "usage/stats" && method !== "runtime/capabilities";
             const properties = sessionMethod && method !== "session/list"
                 ? { sessionId: { type: "string" } }
                 : workspaceMethod
@@ -241,24 +246,24 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_models_list",
         title: "List available models",
-        description: "Live model catalog of a workspace as discovered by the harness (provider, model id, context window, reasoning levels, modalities). No invented model names.",
+        description: "Full native model catalog (provider, model id, context, reasoning, modalities). Native 0.16.9 requires creating and closing an owned deferred session without a prompt; unavailable in bridge read-only mode. No invented models or workspace revision.",
         inputSchema: {
             type: "object",
             properties: { workspacePath: { type: "string" } },
             required: ["workspacePath"],
             additionalProperties: false,
         },
-        mutating: false,
+        mutating: true,
         handler: async (args) => {
             const { workspacePath } = ws(ctx, args);
-            const state = await ctx.runtime.callForWorkspace("workspace/readState", workspacePath, {});
-            return { modelCatalog: state?.modelCatalog ?? null, revision: state?.revision ?? null };
+            const state = await ctx.runtime.readWorkspaceCatalog(workspacePath);
+            return { modelCatalog: state.modelCatalog, revision: null, source: state.source };
         },
     });
     tools.push({
         name: "zcode_model_set",
         title: "Select model / mode / reasoning",
-        description: "Select the model (providerId/modelId from the live catalog), optional reasoning level and/or permission mode for a session or a workspace default. Returns requested AND effective values after read-back verification. GLM-5.3-Flash is only used when present in the actual catalog; otherwise a clear error with the catalog is returned.",
+        description: "Select model (providerId/modelId), reasoning and/or permission mode for a session. Returns requested and effective values with actual read-back comparison. Native 0.16.9 has no workspace-default setters; scope=workspace returns an explicit unsupported error without mutation.",
         inputSchema: {
             type: "object",
             properties: {
@@ -278,7 +283,7 @@ export function buildTools(ctx) {
             requireWritable(ctx, "zcode_model_set");
             const scope = str(args, "scope");
             const modelRef = parseModelRef(args);
-            const thoughtLevel = optStr(args, "thoughtLevel");
+            const thoughtLevel = args.thoughtLevel === undefined ? null : str(args, "thoughtLevel");
             const mode = optStr(args, "mode");
             requireModeAllowed(ctx, mode);
             const requested = {};
@@ -290,27 +295,40 @@ export function buildTools(ctx) {
                 requested.mode = mode;
             if (scope === "session") {
                 const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, str(args, "sessionId"));
+                let revision = optNum(args, "expectedRevision");
+                const mutations = [];
                 if (modelRef)
-                    await ctx.runtime.ipcSessionSetModel(sessionId, modelRef.providerId, modelRef.modelId);
-                if (thoughtLevel)
-                    await ctx.runtime.ipcSessionSetThoughtLevel(sessionId, thoughtLevel);
+                    mutations.push(["session/setModel", { model: { ...modelRef, ...(thoughtLevel === null ? {} : { options: { reasoningLevel: thoughtLevel } }) } }]);
+                else if (thoughtLevel !== null)
+                    mutations.push(["session/setThoughtLevel", { thoughtLevel }]);
                 if (mode)
-                    await ctx.runtime.ipcSessionSetMode(sessionId, mode);
+                    mutations.push(["session/setMode", { mode }]);
+                if (!mutations.length)
+                    throw new Error("nothing to set: provide model, thoughtLevel or mode");
+                for (const [method, fields] of mutations) {
+                    const result = await ctx.runtime.call(method, { sessionId, ...fields, ...(revision === null ? {} : { expectedRevision: revision }) });
+                    if (revision !== null) {
+                        const next = result.runtime?.stateRevision;
+                        if (typeof next !== "number" || !Number.isSafeInteger(next) || next < 0)
+                            throw new Error("INVALID_NATIVE_RESPONSE: setter omitted session revision; refusing remaining mutations");
+                        revision = next;
+                    }
+                }
                 const readBack = await ctx.runtime.ipcSessionRead(sessionId);
                 const settings = (readBack?.settings ?? {});
                 const model = (settings.model ?? {});
                 const current = (model.current ?? {});
                 const sMode = (settings.mode ?? {});
                 const sThought = (settings.thoughtLevel ?? settings.reasoning ?? {});
+                const effective = {
+                    model: current.providerId && current.modelId ? `${String(current.providerId)}/${String(current.modelId)}` : null,
+                    mode: sMode.current ?? null,
+                    thoughtLevel: sThought.current ?? null,
+                };
                 return {
-                    scope,
-                    requested,
-                    effective: {
-                        model: current.providerId && current.modelId ? `${String(current.providerId)}/${String(current.modelId)}` : null,
-                        mode: sMode.current ?? null,
-                        thoughtLevel: sThought.current ?? sThought.level ?? null,
-                    },
-                    verified: true,
+                    scope, requested, effective,
+                    revision: readBack.runtime?.stateRevision ?? null,
+                    verified: Object.entries(requested).every(([key, value]) => effective[key] === value),
                 };
             }
             // workspace scope
@@ -371,13 +389,13 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_settings_update",
         title: "Update settings",
-        description: "Apply validated workspace setting changes (mode, model, thoughtLevel) with optional CAS revision. Returns before/after (redacted) and the new revision. Unknown fields are rejected, never silently written.",
+        description: "Update native process-wide, non-persisted boolean preferences: askUserQuestionAutoResolutionEnabled, modelIoFullRetentionEnabled, offPeakToolEnabled, dynamicWorkflowEnabled. Returns native acknowledgement; no read-back getter or CAS revision exists. Workspace mode/model/thoughtLevel defaults are unsupported; use session-scoped model selection.",
         inputSchema: {
             type: "object",
             properties: {
                 workspacePath: { type: "string" },
-                changes: { type: "object", description: "e.g. {\"model\": \"zai/GLM-5.3\", \"mode\": \"build\"}" },
-                expectedRevision: { type: "number", description: "CAS guard from a previous zcode_settings_schema/get read" },
+                changes: { type: "object", description: "Explicit process-runtime booleans, e.g. {\"dynamicWorkflowEnabled\": false}. Applies beyond this workspace; not persisted." },
+                expectedRevision: { type: "integer", minimum: 0, description: "Unsupported for native 0.16.9 workspace preferences; supplying this rejects the update without mutation." },
             },
             required: ["workspacePath", "changes"],
             additionalProperties: false,
@@ -398,7 +416,7 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_settings_reset",
         title: "Reset setting",
-        description: "Reset one writable setting to its known default value.",
+        description: "Native 0.16.9 exposes no resettable workspace defaults. Returns an explicit unsupported/default-unknown error without mutation; set an explicit process-runtime preference or use session-scoped model selection instead.",
         inputSchema: {
             type: "object",
             properties: { workspacePath: { type: "string" }, path: { type: "string", enum: ["mode", "model", "thoughtLevel"] } },
@@ -442,7 +460,7 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_workspace_open",
         title: "Open a workspace",
-        description: "Validate a workspace against the allowlist and read its live state (model catalog, settings, revision).",
+        description: "Validate the workspace allowlist and read native presentation (mode and slash commands). Model/reasoning defaults and workspace revision are not exposed by 0.16.9; use zcode_models_list separately for full catalog discovery.",
         inputSchema: {
             type: "object",
             properties: { workspacePath: { type: "string" } },
@@ -452,9 +470,7 @@ export function buildTools(ctx) {
         mutating: false,
         handler: async (args) => {
             const { workspacePath } = ws(ctx, args);
-            const state = await ctx.runtime.callForWorkspace("workspace/readState", workspacePath, {}, 60_000);
-            const revision = Number(state?.revision ?? state?.modelCatalog?.revision ?? 0);
-            return { workspacePath, revision, settings: redactDeep(state?.settings ?? {}), modelCatalog: state?.modelCatalog ?? null };
+            return { workspacePath, ...await ctx.settings.readWorkspaceState(workspacePath) };
         },
     });
     // -------------------------------------------------------------- sessions
@@ -641,6 +657,7 @@ export function buildTools(ctx) {
             requireWritable(ctx, "zcode_task_start");
             const { workspacePath, workspaceKey } = ws(ctx, args);
             const prompt = str(args, "prompt");
+            const thoughtLevel = args.thoughtLevel === undefined ? null : str(args, "thoughtLevel");
             const mode = optStr(args, "mode");
             requireModeAllowed(ctx, mode);
             let sessionIdRaw = optStr(args, "sessionId");
@@ -656,8 +673,8 @@ export function buildTools(ctx) {
             const modelRef = parseModelRef(args);
             // GLM-5.3-Flash preference guard: refuse silent model swaps.
             if (modelRef) {
-                const state = await ctx.runtime.callForWorkspace("workspace/readState", workspacePath, {});
-                const available = state?.modelCatalog?.available ?? [];
+                const state = await ctx.runtime.readWorkspaceCatalog(workspacePath);
+                const available = state.modelCatalog.available;
                 const known = available.some((m) => {
                     const ref = (m.ref ?? {});
                     return `${String(ref.providerId)}/${String(ref.modelId)}` === `${modelRef.providerId}/${modelRef.modelId}`;
@@ -675,7 +692,7 @@ export function buildTools(ctx) {
                 prompt,
                 sessionId: sessionIdRaw,
                 model: modelRef,
-                thoughtLevel: optStr(args, "thoughtLevel"),
+                thoughtLevel,
                 mode,
                 readOnly: optBool(args, "readOnly") ?? undefined,
                 idempotencyKey: optStr(args, "idempotencyKey"),

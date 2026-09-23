@@ -6,10 +6,9 @@ import {
 import {
   captchaSolverConcurrency,
   runCaptchaSolve,
-  setCaptchaSolverConcurrency,
   shutdownCaptchaSolver,
 } from "./captcha-solver.js";
-import { isCaptchaDuplicateError, isCaptchaIpBlockError, parseCertifyId } from "./captcha-token.js";
+import { classifyCaptchaError, parseCertifyId } from "./captcha-token.js";
 
 export interface CaptchaPoolOptions {
   /** @deprecated Use poolSizeMax — kept as max cap alias. */
@@ -30,7 +29,7 @@ export interface CaptchaPoolOptions {
   solveRetries?: number;
   staggerMs?: number;
   solveConcurrency?: number;
-  /** Parallel solves raced when a take finds the pool empty (default 2). */
+  /** Solves raced when a take finds the pool empty (default 1). */
   emptyTakeRace?: number;
   /** Host CPU ceiling for captcha workers (default 100, 0 = off). */
   cpuLimitPercent?: number;
@@ -77,24 +76,27 @@ class CertifyIdRegistry {
   }
 }
 
-const DEFAULT_POOL_MIN = Number(process.env.CAPTCHA_POOL_MIN || 40);
-const DEFAULT_POOL_MAX = Number(process.env.CAPTCHA_POOL_MAX || 120);
+// Environment defaults serve the single in-process runtime. Old daemon-era
+// values must not reintroduce eager mint churn; explicit pool options remain
+// available to callers (including synthetic parallel scheduling tests).
+function boundedEnvCount(name: string, fallback: number, max: number): number {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? Math.min(value, max) : fallback;
+}
+
+const DEFAULT_POOL_MIN = boundedEnvCount("CAPTCHA_POOL_MIN", 1, 1);
+const DEFAULT_POOL_MAX = boundedEnvCount("CAPTCHA_POOL_MAX", 4, 4);
 const DEFAULT_TOKEN_TTL_MS = Number(process.env.CAPTCHA_CACHE_TTL_MS || 95_000);
 const DEFAULT_REFILL_INTERVAL_MS = Number(process.env.CAPTCHA_REFILL_INTERVAL_MS || 1_000);
 const DEFAULT_STAGGER_MS = Number(process.env.CAPTCHA_SOLVE_STAGGER_MS || 0);
-const DEFAULT_SOLVE_CONCURRENCY = Number(
-	process.env.CAPTCHA_SOLVE_CONCURRENCY ||
-		(process.env.ZCODE_CAPTCHA_LOW_CPU === "1" ? 3 : 8),
-);
+const DEFAULT_SOLVE_CONCURRENCY = boundedEnvCount("CAPTCHA_SOLVE_CONCURRENCY", 1, 1);
 const DEFAULT_SCALE_DOWN_IDLE_MS = Number(process.env.CAPTCHA_POOL_SCALE_DOWN_IDLE_MS || 120_000);
 const DEFAULT_IDLE_FLOOR = Number(process.env.CAPTCHA_POOL_IDLE_FLOOR || 1);
 // Zero-traffic beyond this stops background solving entirely (floor 0): no
 // mint churn, near-zero CPU. The next token take restores poolSizeMin.
 const DEFAULT_DEEP_IDLE_AFTER_MS = Number(process.env.CAPTCHA_DEEP_IDLE_AFTER_MS || 900_000);
-// Parallel solves raced on an empty-pool take — first success serves the
-// client, the twins top up the pool. Cuts worst-case cold TTFB and widens
-// odds against a bad rotated pe bundle stalling one racer.
-const EMPTY_TAKE_RACE = Math.max(1, Number(process.env.CAPTCHA_EMPTY_TAKE_RACE || 3));
+// Racing cannot accelerate a single runtime; do not queue speculative mints.
+const EMPTY_TAKE_RACE = boundedEnvCount("CAPTCHA_EMPTY_TAKE_RACE", 1, 1);
 const SOLVE_RETRIES = Number(process.env.ZCODE_CAPTCHA_RETRIES || 4);
 const SCALE_UP_STEP = 20;
 const TAKE_RATE_WINDOW_MS = 120_000;
@@ -158,20 +160,12 @@ export class CaptchaTokenPool {
   private lastStormResetAt = 0;
 
   constructor(opts: CaptchaPoolOptions = {}) {
-    // The module-level singleton constructs with no opts before config load;
-    // resolvePoolOpts would fall back to env/global defaults there (e.g.
-    // poolSizeMin 40) and configure()'s clamp would preserve that as the
-    // starting target — minting a storm of soon-expired tokens at every
-    // boot. With no explicit opts, defer sizing to the first configure().
-    const hasOpts = Object.keys(opts).length > 0;
     this.opts = resolvePoolOpts(opts);
-    this.effectiveTarget = hasOpts ? this.opts.poolSizeMin : 0;
-    // Seed idle clock at startup so a no-traffic proxy decays to idleFloor
-    // instead of solving 40-60 tokens forever (lastTakeAt=0 disabled decay).
+    this.effectiveTarget = this.opts.poolSizeMin;
+    // Seed idle clock at startup so a no-traffic proxy eventually stops mints.
     this.lastTakeAt = Date.now();
     this.certifyIds = new CertifyIdRegistry(this.opts.tokenTtlMs);
     this.initGovernor(opts);
-    setCaptchaSolverConcurrency(this.opts.solveConcurrency);
   }
 
   configure(opts: CaptchaPoolOptions): void {
@@ -182,10 +176,6 @@ export class CaptchaTokenPool {
       Math.min(this.effectiveTarget, this.opts.poolSizeMax),
     );
     this.initGovernor(opts);
-    // Propagate the resolved concurrency to the solver daemon — the
-    // import-time constructor runs before config load and would otherwise
-    // leave the daemon at its fallback (8) instead of the configured value.
-    setCaptchaSolverConcurrency(this.opts.solveConcurrency);
     this.trimToTarget();
   }
 
@@ -213,7 +203,7 @@ export class CaptchaTokenPool {
   invalidate(): void {
     this.tokens = [];
     this.certifyIds.clear();
-    this.pausedUntil = Date.now() + this.opts.staggerMs;
+    this.pausedUntil = Math.max(this.pausedUntil, Date.now() + this.opts.staggerMs);
   }
 
   startBackgroundRefill(cfg: CaptchaConfig): void {
@@ -299,7 +289,11 @@ export class CaptchaTokenPool {
       const concurrency = this.governor?.enabled
         ? this.governor.backgroundConcurrency(this.tokens.length)
         : this.opts.solveConcurrency;
+      const readyBefore = this.tokens.length;
       await this.solveBatch(cfg, need, Math.max(1, concurrency));
+      // A failed batch has already spent its retry budget. Leave recovery to
+      // the paced refill loop instead of immediately minting another batch.
+      if (this.tokens.length <= readyBefore) break;
     }
   }
 
@@ -373,9 +367,11 @@ export class CaptchaTokenPool {
    * authority while active — bursts raise demand, quiet periods drain it.
    */
   private computeActiveTarget(): number {
-    const demand = Math.max(this.demandTarget(), this.opts.poolSizeMin);
-    const raw = Math.ceil(demand * 1.25) + 1;
-    const governorMax = this.governor?.maxPoolTarget() ?? this.opts.poolSizeMax;
+    const demand = this.demandTarget();
+    const raw = this.takeTimestamps.length === 0
+      ? this.opts.poolSizeMin
+      : Math.ceil(Math.max(demand, this.opts.poolSizeMin) * 1.25) + 1;
+    const governorMax = this.governor?.enabled ? this.governor.maxPoolTarget() : this.opts.poolSizeMax;
     return Math.max(
       this.currentFloor(),
       Math.min(this.opts.poolSizeMax, governorMax, raw),
@@ -576,7 +572,9 @@ export class CaptchaTokenPool {
       for (let attempt = 1; attempt <= this.opts.solveRetries; attempt += 1) {
         try {
           if (Date.now() < this.pausedUntil) break;
-          const param = await runCaptchaSolve(cfg.sceneId, cfg.region, cfg.prefix);
+          const param = await runCaptchaSolve(cfg.sceneId, cfg.region, cfg.prefix, () => {
+            if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
+          });
           if (!param) {
             lastErr = "solver returned empty";
             continue;
@@ -588,10 +586,11 @@ export class CaptchaTokenPool {
           this.noteMintSuccess();
           return param;
         } catch (err) {
-          lastErr = err instanceof Error ? err.message : String(err);
-          if (isCaptchaDuplicateError(lastErr)) {
+          const category = classifyCaptchaError(err);
+          lastErr = err instanceof Error ? err.message : 'captcha solver failure';
+          if (category === 'duplicate') {
             lastErr = `duplicate certifyId (F008)`;
-          } else if (isCaptchaIpBlockError(lastErr) || /(?:^|\D)429(?:\D|$)/.test(lastErr)) {
+          } else if (category === 'rate-limit') {
             sawIpBlock = true;
             this.pausedUntil = Math.max(this.pausedUntil, Date.now() + 300_000);
             break;

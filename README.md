@@ -95,16 +95,18 @@ These commands start/check the proxy automatically. A reply of `ok` confirms the
 For an interactive OMP session:
 
 ```sh
-omp --model zcode/glm-5.3
+omp --model zcode/glm-5.3-flash
 ```
 
 For an interactive Claude Code session:
 
 ```sh
-zcode-kit run claude-code -- --model glm-5.3
+zcode-kit run claude-code -- --model glm-5.3-flash
 ```
 
 Choose `glm-5.3` for text, or `glm-5.3-flash` for text and images. Image support also depends on your assistant. An optional MCP bridge provides tools from your installed ZCode runtime; registering it is not the same as connecting a model.
+
+**Currently unreleased local repair:** Flash always uses thinking. Requests that disable thinking are normalized to `low`; explicit `high` and `max` are preserved. In OMP, select the level with `--thinking low`, `--thinking high`, or `--thinking max`. Completed model replies have been verified with Flash through the direct proxy and Claude Code; this is not a claim that every harness has passed.
 
 <details>
 <summary>Other assistants and integration limits</summary>
@@ -154,6 +156,8 @@ zcode-kit auth status
 
 - **Command not found:** reopen the terminal. For release installs, check that `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) or `$HOME/.local/bin` (macOS/Linux) is on PATH.
 - **No model reply:** check the Desktop login and available quota. Start the proxy if your assistant does not start it. Local health does not prove model access.
+- **OMP autostart (currently unreleased local repair):** launch OMP directly. Setup pins native Node/Bun; the extension runs preflight in a fresh child instead of importing kit modules into OMP. Failures report secret-free categories; the child is limited to 120 seconds. Fix the reported cause, then retry after the 60-second per-session cooldown; recovery is possible in the same session. If the runtime moved, rerun `zcode-kit setup --harness auto` and reload the extension. Unknown port owners are left untouched.
+- **Desktop login import (currently unreleased local repair):** run `zcode-kit auth login zai --import` to import the current active Desktop 0.16.9 `zai`/`start-plan` login; an explicitly configured plan is required. If `credentials.json` exists, it is authoritative: invalid credentials do not silently fall back to legacy `config.json`. Modern `coding-plan` logins use normal OAuth with `zcode-kit auth login zai` instead; the importer does not create or resolve API keys.
 - **401 or occupied port:** check for another kit installation. Do not delete keys or kill an unknown process.
 - **Setup partly failed:** read the printed rollback command before trying again. Earlier changes may still exist.
 

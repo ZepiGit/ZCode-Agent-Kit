@@ -210,6 +210,7 @@ export class TaskManager {
             requestedModel: params.model ? `${params.model.providerId}/${params.model.modelId}` : null,
             effectiveModel: null,
             thoughtLevel: params.thoughtLevel ?? null,
+            selectionVerified: false,
             createdAt: new Date().toISOString(),
             startedAt: null,
             finishedAt: null,
@@ -249,6 +250,38 @@ export class TaskManager {
             void this.startNow(t, params);
         }
     }
+    async verifySelection(t) {
+        const rec = t.record;
+        let effectiveModel = null;
+        let effectiveThoughtLevel = null;
+        try {
+            const readBack = await this.runtime.ipcSessionRead(rec.sessionId);
+            const settings = (readBack?.settings ?? {});
+            const model = (settings.model ?? {});
+            const current = (model.current ?? {});
+            if (typeof current.providerId === "string" && typeof current.modelId === "string") {
+                effectiveModel = { providerId: current.providerId, modelId: current.modelId };
+            }
+            const thought = (settings.thoughtLevel ?? settings.reasoning ?? {});
+            effectiveThoughtLevel = thought.current ?? null;
+        }
+        catch (err) {
+            if (rec.requestedModel !== null || rec.thoughtLevel !== null) {
+                throw new TaskError("SELECTION_VERIFICATION_FAILED", `cannot verify requested model/reasoning before sending prompt: ${err instanceof Error ? err.message : String(err)}`);
+            }
+            t.warnings.push(`session read before send failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        if (rec.requestedModel !== null) {
+            const slash = rec.requestedModel.indexOf("/");
+            if (effectiveModel?.providerId !== rec.requestedModel.slice(0, slash) || effectiveModel?.modelId !== rec.requestedModel.slice(slash + 1)) {
+                throw new TaskError("MODEL_MISMATCH", `requested model ${rec.requestedModel} differs from effective model ${effectiveModel ? `${effectiveModel.providerId}/${effectiveModel.modelId}` : "unknown"}; prompt not sent`);
+            }
+        }
+        if (rec.thoughtLevel !== null && effectiveThoughtLevel !== rec.thoughtLevel) {
+            throw new TaskError("THOUGHT_LEVEL_MISMATCH", `requested reasoning level ${rec.thoughtLevel} differs from effective reasoning level ${String(effectiveThoughtLevel)}; prompt not sent`);
+        }
+        return effectiveModel;
+    }
     async startNow(t, params) {
         const rec = t.record;
         if (rec.state !== "queued")
@@ -287,18 +320,18 @@ export class TaskManager {
             this.syncIngress();
             if (params.model) {
                 try {
-                    await this.runtime.ipcSessionSetModel(sessionId, params.model.providerId, params.model.modelId);
+                    await this.runtime.ipcSessionSetModel(sessionId, params.model.providerId, params.model.modelId, params.thoughtLevel);
                 }
                 catch (err) {
                     throw new TaskError("MODEL_SET_FAILED", `selecting ${params.model.providerId}/${params.model.modelId} failed: ${err instanceof Error ? err.message : String(err)}`);
                 }
             }
-            if (rec.thoughtLevel) {
+            else if (params.thoughtLevel != null) {
                 try {
-                    await this.runtime.ipcSessionSetThoughtLevel(sessionId, rec.thoughtLevel);
+                    await this.runtime.ipcSessionSetThoughtLevel(sessionId, params.thoughtLevel);
                 }
                 catch (err) {
-                    t.warnings.push(`setThoughtLevel failed: ${err instanceof Error ? err.message : String(err)}`);
+                    throw new TaskError("THOUGHT_LEVEL_SET_FAILED", `setThoughtLevel failed: ${err instanceof Error ? err.message : String(err)}`);
                 }
             }
             const mode = rec.readOnly ? "plan" : rec.mode ?? (this.config.allowYolo ? null : "build");
@@ -306,19 +339,14 @@ export class TaskManager {
                 await this.runtime.ipcSessionSetMode(sessionId, mode);
             if (!stillStarting())
                 return;
-            // Read back the effective model (verification, not assumption).
-            try {
-                const readBack = await this.runtime.ipcSessionRead(sessionId);
-                const settings = (readBack?.settings ?? {});
-                const model = (settings.model ?? {});
-                const current = (model.current ?? {});
-                if (current.providerId && current.modelId) {
-                    rec.effectiveModel = { providerId: String(current.providerId), modelId: String(current.modelId) };
-                }
-            }
-            catch (err) {
-                t.warnings.push(`session read after start failed: ${err instanceof Error ? err.message : String(err)}`);
-            }
+            // The persisted marker is evidence of startup verification, not a substitute
+            // for reading the current selection again before a terminal follow-up.
+            const effectiveModel = await this.verifySelection(t);
+            if (!stillStarting())
+                return;
+            rec.effectiveModel = effectiveModel;
+            rec.selectionVerified = true;
+            t.persist();
             const subscription = await this.runtime.ipcSessionSubscribe(sessionId);
             if (typeof subscription.eventSeq === 'number')
                 rec.lastSeq = Math.max(rec.lastSeq, subscription.eventSeq);
@@ -371,6 +399,9 @@ export class TaskManager {
         }
         if (this.bySession.get(rec.sessionId) !== taskId)
             throw new TaskError("SESSION_BUSY", "session is owned by a newer task");
+        if (restarting && (rec.requestedModel !== null || rec.thoughtLevel !== null) && rec.selectionVerified !== true) {
+            throw new TaskError("SELECTION_NOT_VERIFIED", "task model/reasoning selection was never verified; start a new task with the requested selection; prompt not sent");
+        }
         const previousState = rec.state;
         t.inputPending = true;
         if (restarting)
@@ -380,6 +411,9 @@ export class TaskManager {
         let dispatched = false;
         try {
             await this.verifySessionWorkspace(rec.sessionId, rec.workspacePath);
+            if (!canSend())
+                throw new TaskError("INTERRUPTED", "task interrupted before input was sent");
+            const effectiveModel = restarting ? await this.verifySelection(t) : rec.effectiveModel;
             if (!canSend())
                 throw new TaskError("INTERRUPTED", "task interrupted before input was sent");
             const mode = rec.readOnly ? "plan" : rec.mode ?? (this.config.allowYolo ? null : "build");
@@ -400,6 +434,7 @@ export class TaskManager {
             rec.finishedAt = null;
             rec.error = null;
             rec.interruptionReason = null;
+            rec.effectiveModel = effectiveModel;
             rec.state = "starting";
             t.persist();
             dispatched = true;

@@ -26,7 +26,15 @@ function zcodeProvider(ctx) {
     },
     models: {
       "glm-5.3": { name: "GLM-5.3", limit: { context: 1000000, output: 128000 } },
-      "glm-5.3-flash": { name: "GLM-5.3-Flash", limit: { context: 1000000, output: 128000 } },
+      "glm-5.3-flash": {
+        name: "GLM-5.3-Flash", limit: { context: 1000000, output: 128000 },
+        options: { reasoningEffort: "low" },
+        variants: {
+          low: { reasoningEffort: "low" },
+          high: { reasoningEffort: "high" },
+          max: { reasoningEffort: "max" },
+        },
+      },
     },
   };
 }

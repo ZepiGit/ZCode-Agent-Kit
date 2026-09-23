@@ -3,6 +3,26 @@
 
 **Bestandsaufnahme:** Dieses Manifest beschreibt die Komponenten und Revisionen, die sich tatsächlich in diesem Repository befinden. Es behauptet nicht, dass jedes Upstream-Projekt seine neueste Version verwendet. Externe Harness-Versionen sind Referenzwerte und keine vom Kit installierten oder fest gepinnten Versionen.
 
+Die aktuellen lokalen Reparaturen sind **unveröffentlichte Änderungen**, keine
+neue Upstream-Revision und kein Beleg für ein veröffentlichtes Kit-Release.
+Dazu gehören der maßgebliche Import gemeinsamer Desktop-0.16.9-Zugangsdaten;
+streng validierte TTL für den CAPTCHA-Cache in Speicher und auf Platte sowie
+isolierte Cache-Verzeichnisse, jeweils über die verwaltete Umgebung weitergegeben;
+atomare Cache-Datenumschläge und Herkunftsangaben je geladenem Artefakt; sowie
+ein statischer Kompatibilitätshelfer für gespeicherte Skripte, der keinen
+Provider-Code ausführt und keinen Ende-zu-Ende-Erfolg belegt. Die alte
+diagnostische Bytecode-VM-Umschreibung wurde nach reproduzierter
+Bundle-Beschädigung zusammen mit sensiblen DBT-Dumps entfernt; Solver und
+Sicherheitsprüfungen bleiben erhalten, Debug-Diagnosen enthalten nur Metadaten.
+Flash-Anfragen mit deaktiviertem Thinking werden auf `low` normalisiert;
+`high` und `max` bleiben verfügbar. Der lokale Transport verarbeitet auch
+Brotli-/Deflate-Streams und JSON-Fehler; der Responses-Adapter erhält
+Tool-Ergebnisse und Pflichtfelder der Events. Codex verwendet unter Windows
+eine Restricted-Token-Sandbox; OpenCode bietet ausdrückliche Flash-Varianten.
+Die native Bridge unterstützt das installierte 0.16.9-Protokoll; ihr Modellpfad
+bleibt vom Proxy getrennt. Diese Änderungen belegen kein gleichwertiges
+Live-Verhalten auf anderen Betriebssystemen oder über alle Harnesses hinweg.
+
 | Komponente | Quelle | Gepinnte Version / Referenz | Lizenz | Lokale Änderungen |
 |---|---|---|---|---|
 | zcode-proxy | https://github.com/TriDefender/zcode-api | v4.6.4, Commit `9a5cebe07c5255faa675075fa37632d4dea733fa` (2026-09-11) | MIT (im Upstream-README angegeben; Upstream enthält keine LICENSE-Datei) | Die vendorte Basis ist v4.6.4. Beim Abgleich am 2026-09-22 war v4.6.9 die neueste veröffentlichte Upstream-Version; sie ist in diesem Repository nicht enthalten. Die Git-Historie des Kits dokumentiert lokale Änderungen, darunter Anpassungen an Credentials, Streaming, Kontrollport und Tests. `zcode-proxy-src/README.md` beschreibt den Kit-Kontext; die Fassungen `.de`, `.es`, `.ja` und `.zh-CN` sind Übersetzungen. Das Upstream-README ist im gepinnten Commit einsehbar. |

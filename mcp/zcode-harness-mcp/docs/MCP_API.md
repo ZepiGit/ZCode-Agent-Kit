@@ -11,28 +11,38 @@ als Tool-Fehler (`isError:true`) mit präziser Meldung (`READ_ONLY_MODE`, `REVIS
 | Tool | Argumente | Beschreibung |
 | --- | --- | --- |
 | `zcode_health` | – | Bridge-Version, Runtime-Pfad/Version/Fingerprint, Prozesszustand, Read-only, Allowlist, Interaction-Policy. Degradierter Modus (Runtime nicht gefunden) wird ehrlich gemeldet. |
-| `zcode_capabilities` | – | Vollständige Capability-Registry (45 Einträge): id, Beschreibung, Backend-Methode, Richtung, availability/implementation/verification, MCP-Mapping, Nachweis. |
+| `zcode_capabilities` | – | Vollständige Capability-Registry des aktuellen Builds: id, Beschreibung, Backend-Methode, Richtung, availability/implementation/verification, MCP-Mapping, Nachweis. |
 | `zcode_operations_list` | `workspacePath?, kind? (mcp\|plugins\|skills\|usage\|registry)` | Native Listen (MCP-Server im Harness, Plugins, Skills, Usage-Stats) oder Registry-Überblick. |
 | `zcode_operation_describe` | `method` | Registry-Beschreibung einer nativen Methode. |
-| `zcode_operation_invoke` | `method, params?` | Aufruf **nur** aus der Read-only-Allowlist (`session/*`-Reads, `workspace/readState`, `mcp/list`, `plugins/list|overview`, `skills/referenceCatalog`, `usage/stats`). Kein beliebiges RPC-Passthrough. |
+| `zcode_operation_invoke` | `method, params?` | Aufruf **nur** aus der Read-only-Allowlist (`session/*`-Reads, `workspace/readPresentation`, `runtime/capabilities` mit `{}`, `mcp/list`, `plugins/list|overview`, `skills/referenceCatalog`, `usage/stats`). Kein beliebiges RPC-Passthrough. |
 
 ## Modelle & Einstellungen
 
 | Tool | Argumente | Beschreibung |
 | --- | --- | --- |
-| `zcode_models_list` | `workspacePath` | Live-Katalog des Harness (Provider, ModelId, Kontextfenster, Reasoning-Levels, Modalitäten). Keine erfundenen Modellnamen. |
-| `zcode_model_set` | `scope: session\|workspace, sessionId?/workspacePath?, model? ("providerId/modelId"), thoughtLevel?, mode?` | Setzt Modell/Reasoning/Mode; antwortet mit `requested` **und** `effective` (Read-back-Verifikation). Unbekanntes Modell → Fehler mit tatsächlichem Katalog. GLM-5.3-Flash wird nur verwendet, wenn im Katalog vorhanden — nie still ersetzt. |
-| `zcode_settings_schema` | `workspacePath` | Typen, Choices, Defaults, effektive Werte, Quellen, Scopes, Schreibbarkeit, Neustart-Bedarf, Notizen (Desktop-Settings = read-only Inventar). |
-| `zcode_settings_get` | `workspacePath, path?, scope?: workspace\|desktop` | Effektive Settings oder redigiertes Desktop-Inventar (`~/.zcode/v2/setting.json`, nur lesend). |
-| `zcode_settings_update` | `workspacePath, changes, expectedRevision?` | Validiert + CAS (Revision aus vorherigem Lesen), Read-back (before/after), unbekannte Felder werden abgelehnt, nie still geschrieben. |
-| `zcode_settings_reset` | `workspacePath, path (mode\|model\|thoughtLevel)` | Zurücksetzen auf bekannten Default. |
+| `zcode_models_list` | `workspacePath` | Vollständige native Metadaten in `modelCatalog.available`, `revision:null`, Herkunft explizit. Erstellt/schließt eine eigene deferred Session ohne Prompt; kann Runtime-Dienste initialisieren und ist unter `--read-only` gesperrt. Cleanup-Verweigerung ist ein Fehler. |
+| `zcode_model_set` | `scope: session\|workspace, sessionId?/workspacePath?, model? ("providerId/modelId"), thoughtLevel?, mode?, expectedRevision?` | Native Session-Setter mit CAS; liefert `requested`, `effective` und tatsächlichen Vergleich (`verified`). Revision wird zwischen Settern fortgeschrieben. `scope:workspace` ist nicht unterstützt, kein lokaler Ersatz. Modellnamen müssen aus dem tatsächlichen Katalog stammen; nie stiller Ersatz. |
+| `zcode_settings_schema` | `workspacePath` | Typen, Choices, Quellen, Scopes und Schreibbarkeit. Workspace-Modell/Modus/Reasoning nicht schreibbar; unbekannte Defaults `null`. Runtime-Präferenzen haben Prozess-Scope und unbekannte effektive/Default-Werte. Desktop-Settings bleiben read-only Inventar. |
+| `zcode_settings_get` | `workspacePath, path?, scope?: workspace\|desktop` | Präsentation mit explizit unbekannten Defaults oder redigiertes Desktop-Inventar (`~/.zcode/v2/setting.json`, nur lesend). `path:modelCatalog` verweist auf das separate Tool statt versteckt eine Session zu erstellen. |
+| `zcode_settings_update` | `workspacePath, changes, expectedRevision?` | Nur die vier unten genannten Runtime-Booleans; gesamter Batch vorab validiert. Prozessweit, nicht persistent; native Bestätigung statt unabhängiger Read-back-Verifikation. `expectedRevision` → `UNSUPPORTED_REVISION` vor Mutation; Workspace-Defaults → `UNSUPPORTED_WORKSPACE_DEFAULT`. |
+| `zcode_settings_reset` | `workspacePath, path (mode\|model\|thoughtLevel)` | Nativ 0.16.9 nicht unterstützt: `UNSUPPORTED_WORKSPACE_DEFAULT`, kein erfundener Default oder Fallback. |
+
+`changes` unterstützt `askUserQuestionAutoResolutionEnabled`, `modelIoFullRetentionEnabled`,
+`offPeakToolEnabled`, `dynamicWorkflowEnabled` als Booleans. Die Bridge prüft die native
+Bestätigung und kennzeichnet sie als `native-acknowledgement`; es gibt keinen unabhängigen
+Getter, keine Workspace-Revision und keinen Reset. Auswirkungen reichen über den angegebenen
+Workspace hinaus, bei Interaktionen bzw. Model-IO auch auf offene Rückfragen bzw. aktive Sessions.
+Der aktuelle native Katalog enthält nachweislich `zai-api/GLM-5.3-Flash`; native Flash-Inferenz
+wurde unter Windows/ZCode 0.16.9 nach bestätigter Modell-/`low`-Auswahl mit
+Upstream `1113` (Guthaben/Ressourcenpaket fehlt) blockiert. Proxy-Erfolg ist kein
+MCP-Modellerfolg.
 
 ## Workspaces & Sessions
 
 | Tool | Argumente |
 | --- | --- |
 | `zcode_workspaces_list` | – (Allowlist + im Harness gesehene Workspaces) |
-| `zcode_workspace_open` | `workspacePath` → revision/settings/modelCatalog |
+| `zcode_workspace_open` | `workspacePath` → presentation, mode, revision:null, model:null, thoughtLevel:null, Quelle/Hinweis; reines `workspace/readPresentation`, kein Katalog/Default und keine Session-Erstellung |
 | `zcode_sessions_list` | `workspacePath?` |
 | `zcode_session_create` | `workspacePath, mode?` → sessionId |
 | `zcode_session_get` | `sessionId` → Projection (status/tokens/kontext), settings, todos |
@@ -110,3 +120,7 @@ Alle Resources sind wirklich lesbar (`resources/read`); Clients ohne Resource-Su
 
 Siehe README (stdio) und `examples/config/http.mcp.json` (HTTP). Getestete Clients: offizieller
 SDK-Testclient (dieses Repo, Node), HTTP-Client über `fetch` (Robustheitstest), MCP-Smoke-Client.
+`examples/config/stdio.mcp.json` bleibt absichtlich `--read-only`: Präsentation und
+`runtime/capabilities` sind verfügbar, vollständige Katalogabfragen und Session-Setter nicht.
+Die Demo benötigt Schreibfreigabe für die Katalog-Session und wählt Modell/Modus nativ pro
+Session statt entfernte Workspace-Defaults zu setzen.

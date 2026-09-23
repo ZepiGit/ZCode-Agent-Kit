@@ -5,9 +5,6 @@ import {
   destroyDom,
   installGlobalWindowAlias,
   removeGlobalWindowAlias,
-  requestLogSizeForTest,
-  resetRequestLogForTest,
-  recordRequestForTest,
 } from "./captcha-happy.js";
 
 const HERMETIC_RESOURCES = {
@@ -36,20 +33,8 @@ describe("createDom resource injection", () => {
       expect(dom.window.document.getElementById("cap")).not.toBeNull();
       expect(dom.window.document.querySelectorAll("script[src]").length).toBe(0);
     } finally {
-      destroyDom(dom.window);
+      await destroyDom(dom.window);
     }
-  });
-});
-
-describe("bounded captcha request diagnostics", () => {
-  test("keeps only the most recent request records", () => {
-    resetRequestLogForTest();
-    for (let i = 0; i < 2_000; i += 1) {
-      recordRequestForTest({ at: i, method: "GET", url: `https://zcode.z.ai/${i}` });
-    }
-    expect(requestLogSizeForTest()).toBeLessThan(2_000);
-    expect(requestLogSizeForTest()).toBeGreaterThanOrEqual(12);
-    resetRequestLogForTest();
   });
 });
 
@@ -95,12 +80,13 @@ describe("guest timer ownership (lexical scope)", () => {
       const deadline = Date.now() + 5_000;
       while (ticks === 0 && Date.now() < deadline) await Bun.sleep(10);
       const before = ticks;
-      destroyDom(w);
+      await destroyDom(w);
       // A cancelled interval produces no further ticks; give it several
       // periods of the 40ms heartbeat to prove silence.
       await Bun.sleep(300);
       return { before, after: ticks - before };
     } finally {
+      await destroyDom(w);
       try { clearInterval((globalThis as Record<string, unknown>).__capTestArmed as never); } catch {}
       delete (globalThis as Record<string, unknown>).__capTestTick;
       delete (globalThis as Record<string, unknown>).__capTestArmed;
@@ -148,7 +134,7 @@ describe("guest timer ownership (lexical scope)", () => {
       expect(typeof g.__capTestTopLevel).toBe("function");
       expect(g.__capTestVar).toBe(7);
     } finally {
-      destroyDom(w);
+      await destroyDom(w);
       delete (globalThis as Record<string, unknown>).__capTestTopLevel;
       delete (globalThis as Record<string, unknown>).__capTestVar;
     }

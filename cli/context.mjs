@@ -218,8 +218,8 @@ export function bootstrap(ctx, log = console.log) {
 
   const credStore = process.env.ZCODE_PROXY_CREDENTIALS_PATH || join(ctx.home, ".zcode-proxy", "credentials.json");
   if (!existsSync(credStore)) {
-    const desktopCfg = join(ctx.home, ".zcode", "v2", "config.json");
-    if (existsSync(desktopCfg)) {
+    const desktopDir = join(ctx.home, ".zcode", "v2");
+    if (existsSync(join(desktopDir, "credentials.json")) || existsSync(join(desktopDir, "config.json"))) {
       log("  importing ZCode Desktop credential (start-plan)...");
       try {
         execFileSync(resolveBun(ctx.root), ["run", "src/index.ts", "auth", "login", "zai", "--import"], {

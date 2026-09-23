@@ -5,8 +5,8 @@
  * production-proven, self-contained: bundled into the single-file release
  * binary — no external Node.js, no browser, no jsdom). Tokens are minted
  * into a pool (captcha-pool.ts); requests take an already-solved token
- * (sub-ms) while background refills keep the pool warm — the hot path
- * never waits on a solve.
+ * (sub-ms) while background refills keep the pool warm. An empty pool waits
+ * for the shared serial solver.
  *
  * Fingerprint stability: the happy-dom solver's polyfill/guest-patch values
  * are deterministic and STABLE (never randomized) — Aliyun's risk engine
@@ -59,7 +59,7 @@ export async function getCaptchaToken(appVersion: string): Promise<{ verifyParam
   const cfg = await fetchCaptchaConfig(appVersion);
   if (!cfg || !cfg.enabled || !cfg.prefix || !cfg.sceneId) throw new Error("Captcha config unavailable");
   // Pre-solved token pool: requests take an already-minted token (sub-ms)
-  // while background solves refill — the hot path never waits on a solve.
+  // while background solves refill; an empty bank waits for a serial solve.
   const verifyParam = await takeCaptchaToken(cfg);
   return { verifyParam, region: cfg.region };
 }
@@ -77,14 +77,10 @@ export async function startCaptchaPool(appVersion: string): Promise<void> {
   if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== '1') return;
   const cfg = await fetchCaptchaConfig(appVersion);
   if (!cfg || !cfg.enabled) return;
-  // Size the pool before prefill: the module-level pool defers sizing to the
-  // first configure() so a cold boot doesn't mint a storm of soon-expired
-  // tokens. CAPTCHA_POOL_MIN/CAPTCHA_POOL_MAX env vars override the defaults.
-  const min = Number(process.env.CAPTCHA_POOL_MIN || 20);
-  const max = Number(process.env.CAPTCHA_POOL_MAX || Math.max(min * 6, 120));
-  configureCaptchaPool({ poolSizeMin: min, poolSizeMax: max });
+  // Use the pool's bounded defaults (warm 1, bank at most 4), or previously
+  // supplied options. Only observed takes may grow the background target.
+  await prefillCaptchaPool(cfg as CaptchaConfig);
   startCaptchaPoolRefill(cfg as CaptchaConfig);
-  await prefillCaptchaPool(cfg as CaptchaConfig, min);
 }
 
 /** Request an urgent refill burst (e.g. after a challenge/retry). */

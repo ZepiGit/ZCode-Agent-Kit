@@ -25,8 +25,9 @@
  *   `T9o` builds the Environment lines with REAL runtime values (cwd,
  *   platform, shell, osVersion — `createNodeContextSourceAdapter`) and the
  *   conditional `- You are powered by the model named X.` as the section's
- *   last line. `cwd` is never "unknown" in real traffic; the proxy fills it
- *   (and platform/osVersion) from the SAME identity env chain as the
+ *   last line. The proxy only supplies cwd when explicitly overridden;
+ *   otherwise the calling harness's own workspace context is preserved.
+ *   Platform/osVersion use the SAME identity env chain as the
  *   X-Platform/X-Os-Version headers, so the prompt can never contradict the
  *   headers (a mixed combination no real client produces). See
  *   {@link resolveEnvPromptInfo} in identity.ts.
@@ -57,7 +58,7 @@ export interface SystemBlock {
 
 /** Runtime environment values for the Environment section (`T9o` input). */
 export interface StartPlanEnvInfo {
-  cwd: string;
+  cwd?: string;
   platform: string;
   shell: string;
   osVersion: string;
@@ -79,7 +80,7 @@ export function buildEnvironmentSection(env: StartPlanEnvInfo, currentModel?: st
   const lines = [
     e.heading,
     e.invokedLine,
-    `- ${e.cwdLabel}: ${env.cwd}`,
+    ...(env.cwd ? [`- ${e.cwdLabel}: ${env.cwd}`] : []),
     `- ${e.gitLabel}: ${e.gitNo}`,
     `- ${e.platformLabel}: ${env.platform}`,
     `- ${e.shellLabel}: ${env.shell}`,

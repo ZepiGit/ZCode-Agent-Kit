@@ -438,6 +438,7 @@ function toolCallAddedItem(
       id: entry.itemId,
       call_id: entry.id,
       execution: "client",
+      arguments: {},
       status: "in_progress",
     };
   }
@@ -449,6 +450,7 @@ function toolCallAddedItem(
       call_id: entry.id,
       name: ns.name,
       namespace: ns.namespace,
+      arguments: "",
       status: "in_progress",
     };
   }
@@ -457,6 +459,7 @@ function toolCallAddedItem(
     id: entry.itemId,
     call_id: entry.id,
     name: entry.name,
+    arguments: "",
     status: "in_progress",
   };
 }
@@ -539,7 +542,7 @@ function ensureReasoningItem(state: ResponsesStreamState): ResponsesStreamEvent[
     seq(state, {
       type: "response.output_item.added",
       output_index: state.reasoningIndex,
-      item: { type: "reasoning", id: state.reasoningItemId, status: "in_progress" },
+      item: { type: "reasoning", id: state.reasoningItemId, status: "in_progress", summary: [] },
     }),
     seq(state, {
       type: "response.reasoning_summary_part.added",
@@ -621,7 +624,7 @@ function ensureMessageItem(state: ResponsesStreamState): ResponsesStreamEvent[] 
       id: state.messageItemId,
       role: "assistant",
       status: "in_progress",
-      content: [{ type: "output_text" }],
+      content: [{ type: "output_text", text: "" }],
     },
   })];
 }

@@ -157,7 +157,7 @@ Usage:
   zcode-proxy auth login <provider> Login via OAuth (provider: zai | bigmodel)
   zcode-proxy auth login <provider> --account ID [--replace]
   zcode-proxy auth login <provider> --import
-                                    Import API key from ~/.zcode/v2/config.json
+                                    Import the current Desktop login (legacy config only if no shared store)
   zcode-proxy auth logout           Clear stored credentials
   zcode-proxy auth status           Show current authentication state
   zcode-proxy auth accounts [--json]
@@ -521,7 +521,8 @@ async function authLogin(args: string[]): Promise<void> {
   let cred: Credential;
 
   if (importMode) {
-    cred = importFromZCodeConfig(provider);
+    const configuredPlan = loadConfig(process.env.ZCODE_PROXY_CONFIG ?? "config.yaml").plan;
+    cred = importFromZCodeConfig(provider, configuredPlan);
   } else {
     const { accessToken, userId, jwt } = await runOAuth(provider, pasteMode);
     console.log("\nResolving API key...");

@@ -40,6 +40,8 @@ HTTP 代理，支持三种标准格式：
 `generated/` 下的路径指向 Kit 状态：正式版/源码安装位于 Kit
 目录中；npm 安装位于单独的状态目录中。
 
+直接启动 OMP，例如 `omp --model zcode/glm-5.3-flash --thinking low`，不要通过 `zcode-kit run` 启动。**目前尚未发布的本地修复：**设置过程固定原生 Node/Bun；自启动预检查使用新的子进程，不将 Kit 模块导入 OMP。子进程最长运行 120 秒，并报告不含秘密信息的错误类别。修复原因后，等待该会话的 60 秒冷却时间再重试；可在同一会话中恢复。若运行时位置已变更，请重新运行 `zcode-kit setup --harness auto` 并重新加载扩展。不会终止占用端口的未知进程。仅有代理健康或设置成功并不能证明模型回复能够完成。
+
 ## 可选启用的包装器（现有配置不受影响）
 
 | Harness | 包装器 | 作用 |
@@ -70,6 +72,10 @@ model: glm-5.3
 - **OpenAI 格式**： `reasoning_effort: low|high|max` + `thinking: {type: "enabled"}`
   （代理会翻译成 Anthropic 字段）。
 
+**目前尚未发布的本地修复 — Flash：**`glm-5.3-flash` 始终启用 thinking。显式禁用 thinking 会被规范化为 `low`；显式选择的 `high` 和 `max` 保持不变。对于 Flash，Anthropic 格式的低级别 thinking 预算为 `8000` tokens（而非上方通用示例的 `2048`），并额外预留回答的输出空间；OpenAI 格式使用 `reasoning_effort: low`。不要仅凭较高的 thinking 强度就认定发生了卡死。通过直接代理调用和 Claude Code 已成功完成 Flash 回复；这不代表所有 harness 均已通过验收。
+
+在 Windows 上，隔离的 Codex 配置启用受限令牌沙箱（`windows.sandbox = "unelevated"`）；`workspace-write` 仍限制在项目范围内，不授予完全访问权限。OpenCode Flash 支持 `--variant low`、`high` 和 `max`，默认使用 `low`。支持其原生可执行文件 npm 包装器及 Brotli/deflate 压缩的会话流。Responses 工具结果的文本和图像会被保留，不会将无效事件视为成功输出。
+
 ## MCP 客户端（通用）
 
 ```json
@@ -87,7 +93,8 @@ model: glm-5.3
 桥接控制的是**真实安装的 ZCode Harness**（app-server 协议：会话、回合、
 任务）。交互验证可能需要运行 Desktop；服务商仍可能拒绝模型请求。
 桥接支持 `low/high/max` 推理级别。实时模型目录可能与代理不同；
-GLM-5.3-Flash 已通过代理路径验证。详情见
+GLM-5.3-Flash 已通过代理路径验证。原生目录中存在模型条目，不代表原生
+模型调用已成功；代理路径的验收也不能证明原生服务商路径已通过验收。详情见
 [MCP 桥接文档](../mcp/zcode-harness-mcp/README.zh-CN.md)。
 
 ## 配额与错误形态
@@ -95,4 +102,5 @@ GLM-5.3-Flash 已通过代理路径验证。详情见
 - `GET /quota`（需认证）显示各模型的令牌桶。
 - 配额耗尽 → HTTP 400 `[1005] exceed quota limit`（不可重试；等待服务商恢复额度）。
 - `[3007] captcha verify failed` → 高频重试后的网关反滥用机制；请暂停片刻。
-- `401 start_plan_jwt_invalid` → 检查 Desktop 登录，并通过 `zcode-kit auth login zai` 更新。
+- `401 start_plan_jwt_invalid` → 检查 Desktop 登录，并通过 `zcode-kit auth login zai` 更新。**目前尚未发布的本地修复：**对于 Desktop 0.16.9 当前激活且已明确配置计划的 `zai`/`start-plan` 登录，使用 `zcode-kit auth login zai --import`。只要存在 `credentials.json`，就以它为准；凭据无效时不会静默回退到 `config.json`。新版 `coding-plan` 登录使用常规 OAuth；导入不会创建或获取 API 密钥。
+- Flash 返回 `[1210]` → 检查是否已启用 thinking，并选择 `low`、`high` 或 `max`，而不是禁用它。目前尚未发布的本地修复会将禁用的 thinking 规范化为 `low`；参见上方 Flash 说明。

@@ -14,9 +14,9 @@ app-server --stdio`、ローカルインストール）が自身のツール・�
 管理・権限で実行します。
 
 - プロトコル：外側は MCP（公式 SDK）、内側は **ZCode Protocol v1**
-  （stdio 上の NDJSON、0.16.5 に対してライブ検証済み）——
+  （stdio 上の NDJSON。0.16.5 のライブ検証は過去の記録で、現在の契約は 0.16.9）——
   [`docs/PROTOCOL.md`](docs/PROTOCOL.md) 参照。
-- 規模：32 の MCP ツール + MCP リソース。45 エントリのケイパビリティ
+- 規模：32 の MCP ツール + MCP リソース。ネイティブ契約に合わせたケイパビリティ
   レジストリ（[`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)）。
 - `npm test` は決定論的なローカルフィクスチャを使います。ライブテストは明示 opt-in が必要で、過去の報告は現在の検証証拠ではありません。
 - 監査修正：セッション ID もワークスペース制限対象、`yolo` は `--allow-yolo` が必要です。ツール許可は完全一致で Bash/PowerShell/Shell は拒否します。ファイルサイズに上限があり、JSONL は各最大4 MiBの2ファイルを保持。EOF はタスクを中断して子プロセスを終了しますが Windows のプロセスツリー隔離は保証しません。`--runtime-path` はコード実行なので信頼できるファイルのみ指定してください。
@@ -32,6 +32,13 @@ app-server --stdio`、ローカルインストール）が自身のツール・�
   - または `--runtime-path` / `ZCODE_HARNESS_RUNTIME_PATH` でインストール済みのファイルを指定
 - ZCode ログイン済み（ハーネスはローカルの Z.AI OAuth ログインを使用。
   ブリッジは**資格情報を管理せず**、すべての出力でシークレットを伏字に）
+
+同梱プロバイダーのパスは作業ディレクトリではなく、検証済みランタイムの
+エントリーポイントから解決します。空でない `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE`
+が `ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE`、検出した同梱ファイルの順に優先します。
+変更は子プロセスの環境だけで、`ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` は保持し、親の環境は
+変更しません。明示したシード設定が無効なら代替せずエラーにします。ネイティブ設定の
+生成は引き続きベンダー側が行います。詳細は [`docs/SECURITY.md`](docs/SECURITY.md)。
 
 ## インストール（Windows / PowerShell）
 
@@ -90,7 +97,7 @@ node examples\demo-client.mjs --fixture
 
 デモクライアントは完全なフローを示します：能力の発見 → ワークスペース
 オープン → 実モデルカタログの読み取り → GLM-5.3-Flash チェック（黙って
-モデルを切り替えない）→ 設定変更 → タスク起動 → 進捗ポーリング →
+モデルを切り替えない）→ セッションのモデルとモードを選択 → タスク起動 → 進捗ポーリング →
 追加質問への回答 → 結果 + アーティファクトの読み取り → 同じセッションで
 追加発注。
 
@@ -136,6 +143,20 @@ npm run test:live # 明示的に有効化：実インストールと利用枠の
 詳細：[`docs/SECURITY.md`](docs/SECURITY.md) · 正直な限界： [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
 
 ## 状態
+
+0.16.9 の `workspace/readPresentation` は表示情報のみを返し、既定値、カタログ、
+設定リビジョンは返しません。`zcode_models_list` はブリッジ所有の遅延永続化セッションを
+プロンプトなしで作成・終了します。ランタイムサービスを初期化する可能性があるため、
+`--read-only` では拒否されます。セッション単位のネイティブなモデル・モード・推論レベル
+選択は利用できます。永続的なワークスペース既定値の設定・リセットは非対応で、
+ローカルの代替保存ではなく明示的なエラーを返します。ランタイム設定は共有 app-server
+プロセス全体に作用し、その応答は独立した再読み取り検証ではありません。
+
+現在のネイティブカタログに `zai-api/GLM-5.3-Flash` が含まれることは確認済みですが、
+Windows の ZCode 0.16.9 で reasoning `low` を指定した実リクエストは、
+残高またはリソースパッケージ不足を示す上流コード `1113` でブロックされました。
+ネイティブ Flash 応答の成功は主張しません。プロキシでの成功は MCP モデルの成功を証明しません。
+0.16.5 の観測結果は過去の記録です。
 
 現在の実装および検証状況：[`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · テスト証跡：[CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · API リファレンス： [`docs/MCP_API.md`](docs/MCP_API.md)
 

@@ -42,6 +42,8 @@ Konfigurationen oder Wrapper-Dateien erzeugt.
 Pfade unter `generated/` beziehen sich auf den Kit-Zustand: bei Release-/
 Quellcode-Installationen im Kit-Verzeichnis, bei npm im separaten Zustandsverzeichnis.
 
+OMP direkt starten, etwa mit `omp --model zcode/glm-5.3-flash --thinking low`, nicht über `zcode-kit run`. **Derzeit unveröffentlichte lokale Korrektur:** Das Setup fixiert natives Node/Bun; die Autostart-Vorprüfung läuft in einem neuen Kindprozess, ohne Kit-Module in OMP zu importieren. Der Kindprozess ist auf 120 Sekunden begrenzt und meldet Fehlerkategorien ohne Geheimnisse. Ursache beheben und nach der sitzungsbezogenen Wartezeit von 60 Sekunden erneut versuchen; dieselbe Sitzung kann sich erholen. Wurde die Laufzeit verschoben, `zcode-kit setup --harness auto` erneut ausführen und die Erweiterung neu laden. Unbekannte Portbesitzer werden nie beendet. Ein gesunder Proxy oder erfolgreiches Setup allein beweist keine vollständig abgeschlossene Modellantwort.
+
 ## Opt-in-Wrapper (bestehende Config bleibt unberührt)
 
 | Harness | Wrapper | Was er tut |
@@ -72,6 +74,10 @@ Reasoning/Thinking:
 - **OpenAI-Format**: `reasoning_effort: low|high|max` + `thinking: {type: "enabled"}`
   (der Proxy übersetzt in die Anthropic-Felder).
 
+**Derzeit unveröffentlichte lokale Korrektur — Flash:** `glm-5.3-flash` verwendet immer Thinking. Ausdrücklich deaktiviertes Thinking wird auf `low` normalisiert; ausdrücklich gewähltes `high` und `max` bleiben erhalten. Bei Flash beträgt das niedrige Anthropic-Thinking-Budget `8000` Tokens (statt der allgemeinen `2048` oben), mit zusätzlichem Ausgabespielraum für die Antwort; OpenAI verwendet `reasoning_effort: low`. Höherer Thinking-Aufwand allein ist kein Beleg für einen Hänger. Flash-Antworten über den direkten Proxy und Claude Code wurden erfolgreich abgeschlossen; das belegt keine erfolgreiche Prüfung aller Assistenten.
+
+Unter Windows aktiviert das isolierte Codex-Profil die Restricted-Token-Sandbox (`windows.sandbox = "unelevated"`); `workspace-write` bleibt auf das Projekt begrenzt und gewährt keinen Vollzugriff. OpenCode Flash bietet `--variant low`, `high` und `max`, standardmäßig `low`. Der native npm-EXE-Wrapper und Brotli-/Deflate-komprimierte Session-Streams werden unterstützt. Text- und Bildanteile von Responses-Tool-Ergebnissen bleiben erhalten; fehlerhafte Events gelten nicht als erfolgreiche Ausgabe.
+
 ## MCP-Clients (generisch)
 
 ```json
@@ -90,7 +96,9 @@ Die Bridge steuert den **lokal installierten ZCode-Harness** (App-Server-Protoko
 Sessions, Turns, Tasks). Für interaktive Verifizierung kann Desktop nötig sein;
 der Provider kann Modell-Turns dennoch ablehnen. Die Bridge bietet die
 Reasoning-Level `low/high/max`. Ihr Live-Modellkatalog kann vom Proxy-Katalog
-abweichen; GLM-5.3-Flash wurde über den Proxy geprüft. Details:
+abweichen; GLM-5.3-Flash wurde über den Proxy geprüft. Ein Eintrag im nativen
+Katalog beweist keinen erfolgreichen nativen Modell-Turn; eine erfolgreiche
+Proxy-Prüfung belegt keinen Erfolg beim nativen Provider. Details:
 [MCP-Bridge](../mcp/zcode-harness-mcp/README.de.md).
 
 ## Kontingent & Fehlerbilder
@@ -98,4 +106,5 @@ abweichen; GLM-5.3-Flash wurde über den Proxy geprüft. Details:
 - `GET /quota` (authentifiziert) zeigt die Token-Buckets je Modell.
 - Kontingent erschöpft → HTTP 400 `[1005] exceed quota limit` (nicht wiederholbar — warten, bis der Anbieter wieder Kontingent bereitstellt).
 - `[3007] captcha verify failed` → Gateway-Anti-Absicherung nach intensiven Retry-Versuchen; Pause einlegen.
-- `401 start_plan_jwt_invalid` → Desktop-Anmeldung prüfen und mit `zcode-kit auth login zai` erneuern.
+- `401 start_plan_jwt_invalid` → Desktop-Anmeldung prüfen und mit `zcode-kit auth login zai` erneuern. **Derzeit unveröffentlichte lokale Korrektur:** Mit `zcode-kit auth login zai --import` den aktuell aktiven `zai`/`start-plan`-Login aus Desktop 0.16.9 mit ausdrücklich konfiguriertem Plan importieren. Eine vorhandene `credentials.json` ist maßgeblich; bei ungültigen Anmeldedaten erfolgt kein stiller Rückgriff auf `config.json`. Moderne `coding-plan`-Logins verwenden stattdessen normales OAuth; der Import erstellt oder ermittelt keine API-Schlüssel.
+- `[1210]` bei Flash → prüfen, ob Thinking aktiviert ist, und `low`, `high` oder `max` wählen, statt Thinking zu deaktivieren. Die derzeit unveröffentlichte lokale Korrektur normalisiert deaktiviertes Thinking auf `low`; siehe den Flash-Hinweis oben.

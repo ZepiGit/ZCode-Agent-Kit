@@ -18,10 +18,26 @@ Sicherheitszertifizierung.
   nicht.
 - Lokale Konfigurationen, Zugangsdaten, Schlüssel, Logs und Backups können
   sensible Daten enthalten. Beschränke den Zugriff und entferne Geheimnisse,
-  bevor du solche Daten weitergibst.
+  bevor du solche Daten weitergibst. CAPTCHA-Debug-Diagnosen enthalten nur
+  Metadaten. Die alte diagnostische Bytecode-VM-Umschreibung (`PE_PATCH`) wurde
+  nach reproduzierter Bundle-Beschädigung entfernt, ebenso die sensiblen
+  DBT-Argument-Dumps (`CAPTCHA_DUMP_DBT`); aktiviere diese Schalter nicht.
+  Solver und Sicherheitsprüfungen bleiben erhalten. Herkunftsangaben je
+  Artefakt und Hashes der geladenen Bytes dienen der Diagnose; sie sind weder
+  eine Sandbox noch ein Beleg für sicheren Provider-Code. Der statische
+  Kompatibilitätshelfer liest nur gespeicherte Skripte; er führt sie nicht aus
+  und belegt keinen Ende-zu-Ende-Erfolg der Challenge.
+- Der Desktop-Import liest den aktuellen gemeinsamen Login. Ist die
+  `credentials.json` von Desktop 0.16.9 vorhanden, ist sie maßgeblich; die alte
+  `config.json` wird nur bei ihrem Fehlen verwendet, nicht bei Fehlern der
+  Entschlüsselung oder Provider-Prüfung. Der Import verändert die
+  Desktop-Zugangsdaten nicht und ermittelt oder erstellt keine API-Schlüssel.
+  Ein aktiver `zai`-/`start-plan`-Import erfordert für `start-plan` einen ausdrücklich
+  konfigurierten Plan; `coding-plan` verwendet stattdessen den normalen OAuth-Login.
 - Der optionale Account Rotator speichert separate, verschlüsselte Kopien von
   Logins, über die du bereits verfügst. Verwende nur Konten, auf die du
-  zugreifen darfst. Er erstellt keine Konten und umgeht keine Provider-Limits.
+  zugreifen darfst. Er erstellt keine Konten, setzt keine Kontingente zurück
+  und umgeht keine Provider-Limits.
 - Integrationen starten lokale Assistenten mit den Berechtigungen des aktuellen
   Betriebssystem-Nutzers. Prüfe Installer- und Setup-Aktionen, bevor du sie in
   Umgebungen mit strengeren Sicherheitsanforderungen ausführst.

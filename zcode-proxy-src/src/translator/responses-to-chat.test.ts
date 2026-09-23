@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { responsesToChatCompletions, ToolTranslationError } from "./responses-to-chat.js";
 import type { ResponsesRequest } from "./responses-types.js";
+import { translateRequestOpenAIToAnthropic } from "./openai-to-anthropic.js";
 
 function baseReq(overrides: Partial<ResponsesRequest> = {}): ResponsesRequest {
   return { model: "glm-5.2", input: [{ type: "message", role: "user", content: "hi" }], ...overrides };
@@ -157,6 +158,38 @@ describe("responsesToChatCompletions", () => {
     // custom input wrapped as {input:"..."}
     expect(JSON.parse(msgs[1].tool_calls![0].function.arguments)).toEqual({ input: "ls -la" });
     expect(msgs[2]).toEqual({ role: "tool", tool_call_id: "call_1", content: "file1.txt" });
+  });
+
+  it("preserves structured MCP errors and custom-tool image results through the upstream translator", () => {
+    const error = "Error: read failed\nAccess denied: C:\\private\\file.txt";
+    const request = responsesToChatCompletions(baseReq({
+      input: [
+        { type: "function_call", call_id: "read_1", name: "read", arguments: "{}" },
+        { type: "custom_tool_call", call_id: "image_1", name: "capture", input: "screen" },
+        { type: "function_call_output", call_id: "read_1", output: [{ type: "input_text", text: error }] },
+        { type: "custom_tool_call_output", call_id: "image_1", output: [
+          { type: "input_text", text: "before\n" },
+          { type: "input_image", image_url: "data:image/png;base64,AAAA" },
+          { type: "input_text", text: "\nafter" },
+        ] },
+      ],
+    })).chatRequest;
+    const upstream = translateRequestOpenAIToAnthropic(request);
+    expect(upstream.messages[1]).toEqual({ role: "user", content: [
+      { type: "tool_result", tool_use_id: "read_1", content: error },
+      { type: "tool_result", tool_use_id: "image_1", content: [
+        { type: "text", text: "before\n" },
+        { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+        { type: "text", text: "\nafter" },
+      ] },
+    ] });
+  });
+
+  it("rejects unsupported tool result parts instead of silently erasing them", () => {
+    expect(() => responsesToChatCompletions(baseReq({ input: [
+      { type: "function_call", call_id: "c1", name: "audio", arguments: "{}" },
+      { type: "function_call_output", call_id: "c1", output: [{ type: "input_audio", audio_url: "data:audio/wav;base64,AAAA" }] },
+    ] }))).toThrow(ToolTranslationError);
   });
 
   it("attaches reasoning to the next assistant tool_call message", () => {

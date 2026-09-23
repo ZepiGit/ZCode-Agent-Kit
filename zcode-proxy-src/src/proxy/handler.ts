@@ -47,7 +47,7 @@ import { translateRequestAnthropicToOpenAI, translateResponseOpenAIToAnthropic }
 import { anthropicSseToOpenaiSse, openaiSseToAnthropicSse } from "../translator/sse-translator.js";
 import type { OpenAIChatRequest, OpenAIChatResponse, AnthropicMessagesRequest, AnthropicMessagesResponse } from "../translator/types.js";
 import { dumpPhase, dumpHeaders, dumpBody, dumpEnabled } from "./dump.js";
-import { inflateWithCap } from "./inflate.js";
+import { inflateWithCap, decodeContentStream } from "./inflate.js";
 import { buildAnthropicMetadataUserId } from "./trace-headers.js";
 
 /** Options for the proxy handler. */
@@ -429,6 +429,9 @@ export async function proxyRequest(
     // status. Anthropic clients would see a valid-but-empty response and
     // retry blindly — surface a real error status instead.
     const sniffed = await decodeBodyText(upstreamResp);
+    if (sniffed === null || !sniffed.trim()) {
+      return errorResponse(502, "upstream_invalid_response", "Upstream returned an empty or undecodable response.");
+    }
     const envelope = parseGatewayErrorEnvelope(sniffed);
     if (envelope) {
       printRow(reqId, format, meta, envelope.status, started, headersAt, 0, 0, 0);
@@ -454,24 +457,18 @@ export async function proxyRequest(
  * Fully decode a response body to text, undoing gzip/deflate/br when the
  * runtime has not already done so. Tries the raw bytes first and only runs
  * explicit decompression when the result does not look like JSON, so both
- * auto-decompressing and transparent runtimes are handled. Returns "" when
+ * auto-decompressing and transparent runtimes are handled. Returns null when
  * nothing decodable can be produced.
  */
-async function decodeBodyText(resp: Response): Promise<string> {
+async function decodeBodyText(resp: Response): Promise<string | null> {
   const encoding = (resp.headers.get("content-encoding") ?? "").toLowerCase();
   try {
     const buf = await resp.arrayBuffer();
     const raw = new TextDecoder().decode(buf);
     if (raw.trimStart().startsWith("{") || !encoding) return raw;
-    let stream: ReadableStream<any> | null = new Response(buf).body;
-    for (const enc of encoding.split(",").map((e) => e.trim()).reverse()) {
-      if (enc === "gzip" || enc === "deflate" || enc === "br") {
-        stream = stream!.pipeThrough(new DecompressionStream(enc as unknown as CompressionFormat) as unknown as ReadableWritablePair<any, any>);
-      }
-    }
-    return await new Response(stream).text();
+    return await new Response(decodeContentStream(new Response(buf).body!, encoding)).text();
   } catch {
-    return "";
+    return null;
   }
 }
 

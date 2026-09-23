@@ -8,7 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { createHash } from "node:crypto";
-import { spawnVersionProbe } from "./runtime/spawn.js";
+import { findBundledProviderConfig, spawnVersionProbe } from "./runtime/spawn.js";
 import { createLogger } from "./util/log.js";
 
 const log = createLogger("discovery");
@@ -16,6 +16,8 @@ const log = createLogger("discovery");
 export interface RuntimeInfo {
   /** Absolute path to zcode.cjs. */
   harnessPath: string;
+  /** Readable distribution config, or null for layouts with native resolution. */
+  bundledProviderConfigPath: string | null;
   /** Program used to run the harness ("node" from PATH; fixed literal). */
   nodeProgram: "node";
   /** Version reported by the harness itself (`zcode --version`). */
@@ -70,9 +72,9 @@ function runVersion(harnessPath: string, timeoutMs = 20_000): Promise<string | n
       });
       child.stderr?.on("data", () => {});
       child.on("error", () => done(null));
-      child.on("exit", () => {
+      child.on("close", (code) => {
         const m = out.match(/zcode\s+(\d+\.\d+\.\d+[^\s]*)/i) ?? out.match(/(\d+\.\d+\.\d+[^\s]*)/);
-        done(m ? m[1]! : null);
+        done(code === 0 && m ? m[1]! : null);
       });
       timer = setTimeout(() => {
         try {
@@ -98,21 +100,13 @@ async function readDesktopVersion(desktopExe: string): Promise<string | null> {
 }
 
 export async function discoverRuntime(opts: { runtimePathOverride?: string | null }): Promise<RuntimeInfo> {
-  const candidates: string[] = [];
-  let source: RuntimeInfo["source"] = "default-candidates";
-  if (opts.runtimePathOverride) {
-    candidates.push(opts.runtimePathOverride);
-    source = "env";
-  } else if (process.env.ZCODE_HARNESS_RUNTIME_PATH) {
-    candidates.push(process.env.ZCODE_HARNESS_RUNTIME_PATH);
-    source = "env";
-  }
   // An explicit operator path must not be silently replaced by defaults.
-  const explicit = opts.runtimePathOverride ?? process.env.ZCODE_HARNESS_RUNTIME_PATH ?? null;
+  const explicit = opts.runtimePathOverride || process.env.ZCODE_HARNESS_RUNTIME_PATH || null;
+  const source: RuntimeInfo["source"] = explicit ? "env" : "default-candidates";
   if (explicit && !fs.existsSync(path.resolve(explicit))) {
     throw new Error(`ZCODE_HARNESS_RUNTIME_PATH (--runtime-path) points to a missing file: ${path.resolve(explicit)}`);
   }
-  candidates.push(...candidateHarnessPaths());
+  const candidates = explicit ? [explicit] : candidateHarnessPaths();
 
   const considered: string[] = [];
   for (const candidate of candidates) {
@@ -122,13 +116,16 @@ export async function discoverRuntime(opts: { runtimePathOverride?: string | nul
     const version = await runVersion(abs);
     if (version === null) {
       log.warn("candidate exists but did not answer --version", { candidate: abs });
-      // Still accept the candidate: a present bundle with a broken --version
-      // is a real environment condition; the bridge reports it honestly.
+      if (explicit) {
+        throw new Error("ZCODE_HARNESS_RUNTIME_PATH (--runtime-path) failed the node --version probe; refusing to use another runtime");
+      }
+      continue;
     }
     const fp = fileFingerprint(abs);
     const desktopExe = path.join(path.dirname(path.dirname(path.dirname(abs))), "ZCode.exe");
     const info: RuntimeInfo = {
       harnessPath: abs,
+      bundledProviderConfigPath: findBundledProviderConfig(abs),
       nodeProgram: "node",
       harnessVersion: version,
       bundleFingerprint: fp?.sha256 ?? null,
@@ -141,7 +138,7 @@ export async function discoverRuntime(opts: { runtimePathOverride?: string | nul
     return info;
   }
   throw new Error(
-    `ZCode harness (zcode.cjs) not found. Considered:\n${considered
+    `No verified ZCode harness (zcode.cjs) found (missing or failed --version). Considered:\n${considered
       .map((c) => `  - ${c}`)
       .join("\n")}\nSet ZCODE_HARNESS_RUNTIME_PATH or pass --runtime-path.`
   );

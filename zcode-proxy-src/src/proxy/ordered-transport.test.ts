@@ -18,8 +18,28 @@ import { proxyRequest } from "./handler.js";
 import { AuthManager } from "../auth/manager.js";
 import type { ProxyConfig, ProxyIdentity } from "../config/types.js";
 import { fixtureSecret } from "../test-fixtures.js";
+import { gzipSync, deflateSync, brotliCompressSync } from "node:zlib";
 
 const PROXY_KEY = fixtureSecret("ordered-transport-key");
+
+for (const [encoding, compress] of [["gzip", gzipSync], ["deflate", deflateSync], ["br", brotliCompressSync]] as const) {
+  it('ordered transport decodes ' + encoding + ' before SSE translation', async () => {
+    const plain = 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+    const bytes = compress(Buffer.from(plain));
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream', 'content-encoding': encoding });
+      res.write(bytes.subarray(0, 3)); res.end(bytes.subarray(3));
+    });
+    const ready = Promise.withResolvers<void>(); server.listen(0, '127.0.0.1', ready.resolve); await ready.promise;
+    try {
+      const address = server.address(); if (!address || typeof address === 'string') throw new Error('server unavailable');
+      const response = await sendOrderedUpstreamRequest({ url: 'http://127.0.0.1:' + address.port, headers: [], decompress: true });
+      expect(await response.text()).toBe(plain);
+      expect(response.headers.get('content-encoding')).toBeNull();
+      expect(response.headers.get('content-length')).toBeNull();
+    } finally { server.closeAllConnections(); server.close(); }
+  });
+}
 
 interface SilentServer {
   server: Server;

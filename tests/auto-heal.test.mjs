@@ -3,7 +3,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, cpSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import omp from '../cli/adapters/omp.mjs';
+import { resolveBun } from '../lib/process.mjs';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import { createCtx, bootstrap } from '../cli/context.mjs';
@@ -34,16 +37,19 @@ async function api() {
 function snapshot(errors = []) {
   return { provider: 'zai', serverTime: 1700000000, jwt: { ageHours: 1, issuedAt: 1699996400 }, balances: [], claimablePlans: [], errors, asOf: '2023-11-14T22:13:20.000Z', cached: false };
 }
-async function mock(t, ctx, { code, foreign = false, hang = false, smokeCode, quotaBody } = {}) {
+async function mock(t, ctx, { code, foreign = false, hang = false, smokeCode, quotaBody, smokeReply } = {}) {
   const hits = [];
-  const server = http.createServer((req, res) => {
+  const server = http.createServer(async (req, res) => {
     hits.push(req.url);
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    let input = {}; try { input = JSON.parse(Buffer.concat(chunks).toString()); } catch {}
     if (foreign || req.headers.authorization !== `Bearer ${KEY}`) return res.writeHead(401).end('{}');
     if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok', provider: 'zai' }));
     if (hang) return;
     const body = req.url === '/quota'
       ? quotaBody ?? snapshot(code ? [`balance: ${code} SECRET-should-not-be-logged`] : [])
-      : smokeCode ? { error: { type: 'upstream_error', message: `[${smokeCode}] SECRET-should-not-be-logged` } } : { choices: [{ message: { content: 'ok' } }] };
+      : smokeCode ? { error: { type: 'upstream_error', message: `[${smokeCode}] SECRET-should-not-be-logged` } }
+      : smokeReply ?? { model: input.model, choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: String(input.messages?.[0]?.content ?? '').match(/ZCODE_SMOKE_[A-F0-9]+/)?.[0] ?? 'ok' } }] };
     res.end(JSON.stringify(body));
   });
   await new Promise(r => server.listen(0, '127.0.0.1', r));
@@ -233,6 +239,13 @@ test('setup smoke is one bounded minimal request and explicit opt-out skips all 
   assert.equal((await setupSmoke(ctx, { env: {} })).code, 0);
   assert.equal(hits.filter(p => p === '/v1/chat/completions').length, 1);
 });
+test('setup smoke rejects empty or unfinished choices instead of declaring connectivity', async t => {
+  const ctx = fixture(t);
+  await mock(t, ctx, { smokeReply: { choices: [{ message: { role: 'assistant', content: '' }, finish_reason: null }] } });
+  const { setupSmoke } = await api();
+  assert.notEqual((await setupSmoke(ctx, { env: {} })).code, 0);
+});
+
 test('manager doctor honors isolated ZCODE_PROXY_CREDENTIALS_PATH', async t => {
   const ctx = fixture(t); const store = join(ctx.home, 'custom-credentials.json'); writeFileSync(store, '{}');
   const previous = process.env.ZCODE_PROXY_CREDENTIALS_PATH; process.env.ZCODE_PROXY_CREDENTIALS_PATH = store;
@@ -253,9 +266,9 @@ test('bootstrap honors isolated credential store without importing desktop crede
   try { bootstrap(ctx); } finally { console.log = original; for (const key of ['ZCODE_PROXY_CREDENTIALS_PATH', 'ZCODE_KIT_SKIP_DEPS']) { if (previous[key] === undefined) delete process.env[key]; else process.env[key] = previous[key]; } }
   assert.ok(messages.includes('  proxy credentials present'), messages.join('\n'));
 });
-function runNode(file, args, env) {
+function runNode(file, args, env, runtime = process.execPath) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [file, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(runtime, [file, ...args], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', b => stdout += b); child.stderr.on('data', b => stderr += b);
     child.on('error', reject); child.on('close', code => resolve({ code, stdout, stderr }));
@@ -290,22 +303,227 @@ test('OMP session rechecks local health and recovers after failure without per-t
   time += 101; await ensure(); assert.equal(runs, 2, 'healthy TTL only calls local health');
   time += 101; healthy = false; await ensure(); assert.equal(runs, 3, 'later proxy crash can restart safely');
 });
-test('OMP extension diagnostics use stderr without contaminating print-mode stdout', () => {
-  const source = readFileSync(join(ROOT, 'proxy', 'zcode-proxy-autostart.ts'), 'utf8');
-  assert.doesNotMatch(source, /console\.(?:log|info)\s*\(|process\.stdout\s*\./);
-  assert.match(source, /if \(stderr\.trim\(\)\) console\.error\(/, 'preflight warnings belong on stderr');
-  assert.match(source, /console\.error\("\[zcode-autostart\] preflight failed/, 'startup failure belongs on stderr');
+test('OMP preflight captures child stdout and forwards only secret-free warning categories', async t => {
+  const ctx = fixture(t); const quotaBody = snapshot(['balance: 3012 SECRET']); await mock(t, ctx, { quotaBody });
+  cpSync(join(ROOT, 'cli'), join(ctx.root, 'cli'), { recursive: true });
+  cpSync(join(ROOT, 'lib'), join(ctx.root, 'lib'), { recursive: true });
+  cpSync(join(ROOT, 'proxy', 'zcode-proxy-manager.mjs'), join(ctx.root, 'proxy', 'zcode-proxy-manager.mjs'));
+  const runner = join(ctx.root, 'runner.mjs');
+  writeFileSync(runner, `import { runSessionPreflight } from './cli/heal.mjs'; await runSessionPreflight({ root: ${JSON.stringify(ctx.root)} });`);
+  const result = await runNode(runner, [], runtimeEnv(ctx));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /auth3012/);
+  assert.doesNotMatch(result.stderr, /SECRET|Bearer|synthetic-local-key/);
 });
-test('all shipped launchers and OMP share preflight rather than hidden or repeated starts', () => {
-  // Shell launchers only delegate to the JS launcher (no argument re-parsing
-  // by cmd.exe/sh); the JS launcher and the OMP extension share the preflight.
-  for (const id of ['aider', 'claude', 'codex']) for (const ext of ['cmd', 'sh']) {
-    const src = readFileSync(join(ROOT, 'bin', `zcode-${id}.${ext}`), 'utf8');
-    assert.match(src, /launch\.mjs/); assert.doesNotMatch(src, /manager\.mjs.*start/);
-    assert.doesNotMatch(src, /\bheal\.mjs\b/, 'preflight belongs to the JS launcher, not a second shell-level start');
-  }
-  const launcher = readFileSync(join(ROOT, 'cli', 'launch.mjs'), 'utf8');
-  assert.match(launcher, /startupPreflight\(/); assert.doesNotMatch(launcher, /\.start\(/);
-  const omp = readFileSync(join(ROOT, 'proxy', 'zcode-proxy-autostart.ts'), 'utf8');
-  assert.match(omp, /heal\.mjs/);
+function runtimeEnv(ctx, path = dirname(process.execPath)) {
+  const env = { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'path' || key === 'ZCODE_KIT_BUN') delete env[key];
+  env.PATH = path;
+  return env;
+}
+function childPreflight(t, source) {
+  const ctx = fixture(t);
+  const root = join(ctx.root, "kit space $& $' #");
+  mkdirSync(join(root, 'cli'), { recursive: true });
+  writeFileSync(join(root, 'cli', 'heal.mjs'), source);
+  return { ...ctx, root };
+}
+
+test('OMP launches native Node with literal spaced paths, kit cwd and deterministic child PATH', async t => {
+  const ctx = childPreflight(t, `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync('launch.json', JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2), path: process.env.PATH }));
+    console.log('SECRET child stdout');
+    console.error('SECRET child stderr');
+  `);
+  const { runSessionPreflight } = await api();
+  const nativeDir = join(ctx.root, 'native runtime'); mkdirSync(nativeDir);
+  cpSync(process.execPath, join(nativeDir, process.platform === 'win32' ? 'node.exe' : 'node'));
+  const env = runtimeEnv(ctx, nativeDir);
+  if (process.platform === 'win32') env.Path = join(ctx.root, 'nonexistent inherited path');
+  const warnings = [];
+  await runSessionPreflight({ root: ctx.root, env, warn: message => warnings.push(message) });
+  const launch = JSON.parse(readFileSync(join(ctx.root, 'launch.json'), 'utf8'));
+  assert.equal(launch.cwd, ctx.root);
+  assert.deepEqual(launch.args, ['--diagnostic-code']);
+  assert.equal(launch.path, nativeDir);
+  assert.deepEqual(warnings, [], 'arbitrary child output must not become diagnostics');
+});
+
+test('OMP ignores Windows shell shims during native runtime discovery', { skip: process.platform !== 'win32' }, async t => {
+  const ctx = childPreflight(t, 'process.exitCode = 0;');
+  const shimDir = join(ctx.root, 'shim bin'); mkdirSync(shimDir);
+  writeFileSync(join(shimDir, 'node.cmd'), '@echo off\r\necho invoked>shim-ran\r\n');
+  const { runSessionPreflight } = await api();
+  await assert.rejects(runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx, shimDir) }), { code: 'runtime-unavailable' });
+  assert.equal(existsSync(join(ctx.root, 'shim-ran')), false);
+});
+
+test('OMP uses the kit native Bun path when Node is absent from the child PATH', async t => {
+  const ctx = childPreflight(t, `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync('runtime.json', JSON.stringify({ bun: Boolean(process.versions.bun), cwd: process.cwd() }));
+  `);
+  writeFileSync(join(ctx.root, '.bun-path'), resolveBun(ROOT));
+  const { runSessionPreflight } = await api();
+  await runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx, '') });
+  assert.deepEqual(JSON.parse(readFileSync(join(ctx.root, 'runtime.json'), 'utf8')), { bun: true, cwd: ctx.root });
+});
+
+test('OMP runtime discovery failure cools down and recovers after PATH repair', async t => {
+  const ctx = childPreflight(t, `import { writeFileSync } from 'node:fs'; writeFileSync('started', 'yes');`);
+  const { createSessionPreflight, runSessionPreflight } = await api();
+  let time = 1000, attempts = 0;
+  const env = runtimeEnv(ctx, '');
+  const ensure = createSessionPreflight({ now: () => time, ttlMs: 100, health: async () => false, run: () => {
+    attempts++;
+    return runSessionPreflight({ root: ctx.root, env });
+  } });
+  await assert.rejects(ensure(), { code: 'runtime-unavailable' });
+  env.PATH = dirname(process.execPath);
+  await ensure();
+  assert.equal(attempts, 1);
+  assert.equal(existsSync(join(ctx.root, 'started')), false);
+  time += 101;
+  await Promise.all([ensure(), ensure()]);
+  assert.equal(attempts, 2);
+  assert.equal(readFileSync(join(ctx.root, 'started'), 'utf8'), 'yes');
+});
+
+for (const [exitCode, category] of [[3, 'foreign'], [5, 'key'], [4, 'startup']]) {
+  test(`OMP reports secret-free ${category} failure without launching another runtime`, async t => {
+    const ctx = childPreflight(t, `
+      import { appendFileSync } from 'node:fs';
+      appendFileSync('attempts', 'x');
+      console.log('SECRET stdout'); console.error('Bearer SECRET stderr'); process.exitCode = ${exitCode};
+    `);
+    // A configured fallback must not rerun a child that actually launched.
+    writeFileSync(join(ctx.root, '.bun-path'), process.execPath);
+    const { runSessionPreflight } = await api();
+    await assert.rejects(runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx) }), err => {
+      assert.equal(err.code, category);
+      assert.doesNotMatch(err.message, /SECRET|Bearer/);
+      return true;
+    });
+    assert.equal(readFileSync(join(ctx.root, 'attempts'), 'utf8'), 'x');
+  });
+}
+
+test('OMP retries a failed native child only after cooldown and recovers in the same session', async t => {
+  const ctx = childPreflight(t, `
+    import { existsSync, writeFileSync } from 'node:fs';
+    if (!existsSync('attempted')) { writeFileSync('attempted', 'yes'); process.exitCode = 4; }
+    else writeFileSync('recovered', 'yes');
+  `);
+  const { createSessionPreflight, runSessionPreflight } = await api();
+  let time = 1000;
+  const ensure = createSessionPreflight({ now: () => time, ttlMs: 100, health: async () => existsSync(join(ctx.root, 'recovered')), run: () => runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx) }) });
+  await assert.rejects(ensure(), { code: 'startup' });
+  await ensure(); assert.equal(existsSync(join(ctx.root, 'recovered')), false);
+  time += 100; await ensure();
+  assert.equal(readFileSync(join(ctx.root, 'recovered'), 'utf8'), 'yes');
+});
+
+test('OMP bounds hung and noisy preflight children without exposing their output', async t => {
+  const { runSessionPreflight } = await api();
+  const hung = childPreflight(t, 'setInterval(() => {}, 1000);');
+  await assert.rejects(runSessionPreflight({ root: hung.root, env: runtimeEnv(hung), timeoutMs: 150 }), { code: 'timeout' });
+  const noisy = childPreflight(t, `process.stdout.write('SECRET'.repeat(20000));`);
+  await assert.rejects(runSessionPreflight({ root: noisy.root, env: runtimeEnv(noisy) }), err => {
+    assert.equal(err.code, 'output-limit');
+    assert.doesNotMatch(err.message, /SECRET/);
+    return true;
+  });
+  rmSync(join(noisy.root, 'cli', 'heal.mjs'));
+  await assert.rejects(runSessionPreflight({ root: noisy.root, env: runtimeEnv(noisy) }), { code: 'installation' });
+});
+
+test('OMP child preflight refuses a real foreign listener without quota calls or pid mutation', async t => {
+  const ctx = fixture(t); const hits = await mock(t, ctx, { foreign: true });
+  cpSync(join(ROOT, 'cli'), join(ctx.root, 'cli'), { recursive: true });
+  cpSync(join(ROOT, 'lib'), join(ctx.root, 'lib'), { recursive: true });
+  cpSync(join(ROOT, 'proxy', 'zcode-proxy-manager.mjs'), join(ctx.root, 'proxy', 'zcode-proxy-manager.mjs'));
+  const pid = join(ctx.root, 'logs', 'proxy.pid');
+  const record = JSON.stringify({ pid: process.pid, startedMs: 1 }); writeFileSync(pid, record);
+  const { runSessionPreflight } = await api();
+  await assert.rejects(runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx) }), { code: 'foreign' });
+  assert.equal(readFileSync(pid, 'utf8'), record);
+  assert.deepEqual(hits, ['/health']);
+  const response = await fetch(`http://127.0.0.1:${ctx.port()}/still-alive`);
+  assert.equal(response.status, 401, 'the foreign listener still serves requests');
+});
+
+test('generated OMP extension recovers after disk module repair without restarting its Bun host', async t => {
+  const brokenModule = `
+    import { appendFileSync } from 'node:fs';
+    appendFileSync('attempts', 'x');
+    throw new Error('SECRET module evaluation failed');
+  `;
+  const repairedModule = `
+    import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+    appendFileSync('attempts', 'x');
+    if (!existsSync('start-failed')) {
+      writeFileSync('start-failed', 'yes');
+      console.error('Bearer SECRET failed start'); process.exitCode = 4;
+    } else {
+      writeFileSync('recovered', 'yes');
+      console.log('SECRET child stdout');
+      console.error('[zcode-preflight] cause=auth3012');
+    }
+  `;
+  const ctx = childPreflight(t, brokenModule);
+  mkdirSync(join(ctx.root, 'proxy'));
+  cpSync(join(ROOT, 'proxy', 'zcode-proxy-autostart.ts'), join(ctx.root, 'proxy', 'zcode-proxy-autostart.ts'));
+  const agent = join(ctx.home, '.omp', 'agent'); mkdirSync(agent, { recursive: true });
+  writeFileSync(join(agent, 'models.yml'), 'providers:\n  unrelated:\n    apiKey: keep\n');
+  writeFileSync(join(agent, 'config.yml'), 'theme: dark\n');
+  omp.apply({ ...ctx, proxySrc: join(ROOT, 'zcode-proxy-src'), port: () => 8457 }, { touch() {} }, () => {});
+  const extension = join(agent, 'extensions', 'zcode-proxy-autostart.ts');
+  const runner = join(ctx.root, 'extension-runner.mjs');
+  writeFileSync(runner, `
+    import assert from 'node:assert/strict';
+    import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+    import { join } from 'node:path';
+    import extension from ${JSON.stringify(pathToFileURL(extension).href)};
+    const root = ${JSON.stringify(ctx.root)};
+    const attempts = () => existsSync(join(root, 'attempts')) ? readFileSync(join(root, 'attempts'), 'utf8') : '';
+    const recovered = () => existsSync(join(root, 'recovered'));
+    let time = 1000, hook, healthCalls = 0;
+    Date.now = () => time;
+    const warnings = []; console.error = message => warnings.push(String(message));
+    globalThis.fetch = async (url, options) => {
+      healthCalls++;
+      assert.equal(url, 'http://127.0.0.1:8457/health');
+      assert.equal(options.headers.authorization, ${JSON.stringify(`Bearer ${KEY}`)});
+      return { ok: true, json: async () => ({ status: 'ok', provider: recovered() ? 'zai' : 'foreign' }) };
+    };
+    extension({ on(event, handler) { assert.equal(event, 'before_provider_request'); hook = handler; } });
+    const request = () => hook({}, { model: { provider: 'zcode' } });
+    await hook({}, { model: { provider: 'other' } });
+    await hook({}, {});
+    assert.equal(attempts(), ''); assert.equal(healthCalls, 0);
+    await Promise.all([request(), request()]);
+    assert.equal(attempts(), 'x'); assert.equal(recovered(), false);
+    assert.equal(warnings.length, 1); assert.match(warnings[0], /startup:/);
+    // Repair the very same module path while the same OMP/Bun host stays alive.
+    writeFileSync(join(root, 'cli', 'heal.mjs'), ${JSON.stringify(repairedModule)});
+    time += 59999; await request(); assert.equal(attempts(), 'x');
+    time += 1; await request();
+    assert.equal(attempts(), 'xx'); assert.equal(recovered(), false);
+    assert.equal(warnings.length, 2); assert.match(warnings[1], /startup:/);
+    await request(); assert.equal(attempts(), 'xx');
+    time += 60000; await Promise.all([request(), request()]);
+    assert.equal(attempts(), 'xxx'); assert.equal(recovered(), true);
+    assert.equal(healthCalls, 2); assert.match(warnings[2], /auth3012:/);
+    time += 60000; await hook({}, { models: { current: () => ({ provider: 'zcode' }) } });
+    assert.equal(attempts(), 'xxx'); assert.equal(healthCalls, 3);
+    rmSync(join(root, 'recovered')); time += 60000; await request();
+    assert.equal(attempts(), 'xxxx'); assert.equal(recovered(), true); assert.equal(healthCalls, 4);
+    assert.doesNotMatch(warnings.join('\\n'), /SECRET|Bearer|synthetic-local-key/);
+  `);
+  // Execute the actual generated TypeScript in Bun, as OMP does; no source-text assertions.
+  const result = await runNode(runner, [], runtimeEnv(ctx, ''), resolveBun(ROOT));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout, '', 'print-mode stdout remains reserved for model output');
 });

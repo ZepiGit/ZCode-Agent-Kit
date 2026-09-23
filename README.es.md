@@ -95,16 +95,18 @@ Estos comandos inician o comprueban el proxy automáticamente. Una respuesta `ok
 Para una sesión interactiva de OMP:
 
 ```sh
-omp --model zcode/glm-5.3
+omp --model zcode/glm-5.3-flash
 ```
 
 Para una sesión interactiva de Claude Code:
 
 ```sh
-zcode-kit run claude-code -- --model glm-5.3
+zcode-kit run claude-code -- --model glm-5.3-flash
 ```
 
 Elige `glm-5.3` para texto o `glm-5.3-flash` para texto e imágenes. La compatibilidad con imágenes también depende del asistente. Un puente MCP opcional ofrece herramientas de la instalación local de ZCode; registrar el puente no equivale a conectar un modelo.
+
+**Corrección local aún no publicada:** Flash siempre usa thinking. Las solicitudes que desactivan thinking se normalizan a `low`; se conservan `high` y `max` cuando se eligen explícitamente. En OMP, selecciona el nivel con `--thinking low`, `--thinking high` o `--thinking max`. Se han verificado respuestas completas de Flash mediante el proxy directo y Claude Code; esto no significa que todos los asistentes hayan superado las pruebas.
 
 <details>
 <summary>Otros asistentes y límites de integración</summary>
@@ -154,6 +156,8 @@ zcode-kit auth status
 
 - **No se encuentra el comando:** vuelve a abrir la terminal. En instalaciones de una versión publicada, comprueba que `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) o `$HOME/.local/bin` (macOS/Linux) esté en PATH.
 - **No responde el modelo:** comprueba la sesión de Desktop y la cuota disponible. Inicia el proxy si tu asistente no lo hace. Una comprobación de salud local no demuestra acceso al modelo.
+- **Autoarranque de OMP (corrección local aún no publicada):** ejecuta OMP directamente. La configuración fija Node/Bun nativos; la extensión realiza la comprobación previa en un proceso hijo nuevo, sin importar módulos del kit en OMP. Los fallos muestran categorías sin secretos; el proceso hijo tiene un límite de 120 segundos. Corrige la causa indicada y reintenta tras los 60 segundos de espera por sesión; es posible recuperarse en la misma sesión. Si cambió la ubicación del runtime, ejecuta de nuevo `zcode-kit setup --harness auto` y recarga la extensión. No se modifican procesos desconocidos que ocupen el puerto.
+- **Importar el login de Desktop (corrección local aún no publicada):** ejecuta `zcode-kit auth login zai --import` para importar el login activo de `zai`/`start-plan` en Desktop 0.16.9; se requiere un plan configurado explícitamente. Si existe `credentials.json`, es la fuente autoritativa: unas credenciales inválidas no provocan una vuelta silenciosa al antiguo `config.json`. Los logins modernos de `coding-plan` usan el OAuth normal con `zcode-kit auth login zai`; el importador no crea ni obtiene claves API.
 - **401 o puerto ocupado:** comprueba si existe otra instalación del kit. No borres claves ni termines un proceso que no reconoces.
 - **La configuración falló a medias:** lee el comando de rollback mostrado antes de volver a intentarlo. Es posible que queden cambios anteriores.
 

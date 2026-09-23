@@ -5,9 +5,11 @@
 // tool); a hand-written `zcode` entry outside any managed block aborts the
 // adapter fail-closed instead of being overwritten.
 import { readFileSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";
+import { resolveCommand, resolveBun } from "../../lib/process.mjs";
+import { PREFLIGHT_DETAILS, PREFLIGHT_WARNINGS } from "../heal.mjs";
 
 const BLOCK_NAME = "zcode-kit";
 const MARKER_BEGIN = `# >>> ${BLOCK_NAME} (managed block) — do not edit inside`;
@@ -266,12 +268,23 @@ export default {
 
     const extSrc = join(ctx.root, "proxy", "zcode-proxy-autostart.ts");
     const extDst = join(agentDir, "extensions", EXT_ENTRY_NAME);
+    // Pin a real native interpreter while setup has a working runtime/PATH.
+    // A packaged OMP execPath is not a Node/Bun interpreter. Never use it.
+    let runtime;
+    if (/^(?:node|bun)(?:\.exe)?$/i.test(basename(process.execPath))) runtime = process.execPath;
+    else {
+      try { runtime = resolveCommand(process.platform === "win32" ? "node.exe" : "node"); }
+      catch (err) { if (err.code !== "ENOENT") throw err; runtime = resolveBun(ctx.root); }
+    }
     ensureDir(ctx, dirname(extDst));
-    const literal = (p) => p.replace(/\\/g, "/").replace(/"/g, '\\"');
+    const literal = (p) => JSON.stringify(p.replace(/\\/g, "/")).slice(1, -1);
     const extContent = readFileSync(extSrc, "utf8")
-      .replaceAll("__ZCODE_OM_ROOT__", literal(ctx.root))
-      .replaceAll("__ZCODE_OM_KEY_FILE__", literal(ctx.keyFile))
-      .replaceAll("__ZCODE_OM_PORT__", String(port));
+      .replaceAll("__ZCODE_OM_ROOT__", () => literal(ctx.root))
+      .replaceAll("__ZCODE_OM_KEY_FILE__", () => literal(ctx.keyFile))
+      .replaceAll("__ZCODE_OM_RUNTIME__", () => literal(runtime))
+      .replaceAll("__ZCODE_OM_FAILURE_DETAILS__", () => JSON.stringify(JSON.stringify(PREFLIGHT_DETAILS)).slice(1, -1))
+      .replaceAll("__ZCODE_OM_WARNINGS__", () => JSON.stringify(JSON.stringify(PREFLIGHT_WARNINGS)).slice(1, -1))
+      .replaceAll("__ZCODE_OM_PORT__", () => String(port));
     if (!existsSync(extDst) || readFileSync(extDst, "utf8") !== extContent) {
       commitFile(ctx, tx, extDst, extContent, { log });
       log("  extension installed/updated: ~/.omp/agent/extensions/zcode-proxy-autostart.ts");

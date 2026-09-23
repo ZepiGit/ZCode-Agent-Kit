@@ -7,8 +7,9 @@ Konto gespeichert. Bei unterstützten Anfragen kann das Kit ein anderes
 gespeichertes Konto versuchen, wenn das ausgewählte Konto nicht fortfahren
 kann. Ein erneuter Versuch ist nicht garantiert erfolgreich.
 
-Die Funktion erstellt keine Konten und umgeht keine Provider-Regeln. Verwende
-nur Konten, auf die du zugreifen darfst.
+Die Funktion erstellt keine Konten, setzt keine Kontingente zurück und umgeht
+keine Provider-Regeln. Der Import eines Logins gewährt kein neues Kontingent.
+Verwende nur Konten, auf die du zugreifen darfst.
 
 ## Aktivieren oder deaktivieren
 
@@ -34,6 +35,18 @@ zcode-kit auth login zai
 zcode-kit auth login zai --import
 zcode-kit accounts
 ```
+
+Der Import liest die aktuellen gemeinsamen Desktop-Zugangsdaten, kein neu
+erstelltes Konto. Bei Desktop 0.16.9 ist die verschlüsselte `credentials.json`
+maßgeblich, wenn sie vorhanden ist. Nur bei ihrem Fehlen ist ein Fallback auf
+die ältere `config.json` möglich; beschädigte Daten, ein falsches
+Entschlüsselungs-Secret oder ein nicht unterstützter aktiver Provider führen
+zu einem Fehler statt zum stillen Import eines älteren Logins. Der Importer
+liest den aktuell aktiven `zai`-/`start-plan`-Login und verlangt für `start-plan`
+einen ausdrücklich konfigurierten Plan. Verwende für `coding-plan` den oben
+gezeigten normalen OAuth-Login: Der rein lesende Desktop-Importer ermittelt
+oder erstellt keine API-Schlüssel. Er verändert die gemeinsamen
+Desktop-Zugangsdaten nicht.
 
 Die Kontenliste zeigt die IDs für diese Verwaltungsbefehle:
 

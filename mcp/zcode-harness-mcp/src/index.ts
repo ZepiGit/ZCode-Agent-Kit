@@ -102,6 +102,7 @@ async function main(): Promise<void> {
       bundleFingerprint: null,
       bundleBytes: null,
       desktopVersion: null,
+      bundledProviderConfigPath: null,
       source: "default-candidates",
       candidatesConsidered: [],
     },

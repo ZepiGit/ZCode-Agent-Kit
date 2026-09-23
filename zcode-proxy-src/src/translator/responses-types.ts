@@ -20,7 +20,7 @@
 
 /** Reasoning configuration on a Responses request. */
 export interface ResponsesReasoning {
-  effort?: "minimal" | "low" | "medium" | "high";
+  effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   summary?: "auto" | "concise" | "detailed" | "none";
 }
 
@@ -50,9 +50,9 @@ export type ResponsesInputItem =
   | { type: "message"; role: "user" | "assistant" | "developer" | "system"; content: ResponsesContentPart[] | string; [k: string]: unknown }
   | { type: "reasoning"; id?: string; content?: ResponsesContentPart[]; summary?: ResponsesContentPart[]; encrypted_content?: string; [k: string]: unknown }
   | { type: "function_call"; call_id: string; name: string; arguments: string; id?: string; [k: string]: unknown }
-  | { type: "function_call_output"; call_id: string; output: string; id?: string; [k: string]: unknown }
+  | { type: "function_call_output"; call_id: string; output: string | ResponsesContentPart[]; id?: string; [k: string]: unknown }
   | { type: "custom_tool_call"; call_id: string; name: string; input: string; id?: string; [k: string]: unknown }
-  | { type: "custom_tool_call_output"; call_id: string; output: string; id?: string; [k: string]: unknown }
+  | { type: "custom_tool_call_output"; call_id: string; output: string | ResponsesContentPart[]; id?: string; [k: string]: unknown }
   | { type: "tool_search_call"; call_id?: string; arguments?: Record<string, unknown> | string; id?: string; [k: string]: unknown }
   | { type: "tool_search_output"; call_id?: string; output?: unknown; id?: string; [k: string]: unknown }
   | { type: "additional_tools"; role?: string; tools?: ResponsesTool[]; [k: string]: unknown }

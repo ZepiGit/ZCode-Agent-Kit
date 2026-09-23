@@ -14,9 +14,22 @@ its bundled integrations. It is not a security certification.
   binding and bearer authentication do not isolate it.
 - Local configuration, credentials, keys, logs, and backups may contain
   sensitive data. Restrict access and remove secrets before sharing them.
+  CAPTCHA debug diagnostics are metadata-only. The old bytecode-VM diagnostic
+  rewrite (`PE_PATCH`) was removed after reproduced bundle corruption, and
+  sensitive DBT argument dumps (`CAPTCHA_DUMP_DBT`) were removed; do not enable
+  those switches. The solver and its security gates remain. Per-artifact
+  provenance and loaded-byte hashes are diagnostics, not a sandbox or proof
+  that vendor code is safe. The static compatibility helper only reads saved
+  scripts; it does not execute them or prove end-to-end challenge success.
+- Desktop import reads the current shared login. If Desktop 0.16.9's
+  `credentials.json` exists, it is authoritative; the legacy `config.json` is
+  used only when it is absent, not when decryption or provider validation fails.
+  Import is read-only with respect to Desktop credentials and does not
+  resolve/create API keys. An active `zai`/`start-plan` import requires an
+  explicitly configured plan for `start-plan`; `coding-plan` uses normal OAuth instead.
 - The optional Account Rotator stores separate encrypted copies of logins you
   already control. Use only accounts you are authorized to access. It does not
-  create accounts or bypass provider limits.
+  create accounts, reset quotas, or bypass provider limits.
 - Integrations run local assistant tools with the permissions of the current
   operating-system user. Review installer and setup actions before running
   them in environments with stricter security requirements.

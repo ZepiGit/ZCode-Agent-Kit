@@ -17,10 +17,10 @@ app-server --stdio`, instalada localmente) con sus herramientas, su gestión de
 contexto y sus permisos.
 
 - Protocolo: MCP (SDK oficial) hacia fuera, **ZCode Protocol v1** (NDJSON por
-  stdio, verificado en vivo contra 0.16.5) hacia dentro — ver
+  stdio; la verificación de 0.16.5 es histórica, el contrato actual es 0.16.9) hacia dentro — ver
   [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
-- Alcance: 32 herramientas MCP + recursos MCP; registro de capacidades con 45
-  entradas ([`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)).
+- Alcance: 32 herramientas MCP + recursos MCP; registro de capacidades actualizado
+  según el contrato nativo ([`CAPABILITY_MATRIX.md`](CAPABILITY_MATRIX.md)).
 - `npm test` ejecuta fixtures locales deterministas. Las pruebas reales requieren opt-in; informes históricos no son aceptación actual.
 - Refuerzo: IDs de sesión limitados al workspace; `yolo` requiere `--allow-yolo`. La allowlist usa nombres exactos; Bash, PowerShell y Shell se deniegan. Artefactos con límite de tamaño; JSONL conserva dos archivos de máximo 4 MiB cada uno. EOF interrumpe tareas y cierra el hijo; no se garantiza aislamiento del árbol de procesos Windows. `--runtime-path` ejecuta código: solo archivos confiables.
 
@@ -35,6 +35,15 @@ contexto y sus permisos.
   - también puedes indicar el archivo instalado con `--runtime-path` o `ZCODE_HARNESS_RUNTIME_PATH`
 - ZCode con sesión iniciada (el harness usa el login OAuth local de Z.AI; el
   puente **no gestiona credenciales** y redacta secretos en todas las salidas)
+
+La ruta del proveedor incluido se resuelve desde el punto de entrada verificado,
+no desde el directorio de trabajo. `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` no vacío
+prevalece sobre `ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE` y, después, sobre el
+archivo detectado. Solo se ajusta el entorno del hijo; se conserva
+`ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` y no se modifica el entorno padre. Una ruta
+explícita de configuración base inválida falla sin sustitución. La materialización
+nativa de la configuración sigue a cargo del proveedor; detalles en
+[`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Instalación (Windows / PowerShell)
 
@@ -93,7 +102,7 @@ node examples\demo-client.mjs --fixture
 
 El cliente de demo muestra el flujo completo: descubrir capacidades → abrir
 workspace → leer el catálogo real de modelos → comprobación de GLM-5.3-Flash
-(sin cambio silencioso de modelo) → cambiar un ajuste → iniciar una tarea →
+(sin cambio silencioso de modelo) → elegir el modelo y modo de sesión → iniciar una tarea →
 consultar progreso → responder una pregunta de seguimiento → leer resultado +
 artefactos → pedido de seguimiento en la misma sesión.
 
@@ -139,6 +148,20 @@ npm run test:live # habilitación explícita: instalación real y posible uso de
 Detalles: [`docs/SECURITY.md`](docs/SECURITY.md) · Límites honestos: [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)
 
 ## Estado
+
+En 0.16.9, `workspace/readPresentation` solo devuelve la presentación, sin valores
+predeterminados, catálogo ni revisión de ajustes. `zcode_models_list` crea y cierra
+una sesión propia con persistencia diferida y sin prompt; puede inicializar servicios
+de runtime y se rechaza con `--read-only`. Se admite la selección nativa de modelo,
+modo y razonamiento por sesión. Los setters y el reset de valores persistentes del
+workspace no están disponibles: se devuelve un error explícito, sin sustituto local.
+Las preferencias de runtime afectan al proceso app-server compartido; su confirmación
+no es una lectura independiente de verificación.
+
+El catálogo nativo actual se verificó e incluye `zai-api/GLM-5.3-Flash`. Una solicitud
+en Windows con ZCode 0.16.9 y razonamiento `low` fue bloqueada por el código `1113`
+(saldo o paquete de recursos insuficiente); no se afirma una respuesta nativa. El éxito del proxy no demuestra éxito
+del modelo por MCP. Las observaciones de 0.16.5 son históricas.
 
 Estado actual de implementación y verificación: [`KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) · Evidencia de tests: [CI](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml) · Referencia de API: [`docs/MCP_API.md`](docs/MCP_API.md)
 

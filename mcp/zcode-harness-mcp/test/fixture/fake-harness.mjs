@@ -15,13 +15,16 @@
  *   FAKE_HANG_AFTER_REQUESTS=N      stop answering after N requests
  *   FAKE_NO_STREAM=0|1              omit model.streaming events
  *   FAKE_RUNTIME_LOG=...            append received method/params as JSONL
+ *   FAKE_REQUIRE_REASONING=0|1      require model.options.reasoningLevel in setModel
+ *   FAKE_MODEL_MISMATCH=0|1         acknowledge model selection without applying it
+ *   FAKE_THOUGHT_MISMATCH=0|1       acknowledge effort selection without applying it
  */
 import readline from "node:readline";
 import fs from "node:fs";
 
 // Discovery probe: answer `--version` like the real harness and exit.
 if (process.argv.includes("--version")) {
-  process.stdout.write("zcode 0.16.5\n");
+  process.stdout.write("zcode 0.16.9\n");
   process.exit(0);
 }
 
@@ -30,10 +33,10 @@ let seq = 0;
 let serverReqCounter = 0;
 let requestCount = 0;
 const sessions = new Map();
-let workspaceRevision = 3;
-const wsDefaults = { mode: "build", model: { providerId: "fake", modelId: "FAKE-Main" }, thoughtLevel: "max" };
+let dynamicWorkflowEnabled = false;
 
 const MODELS = [
+  { ref: { providerId: "zai-api", modelId: "GLM-5.3-Flash" }, label: "GLM-5.3-Flash", contextWindow: 200000, maxOutputTokens: 64000, reasoning: { enabled: true, levels: [{ value: "low" }, { value: "max" }], defaultLevel: "max" } },
   { ref: { providerId: "fake", modelId: "FAKE-Main" }, label: "FAKE-Main", contextWindow: 200000, maxOutputTokens: 64000, reasoning: { enabled: true, levels: [{ value: "low" }, { value: "max" }], defaultLevel: "max" } },
   { ref: { providerId: "fake", modelId: "FAKE-Lite" }, label: "FAKE-Lite", contextWindow: 200000, maxOutputTokens: 64000, reasoning: { enabled: true, levels: [{ value: "enabled" }, { value: "disabled" }], defaultLevel: "enabled" } },
 ];
@@ -57,19 +60,6 @@ const pendingServer = new Map();
 function emit(sessionId, type, payload) {
   seq += 1;
   notify("session/event", { sessionId, seq, type, payload });
-}
-
-function workspaceState(workspacePath) {
-  return {
-    revision: workspaceRevision,
-    modelCatalog: { available: MODELS, providers: [{ providerId: "fake", source: "builtin", models: MODELS.map((m) => ({ ...m, modelId: m.ref.modelId })) }] },
-    settings: {
-      mode: { current: wsDefaults.mode },
-      model: { available: MODELS, current: { ...wsDefaults.model } },
-      thoughtLevel: { current: wsDefaults.thoughtLevel },
-    },
-    workspace: { workspaceKey: workspacePath, workspacePath },
-  };
 }
 
 function sessionRecord(sessionId, workspacePath, mode) {
@@ -133,34 +123,37 @@ rl.on("line", async (line) => {
   logRequest(method, params);
   const hangAfter = Number(env("FAKE_HANG_AFTER_REQUESTS", "0"));
   if (hangAfter > 0 && requestCount > hangAfter) return;
-  switch (method) {
-    case "workspace/readState": {
-      const wp = params.workspace?.workspacePath ?? "C:\\fake";
-      write({ id, result: workspaceState(wp) });
+  if (["session/setModel", "session/setMode", "session/setThoughtLevel"].includes(method) && params.expectedRevision !== undefined) {
+    const s = sessions.get(params.sessionId);
+    if (s && params.expectedRevision !== (s.stateRevision ?? 0)) {
+      write({ id, error: { code: -32009, message: "Session state revision mismatch" } });
       return;
     }
-    case "workspace/setDefaultModel": {
-      const model = params.model ?? {};
-      const known = MODELS.some((m) => m.ref.providerId === model.providerId && m.ref.modelId === model.modelId);
-      if (!known) {
-        write({ id, error: { code: -32603, message: `Unsupported model: ${model.providerId}/${model.modelId}. Available models: main, fake/FAKE-Main, lite, fake/FAKE-Lite.` } });
+  }
+  switch (method) {
+    case "workspace/readPresentation": {
+      write({ id, result: { workspace: params.workspace, mode: "build", slashCommands: [{ name: "help", description: "Help" }, ...(dynamicWorkflowEnabled ? [{ name: "workflow", description: "Workflow" }] : [])] } });
+      return;
+    }
+    case "runtime/capabilities": {
+      write({ id, result: { independentPlanState: true } });
+      return;
+    }
+    case "workspace/updateInteractionPreferences":
+    case "workspace/updateModelIoPreferences":
+    case "workspace/updateOffPeakToolPolicy":
+    case "workspace/updateDynamicWorkflowPolicy": {
+      const field = method.endsWith("InteractionPreferences") ? "askUserQuestionAutoResolutionEnabled" : method.endsWith("ModelIoPreferences") ? "fullRetentionEnabled" : "enabled";
+      const nested = field !== "enabled";
+      const value = nested ? params.preferences?.[field] : params[field];
+      const keys = Object.keys(params);
+      if (typeof value !== "boolean" || keys.some(k => !["workspace", nested ? "preferences" : "enabled"].includes(k)) || (nested && Object.keys(params.preferences).some(k => k !== field))) {
+        write({ id, error: { code: -32602, message: "Invalid preference params" } });
         return;
       }
-      wsDefaults.model = { providerId: model.providerId, modelId: model.modelId };
-      workspaceRevision += 1;
-      write({ id, result: workspaceState(params.workspace?.workspacePath ?? "C:\\fake") });
-      return;
-    }
-    case "workspace/setDefaultMode": {
-      wsDefaults.mode = params.mode;
-      workspaceRevision += 1;
-      write({ id, result: workspaceState(params.workspace?.workspacePath ?? "C:\\fake") });
-      return;
-    }
-    case "workspace/setDefaultThoughtLevel": {
-      wsDefaults.thoughtLevel = params.thoughtLevel;
-      workspaceRevision += 1;
-      write({ id, result: workspaceState(params.workspace?.workspacePath ?? "C:\\fake") });
+      if (method === "workspace/updateDynamicWorkflowPolicy") dynamicWorkflowEnabled = value;
+      const extra = field === "askUserQuestionAutoResolutionEnabled" ? { snoozedInteractionCount: 0 } : field === "fullRetentionEnabled" ? { updatedSessionCount: sessions.size } : {};
+      write({ id, result: { workspace: params.workspace, [field]: env("FAKE_PREFERENCE_MISMATCH", "0") === "1" ? !value : value, ...extra } });
       return;
     }
     case "session/list": {
@@ -173,7 +166,7 @@ rl.on("line", async (line) => {
       const wsPath = params.workspace?.workspacePath ?? "C:\\fake";
       const sessionId = `sess_fake-${Math.random().toString(36).slice(2, 10)}`;
       const mode = params.mode ?? "build";
-      sessions.set(sessionId, { record: sessionRecord(sessionId, wsPath, mode), events: [], stopped: false });
+      sessions.set(sessionId, { record: sessionRecord(sessionId, wsPath, mode), persistence: params.persistence ?? "immediate", stateRevision: 0, thoughtLevel: "max", events: [], stopped: false });
       // Reverse call that blocks create until answered (as the real harness does).
       serverRequest("session/requestRuntimePreferences", { sessionId, scope: "runtime-materialization" }, (resp) => {
         if (resp.error) {
@@ -192,7 +185,7 @@ rl.on("line", async (line) => {
             protocol: { name: "ZCode Protocol", version: 1 },
             session: sessionRecord(sessionId, wsPath, mode),
             projection: { sessionId, status: "idle", activeToolCalls: [], backgroundJobs: [], pendingPermissions: [], contextWindow: 200000, contextUsed: 0, totalTokenCount: 0, turnCount: 0, mode },
-            settings: { mode: { current: mode }, model: { available: MODELS, current: { providerId: "fake", modelId: "FAKE-Main" } } },
+            settings: { mode: { current: mode }, model: { ...(env("FAKE_MISSING_CATALOG", "0") === "1" && params.persistence === "deferred" ? {} : { available: MODELS }), current: { providerId: "fake", modelId: "FAKE-Main" } } },
             runtime: { eventSeq: 0, stateRevision: 0 },
             messages: [],
           },
@@ -220,15 +213,28 @@ rl.on("line", async (line) => {
         return;
       }
       const m = params.model ?? {};
-      const known = MODELS.some((x) => x.ref.providerId === m.providerId && x.ref.modelId === m.modelId);
+      const known = MODELS.find((x) => x.ref.providerId === m.providerId && x.ref.modelId === m.modelId);
       if (!known) {
-        write({ id, error: { code: -32603, message: `Unsupported model: ${m.providerId}/${m.modelId}. Available models: main, fake/FAKE-Main, lite, fake/FAKE-Lite.` } });
+        write({ id, error: { code: -32603, message: `Unsupported model: ${m.providerId}/${m.modelId}. Available models: ${MODELS.map(x => `${x.ref.providerId}/${x.ref.modelId}`).join(", ")}.` } });
         return;
       }
-      s.record.model = { providerId: m.providerId, modelId: m.modelId };
+      const reasoningLevel = m.options?.reasoningLevel;
+      if (env("FAKE_REQUIRE_REASONING", "0") === "1" && reasoningLevel === undefined) {
+        write({ id, error: { code: -32603, message: `Reasoning level is required for ${m.providerId}/${m.modelId}` } });
+        return;
+      }
+      if (reasoningLevel !== undefined && !known.reasoning.levels.some(level => level.value === reasoningLevel)) {
+        write({ id, error: { code: -32603, message: "Unsupported reasoning effort: " + reasoningLevel } });
+        return;
+      }
+      if (env("FAKE_MODEL_MISMATCH", "0") !== "1") {
+        s.record.model = { providerId: m.providerId, modelId: m.modelId };
+        if (env("FAKE_THOUGHT_MISMATCH", "0") !== "1") s.thoughtLevel = reasoningLevel ?? known.reasoning.defaultLevel;
+      }
+      s.stateRevision = (s.stateRevision ?? 0) + 1;
       seq += 1;
       notify("session/event", { sessionId: params.sessionId, seq, type: "session.updated", payload: { model: `${m.providerId}/${m.modelId}` } });
-      write({ id, result: { projection: { sessionId: params.sessionId, status: "idle" }, settings: { model: { current: m } } } });
+      write({ id, result: { runtime: { stateRevision: s.stateRevision }, projection: { sessionId: params.sessionId, status: "idle" }, settings: { model: { current: s.record.model } } } });
       return;
     }
     case "session/setMode": {
@@ -238,7 +244,8 @@ rl.on("line", async (line) => {
         return;
       }
       s.record.mode = params.mode;
-      write({ id, result: { projection: { sessionId: params.sessionId, status: "idle", mode: params.mode }, settings: { mode: { current: params.mode } } } });
+      s.stateRevision = (s.stateRevision ?? 0) + 1;
+      write({ id, result: { runtime: { stateRevision: s.stateRevision }, projection: { sessionId: params.sessionId, status: "idle", mode: params.mode }, settings: { mode: { current: params.mode } } } });
       return;
     }
     case "session/setThoughtLevel": {
@@ -247,11 +254,14 @@ rl.on("line", async (line) => {
         write({ id, error: { code: -32602, message: "Session not found" } });
         return;
       }
-      if (!["low", "max", "enabled", "disabled"].includes(params.thoughtLevel)) {
+      const model = MODELS.find(m => m.ref.providerId === s.record.model.providerId && m.ref.modelId === s.record.model.modelId);
+      if (!model?.reasoning.levels.some(level => level.value === params.thoughtLevel)) {
         write({ id, error: { code: -32603, message: "Unsupported reasoning effort: " + params.thoughtLevel } });
         return;
       }
-      write({ id, result: { projection: { sessionId: params.sessionId, status: "idle" } } });
+      if (env("FAKE_THOUGHT_MISMATCH", "0") !== "1") s.thoughtLevel = params.thoughtLevel;
+      s.stateRevision = (s.stateRevision ?? 0) + 1;
+      write({ id, result: { runtime: { stateRevision: s.stateRevision }, projection: { sessionId: params.sessionId, status: "idle" } } });
       return;
     }
     case "session/send": {
@@ -302,7 +312,8 @@ rl.on("line", async (line) => {
             turnCount: s.turnCount ?? 0,
             mode: s.record.mode,
           },
-          settings: { mode: { current: s.record.mode }, model: { available: MODELS, current: s.record.model } },
+          settings: { mode: { current: s.record.mode }, model: { available: MODELS.filter(m => m.ref.modelId === s.record.model.modelId), current: s.record.model }, thoughtLevel: { current: s.thoughtLevel ?? "max" } },
+          runtime: { stateRevision: s.stateRevision ?? 0 },
           todos: [],
         },
       });
@@ -327,8 +338,10 @@ rl.on("line", async (line) => {
       return;
     }
     case "session/close": {
-      sessions.delete(params.sessionId);
-      write({ id, result: { closed: true } });
+      const s = sessions.get(params.sessionId);
+      const closed = !!s && (params.expectedPersistence === undefined || params.expectedPersistence === s.persistence) && env("FAKE_REFUSE_CLOSE", "0") !== "1";
+      if (closed) sessions.delete(params.sessionId);
+      write({ id, result: { closed } });
       return;
     }
     case "session/fork": {

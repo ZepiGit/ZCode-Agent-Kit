@@ -3,6 +3,7 @@ import { AuthManager } from "../auth/manager.js";
 import { createAccountRotator } from "../auth/account-rotator.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
 import { recoverAndMapUpstream } from "./upstream-errors.js";
+import { brotliCompressSync } from "node:zlib";
 
 const first = { apiKey: "pool-one", provider: "zai" as const };
 const second = { apiKey: "pool-two", provider: "zai" as const };
@@ -33,6 +34,16 @@ async function run(response: Response, code: string | undefined = undefined): Pr
 }
 
 describe("account-pool upstream recovery", () => {
+  it("surfaces Brotli-compressed rejection without rotating or declaring success", async () => {
+    const { response, calls } = await run(new Response(brotliCompressSync(JSON.stringify({ code: 3007, msg: "private provider detail" })), {
+      headers: { "content-type": "application/json", "content-encoding": "br" },
+    }));
+    expect(response.status).toBe(403);
+    expect(calls).toBe(0);
+    const body = await response.json() as { error: { message: string } };
+    expect(body.error.message).toContain("[3007]");
+    expect(body.error.message).not.toContain("private provider detail");
+  });
   for (const code of [1005, 1113, 3001]) {
     it(`rotates once for explicit quota code ${code}, including HTTP 200 envelopes`, async () => {
       const { response, calls } = await run(Response.json({ code, msg: "redacted upstream text" }, { status: 200 }));
@@ -59,6 +70,21 @@ describe("account-pool upstream recovery", () => {
     });
     expect(calls).toBe(1);
     expect(result.status).toBe(400);
+  });
+
+  it("keeps Anthropic 1210 non-retryable with fixed guidance and the original HTTP error status", async () => {
+    for (const status of [400, 422]) {
+      const { response, calls } = await run(Response.json({
+        type: "error", error: { type: "invalid_request_error", message: "[1210][provider-secret][request-secret]" },
+      }, { status }));
+      expect(calls).toBe(0);
+      expect(response.status).toBe(status);
+      const body = await response.json() as { error: { type: string; message: string } };
+      expect(body.error.type).toBe("invalid_request_error");
+      for (const effort of ["low", "high", "max"]) expect(body.error.message).toContain(effort);
+      expect(body.error.message).not.toContain("provider-secret");
+      expect(body.error.message).not.toContain("request-secret");
+    }
   });
 
   it("does not mark a streaming 200 healthy from its header alone", async () => {

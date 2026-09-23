@@ -10,6 +10,71 @@
  * setting both fields) plus live upstream verification.
  */
 
+import { MODELS } from "./models.js";
+
+/** Fields inspected at the JSON boundary; malformed values are never coerced. */
+interface ThinkingRequest {
+  model?: unknown;
+  thinking?: unknown;
+  output_config?: unknown;
+  max_tokens?: unknown;
+  temperature?: unknown;
+  top_k?: unknown;
+  top_p?: unknown;
+}
+
+/**
+ * Flash always thinks: upstream rejects disabled with validation code 1210.
+ * Only rewrite an explicit disabled request for this verified model. The
+ * disabled → enabled transition lets the native path apply additive compat
+ * once, while leaving already-translated requests' total budgets untouched.
+ * A supported explicit effort wins; otherwise off means the lowest effort.
+ */
+export function normalizeGlm53FlashThinking(body: ThinkingRequest, requestedEffort?: string): boolean {
+  if (typeof body.model !== "string" || body.model.toLowerCase() !== "glm-5.3-flash") return false;
+  const thinking = body.thinking;
+  if (!thinking || typeof thinking !== "object" || Array.isArray(thinking)
+    || !("type" in thinking) || thinking.type !== "disabled") return false;
+  const output = body.output_config;
+  const config = output && typeof output === "object" && !Array.isArray(output) ? output : undefined;
+  const explicitEffort = config && "effort" in config ? config.effort : undefined;
+  const effort = explicitEffort === "low" || explicitEffort === "high" || explicitEffort === "max"
+    ? explicitEffort : requestedEffort === "low" || requestedEffort === "high" || requestedEffort === "max" ? requestedEffort : "low";
+  const reasoning = buildGlm53Reasoning(effort);
+  body.thinking = reasoning.thinking;
+  body.output_config = { ...config, ...reasoning.output_config };
+  return true;
+}
+
+/**
+ * Mirror the SDK's Anthropic builder: thinking removes sampling parameters
+ * and adds its budget on top of the answer allowance, capped at the model
+ * ceiling. Enabled thinking without a budget uses 1024; adaptive does not.
+ * Call once for translated requests, or only after native disabled thinking
+ * was normalized. Native enabled requests already carry a total allowance.
+ */
+export function applyAnthropicThinkingCompat(result: ThinkingRequest): void {
+  const thinking = result.thinking;
+  if (!thinking || typeof thinking !== "object" || Array.isArray(thinking)
+    || !("type" in thinking) || (thinking.type !== "enabled" && thinking.type !== "adaptive")) {
+    if (result.temperature !== undefined && result.top_p !== undefined) delete result.top_p;
+    return;
+  }
+  let budget = "budget_tokens" in thinking ? thinking.budget_tokens : undefined;
+  if (thinking.type === "enabled" && (typeof budget !== "number" || !Number.isFinite(budget))) {
+    budget = GLM53_MIN_THINKING_BUDGET;
+    Object.assign(thinking, { budget_tokens: GLM53_MIN_THINKING_BUDGET });
+  }
+  delete result.temperature;
+  delete result.top_k;
+  delete result.top_p;
+  if (typeof result.max_tokens !== "number" || !Number.isFinite(result.max_tokens) || result.max_tokens <= 0) return;
+  const effective = typeof budget === "number" && Number.isFinite(budget) ? budget : 0;
+  result.max_tokens += effective;
+  const modelMax = MODELS.find((m) => m.id === result.model)?.maxOutputTokens;
+  if (modelMax !== undefined && result.max_tokens > modelMax) result.max_tokens = modelMax;
+}
+
 /** The three legal `output_config.effort` levels for GLM-5.3 models (module-local; the type below is the public contract). */
 const GLM53_EFFORT_LEVELS = ["low", "high", "max"] as const;
 
@@ -98,8 +163,8 @@ export function buildGlm53Reasoning(effort: Glm53Effort): {
  * maxOutputTokens - 1)`, applied against the large fixed model ceiling, not
  * the per-request `max_tokens`). The request-level budget-vs-answer split is
  * NOT clamped here: the bundle's anthropic builder instead ADDS the budget on
- * top of `max_tokens` (see applyAnthropicThinkingCompat in
- * openai-to-anthropic.ts), which is how real traffic keeps answer room.
+ * top of `max_tokens` (see applyAnthropicThinkingCompat above), which is how
+ * real traffic keeps answer room.
  * Passes `budget` through unchanged when `modelMaxTokens` isn't a finite
  * number (unknown model ids — nothing to clamp against).
  */

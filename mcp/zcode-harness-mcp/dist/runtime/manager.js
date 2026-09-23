@@ -47,6 +47,7 @@ export class RuntimeManager {
             return this.connection;
         const conn = new ZcodeConnection({
             harnessPath: this.runtimeInfo.harnessPath,
+            bundledProviderConfigPath: this.runtimeInfo.bundledProviderConfigPath,
             cwd: path.dirname(this.config.dataDir + path.sep), // stable neutral cwd (data dir parent)
             requestTimeoutMs: this.requestTimeoutMs,
             onNotification: (method, params) => this.dispatchNotification(method, params),
@@ -160,6 +161,39 @@ export class RuntimeManager {
             throw err;
         }
     }
+    /**
+     * 0.16.9 exposes the full catalog only in session/create (session/read is
+     * current-model-only). Use an owned deferred session, never send a prompt,
+     * and close only while it is still deferred. No workspace defaults are set.
+     */
+    async readWorkspaceCatalog(workspacePath) {
+        if (this.config.readOnly)
+            throw new Error("READ_ONLY_MODE: full catalog discovery requires a deferred native session; use workspace/readPresentation for a pure read");
+        const snapshot = await this.callForWorkspace("session/create", workspacePath, {
+            persistence: "deferred",
+            mode: "plan",
+            titleGenerationEnabled: false,
+            toolAllowlist: [],
+        }, 90_000);
+        const session = snapshot.session;
+        const sessionId = parseSessionId(session?.sessionId);
+        if (!sessionId)
+            throw new Error("INVALID_NATIVE_RESPONSE: catalog session has no valid sessionId");
+        try {
+            const settings = snapshot.settings;
+            const model = settings?.model;
+            const available = model?.available;
+            if (!settings || !Array.isArray(available)) {
+                throw new Error("INVALID_NATIVE_RESPONSE: session/create omitted the model catalog");
+            }
+            return { modelCatalog: { available }, source: "session/create (deferred, no prompt)" };
+        }
+        finally {
+            const closed = await this.call("session/close", { sessionId, expectedPersistence: "deferred" });
+            if (closed.closed !== true)
+                throw new Error("CATALOG_SESSION_NOT_CLOSED: native deferred-session guard refused cleanup");
+        }
+    }
     /** Workspace-scoped call helper. */
     callForWorkspace(method, workspacePath, extra, timeoutMs) {
         return this.call(method, { workspace: workspaceRef(workspacePath), ...extra }, timeoutMs);
@@ -208,11 +242,14 @@ export class RuntimeManager {
             throw new Error("invalid session id");
         return this.call("session/stop", { sessionId: sid });
     }
-    async ipcSessionSetModel(sessionId, providerId, modelId) {
+    async ipcSessionSetModel(sessionId, providerId, modelId, thoughtLevel) {
         const sid = parseSessionId(sessionId);
         if (!sid)
             throw new Error("invalid session id");
-        return this.call("session/setModel", { sessionId: sid, model: { providerId, modelId } });
+        return this.call("session/setModel", {
+            sessionId: sid,
+            model: { providerId, modelId, ...(thoughtLevel == null ? {} : { options: { reasoningLevel: thoughtLevel } }) },
+        });
     }
     async ipcSessionSetMode(sessionId, mode) {
         const sid = parseSessionId(sessionId);

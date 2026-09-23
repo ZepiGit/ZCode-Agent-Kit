@@ -3,6 +3,8 @@
 // print provider bodies, or schedule recurring provider checks.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { resolveCommand, resolveBun } from '../lib/process.mjs';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
@@ -51,6 +53,83 @@ export function createSessionPreflight({ health, run, now = Date.now, ttlMs = 60
   };
 }
 
+// The adapter embeds this fixed vocabulary in the standalone OMP extension;
+// the host never needs to import this installation's modules.
+export const PREFLIGHT_DETAILS = {
+  installation: 'Preflight files are missing or unreadable; repair this kit installation and rerun zcode-kit setup for OMP.',
+  'runtime-unavailable': 'Native Node/Bun unavailable; restore the runtime or rerun zcode-kit setup for OMP to pin its current path, then reload the extension.',
+  'runtime-denied': 'Native runtime launch denied; check executable permissions and OS application controls.',
+  timeout: 'Safe start timed out; inspect zcode-kit doctor and manager ownership before retrying. No takeover attempted.',
+  'output-limit': 'Preflight output exceeded its bound; inspect zcode-kit doctor and local manager logs.',
+  foreign: 'Port occupied or key mismatched; listener left untouched. Run zcode-kit doctor and inspect ownership manually.',
+  key: 'Local proxy key unavailable; run zcode-kit doctor and repair this installation with zcode-kit setup.',
+  startup: 'Safe start failed; run zcode-kit doctor and inspect proxy logs and manager lock ownership.',
+};
+export const PREFLIGHT_WARNINGS = {
+  auth3012: 'Account authentication warning; run zcode-kit auth status.',
+  auth: 'Account authentication warning; run zcode-kit auth status.',
+  balance1113: 'Account balance warning; check the account plan/quota.',
+  balance3001: 'Account balance warning; check the account plan/quota.',
+  balance: 'Account balance warning; check the account plan/quota.',
+  'quota-unavailable': 'Quota check unavailable; continuing with the healthy local proxy. No retry scheduled.',
+};
+export function preflightFailureDetail(code) {
+  const category = typeof code === 'string' && Object.hasOwn(PREFLIGHT_DETAILS, code) ? code : 'startup';
+  return `${category}: ${PREFLIGHT_DETAILS[category]}`;
+}
+function preflightError(code) {
+  return Object.assign(new Error(preflightFailureDetail(code)), { code });
+}
+
+// Reuse the kit's native resolver (including .bun-path), never an OMP execPath
+// or a shell shim. All output is captured: -p stdout belongs to the model.
+export async function runSessionPreflight({ root, env = process.env, timeoutMs = 120000, warn = console.error }) {
+  const file = join(root, 'cli', 'heal.mjs');
+  try {
+    if (!statSync(root).isDirectory() || !statSync(file).isFile()) throw new Error();
+  } catch { throw preflightError('installation'); }
+  const childEnv = { ...env };
+  if (process.platform === 'win32') {
+    const pathKey = Object.hasOwn(env, 'PATH') ? 'PATH' : Object.keys(env).find(key => key.toLowerCase() === 'path');
+    for (const key of Object.keys(childEnv)) if (key.toLowerCase() === 'path') delete childEnv[key];
+    if (pathKey) childEnv.PATH = env[pathKey];
+  }
+  const launch = runtime => new Promise((resolve, reject) => {
+    execFile(runtime, [file, '--diagnostic-code'], {
+      cwd: root, env: childEnv, timeout: timeoutMs, windowsHide: true,
+      shell: false, windowsVerbatimArguments: false, maxBuffer: 64 * 1024,
+    }, (err, _stdout, stderr) => {
+      if (err) { reject(err); return; }
+      // Do not forward runtime/provider stderr: it can contain credentials.
+      const cause = stderr.trim().match(/^\[zcode-preflight\] cause=([a-z0-9-]+)$/)?.[1];
+      if (cause && Object.hasOwn(PREFLIGHT_WARNINGS, cause)) {
+        warn(`[zcode-autostart] ${cause}: ${PREFLIGHT_WARNINGS[cause]}`);
+      }
+      resolve();
+    });
+  });
+  let runtime;
+  try { runtime = resolveCommand(process.platform === 'win32' ? 'node.exe' : 'node', childEnv); }
+  catch (err) { if (err.code !== 'ENOENT') throw preflightError('runtime-denied'); }
+  try {
+    if (runtime) {
+      try { await launch(runtime); return; }
+      catch (err) { if (err.code !== 'ENOENT') throw err; }
+    }
+    try { runtime = resolveBun(root, childEnv); }
+    catch { throw preflightError('runtime-unavailable'); }
+    await launch(runtime);
+  } catch (err) {
+    if (err.code === 'runtime-unavailable') throw err;
+    const code = err.code === 'ENOENT' ? 'runtime-unavailable'
+      : err.code === 'EACCES' || err.code === 'EPERM' ? 'runtime-denied'
+      : err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'output-limit'
+      : err.killed || err.code === 'ETIMEDOUT' ? 'timeout'
+      : err.code === 3 ? 'foreign' : err.code === 5 ? 'key' : 'startup';
+    throw preflightError(code);
+  }
+}
+
 const inFlight = new Map();
 export function startupPreflight(ctx, options = {}) {
   const id = `${ctx.root}\n${ctx.home}`;
@@ -88,16 +167,20 @@ export async function setupSmoke(ctx, { env = process.env, timeoutMs = 90000 } =
   }
   const ready = await startupPreflight(ctx);
   if (ready.code) return ready;
+  const marker = `ZCODE_SMOKE_${randomBytes(6).toString('hex').toUpperCase()}`;
   try {
     const response = await fetch(`http://127.0.0.1:${ctx.port()}/v1/chat/completions`, {
       method: 'POST', headers: { authorization: `Bearer ${ctx.key()}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: 'glm-5.3-flash', messages: [{ role: 'user', content: 'Reply OK.' }], max_tokens: 8, stream: false, thinking: { type: 'disabled' } }),
+      body: JSON.stringify({ model: 'glm-5.3-flash', messages: [{ role: 'user', content: `Reply with exactly ${marker}.` }], max_tokens: 32, stream: false, reasoning_effort: 'low' }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     const body = await response.json().catch(() => null);
     const diagnostic = diagnoseQuota(response.status, body);
     if (diagnostic.code) return outcome(ctx, diagnostic.code, diagnostic.cause, diagnostic.detail, 'smoke-check');
-    const ok = response.ok && Array.isArray(body?.choices) && body.choices.length > 0;
+    const choice = body?.choices?.[0];
+    const ok = response.ok && body?.model === 'glm-5.3-flash'
+      && choice?.message?.role === 'assistant' && choice.finish_reason === 'stop'
+      && choice.message.content?.trim() === marker;
     return outcome(ctx, ok ? 0 : 1, 'smoke', ok ? 'Setup live smoke passed (one minimal model request).' : 'Setup live smoke failed; integrations were saved and remain configured. Run zcode-kit doctor before retrying.', 'smoke-check');
   } catch {
     return outcome(ctx, 1, 'smoke', 'Setup live smoke timed out/unavailable; integrations were saved and remain configured. No retry scheduled.', 'smoke-check');
@@ -169,6 +252,7 @@ let entry = '';
 try { entry = realpathSync(process.argv[1] ?? ''); } catch {}
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   startupPreflight(createCtx()).then(result => {
-    console.error(result.detail); process.exitCode = result.code;
+    console.error(process.argv.includes('--diagnostic-code') ? `[zcode-preflight] cause=${CAUSES.has(result.cause) ? result.cause : 'unknown'}` : result.detail);
+    process.exitCode = result.code;
   }).catch(() => { console.error('ZCode preflight failed; run zcode-kit doctor.'); process.exitCode = 2; });
 }

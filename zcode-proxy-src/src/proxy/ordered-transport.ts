@@ -1,5 +1,6 @@
 import { connect as connectTcp, type Socket } from "node:net";
 import { connect as connectTls, type TLSSocket } from "node:tls";
+import { decodeContentStream } from "./inflate.js";
 
 export type OrderedHeaderPair = [string, string];
 
@@ -126,7 +127,6 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
           const headerBytes = headerBuffer.slice(0, headerEnd);
           const rest = headerBuffer.slice(headerEnd + HEADER_END.byteLength);
           const parsed = parseResponseHeaders(headerBytes);
-          responseStarted = true;
 
           const transferEncoding = parsed.headers.get("transfer-encoding")?.toLowerCase() ?? "";
           if (transferEncoding.split(",").map((s) => s.trim()).includes("chunked")) {
@@ -139,13 +139,13 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
           }
 
           let responseBody: ReadableStream<Uint8Array> = bodyStream;
-          if (req.decompress && parsed.headers.get("content-encoding")?.toLowerCase() === "gzip") {
+          if (req.decompress && parsed.headers.has("content-encoding")) {
+            responseBody = decodeContentStream(bodyStream, parsed.headers.get("content-encoding")!);
             parsed.headers.delete("content-encoding");
             parsed.headers.delete("content-length");
-            const gzip = new DecompressionStream("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
-            responseBody = bodyStream.pipeThrough(gzip);
           }
 
+          responseStarted = true;
           resolve(new Response(responseBody, {
             status: parsed.status,
             statusText: parsed.statusText,

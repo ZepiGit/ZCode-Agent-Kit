@@ -66,6 +66,33 @@ test('setup smoke failure reports configured state without failing successful se
   assert.match(res.stdout + res.stderr, /1113|smoke|model access/i);
 });
 
+test('Claude MCP registration recognizes equivalent Windows paths without changing ownership', { skip: process.platform !== 'win32' }, async t => {
+  const f = fixture(t);
+  mkdirSync(join(f.home, '.claude'));
+  const server = join(f.root, 'mcp', 'zcode-harness-mcp', 'dist', 'index.js');
+  mkdirSync(dirname(server), { recursive: true }); writeFileSync(server, '');
+  const configured = server.replaceAll('\\', '/').toUpperCase();
+  const attempts = join(f.root, 'mcp-add.json');
+  writeFileSync(join(f.bin, 'entry.cjs'), `const fs=require('node:fs'); if(process.argv[3]==='get'){console.log('Command: node\\nArgs: '+${JSON.stringify(configured)}+' --stdio');}else{fs.writeFileSync(${JSON.stringify(attempts)},JSON.stringify(process.argv));process.exitCode=1;}`);
+  writeFileSync(join(f.bin, 'claude.cmd'), '@ECHO off\r\nSET dp0=%~dp0\r\n"' + process.execPath + '" "%dp0%\\entry.cjs" %*\r\n');
+  const result = await run(f, ['setup', '--harness', 'claude-code']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /registered by another kit copy/);
+  assert.equal(existsSync(attempts), false, 'equivalent registration is not replaced');
+});
+
+test('Claude MCP registration refuses a foreign path containing the managed path as a prefix', { skip: process.platform !== 'win32' }, async t => {
+  const f = fixture(t);
+  mkdirSync(join(f.home, '.claude'));
+  const server = join(f.root, 'mcp', 'zcode-harness-mcp', 'dist', 'index.js');
+  mkdirSync(dirname(server), { recursive: true }); writeFileSync(server, '');
+  writeFileSync(join(f.bin, 'entry.cjs'), `console.log('Command: node\\nArgs: '+${JSON.stringify(server + '.foreign')}+' --stdio');`);
+  writeFileSync(join(f.bin, 'claude.cmd'), '@ECHO off\r\nSET dp0=%~dp0\r\n"' + process.execPath + '" "%dp0%\\entry.cjs" %*\r\n');
+  const result = await run(f, ['setup', '--harness', 'claude-code']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /registered by another kit copy/);
+});
+
 test('uninstall preserves unrecorded Codex sessions and history', async t => {
   const f = fixture(t);
   const data = join(f.root, 'generated', 'codex-home', 'sessions'); mkdirSync(data, { recursive: true });

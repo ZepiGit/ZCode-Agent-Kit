@@ -2,7 +2,214 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { startBridge } from './client.mjs';
+import { startBridge, isolatedTestEnv } from './client.mjs';
+import os from 'node:os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
+const discoveryUrl = new URL('../../dist/discovery.js', import.meta.url).href;
+const managerUrl = new URL('../../dist/runtime/manager.js', import.meta.url).href;
+const builtinKey = 'ZCODE_BUILTIN_PROVIDER_CONFIG_FILE';
+const bundledKey = 'ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE';
+const personalKey = 'ZCODE_PERSONAL_PROVIDER_CONFIG_FILE';
+
+// This fixture reads real selected files and answers one stdio request. It does
+// not import the vendor, use credentials, or make native/model requests.
+const providerHarness = `
+const fs = require('node:fs');
+const readline = require('node:readline');
+if (process.argv.includes('--version')) {
+  process.stdout.write('zcode 0.16.9\\n');
+  process.exit(0);
+}
+const builtin = process.env.${builtinKey}?.trim();
+if (!builtin) {
+  process.stderr.write('unstructured-private-value 无法定位 CLI ZCode Built-in Provider Config: private-path\\n', () => process.exit(1));
+} else {
+  const config = JSON.parse(fs.readFileSync(builtin, 'utf8'));
+  const personal = process.env.${personalKey}?.trim();
+  const personalMarker = personal ? JSON.parse(fs.readFileSync(personal, 'utf8')).marker : null;
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on('line', line => {
+    const request = JSON.parse(line);
+    process.stdout.write(JSON.stringify({ id: request.id, result: { marker: config.marker, personalMarker } }) + '\\n');
+  });
+}
+`;
+
+function providerLayout(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zcode provider repair '));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const harness = path.join(root, 'installation', 'Program Files', 'ZCode', 'resources', 'glm', 'zcode.cjs');
+  const cwd = path.join(root, 'unrelated working directory');
+  fs.mkdirSync(path.dirname(harness), { recursive: true });
+  fs.mkdirSync(cwd, { recursive: true });
+  fs.writeFileSync(harness, providerHarness);
+  return { root, harness, cwd };
+}
+
+function providerFile(file, marker) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ marker }));
+  return file;
+}
+
+async function launchProviderFixture(layout, overrides = {}, { defaultDiscovery = false, removeAfterDiscovery = false } = {}) {
+  const env = isolatedTestEnv(layout.root, {
+    [builtinKey]: undefined,
+    [bundledKey]: undefined,
+    [personalKey]: undefined,
+    ZCODE_HARNESS_RUNTIME_PATH: undefined,
+    ...overrides,
+  });
+  const script = `
+    import assert from 'node:assert/strict';
+    import fs from 'node:fs';
+    import { discoverRuntime } from ${JSON.stringify(discoveryUrl)};
+    import { RuntimeManager } from ${JSON.stringify(managerUrl)};
+    const before = { ...process.env };
+    let runtime;
+    try {
+      const info = await discoverRuntime(${defaultDiscovery ? '{}' : JSON.stringify({ runtimePathOverride: layout.harness })});
+      if (${removeAfterDiscovery}) fs.unlinkSync(info.bundledProviderConfigPath);
+      runtime = new RuntimeManager({ dataDir: ${JSON.stringify(path.join(layout.cwd, 'bridge-data'))}, defaultRequestTimeoutMs: 3000 }, info, {});
+      const result = await runtime.call('fixture/provider');
+      process.stdout.write(JSON.stringify({ result, harnessPath: info.harnessPath }));
+    } catch (error) {
+      process.stdout.write(JSON.stringify({ error: error.message, code: error.code }));
+    } finally {
+      runtime?.stop();
+    }
+    assert.deepEqual({ ...process.env }, before, 'launch must not mutate the bridge environment');
+  `;
+  const { stdout, stderr } = await execFileAsync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: layout.cwd, env, encoding: 'utf8', timeout: 15000, windowsHide: true,
+  });
+  assert.doesNotMatch(stdout + stderr, /unstructured-private-value|private-path/);
+  const result = JSON.parse(stdout);
+  if (result.error) result.diagnostic = stderr;
+  return result;
+}
+
+test('provider bootstrap: installed sibling config works with spaces and unrelated cwd without changing parent env', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  providerFile(path.join(layout.cwd, 'config/provider/zcode-builtin.json'), 'wrong-cwd');
+  const result = await launchProviderFixture(layout);
+  assert.deepEqual(result.result, { marker: 'installed', personalMarker: null });
+});
+
+test('provider bootstrap: older adjacent layout takes precedence over sibling config', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'sibling');
+  providerFile(path.join(path.dirname(layout.harness), 'provider/zcode-builtin.json'), 'adjacent');
+  assert.deepEqual((await launchProviderFixture(layout)).result, { marker: 'adjacent', personalMarker: null });
+});
+
+test('provider bootstrap: legacy source layout is resolved relative to the verified entrypoint', async (t) => {
+  const layout = providerLayout(t);
+  layout.harness = path.join(layout.root, 'a/b/c/d/e/zcode.cjs');
+  fs.mkdirSync(path.dirname(layout.harness), { recursive: true });
+  fs.writeFileSync(layout.harness, providerHarness);
+  providerFile(path.join(layout.root, 'config/provider/zcode-builtin.json'), 'legacy');
+  assert.deepEqual((await launchProviderFixture(layout)).result, { marker: 'legacy', personalMarker: null });
+});
+
+test('provider bootstrap: builtin and personal operator overrides win over bundled and installed configs', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  const builtin = providerFile(path.join(layout.cwd, 'operator builtin.json'), 'operator');
+  const personal = providerFile(path.join(layout.cwd, 'operator personal.json'), 'personal');
+  const result = await launchProviderFixture(layout, {
+    [builtinKey]: path.basename(builtin),
+    [personalKey]: path.basename(personal),
+    [bundledKey]: path.join(layout.root, 'unused missing bundled.json'),
+  });
+  assert.deepEqual(result.result, { marker: 'operator', personalMarker: 'personal' }, JSON.stringify(result));
+});
+
+test('provider bootstrap: bundled-only override seeds CLI builtin without inventing a personal override', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  const bundled = providerFile(path.join(layout.root, 'operator bundled.json'), 'bundled');
+  assert.deepEqual((await launchProviderFixture(layout, { [bundledKey]: bundled })).result, { marker: 'bundled', personalMarker: null });
+});
+
+test('provider bootstrap: builtin-only override is preserved without supplying a personal path', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  const builtin = providerFile(path.join(layout.root, 'operator.json'), 'operator');
+  assert.deepEqual((await launchProviderFixture(layout, { [builtinKey]: builtin })).result, { marker: 'operator', personalMarker: null });
+});
+
+test('provider bootstrap: missing bundled override fails rather than using installed providers', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  const result = await launchProviderFixture(layout, { [bundledKey]: path.join(layout.root, 'missing.json') });
+  assert.match(result.error, /ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE.*not a readable file/);
+});
+
+test('provider bootstrap: blank overrides do not disable distribution resolution', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  assert.deepEqual((await launchProviderFixture(layout, {
+    [builtinKey]: '  ', [bundledKey]: '', [personalKey]: '  ',
+  })).result, { marker: 'installed', personalMarker: null });
+});
+
+test('provider bootstrap: explicit personal override is retained with discovered builtin', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  const personal = providerFile(path.join(layout.root, 'personal.json'), 'personal');
+  assert.deepEqual((await launchProviderFixture(layout, { [personalKey]: personal })).result, { marker: 'installed', personalMarker: 'personal' });
+});
+
+test('provider bootstrap: missing explicit builtin is not replaced by a working installed config', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  const result = await launchProviderFixture(layout, { [builtinKey]: path.join(layout.root, 'missing.json') });
+  assert.equal(result.result, undefined);
+  assert.match(result.error, /ZCODE_BUILTIN_PROVIDER_CONFIG_FILE.*not a readable file/);
+});
+
+test('provider bootstrap: a directory is not a bundled config and missing config errors never leak stderr', async (t) => {
+  const layout = providerLayout(t);
+  fs.mkdirSync(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), { recursive: true });
+  const result = await launchProviderFixture(layout, { ZCODE_HARNESS_LOG_LEVEL: 'debug' });
+  assert.equal(result.code, 'HARNESS_EXITED');
+  assert.match(result.error, /PROVIDER_CONFIG_MISSING/);
+});
+
+test('provider bootstrap: config removed after discovery fails before launching the harness', async (t) => {
+  const layout = providerLayout(t);
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'installed');
+  const result = await launchProviderFixture(layout, {}, { removeAfterDiscovery: true });
+  assert.match(result.error, /installed bundled provider config.*not a readable file/);
+});
+
+test('runtime discovery: nonzero version probe cannot select an explicit runtime', async (t) => {
+  const layout = providerLayout(t);
+  fs.writeFileSync(layout.harness, "process.stdout.write('zcode 0.16.9\\n'); process.exitCode = 7;");
+  const result = await launchProviderFixture(layout);
+  assert.match(result.error, /failed.*--version probe/);
+});
+
+test('runtime discovery: failed default candidate is skipped for a verified installed distribution', async (t) => {
+  const layout = providerLayout(t);
+  const failed = path.join(layout.root, 'local/Programs/ZCode/resources/glm/zcode.cjs');
+  fs.mkdirSync(path.dirname(failed), { recursive: true });
+  fs.writeFileSync(failed, "process.stdout.write('zcode 0.16.9\\n'); process.exitCode = 7;");
+  providerFile(path.resolve(path.dirname(layout.harness), '../config/provider/zcode-builtin.json'), 'verified');
+  const result = await launchProviderFixture(layout, {
+    LOCALAPPDATA: path.join(layout.root, 'local'),
+    ProgramFiles: path.join(layout.root, 'installation', 'Program Files'),
+    // Windows initializes ProgramFiles from the native ProgramW6432 alias.
+    ProgramW6432: path.join(layout.root, 'installation', 'Program Files'),
+  }, { defaultDiscovery: true });
+  assert.equal(result.harnessPath, layout.harness, JSON.stringify(result));
+  assert.deepEqual(result.result, { marker: 'verified', personalMarker: null });
+});
 
 async function waitExit(child, timeoutMs = 5000) {
   if (child.exitCode !== null || child.signalCode !== null) return;
@@ -99,9 +306,9 @@ test('D-01: foreign session resources are denied before transcript or projection
     const r = await c.call('resources/read', { uri: 'zcode://sessions/sess_foreign-fixture' });
     assert.match(r.error.message, /allowlist/);
     assert.doesNotMatch(JSON.stringify(r), /FOREIGN-SECRET/);
-    const err = await c.expectToolError('zcode_operation_invoke', { method: 'workspace/readState', params: { workspace: { workspacePath: 12 } } });
+    const err = await c.expectToolError('zcode_operation_invoke', { method: 'workspace/readPresentation', params: { workspace: { workspacePath: 12 } } });
     assert.match(err, /workspacePath.*string/);
-    assert.match(await c.expectToolError('zcode_operation_invoke', { method: 'workspace/readState' }), /workspace.*required/);
+    assert.match(await c.expectToolError('zcode_operation_invoke', { method: 'workspace/readPresentation' }), /workspace.*required/);
   } finally { await c.stop(); }
 });
 

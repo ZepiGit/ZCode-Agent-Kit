@@ -209,12 +209,12 @@ export function identityCacheKey(identity: ProxyIdentity): string {
  *
  * `shell` follows the bundle algorithm verbatim (`SHELL` ?? `ComSpec` ?? ""
  * → basename, else "unknown" — "unknown" is a legal shell value when
- * detection fails). `cwd` is `ZCODE_IDENTITY_ENV_CWD` if set (Android /
- * masked-identity deployments), else `process.cwd()` — the real client sends
- * its actual working directory, and `cwd` is NEVER "unknown" in real traffic.
+ * detection fails). Only an explicit `ZCODE_IDENTITY_ENV_CWD` override can
+ * supply cwd here. The daemon working directory is not the calling client
+ * workspace; otherwise preserve the client context without inventing a path.
  */
 export interface EnvPromptInfo {
-  cwd: string;
+  cwd?: string;
   platform: string;
   shell: string;
   osVersion: string;
@@ -227,6 +227,6 @@ export function resolveEnvPromptInfo(): EnvPromptInfo {
   const osVersion = [platform, release, arch].filter((part) => part.length > 0).join(" ");
   const shellRaw = process.env.SHELL ?? process.env.ComSpec ?? process.env.COMSPEC ?? "";
   const shell = shellRaw ? basename(shellRaw) : "unknown";
-  const cwd = process.env.ZCODE_IDENTITY_ENV_CWD?.trim() || process.cwd();
+  const cwd = process.env.ZCODE_IDENTITY_ENV_CWD?.trim() || undefined;
   return { cwd, platform, shell, osVersion };
 }

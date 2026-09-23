@@ -688,6 +688,51 @@ describe("translateRequestOpenAIToAnthropic", () => {
       expect(result.max_tokens).toBe(131_072);
     });
 
+    it("Flash disabled thinking becomes low with the requested answer allowance intact", () => {
+      const result = translateRequestOpenAIToAnthropic({
+        model: "glm-5.3-flash",
+        messages: [{ role: "user", content: "Hi" }],
+        thinking: { type: "disabled" },
+        max_tokens: 64,
+        temperature: 0.7,
+        top_p: 0.9,
+      });
+      expect(result.thinking).toEqual({ type: "enabled", budget_tokens: 8_000 });
+      expect(result.output_config).toEqual({ effort: "low" });
+      expect(result.max_tokens).toBe(8_064);
+      expect(result.temperature).toBeUndefined();
+      expect(result.top_p).toBeUndefined();
+    });
+
+    it("Flash explicit effort wins over disabled thinking without losing answer headroom", () => {
+      for (const [effort, budget] of [["low", 8_000], ["high", 16_000], ["max", 32_000]] as const) {
+        const result = translateRequestOpenAIToAnthropic({
+          model: "glm-5.3-flash",
+          messages: [{ role: "user", content: "Hi" }],
+          thinking: { type: "disabled" },
+          reasoning_effort: effort,
+          max_tokens: 64,
+        });
+        expect(result.thinking).toEqual({ type: "enabled", budget_tokens: budget });
+        expect(result.output_config).toEqual({ effort });
+        expect(result.max_tokens).toBe(budget + 64);
+      }
+    });
+
+    it("Flash malformed thinking does not override an explicit effort or coerce a budget", () => {
+      for (const thinking of [null, [], "disabled", { type: "enabled", budget_tokens: "8000" }]) {
+        const result = translateRequestOpenAIToAnthropic({
+          model: "glm-5.3-flash",
+          messages: [{ role: "user", content: "Hi" }],
+          reasoning_effort: "low",
+          max_tokens: 64,
+          thinking,
+        } as unknown as OpenAIChatRequest);
+        expect(result.thinking).toEqual({ type: "enabled", budget_tokens: 8_000 });
+        expect(result.max_tokens).toBe(8_064);
+      }
+    });
+
     it("glm-5.3: explicit thinking:{type:'disabled'} is forwarded as-is, not overridden to an effort level", () => {
       const req = {
         model: "glm-5.3",

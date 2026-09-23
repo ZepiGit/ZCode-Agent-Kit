@@ -3,7 +3,7 @@
  * @see .omo/plans/zcode-proxy.md Task 6
  */
 import { describe, it, expect, mock, beforeEach } from "bun:test";
-import { gzipSync } from "node:zlib";
+import { gzipSync, brotliCompressSync } from "node:zlib";
 import { createServer } from "node:net";
 import { buildUpstreamRequest, buildUpstreamHeaderPairs, buildUpstreamURL, buildAuthHeaders } from "./upstream.js";
 import { sendOrderedUpstreamRequest } from "./ordered-transport.js";
@@ -933,6 +933,24 @@ describe("client gzip handling", () => {
   };
 
   const auth = oauthAuth();
+
+  it("preserves Brotli-compressed Anthropic JSON instead of emitting empty success", async () => {
+    const fetchMock = mock(async () => new Response(brotliCompressSync(ANTHROPIC_RESPONSE), {
+      headers: { "content-type": "application/json", "content-encoding": "br" },
+    }));
+    const resp = await proxyRequest(makeClientReq('{"model":"glm-4.6","messages":[]}'), "anthropic", { config: testConfig, auth, fetchImpl: fetchMock as any });
+    expect(resp.status).toBe(200);
+    expect(await resp.json()).toEqual(JSON.parse(ANTHROPIC_RESPONSE));
+  });
+
+  it("rejects corrupt compressed JSON instead of returning empty HTTP 200", async () => {
+    const fetchMock = mock(async () => new Response("invalid Brotli bytes", {
+      headers: { "content-type": "application/json", "content-encoding": "br" },
+    }));
+    const resp = await proxyRequest(makeClientReq('{"model":"glm-4.6","messages":[]}'), "anthropic", { config: testConfig, auth, fetchImpl: fetchMock as any });
+    expect(resp.status).toBe(502);
+    expect((await resp.json() as { error: { type: string } }).error.type).toBe("upstream_invalid_response");
+  });
 
   it("stripAutoDecodedEncoding drops gzip/br labels and stale content-length", () => {
     const upstream = new Response('{"ok":true}', {

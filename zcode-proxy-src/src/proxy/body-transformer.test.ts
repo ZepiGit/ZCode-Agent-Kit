@@ -4,6 +4,8 @@
  */
 import { describe, it, expect } from "bun:test";
 import { transformRequestBody } from "./body-transformer.js";
+import { translateRequestOpenAIToAnthropic } from "../translator/openai-to-anthropic.js";
+import { responsesToChatCompletions } from "../translator/responses-to-chat.js";
 
 describe("transformRequestBody — general", () => {
   it("returns undefined unchanged", () => {
@@ -27,6 +29,115 @@ describe("transformRequestBody — general", () => {
   it("returns original body when no transformation applies", () => {
     const body = JSON.stringify({ model: "glm-4.6", messages: [], stream: false });
     expect(transformRequestBody(body, { format: "openai" })).toBe(body);
+  });
+});
+
+describe("transformRequestBody — Flash thinking compatibility", () => {
+  it("normalizes native disabled thinking once, retaining answer room and output options", () => {
+    const body = JSON.stringify({
+      model: "glm-5.3-flash", max_tokens: 64,
+      thinking: { type: "disabled", budget_tokens: 99 },
+      output_config: { task_budget: { type: "tokens", total: 100_000 } },
+      temperature: 0.7, top_p: 0.9, top_k: 20,
+      messages: [{ role: "user", content: "Hi" }],
+    });
+    const once = transformRequestBody(body, { format: "anthropic" });
+    const result = JSON.parse(once!);
+    expect(result.thinking).toEqual({ type: "enabled", budget_tokens: 8_000 });
+    expect(result.output_config).toEqual({ effort: "low", task_budget: { type: "tokens", total: 100_000 } });
+    expect(result.max_tokens).toBe(8_064);
+    expect(result.temperature).toBeUndefined();
+    expect(result.top_p).toBeUndefined();
+    expect(result.top_k).toBeUndefined();
+    expect(transformRequestBody(once, { format: "anthropic" })).toBe(once);
+  });
+
+  it("preserves supported native effort when disabled is upgraded", () => {
+    for (const [effort, budget] of [["low", 8_000], ["high", 16_000], ["max", 32_000]] as const) {
+      const once = transformRequestBody(JSON.stringify({
+        model: "glm-5.3-flash", max_tokens: 64,
+        thinking: { type: "disabled" }, output_config: { effort },
+      }), { format: "anthropic" });
+      const result = JSON.parse(once!);
+      expect(result.thinking).toEqual({ type: "enabled", budget_tokens: budget });
+      expect(result.output_config.effort).toBe(effort);
+      expect(result.max_tokens).toBe(64 + budget);
+      expect(transformRequestBody(once, { format: "anthropic" })).toBe(once);
+    }
+  });
+
+  it("does not add a second budget after OpenAI or Responses translation", () => {
+    const requests = [
+      translateRequestOpenAIToAnthropic({
+        model: "glm-5.3-flash", max_tokens: 64,
+        messages: [{ role: "user", content: "Hi" }], thinking: { type: "disabled" },
+      }),
+      translateRequestOpenAIToAnthropic(responsesToChatCompletions({
+        model: "glm-5.3-flash", input: "Hi", max_output_tokens: 64, reasoning: { effort: "none" },
+      }).chatRequest),
+    ];
+    for (const request of requests) {
+      const once = transformRequestBody(JSON.stringify(request), { format: "anthropic" });
+      const result = JSON.parse(once!);
+      expect(result.thinking).toEqual({ type: "enabled", budget_tokens: 8_000 });
+      expect(result.output_config.effort).toBe("low");
+      expect(result.max_tokens).toBe(8_064);
+      expect(transformRequestBody(once, { format: "anthropic" })).toBe(once);
+    }
+  });
+
+  it("does not reinterpret native enabled or adaptive total allowances", () => {
+    for (const type of ["enabled", "adaptive"]) {
+      const body = JSON.stringify({
+        model: "glm-5.3-flash", max_tokens: 16_064,
+        thinking: { type, budget_tokens: 16_000 }, output_config: { effort: "high" },
+      });
+      expect(transformRequestBody(body, { format: "anthropic" })).toBe(body);
+    }
+  });
+
+  it("caps the additive total at the catalog output ceiling", () => {
+    const result = JSON.parse(transformRequestBody(JSON.stringify({
+      model: "glm-5.3-flash", max_tokens: 127_000, thinking: { type: "disabled" },
+    }), { format: "anthropic" })!);
+    expect(result.max_tokens).toBe(128_000);
+    expect(result.thinking.budget_tokens).toBe(8_000);
+  });
+
+  it("leaves generic models and other Flash-like model ids disabled", () => {
+    for (const model of ["glm-5.3", "glm-5.2", "glm-5.3-flash-other", "other-glm-5.3-flash"]) {
+      const body = JSON.stringify({ model, max_tokens: 64, thinking: { type: "disabled" }, temperature: 0.5 });
+      expect(transformRequestBody(body, { format: "anthropic" })).toBe(body);
+    }
+  });
+
+  it("does not apply Anthropic budget semantics to an OpenAI upstream body", () => {
+    const body = JSON.stringify({ model: "glm-5.3-flash", max_tokens: 64, thinking: { type: "disabled" } });
+    expect(transformRequestBody(body, { format: "openai" })).toBe(body);
+  });
+
+  it("leaves malformed model and thinking fields alone", () => {
+    for (const value of [null, [], 42, "disabled", {}]) {
+      for (const request of [
+        { model: value, thinking: { type: "disabled" }, max_tokens: 64 },
+        { model: "glm-5.3-flash", thinking: value, max_tokens: 64 },
+      ]) {
+        const body = JSON.stringify(request);
+        expect(transformRequestBody(body, { format: "anthropic" })).toBe(body);
+      }
+    }
+  });
+
+  it("replaces malformed output options without coercing invalid answer allowances", () => {
+    for (const value of [null, [], "64", {}, -1, 0]) {
+      const result = JSON.parse(transformRequestBody(JSON.stringify({
+        model: "glm-5.3-flash", max_tokens: value,
+        thinking: { type: "disabled" }, output_config: value,
+      }), { format: "anthropic" })!);
+      expect(result.max_tokens).toEqual(value);
+      expect(result.thinking).toEqual({ type: "enabled", budget_tokens: 8_000 });
+      expect(result.output_config).toEqual({ effort: "low" });
+    }
   });
 });
 
@@ -187,6 +298,35 @@ describe("transformRequestBody — combined behavior", () => {
     expect(parsed.messages[0].content).toBe("hi");
   });
 });
+
+for (const format of ["anthropic", "openai"] as const) {
+  it(`start-plan ${format} preserves each client's directory without claiming the daemon directory`, () => {
+    const old = process.env.ZCODE_IDENTITY_ENV_CWD;
+    delete process.env.ZCODE_IDENTITY_ENV_CWD;
+    try {
+      for (const cwd of ["C:/client one/project", "/client-two/project"]) {
+        const context = "<env>\nWorking directory: " + cwd + "\n</env>";
+        const messages = [{ role: "user", content: "Work here: /untrusted-user-path" }];
+        const body = format === "anthropic"
+          ? { model: "glm-5.3-flash", system: context, messages }
+          : { model: "glm-5.3-flash", messages: [{ role: "system", content: context }, ...messages] };
+        const out = JSON.parse(transformRequestBody(JSON.stringify(body), { format, startPlan: true })!);
+        const system = format === "anthropic" ? out.system.map((b: { text: string }) => b.text).join("\n")
+          : out.messages.filter((m: { role: string }) => m.role === "system").map((m: { content: string }) => m.content).join("\n");
+        expect(system).toContain(context);
+        expect(system).not.toContain("Primary working directory:");
+        expect(system).not.toContain(process.cwd());
+        expect(system).not.toContain("/untrusted-user-path");
+      }
+      const out = JSON.parse(transformRequestBody(JSON.stringify({ model: "glm-5.3-flash", messages: [{ role: "user", content: "hello" }] }), { format, startPlan: true })!);
+      expect(JSON.stringify(out)).not.toContain(process.cwd().replaceAll("\\", "\\\\"));
+      expect(JSON.stringify(out)).not.toContain("Primary working directory:");
+    } finally {
+      if (old === undefined) delete process.env.ZCODE_IDENTITY_ENV_CWD;
+      else process.env.ZCODE_IDENTITY_ENV_CWD = old;
+    }
+  });
+}
 
 /** Deterministic env for start-plan assertions (resolveEnvPromptInfo reads these). */
 function withEnvPromptVars<T>(fn: () => T): T {

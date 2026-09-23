@@ -8,21 +8,23 @@
  *
  * Mechanics:
  *  1. cookie priming of https://zcode.z.ai/ (5-min cache)
- *  2. CDN disk cache at ~/.zcode-captcha-cdn-cache/<sha1(url)> + in-mem cache
+ *  2. TTL-bound atomic CDN disk envelopes + memory cache (captcha-cdn-cache.ts)
  *  3. installNativeToString (mask JS-implemented platform APIs as native)
  *  4. per-request client-hint / UA / origin / referer injection (interceptor)
  *  5. guest-side patches (Event.isTrusted, HTMLDocument naming, btoa)
- *  6. solve contract: initAliyunCaptcha + getInstance().startTracelessVerification()
+ *  6. initAliyunCaptcha + callable startTracelessVerification(), otherwise show()
  */
 import { GlobalWindow as Window, PropertySymbol } from "happy-dom";
 import WindowBrowserContext from "happy-dom/lib/window/WindowBrowserContext.js";
 import { ProxyAgent, setGlobalDispatcher } from "undici";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import vm from "node:vm";
 import { Worker } from "node:worker_threads";
+import { CaptchaCdnCache } from "./captcha-cdn-cache.js";
+import { normalizeCaptchaError } from "./captcha-token.js";
+import { beginCaptchaAttempt, recordCaptchaRequest, recordCaptchaLoad, recordCaptchaEvaluation,
+  lastCaptchaActivity, lastCaptchaPeUrl, captchaResourceId, captchaFailureSummary,
+  startCaptchaInstance } from "./captcha-diagnostics.js";
 
 // ── Blocking fetch for sync XHR (self-contained builds) ────────────────────
 // happy-dom implements sync XHR by spawning `process.argv[0] -e <script>`,
@@ -121,8 +123,9 @@ function shutdownSyncFetchWorker(): void {
   _syncFetchWorker = null;
 }
 
-const CDN_CACHE_DIR = path.join(os.homedir(), ".zcode-captcha-cdn-cache");
-const _memCdnCache = new Map();
+// Lazy construction validates environment settings on first use, not import.
+let _cdnCache: CaptchaCdnCache | undefined;
+function defaultCdnCache() { return _cdnCache ??= new CaptchaCdnCache(); }
 let _cookieCache = { cookies: [], ts: 0 };
 const COOKIE_CACHE_TTL_MS = 5 * 60 * 1000;
 const _DEBUG = /^(1|true|yes)$/i.test(
@@ -137,14 +140,7 @@ if (proxyUrl) {
 }
 
 // ── Globals shared across solves ────────────────────────────────────────────
-const _requestLog = [];
-function recordRequest(entry) {
-  _requestLog.push(entry);
-  if (_requestLog.length > 256) _requestLog.splice(0, _requestLog.length - 256);
-}
-export const requestLogSizeForTest = () => _requestLog.length;
-export const resetRequestLogForTest = () => { _requestLog.length = 0; };
-export const recordRequestForTest = recordRequest;
+// Request history lives in a WeakMap keyed by its actual window.
 const solveTimes = [];
 // Consecutive-stall tracker per pe bundle URL: the same cached pe version
 // can stall every attempt (bad rotated VM variant / stale cache). After two
@@ -162,11 +158,10 @@ function noteStallAndMaybeEvict(peUrl) {
     const n = (_stallCounts.get(peUrl) || 0) + 1;
     _stallCounts.set(peUrl, n);
     if (n >= 2 && !_DEBUG) {
-      process.stderr.write(`[pe-cache-evict] ${peUrl.split("/").pop()} stalled ${n}x — evicting cache\n`);
+      process.stderr.write(`[pe-cache-evict] ${captchaResourceId(peUrl)} stalled ${n}x — evicting cache\n`);
     }
     if (n >= 2) {
-      _memCdnCache.delete(peUrl);
-      try { fs.unlinkSync(diskPathFor(peUrl)); } catch (_) {}
+      defaultCdnCache().invalidate(peUrl);
       _stallCounts.delete(peUrl);
     }
   } catch (_) {}
@@ -194,12 +189,6 @@ const HTML = `<!DOCTYPE html><html><head></head><body>
 <div id="cap"></div><button id="btn"></button>
 <script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
 </body></html>`;
-
-function diskPathFor(url) {
-  // Hex digest of the URL: also the reason attacker-controlled URL text can
-  // never become a path segment here.
-  return path.join(CDN_CACHE_DIR, crypto.createHash("sha256").update(String(url)).digest("hex"));
-}
 
 // ── Egress allowlist ───────────────────────────────────────────────────────
 // Guest code from the CDN controls request URLs. Without this, a hostile or
@@ -279,64 +268,8 @@ function sniffMime(url) {
   return "application/octet-stream";
 }
 
-// ── pe.* bytecode VM harvest hook (same as solve-core) ──────────────────────
-const peVmCallRegex =
-  /55==A\?\(f=r\[n\+\+\],l=e\.pop\(\),h=e\.pop\(\),o=\[\],\w+\(f\)\.forEach\(function\(\)\{o\.unshift\(e\.pop\(\)\)\}\),p=null===h\?l\.apply\((\w+),o\):h\[l\]\.apply\(h,o\),r\[n\+\+\]&&e\.push\(p\)\):/;
-function patchPeBundle(buf, url) {
-  if (process.env.PE_PATCH === "off") return buf;
-  if (!/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) return buf;
-  let src = buf.toString("utf8");
-  if (src.includes("__DBT")) return buf;
-  const m = src.match(peVmCallRegex);
-  if (!m) return buf;
-  const locals = m[1];
-  const hook = `55==A?(f=r[n++],l=e.pop(),h=e.pop(),o=[],v(f).forEach(function(){o.unshift(e.pop())}),p=null===h?l.apply(${locals},o):h[l].apply(h,o),r[n++]&&e.push(p),function(){try{if(l===window.btoa||l===window.atob){window.__DBT=window.__DBT||[];var __sav=[];for(var __i=0;__i<e.length;__i++){var __vv=e[__i];if(typeof __vv==="string"){__sav.push("s:"+__vv)}else if(typeof __vv==="number"){__sav.push("n:"+__vv)}else if(typeof __vv==="boolean"){__sav.push("b:"+__vv)}else if(__vv&&typeof __vv.length==="number"){__sav.push("a:"+__vv.length)}else{__sav.push("t:"+typeof __vv)}}var __ls={};for(var __k2 in ${locals}){if(__k2!=="_"&&__k2!=="*"&&__k2!=="arguments"){try{var __lv=${locals}[__k2];if(typeof __lv==="string"){__ls[__k2]="s:"+__lv}else if(typeof __lv==="number"){__ls[__k2]="n:"+__lv}else if(__lv&&typeof __lv.length==="number"){__ls[__k2]="a:"+__lv.length}else{__ls[__k2]="t:"+typeof __lv}}catch(_e){}}}window.__DBT.push({call:"btoa",ip:n,args:o.map(function(__a){return typeof __a==="string"?"s:"+__a:typeof __a==="number"?"n:"+__a:typeof __a==="function"?"fn:"+(__a.name||"?"):typeof __a==="object"&&__a?"obj":typeof __a}),stack:__sav,locals:__ls,rlen:r.length,r:r})}}catch(_e){}}()):`;
-  src = src.replace(m[0], hook);
-  if (_DEBUG) process.stderr.write(`[loader-patch] ${url} (VM hook applied, locals=${locals})\n`);
-  return Buffer.from(src, "utf8");
-}
-
-// ── CDN cache access ────────────────────────────────────────────────────────
-function getCachedBody(url) {
-  const mem = _memCdnCache.get(url);
-  if (mem) return mem;
-  try {
-    const p = diskPathFor(url);
-    if (fs.existsSync(p)) {
-      const body = fs.readFileSync(p);
-      _memCdnCache.set(url, body);
-      return body;
-    }
-  } catch (_) {}
-  return null;
-}
-
-async function fetchAndStore(url) {
-  try {
-    const res = await fetch(url, { headers: { "user-agent": fp.userAgent } });
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > 0) {
-      _memCdnCache.set(url, buf);
-      try {
-        const p = diskPathFor(url);
-        fs.mkdirSync(CDN_CACHE_DIR, { recursive: true });
-        fs.writeFileSync(p, buf);
-        // verify write completed (no partial file)
-        const stat = fs.statSync(p);
-        if (stat.size !== buf.length) {
-          process.stderr.write(`[cache-write-short] ${url} wrote ${stat.size}/${buf.length}b — rewrite\n`);
-          fs.writeFileSync(p, buf);
-        }
-      } catch (err) {
-        if (_DEBUG) process.stderr.write(`[cache-write-err] ${url}: ${err.message}\n`);
-      }
-    }
-    return buf;
-  } catch (err) {
-    if (_DEBUG) process.stderr.write(`[loader-fetch-err] ${url}: ${err.message}\n`);
-    return null;
-  }
-}
+// CDN code is loaded byte-for-byte. Diagnostics hash the original bytes
+// instead of rewriting a minified VM or collecting its argument/local values.
 
 // ── Request header injection (every frame request: XHR, fetch, scripts) ────
 function injectRequestHeaders(request) {
@@ -413,37 +346,57 @@ function storeSetCookies(res, url) {
 
 // ── The interceptor: replaces happy-dom's network layer completely ─────────
 // All frame requests (scripts, XHR, fetch, images) funnel through here.
-function makeInterceptor(bypassPeCache = false) {
-  const skipPeCache = (url) => bypassPeCache && /dynamicJS\/.*\/pe\.\d+\./.test(url);
+export function makeInterceptor(bypassPeCache = false, resources = {}) {
+  const cache = resources.cache ?? defaultCdnCache();
+  const fetchAsync = resources.fetch ?? globalThis.fetch;
+  const fetchSync = resources.syncFetch ?? syncFetchBlocking;
+  const bypassed = new Set();
+  const cacheable = (request) => isCdnUrl(request.url) && String(request.method || "GET").toUpperCase() === "GET";
+  const cached = (url) => {
+    if (bypassPeCache && /dynamicJS\/.*\/pe\.\d+\./.test(url) && !bypassed.has(url)) {
+      bypassed.add(url);
+      cache.invalidate(url);
+    }
+    const entry = cache.get(url);
+    if (entry && /\.js(\?|$)/i.test(url) && !isParsableJs(entry.body)) {
+      cache.invalidate(url);
+      return null;
+    }
+    return entry;
+  };
+  const loaded = (w, url, entry) => {
+    const body = entry.body;
+    recordCaptchaLoad(w, url, entry, body);
+    if (/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) w.__lastPeUrl = url;
+    return body;
+  };
   return {
     async beforeAsyncRequest({ request, window: w }) {
       const url = request.url;
-      recordRequest({ at: Date.now(), method: request.method, url });
+      recordCaptchaRequest(w, url, request.method);
       if (!isAllowedRequestUrl(url)) {
-        if (_DEBUG) process.stderr.write(`[xhr-blocked] ${url}\n`);
+        if (_DEBUG) process.stderr.write(`[xhr-blocked] ${captchaResourceId(url)}\n`);
         return new w.Response("", { status: 503, statusText: "blocked by egress allowlist" });
       }
       injectRequestHeaders(request);
-      if (isCdnUrl(url)) {
-        let body = skipPeCache(url) ? null : getCachedBody(url);
-        if (body && /\.js(\?|$)/i.test(url) && !isParsableJs(body)) {
-          process.stderr.write(`[cache-bad-js] ${url} len=${body.length} unparsable — refetch fresh\n`);
-          _memCdnCache.delete(url);
-          try { fs.unlinkSync(diskPathFor(url)); } catch (_) {}
-          body = null;
-        }
-        // sync interceptor serves only from cache; the async interceptor
-        // above warms the cache on first load, so misses fall through to
-        // the async fetch path handled by happy-dom.
-        if (body) {
-          if (/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) {
-            try { w.__lastPeUrl = url; } catch (_) {}
-          }
-          return new w.Response(patchPeBundle(Buffer.from(body), url), {
-            status: 200,
-            statusText: "OK",
-            headers: { "content-type": sniffMime(url) },
+      if (cacheable(request)) {
+        try {
+          const hit = cached(url);
+          const entry = hit ?? await cache.load(url, async () => {
+            // No automatic redirects: an allowed CDN must not redirect the
+            // worker/global fetch to a forbidden destination.
+            const res = await fetchAsync(url, { method: "GET", headers: request.headers, redirect: "error" });
+            if (res.status !== 200) throw new Error("CDN response was not 200");
+            const body = Buffer.from(await res.arrayBuffer());
+            if (!body.length || (/\.js(\?|$)/i.test(url) && !isParsableJs(body))) throw new Error("Invalid CDN body");
+            return body;
           });
+          return new w.Response(loaded(w, url, entry), {
+            status: 200, statusText: "OK", headers: { "content-type": sniffMime(url) },
+          });
+        } catch {
+          if (_DEBUG) process.stderr.write(`[cdn-fetch-failed] ${captchaResourceId(url)}\n`);
+          return new w.Response("", { status: 503, statusText: "CDN fetch failed" });
         }
       }
       // Passthrough via global fetch (undici; honors global ProxyAgent).
@@ -452,85 +405,53 @@ function makeInterceptor(bypassPeCache = false) {
         request.headers.forEach((value, key) => {
           init.headers[key] = value;
         });
-        const bs = new URL(url);
         const cookie = cookieHeader(request, w, global.__browserFrame);
         if (cookie) init.headers.cookie = cookie;
-        let hasBody = false;
         try {
           if (request.body) {
             const ab = await request.arrayBuffer();
             if (ab && ab.byteLength > 0) {
               init.body = ab;
-              hasBody = true;
             }
           }
         } catch (_) {}
-        const res = await fetch(url, init);
+        const res = await fetchAsync(url, { ...init, redirect: "error" });
         const buf = Buffer.from(await res.arrayBuffer());
         storeSetCookies(res, url);
-        if (_DEBUG && /captcha-open|verify\.|device\.saf|cloudauth-device|upload\./i.test(url) && buf.length && buf.length < 4096) {
-          try {
-            process.stderr.write(`[xhr-body] ${request.method} ${bs.hostname}${bs.pathname}-> ${res.status} ${buf.toString("utf8").slice(0, 1200)}\n`);
-          } catch (_) {}
-        }
         const headers = {};
         const ct = res.headers.get("content-type");
         if (ct) headers["content-type"] = ct;
-        const logHost = bs.hostname;
-        if (_DEBUG)
-          process.stderr.write(
-            `[xhr] ${request.method} ${logHost}${bs.pathname} -> ${res.status} (${buf.length}b)\n`,
-          );
+        if (_DEBUG) process.stderr.write(`[xhr] ${captchaResourceId(url)} -> ${res.status} (${buf.length}b)\n`);
         return new w.Response(buf, {
           status: res.status,
           statusText: res.statusText || "",
           headers,
         });
       } catch (err) {
-        if (_DEBUG) process.stderr.write(`[xhr-err] ${url}: ${err.message}\n`);
+        if (_DEBUG) process.stderr.write(`[xhr-err] ${captchaResourceId(url)}\n`);
         return new w.Response("", { status: 503, statusText: "passthrough failed" });
       }
     },
     beforeSyncRequest({ request, window: w }) {
       const url = request.url;
-      recordRequest({ at: Date.now(), method: request.method, url, sync: true });
+      recordCaptchaRequest(w, url, request.method);
+      // SyncFetch consumes a plain Buffer, not a Response's ReadableStream.
+      const response = (body, status = 200, statusText = "OK", headers = {}) => ({
+        status, statusText, ok: status >= 200 && status < 300, url, redirected: false,
+        headers: new w.Headers(headers), body, [PropertySymbol.virtualServerFile]: null,
+      });
       if (!isAllowedRequestUrl(url)) {
-        if (_DEBUG) process.stderr.write(`[sync-xhr-blocked] ${url}\n`);
-        return new w.Response("", { status: 503, statusText: "blocked by egress allowlist" });
+        if (_DEBUG) process.stderr.write(`[sync-xhr-blocked] ${captchaResourceId(url)}\n`);
+        return response(Buffer.alloc(0), 503, "blocked by egress allowlist");
       }
       injectRequestHeaders(request);
-      let body = null;
-      if (isCdnUrl(url)) {
-        body = skipPeCache(url) ? null : getCachedBody(url);
-        if (body && /\.js(\?|$)/i.test(url) && !isParsableJs(body)) {
-          process.stderr.write(`[cache-bad-js:sync] ${url} len=${body.length} unparsable — refetch fresh\n`);
-          _memCdnCache.delete(url);
-          try { fs.unlinkSync(diskPathFor(url)); } catch (_) {}
-          body = null;
-        }
-        // sync interceptor serves only from cache; the async interceptor
-        // above warms the cache on first load, so misses fall through to
-        // the async fetch path handled by happy-dom.
+      if (cacheable(request)) {
+        const hit = cached(url);
+        if (hit) return response(loaded(w, url, hit), 200, "OK", { "content-type": sniffMime(url) });
       }
-      if (body) {
-        if (/dynamicJS\/[^/]*\/pe\.\d+\./.test(url)) {
-          try { w.__lastPeUrl = url; } catch (_) {}
-        }
-        return {
-          status: 200,
-          statusText: "OK",
-          ok: true,
-          url,
-          redirected: false,
-          headers: new w.Headers({ "content-type": sniffMime(url) }),
-          body: patchPeBundle(Buffer.from(body), url),
-          [PropertySymbol.virtualServerFile]: null,
-        };
-      }
-      // Non-CDN sync request: serve it blocking via a worker thread. Never
-      // fall through to happy-dom's own sync fetch — it spawns a child
-      // process with `process.argv[0] -e`, which breaks compiled binaries.
-      const init = { method: request.method, headers: {} as Record<string, string> };
+      // All misses, including CDN scripts, use the blocking worker. Never
+      // fall through to happy-dom's child-process sync fetch in compiled builds.
+      const init = { method: request.method, headers: {} as Record<string, string>, redirect: "error" };
       request.headers.forEach((value, key) => {
         init.headers[key] = value;
       });
@@ -542,10 +463,18 @@ function makeInterceptor(bypassPeCache = false) {
           if (ab && (ab as any).byteLength > 0) init.body = ab;
         }
       } catch (_) {}
-      const res = syncFetchBlocking(url, init as any) as any;
+      const res = fetchSync(url, init as any) as any;
       if (res.error) {
-        process.stderr.write(`[sync-xhr-err] ${url}: ${res.error}\n`);
-        return new w.Response("", { status: 503, statusText: "sync fetch failed" });
+        if (_DEBUG) process.stderr.write(`[sync-xhr-err] ${captchaResourceId(url)}\n`);
+        return response(Buffer.alloc(0), 503, "sync fetch failed");
+      }
+      if (cacheable(request) && res.status === 200) {
+        const body = Buffer.from(res.body);
+        if (!body.length || (/\.js(\?|$)/i.test(url) && !isParsableJs(body))) {
+          return response(Buffer.alloc(0), 503, "Invalid CDN body");
+        }
+        const entry = cache.put(url, body);
+        return response(loaded(w, url, entry), 200, "OK", { "content-type": sniffMime(url) });
       }
       try {
         for (const raw of res.setCookie || []) {
@@ -686,6 +615,7 @@ function makeScopedFunction(w) {
     const id = w.__capScopeId;
     const source =
       `return function(${params}){with(globalThis.${GUEST_SCOPE_ROOT}[${JSON.stringify(id)}]){\n${body}\n}}`;
+    recordCaptchaEvaluation(w, undefined, source);
     return Function(source)();
   };
   // Guest fingerprint code sweeps name/toString over platform builtins.
@@ -722,7 +652,7 @@ function makeScopedFunction(w) {
  *   also fine — the preceding expression's value stands.)
  */
 function wrapGuestSource(code, filename, scopeId) {
-  const sourceUrl = filename && /^https?:/.test(String(filename)) ? `\n//# sourceURL=${filename}` : "";
+  const sourceUrl = filename ? `\n//# sourceURL=${captchaResourceId(filename)}` : "";
   const scopeRef = `globalThis.${GUEST_SCOPE_ROOT}[${JSON.stringify(scopeId)}]`;
   // The leading newline keeps guest line numbers aligned with the CDN
   // original; the trailing one guards a source ending in a line comment.
@@ -731,70 +661,31 @@ function wrapGuestSource(code, filename, scopeId) {
 
 // ── Parse-fail instrumentation (host side) ─────────────────────────────────
 // Wraps happy-dom's VM eval funnel (window[PropertySymbol.evaluateScript]).
-// Every script tag / compiled module / dynamic chunk that happy-dom parses
-// passes through here with options.filename = source URL, so any SyntaxError
-// is dumped with URL + length + head/tail + sha1, and the disk cache is
-// re-validated against a fresh CDN fetch when the URL is an http(s) file.
+// Capture the actual evaluation bytes before invoking the guest. Diagnostics
+// never re-fetch a URL or mutate a cache: later bytes cannot explain this attempt.
 function installEvalInstrumentation(w) {
   const sym = PropertySymbol && PropertySymbol.evaluateScript;
-  if (!sym || typeof w[sym] !== "function") {
-    process.stderr.write("[instr] no evaluateScript symbol, host hook skipped\n");
-    return;
-  }
+  if (!sym || typeof w[sym] !== "function") return;
   const orig = w[sym];
   w[sym] = function (code, options) {
     const scopeId = w.__capScopeId;
+    const filename = options && options.filename;
     try {
-      // Guest scripts run inside this window's `with` scope (wrapGuestSource):
-      // this funnel is the single entry point for every script tag, compiled
-      // module and dynamic pe/FeiLin chunk, so wrapping here covers them all.
-      // Our own GUEST_EVAL_PATCH goes through w.eval() and is unaffected.
       if (scopeId) {
         try {
-          return orig.call(this, wrapGuestSource(String(code ?? ""), options && options.filename, scopeId), options);
+          const input = String(code ?? "");
+          const wrapped = wrapGuestSource(input, filename, scopeId);
+          recordCaptchaEvaluation(w, filename, wrapped, input);
+          return orig.call(this, wrapped, options);
         } catch (scopeErr) {
-          // Only a wrapper-induced parse failure (e.g. a top-level "use
-          // strict" making `with` illegal) falls back — a genuine error from
-          // the guest body must propagate to the diagnostics path below.
           if (!(scopeErr instanceof SyntaxError)) throw scopeErr;
-          process.stderr.write(
-            `[instr] guest scope rejected (${scopeErr.message.slice(0, 80)}), evaluating unwrapped\n`,
-          );
+          if (_DEBUG) process.stderr.write("[instr] guest scope parse failed; evaluating unwrapped\n");
         }
       }
+      if (typeof code === "string") recordCaptchaEvaluation(w, filename, code);
       return orig.call(this, code, options);
     } catch (err) {
-      try {
-        const src = String(code || "");
-        const filename = (options && options.filename) || "?";
-        const digest = crypto.createHash("sha256").update(src).digest("hex");
-        process.stderr.write(
-          `\n[EVAL-PARSE-FAIL] file=${filename} len=${src.length} sha256=${digest}\n` +
-            `  head300: ${JSON.stringify(src.slice(0, 300))}\n` +
-            `  tail100: ${JSON.stringify(src.slice(-100))}\n` +
-            `  err: ${err && err.message}\n`,
-        );
-        if (/^https?:/.test(filename)) {
-          (async () => {
-            try {
-              const res = await fetch(filename, { headers: { "user-agent": fp.userAgent } });
-              const fresh = Buffer.from(await res.arrayBuffer());
-              process.stderr.write(
-                `[EVAL-CACHE-COMPARE] cachedLen=${src.length} freshLen=${fresh.length} freshSha256=${crypto.createHash("sha256").update(fresh).digest("hex")} http=${res.status}\n`,
-              );
-              if (fresh.length > 0 && fresh.length !== src.length) {
-                process.stderr.write(`[EVAL-CACHE-MISMATCH] deleting ${diskPathFor(filename)} (stale/truncated cache)\n`);
-                try {
-                  fs.unlinkSync(diskPathFor(filename));
-                } catch (_) {}
-                _memCdnCache.delete(filename);
-              }
-            } catch (fetchErr) {
-              process.stderr.write(`[EVAL-CACHE-COMPARE-ERR] ${fetchErr.message}\n`);
-            }
-          })();
-        }
-      } catch (e2) {}
+      try { process.stderr.write(`[EVAL-FAIL] ${captchaFailureSummary(w)}\n`); } catch {}
       throw err;
     }
   };
@@ -961,7 +852,7 @@ const GUEST_EVAL_PATCH = `
       if (typeof window.__capDebugDump === "function") {
         window.__capDebugDump(window.__lastPeUrl || "?", src, kind);
       } else {
-        console.error("[" + kind + "] url=" + (window.__lastPeUrl || "?") + " len=" + src.length + " head=" + JSON.stringify(src.slice(0, 300)) + " tail=" + JSON.stringify(src.slice(-100)));
+        console.error("guest evaluation failed; metadata unavailable");
       }
     } catch (e2) {}
   }
@@ -1723,14 +1614,8 @@ function installTrafficLogger(w) {
     const DEBUG_HOSTS = /(cloudauth-device|captcha-open|verify|upload|nocaptcha|aliyuncs)/i;
     if (DEBUG_HOSTS.test(url)) {
       this.addEventListener("load", () => {
-        let respPreview = "";
         try {
-          respPreview = String(this.responseText || "").slice(0, 3000);
-        } catch (_) {}
-        try {
-          process.stderr.write(
-            `\n===== XHR ${String(this.__capMethod || "?")} ${url}\n--- RESP (${respPreview.length}b) ---\n${respPreview}\n=====\n`,
-          );
+          process.stderr.write(`[guest-xhr] ${captchaResourceId(url)} status=${Number(this.status) || 0}\n`);
         } catch (_) {}
       });
     }
@@ -1740,12 +1625,9 @@ function installTrafficLogger(w) {
 
 function safeJson(x) {
   try {
-    if (x instanceof Error) return `Error: ${x.message}\n${(x.stack || "").slice(0, 1500)}`;
-    const s = JSON.stringify(x);
-    return s !== undefined && s.length < 3000 ? s : String(x);
-  } catch (_) {
-    return String(x);
-  }
+    const s = typeof x === "string" ? x : JSON.stringify(x) ?? String(x);
+    return `len=${s.length} sha256=${crypto.createHash("sha256").update(s).digest("hex")}`;
+  } catch { return "metadata-unavailable"; }
 }
 
 // ── Behavioral priming (FeiLin human-motion buffer) ────────────────────────
@@ -1822,7 +1704,14 @@ interface DomResources {
   documentHtml: string;
 }
 
+// A failed close may leave child/parent work alive. Do not admit another DOM
+// in this process: happy-dom marks pages closed BEFORE destruction settles, so
+// retrying close() cannot establish that the remaining work was stopped.
+let _domCloseFailed = false;
+const _domOwners = new WeakMap();
+
 async function createDom(region: string, prefix: string, resources?: DomResources) {
+  if (_domCloseFailed) throw new Error("CAPTCHA DOM cleanup failed; runtime unavailable");
   if (!resources && process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== "1") {
     throw new Error("Remote CAPTCHA JavaScript is disabled: this runtime does not provide an OS sandbox. Operator opt-in ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA=1 is required for trusted standalone use.");
   }
@@ -1851,7 +1740,11 @@ async function createDom(region: string, prefix: string, resources?: DomResource
 
   const interceptor = resources ? {
     beforeAsyncRequest: async ({ window: w }) => new w.Response("", { status: 503, statusText: "network disabled for injected fixtures" }),
-    beforeSyncRequest: ({ window: w }) => new w.Response("", { status: 503, statusText: "network disabled for injected fixtures" }),
+    beforeSyncRequest: ({ window: w, request }) => ({
+      status: 503, statusText: "network disabled for injected fixtures", ok: false,
+      url: request.url, redirected: false, headers: new w.Headers(), body: Buffer.alloc(0),
+      [PropertySymbol.virtualServerFile]: null,
+    }),
   } : makeInterceptor(_bypassPeCacheOnce);
   _bypassPeCacheOnce = false;
   // Guest console is silent unless CAPTCHA_DEBUG — piping every SDK log to
@@ -1859,12 +1752,12 @@ async function createDom(region: string, prefix: string, resources?: DomResource
   const noop = () => {};
   const guestConsole = _DEBUG
     ? {
-        log: (...a) => process.stderr.write(`[guest-log] ${a.map((x) => (typeof x === "object" ? safeJson(x) : String(x))).join(" ")}\n`),
-        warn: (...a) => process.stderr.write(`[guest-warn] ${a.map((x) => (typeof x === "object" ? safeJson(x) : String(x))).join(" ")}\n`),
-        error: (...a) => process.stderr.write(`[guest-err] ${a.map((x) => (typeof x === "object" ? safeJson(x) : String(x))).join(" ")}\n`),
-        info: (...a) => process.stderr.write(`[guest-info] ${a.map((x) => (typeof x === "object" ? safeJson(x) : String(x))).join(" ")}\n`),
-        debug: (...a) => process.stderr.write(`[guest-debug] ${a.map((x) => (typeof x === "object" ? safeJson(x) : String(x))).join(" ")}\n`),
-        trace: (...a) => process.stderr.write(`[guest-trace] ${a.map((x) => (typeof x === "object" ? safeJson(x) : String(x))).join(" ")}\n`),
+        log: (...a) => process.stderr.write(`[guest-log] ${a.map(safeJson).join(" ")}\n`),
+        warn: (...a) => process.stderr.write(`[guest-warn] ${a.map(safeJson).join(" ")}\n`),
+        error: (...a) => process.stderr.write(`[guest-err] ${a.map(safeJson).join(" ")}\n`),
+        info: (...a) => process.stderr.write(`[guest-info] ${a.map(safeJson).join(" ")}\n`),
+        debug: (...a) => process.stderr.write(`[guest-debug] ${a.map(safeJson).join(" ")}\n`),
+        trace: (...a) => process.stderr.write(`[guest-trace] ${a.map(safeJson).join(" ")}\n`),
       }
     : { log: noop, warn: noop, error: noop, info: noop, debug: noop, trace: noop };
   const w = new Window({
@@ -1883,9 +1776,14 @@ async function createDom(region: string, prefix: string, resources?: DomResource
     },
   });
 
+  const owner = { browserFrame: null, aliased: false, closing: null };
+  _domOwners.set(w, owner);
+  let initialized = false;
+  try {
   // Reach into the frame for cookie container + frame ref (host side helpers).
   // WindowBrowserContext imported at module scope
   const browserFrame = new WindowBrowserContext(w).getBrowserFrame();
+  owner.browserFrame = browserFrame;
   global.__browserFrame = browserFrame;
   global.__cookieContainer = browserFrame.page.context.cookieContainer;
 
@@ -1947,43 +1845,18 @@ async function createDom(region: string, prefix: string, resources?: DomResource
   const needsGlobalAlias = typeof Bun !== "undefined";
   if (needsGlobalAlias) {
     const g = globalThis;
+    owner.aliased = true;
     installGlobalWindowAlias(g, w);
   }
   if (w.Error) {
     w.Error.prepareStackTrace = Error.prepareStackTrace;
   }
-  // Host-side recorder the guest dump helper calls: computes sha1 of the failing
-  // source (guest realm has no node crypto) and re-checks the pe disk cache.
-  w.__capDebugDump = (url, src, kind) => {
+  // Guest-provided text is never logged, including in debug mode.
+  w.__capDebugDump = (url, src) => {
     try {
-      const s = String(src || "");
-      const digest = crypto.createHash("sha256").update(s).digest("hex");
-      process.stderr.write(
-        `\n[${kind}] url=${url} len=${s.length} sha256=${digest}\n` +
-          `  head300: ${JSON.stringify(s.slice(0, 300))}\n` +
-          `  tail100: ${JSON.stringify(s.slice(-100))}\n`,
-      );
-      if (/^https?:/.test(String(url))) {
-        (async () => {
-          try {
-            const res = await fetch(url, { headers: { "user-agent": fp.userAgent } });
-            const fresh = Buffer.from(await res.arrayBuffer());
-            process.stderr.write(
-              `[${kind}-CACHE-COMPARE] cachedLen=${s.length} freshLen=${fresh.length} freshSha256=${crypto.createHash("sha256").update(fresh).digest("hex")} http=${res.status}\n`,
-            );
-            if (fresh.length > 0 && fresh.length !== s.length) {
-              process.stderr.write(`[${kind}-MISMATCH] deleting ${diskPathFor(url)} (stale/truncated cache)\n`);
-              try {
-                fs.unlinkSync(diskPathFor(url));
-              } catch (_) {}
-              _memCdnCache.delete(url);
-            }
-          } catch (fetchErr) {
-            process.stderr.write(`[${kind}-CACHE-COMPARE-ERR] ${fetchErr.message}\n`);
-          }
-        })();
-      }
-    } catch (_) {}
+      recordCaptchaEvaluation(w, url, String(src || ""));
+      process.stderr.write(`[GUEST-EVAL-FAIL] ${captchaFailureSummary(w)}\n`);
+    } catch {}
   };
   w.eval(GUEST_EVAL_PATCH);
 
@@ -1992,7 +1865,13 @@ async function createDom(region: string, prefix: string, resources?: DomResource
 
   w.AliyunCaptchaConfig = { region, prefix };
 
+  initialized = true;
   return { window: w, browserFrame };
+  } finally {
+    // Preserve the initialization error. destroyDom consumes unsafe close
+    // errors and quarantines the runtime if destruction cannot be established.
+    if (!initialized) await destroyDom(w);
+  }
 }
 
 // Bun-only: alias the active window on globalThis (script tags run in the
@@ -2252,24 +2131,41 @@ export function removeGlobalWindowAlias(g, w) {
   } catch (_) {}
 }
 
-function destroyDom(win) {
-  try {
-    const cap = win.document.getElementById("cap");
-    if (cap) cap.replaceChildren();
-    win.happyDOM.close();
-  } catch (_) {}
-  try {
-    global.__cookieContainer = null;
-    global.__browserFrame = null;
-  } catch (_) {}
-  try {
-    if (typeof Bun !== "undefined") removeGlobalWindowAlias(globalThis, win);
-  } catch (_) {}
-  // The scope holds window-bound timer functions; dropping it releases the
-  // closed window and makes any straggler's `new Function` fall back to the
-  // host constructor (harmless: the window registry is already cleared).
-  removeGuestScope(win);
-  try { shutdownSyncFetchWorker(); } catch (_) {}
+function destroyDom(win): Promise<boolean> {
+  let owner = _domOwners.get(win);
+  if (!owner) {
+    owner = { browserFrame: null, aliased: false, closing: null };
+    _domOwners.set(win, owner);
+  }
+  // Repeated callers share the ORIGINAL close, not happy-dom's early-return
+  // path for a page already marked closed while child destruction is pending.
+  if (owner.closing) return owner.closing;
+  owner.closing = Promise.resolve().then(async () => {
+    try {
+      // Do not detach #cap's children first: iframe removal starts an unawaited
+      // destroyFrame and removes that frame from the page's awaited child list.
+      await win.happyDOM.close();
+    } catch (_) {
+      // No timeout/retry may release ownership of potentially live guest work.
+      // Reject new admission instead, without retaining/logging guest errors.
+      _domCloseFailed = true;
+      return false;
+    }
+    try {
+      if (owner.browserFrame && global.__browserFrame === owner.browserFrame) {
+        global.__cookieContainer = null;
+        global.__browserFrame = null;
+      }
+    } catch (_) {}
+    try {
+      if (owner.aliased) removeGlobalWindowAlias(globalThis, win);
+    } catch (_) {}
+    // Scope and aliases must remain available throughout child/frame draining.
+    removeGuestScope(win);
+    try { shutdownSyncFetchWorker(); } catch (_) {}
+    return true;
+  });
+  return owner.closing;
 }
 
 function extractVerifyParam(param) {
@@ -2278,7 +2174,7 @@ function extractVerifyParam(param) {
     verifyParam = param.verifyParam || param.data || param.param;
   }
   if (!verifyParam || String(verifyParam).length < 20) {
-    throw new Error("solver returned empty param: " + JSON.stringify(param));
+    throw new Error("solver returned empty param");
   }
   const str = String(verifyParam);
   // Strict validation: a REAL Aliyun verify param is ~280 chars of base64
@@ -2288,7 +2184,7 @@ function extractVerifyParam(param) {
   // it out of the solver.
   if (str.length < 200) {
     throw new Error(
-      "verify param too short (" + str.length + " chars) — degraded result, refusing: " + str.slice(0, 80),
+      "verify param too short (" + str.length + " chars) — degraded result, refusing: ",
     );
   }
   try {
@@ -2296,13 +2192,13 @@ function extractVerifyParam(param) {
     const secTok = decoded && (decoded.securityToken || decoded.SecurityToken);
     if (!secTok || String(secTok).length < 50) {
       throw new Error(
-        "verify param missing securityToken — refusing degraded result: " + str.slice(0, 80),
+        "verify param missing securityToken — refusing degraded result: ",
       );
     }
   } catch (err) {
     if (err instanceof SyntaxError || /securityToken/.test(String(err.message))) {
       throw err instanceof SyntaxError
-        ? new Error("verify param not base64-JSON: " + str.slice(0, 80))
+        ? new Error("verify param not base64-JSON: ")
         : err;
     }
     throw err;
@@ -2312,10 +2208,7 @@ function extractVerifyParam(param) {
 
 function handleCaptchaResult(result) {
   if (result && typeof result === "object" && result.verifyResult === false) {
-    throw new Error(
-      "verify rejected: " +
-        JSON.stringify({ verifyCode: result.verifyCode, certifyId: result.certifyId }),
-    );
+    throw normalizeCaptchaError(result);
   }
   return result;
 }
@@ -2330,11 +2223,13 @@ const _reusePool = { window: null, browserFrame: null, solves: 0, lastUsedAt: 0 
 const REUSE_MAX_SOLVES = Number(process.env.CAPTCHA_REUSE_MAX_SOLVES || 25);
 const REUSE_MAX_IDLE_MS = Number(process.env.CAPTCHA_REUSE_MAX_IDLE_MS || 120_000);
 
-function takeReusableWindow() {
+async function takeReusableWindow() {
   const p = _reusePool;
   if (!p.window) return null;
-  if (p.solves >= REUSE_MAX_SOLVES) { discardReusableWindow(); return null; }
-  if (Date.now() - p.lastUsedAt > REUSE_MAX_IDLE_MS) { discardReusableWindow(); return null; }
+  if (p.solves >= REUSE_MAX_SOLVES || Date.now() - p.lastUsedAt > REUSE_MAX_IDLE_MS) {
+    await discardReusableWindow();
+    return null;
+  }
   return { window: p.window, browserFrame: p.browserFrame, reused: true };
 }
 function stageReusableWindow(window, browserFrame) {
@@ -2343,10 +2238,10 @@ function stageReusableWindow(window, browserFrame) {
   _reusePool.solves = 0;
   _reusePool.lastUsedAt = Date.now();
 }
-function discardReusableWindow() {
+async function discardReusableWindow() {
   const p = _reusePool;
-  if (p.window) {
-    try { destroyDom(p.window); } catch (_) {}
+  if (p.window && !await destroyDom(p.window)) {
+    throw new Error("CAPTCHA DOM cleanup failed; runtime unavailable");
   }
   p.window = null;
   p.browserFrame = null;
@@ -2372,7 +2267,8 @@ function guestErrorSummary(w, max = 4) {
     const total = errs.reduce((a, e) => a + ((e && e.n) || 1), 0);
     const parts = errs.slice(0, max).map((e) => {
       const n = e && e.n && e.n > 1 ? `x${e.n}` : "";
-      return `${(e && e.k) || "?"}${n}: ${String((e && e.m) || "?").slice(0, 120)}`;
+      const kind = e?.k === "WINDOW-ERROR" || e?.k === "UH-REASON" ? e.k : "GUEST-ERROR";
+      return `${kind}${n}: ${safeJson(e?.m)}`;
     });
     return ` guestErrors(${total}): ${parts.join(" || ")}`;
   } catch (_) {
@@ -2380,60 +2276,47 @@ function guestErrorSummary(w, max = 4) {
   }
 }
 
-async function solveTraceless(opts) {
+async function solveTraceless(opts, resources?: DomResources) {
+  if (_domCloseFailed) throw new Error("CAPTCHA DOM cleanup failed; runtime unavailable");
   const scene = opts.scene || "11xygtvd";
   const region = opts.region || "sgp";
   const prefix = opts.prefix || "no8xfe";
   const timeoutMs = opts.timeoutMs ?? 30_000;
 
-  const wantReuse = opts.reuseWindow ?? process.env.CAPTCHA_WINDOW_REUSE === "1";
+  const wantReuse = !resources && (opts.reuseWindow ?? process.env.CAPTCHA_WINDOW_REUSE === "1");
   let dom;
   let reused = false;
   if (wantReuse) {
-    dom = takeReusableWindow();
+    dom = await takeReusableWindow();
     if (dom) reused = true;
   }
   if (!dom) {
-    dom = await createDom(region, prefix);
+    dom = await createDom(region, prefix, resources);
   }
   const { window: w, browserFrame } = dom;
-  const solveStart = Date.now();
-  let solveSucceeded = false;
   let keepWindow = false;
+  let solveFailed = false;
   try {
+    const solveStart = Date.now();
+    beginCaptchaAttempt(w);
     await waitFor(() => typeof w.initAliyunCaptcha === "function", timeoutMs, 50);
 
     simulateBehavior(w, 600);
 
     const param = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        const peUrl = (() => { try { return w.__lastPeUrl || "?"; } catch (_) { return "?"; } })();
-        const reqs = _requestLog
-          .filter((r) => r.at >= solveStart)
-          .map((r) => `${(r.at - solveStart)}ms ${r.method} ${String(r.url).replace(/^https?:\/\//, "").slice(0, 60)}`)
-          .slice(-12);
-        reject(new Error(`captcha solve timeout pe=${peUrl.split("/").pop() || peUrl} reqs=${JSON.stringify(reqs)}`));
-      }, timeoutMs);      // Fail-fast stall detector: healthy solves keep firing XHRs until verify
-      // (~3s). If no XHR for stallMs and none pending, this pe-VM variant
-      // stalled (seen across rotated pe.0xx versions) — abort early so the
-      // caller can retry with a fresh InitCaptchaV3 (new pe version).
-      // Fail-fast stall detector: healthy solves keep firing XHRs until
-      // verify (~3s, gaps <2s). If no XHR for 6s, this pe-VM variant stalled
-      // (seen across rotated pe.0xx versions) — abort early so the caller
-      // can retry with a fresh InitCaptchaV3 (new pe version).
+        clearInterval(stallTimer);
+        reject(new Error("captcha solve timeout"));
+      }, timeoutMs);
+      // Activity from another window must not postpone this attempt's stall.
       const stallMs = opts.stallMs ?? Number(process.env.CAPTCHA_STALL_MS || 6_000);
       const stallTimer = setInterval(() => {
-        const last = _requestLog[_requestLog.length - 1];
-        if (last && Date.now() - last.at > stallMs) {
-          const peUrl = (() => { try { return w.__lastPeUrl || "?"; } catch (_) { return "?"; } })();
-          noteStallAndMaybeEvict(peUrl);
-          const reqs = _requestLog
-            .filter((r) => r.at >= solveStart)
-            .map((r) => `${(r.at - solveStart)}ms ${r.method} ${String(r.url).replace(/^https?:\/\//, "").slice(0, 60)}`)
-            .slice(-12);
+        const last = lastCaptchaActivity(w, solveStart);
+        if (Date.now() - last > stallMs) {
+          noteStallAndMaybeEvict(lastCaptchaPeUrl(w));
           clearTimeout(timer);
           clearInterval(stallTimer);
-          reject(new Error(`captcha solve stall pe=${peUrl.split("/").pop() || peUrl} lastXhr=${(last.at - solveStart)}ms reqs=${JSON.stringify(reqs)}`));
+          reject(new Error(`captcha solve stall lastXhr=${last - solveStart}ms`));
         }
       }, 500);
       const finish = (fn) => (value) => {
@@ -2454,24 +2337,23 @@ async function solveTraceless(opts) {
           showErrorTip: false,
           getInstance: (inst) => {
             try {
-              (inst.startTracelessVerification || inst.show).call(inst);
+              startCaptchaInstance(inst);
             } catch (e) {
-              finish(reject)(new Error(`start: ${e.message}`));
+              finish(reject)(normalizeCaptchaError(e));
             }
           },
           success: (result) => {
             try {
               finish(resolve)(handleCaptchaResult(result));
             } catch (err) {
-              finish(reject)(err);
+              finish(reject)(normalizeCaptchaError(err));
             }
           },
-          fail: (err) => finish(reject)(new Error(`fail: ${JSON.stringify(err)}`)),
-          onError: (err) => finish(reject)(new Error(`onError: ${JSON.stringify(err)}`)),
+          fail: (err) => finish(reject)(normalizeCaptchaError(err)),
+          onError: (err) => finish(reject)(normalizeCaptchaError(err)),
         });
       } catch (err) {
-        clearTimeout(timer);
-        reject(err);
+        finish(reject)(normalizeCaptchaError(err));
       }
     });
 
@@ -2485,19 +2367,13 @@ async function solveTraceless(opts) {
       w.__capErrs = [];
     } catch (_) {}
 
-    // Dump the pe-VM btoa tracer if requested (rotation forensics).
-    if (process.env.CAPTCHA_DUMP_DBT === "1") {
-      try {
-        const dbt = w.__DBT || [];
-        fs.writeFileSync(
-          process.env.CAPTCHA_DBT_FILE || "/tmp/pe-dbt.json",
-          JSON.stringify({ count: dbt.length, last: dbt.slice(-8), all: dbt }, null, 1),
-        );
-      } catch (_) {}
+    let out;
+    try {
+      out = extractVerifyParam(param);
+    } catch (err) {
+      // Result fields/coercion are guest-controlled too; never forward throws.
+      throw normalizeCaptchaError(err);
     }
-
-    solveSucceeded = true;
-    const out = extractVerifyParam(param);
     if (wantReuse) {
       if (reused) noteWindowSolved();
       else stageReusableWindow(w, browserFrame);
@@ -2505,22 +2381,28 @@ async function solveTraceless(opts) {
     }
     return out;
   } catch (err) {
+    solveFailed = true;
     // Attach captured guest window errors to the failure — the only situation
     // where they are actionable (a successful solve makes them irrelevant).
-    const summary = guestErrorSummary(w);
-    if (summary) {
-      try {
-        err.message = `${err && err.message ? err.message : String(err)} |${summary}`;
-      } catch (_) {}
-    }
+    try {
+      const summary = guestErrorSummary(w);
+      err.message = `${err.message} |${summary} captchaMetadata=${captchaFailureSummary(w)}`;
+    } catch {} // Frozen errors and failed metadata leave the original untouched.
     throw err;
   } finally {
     // Reuse mode: on success the window stays pooled (keepWindow) for the next
     // solve — a ~48% CPU cut. On failure it is destroyed: a stalled window must
     // not poison later solves, and the retry rolls a fresh pe anyway.
     if (!keepWindow) {
-      if (_reusePool.window === w) _reusePool.window = null;
-      destroyDom(w);
+      const closed = await destroyDom(w);
+      if (closed && _reusePool.window === w) {
+        _reusePool.window = null;
+        _reusePool.browserFrame = null;
+        _reusePool.solves = 0;
+      }
+      if (!closed && !solveFailed) {
+        throw new Error("CAPTCHA DOM cleanup failed; runtime unavailable");
+      }
     }
   }
 }

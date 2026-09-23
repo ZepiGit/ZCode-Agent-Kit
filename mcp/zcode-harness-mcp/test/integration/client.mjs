@@ -22,7 +22,7 @@ export function isolatedTestEnv(rootDir, overrides = {}) {
   }
   const nodeDir = path.dirname(process.execPath);
   const systemRoot = process.env.SystemRoot ?? "C:\\Windows";
-  return {
+  const env = {
     ...process.env,
     HOME: home,
     USERPROFILE: home,
@@ -40,8 +40,16 @@ export function isolatedTestEnv(rootDir, overrides = {}) {
     ZCODE_KIT_SKIP_SMOKE: "1",
     ZCODE_KIT_SKIP_DEPS: "1",
     ZCODE_HARNESS_LOG_LEVEL: "warn",
-    ...overrides,
   };
+  for (const [name, value] of Object.entries(overrides)) {
+    // Windows environment names are case-insensitive; Node otherwise picks
+    // one lexicographically, which can resurrect inherited real-user paths.
+    for (const existing of Object.keys(env)) {
+      if (existing.toLowerCase() === name.toLowerCase()) delete env[existing];
+    }
+    if (value !== undefined) env[name] = value;
+  }
+  return env;
 }
 
 export async function startBridge(overrides = {}) {

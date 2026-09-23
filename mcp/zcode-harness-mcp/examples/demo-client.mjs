@@ -1,7 +1,7 @@
 /**
  * Demo client — shows the full flow FROM THE PERSPECTIVE OF ANOTHER AGENT:
  *   discover capabilities → choose workspace → read models → try GLM-5.3-Flash
- *   → inspect/change a setting → start a task → poll progress → answer
+ *   → select native session model/mode → start a task → poll progress → answer
  *   interactions → read result + artifacts → follow-up in the same session.
  *
  * Run against the REAL installed harness (default):
@@ -114,15 +114,17 @@ console.log(`  capabilities: ${caps.capabilities.length} Einträge (available: $
 
 step(2, "Workspace wählen und öffnen");
 const ws = await tool("zcode_workspace_open", { workspacePath: workspace });
-console.log(`  workspace: ${workspace} (revision ${ws.revision})`);
+console.log(`  workspace: ${workspace} (Präsentationsmodus ${ws.mode}; keine Workspace-Defaults/Revision)`);
 
-step(3, "Verfügbare Modelle lesen (echter Katalog)");
+step(3, "Vollkatalog über eigene deferred Session ohne Prompt lesen und Session schließen");
+console.log("  Kann Runtime-Dienste initialisieren; unter --read-only gesperrt. Katalogpräsenz ist kein Inferenznachweis.");
 const models = await tool("zcode_models_list", { workspacePath: workspace });
 const catalogIds = (models.modelCatalog.available ?? []).map((m) => `${m.ref.providerId}/${m.ref.modelId}`);
 console.log(`  Katalog: ${catalogIds.join(", ")}`);
 
 step(4, "GLM-5.3-Flash versuchen (nur wenn wirklich im Katalog)");
-const flash = catalogIds.find((id) => id.toLowerCase() === "zai/glm-5.3-flash");
+const flash = catalogIds.find((id) => id.toLowerCase() === "zai-api/glm-5.3-flash")
+  ?? catalogIds.find((id) => id.slice(id.indexOf("/") + 1).toLowerCase() === "glm-5.3-flash");
 if (flash) {
   console.log(`  ${flash} ist verfügbar und wird bevorzugt.`);
 } else {
@@ -131,16 +133,25 @@ if (flash) {
 }
 const preferred = flash ?? catalogIds[0];
 
-step(5, "Einstellung prüfen, ändern und zurücksetzen");
+step(5, "Session-Modell und Modus nativ auswählen (keine Workspace-Defaults)");
 const schema = await tool("zcode_settings_schema", { workspacePath: workspace });
 const modeSetting = schema.settings.find((s) => s.path === "mode");
-console.log(`  mode: effektiv=${modeSetting.effective}, schreibbar=${modeSetting.writable}`);
-const upd = await tool("zcode_settings_update", { workspacePath: workspace, changes: { mode: "build" } });
-console.log(`  update: ${JSON.stringify(upd.applied)} (revision ${upd.revision})`);
+console.log(`  workspace mode: effektiv=${modeSetting.effective}, schreibbar=${modeSetting.writable}`);
+const session = await tool("zcode_session_create", { workspacePath: workspace, mode: "build" });
+const selection = await tool("zcode_model_set", {
+  scope: "session", sessionId: session.sessionId, model: preferred, mode: "build",
+});
+console.log(`  requested=${JSON.stringify(selection.requested)} effective=${JSON.stringify(selection.effective)} verified=${selection.verified}`);
+if (!selection.verified) {
+  await tool("zcode_session_close", { sessionId: session.sessionId });
+  child.stdin.end();
+  throw new Error("Native Session-Auswahl nicht bestätigt; kein Modellauftrag gestartet.");
+}
 
 step(6, "Aufgabe starten (nicht-blockierend)");
 const task = await tool("zcode_task_start", {
   workspacePath: workspace,
+  sessionId: session.sessionId,
   prompt: "Schreibe die Datei demo-notiz.txt mit genau einer Zeile: Demo vom MCP-Bridge-Test.",
   model: preferred,
   idempotencyKey: "demo-" + Date.now(),
@@ -209,6 +220,7 @@ if (["completed", "failed", "cancelled", "interrupted", "unknown"].includes(rec.
   }
 }
 
+await tool("zcode_session_close", { sessionId: session.sessionId });
 console.log("\nDemo beendet.");
 child.stdin.end();
 await new Promise((r) => setTimeout(r, 300));

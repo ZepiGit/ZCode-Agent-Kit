@@ -95,16 +95,18 @@ zcode-kit run codex -- exec "Reply with ok" -m glm-5.3-flash
 OMP の対話セッション:
 
 ```sh
-omp --model zcode/glm-5.3
+omp --model zcode/glm-5.3-flash
 ```
 
 Claude Code の対話セッション:
 
 ```sh
-zcode-kit run claude-code -- --model glm-5.3
+zcode-kit run claude-code -- --model glm-5.3-flash
 ```
 
 テキストには `glm-5.3`、テキストと画像には `glm-5.3-flash` を選びます。画像への対応はアシスタント側にも依存します。オプションの MCP ブリッジはインストール済みの ZCode ランタイムのツールを提供します。ブリッジを登録するだけではモデルは接続されません。
+
+**現在未リリースのローカル修正:** Flash は常に thinking を使用します。thinking を無効にしたリクエストは `low` に正規化され、明示的に選んだ `high` と `max` は維持されます。OMP では `--thinking low`、`--thinking high`、`--thinking max` でレベルを選びます。直接のプロキシ経由と Claude Code で Flash の応答完了を確認済みですが、すべてのアシスタントが検証に合格したことを意味するものではありません。
 
 <details>
 <summary>その他のアシスタントと統合の制限</summary>
@@ -154,6 +156,8 @@ zcode-kit auth status
 
 - **コマンドが見つからない:** ターミナルを開き直してください。リリース版のインストールでは、`%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) または `$HOME/.local/bin` (macOS/Linux) が PATH にあるか確認します。
 - **モデルから返答がない:** Desktop のログインと残りの利用枠を確認します。アシスタントがプロキシを起動しない場合は、手動で起動します。ローカルのヘルスチェックだけではモデルへのアクセスは確認できません。
+- **OMP の自動起動（現在未リリースのローカル修正）:** OMP を直接起動します。セットアップでネイティブの Node/Bun を固定し、拡張機能は kit モジュールを OMP にインポートせず、新しい子プロセスで事前確認を行います。失敗時は機密情報を含まないカテゴリを表示し、子プロセスの実行時間は最大 120 秒です。原因を修正し、セッションごとの 60 秒の待機時間後に再試行してください。同じセッション内で復旧できます。ランタイムを移動した場合は `zcode-kit setup --harness auto` を再実行し、拡張機能を再読み込みします。ポートを使用している不明なプロセスには干渉しません。
+- **Desktop のログインをインポート（現在未リリースのローカル修正）:** `zcode-kit auth login zai --import` で Desktop 0.16.9 の現在アクティブな `zai`/`start-plan` ログインを取り込みます。プランの明示的な設定が必要です。`credentials.json` が存在する場合はそれが正となり、認証情報が無効でも旧 `config.json` へ暗黙にはフォールバックしません。新形式の `coding-plan` ログインでは、代わりに `zcode-kit auth login zai` で通常の OAuth を使います。インポーターは API キーの作成や取得を行いません。
 - **401 またはポートが使用中:** 別の kit がインストールされていないか確認します。キーを削除したり、不明なプロセスを終了したりしないでください。
 - **セットアップが途中で失敗した:** 再実行する前に表示されたロールバックコマンドを確認します。以前の変更が残っている場合があります。
 

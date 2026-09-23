@@ -3,6 +3,24 @@
 
 **Snapshot:** This file describes the components and revisions actually present in this repository. It does not claim that every upstream project is at its latest release. External harness versions are recorded references, not versions installed or pinned by the Kit.
 
+The current local repairs are **unreleased changes**, not a new upstream pin or
+proof of a published Kit release. They include authoritative import of Desktop
+0.16.9 shared credentials; strictly validated memory/disk CAPTCHA cache TTL and
+isolated cache directories passed through the managed environment; atomic cache
+envelopes and per-loaded-artifact provenance; and a static saved-script
+compatibility helper that does not execute vendor code or prove end-to-end
+success. The old bytecode-VM diagnostic rewrite was removed after reproduced
+bundle corruption, along with sensitive DBT dumps; the solver and its security
+gates remain, with metadata-only debug diagnostics. Flash requests that disable
+thinking are normalized to `low`, while `high` and `max` remain available.
+The local transport also handles Brotli/deflate streams and JSON errors; the
+Responses adapter preserves tool output and required event fields. Windows
+Codex uses a restricted-token sandbox, and OpenCode exposes explicit Flash
+reasoning variants. The native bridge targets the installed 0.16.9 protocol;
+its model route remains distinct from the proxy route.
+These changes do not establish equivalent live behavior on other operating
+systems or across all harnesses.
+
 | Component | Source | Bundled pin / recorded reference | License | Local changes |
 |---|---|---|---|---|
 | zcode-proxy | https://github.com/TriDefender/zcode-api | v4.6.4, commit `9a5cebe07c5255faa675075fa37632d4dea733fa` (2026-09-11) | MIT (declared in upstream README; upstream has no LICENSE file) | The vendored base is v4.6.4. At this snapshot (2026-09-22), upstream's latest published release was v4.6.9; it is not incorporated in this tree. The root Git history records local changes, including credential, streaming, control-port, and test fixes. `zcode-proxy-src/README.md` describes the Kit context; its `.de`, `.es`, `.ja`, and `.zh-CN` files are translations. The upstream README is available at the pinned commit. |

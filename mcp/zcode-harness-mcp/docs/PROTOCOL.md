@@ -1,8 +1,12 @@
 # ZCode Protocol v1 — Reverse-Engineering-Dokumentation
 
-Dokumentiert den Stand, der live gegen die lokale Installation verifiziert wurde.
-Alle Aussagen mit „live“ wurden gegen die echte Runtime ausgeführt; die Community-
-Quellen bestätigen dieselben Mechanismen.
+Dokumentiert den aktuellen nativen 0.16.9-Vertrag und getrennt davon historische
+0.16.5-Nachweise. Unqualifizierte „live“-Angaben in den bestehenden Abschnitten beziehen
+sich auf 2026-09-12 und sind keine aktuelle 0.16.9-Abnahme. Die historischen Überschriften
+bleiben als Linkziele erhalten. Aktuell nachgewiesen ist der vollständige native Katalog
+mit `zai-api/GLM-5.3-Flash`. Der reale Windows-Test bestätigte Modell und `low` vor
+dem Senden, wurde jedoch durch Upstream `1113` (Guthaben/Ressourcenpaket fehlt)
+blockiert; Proxy-Erfolge sind kein MCP-Inferenznachweis.
 
 ##	Runtime / Fingerabdruck (live, 2026-09-12)
 
@@ -34,6 +38,34 @@ Quellen bestätigen dieselben Mechanismen.
 - Kein Initialize-Handshake auf dieser Verbindung: `initialize` antwortet `-32601` (live); die Verbindung beginnt direkt mit Methodenaufrufen. Protokollversion wird in `session/create`-Result unter `result.protocol` gemeldet: `{"name":"ZCode Protocol","version":1}` (live).
 
 ## Methoden-Registry (aus dem 0.16.5-Bundle extrahiert, dispatcher-verifiziert)
+
+**Aktueller 0.16.9-Vertrag (gezielt im installierten Dispatcher untersucht):**
+
+- `runtime/capabilities` erhält `{}` und liefert `{independentPlanState:true}`.
+- `workspace/readPresentation` erhält `{workspace}` und liefert `{workspace,mode,slashCommands}`:
+  keine Defaults, kein Katalog, keine Settings-Revision. Die Bridge erfindet diese nicht.
+- Der vollständige Katalog stammt aus `session/create` mit `{workspace,persistence:"deferred",
+  mode:"plan",titleGenerationEnabled:false,toolAllowlist:[]}` ohne Modell, Reasoning oder Prompt:
+  `settings.model.available` enthält die vollständigen nativen Metadaten. Die Bridge schließt
+  ihre eigene Session im `finally` über `session/close` mit `{sessionId,expectedPersistence:"deferred"}`;
+  verweigertes Schließen ist ein Fehler. Dies kann Runtime-Dienste initialisieren und ist unter
+  `--read-only` gesperrt. `session/read` liefert nur die aktuelle Modellauswahl, keinen Vollkatalog;
+  auch eine v4-Workspace-Subscription ist kein unabhängiger kalter Vollkatalog.
+- `session/setModel`, `session/setThoughtLevel`, `session/setMode` unterstützen native
+  `expectedRevision`; aufeinanderfolgende Setter verwenden `runtime.stateRevision` aus der Antwort.
+  `persistAsWorkspaceLastUsed` stellt keine persistenten Workspace-Defaults wieder her.
+- `workspace/updateInteractionPreferences` erhält
+  `{workspace,preferences:{askUserQuestionAutoResolutionEnabled:boolean}}`;
+  `workspace/updateModelIoPreferences` erhält `{workspace,preferences:{fullRetentionEnabled:boolean}}`;
+  `workspace/updateOffPeakToolPolicy` und `workspace/updateDynamicWorkflowPolicy` erhalten
+  `{workspace,enabled:boolean}`. Alle vier ändern den **geteilten App-Server-Prozess**, nicht
+  persistente Workspace-Defaults. Kein Getter, Reset, bekannter Default oder CAS-Vertrag;
+  native Bestätigung ist kein unabhängiges Read-back.
+- `workspace/readState`, `workspace/setDefault*`, `workspace/upsertModelProvider`,
+  `workspace/removeModelProvider` und `workspace/updateProviderRegistry` fehlen im 0.16.9-Dispatcher.
+  Keine erfundenen Aliasse oder Fallbacks; frühere Versionskompatibilität wird nicht behauptet.
+
+**Nur historisches 0.16.5-Inventar, keine aktuelle Liste unterstützter Befehle:**
 
 Session: `session/create, resume, list, subagents, requestRuntimePreferences¹, read, messages, events, subscribe, send, stop, cancelBackgroundTask, fork, compact, goal, close, setModel, setThoughtLevel, updateRuntimeModelConfig, setMode, usage`
 
@@ -68,7 +100,8 @@ v4-Face (Desktop-Gateway, `requireV4Gateway`): `v4/conversation/{subscribe,unsub
 
 ## Provider-/Risikokontrolle (live, entscheidend für Live-Verhalten)
 
-Turns aus Harness-Prozessen **außerhalb der Desktop-App** werden aktuell vom Provider mit
+Historischer Befund (0.16.5, 2026-09-12), keine aktuelle Flash-Inferenz-Aussage:
+Turns aus Harness-Prozessen **außerhalb der Desktop-App** wurden vom Provider mit
 HTTP 400 `captcha verify failed` abgelehnt (live auch per `zcode --prompt --json --verbose`):
 `ProviderBusinessError: captcha verify failed … providerId:"zai" … transport:"sse"`.
 Der Desktop-Captcha-Flow (`captcha-retry` → Aliyun-Token → Retry) ist eine Desktop-UI-Fähigkeit;

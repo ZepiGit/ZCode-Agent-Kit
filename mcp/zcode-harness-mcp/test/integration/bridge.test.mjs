@@ -14,7 +14,6 @@ test("health + capabilities over MCP", async () => {
     const health = await c.tool("zcode_health", {});
     assert.equal(health.degraded ?? false, false);
     assert.match(String(health.runtime.harnessPath), /fake-harness\.mjs$/);
-    assert.equal(health.runtime.harnessVersion, "0.16.5"); // fixture reports --version output
     const caps = await c.tool("zcode_capabilities", {});
     assert.ok(caps.capabilities.length >= 40);
   } finally {
@@ -22,57 +21,56 @@ test("health + capabilities over MCP", async () => {
   }
 });
 
-test("workspace open + model catalog from live readState", async () => {
+test("workspace presentation and full catalog do not invent defaults or retain discovery sessions", async () => {
   const c = await startBridge();
   try {
     const opened = await c.tool("zcode_workspace_open", { workspacePath: c.workspaceDir });
-    assert.ok(opened.revision >= 0);
+    assert.equal(opened.revision, null);
+    assert.equal(opened.settings.model, null);
+    assert.equal(opened.presentation.mode, "build");
+    const existing = await c.tool("zcode_session_create", { workspacePath: c.workspaceDir });
+    const before = await c.tool("zcode_sessions_list", {});
     const models = await c.tool("zcode_models_list", { workspacePath: c.workspaceDir });
-    const ids = (models.modelCatalog.available ?? []).map((m) => `${m.ref.providerId}/${m.ref.modelId}`);
-    assert.deepEqual(ids, ["fake/FAKE-Main", "fake/FAKE-Lite"]);
+    assert.deepEqual(models.modelCatalog.available.map(m => `${m.ref.providerId}/${m.ref.modelId}`), ["zai-api/GLM-5.3-Flash", "fake/FAKE-Main", "fake/FAKE-Lite"]);
+    assert.equal(models.revision, null);
+    assert.deepEqual(await c.tool("zcode_sessions_list", {}), before);
+    const original = await c.tool("zcode_session_get", { sessionId: existing.session.sessionId });
+    assert.equal(original.settings.mode.current, "build");
+    assert.equal(original.settings.model.current.modelId, "FAKE-Main");
+    assert.equal(original.projection.turnCount, 0);
+    assert.equal(original.settings.model.available.length, 1); // native read is current-only
   } finally {
     await c.stop();
   }
 });
 
-test("settings schema/get/update/reset with CAS + verification", async () => {
+test("settings expose native process scope and reject unavailable workspace defaults and CAS", async () => {
   const c = await startBridge();
   try {
     const schema = await c.tool("zcode_settings_schema", { workspacePath: c.workspaceDir });
-    const paths = schema.settings.map((s) => s.path);
-    assert.ok(paths.includes("mode") && paths.includes("model") && paths.includes("thoughtLevel"));
-
-    // invalid value rejected
-    const err1 = await c.expectToolError("zcode_settings_update", { workspacePath: c.workspaceDir, changes: { mode: "banana" } });
-    assert.match(err1, /INVALID_VALUE|mode must be/);
-
-    // unknown field rejected (no silent writes)
-    const err2 = await c.expectToolError("zcode_settings_update", { workspacePath: c.workspaceDir, changes: { doesNotExist: 1 } });
-    assert.match(err2, /UNKNOWN_SETTING|unknown/);
-
-    // valid update with read-back
-    const upd = await c.tool("zcode_settings_update", { workspacePath: c.workspaceDir, changes: { mode: "plan" } });
-    const modeEntry = upd.applied.find((a) => a.path === "mode");
-    assert.equal(modeEntry.after, "plan");
-
-    // CAS conflict rejected
-    const schema2 = await c.tool("zcode_settings_schema", { workspacePath: c.workspaceDir });
-    const err3 = await c.expectToolError("zcode_settings_update", {
-      workspacePath: c.workspaceDir,
-      changes: { mode: "build" },
-      expectedRevision: schema2.revision + 100,
-    });
-    assert.match(err3, /revision moved/);
-
-    // reset
-    const reset = await c.tool("zcode_settings_reset", { workspacePath: c.workspaceDir, path: "mode" });
-    assert.equal(reset.applied.find((a) => a.path === "mode")?.after, "build");
+    assert.equal(schema.revision, null);
+    assert.equal(schema.settings.find(s => s.path === "model").writable, false);
+    const preference = schema.settings.find(s => s.path === "dynamicWorkflowEnabled");
+    assert.equal(preference.scope, "runtime");
+    assert.equal(preference.effective, null);
+    const changes = { askUserQuestionAutoResolutionEnabled: false, modelIoFullRetentionEnabled: false, offPeakToolEnabled: false, dynamicWorkflowEnabled: true };
+    const update = await c.tool("zcode_settings_update", { workspacePath: c.workspaceDir, changes });
+    assert.deepEqual(Object.fromEntries(update.applied.map(a => [a.path, a.after])), changes);
+    assert.equal(update.revision, null);
+    assert.ok(update.applied.every(a => a.scope === "runtime" && a.verification === "native-acknowledgement"));
+    assert.match(await c.expectToolError("zcode_settings_update", { workspacePath: c.workspaceDir, changes: { mode: "plan" } }), /UNSUPPORTED_WORKSPACE_DEFAULT/);
+    assert.match(await c.expectToolError("zcode_model_set", { scope: "workspace", workspacePath: c.workspaceDir, model: "fake\/FAKE-Lite" }), /UNSUPPORTED_WORKSPACE_DEFAULT/);
+    assert.match(await c.expectToolError("zcode_settings_update", { workspacePath: c.workspaceDir, changes, expectedRevision: 0 }), /UNSUPPORTED_REVISION/);
+    assert.match(await c.expectToolError("zcode_settings_update", { workspacePath: c.workspaceDir, changes: { unknown: true } }), /UNKNOWN_SETTING/);
+    assert.match(await c.expectToolError("zcode_settings_reset", { workspacePath: c.workspaceDir, path: "mode" }), /UNSUPPORTED_WORKSPACE_DEFAULT/);
+    const state = await c.tool("zcode_settings_get", { workspacePath: c.workspaceDir });
+    assert.equal(state.settings.model, null);
   } finally {
     await c.stop();
   }
 });
 
-test("model selection: valid + read-back, invalid + catalog error, flash-not-available case", async () => {
+test("model selection: valid read-back and unsupported model error", async () => {
   const c = await startBridge();
   try {
     // valid session-scoped selection with read-back
@@ -90,6 +88,194 @@ test("model selection: valid + read-back, invalid + catalog error, flash-not-ava
   } finally {
     await c.stop();
   }
+});
+
+test("native session CAS selects Flash and low reasoning atomically before mode changes", async () => {
+  const c = await startBridge({ env: { FAKE_REQUIRE_REASONING: "1" } });
+  try {
+    const created = await c.tool("zcode_session_create", { workspacePath: c.workspaceDir });
+    const sessionId = created.session.sessionId;
+    const selected = await c.tool("zcode_model_set", { scope: "session", sessionId, model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low", mode: "plan", expectedRevision: 0 });
+    assert.deepEqual(selected.effective, { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low", mode: "plan" });
+    assert.equal(selected.verified, true);
+    const conflict = await c.expectToolError("zcode_model_set", { scope: "session", sessionId, model: "fake/FAKE-Main", thoughtLevel: "max", expectedRevision: 0 });
+    assert.match(conflict, /revision mismatch/);
+    const invalid = await c.expectToolError("zcode_model_set", { scope: "session", sessionId, model: "fake/FAKE-Lite", thoughtLevel: "low", mode: "build", expectedRevision: selected.revision });
+    assert.match(invalid, /Unsupported reasoning effort/);
+    const unchanged = await c.tool("zcode_session_get", { sessionId });
+    assert.equal(unchanged.settings.model.current.modelId, "GLM-5.3-Flash");
+    assert.equal(unchanged.settings.thoughtLevel.current, "low");
+    assert.equal(unchanged.settings.mode.current, "plan");
+    assert.equal(unchanged.runtime.stateRevision, selected.revision);
+    const thoughtOnly = await c.tool("zcode_model_set", { scope: "session", sessionId, thoughtLevel: "max", expectedRevision: selected.revision });
+    assert.equal(thoughtOnly.verified, true);
+    assert.deepEqual(thoughtOnly.effective, { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "max", mode: "plan" });
+  } finally { await c.stop(); }
+});
+
+test("model selection does not claim verification when native read-back differs", async () => {
+  const c = await startBridge({ env: { FAKE_MODEL_MISMATCH: "1" } });
+  try {
+    const created = await c.tool("zcode_session_create", { workspacePath: c.workspaceDir });
+    const selected = await c.tool("zcode_model_set", { scope: "session", sessionId: created.session.sessionId, model: "fake/FAKE-Lite" });
+    assert.equal(selected.verified, false);
+    assert.equal(selected.effective.model, "fake/FAKE-Main");
+  } finally { await c.stop(); }
+});
+
+test("model selection does not verify an acknowledged but unapplied reasoning level", async () => {
+  const c = await startBridge({ env: { FAKE_REQUIRE_REASONING: "1", FAKE_THOUGHT_MISMATCH: "1" } });
+  try {
+    const created = await c.tool("zcode_session_create", { workspacePath: c.workspaceDir });
+    const selected = await c.tool("zcode_model_set", { scope: "session", sessionId: created.session.sessionId, model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low" });
+    assert.equal(selected.verified, false);
+    assert.deepEqual(selected.effective, { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "max", mode: "build" });
+  } finally { await c.stop(); }
+});
+
+test("task_start completes with Flash and low reasoning when atomic reasoning is required", async () => {
+  const c = await startBridge({ env: { FAKE_REQUIRE_REASONING: "1" } });
+  try {
+    const started = await c.tool("zcode_task_start", { workspacePath: c.workspaceDir, prompt: "fixture Flash turn", model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low", readOnly: true });
+    const done = await c.tool("zcode_task_wait", { taskId: started.taskId, timeoutMs: 30_000 });
+    assert.equal(done.state, "completed");
+    const result = await c.tool("zcode_task_result", { taskId: started.taskId });
+    assert.equal(result.status, "completed");
+    assert.equal(result.responseText, "FAKE-OK");
+    assert.equal(result.requestedModel, "zai-api/GLM-5.3-Flash");
+    assert.deepEqual(result.effectiveModel, { providerId: "zai-api", modelId: "GLM-5.3-Flash" });
+    assert.equal(result.thoughtLevel, "low");
+    const session = await c.tool("zcode_session_get", { sessionId: done.sessionId });
+    assert.equal(session.settings.thoughtLevel.current, "low");
+    assert.equal(session.settings.mode.current, "plan");
+    assert.equal(session.projection.turnCount, 1);
+  } finally { await c.stop(); }
+});
+
+for (const scenario of [
+  { name: "model mismatch", env: { FAKE_MODEL_MISMATCH: "1" }, request: { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low" }, error: /differs from effective model/ },
+  { name: "atomic effort mismatch", env: { FAKE_THOUGHT_MISMATCH: "1" }, request: { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low" }, error: /differs from effective reasoning level/ },
+  { name: "thought-only effort mismatch", env: { FAKE_THOUGHT_MISMATCH: "1" }, request: { thoughtLevel: "low" }, error: /differs from effective reasoning level/ },
+  { name: "invalid atomic effort", env: {}, request: { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "enabled" }, error: /Unsupported reasoning effort/ },
+  { name: "invalid thought-only effort", env: {}, request: { thoughtLevel: "enabled" }, error: /Unsupported reasoning effort/ },
+  // Matching the current model does not excuse a rejected startup setter.
+  { name: "missing required effort on the current model", env: {}, request: { model: "fake/FAKE-Main" }, error: /Reasoning level is required/ },
+]) {
+  test(`task_start rejects ${scenario.name} before sending and retains the user session`, async () => {
+    const c = await startBridge({ env: { FAKE_REQUIRE_REASONING: "1", ...scenario.env } });
+    try {
+      const created = await c.tool("zcode_session_create", { workspacePath: c.workspaceDir });
+      const sessionId = created.session.sessionId;
+      const started = await c.tool("zcode_task_start", { workspacePath: c.workspaceDir, sessionId, prompt: "must not be sent", ...scenario.request });
+      const done = await c.tool("zcode_task_wait", { taskId: started.taskId, timeoutMs: 30_000 });
+      assert.equal(done.state, "failed");
+      assert.match(done.error, scenario.error);
+      const result = await c.tool("zcode_task_result", { taskId: started.taskId });
+      assert.equal(result.status, "failed");
+      assert.equal(result.responseText, "");
+      assert.ok(result.errors.some(error => scenario.error.test(error)));
+      const session = await c.tool("zcode_session_get", { sessionId });
+      assert.equal(session.projection.turnCount, 0);
+      assert.equal(session.projection.status, "idle");
+      const beforeInput = await c.tool("zcode_task_get", { taskId: started.taskId });
+      const rejected = await c.expectToolError("zcode_task_input", { taskId: started.taskId, content: "must not bypass failed selection" });
+      assert.match(rejected, /selection was never verified.*start a new task/);
+      assert.deepEqual(await c.tool("zcode_session_get", { sessionId }), session);
+      assert.deepEqual(await c.tool("zcode_task_get", { taskId: started.taskId }), beforeInput);
+      assert.deepEqual(await c.tool("zcode_task_result", { taskId: started.taskId }), result);
+    } finally { await c.stop(); }
+  });
+}
+
+for (const scenario of [
+  { name: "model", request: { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low" }, change: { model: "fake/FAKE-Main", thoughtLevel: "low" }, error: /differs from effective model/ },
+  { name: "effort with explicit model", request: { model: "zai-api/GLM-5.3-Flash", thoughtLevel: "low" }, change: { thoughtLevel: "max" }, error: /differs from effective reasoning level/ },
+  { name: "effort without explicit model", request: { thoughtLevel: "low" }, change: { thoughtLevel: "max" }, error: /differs from effective reasoning level/ },
+]) {
+  test(`terminal task_input rejects changed ${scenario.name} without altering the session or completed result`, async () => {
+    const c = await startBridge({ env: { FAKE_REQUIRE_REASONING: "1" } });
+    try {
+      const created = await c.tool("zcode_session_create", { workspacePath: c.workspaceDir });
+      const sessionId = created.session.sessionId;
+      const started = await c.tool("zcode_task_start", { workspacePath: c.workspaceDir, sessionId, prompt: "first verified turn", ...scenario.request });
+      const done = await c.tool("zcode_task_wait", { taskId: started.taskId, timeoutMs: 30_000 });
+      assert.equal(done.state, "completed");
+      const result = await c.tool("zcode_task_result", { taskId: started.taskId });
+      assert.equal(result.responseText, "FAKE-OK");
+      const beforeInput = await c.tool("zcode_task_get", { taskId: started.taskId });
+      const changed = await c.tool("zcode_model_set", { scope: "session", sessionId, ...scenario.change });
+      assert.equal(changed.verified, true);
+      const session = await c.tool("zcode_session_get", { sessionId });
+      assert.equal(session.projection.turnCount, 1);
+
+      const rejected = await c.expectToolError("zcode_task_input", { taskId: started.taskId, content: "must not use changed selection" });
+      assert.match(rejected, scenario.error);
+      assert.deepEqual(await c.tool("zcode_session_get", { sessionId }), session);
+      assert.deepEqual(await c.tool("zcode_task_get", { taskId: started.taskId }), beforeInput);
+      assert.deepEqual(await c.tool("zcode_task_result", { taskId: started.taskId }), result);
+
+      // Restoring the original selection permits a real follow-up in the same
+      // user session, rather than permanently disabling completed-task input.
+      const restored = await c.tool("zcode_model_set", { scope: "session", sessionId, ...scenario.request });
+      assert.equal(restored.verified, true);
+      await c.tool("zcode_task_input", { taskId: started.taskId, content: "follow-up with original selection" });
+      const followed = await c.tool("zcode_task_wait", { taskId: started.taskId, timeoutMs: 30_000 });
+      assert.equal(followed.state, "completed");
+      assert.equal(followed.sessionId, sessionId);
+      assert.equal(followed.followUpCount, 1);
+      const finalSession = await c.tool("zcode_session_get", { sessionId });
+      assert.equal(finalSession.projection.turnCount, 2);
+      assert.equal(finalSession.settings.thoughtLevel.current, "low");
+      const followupResult = await c.tool("zcode_task_result", { taskId: started.taskId });
+      assert.equal(followupResult.responseText, "FAKE-OK");
+      assert.deepEqual(followupResult.effectiveModel, finalSession.settings.model.current);
+    } finally { await c.stop(); }
+  });
+}
+
+test("empty explicit effort is rejected rather than silently using the model default", async () => {
+  const c = await startBridge();
+  try {
+    const created = await c.tool("zcode_session_create", { workspacePath: c.workspaceDir });
+    const sessionId = created.session.sessionId;
+    assert.match(await c.expectToolError("zcode_model_set", { scope: "session", sessionId, model: "zai-api/GLM-5.3-Flash", thoughtLevel: "" }), /thoughtLevel/);
+    assert.match(await c.expectToolError("zcode_task_start", { workspacePath: c.workspaceDir, sessionId, prompt: "must not be sent", model: "zai-api/GLM-5.3-Flash", thoughtLevel: "" }), /thoughtLevel/);
+    const session = await c.tool("zcode_session_get", { sessionId });
+    assert.equal(session.settings.model.current.modelId, "FAKE-Main");
+    assert.equal(session.projection.turnCount, 0);
+  } finally { await c.stop(); }
+});
+
+test("missing native catalog is an error and still closes the owned deferred session", async () => {
+  const c = await startBridge({ env: { FAKE_MISSING_CATALOG: "1" } });
+  try {
+    assert.match(await c.expectToolError("zcode_models_list", { workspacePath: c.workspaceDir }), /INVALID_NATIVE_RESPONSE/);
+    assert.deepEqual((await c.tool("zcode_sessions_list", {})).sessions, []);
+  } finally { await c.stop(); }
+});
+
+test("catalog cleanup refusal is surfaced instead of claiming successful discovery", async () => {
+  const c = await startBridge({ env: { FAKE_REFUSE_CLOSE: "1" } });
+  try {
+    assert.match(await c.expectToolError("zcode_models_list", { workspacePath: c.workspaceDir }), /CATALOG_SESSION_NOT_CLOSED/);
+  } finally { await c.stop(); }
+});
+
+test("runtime preference acknowledgement mismatch is not reported as applied", async () => {
+  const c = await startBridge({ env: { FAKE_PREFERENCE_MISMATCH: "1" } });
+  try {
+    assert.match(await c.expectToolError("zcode_settings_update", { workspacePath: c.workspaceDir, changes: { dynamicWorkflowEnabled: true } }), /VERIFICATION_FAILED/);
+  } finally { await c.stop(); }
+});
+
+test("invalid preference batch is rejected before its valid prefix mutates native state", async () => {
+  const c = await startBridge();
+  try {
+    const before = await c.tool("zcode_workspace_open", { workspacePath: c.workspaceDir });
+    const result = await c.expectToolError("zcode_settings_update", { workspacePath: c.workspaceDir, changes: { dynamicWorkflowEnabled: true, modelIoFullRetentionEnabled: "yes" } });
+    assert.match(result, /INVALID_VALUE/);
+    assert.deepEqual(await c.tool("zcode_workspace_open", { workspacePath: c.workspaceDir }), before);
+  } finally { await c.stop(); }
 });
 
 test("task lifecycle: start → events → wait → complete → result", async () => {
@@ -252,8 +438,12 @@ test("read-only mode: mutating tools blocked, read tools work", async () => {
     assert.match(err, /READ_ONLY_MODE/);
     const health = await c.tool("zcode_health", {});
     assert.equal(health.bridge.readOnly, true);
-    const models = await c.tool("zcode_models_list", { workspacePath: c.workspaceDir });
-    assert.ok(models.modelCatalog.available.length >= 2);
+    assert.match(await c.expectToolError("zcode_models_list", { workspacePath: c.workspaceDir }), /READ_ONLY_MODE/);
+    const presentation = await c.tool("zcode_workspace_open", { workspacePath: c.workspaceDir });
+    assert.equal(presentation.presentation.mode, "build");
+    const capability = await c.tool("zcode_operation_invoke", { method: "runtime/capabilities" });
+    assert.equal(capability.independentPlanState, true);
+    assert.deepEqual((await c.tool("zcode_sessions_list", {})).sessions, []);
     // task_start blocked too
     const err2 = await c.expectToolError("zcode_task_start", { workspacePath: c.workspaceDir, prompt: "nope" });
     assert.match(err2, /READ_ONLY_MODE/);

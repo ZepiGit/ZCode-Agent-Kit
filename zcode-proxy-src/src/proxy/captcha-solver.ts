@@ -11,20 +11,35 @@ const BACKEND = process.env.ZCODE_CAPTCHA_BACKEND?.trim().toLowerCase() || "happ
 
 let happyMod: typeof import("./captcha-happy.js") | null = null;
 
-export async function runCaptchaSolve(scene: string, region: string, prefix: string): Promise<string> {
-  if (BACKEND !== "happy") {
-    throw new Error(`captcha backend "${BACKEND}" is not available; use ZCODE_CAPTCHA_BACKEND=happy`);
-  }
-  if (!happyMod) happyMod = await import("./captcha-happy.js");
-  return happyMod.solveTraceless({ scene, region, prefix });
+// All callers share one runtime: happy-dom aliases the host globals and uses
+// process-global browserFrame/cookieContainer references. Hold this queue through
+// backend settlement (including its finally cleanup), not the caller's deadline.
+let solveQueue: Promise<void> = Promise.resolve();
+
+export function runCaptchaSolve(
+  scene: string,
+  region: string,
+  prefix: string,
+  beforeSolve?: () => void,
+): Promise<string> {
+  const result = solveQueue.then(async () => {
+    if (BACKEND !== "happy") {
+      throw new Error(`captcha backend "${BACKEND}" is not available; use ZCODE_CAPTCHA_BACKEND=happy`);
+    }
+    if (!happyMod) happyMod = await import("./captcha-happy.js");
+    // A provider pause may have started while this request waited in the queue.
+    beforeSolve?.();
+    return happyMod.solveTraceless({ scene, region, prefix });
+  });
+  // Recover the queue without swallowing the error delivered to this caller.
+  solveQueue = result.then(() => {}, () => {});
+  return result;
 }
 
-/** In-process solving needs no worker pool management — kept for the pool API. */
-export function setCaptchaSolverConcurrency(_n: number): void {}
-
-/** In-process solving needs no worker pool management — kept for the pool API. */
+/** Do not release a live window when a host stops waiting for its result. */
 export function shutdownCaptchaSolver(): void {}
 
+/** Fixed supported capacity, independent of historical daemon configuration. */
 export function captchaSolverConcurrency(): number {
-  return Number(process.env.CAPTCHA_DAEMON_CONCURRENCY || 4);
+  return 1;
 }

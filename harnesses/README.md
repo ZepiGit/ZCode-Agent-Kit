@@ -40,6 +40,8 @@ generated wrapper files.
 Paths under `generated/` refer to kit state: the kit directory for release
 installs/source checkouts, or the separate state directory for npm installs.
 
+Run OMP directly, for example `omp --model zcode/glm-5.3-flash --thinking low`, not through `zcode-kit run`. **Currently unreleased local repair:** setup pins native Node/Bun; autostart preflight uses a fresh child process, not kit-module imports into OMP. The child has a 120-second limit and reports secret-free failure categories. After fixing the cause, retry after the 60-second per-session cooldown; the same session can recover. If the runtime moved, rerun `zcode-kit setup --harness auto` and reload the extension. Unknown port owners are never stopped. A healthy proxy or successful setup alone does not prove that a model reply completes.
+
 ## Opt-in wrappers (existing config stays untouched)
 
 | Harness | Wrapper | What it does |
@@ -70,6 +72,10 @@ Reasoning/thinking:
 - **OpenAI format**: `reasoning_effort: low|high|max` + `thinking: {type: "enabled"}`
   (the proxy translates into the Anthropic fields).
 
+**Currently unreleased local repair — Flash:** `glm-5.3-flash` always thinks. Explicitly disabled thinking is normalized to `low`; explicit `high` and `max` are preserved. For Flash, the low Anthropic thinking budget is `8000` tokens (rather than the generic `2048` above), with additional output headroom for the answer; OpenAI uses `reasoning_effort: low`. Do not treat higher thinking effort alone as evidence of a hang. Direct-proxy and Claude Code Flash replies have completed successfully; this does not establish acceptance for every harness.
+
+On Windows the isolated Codex profile enables the restricted-token sandbox (`windows.sandbox = "unelevated"`); `workspace-write` remains limited to the project and does not grant full access. OpenCode Flash exposes `--variant low`, `high`, and `max`, with `low` as its default. Its native npm executable wrapper and Brotli/deflate-compressed session streams are supported. Responses tool-result text and image parts are preserved; malformed event items are not treated as successful output.
+
 ## MCP clients (generic)
 
 ```json
@@ -88,7 +94,9 @@ The bridge drives the **real installed ZCode harness** (app-server protocol:
 sessions, turns, tasks). Desktop may be needed for interactive verification;
 the provider can still reject a model turn. Bridge reasoning levels are
 `low/high/max`. Its live model catalog can differ from the proxy catalog;
-GLM-5.3-Flash is verified through the proxy path. Details:
+GLM-5.3-Flash is verified through the proxy path. A native catalog entry is
+not proof of a successful native model turn, and proxy acceptance does not
+establish native-provider acceptance. Details:
 [mcp/zcode-harness-mcp/README.md](../mcp/zcode-harness-mcp/README.md).
 
 ## Quota & error modes
@@ -96,4 +104,5 @@ GLM-5.3-Flash is verified through the proxy path. Details:
 - `GET /quota` (authenticated) shows the token buckets per model.
 - Quota exhausted → HTTP 400 `[1005] exceed quota limit` (not retryable — wait for the provider to restore quota).
 - `[3007] captcha verify failed` → gateway anti-abuse after intense retrying; take a pause.
-- `401 start_plan_jwt_invalid` → check your Desktop login and renew it with `zcode-kit auth login zai`.
+- `401 start_plan_jwt_invalid` → check your Desktop login and renew it with `zcode-kit auth login zai`. **Currently unreleased local repair:** use `zcode-kit auth login zai --import` for the current active Desktop 0.16.9 `zai`/`start-plan` login with an explicitly configured plan. Existing `credentials.json` is authoritative; invalid credentials do not silently fall back to `config.json`. Modern `coding-plan` logins use normal OAuth instead; import does not create or resolve API keys.
+- `[1210]` with Flash → check that thinking is enabled and choose `low`, `high`, or `max`, rather than disabling it. The currently unreleased local repair normalizes disabled thinking to `low`; see the Flash note above.

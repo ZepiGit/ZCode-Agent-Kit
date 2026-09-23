@@ -95,16 +95,18 @@ zcode-kit run codex -- exec "Reply with ok" -m glm-5.3-flash
 启动交互式 OMP 会话：
 
 ```sh
-omp --model zcode/glm-5.3
+omp --model zcode/glm-5.3-flash
 ```
 
 启动交互式 Claude Code 会话：
 
 ```sh
-zcode-kit run claude-code -- --model glm-5.3
+zcode-kit run claude-code -- --model glm-5.3-flash
 ```
 
 文本任务选择 `glm-5.3`；文本和图片任务选择 `glm-5.3-flash`。图片支持还取决于助手自身。可选的 MCP 桥接提供本机 ZCode 运行时的工具；注册它不等于连接了模型。
+
+**目前尚未发布的本地修复：**Flash 始终启用 thinking。禁用 thinking 的请求会被规范化为 `low`；显式选择的 `high` 和 `max` 保持不变。在 OMP 中使用 `--thinking low`、`--thinking high` 或 `--thinking max` 选择级别。已通过直接代理调用和 Claude Code 验证 Flash 能完整返回模型回复；这并不表示所有助手都已通过测试。
 
 <details>
 <summary>其他助手与集成限制</summary>
@@ -154,6 +156,8 @@ zcode-kit auth status
 
 - **找不到命令：**重新打开终端。对于正式版安装，请检查 `%LOCALAPPDATA%\Microsoft\WindowsApps`（Windows）或 `$HOME/.local/bin`（macOS/Linux）是否位于 PATH 中。
 - **模型没有回复：**检查 Desktop 登录状态和可用额度。如果助手不会自动启动代理，请手动启动。本地健康检查不能证明模型可访问。
+- **OMP 自启动（目前尚未发布的本地修复）：**直接启动 OMP。设置过程固定原生 Node/Bun；扩展在新的子进程中执行预检查，而不是将 Kit 模块导入 OMP。失败时会报告不含秘密信息的错误类别；子进程最长运行 120 秒。修复所报告的原因后，等待该会话的 60 秒冷却时间再重试；可在同一会话中恢复。若运行时位置已变更，请重新运行 `zcode-kit setup --harness auto` 并重新加载扩展。不会干预占用端口的未知进程。
+- **导入 Desktop 登录（目前尚未发布的本地修复）：**运行 `zcode-kit auth login zai --import`，导入 Desktop 0.16.9 当前激活的 `zai`/`start-plan` 登录；必须已明确配置计划。只要存在 `credentials.json`，就以它为准；凭据无效时不会静默回退到旧的 `config.json`。新版 `coding-plan` 登录应改用 `zcode-kit auth login zai` 进行常规 OAuth 登录；导入器不会创建或获取 API 密钥。
 - **401 或端口被占用：**检查是否存在另一份 Kit。不要删除密钥，也不要终止不认识的进程。
 - **设置中途失败：**重试前先阅读输出中的回滚命令。此前的变更可能仍在。
 

@@ -48,7 +48,7 @@ function cap(
 }
 
 export const BRIDGE_VERSION = "0.1.0";
-export const TARGET_PROTOCOL = "ZCode Protocol v1 (zcode.cjs app-server --stdio, verified 0.16.5)";
+export const TARGET_PROTOCOL = "ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher inspected; live validation pending)";
 export const HARNESS_FINGERPRINT = "sha256-16 of bundle, see zcode_health";
 
 export const CAPABILITIES: Capability[] = [
@@ -74,15 +74,14 @@ export const CAPABILITIES: Capability[] = [
   cap("session.cancelBackgroundTask", "Cancel background task", "Cancel a background job of a session.", "session/cancelBackgroundTask", "client_call", "available", "implemented", "fixture_verified", "zcode_task_cancel (internal)", "registered; live condition (running background job) not reproducible"),
 
   // ---- workspace ---------------------------------------------------------
-  cap("workspace.readState", "Workspace state", "Model catalog, settings and revision for a workspace.", "workspace/readState", "client_call", "available", "implemented", "live_verified", "zcode_workspace_open", "live probe: modelCatalog + settings + revision"),
-  cap("workspace.setDefaultModel", "Workspace default model", "Set the default model of a workspace.", "workspace/setDefaultModel", "client_call", "available", "implemented", "fixture_verified", "zcode_settings_update", "schema verified; live response timing varies"),
-  cap("workspace.setDefaultMode", "Workspace default mode", "Set the default permission mode of a workspace.", "workspace/setDefaultMode", "client_call", "available", "implemented", "fixture_verified", "zcode_settings_update", "schema verified"),
-  cap("workspace.setDefaultThoughtLevel", "Workspace default reasoning", "Set default reasoning level of a workspace.", "workspace/setDefaultThoughtLevel", "client_call", "available", "implemented", "fixture_verified", "zcode_settings_update", "schema verified"),
-  cap("workspace.upsertModelProvider", "Custom model provider", "Register a custom provider.", "workspace/upsertModelProvider", "client_call", "available", "missing", "untested", null, "deliberately not exposed: writing provider configs (API keys) is out of scope v1"),
-  cap("workspace.removeModelProvider", "Remove model provider", "Remove a custom provider.", "workspace/removeModelProvider", "client_call", "available", "missing", "untested", null, "not exposed in v1"),
-  cap("workspace.updateProviderRegistry", "Provider registry", "Update provider registry.", "workspace/updateProviderRegistry", "client_call", "available", "missing", "untested", null, "not exposed in v1"),
-  cap("workspace.updateInteractionPreferences", "Interaction preferences", "Update interaction preferences.", "workspace/updateInteractionPreferences", "client_call", "available", "missing", "untested", null, "schema unknown; not exposed in v1"),
-  cap("workspace.updateModelIoPreferences", "Model IO preferences", "Update model IO preferences.", "workspace/updateModelIoPreferences", "client_call", "available", "missing", "untested", null, "schema unknown; not exposed in v1"),
+  cap("workspace.readPresentation", "Workspace presentation", "Native mode and slash commands; no catalog or workspace revision.", "workspace/readPresentation", "client_call", "available", "implemented", "untested", "zcode_workspace_open", "0.16.9 dispatcher and strict result schema inspected; live validation pending"),
+  cap("workspace.modelCatalog", "Full model catalog", "Full catalog from an owned deferred session; no prompt; session closed afterward. Not allowed in bridge read-only mode.", "session/create + session/close", "client_call", "available", "implemented", "untested", "zcode_models_list", "0.16.9 creation snapshot contains full catalog; session/read is current-only"),
+  cap("workspace.defaults", "Workspace defaults", "Workspace model, mode and reasoning default setters are absent; use session-scoped setters.", "none", "client_call", "removed_in_version", "not_applicable", "untested", null, "0.16.9 dispatcher contains no workspace default setters or workspace CAS revision"),
+  cap("runtime.capabilities", "Native runtime capabilities", "Read native runtime capabilities without session creation.", "runtime/capabilities", "client_call", "available", "implemented", "untested", "zcode_operation_invoke", "0.16.9 dispatcher returns independentPlanState"),
+  cap("workspace.updateInteractionPreferences", "Interaction preferences", "Set process-wide question auto-resolution; affects existing interactions.", "workspace/updateInteractionPreferences", "client_call", "available", "implemented", "untested", "zcode_settings_update", "0.16.9 preferences.askUserQuestionAutoResolutionEnabled; acknowledgement includes snoozedInteractionCount; no CAS/getter"),
+  cap("workspace.updateModelIoPreferences", "Model IO preferences", "Set process-wide full model IO retention; applies to active sessions.", "workspace/updateModelIoPreferences", "client_call", "available", "implemented", "untested", "zcode_settings_update", "0.16.9 preferences.fullRetentionEnabled; acknowledgement includes updatedSessionCount; no CAS/getter"),
+  cap("workspace.updateOffPeakToolPolicy", "Off-peak policy", "Set process-runtime off-peak tool policy, not a persistent workspace default.", "workspace/updateOffPeakToolPolicy", "client_call", "available", "implemented", "untested", "zcode_settings_update", "0.16.9 enabled boolean; native acknowledgement only"),
+  cap("workspace.updateDynamicWorkflowPolicy", "Dynamic workflow policy", "Set process-runtime workflow policy, not a persistent workspace default.", "workspace/updateDynamicWorkflowPolicy", "client_call", "available", "implemented", "untested", "zcode_settings_update", "0.16.9 enabled boolean; native acknowledgement only"),
   cap("workspace.generateText", "One-shot text generation", "Generate text without a session.", "workspace/generateText", "client_call", "available", "missing", "untested", null, "model-dependent; blocked by environment (captcha) for live verification"),
   cap("workspace.hooks.trustGrant", "Hook trust", "Grant trust for workspace hooks.", "workspace/hooks/trustGrant", "server_callback", "available", "implemented", "fixture_verified", "(auto-declined by policy)", "registered; auto-decline keeps authority with operator"),
 

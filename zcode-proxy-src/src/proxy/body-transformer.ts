@@ -5,6 +5,8 @@
  * proxy: it just loses the optimization.
  *
  * Transformations applied:
+ *   0. Anthropic glm-5.3-flash + disabled thinking → enabled low (or an
+ *      explicit supported effort), adding the budget once for answer room.
  *   1. OpenAI + `stream: true` → inject `stream_options.include_usage: true`
  *      (matches `@ai-sdk/openai-compatible` default in `_reverse/zcode.cjs`).
  *   2. start-plan → prepend ZCode gateway system blocks. OpenAI upstream gets
@@ -22,6 +24,7 @@
  * @see _reverse/NOTEPAD.md "How Credential is Used for LLM Calls"
  */
 import type { Format } from "../translator/types.js";
+import { normalizeGlm53FlashThinking, applyAnthropicThinkingCompat } from "../provider/reasoning.js";
 import { buildStartPlanSystem, buildContextPrefixMessage } from "./system-prompt.js";
 import { resolveEnvPromptInfo } from "./identity.js";
 
@@ -63,6 +66,10 @@ export function transformRequestBody(body: string | undefined, ctx: TransformCon
   }
   if (ctx.format === "anthropic") {
     const obj = parsed as Record<string, unknown>;
+    if (normalizeGlm53FlashThinking(obj)) {
+      applyAnthropicThinkingCompat(obj);
+      modified = true;
+    }
     if (ctx.startPlan) {
       modified = applyStartPlanSystem(obj) || modified;
     }

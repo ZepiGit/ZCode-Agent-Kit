@@ -8,6 +8,27 @@
  * bounded inflation and reports the outcome.
  */
 
+import { Duplex } from "node:stream";
+import { createBrotliDecompress } from "node:zlib";
+
+/** Decode HTTP content codings in reverse application order on Node and Bun. */
+export function decodeContentStream(source: ReadableStream<Uint8Array>, encoding: string): ReadableStream<Uint8Array> {
+  let stream = source;
+  for (const coding of encoding.toLowerCase().split(",").map(value => value.trim()).reverse()) {
+    if (coding === "identity" || coding === "") continue;
+    let decoder: ReadableWritablePair<Uint8Array, Uint8Array>;
+    if (coding === "br") {
+      decoder = Duplex.toWeb(createBrotliDecompress()) as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
+    } else if (coding === "gzip" || coding === "x-gzip" || coding === "deflate") {
+      decoder = new DecompressionStream(coding === "x-gzip" ? "gzip" : coding) as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
+    } else {
+      throw new Error("Unsupported upstream content encoding");
+    }
+    stream = stream.pipeThrough(decoder);
+  }
+  return stream;
+}
+
 export type InflateResult =
   | { ok: true; bytes: Uint8Array }
   | { ok: false; reason: "too_large" }

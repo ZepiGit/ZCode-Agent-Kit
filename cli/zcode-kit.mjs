@@ -37,7 +37,7 @@ import { launchHarness } from "./launch.mjs";
 import { askAccountRotator, configureAccountRotator, restartForAccountChange, rotatorChoice } from "./account-setup.mjs";
 import { setupOutput } from "./setup-output.mjs";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, normalize } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 const ADAPTER_IDS = ["omp", "pi", "claude-code", "codex", "opencode", "cline", "kilo-code", "aider", "continue", "goose"];
@@ -232,6 +232,26 @@ async function cmdSetup() {
   return 0;
 }
 
+function sameInstallationPath(candidate, expected) {
+  if (typeof candidate !== "string" || !isAbsolute(candidate)) return false;
+  const canonical = value => {
+    let resolved = normalize(value);
+    try { resolved = realpathSync(resolved); } catch { /* lexical identity still handles missing artifacts */ }
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  return canonical(candidate) === canonical(expected);
+}
+
+function claudeMcpEntryPath(output) {
+  // `claude mcp get` is a human-readable display, not a shell command. Match
+  // the entire argument field, allowing a quoted script path with spaces;
+  // substring checks would incorrectly adopt `index.js.foreign`.
+  const text = String(output ?? "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
+  const field = text.match(/^\s*Args:\s*(.+?)\s+--stdio\s*$/m)?.[1];
+  if (!field) return null;
+  return field.startsWith('"') && field.endsWith('"') ? field.slice(1, -1) : field;
+}
+
 /** MCP bridge registration (OMP mcp.json / claude mcp add) — additive, namespaced. */
 async function integrateMcp(tx, detected, targets, log = console.log) {
   if (flags["no-mcp"]) return;
@@ -250,7 +270,7 @@ async function integrateMcp(tx, detected, targets, log = console.log) {
         const current = j.mcpServers?.["zcode-harness"];
         // F-09: an entry pointing at ANOTHER kit copy is not "ours" — replace
         // only when it is absent or already points at this installation.
-        const ours = !current || (Array.isArray(current.args) && current.args[0] === serverJs);
+        const ours = !current || (Array.isArray(current.args) && sameInstallationPath(current.args[0], serverJs));
         if (!current || (ours && JSON.stringify(current) !== JSON.stringify(entry))) {
           j.mcpServers = j.mcpServers ?? {};
           j.mcpServers["zcode-harness"] = entry;
@@ -271,7 +291,7 @@ async function integrateMcp(tx, detected, targets, log = console.log) {
   }
   if (targets.includes("claude-code") && detected["claude-code"]) {
     const get = runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
-    if (get.status === 0 && !(get.stdout ?? "").includes(serverJs)) {
+    if (get.status === 0 && !sameInstallationPath(claudeMcpEntryPath(get.stdout), serverJs)) {
       // F-09: registered by another kit copy — never silently adopt it.
       log('  WARN: claude "zcode-harness" is registered by another kit copy — left untouched');
     } else if (get.status === 0) {
