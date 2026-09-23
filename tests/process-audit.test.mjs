@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -9,7 +10,9 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'kit-process-'));
   const bin = join(root, 'sp ace (test) %literal% 日本');
   mkdirSync(bin);
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // Windows may briefly retain the executed image after spawnSync has returned.
+  // Await bounded filesystem retries; persistent locks must still fail cleanup.
+  t.after(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   return { root, bin };
 }
 
