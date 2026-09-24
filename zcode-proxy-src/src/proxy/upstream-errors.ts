@@ -3,8 +3,30 @@ import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
 
-/** Wait before the same-credential retry on a clean 1005/1113 envelope (see recoverAndMapUpstream). */
-const SAME_CREDENTIAL_QUOTA_RETRY_MS = 750;
+/**
+ * Same-account retry schedule for a clean 1005/1113 envelope (see
+ * recoverAndMapUpstream). The gateway needs a variable time to fall through
+ * to another balance package; live evidence ranges from seconds to about a
+ * minute, so the default schedule spans ~65s before the request fails over.
+ */
+const DEFAULT_QUOTA_RETRY_DELAYS_MS = [1_000, 4_000, 10_000, 20_000, 30_000];
+const MAX_QUOTA_RETRY_ATTEMPTS = 6;
+const MAX_SINGLE_QUOTA_RETRY_DELAY_MS = 60_000;
+
+function quotaRetryDelays(override?: readonly number[]): readonly number[] {
+  if (override) return override;
+  const raw = process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
+  if (raw) {
+    if (raw.trim().toLowerCase() === "off") return [];
+    const parsed = raw.split(",")
+      .map((part) => Number(part.trim()))
+      .filter((n) => Number.isSafeInteger(n) && n >= 0)
+      .map((n) => Math.min(n, MAX_SINGLE_QUOTA_RETRY_DELAY_MS))
+      .slice(0, MAX_QUOTA_RETRY_ATTEMPTS);
+    return parsed;
+  }
+  return DEFAULT_QUOTA_RETRY_DELAYS_MS;
+}
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   const { promise, resolve } = Promise.withResolvers<void>();
@@ -95,8 +117,8 @@ export async function recoverAndMapUpstream(opts: {
   resendHandle?: (handle: AccountHandle) => Promise<Response>;
   /** Shared retry budget/identity set for callers that compose recovery layers. */
   attemptedIdentities?: Set<string>;
-  /** Test seam: wait before the same-credential quota retry. */
-  quotaRetryDelayMs?: number;
+  /** Test seam: wait schedule for same-credential quota retries. */
+  quotaRetryDelaysMs?: readonly number[];
 }): Promise<Response> {
   let response = opts.response;
   let activeCredential = opts.credential;
@@ -109,27 +131,33 @@ export async function recoverAndMapUpstream(opts: {
   // A clean 1005/1113 envelope can name one exhausted package while the same
   // account still holds balance for the model in another package (e.g. an
   // event grant next to an empty daily free package). Observed live: the
-  // gateway then serves an immediate retry from the package that still has
-  // balance. The envelope proves only that no output reached the client, so
-  // one bounded same-credential resend cannot duplicate a response — whether
-  // a rejected request costs tokens is decided by the gateway, exactly as in
-  // the existing rotation path. A start-plan resend re-mints a captcha token
-  // like any failover resend. If the retry still reports exhaustion, the
-  // rotation below treats it as a real quota failure and the per-credential
-  // memo suppresses further same-account retries until the reset window.
+  // gateway then serves a retry from the package that still has balance, but
+  // the time it needs varies (seconds to about a minute), so the same
+  // credential is retried on a growing schedule. The envelope proves only
+  // that no output reached the client, so a bounded resend cannot duplicate
+  // a response — whether a rejected request costs tokens is decided by the
+  // gateway, exactly as in the existing rotation path. A start-plan resend
+  // re-mints a captcha token like any failover resend. If the schedule is
+  // exhausted and the last response still reports exhaustion, the rotation
+  // below treats it as a real quota failure and the per-credential memo
+  // suppresses further same-account retries until the reset window.
   const quotaEnvelope = envelope !== null && [1005, 1113].includes(envelope.code ?? -1);
-  const retryAdmitted = activeHandle
-    ? opts.auth.canResendCredential?.(activeHandle) ?? false
-    : opts.auth.canResendCredential?.(activeCredential) ?? false;
-  if (quotaEnvelope && !streaming && !opts.signal.aborted && retryAdmitted) {
-    await abortableDelay(opts.quotaRetryDelayMs ?? SAME_CREDENTIAL_QUOTA_RETRY_MS, opts.signal);
-    // Re-admit after the wait: a concurrent quarantine, pause, credential
-    // replace, removal or a remembered failed retry must not send again.
-    const readmitted = !opts.signal.aborted
-      && (activeHandle
+  if (quotaEnvelope && !streaming && !opts.signal.aborted) {
+    let confirmedExhausted = false;
+    for (const [index, delayMs] of quotaRetryDelays(opts.quotaRetryDelaysMs).entries()) {
+      const retryAdmitted = activeHandle
         ? opts.auth.canResendCredential?.(activeHandle) ?? false
-        : opts.auth.canResendCredential?.(activeCredential) ?? false);
-    if (readmitted) {
+        : opts.auth.canResendCredential?.(activeCredential) ?? false;
+      if (!retryAdmitted) break;
+      await abortableDelay(delayMs, opts.signal);
+      // Re-admit after the wait: a concurrent quarantine, pause, credential
+      // replace, removal or a remembered failed retry must not send again.
+      const readmitted = !opts.signal.aborted
+        && (activeHandle
+          ? opts.auth.canResendCredential?.(activeHandle) ?? false
+          : opts.auth.canResendCredential?.(activeCredential) ?? false);
+      if (!readmitted) break;
+      console.log(`[quota-retry] same-account resend ${index + 1} after ${delayMs}ms`);
       try {
         const retried = activeHandle && opts.resendHandle
           ? await opts.resendHandle(activeHandle)
@@ -137,10 +165,9 @@ export async function recoverAndMapUpstream(opts: {
         const retriedEnvelope = await inspect(retried);
         const retriedStreaming = retried.headers.get("content-type")?.includes("text/event-stream") === true;
         const retriedQuota = retriedEnvelope !== null && [1005, 1113].includes(retriedEnvelope.code ?? -1);
-        if (retriedQuota) opts.auth.blockSameCredentialRetry?.(activeHandle ?? activeCredential, retriedEnvelope?.resetAt);
         // Adopt the retry only when it succeeded or is itself a quota
-        // envelope; any other failure (5xx, 429, captcha) keeps the original
-        // 1005 so the rotation below still fails over to another account.
+        // envelope; any other failure (5xx, 429, captcha) keeps the current
+        // quota envelope so the rotation below still fails over.
         if ((retried.ok && retriedEnvelope === null) || retriedQuota) {
           void response.body?.cancel().catch(() => {});
           response = retried;
@@ -149,11 +176,22 @@ export async function recoverAndMapUpstream(opts: {
           streaming = retriedStreaming;
         } else {
           void retried.body?.cancel().catch(() => {});
+          break;
         }
+        if (!retriedQuota) break; // served from a package with balance — done
+        // A SENT retry came back exhausted: this is real evidence for the memo.
+        confirmedExhausted = true;
       } catch {
         // The retry could not be sent (connect or captcha failure): keep the
-        // original quota envelope so rotation below is not lost.
+        // current quota envelope so rotation below is not lost.
+        break;
       }
+    }
+    // Block the memo only on proven exhaustion: a schedule that was aborted,
+    // admission-denied or ended in a non-quota failure must not disable the
+    // package fall-through for later requests.
+    if (confirmedExhausted && envelope !== null && [1005, 1113].includes(envelope.code ?? -1)) {
+      opts.auth.blockSameCredentialRetry?.(activeHandle ?? activeCredential, envelope.resetAt);
     }
   }
   // Account-pool retries are limited to explicit balance/quota envelopes. The

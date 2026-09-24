@@ -6,6 +6,11 @@ import type { ProxyConfig } from "../config/types.js";
 import { gzipSync } from "node:zlib";
 import { fixtureSecret } from "../test-fixtures.js";
 
+// The default same-account retry schedule (1s/4s/10s) would sleep in real
+// time here; one immediate attempt covers the recovery semantics these
+// handler-level tests pin. Pool tests exercise the multi-attempt schedule.
+process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS = "0";
+
 const OLD_KEY = fixtureSecret("recovery-old");
 const FRESH_KEY = fixtureSecret("recovery-fresh");
 

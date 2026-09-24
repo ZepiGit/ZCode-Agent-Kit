@@ -312,7 +312,15 @@ export class AuthManager {
    */
   canResendCredential(target: Credential | AccountHandle): boolean {
     const rotator = this.source.accountRotator;
-    if (!rotator) return !this.sameCredentialRetryBlockedUntil.has(this.retryMemoKey(target));
+    if (!rotator) {
+      // The memo expires at its recorded reset time or cooldown; without
+      // this check the first failed retry would disable the package
+      // fall-through until the process restarts.
+      const key = this.retryMemoKey(target);
+      const until = this.sameCredentialRetryBlockedUntil.get(key);
+      if (until !== undefined && until <= Date.now()) this.sameCredentialRetryBlockedUntil.delete(key);
+      return !this.sameCredentialRetryBlockedUntil.has(key);
+    }
     const handle = "credentialRevision" in target
       ? target
       : (() => {

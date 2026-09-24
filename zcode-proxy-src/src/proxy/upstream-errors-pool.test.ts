@@ -18,6 +18,7 @@ function poolAuth(): AuthManager {
 async function run(
   response: Response,
   resendImpl?: (apiKey: string) => Response,
+  seam: readonly number[] = [0],
 ): Promise<{ response: Response; calls: number; sent: string[]; auth: AuthManager }> {
   const auth = poolAuth();
   let calls = 0;
@@ -28,7 +29,7 @@ async function run(
     credential: first,
     plan: "coding-plan",
     signal: new AbortController().signal,
-    quotaRetryDelayMs: 0,
+    quotaRetryDelaysMs: seam,
     resend: async (credential) => {
       calls++;
       sent.push(credential.apiKey);
@@ -79,6 +80,26 @@ describe("account-pool upstream recovery", () => {
     expect(response.status).toBe(200);
   });
 
+  it("stops the schedule without memo when a later attempt succeeds", async () => {
+    let quotaSends = 0;
+    const { response, calls, sent, auth } = await run(
+      Response.json({ code: 1005, msg: "redacted upstream text" }, { status: 200 }),
+      (apiKey) => {
+        if (apiKey === "pool-one" && quotaSends >= 2) return Response.json({ ok: true });
+        quotaSends++;
+        return Response.json({ code: 1005, msg: "redacted upstream text" }, { status: 200 });
+      },
+      [0, 0, 0],
+    );
+    // Two quota attempts, then the gateway falls through to the package
+    // with balance. No rotation, no memo — the account stays usable.
+    expect(calls).toBe(3);
+    expect(sent).toEqual(["pool-one", "pool-one", "pool-one"]);
+    expect(response.status).toBe(200);
+    expect(auth.listAccounts().find((a) => a.id === "one")?.state).not.toBe("exhausted");
+    expect(auth.canResendCredential(first)).toBe(true);
+  });
+
   it("keeps rotation when the retry fails with a non-quota error or cannot be sent", async () => {
     for (const retryOutcome of [
       (apiKey: string) => (apiKey === "pool-one" ? Response.json({ code: 5000, msg: "x" }, { status: 500 }) : Response.json({ ok: true })),
@@ -95,13 +116,17 @@ describe("account-pool upstream recovery", () => {
     }
   });
 
-  it("aborts during the retry wait without sending anything", async () => {
-    const auth = poolAuth();
+  it("aborts during the retry wait without sending anything or memoizing", async () => {
+    // Legacy auth (no rotator): canResendCredential reflects only the retry
+    // memo, so this pins that an aborted schedule proves nothing. In pool
+    // mode the pre-existing tail marks the account exhausted after a real
+    // upstream 1005 — that cooldown is intentional and unchanged.
+    const auth = new AuthManager({});
     const controller = new AbortController();
     let calls = 0;
     const pending = recoverAndMapUpstream({
       response: Response.json({ code: 1005 }, { status: 400 }), auth, credential: first,
-      plan: "coding-plan", signal: controller.signal, quotaRetryDelayMs: 100,
+      plan: "coding-plan", signal: controller.signal, quotaRetryDelaysMs: [100],
       resend: async () => { calls++; return Response.json({ ok: true }); },
     });
     setTimeout(() => controller.abort(), 10);
@@ -109,9 +134,33 @@ describe("account-pool upstream recovery", () => {
     expect(calls).toBe(0);
     expect(result.status).toBe(400);
     expect(await result.text()).toContain("[1005]");
+    expect(auth.canResendCredential(first)).toBe(true);
   });
 
-  it("does not rotate 401/3012 or streams, and bounds the retry budget to two sends", async () => {
+  it("does not memoize a retry that failed with a non-quota error (legacy)", async () => {
+    const auth = new AuthManager({});
+    const cred = { apiKey: "legacy-one", provider: "zai" as const };
+    let calls = 0;
+    const result = await recoverAndMapUpstream({
+      response: Response.json({ code: 1005 }, { status: 400 }), auth, credential: cred,
+      plan: "coding-plan", signal: new AbortController().signal, quotaRetryDelaysMs: [0],
+      resend: async () => { calls++; return Response.json({ code: 5000, msg: "x" }, { status: 500 }); },
+    });
+    expect(calls).toBe(1);
+    expect(result.status).toBe(400);
+    expect(auth.canResendCredential(cred)).toBe(true);
+  });
+
+  it("expires the legacy same-account retry memo at its cooldown", async () => {
+    const auth = new AuthManager({});
+    const cred = { apiKey: "legacy-two", provider: "zai" as const };
+    auth.blockSameCredentialRetry(cred, Date.now() + 20);
+    expect(auth.canResendCredential(cred)).toBe(false);
+    await Bun.sleep(40);
+    expect(auth.canResendCredential(cred)).toBe(true);
+  });
+
+  it("does not rotate 401/3012 or streams, and bounds same-account retries to the schedule", async () => {
     for (const response of [
       new Response("unauthorized", { status: 401 }),
       Response.json({ code: 3012 }, { status: 400 }),
@@ -125,11 +174,11 @@ describe("account-pool upstream recovery", () => {
     const sent: string[] = [];
     const result = await recoverAndMapUpstream({
       response: Response.json({ code: 1005 }, { status: 400 }), auth, credential: first,
-      plan: "coding-plan", signal: new AbortController().signal, quotaRetryDelayMs: 0,
+      plan: "coding-plan", signal: new AbortController().signal, quotaRetryDelaysMs: [0, 0, 0],
       resend: async (credential) => { calls++; sent.push(credential.apiKey); return Response.json({ code: 1005 }, { status: 400 }); },
     });
-    expect(calls).toBe(2);
-    expect(sent).toEqual(["pool-one", "pool-two"]);
+    expect(calls).toBe(4);
+    expect(sent).toEqual(["pool-one", "pool-one", "pool-one", "pool-two"]);
     expect(result.status).toBe(400);
   });
 
@@ -195,7 +244,7 @@ describe("account-pool upstream recovery", () => {
     const result = await recoverAndMapUpstream({
       response: Response.json({ code: 1005 }, { status: 400 }), auth,
       credential: handle.credential, handle, plan: "coding-plan",
-      signal: new AbortController().signal, quotaRetryDelayMs: 0,
+      signal: new AbortController().signal, quotaRetryDelaysMs: [0],
       resend: async () => { throw new Error("bare resend must not be used"); },
       resendHandle: async (next) => {
         selected = next;

@@ -98,7 +98,7 @@ Verdicts, in order of precedence:
 | `blocked` | Excluded by provider, plan, or allowlist policy. |
 | `expired` / `invalid` | Login expired or unusable with the current configuration. |
 | `auth_error` | The billing service rejected the login (401/3012); sign in again. |
-| `exhausted` | In cooldown after a quota error, until the shown time. Before the cooldown starts, the kit retries the same account once — the gateway may then serve the retry from another balance package that still has quota (e.g. an event grant next to an empty daily package). The cooldown applies only if that retry also reports exhaustion. |
+| `exhausted` | In cooldown after a quota error, until the shown time. Before the cooldown starts, the kit retries the same account on a growing schedule (default after 1s, 4s, 10s, 20s and 30s) — the gateway may serve a retry from another balance package that still has quota (e.g. an event grant next to an empty daily package). The cooldown applies only if the retries themselves report exhaustion. The schedule is tunable with `ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS` (comma-separated milliseconds, e.g. `0` or `off` to disable, max 6 entries, each capped at 60s). |
 | `duplicate` | Equal verified OAuth identity or identical credentials in the eligible set; quota is queried and summed once. A decoded JWT subject alone never suppresses a probe. |
 | `no_quota_data` | The service answered but reported no quota packages for this account right now. Not a confirmed healthy state. |
 | `empty` | Every quota package is used up. |
