@@ -12,20 +12,29 @@ import type { AccountHandle } from "../auth/account-rotator.js";
 const DEFAULT_QUOTA_RETRY_DELAYS_MS = [1_000, 4_000, 10_000, 20_000, 30_000];
 const MAX_QUOTA_RETRY_ATTEMPTS = 6;
 const MAX_SINGLE_QUOTA_RETRY_DELAY_MS = 60_000;
+let quotaRetryEnvWarned = false;
 
-function quotaRetryDelays(override?: readonly number[]): readonly number[] {
+/** Exported for tests: the effective same-account retry schedule. */
+export function quotaRetryDelays(override?: readonly number[]): readonly number[] {
   if (override) return override;
   const raw = process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
-  if (raw) {
-    if (raw.trim().toLowerCase() === "off") return [];
-    const parsed = raw.split(",")
-      .map((part) => Number(part.trim()))
-      .filter((n) => Number.isSafeInteger(n) && n >= 0)
-      .map((n) => Math.min(n, MAX_SINGLE_QUOTA_RETRY_DELAY_MS))
-      .slice(0, MAX_QUOTA_RETRY_ATTEMPTS);
-    return parsed;
+  if (raw === undefined) return DEFAULT_QUOTA_RETRY_DELAYS_MS;
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "off") return [];
+  // One invalid token rejects the whole value (falling back to the default
+  // schedule beats a silently mutated one); empty segments are dropped, and
+  // only plain decimal milliseconds are accepted — Number() would otherwise
+  // read "0x10", "1e3" or "1.0" as numbers.
+  const parts = trimmed.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+  const valid = parts.length > 0 && parts.every((part) => /^[0-9]+$/.test(part));
+  if (!valid) {
+    if (!quotaRetryEnvWarned) {
+      quotaRetryEnvWarned = true;
+      console.error(`[quota-retry] ignoring invalid ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS=${JSON.stringify(raw)} — using the default schedule`);
+    }
+    return DEFAULT_QUOTA_RETRY_DELAYS_MS;
   }
-  return DEFAULT_QUOTA_RETRY_DELAYS_MS;
+  return parts.map((part) => Math.min(Number(part), MAX_SINGLE_QUOTA_RETRY_DELAY_MS)).slice(0, MAX_QUOTA_RETRY_ATTEMPTS);
 }
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
@@ -133,7 +142,7 @@ export async function recoverAndMapUpstream(opts: {
   // event grant next to an empty daily free package). Observed live: the
   // gateway then serves a retry from the package that still has balance, but
   // the time it needs varies (seconds to about a minute), so the same
-  // credential is retried on a growing schedule. The envelope proves only
+  // credential is retried on a growing schedule. These envelopes prove only
   // that no output reached the client, so a bounded resend cannot duplicate
   // a response — whether a rejected request costs tokens is decided by the
   // gateway, exactly as in the existing rotation path. A start-plan resend
@@ -141,6 +150,8 @@ export async function recoverAndMapUpstream(opts: {
   // exhausted and the last response still reports exhaustion, the rotation
   // below treats it as a real quota failure and the per-credential memo
   // suppresses further same-account retries until the reset window.
+  // 3007 (captcha verify failed) is deliberately NOT retried here: the
+  // handler captcha-retry layer already owns one fresh-token resend for it.
   const quotaEnvelope = envelope !== null && [1005, 1113].includes(envelope.code ?? -1);
   if (quotaEnvelope && !streaming && !opts.signal.aborted) {
     let confirmedExhausted = false;
@@ -157,7 +168,9 @@ export async function recoverAndMapUpstream(opts: {
           ? opts.auth.canResendCredential?.(activeHandle) ?? false
           : opts.auth.canResendCredential?.(activeCredential) ?? false);
       if (!readmitted) break;
-      console.log(`[quota-retry] same-account resend ${index + 1} after ${delayMs}ms`);
+      const accountLabel = activeHandle?.id
+        ?? (opts.auth.isAccountPoolEnabled?.() ? "pool" : "single-account");
+      console.log(`[quota-retry] account ${accountLabel}: same-account resend ${index + 1} after ${delayMs}ms`);
       try {
         const retried = activeHandle && opts.resendHandle
           ? await opts.resendHandle(activeHandle)
@@ -187,9 +200,10 @@ export async function recoverAndMapUpstream(opts: {
         break;
       }
     }
-    // Block the memo only on proven exhaustion: a schedule that was aborted,
-    // admission-denied or ended in a non-quota failure must not disable the
-    // package fall-through for later requests.
+    // Memoize only proven exhaustion: the memo requires that a SENT retry
+    // itself returned a quota envelope. An aborted, admission-denied or
+    // non-quota-failed schedule never reaches this with evidence, so it must
+    // not disable the package fall-through for later requests.
     if (confirmedExhausted && envelope !== null && [1005, 1113].includes(envelope.code ?? -1)) {
       opts.auth.blockSameCredentialRetry?.(activeHandle ?? activeCredential, envelope.resetAt);
     }

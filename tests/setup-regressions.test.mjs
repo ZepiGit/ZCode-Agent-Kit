@@ -170,7 +170,7 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
   cpSync(join(KIT, "cli"), join(checkout, "cli"), { recursive: true });
   cpSync(join(KIT, "lib"), join(checkout, "lib"), { recursive: true });
   cpSync(join(KIT, "proxy", "config.example.yaml"), join(checkout, "proxy", "config.example.yaml"));
-  writeFileSync(join(checkout, "proxy", "zcode-proxy-manager.mjs"), "console.log('stub manager start invoked');\n");
+  writeFileSync(join(checkout, "proxy", "zcode-proxy-manager.mjs"), "console.log('stub manager:', process.argv[2] ?? 'none');\n");
   const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8" });
   try {
     git(["init", "-b", "main"], checkout);
@@ -196,7 +196,7 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
     });
     assert.match(out, /re-applying integrations for detected harnesses/);
     assert.match(out, /starting the proxy on the updated code/, "update must restart the proxy after re-setup");
-    assert.match(out, /stub manager start invoked/);
+    assert.match(out, /stub manager: start/, "the manager must be invoked with the start subcommand");
     assert.doesNotMatch(out, /refusing to write user configs from a source checkout/);
     assert.ok(existsSync(join(checkout, ".proxykey")), "re-setup must have bootstrapped from the checkout root");
   } finally {

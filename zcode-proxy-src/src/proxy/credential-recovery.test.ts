@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { AuthManager } from "../auth/manager.js";
 import { proxyRequest } from "./handler.js";
 import { handleResponses } from "./responses-handler.js";
@@ -6,10 +6,15 @@ import type { ProxyConfig } from "../config/types.js";
 import { gzipSync } from "node:zlib";
 import { fixtureSecret } from "../test-fixtures.js";
 
-// The default same-account retry schedule (1s/4s/10s) would sleep in real
-// time here; one immediate attempt covers the recovery semantics these
+// The default same-account retry schedule (1s/4s/10s/20s/30s) would sleep in
+// real time here; one immediate attempt covers the recovery semantics these
 // handler-level tests pin. Pool tests exercise the multi-attempt schedule.
+const previousRetryDelaysEnv = process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
 process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS = "0";
+afterAll(() => {
+  if (previousRetryDelaysEnv === undefined) delete process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
+  else process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS = previousRetryDelaysEnv;
+});
 
 const OLD_KEY = fixtureSecret("recovery-old");
 const FRESH_KEY = fixtureSecret("recovery-fresh");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { AuthManager } from "../auth/manager.js";
 import { createAccountRotator } from "../auth/account-rotator.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
-import { recoverAndMapUpstream } from "./upstream-errors.js";
+import { quotaRetryDelays, recoverAndMapUpstream } from "./upstream-errors.js";
 import { brotliCompressSync } from "node:zlib";
 
 const first = { apiKey: "pool-one", provider: "zai" as const };
@@ -49,6 +49,18 @@ describe("account-pool upstream recovery", () => {
     const body = await response.json() as { error: { message: string } };
     expect(body.error.message).toContain("[3007]");
     expect(body.error.message).not.toContain("private provider detail");
+  });
+
+  it("leaves 3007 captcha envelopes to the handler captcha layer without retrying", async () => {
+    const { response, calls, sent, auth } = await run(
+      Response.json({ code: 3007, msg: "redacted upstream text" }, { status: 403 }),
+    );
+    // The handler captcha-retry layer owns 3007; the quota path must not
+    // duplicate it, mark the account, or memoize.
+    expect(calls).toBe(0);
+    expect(sent).toEqual([]);
+    expect(response.status).toBe(403);
+    expect(auth.listAccounts().find((a) => a.id === "one")?.state).not.toBe("exhausted");
   });
   for (const code of [1005, 1113]) {
     it(`retries the same credential on a clean ${code} envelope before rotating`, async () => {
@@ -137,6 +149,26 @@ describe("account-pool upstream recovery", () => {
     expect(auth.canResendCredential(first)).toBe(true);
   });
 
+  it("keeps failover for overlapping requests when a peer quarantines the account", async () => {
+    const rotator = createAccountRotator([{ id: "one", credential: first }, { id: "two", credential: second }]);
+    const auth = new AuthManager({ accountRotator: rotator });
+    const handle = rotator.getCredentialHandle();
+    const mk = () => recoverAndMapUpstream({
+      response: Response.json({ code: 1005 }, { status: 400 }), auth,
+      credential: handle.credential, handle, plan: "coding-plan",
+      signal: new AbortController().signal, quotaRetryDelaysMs: [0],
+      resend: async () => { throw new Error("bare resend must not be used"); },
+      resendHandle: async (next) => (next.id === "one"
+        ? Response.json({ code: 1005 }, { status: 400 })
+        : Response.json({ ok: true })),
+    });
+    // Whoever finishes first quarantines "one"; the other request's stale
+    // handle must still fail over instead of dying with a hard 400.
+    const [a, b] = await Promise.all([mk(), mk()]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+  });
+
   it("does not memoize a retry that failed with a non-quota error (legacy)", async () => {
     const auth = new AuthManager({});
     const cred = { apiKey: "legacy-one", provider: "zai" as const };
@@ -151,13 +183,39 @@ describe("account-pool upstream recovery", () => {
     expect(auth.canResendCredential(cred)).toBe(true);
   });
 
-  it("expires the legacy same-account retry memo at its cooldown", async () => {
-    const auth = new AuthManager({});
+  it("expires the legacy same-account retry memo at its cooldown", () => {
+    // Driven through the AuthManager clock seam — no real timers needed.
+    let now = 1_000_000;
+    const auth = new AuthManager({ now: () => now });
     const cred = { apiKey: "legacy-two", provider: "zai" as const };
-    auth.blockSameCredentialRetry(cred, Date.now() + 20);
+    auth.blockSameCredentialRetry(cred, now + 20);
     expect(auth.canResendCredential(cred)).toBe(false);
-    await Bun.sleep(40);
+    now += 40;
     expect(auth.canResendCredential(cred)).toBe(true);
+  });
+
+  it("parses ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS strictly", () => {
+    const previous = process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
+    try {
+      const withEnv = (env: string): readonly number[] => {
+        process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS = env;
+        return quotaRetryDelays();
+      };
+      // Invalid input falls back to the whole default schedule.
+      expect(withEnv("1000,x,2000")).toEqual([1_000, 4_000, 10_000, 20_000, 30_000]);
+      expect(withEnv(" ")).toEqual([1_000, 4_000, 10_000, 20_000, 30_000]);
+      expect(withEnv("abc")).toEqual([1_000, 4_000, 10_000, 20_000, 30_000]);
+      // "off" disables; "0" is one immediate attempt (not disabled).
+      expect(withEnv("off")).toEqual([]);
+      expect(withEnv("0")).toEqual([0]);
+      // Tokens are clamped and capped; empty segments reject the value.
+      expect(withEnv("99999999,1,2,3,4,5,6,7")).toEqual([60_000, 1, 2, 3, 4, 5]);
+      // Empty segments are dropped (no silent 0ms attempts); the rest applies.
+      expect(withEnv("1000,,2000")).toEqual([1_000, 2_000]);
+    } finally {
+      if (previous === undefined) delete process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
+      else process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS = previous;
+    }
   });
 
   it("does not rotate 401/3012 or streams, and bounds same-account retries to the schedule", async () => {
@@ -212,7 +270,7 @@ describe("account-pool upstream recovery", () => {
     expect(auth.listAccounts().find((a) => a.id === "one")?.state).toBe("exhausted");
   });
 
-  it("rejects a late response carrying an older handle generation", async () => {
+  it("fails over on a late response with an older handle generation without re-marking", async () => {
     const rotator = createAccountRotator([
       { id: "one", credential: first },
       { id: "two", credential: second },
@@ -220,15 +278,22 @@ describe("account-pool upstream recovery", () => {
     const auth = new AuthManager({ accountRotator: rotator });
     const handle = rotator.getCredentialHandle();
     auth.markCredentialExhausted(handle, "1005", Date.now() + 60_000);
+    const generationAfterMark = rotator.handleForId("one")?.quotaGeneration;
+    const exhaustedUntil = auth.listAccounts().find((a) => a.id === "one")?.exhaustedUntil;
     let calls = 0;
     const result = await recoverAndMapUpstream({
       response: Response.json({ code: 1005 }, { status: 400 }), auth,
       credential: handle.credential, handle, plan: "coding-plan",
-      signal: new AbortController().signal,
+      signal: new AbortController().signal, quotaRetryDelaysMs: [0],
       resend: async () => { calls++; return Response.json({ ok: true }); },
     });
-    expect(calls).toBe(0);
-    expect(result.status).toBe(400);
+    // The stale handle cannot open a marking failover chain, but the proven
+    // exhaustion still earns the caller a selection from the other accounts.
+    expect(calls).toBe(1);
+    expect(result.status).toBe(200);
+    expect(auth.listAccounts().find((a) => a.id === "one")?.state).toBe("exhausted");
+    expect(rotator.handleForId("one")?.quotaGeneration).toBe(generationAfterMark);
+    expect(auth.listAccounts().find((a) => a.id === "one")?.exhaustedUntil).toBe(exhaustedUntil);
   });
 
   it("uses handle context for resend and never reverse maps duplicate credentials", async () => {

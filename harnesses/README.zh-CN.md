@@ -100,7 +100,7 @@ GLM-5.3-Flash 已通过代理路径验证。原生目录中存在模型条目，
 ## 配额与错误形态
 
 - `GET /quota`（需认证）显示各模型的令牌桶。
-- 配额耗尽 → HTTP 400 `[1005] exceed quota limit`（不可重试；等待服务商恢复额度）。
-- `[3007] captcha verify failed` → 高频重试后的网关反滥用机制；请暂停片刻。
+- 配额耗尽 → HTTP 400 `[1005] exceed quota limit`。代理会按递增间隔重试同一账号（最长约65秒），然后切换账号；如果仍然出现，请等待服务商恢复额度。
+- `[3007] captcha verify failed` → 网关反滥用机制。代理会使用新获取的 CAPTCHA 令牌自动重试一次；如果仍然失败，请暂停片刻。
 - `401 start_plan_jwt_invalid` → 检查 Desktop 登录，并通过 `zcode-kit auth login zai` 更新。对于 Desktop 0.16.9 当前激活且已明确配置计划的 `zai`/`start-plan` 登录，使用 `zcode-kit auth login zai --import`。只要存在 `credentials.json`，就以它为准；凭据无效时不会静默回退到 `config.json`。新版 `coding-plan` 登录使用常规 OAuth；导入不会创建或获取 API 密钥。
 - Flash 返回 `[1210]` → 检查是否已启用 thinking，并选择 `low`、`high` 或 `max`，而不是禁用它。代理会将禁用的 thinking 规范化为 `low`；参见上方 Flash 说明。

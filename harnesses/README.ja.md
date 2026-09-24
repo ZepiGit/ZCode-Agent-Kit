@@ -105,9 +105,7 @@ Desktop が必要な場合がありますが、プロバイダーがモデル呼
 ## クォータとエラーの型
 
 - `GET /quota`（認証付き）はモデルごとのトークンバケットを表示します。
-- クォータ消費済み → HTTP 400 `[1005] exceed quota limit`（再試行せず、
-  プロバイダーによる利用枠の回復を待つ）。
-- `[3007] captcha verify failed` → 激しい再試行の後のゲートウェイ側
-  アンチアビューズ。しばらく休憩する。
+- クォータ消費済み → HTTP 400 `[1005] exceed quota limit`。プロキシは同じアカウントを成長間隔で再試行し（最大約65秒）、それから次のアカウントへ切り替えます。それでも表示される場合は、プロバイダーによる利用枠の回復を待ってください。
+- `[3007] captcha verify failed` → ゲートウェイ側のアンチアビューズ。プロキシは新しく発行した CAPTCHA トークンで一度再試行します。それでも失敗する場合は、しばらく休憩してください。
 - `401 start_plan_jwt_invalid` → Desktop のログインを確認し、`zcode-kit auth login zai` で更新。プランが明示的に設定された Desktop 0.16.9 の現在アクティブな `zai`/`start-plan` ログインには `zcode-kit auth login zai --import` を使います。`credentials.json` が存在する場合はそれが正となり、認証情報が無効でも `config.json` へ暗黙にはフォールバックしません。新形式の `coding-plan` ログインでは通常の OAuth を使います。インポートは API キーの作成や取得を行いません。
 - Flash で `[1210]` → thinking が有効か確認し、無効にする代わりに `low`、`high`、`max` を選びます。プロキシは、無効にした thinking を `low` に正規化します。上記の Flash の注記を参照してください。

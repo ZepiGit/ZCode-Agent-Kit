@@ -318,7 +318,8 @@ export class AuthManager {
       // fall-through until the process restarts.
       const key = this.retryMemoKey(target);
       const until = this.sameCredentialRetryBlockedUntil.get(key);
-      if (until !== undefined && until <= Date.now()) this.sameCredentialRetryBlockedUntil.delete(key);
+      const now = this.source.now?.() ?? Date.now();
+      if (until !== undefined && until <= now) this.sameCredentialRetryBlockedUntil.delete(key);
       return !this.sameCredentialRetryBlockedUntil.has(key);
     }
     const handle = "credentialRevision" in target
@@ -338,8 +339,12 @@ export class AuthManager {
       const oldest = map.keys().next().value;
       if (oldest !== undefined) map.delete(oldest);
     }
-    const now = Date.now();
-    map.set(key, resetAt !== undefined && resetAt > now ? resetAt : now + 60_000);
+    // The default cooldown must outlast the default retry schedule (~65s);
+    // a longer env-configured schedule can outlive the memo, which only
+    // means same-account retries resume earlier. The reset time wins when
+    // the upstream provides one.
+    const now = this.source.now?.() ?? Date.now();
+    map.set(key, resetAt !== undefined && resetAt > now ? resetAt : now + 120_000);
   }
 
   private retryMemoKey(target: Credential | AccountHandle): string {
@@ -379,7 +384,24 @@ export class AuthManager {
       || currentHandle.failureGeneration !== failedHandle.failureGeneration
       || currentHandle.quotaGeneration !== failedHandle.quotaGeneration
       || currentHandle.effectiveIdentity !== failedHandle.effectiveIdentity) {
-      return Promise.resolve(null);
+      // A peer request moved this account's state forward (quarantined it, or
+      // a concurrent success cleared its failure): the generation is stale,
+      // so this caller must not mark or join the singleflight entry — but a
+      // real upstream rejection still earns it a failover selection from the
+      // other accounts. Only selection happens here: no marking, no stale
+      // credential replay (the dead id and its old identity are excluded).
+      // Administratively or permanently out accounts (paused, expired,
+      // invalid, removed) stay fail-closed.
+      const state = rotator.list().find((account) => account.id === id)?.state;
+      if (state !== "exhausted" && state !== "ready" && state !== "active") return Promise.resolve(null);
+      try {
+        return Promise.resolve(rotator.getCredentialHandle({
+          excludedIds: new Set([id]),
+          excludedIdentities: new Set([failedHandle.effectiveIdentity, ...(attemptedIdentities ?? [])]),
+        }));
+      } catch {
+        return Promise.resolve(null);
+      }
     }
     const existing = this.poolRecoveries.get(`${id}:${failedHandle.credentialRevision}:${failedHandle.quotaGeneration}`);
     if (existing) return existing;

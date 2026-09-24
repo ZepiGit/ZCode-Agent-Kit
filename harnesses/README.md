@@ -102,7 +102,7 @@ establish native-provider acceptance. Details:
 ## Quota & error modes
 
 - `GET /quota` (authenticated) shows the token buckets per model.
-- Quota exhausted → HTTP 400 `[1005] exceed quota limit` (not retryable — wait for the provider to restore quota).
-- `[3007] captcha verify failed` → gateway anti-abuse after intense retrying; take a pause.
+- Quota exhausted → HTTP 400 `[1005] exceed quota limit`. The proxy retries the same account on a growing schedule (up to ~65s) before failing over; if you still see it, wait for the provider to restore quota.
+- `[3007] captcha verify failed` → gateway anti-abuse. The proxy retries once with a freshly minted captcha token; if it still fails, take a pause.
 - `401 start_plan_jwt_invalid` → check your Desktop login and renew it with `zcode-kit auth login zai`. Use `zcode-kit auth login zai --import` for the current active Desktop 0.16.9 `zai`/`start-plan` login with an explicitly configured plan. Existing `credentials.json` is authoritative; invalid credentials do not silently fall back to `config.json`. Modern `coding-plan` logins use normal OAuth instead; import does not create or resolve API keys.
 - `[1210]` with Flash → check that thinking is enabled and choose `low`, `high`, or `max`, rather than disabling it. The proxy normalizes disabled thinking to `low`; see the Flash note above.

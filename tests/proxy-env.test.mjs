@@ -54,3 +54,9 @@ test('managed env removes ambient solver overrides including Windows casing vari
   assert.equal(env.HTTPS_PROXY, source.HTTPS_PROXY);
   assert.deepEqual(source, snapshot);
 });
+
+test('managed env passes the quota retry schedule knob through to the proxy', () => {
+  const source = { ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS: 'off' };
+  const env = proxyEnv({ config: 'C:/kit/proxy/config.yaml' }, source);
+  assert.equal(env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS, 'off');
+});

@@ -105,9 +105,7 @@ nativo. Detalles: [puente MCP](../mcp/zcode-harness-mcp/README.es.md).
 ## Cuota y modos de error
 
 - `GET /quota` (autenticado) muestra los buckets de tokens por modelo.
-- Cuota agotada → HTTP 400 `[1005] exceed quota limit` (no reintentable;
-  espera a que el proveedor restablezca la cuota).
-- `[3007] captcha verify failed` → anti-abuso del gateway tras reintentos
-  intensos; haz una pausa.
+- Cuota agotada → HTTP 400 `[1005] exceed quota limit`. El proxy reintenta la misma cuenta con un calendario creciente (hasta ~65s) antes de cambiar de cuenta; si aún lo ves, espera a que el proveedor restablezca la cuota.
+- `[3007] captcha verify failed` → anti-abuso del gateway. El proxy reintenta una vez con un token CAPTCHA recién emitido; si aún falla, haz una pausa.
 - `401 start_plan_jwt_invalid` → comprueba la sesión de Desktop y renuévala con `zcode-kit auth login zai`. Usa `zcode-kit auth login zai --import` para el login activo de `zai`/`start-plan` en Desktop 0.16.9 con un plan configurado explícitamente. Si existe `credentials.json`, es la fuente autoritativa; unas credenciales inválidas no provocan una vuelta silenciosa a `config.json`. Los logins modernos de `coding-plan` usan el OAuth normal; la importación no crea ni obtiene claves API.
 - `[1210]` con Flash → comprueba que thinking esté activado y elige `low`, `high` o `max`, en lugar de desactivarlo. El proxy normaliza thinking desactivado a `low`; consulta la nota sobre Flash anterior.

@@ -104,7 +104,7 @@ Proxy-Prüfung belegt keinen Erfolg beim nativen Provider. Details:
 ## Kontingent & Fehlerbilder
 
 - `GET /quota` (authentifiziert) zeigt die Token-Buckets je Modell.
-- Kontingent erschöpft → HTTP 400 `[1005] exceed quota limit` (nicht wiederholbar — warten, bis der Anbieter wieder Kontingent bereitstellt).
-- `[3007] captcha verify failed` → Gateway-Anti-Absicherung nach intensiven Retry-Versuchen; Pause einlegen.
+- Kontingent erschöpft → HTTP 400 `[1005] exceed quota limit`. Der Proxy wiederholt denselben Account nach einem wachsenden Zeitplan (bis ~65s), bevor er weiterwechselt; tritt der Fehler weiter auf, warte, bis der Anbieter wieder Kontingent bereitstellt.
+- `[3007] captcha verify failed` → Gateway-Anti-Absicherung. Der Proxy wiederholt einmal mit einem frisch erzeugten Captcha-Token; schlägt das erneut fehl, lege eine Pause ein.
 - `401 start_plan_jwt_invalid` → Desktop-Anmeldung prüfen und mit `zcode-kit auth login zai` erneuern. Mit `zcode-kit auth login zai --import` den aktuell aktiven `zai`/`start-plan`-Login aus Desktop 0.16.9 mit ausdrücklich konfiguriertem Plan importieren. Eine vorhandene `credentials.json` ist maßgeblich; bei ungültigen Anmeldedaten erfolgt kein stiller Rückgriff auf `config.json`. Moderne `coding-plan`-Logins verwenden stattdessen normales OAuth; der Import erstellt oder ermittelt keine API-Schlüssel.
 - `[1210]` bei Flash → prüfen, ob Thinking aktiviert ist, und `low`, `high` oder `max` wählen, statt Thinking zu deaktivieren. Der Proxy normalisiert deaktiviertes Thinking auf `low`; siehe den Flash-Hinweis oben.
