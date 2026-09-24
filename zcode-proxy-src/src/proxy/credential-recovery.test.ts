@@ -40,7 +40,7 @@ for (const route of ["openai", "anthropic", "responses"]) describe(`${route} saf
     if (status === 429) expect(resp.headers.get("retry-after")).toBe("7");
     expect(calls).toBe(1);
   });
-  for (const code of [3012, 401, 1113, 3001]) test(`retries code ${code} once with changed credential before output`, async () => {
+  for (const code of [3012, 401, 3001]) test(`retries code ${code} once with changed credential before output`, async () => {
     let imports = 0;
     const auth = new AuthManager({ importCredential: async () => { imports++; return fresh; } }); auth.setOAuthCredential(first);
     const seen: string[] = [];
@@ -54,7 +54,24 @@ for (const route of ["openai", "anthropic", "responses"]) describe(`${route} saf
     expect(seen[0]).not.toBe(seen[1]);
     expect(imports).toBe(1);
   });
-  test("unchanged balance credential is not retried or repeatedly imported", async () => {
+  test("retries code 1113 once on the same credential, then once with changed credential", async () => {
+    let imports = 0;
+    const auth = new AuthManager({ importCredential: async () => { imports++; return fresh; } }); auth.setOAuthCredential(first);
+    const seen: string[] = [];
+    const resp = await run(route, auth, async req => {
+      const key = (req.headers.get("authorization") ?? req.headers.get("x-api-key") ?? "").replace(/^Bearer /, "");
+      seen.push(key);
+      // The gateway keeps reporting the exhausted package until the request
+      // carries the replaced credential, then serves from remaining balance.
+      return key === OLD_KEY ? Response.json({ code: 1113, msg: "PRIVATE_FIXTURE" }) : ok();
+    });
+    expect(resp.status).toBe(200);
+    expect((await resp.text()).match(/one reply/g)?.length).toBe(1);
+    // Same-credential package fall-through first, then the import recovery.
+    expect(seen).toEqual([OLD_KEY, OLD_KEY, FRESH_KEY]);
+    expect(imports).toBe(1);
+  });
+  test("remembers a failed same-account retry instead of repeating it", async () => {
     let imports = 0, calls = 0;
     const auth = new AuthManager({ importCredential: async () => { imports++; return first; } }); auth.setOAuthCredential(first);
     for (let i = 0; i < 3; i++) {
@@ -62,7 +79,10 @@ for (const route of ["openai", "anthropic", "responses"]) describe(`${route} saf
       expect(resp.status).toBe(400);
       expect(await resp.text()).not.toContain("PRIVATE_FIXTURE");
     }
-    expect(calls).toBe(3); expect(imports).toBe(1);
+    // The first request spends its same-account retry; the per-credential
+    // memo then suppresses retries until the cooldown, and the unchanged
+    // import result never triggers a third send.
+    expect(calls).toBe(4); expect(imports).toBe(1);
   });
   test("a failed replacement is returned, not a third request", async () => {
     const auth = new AuthManager({ importCredential: async () => fresh }); auth.setOAuthCredential(first);

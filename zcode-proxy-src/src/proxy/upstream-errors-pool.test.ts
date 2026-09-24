@@ -15,22 +15,27 @@ function poolAuth(): AuthManager {
   ]) });
 }
 
-async function run(response: Response, code: string | undefined = undefined): Promise<{ response: Response; calls: number }> {
+async function run(
+  response: Response,
+  resendImpl?: (apiKey: string) => Response,
+): Promise<{ response: Response; calls: number; sent: string[]; auth: AuthManager }> {
   const auth = poolAuth();
   let calls = 0;
+  const sent: string[] = [];
   const result = await recoverAndMapUpstream({
     response,
     auth,
     credential: first,
     plan: "coding-plan",
     signal: new AbortController().signal,
+    quotaRetryDelayMs: 0,
     resend: async (credential) => {
       calls++;
-      expect(credential.apiKey).toBe("pool-two");
-      return Response.json({ ok: true });
+      sent.push(credential.apiKey);
+      return resendImpl ? resendImpl(credential.apiKey) : Response.json({ ok: true });
     },
   });
-  return { response: result, calls };
+  return { response: result, calls, sent, auth };
 }
 
 describe("account-pool upstream recovery", () => {
@@ -44,15 +49,69 @@ describe("account-pool upstream recovery", () => {
     expect(body.error.message).toContain("[3007]");
     expect(body.error.message).not.toContain("private provider detail");
   });
-  for (const code of [1005, 1113, 3001]) {
-    it(`rotates once for explicit quota code ${code}, including HTTP 200 envelopes`, async () => {
-      const { response, calls } = await run(Response.json({ code, msg: "redacted upstream text" }, { status: 200 }));
+  for (const code of [1005, 1113]) {
+    it(`retries the same credential on a clean ${code} envelope before rotating`, async () => {
+      const { response, calls, sent, auth } = await run(Response.json({ code, msg: "redacted upstream text" }, { status: 200 }));
+      expect(sent).toEqual(["pool-one"]);
       expect(calls).toBe(1);
       expect(response.status).toBe(200);
+      // The user-visible point: the account keeps its remaining packages.
+      expect(auth.listAccounts().find((a) => a.id === "one")?.state).not.toBe("exhausted");
     });
   }
 
-  it("does not rotate 401/3012, streams, or retry a second quota failure", async () => {
+  it("rotates once for explicit quota code 3001, including HTTP 200 envelopes", async () => {
+    const { response, calls, sent } = await run(Response.json({ code: 3001, msg: "redacted upstream text" }, { status: 200 }));
+    expect(sent).toEqual(["pool-two"]);
+    expect(calls).toBe(1);
+    expect(response.status).toBe(200);
+  });
+
+  it("falls through to rotation when the same-credential retry also reports exhaustion", async () => {
+    const { response, calls, sent } = await run(
+      Response.json({ code: 1005, msg: "redacted upstream text" }, { status: 200 }),
+      (apiKey) => (apiKey === "pool-one"
+        ? Response.json({ code: 1005, msg: "redacted upstream text" }, { status: 200 })
+        : Response.json({ ok: true })),
+    );
+    expect(sent).toEqual(["pool-one", "pool-two"]);
+    expect(calls).toBe(2);
+    expect(response.status).toBe(200);
+  });
+
+  it("keeps rotation when the retry fails with a non-quota error or cannot be sent", async () => {
+    for (const retryOutcome of [
+      (apiKey: string) => (apiKey === "pool-one" ? Response.json({ code: 5000, msg: "x" }, { status: 500 }) : Response.json({ ok: true })),
+      (apiKey: string) => (apiKey === "pool-one" ? Response.json({ code: 429 }, { status: 429 }) : Response.json({ ok: true })),
+      (apiKey: string) => { if (apiKey === "pool-one") throw new Error("connect failure"); return Response.json({ ok: true }); },
+    ]) {
+      const { response, calls, sent } = await run(
+        Response.json({ code: 1005, msg: "redacted upstream text" }, { status: 200 }),
+        retryOutcome,
+      );
+      expect(sent).toEqual(["pool-one", "pool-two"]);
+      expect(calls).toBe(2);
+      expect(response.status).toBe(200);
+    }
+  });
+
+  it("aborts during the retry wait without sending anything", async () => {
+    const auth = poolAuth();
+    const controller = new AbortController();
+    let calls = 0;
+    const pending = recoverAndMapUpstream({
+      response: Response.json({ code: 1005 }, { status: 400 }), auth, credential: first,
+      plan: "coding-plan", signal: controller.signal, quotaRetryDelayMs: 100,
+      resend: async () => { calls++; return Response.json({ ok: true }); },
+    });
+    setTimeout(() => controller.abort(), 10);
+    const result = await pending;
+    expect(calls).toBe(0);
+    expect(result.status).toBe(400);
+    expect(await result.text()).toContain("[1005]");
+  });
+
+  it("does not rotate 401/3012 or streams, and bounds the retry budget to two sends", async () => {
     for (const response of [
       new Response("unauthorized", { status: 401 }),
       Response.json({ code: 3012 }, { status: 400 }),
@@ -63,12 +122,14 @@ describe("account-pool upstream recovery", () => {
     }
     const auth = poolAuth();
     let calls = 0;
+    const sent: string[] = [];
     const result = await recoverAndMapUpstream({
       response: Response.json({ code: 1005 }, { status: 400 }), auth, credential: first,
-      plan: "coding-plan", signal: new AbortController().signal,
-      resend: async () => { calls++; return Response.json({ code: 1005 }, { status: 400 }); },
+      plan: "coding-plan", signal: new AbortController().signal, quotaRetryDelayMs: 0,
+      resend: async (credential) => { calls++; sent.push(credential.apiKey); return Response.json({ code: 1005 }, { status: 400 }); },
     });
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
+    expect(sent).toEqual(["pool-one", "pool-two"]);
     expect(result.status).toBe(400);
   });
 
@@ -129,15 +190,24 @@ describe("account-pool upstream recovery", () => {
     ]);
     const auth = new AuthManager({ accountRotator: rotator });
     const handle = rotator.getCredentialHandle();
+    const seen: string[] = [];
     let selected: AccountHandle | undefined;
     const result = await recoverAndMapUpstream({
       response: Response.json({ code: 1005 }, { status: 400 }), auth,
       credential: handle.credential, handle, plan: "coding-plan",
-      signal: new AbortController().signal,
+      signal: new AbortController().signal, quotaRetryDelayMs: 0,
       resend: async () => { throw new Error("bare resend must not be used"); },
-      resendHandle: async (next) => { selected = next; return Response.json({ ok: true }); },
+      resendHandle: async (next) => {
+        selected = next;
+        seen.push(next.id);
+        return seen.length === 1
+          ? Response.json({ code: 1005 }, { status: 400 })
+          : Response.json({ ok: true });
+      },
     });
     expect(result.status).toBe(200);
+    // First resend is the same-credential quota retry, the second the rotation.
+    expect(seen).toEqual(["alias-a", "independent"]);
     expect(selected?.id).toBe("independent");
   });
 });

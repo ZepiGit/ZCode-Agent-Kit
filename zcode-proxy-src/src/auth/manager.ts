@@ -48,6 +48,7 @@ export class AuthManager {
   private poolRecoveries = new Map<string, Promise<AccountHandle | null>>();
   private poolPersistence: Promise<void> | undefined;
   private poolPersistenceDirty = false;
+  private readonly sameCredentialRetryBlockedUntil = new Map<string, number>();
   private persistenceStatus: { state: "clean" | "dirty" | "error"; code?: string; at?: number; attempts: number } = { state: "clean", attempts: 0 };
   constructor(private source: CredentialSource = {}) {}
 
@@ -300,6 +301,45 @@ export class AuthManager {
       } finally { this.poolPersistence = undefined; }
     });
     return this.poolPersistence;
+  }
+
+  /**
+   * Whether one same-account resend may still use this credential or handle.
+   * Pool mode re-checks full admission via the rotator (revision, identity,
+   * usable state, alias quarantine). Legacy single-account installs have no
+   * quarantine memory, so a per-credential memo remembers a failed
+   * same-account retry until the reset time or a bounded cooldown.
+   */
+  canResendCredential(target: Credential | AccountHandle): boolean {
+    const rotator = this.source.accountRotator;
+    if (!rotator) return !this.sameCredentialRetryBlockedUntil.has(this.retryMemoKey(target));
+    const handle = "credentialRevision" in target
+      ? target
+      : (() => {
+        const id = rotator.idForCredential(target);
+        return id ? rotator.handleForId(id) : undefined;
+      })();
+    return handle ? rotator.canResendHandle(handle) : false;
+  }
+
+  /** Record that a same-account retry already returned a quota envelope. */
+  blockSameCredentialRetry(target: Credential | AccountHandle, resetAt?: number): void {
+    const key = this.retryMemoKey(target);
+    const map = this.sameCredentialRetryBlockedUntil;
+    if (map.size >= 256 && !map.has(key)) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    const now = Date.now();
+    map.set(key, resetAt !== undefined && resetAt > now ? resetAt : now + 60_000);
+  }
+
+  private retryMemoKey(target: Credential | AccountHandle): string {
+    const credential = "credentialRevision" in target ? target.credential : target;
+    return createHash("sha256")
+      .update(JSON.stringify([credential.provider, credential.apiKey, credential.jwt ?? "", credential.userId ?? ""]))
+      .digest("hex")
+      .slice(0, 24);
   }
 
   private recoverFromAccountPool(

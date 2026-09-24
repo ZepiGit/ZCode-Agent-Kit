@@ -332,6 +332,31 @@ export class AccountRotator {
     };
   }
 
+  /**
+   * Whether one same-account resend may still use this exact handle: the
+   * account must exist with the same credential generation, identity and
+   * credential snapshot, be usable now, and not be alias-blocked by a
+   * quarantined duplicate. The failure generation is deliberately not
+   * compared: a concurrent success's clearFailure bumps it, and skipping the
+   * retry then would defeat the package fall-through that success just
+   * proved possible.
+   */
+  canResendHandle(handle: AccountHandle): boolean {
+    const account = this.accounts.find((candidate) => candidate.id === handle.id);
+    if (!account) return false;
+    if (account.credentialRevision !== handle.credentialRevision
+      || effectiveIdentity(account.credential, this.plan ?? account.plan) !== handle.effectiveIdentity
+      || !sameCredential(account.credential, handle.credential)) return false;
+    const now = this.now();
+    if (!this.isUsable(account, now)) return false;
+    for (const other of this.accounts) {
+      if (other.id === account.id) continue;
+      if (other.exhaustedUntil !== undefined && other.exhaustedUntil > now
+        && effectiveIdentity(other.credential, this.plan ?? other.plan) === handle.effectiveIdentity) return false;
+    }
+    return true;
+  }
+
   /** Admission check immediately before transport dispatch. */
   isHandleCurrent(handle: AccountHandle): boolean {
     const account = this.accounts.find((candidate) => candidate.id === handle.id);
