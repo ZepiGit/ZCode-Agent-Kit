@@ -183,6 +183,26 @@ describe("account-pool upstream recovery", () => {
     expect(auth.canResendCredential(cred)).toBe(true);
   });
 
+  it("does not memoize when the schedule is interrupted after a quota attempt (legacy)", async () => {
+    const auth = new AuthManager({});
+    const cred = { apiKey: "legacy-three", provider: "zai" as const };
+    let calls = 0;
+    const result = await recoverAndMapUpstream({
+      response: Response.json({ code: 1005 }, { status: 400 }), auth, credential: cred,
+      plan: "coding-plan", signal: new AbortController().signal, quotaRetryDelaysMs: [0, 0],
+      resend: async () => {
+        calls++;
+        return calls === 1 ? Response.json({ code: 1005 }, { status: 400 }) : Response.json({ code: 5000, msg: "x" }, { status: 500 });
+      },
+    });
+    // Attempt 1 quota (evidence), attempt 2 non-quota (inconclusive): the
+    // interrupted schedule must not disable the fall-through for later
+    // requests.
+    expect(calls).toBe(2);
+    expect(result.status).toBe(400);
+    expect(auth.canResendCredential(cred)).toBe(true);
+  });
+
   it("expires the legacy same-account retry memo at its cooldown", () => {
     // Driven through the AuthManager clock seam — no real timers needed.
     let now = 1_000_000;

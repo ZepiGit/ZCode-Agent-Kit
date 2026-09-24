@@ -155,11 +155,12 @@ export async function recoverAndMapUpstream(opts: {
   const quotaEnvelope = envelope !== null && [1005, 1113].includes(envelope.code ?? -1);
   if (quotaEnvelope && !streaming && !opts.signal.aborted) {
     let confirmedExhausted = false;
+    let scheduleCompleted = true;
     for (const [index, delayMs] of quotaRetryDelays(opts.quotaRetryDelaysMs).entries()) {
       const retryAdmitted = activeHandle
         ? opts.auth.canResendCredential?.(activeHandle) ?? false
         : opts.auth.canResendCredential?.(activeCredential) ?? false;
-      if (!retryAdmitted) break;
+      if (!retryAdmitted) { scheduleCompleted = false; break; }
       await abortableDelay(delayMs, opts.signal);
       // Re-admit after the wait: a concurrent quarantine, pause, credential
       // replace, removal or a remembered failed retry must not send again.
@@ -167,7 +168,7 @@ export async function recoverAndMapUpstream(opts: {
         && (activeHandle
           ? opts.auth.canResendCredential?.(activeHandle) ?? false
           : opts.auth.canResendCredential?.(activeCredential) ?? false);
-      if (!readmitted) break;
+      if (!readmitted) { scheduleCompleted = false; break; }
       const accountLabel = activeHandle?.id
         ?? (opts.auth.isAccountPoolEnabled?.() ? "pool" : "single-account");
       console.log(`[quota-retry] account ${accountLabel}: same-account resend ${index + 1} after ${delayMs}ms`);
@@ -189,6 +190,7 @@ export async function recoverAndMapUpstream(opts: {
           streaming = retriedStreaming;
         } else {
           void retried.body?.cancel().catch(() => {});
+          scheduleCompleted = false;
           break;
         }
         if (!retriedQuota) break; // served from a package with balance — done
@@ -197,14 +199,15 @@ export async function recoverAndMapUpstream(opts: {
       } catch {
         // The retry could not be sent (connect or captcha failure): keep the
         // current quota envelope so rotation below is not lost.
+        scheduleCompleted = false;
         break;
       }
     }
-    // Memoize only proven exhaustion: the memo requires that a SENT retry
-    // itself returned a quota envelope. An aborted, admission-denied or
-    // non-quota-failed schedule never reaches this with evidence, so it must
-    // not disable the package fall-through for later requests.
-    if (confirmedExhausted && envelope !== null && [1005, 1113].includes(envelope.code ?? -1)) {
+    // Memoize only proven exhaustion across a FULLY run schedule: a sent
+    // retry must have returned a quota envelope and no abort, admission
+    // denial, non-quota failure or transport error may have interrupted the
+    // schedule — an interrupted one is inconclusive, not evidence.
+    if (scheduleCompleted && confirmedExhausted && envelope !== null && [1005, 1113].includes(envelope.code ?? -1)) {
       opts.auth.blockSameCredentialRetry?.(activeHandle ?? activeCredential, envelope.resetAt);
     }
   }
