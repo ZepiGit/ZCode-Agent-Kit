@@ -16,7 +16,7 @@
 //   zcode-kit accounts remove|pause|resume ID [--yes]
 //   zcode-kit accounts explain --model MODEL --operation OP
 //   zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
-//   zcode-kit update [--version vX.Y.Z]          checkout installs only; --version = release tag
+//   zcode-kit update [--version vX.Y.Z]          checkout: fast-forward; npm: npm install; release: verified tarball mirror
 //   zcode-kit rollback [tx-id]
 //   zcode-kit uninstall
 //
@@ -33,11 +33,22 @@ import { spawnSync } from "node:child_process";
 import { runCommandSync, resolveBun } from "../lib/process.mjs";
 import { proxyEnv } from "../lib/proxy-env.mjs";
 import { ensureState } from "../lib/state.mjs";
+import {
+  detectInstallType,
+  downloadRelease,
+  extractTarball,
+  installedVersion,
+  mirrorTree,
+  repoFromPackage,
+  resolveLatestTag,
+  stripV,
+} from "../lib/self-update.mjs";
 import { commitFile, ensureDir } from "../lib/edit.mjs";
 import { launchHarness } from "./launch.mjs";
 import { askAccountRotator, configureAccountRotator, restartForAccountChange, rotatorChoice } from "./account-setup.mjs";
 import { setupOutput } from "./setup-output.mjs";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -114,6 +125,7 @@ function usage(code) {
   zcode-kit accounts explain --model MODEL --operation OP
   zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
+  (update keeps .proxykey, proxy/config.yaml, logs, backups, generated and node_modules)
   (setup: --harness <list> limits adapters AND MCP registration; --no-mcp skips registration)
   (setup: --account-rotator y|n for unattended installs; --verbose for full installer output)
 
@@ -597,62 +609,162 @@ async function cmdAccounts() {
 }
 
 // ------------------------------------------------------------------ update
+// Three installation shapes, three update paths — update picks by layout:
+//   checkout (.git present): git fetch + fast-forward to origin/main or a tag.
+//   npm (node_modules/zcode-agent-kit): npm replaces the global package.
+//   release tarball: download the published archive, verify its SHA-256
+//     against checksums.txt, then mirror it over the installation while
+//     keeping machine-local state (.proxykey, proxy/config.yaml, logs,
+//     backups, generated, node_modules). Download, verification and
+//     extraction all happen before the first installation file is touched.
+// Every path stops a running proxy first and re-runs setup afterwards, so
+// integrations and the proxy come back on the updated code.
 async function cmdUpdate() {
-  // AUD-009: a tarball install has no .git — the git flow below would fail
-  // with a confusing fetch error. State the actual update path instead.
-  if (!existsSync(join(ROOT, ".git"))) {
-    console.error("update: this is a tarball/pinned-release install (no .git) — it cannot self-update via git.");
-    console.error(`  To update: re-run the installer for the new release, or re-download and extract the release tarball to ${ROOT}.`);
-    return 2;
-  }
-  // Conservative by design: refuses on a dirty tree; fast-forward only.
-  // V1-01: a missing git must be reported, not mistaken for a clean tree.
-  const dirty = runCommandSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" });
-  if (dirty.error || dirty.status !== 0) {
-    console.error(`update: cannot run git (${dirty.error?.message ?? `exit ${dirty.status}`}) — install git or re-run the installer.`);
-    return 2;
-  }
-  if ((dirty.stdout ?? "").trim().length > 0) {
-    console.error("update: working tree has changes — commit or stash first (refusing to mix user changes into an update).");
-    return 2;
-  }
-  // A-13/B-19: --version selects a release TAG (vX.Y.Z), never a branch; a
-  // bare --version has no value to select.
+  ensureState(ctx);
+  const type = detectInstallType(ROOT);
   const wanted = flags.version === true ? "" : String(flags.version ?? "");
   if (flags.version !== undefined && !/^v?\d+\.\d+\.\d+$/.test(wanted)) {
     console.error(`update: --version expects a release tag like v0.2.11${wanted ? ` (got "${wanted}")` : ""}.`);
     return 2;
   }
-  const fetch = runCommandSync("git", ["fetch", "--tags", "origin"], { cwd: ROOT, stdio: "inherit" });
-  if (fetch.error || fetch.status !== 0) {
-    console.error(`update: git fetch failed${fetch.error ? ` (${fetch.error.message})` : ""}.`);
-    return fetch.status ?? 2;
-  }
-  let target = "origin/main";
-  if (wanted) {
-    const tag = wanted.startsWith("v") ? wanted : `v${wanted}`;
-    const known = runCommandSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${tag}^{commit}`], { cwd: ROOT, encoding: "utf8" });
-    if (known.error || known.status !== 0) {
-      console.error(`update: release tag ${tag} does not exist on origin.`);
+  const pin = wanted ? `v${wanted.replace(/^v/, "")}` : null;
+  const harnessArgs = [
+    ...(flags.harness ? ["--harness", String(flags.harness)] : []),
+    ...(flags["no-mcp"] ? ["--no-mcp"] : []),
+  ];
+
+  if (type === "checkout") {
+    // Conservative by design: refuses on a dirty tree; fast-forward only.
+    // V1-01: a missing git must be reported, not mistaken for a clean tree.
+    const dirty = runCommandSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" });
+    if (dirty.error || dirty.status !== 0) {
+      console.error(`update: cannot run git (${dirty.error?.message ?? `exit ${dirty.status}`}) — install git or re-run the installer.`);
       return 2;
     }
-    target = `refs/tags/${tag}`;
+    if ((dirty.stdout ?? "").trim().length > 0) {
+      console.error("update: working tree has changes — commit or stash first (refusing to mix user changes into an update).");
+      return 2;
+    }
+    const fetch = runCommandSync("git", ["fetch", "--tags", "origin"], { cwd: ROOT, stdio: "inherit" });
+    if (fetch.error || fetch.status !== 0) {
+      console.error(`update: git fetch failed${fetch.error ? ` (${fetch.error.message})` : ""}.`);
+      return fetch.status ?? 2;
+    }
+    let target = "origin/main";
+    if (pin) {
+      const known = runCommandSync("git", ["rev-parse", "--verify", "--quiet", `refs/tags/${pin}^{commit}`], { cwd: ROOT, encoding: "utf8" });
+      if (known.error || known.status !== 0) {
+        console.error(`update: release tag ${pin} does not exist on origin.`);
+        return 2;
+      }
+      target = `refs/tags/${pin}`;
+    }
+    stopProxyIfRunning();
+    const merge = runCommandSync("git", ["merge", "--ff-only", target], { cwd: ROOT, stdio: "inherit" });
+    if (merge.error || merge.status !== 0) {
+      console.error("update: fast-forward not possible (history diverged). Resolve manually — the kit never force-updates.");
+      return merge.status ?? 2;
+    }
+    return finishUpdate(harnessArgs);
   }
-  const merge = runCommandSync("git", ["merge", "--ff-only", target], { cwd: ROOT, stdio: "inherit" });
-  if (merge.error || merge.status !== 0) {
-    console.error("update: fast-forward not possible (history diverged). Resolve manually — the kit never force-updates.");
-    return merge.status ?? 2;
+
+  if (type === "npm") {
+    const tag = pin ?? await resolveTargetTag();
+    if (!tag) return 2;
+    const installed = installedVersion(ROOT);
+    if (!pin && installed && stripV(tag) === installed) {
+      console.log(`update: already at v${installed} (latest). Nothing to do.`);
+      return 0;
+    }
+    stopProxyIfRunning();
+    const res = runCommandSync("npm", ["install", "-g", `zcode-agent-kit@${stripV(tag)}`], { stdio: "inherit" });
+    if (res.error || res.status !== 0) {
+      console.error(`update: npm install failed${res.error ? ` (${res.error.message})` : ""}. Run it manually: npm install -g zcode-agent-kit@${stripV(tag)}`);
+      return res.status ?? 2;
+    }
+    return finishUpdate(harnessArgs);
   }
+
+  const tag = pin ?? await resolveTargetTag();
+  if (!tag) return 2;
+  const installed = installedVersion(ROOT);
+  if (!pin && installed && stripV(tag) === installed) {
+    console.log(`update: already at v${installed} (latest). Nothing to do.`);
+    return 0;
+  }
+  const tmp = mkdtempSync(join(tmpdir(), "zcode-kit-update-"));
+  let txId = null;
+  try {
+    console.log(`update: downloading ${tag} ...`);
+    const archive = await downloadRelease(repoFromPackage(ROOT), tag, tmp);
+    const src = extractTarball(archive, join(tmp, "out"));
+    const releaseVersion = installedVersion(src);
+    if (releaseVersion !== stripV(tag)) {
+      console.error(`update: archive sanity check failed (package version ${releaseVersion ?? "unknown"} != ${stripV(tag)}).`);
+      return 2;
+    }
+    console.log(`update: verified ${tag} (sha256) — updating ${installed ? `v${installed} ` : ""}→ ${tag}`);
+    stopProxyIfRunning();
+    acquireLock(BACKUP_DIR);
+    let tx;
+    try {
+      tx = beginTransaction(BACKUP_DIR, `zcode-kit update ${tag}`);
+      tx.external(
+        `kit files updated to ${tag}`,
+        `re-apply the previous release: zcode-kit update --version ${installed ? `v${installed}` : "<previous>"} (or re-run the installer)`,
+      );
+      const { copied, deleted } = mirrorTree(src, ROOT);
+      tx.finish();
+      txId = tx.id;
+      console.log(`update: applied ${tag} (${copied} files updated, ${deleted} removed)`);
+    } catch (err) {
+      // Record the interrupted transaction so zcode-kit rollback can list it.
+      try { if (tx) tx.finish(); } catch { /* journal already persisted per op */ }
+      throw err;
+    } finally {
+      releaseLock(join(BACKUP_DIR, ".setup-lock"));
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  return finishUpdate(harnessArgs, txId);
+}
+
+async function resolveTargetTag() {
+  try {
+    return await resolveLatestTag(repoFromPackage(ROOT));
+  } catch (err) {
+    console.error(`update: could not resolve the latest release (${err.message}).`);
+    console.error("  Pin one explicitly: zcode-kit update --version vX.Y.Z");
+    return null;
+  }
+}
+
+function stopProxyIfRunning() {
+  // The manager owns identity proofs: a foreign service on the port is left
+  // alone (exit 3) and update continues — mirroring kit files does not touch it.
+  const res = spawnSync(process.execPath, [join(ROOT, "proxy", "zcode-proxy-manager.mjs"), "stop"], { stdio: "inherit" });
+  if (res.status !== 0 && res.status !== 3) {
+    console.error(`update: proxy stop reported exit ${res.status ?? "unknown"} — continuing; the proxy may need a manual restart.`);
+  }
+}
+
+function finishUpdate(harnessArgs, txId = null) {
   console.log("update: re-applying integrations for detected harnesses...");
-  // Audit H3: update only ever reaches this point from a checkout (the tarball
-  // path returns above), and explicitly running `update` IS the opt-in the
-  // checkout-write guard asks for. Without this, the re-setup step always died
-  // on the guard and update could never finish by design.
-  process.env.ZCODE_KIT_ALLOW_CHECKOUT = "1";
-  // Re-setup in a fresh process so the updated modules (not the ones already
-  // loaded by this process) apply the integrations.
-  const res = spawnSync(process.execPath, [join(ROOT, "cli", "zcode-kit.mjs"), "setup", ...(flags.harness ? ["--harness", String(flags.harness)] : []), ...(flags["no-mcp"] ? ["--no-mcp"] : [])], { cwd: ROOT, stdio: "inherit", env: process.env });
-  return res.status ?? 2;
+  // Audit H3: explicitly running `update` IS the opt-in the checkout-write
+  // guard asks for. Fresh process so the updated modules (not the ones
+  // already loaded by this process) apply the integrations.
+  const res = spawnSync(process.execPath, [join(ROOT, "cli", "zcode-kit.mjs"), "setup", ...harnessArgs], {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: { ...process.env, ZCODE_KIT_ALLOW_CHECKOUT: "1" },
+  });
+  if (res.status !== 0) {
+    console.error("update: setup failed — the kit files are updated; inspect the output above and rerun `zcode-kit setup`.");
+    return res.status ?? 2;
+  }
+  if (txId) console.log(`transaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
+  return 0;
 }
 
 // ---------------------------------------------------------------- rollback

@@ -173,10 +173,10 @@ zcode-kit auth status
 
 **更新:**
 
-- リリース版のインストール: 同じ専用のインストール先で同じリリース版インストーラーを再実行します。最新版を使う場合、古い `ZCODE_KIT_VERSION` の固定指定は削除してください。
-- npm インストール: `npm install -g zcode-agent-kit@latest` を実行してから、その npm インストールの `zcode-kit setup --harness auto --installer` を実行します。
+- どのインストール形態でも `zcode-kit update` を実行できます。リリース版インストールは最新リリースをダウンロードし、SHA-256 で検証してから同一ディレクトリ内で更新し、プロキシキー・設定・ログ・バックアップ・アカウントを保持します。npm インストールは npm のインストールを再実行し、git チェックアウトは `origin/main` へ fast-forward します。バージョンを固定するには `zcode-kit update --version vX.Y.Z` を使います。
+- 手動の代替手段: 同じ専用のインストール先で同じリリース版インストーラーを再実行する（最新版を使う場合、古い `ZCODE_KIT_VERSION` の固定指定は削除）。npm の場合は `npm install -g zcode-agent-kit@latest` を実行してから、その npm インストールで `zcode-kit setup --harness auto --installer` を実行します。
 
-更新時も同じインストール方法を使用してください。
+`update` はプロキシを再起動するため、新しいコードが実際に使われます。更新時も同じインストール方法を使用してください。
 
 **統合の削除:** プロキシを止め（`zcode-kit proxy stop`、上記参照）、`zcode-kit uninstall` を実行します。インストール先、依存関係、ログ、プロキシキー、共有の認証情報は残ります。Desktop からログアウトするわけではありません。残ったファイルを削除する前に確認してください。
 
