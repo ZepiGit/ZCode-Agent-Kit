@@ -176,7 +176,7 @@ zcode-kit auth status
 - 任何安装方式都可以直接运行 `zcode-kit update`。正式版安装会下载最新版本、校验（SHA-256）后就地更新，并保留代理密钥、配置、日志、备份和账号；npm 安装会重新执行 npm 安装；git 检出会快进到 `origin/main`。需要固定版本时使用 `zcode-kit update --version vX.Y.Z`。
 - 手动备选：用相同的专用目标目录重新运行同一个正式版安装器（如果想要最新版本，请移除旧的 `ZCODE_KIT_VERSION` 版本固定设置）；npm 安装则运行 `npm install -g zcode-agent-kit@latest`，随后从该 npm 安装运行 `zcode-kit setup --harness auto --installer`。
 
-`update` 会重启代理，确保实际运行的是新代码。更新时保持使用同一种安装方式。
+`update` 会在改动文件前停止代理，完成后重新启动——命令返回时，代理已经在运行更新后的代码。更新时保持使用同一种安装方式。
 
 **移除集成：**停止代理（`zcode-kit proxy stop`，见上文），再运行 `zcode-kit uninstall`。安装目录、依赖项、日志、代理密钥和共享凭据仍会保留；Desktop 不会因此退出登录。删除剩余文件前请先检查。
 

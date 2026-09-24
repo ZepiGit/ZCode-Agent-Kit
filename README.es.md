@@ -176,7 +176,7 @@ Mantén el proxy en localhost y no compartas `.proxykey`, las credenciales ni lo
 - Cualquier instalación: ejecuta `zcode-kit update`. Una instalación de versión publicada descarga la versión más reciente, la verifica (SHA-256), se actualiza en el mismo directorio y conserva tu clave del proxy, configuración, registros, copias y cuentas; una instalación npm vuelve a ejecutar la instalación de npm; un checkout de git avanza rápido a `origin/main`. Fija una versión con `zcode-kit update --version vX.Y.Z`.
 - Alternativa manual: vuelve a ejecutar el mismo instalador con el mismo destino específico (elimina una fijación anterior de `ZCODE_KIT_VERSION` si quieres la versión más reciente), o para npm ejecuta `npm install -g zcode-agent-kit@latest` y después `zcode-kit setup --harness auto --installer` desde esa instalación npm.
 
-`update` reinicia el proxy para que realmente se use el código nuevo. Conserva el mismo método de instalación al actualizar.
+`update` detiene el proxy antes de tocar archivos y lo reinicia después — cuando el comando termina, el proxy ejecuta el código actualizado. Conserva el mismo método de instalación al actualizar.
 
 **Quitar integraciones:** detén tu proxy (`zcode-kit proxy stop`, ver arriba) y ejecuta `zcode-kit uninstall`. Se conservan la carpeta de instalación, dependencias, registros, claves del proxy y credenciales compartidas; la sesión de Desktop sigue iniciada. Inspecciona los archivos restantes antes de borrar nada.
 

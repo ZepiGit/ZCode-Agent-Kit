@@ -165,10 +165,12 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
   mkdirSync(join(checkout, "proxy"), { recursive: true });
   // Minimal runnable kit: the fixture copy is the code under test, so a
   // regression of the fix fails here immediately. The live proxy/config.yaml
-  // (real key) is deliberately NOT copied — only the example scaffold.
+  // (real key) is deliberately NOT copied — only the example scaffold. The
+  // stub manager pins the restart contract: update must invoke it.
   cpSync(join(KIT, "cli"), join(checkout, "cli"), { recursive: true });
   cpSync(join(KIT, "lib"), join(checkout, "lib"), { recursive: true });
   cpSync(join(KIT, "proxy", "config.example.yaml"), join(checkout, "proxy", "config.example.yaml"));
+  writeFileSync(join(checkout, "proxy", "zcode-proxy-manager.mjs"), "console.log('stub manager start invoked');\n");
   const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8" });
   try {
     git(["init", "-b", "main"], checkout);
@@ -193,6 +195,8 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
       encoding: "utf8",
     });
     assert.match(out, /re-applying integrations for detected harnesses/);
+    assert.match(out, /starting the proxy on the updated code/, "update must restart the proxy after re-setup");
+    assert.match(out, /stub manager start invoked/);
     assert.doesNotMatch(out, /refusing to write user configs from a source checkout/);
     assert.ok(existsSync(join(checkout, ".proxykey")), "re-setup must have bootstrapped from the checkout root");
   } finally {

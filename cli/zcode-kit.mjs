@@ -617,8 +617,9 @@ async function cmdAccounts() {
 //     keeping machine-local state (.proxykey, proxy/config.yaml, logs,
 //     backups, generated, node_modules). Download, verification and
 //     extraction all happen before the first installation file is touched.
-// Every path stops a running proxy first and re-runs setup afterwards, so
-// integrations and the proxy come back on the updated code.
+// Every path stops a running proxy first, re-runs setup afterwards and then
+// restarts the proxy: when update returns, the proxy is running the updated
+// code (a failed restart carries the manager's exit code).
 async function cmdUpdate() {
   ensureState(ctx);
   const type = detectInstallType(ROOT);
@@ -762,6 +763,24 @@ function finishUpdate(harnessArgs, txId = null) {
   if (res.status !== 0) {
     console.error("update: setup failed — the kit files are updated; inspect the output above and rerun `zcode-kit setup`.");
     return res.status ?? 2;
+  }
+  // update stopped the proxy before mutating files, so it must come back
+  // here: an update that returns with a dead proxy is not done. The
+  // manager `start` is idempotent (already-running exits 0) and safe-starts
+  // with full ownership proofs; failures carry its exit code. A kit layout
+  // without the proxy manager (minimal fixtures, tooling checkouts) skips
+  // the start — there is no proxy component to restart.
+  const managerPath = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
+  if (!existsSync(managerPath)) {
+    console.log("update: no proxy manager in this kit layout — skipping the proxy start.");
+    if (txId) console.log(`transaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
+    return 0;
+  }
+  console.log("update: starting the proxy on the updated code...");
+  const started = spawnSync(process.execPath, [managerPath, "start"], { stdio: "inherit" });
+  if (started.status !== 0) {
+    console.error("update: the proxy did not start — the kit files are updated; run `zcode-kit doctor` (the exit code carries the reason).");
+    return started.status ?? 2;
   }
   if (txId) console.log(`transaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
   return 0;
