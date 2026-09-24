@@ -37,15 +37,18 @@ async function api() {
 function snapshot(errors = []) {
   return { provider: 'zai', serverTime: 1700000000, jwt: { ageHours: 1, issuedAt: 1699996400 }, balances: [], claimablePlans: [], errors, asOf: '2023-11-14T22:13:20.000Z', cached: false };
 }
-async function mock(t, ctx, { code, foreign = false, hang = false, smokeCode, quotaBody, smokeReply } = {}) {
+async function mock(t, ctx, { code, foreign = false, hang = false, smokeCode, quotaBody, smokeReply, smokeStatus, healthDetails } = {}) {
   const hits = [];
+  let smokes = 0;
   const server = http.createServer(async (req, res) => {
     hits.push(req.url);
     const chunks = []; for await (const chunk of req) chunks.push(chunk);
     let input = {}; try { input = JSON.parse(Buffer.concat(chunks).toString()); } catch {}
     if (foreign || req.headers.authorization !== `Bearer ${KEY}`) return res.writeHead(401).end('{}');
-    if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok', provider: 'zai' }));
+    if (req.url === '/health') return res.end(JSON.stringify({ status: 'ok', provider: 'zai', ...(healthDetails ? { details: healthDetails() } : {}) }));
     if (hang) return;
+    const status = req.url === '/v1/chat/completions' ? smokeStatus?.(++smokes) : undefined;
+    if (status) return res.writeHead(status).end(JSON.stringify({ error: { type: 'upstream_error', message: 'SECRET-should-not-be-logged' } }));
     const body = req.url === '/quota'
       ? quotaBody ?? snapshot(code ? [`balance: ${code} SECRET-should-not-be-logged`] : [])
       : smokeCode ? { error: { type: 'upstream_error', message: `[${smokeCode}] SECRET-should-not-be-logged` } }
@@ -239,6 +242,33 @@ test('setup smoke is one bounded minimal request and explicit opt-out skips all 
   assert.equal((await setupSmoke(ctx, { env: {} })).code, 0);
   assert.equal(hits.filter(p => p === '/v1/chat/completions').length, 1);
 });
+test('setup smoke retries exactly once, and only after a non-quota failure', async t => {
+  const { setupSmoke } = await api();
+  const smokes = hits => hits.filter(p => p === '/v1/chat/completions').length;
+  for (const [status, expectedCode, expectedRequests] of [[502, 0, 2], [400, 0, 2]]) {
+    const ctx = fixture(t); const hits = await mock(t, ctx, { smokeStatus: n => n === 1 ? status : 0 });
+    assert.equal((await setupSmoke(ctx, { env: {} })).code, expectedCode, `transient HTTP ${status} recovers on the retry`);
+    assert.equal(smokes(hits), expectedRequests);
+  }
+  const failing = fixture(t); const failHits = await mock(t, failing, { smokeStatus: () => 503 });
+  assert.equal((await setupSmoke(failing, { env: {} })).code, 1);
+  assert.equal(smokes(failHits), 2, 'never more than one retry');
+  const quota = fixture(t); const quotaHits = await mock(t, quota, { smokeCode: 1113 });
+  assert.equal((await setupSmoke(quota, { env: {} })).cause, 'balance1113');
+  assert.equal(smokes(quotaHits), 1, 'a quota verdict is final: no retry');
+});
+test('setup smoke waits for a captcha token before its single request and tolerates old proxies', async t => {
+  const { setupSmoke } = await api();
+  const ctx = fixture(t); let polls = 0;
+  const hits = await mock(t, ctx, { healthDetails: () => ({ rssMB: 100, captcha: { ready: ++polls >= 3 ? 1 : 0, target: 1 } }) });
+  assert.equal((await setupSmoke(ctx, { env: {}, pollMs: 10 })).code, 0);
+  assert.ok(polls >= 3, 'readiness is polled until a token is ready');
+  assert.ok(hits.lastIndexOf('/health') < hits.indexOf('/v1/chat/completions'), 'the request follows readiness');
+  assert.equal(hits.filter(p => p === '/v1/chat/completions').length, 1);
+  const unloaded = fixture(t); const unloadedHits = await mock(t, unloaded, { healthDetails: () => ({ captcha: null }) });
+  assert.equal((await setupSmoke(unloaded, { env: {}, pollMs: 10 })).code, 0);
+  assert.equal(unloadedHits.filter(p => p === '/v1/chat/completions').length, 1);
+});
 test('setup smoke rejects empty or unfinished choices instead of declaring connectivity', async t => {
   const ctx = fixture(t);
   await mock(t, ctx, { smokeReply: { choices: [{ message: { role: 'assistant', content: '' }, finish_reason: null }] } });
@@ -349,6 +379,21 @@ test('OMP launches native Node with literal spaced paths, kit cwd and determinis
   assert.deepEqual(launch.args, ['--diagnostic-code']);
   assert.equal(launch.path, nativeDir);
   assert.deepEqual(warnings, [], 'arbitrary child output must not become diagnostics');
+});
+
+test('OMP surfaces a hung-proxy recovery alongside the quota warning, and nothing else', async t => {
+  const ctx = childPreflight(t, `
+    console.error('[zcode-preflight] cause=hung');
+    console.error('[zcode-preflight] cause=auth3012');
+    console.error('Bearer SECRET [zcode-preflight] cause=hung');
+  `);
+  const { runSessionPreflight, PREFLIGHT_WARNINGS } = await api();
+  const warnings = [];
+  await runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx), warn: message => warnings.push(message) });
+  assert.deepEqual(warnings, [
+    `[zcode-autostart] hung: ${PREFLIGHT_WARNINGS.hung}`,
+    `[zcode-autostart] auth3012: ${PREFLIGHT_WARNINGS.auth3012}`,
+  ]);
 });
 
 test('OMP ignores Windows shell shims during native runtime discovery', { skip: process.platform !== 'win32' }, async t => {

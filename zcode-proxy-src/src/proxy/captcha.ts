@@ -13,7 +13,8 @@
  * correlates fingerprint stability across requests; randomizing per-solve
  * flags it as `verifyCode: F001`. See captcha-happy.ts.
  */
-import { shutdownCaptchaSolver } from "./captcha-solver.js";
+import { requestCaptchaSolverRecycle, shutdownCaptchaSolver } from "./captcha-solver.js";
+import { registerCaptchaRuntime } from "../runtime/health-monitor.js";
 import {
   configureCaptchaPool,
   getCaptchaPoolStats,
@@ -24,6 +25,24 @@ import {
   urgentCaptchaRefill,
   type CaptchaConfig,
 } from "./captcha-pool.js";
+
+// /health must never import this module (it would start the solver machinery
+// on a plain health probe), so the module announces itself instead.
+registerCaptchaRuntime({
+  stats: () => {
+    const s = getCaptchaPoolStats();
+    return {
+      ready: s.ready,
+      target: s.target,
+      activeSolves: s.activeSolves,
+      storm: s.storm,
+      mintSuccessRate10m: s.mintSuccessRate10m,
+      solver: s.solver,
+    };
+  },
+  recycle: (reason) => requestCaptchaSolverRecycle(reason),
+  shutdown: () => shutdownCaptcha(),
+});
 
 const CAPTCHA_HEADER = "x-aliyun-captcha-verify-param";
 const REGION_HEADER = "x-aliyun-captcha-verify-region";
@@ -79,8 +98,13 @@ export async function startCaptchaPool(appVersion: string): Promise<void> {
   if (!cfg || !cfg.enabled) return;
   // Use the pool's bounded defaults (warm 1, bank at most 4), or previously
   // supplied options. Only observed takes may grow the background target.
-  await prefillCaptchaPool(cfg as CaptchaConfig);
-  startCaptchaPoolRefill(cfg as CaptchaConfig);
+  try {
+    await prefillCaptchaPool(cfg as CaptchaConfig);
+  } finally {
+    // A failed warmup (provider pause, storm) must still arm the refill
+    // loop: it is what runs the storm probe and resumes after a pause.
+    startCaptchaPoolRefill(cfg as CaptchaConfig);
+  }
 }
 
 /** Request an urgent refill burst (e.g. after a challenge/retry). */

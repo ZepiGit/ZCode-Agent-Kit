@@ -5,8 +5,11 @@ import {
 } from "./captcha-cpu-governor.js";
 import {
   captchaSolverConcurrency,
+  getCaptchaSolverStats,
+  requestCaptchaSolverRecycle,
   runCaptchaSolve,
   shutdownCaptchaSolver,
+  type CaptchaSolverStats,
 } from "./captcha-solver.js";
 import { classifyCaptchaError, parseCertifyId } from "./captcha-token.js";
 
@@ -34,12 +37,8 @@ export interface CaptchaPoolOptions {
   /** Host CPU ceiling for captcha workers (default 100, 0 = off). */
   cpuLimitPercent?: number;
   cpuGovernorIntervalSec?: number;
-  /**
-   * Called when minting fails with an IP-level block ("too many captcha
-   * requests" family). The proxy wires this to the Telegram network reset so
-   * an Aliyun IP block self-heals instead of stranding the token pool.
-   */
-  onCaptchaIpBlock?: (reason: string) => void;
+  /** Clock for the mint-storm breaker (window + backoff). Tests inject a fake. */
+  now?: () => number;
 }
 
 type TokenEntry = { param: string; cachedAt: number; certifyId: string | null };
@@ -100,6 +99,26 @@ const EMPTY_TAKE_RACE = boundedEnvCount("CAPTCHA_EMPTY_TAKE_RACE", 1, 1);
 const SOLVE_RETRIES = Number(process.env.ZCODE_CAPTCHA_RETRIES || 4);
 const SCALE_UP_STEP = 20;
 const TAKE_RATE_WINDOW_MS = 120_000;
+// Mint-storm breaker. The 2026-09-24 incident was hours of back-to-back
+// failing mints (553 guest errors, 4 attempts × ~83 s each) that kept the
+// solver saturated and memory climbing while no request could be served.
+// Below 20 % success over ≥5 attempts, minting stops for an exponential
+// backoff and a single probe decides whether to resume.
+const STORM_WINDOW_MS = 600_000;
+const STORM_MIN_ATTEMPTS = 5;
+const STORM_MAX_SUCCESS_RATE = 0.2;
+const STORM_BACKOFF_BASE_MS = 60_000;
+const STORM_BACKOFF_MAX_MS = 600_000;
+const STORM_TAKE_ERROR = "captcha minting degraded (storm) — retry later";
+
+type StormState = { level: number; until: number; probing: boolean };
+
+/** A queued solve cancelled at admission because a storm began: not a mint. */
+class StormAdmissionCancelled extends Error {
+  constructor() {
+    super(STORM_TAKE_ERROR);
+  }
+}
 
 type ResolvedPoolOpts = {
   poolSizeMin: number;
@@ -113,7 +132,7 @@ type ResolvedPoolOpts = {
   staggerMs: number;
   solveConcurrency: number;
   emptyTakeRace: number;
-  onCaptchaIpBlock?: (reason: string) => void;
+  now: () => number;
 };
 
 function resolvePoolOpts(opts: CaptchaPoolOptions): ResolvedPoolOpts {
@@ -134,7 +153,7 @@ function resolvePoolOpts(opts: CaptchaPoolOptions): ResolvedPoolOpts {
     staggerMs: opts.staggerMs ?? DEFAULT_STAGGER_MS,
     solveConcurrency: opts.solveConcurrency ?? DEFAULT_SOLVE_CONCURRENCY,
     emptyTakeRace: Math.max(1, opts.emptyTakeRace ?? EMPTY_TAKE_RACE),
-    onCaptchaIpBlock: opts.onCaptchaIpBlock,
+    now: opts.now ?? Date.now,
   };
 }
 
@@ -152,12 +171,9 @@ export class CaptchaTokenPool {
   private takeTimestamps: number[] = [];
   private certifyIds: CertifyIdRegistry;
   private governor: CaptchaCpuGovernor | null = null;
-  // Mint-storm detection: sliding windows of failed vs successful mint
-  // attempts. A burst of failures with zero successes means velocity/IP
-  // flagging — fire the telegram IP reset automatically.
-  private mintFailures: number[] = [];
-  private mintSuccesses: number[] = [];
-  private lastStormResetAt = 0;
+  /** Per-attempt mint outcomes inside STORM_WINDOW_MS (breaker input). */
+  private mintOutcomes: Array<{ at: number; ok: boolean }> = [];
+  private storm: StormState | null = null;
 
   constructor(opts: CaptchaPoolOptions = {}) {
     this.opts = resolvePoolOpts(opts);
@@ -186,6 +202,9 @@ export class CaptchaTokenPool {
     max: number;
     activeSolves: number;
     solverWorkers: number;
+    storm: boolean;
+    mintSuccessRate10m: number;
+    solver: CaptchaSolverStats;
     cpu?: CpuGovernorSnapshot;
   } {
     this.pruneExpired();
@@ -196,6 +215,9 @@ export class CaptchaTokenPool {
       max: this.opts.poolSizeMax,
       activeSolves: this.activeSolves,
       solverWorkers: captchaSolverConcurrency(),
+      storm: this.storm !== null,
+      mintSuccessRate10m: this.mintSuccessRate(),
+      solver: getCaptchaSolverStats(),
       cpu: this.governor?.enabled ? this.governor.snapshot() : undefined,
     };
   }
@@ -237,6 +259,13 @@ export class CaptchaTokenPool {
     }
 
     this.onTokenTaken(true, 0);
+    if (this.storm) {
+      // Cached tokens were still served above; an empty pool must not park
+      // the client behind a mint that is almost certain to fail. The refill
+      // call runs the probe mint once the backoff has elapsed.
+      void this.refill({ urgent: true });
+      throw new Error(STORM_TAKE_ERROR);
+    }
     // Re-size immediately from current demand (this take is already in the
     // window) so an empty-pool arrival widens the buffer right away.
     this.effectiveTarget = Math.max(this.effectiveTarget, this.computeActiveTarget());
@@ -245,18 +274,18 @@ export class CaptchaTokenPool {
       // Overall deadline for the racing chain: during mint storms a racer can
       // grind through its retry budget (~30-45s) — cap the client-facing wait
       // and let the background waves finish the job instead.
-      const raceDeadlineMs = Number(process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS || 25_000);
-      param = await Promise.race([
-        this.solveRaced(cfg),
-        new Promise<never>((_, rej) =>
-          setTimeout(
-            () => rej(new Error(`captcha take deadline (${raceDeadlineMs}ms)`)),
-            Math.max(1_000, raceDeadlineMs),
-          ),
-        ),
-      ]);
+      const requestedMs = Number(process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS || 25_000);
+      const raceDeadlineMs = Number.isFinite(requestedMs) && requestedMs > 0
+        ? Math.min(90_000, Math.max(1_000, Math.floor(requestedMs))) : 25_000;
+      const timeout = Promise.withResolvers<never>();
+      const timer = setTimeout(() => timeout.reject(new Error(`captcha take deadline (${raceDeadlineMs}ms)`)), raceDeadlineMs);
+      try { param = await Promise.race([this.solveRaced(cfg), timeout.promise]); }
+      finally { clearTimeout(timer); }
     } catch (err) {
       if (Date.now() < this.pausedUntil) throw err;
+      // Storm began while this take raced: refills are paused, so the grace
+      // wait below could only time out.
+      if (this.storm) throw new Error(STORM_TAKE_ERROR);
       // Mints fail in clusters (pe-stall storms, F008 velocity). Background
       // refill waves keep retrying — give them a short window to land a
       // token before surfacing a failure to the client. This converts most
@@ -284,6 +313,8 @@ export class CaptchaTokenPool {
     const target = Math.min(count ?? this.effectiveTarget, this.effectiveTarget);
     while (this.tokens.length + this.activeSolves < target) {
       if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
+      // Warmup is best-effort; the refill loop owns the storm probe.
+      if (this.storm) break;
       const need = target - this.tokens.length - this.activeSolves;
       if (need <= 0) break;
       const concurrency = this.governor?.enabled
@@ -471,7 +502,12 @@ export class CaptchaTokenPool {
       if (this.tokens.length >= Math.max(this.currentFloor(), 1)) return;
     }
 
-    if (this.refillInFlight || Date.now() < this.pausedUntil) return;
+    if (Date.now() < this.pausedUntil) return;
+    if (this.storm) {
+      void this.probeStorm(this.cfg);
+      return;
+    }
+    if (this.refillInFlight) return;
 
     this.applyGovernorCaps();
 
@@ -500,7 +536,7 @@ export class CaptchaTokenPool {
   /** Fire up to `need` solves in parallel waves of solveConcurrency. */
   private async solveBatch(cfg: CaptchaConfig, need: number, concurrency = this.opts.solveConcurrency): Promise<void> {
     let remaining = need;
-    while (remaining > 0 && this.tokens.length + this.activeSolves < this.effectiveTarget) {
+    while (remaining > 0 && !this.storm && this.tokens.length + this.activeSolves < this.effectiveTarget) {
       const wave = Math.min(remaining, concurrency, this.deficit());
       if (wave <= 0) break;
       if (this.opts.staggerMs > 0) await this.waitForStagger();
@@ -527,87 +563,124 @@ export class CaptchaTokenPool {
     }
   }
 
-  private noteMintFailure(reason: string): void {
-    const now = Date.now();
-    this.mintFailures.push(now);
-    const cutoff = now - 360_000;
-    this.mintFailures = this.mintFailures.filter((t) => t > cutoff);
-    this.maybeFireMintStormReset(reason);
+  private noteMintOutcome(ok: boolean): void {
+    const now = this.opts.now();
+    this.mintOutcomes.push({ at: now, ok });
+    this.pruneMintOutcomes(now);
+    if (!ok && !this.storm) this.maybeEnterStorm(now);
   }
 
-  private noteMintSuccess(): void {
-    const now = Date.now();
-    this.mintSuccesses.push(now);
-    const cutoff = now - 360_000;
-    this.mintSuccesses = this.mintSuccesses.filter((t) => t > cutoff);
+  private pruneMintOutcomes(now: number): void {
+    const cutoff = now - STORM_WINDOW_MS;
+    while (this.mintOutcomes.length > 0 && this.mintOutcomes[0]!.at <= cutoff) this.mintOutcomes.shift();
   }
 
-  /** Velocity/IP flagging signature: many failed mints in the last 5 min
-   *  while nothing succeeded in the last 3. Fires the telegram IP reset at
-   *  most once per cooldown — requestCaptchaIpResetSync dedupes further. */
-  private maybeFireMintStormReset(latestReason: string): void {
-    const now = Date.now();
-    const fails = this.mintFailures.filter((t) => t > now - 300_000).length;
-    const succs = this.mintSuccesses.filter((t) => t > now - 180_000).length;
-    if (fails < 8 || succs > 0) return;
-    if (now - this.lastStormResetAt < 12 * 60_000) return;
-    this.lastStormResetAt = now;
+  /** Share of successful mint attempts in the last 10 min; 1 without data. */
+  private mintSuccessRate(): number {
+    this.pruneMintOutcomes(this.opts.now());
+    if (this.mintOutcomes.length === 0) return 1;
+    const ok = this.mintOutcomes.filter((o) => o.ok).length;
+    return ok / this.mintOutcomes.length;
+  }
+
+  private maybeEnterStorm(now: number): void {
+    const attempts = this.mintOutcomes.length;
+    if (attempts < STORM_MIN_ATTEMPTS) return;
+    const rate = this.mintSuccessRate();
+    if (rate >= STORM_MAX_SUCCESS_RATE) return;
+    this.storm = { level: 0, until: now + stormBackoffMs(0), probing: false };
     console.warn(
-      `[captcha] mint storm detected (${fails} failures/5min, ${succs} successes/3min; latest: ${latestReason.slice(0, 120)}) -> requesting IP reset`,
+      `[captcha] mint storm: ${Math.round(rate * 100)}% of ${attempts} mints succeeded in 10 min — ` +
+        `pausing minting for ${stormBackoffMs(0) / 1000}s and recycling the solver`,
     );
+    // A poisoned solver runtime (sticky DOM failure, bloated heap) is the
+    // cheapest cause to rule out; the worker restarts clean for the probe.
+    try { requestCaptchaSolverRecycle("storm"); } catch {}
+  }
+
+  /**
+   * One single-attempt mint after the backoff: success ends the storm and
+   * clears the outcome window, failure doubles the backoff (capped).
+   */
+  private async probeStorm(cfg: CaptchaConfig): Promise<void> {
+    const storm = this.storm;
+    if (!storm || storm.probing || this.opts.now() < storm.until) return;
+    storm.probing = true;
     try {
-      this.opts.onCaptchaIpBlock?.(`mint storm: ${fails} failed mints in 5min`);
-    } catch {
-      // callback is best-effort; never break the pool
+      const param = await this.solveFresh(cfg, { attempts: 1, probe: true });
+      this.storm = null;
+      this.mintOutcomes = [];
+      console.warn("[captcha] storm probe mint succeeded — minting resumed");
+      this.pushToken(param);
+    } catch (err) {
+      if (this.storm !== storm) return;
+      storm.level += 1;
+      storm.until = this.opts.now() + stormBackoffMs(storm.level);
+      console.warn(
+        `[captcha] storm probe mint failed — backing off ${stormBackoffMs(storm.level) / 1000}s: ` +
+          `${(err instanceof Error ? err.message : String(err)).slice(0, 160)}`,
+      );
+    } finally {
+      storm.probing = false;
     }
   }
 
-  private async solveFresh(cfg: CaptchaConfig): Promise<string> {
+  private async solveFresh(
+    cfg: CaptchaConfig,
+    mode: { attempts: number; probe: boolean } = { attempts: this.opts.solveRetries, probe: false },
+  ): Promise<string> {
     if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
     this.activeSolves += 1;
     this.lastSolveAt = Date.now();
     try {
       let lastErr: string | null = null;
-      let sawIpBlock = false;
-      for (let attempt = 1; attempt <= this.opts.solveRetries; attempt += 1) {
+      for (let attempt = 1; attempt <= mode.attempts; attempt += 1) {
         try {
           if (Date.now() < this.pausedUntil) break;
+          // A storm that began mid-chain stops the remaining retries; only
+          // the probe mints while it lasts.
+          if (this.storm && !mode.probe) {
+            lastErr = STORM_TAKE_ERROR;
+            break;
+          }
           const param = await runCaptchaSolve(cfg.sceneId, cfg.region, cfg.prefix, () => {
             if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
+            // Solves queued behind the one that tripped the storm must not
+            // run: only the single probe mints while it lasts.
+            if (this.storm && !mode.probe) throw new StormAdmissionCancelled();
           });
           if (!param) {
             lastErr = "solver returned empty";
+            if (!mode.probe) this.noteMintOutcome(false);
             continue;
           }
           if (this.isDuplicateParam(param)) {
             lastErr = `duplicate certifyId ${parseCertifyId(param) ?? "?"}`;
+            // Same outcome as an F008 error: the mint produced nothing usable.
+            if (!mode.probe) this.noteMintOutcome(false);
             continue;
           }
-          this.noteMintSuccess();
+          if (!mode.probe) this.noteMintOutcome(true);
           return param;
         } catch (err) {
+          if (err instanceof StormAdmissionCancelled) {
+            lastErr = err.message;
+            break;
+          }
           const category = classifyCaptchaError(err);
           lastErr = err instanceof Error ? err.message : 'captcha solver failure';
           if (category === 'duplicate') {
             lastErr = `duplicate certifyId (F008)`;
           } else if (category === 'rate-limit') {
-            sawIpBlock = true;
+            // Provider rate limits pause requests outright; do not change
+            // network identity or retry around them.
             this.pausedUntil = Math.max(this.pausedUntil, Date.now() + 300_000);
             break;
           }
-          this.noteMintFailure(lastErr);
+          if (!mode.probe) this.noteMintOutcome(false);
         }
       }
-      // Notify the caller while keeping further requests paused; do not change
-      // network identity or retry around provider rate limits.
-      if (sawIpBlock && this.opts.onCaptchaIpBlock && !/429/.test(lastErr ?? '')) {
-        try {
-          this.opts.onCaptchaIpBlock(lastErr ?? "captcha ip block");
-        } catch (_) {
-          // callback is best-effort; never let it break the pool
-        }
-      }
-      throw new Error(`captcha failed after ${this.opts.solveRetries} attempts: ${lastErr ?? "unknown"}`);
+      throw new Error(`captcha failed after ${mode.attempts} attempts: ${lastErr ?? "unknown"}`);
     } finally {
       this.activeSolves -= 1;
     }
@@ -675,6 +748,10 @@ export class CaptchaTokenPool {
   }
 }
 
+function stormBackoffMs(level: number): number {
+  return Math.min(STORM_BACKOFF_MAX_MS, STORM_BACKOFF_BASE_MS * 2 ** level);
+}
+
 export interface CaptchaConfig {
   enabled: boolean;
   prefix: string;
@@ -695,6 +772,9 @@ export function getCaptchaPoolStats(): {
   max?: number;
   activeSolves: number;
   solverWorkers?: number;
+  storm: boolean;
+  mintSuccessRate10m: number;
+  solver: CaptchaSolverStats;
 } {
   return pool.stats();
 }

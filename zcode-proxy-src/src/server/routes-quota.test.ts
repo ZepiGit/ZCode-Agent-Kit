@@ -382,6 +382,27 @@ describe("pool quota overview", () => {
     expect(result.totals).toEqual([{ showName: "Free", remainingUnits: 30, totalUnits: 200, usedUnits: 170, unitType: "token", independent: true }]);
     expect(result.totals.some((entry) => entry.showName === "Unknown")).toBe(false);
   });
+
+  it("bills and sums one upstream user once even when its aliases hold rotated tokens", async () => {
+    clearQuotaCache();
+    const subJwt = (sub: string, nonce: string) => `h.${Buffer.from(JSON.stringify({ sub, iat: IAT, nonce })).toString("base64url")}.s`;
+    const accounts: AccountProfile[] = [
+      { id: "desk", credential: { apiKey: "access", provider: "zai", userId: "user-s", jwt: subJwt("user-s", "a") }, plan: "start-plan" },
+      { id: "oauth", credential: { apiKey: "key", provider: "zai", userId: "user-s", jwt: subJwt("user-s", "b") }, plan: "start-plan" },
+      { id: "other", credential: { apiKey: "other", provider: "zai", jwt: subJwt("user-t", "c") }, plan: "start-plan" },
+    ];
+    let calls = 0;
+    const fetchImpl: typeof fetch = Object.assign(async (): Promise<Response> => {
+      calls++;
+      return new Response(JSON.stringify({ code: 0, data: { balances: [
+        { show_name: "Free", remaining_units: 10, total_units: 100, used_units: 90, unit_type: "token", independent: true },
+      ] } }), { status: 200 });
+    }, { preconnect: fetch.preconnect });
+    const result = await collectPoolQuotaSnapshot(makeConfig(), accounts, fetchImpl);
+    expect(calls).toBe(4);
+    expect(result.accounts.find((account) => account.accountId === "oauth")?.source).toBe("duplicate");
+    expect(result.totals[0]).toMatchObject({ remainingUnits: 20, totalUnits: 200 });
+  });
 });
 
 describe("GET /quota account pool", () => {

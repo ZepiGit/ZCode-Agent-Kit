@@ -103,7 +103,8 @@ function parseCurrentCredential(raw: string, provider: Credential["provider"], p
   if (!jwt) throw new Error("Desktop current start-plan credential unavailable.");
   checkJwt(jwt, true);
   // Credential requires apiKey, but start-plan authenticates with jwt only.
-  // No userId is inferred from unverified JWT claims for account deduplication.
+  // No userId is set from unverified JWT claims: userId is forwarded upstream.
+  // Deduplication reads the JWT subject separately (account-identity.ts).
   return { apiKey: accessToken, provider, jwt };
 }
 

@@ -12,6 +12,19 @@ its bundled integrations. It is not a security certification.
 - Some provider challenge flows can execute provider-supplied JavaScript
   without an operating-system sandbox. Treat that code as untrusted. Loopback
   binding and bearer authentication do not isolate it.
+- The CAPTCHA solver runs on a dedicated worker thread inside the proxy
+  process. This is responsiveness and lifecycle isolation only: a stuck solve
+  no longer blocks the proxy, and the worker can be ended at a deadline and
+  recycled. It is not an operating-system sandbox and adds no new permission
+  boundary; the worker has the same user, file-system, network, and credential
+  access as the proxy.
+- The kit manager terminates a non-answering proxy only when it proves it is
+  its own (past a 60-second startup grace, recorded start time and kit command
+  line match, repeated consecutive health checks fail). A process of unknown
+  ownership is never killed. Automatic restarts requested by the proxy's
+  watchdog or memory guard are limited to 3 per 15 minutes, and a leftover
+  start lock is never taken over automatically. Every stop or restart
+  interrupts connected clients.
 - Local configuration, credentials, keys, logs, and backups may contain
   sensitive data. Restrict access and remove secrets before sharing them.
   CAPTCHA debug diagnostics are metadata-only. The old bytecode-VM diagnostic
@@ -33,6 +46,16 @@ its bundled integrations. It is not a security certification.
 - Integrations run local assistant tools with the permissions of the current
   operating-system user. Review installer and setup actions before running
   them in environments with stricter security requirements.
+
+### Process recovery limits
+
+Windows recovery opens an OS process handle and compares that handle's creation
+time before terminating it; it does not terminate an unrelated PID-selected
+descendant tree. Other platforms currently recheck recorded identity immediately
+before signalling a numeric PID; that does not provide a kernel-atomic pidfd
+guarantee. Legacy Windows instances started with a relative script path cannot
+prove their installation path through CIM and are left for explicit operator
+inspection. Newly started instances use an absolute script path.
 
 ## Reporting a vulnerability
 

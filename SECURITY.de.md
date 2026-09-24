@@ -16,6 +16,21 @@ Sicherheitszertifizierung.
   ohne Betriebssystem-Sandbox ausführen. Behandle diesen Code als nicht
   vertrauenswürdig. Loopback-Bindung und Bearer-Authentifizierung isolieren ihn
   nicht.
+- Der CAPTCHA-Solver läuft in einem eigenen Worker-Thread innerhalb des
+  Proxy-Prozesses. Das ist ausschließlich eine Isolation für
+  Reaktionsfähigkeit und Lebenszyklus: Eine hängende Lösung blockiert den
+  Proxy nicht mehr, und der Worker kann bei Fristablauf beendet und neu
+  gestartet werden. Es ist keine Betriebssystem-Sandbox und schafft keine neue
+  Berechtigungsgrenze; der Worker hat dieselben Nutzer-, Dateisystem-,
+  Netzwerk- und Zugangsdatenrechte wie der Proxy.
+- Der Kit-Manager beendet einen nicht antwortenden Proxy nur, wenn er ihn als
+  eigenen nachweist (nach einer Startfrist von 60 Sekunden, übereinstimmende
+  aufgezeichnete Startzeit und Kit-Befehlszeile, wiederholt aufeinanderfolgend
+  fehlgeschlagene Gesundheitsprüfungen). Ein Prozess mit unbekanntem Besitzer
+  wird nie beendet. Automatische Neustarts auf Anforderung von Watchdog oder
+  Speicherwächter des Proxys sind auf 3 pro 15 Minuten begrenzt, und eine
+  zurückgebliebene Startsperre wird nie automatisch übernommen. Jeder Stopp
+  oder Neustart unterbricht verbundene Clients.
 - Lokale Konfigurationen, Zugangsdaten, Schlüssel, Logs und Backups können
   sensible Daten enthalten. Beschränke den Zugriff und entferne Geheimnisse,
   bevor du solche Daten weitergibst. CAPTCHA-Debug-Diagnosen enthalten nur
@@ -41,6 +56,17 @@ Sicherheitszertifizierung.
 - Integrationen starten lokale Assistenten mit den Berechtigungen des aktuellen
   Betriebssystem-Nutzers. Prüfe Installer- und Setup-Aktionen, bevor du sie in
   Umgebungen mit strengeren Sicherheitsanforderungen ausführst.
+
+### Grenzen der Prozesswiederherstellung
+
+Unter Windows öffnet die Wiederherstellung einen Betriebssystem-Prozesshandle
+und vergleicht dessen Erstellungszeit vor dem Beenden. Fremde, nur über eine PID
+zugeordnete Nachkommen werden nicht pauschal beendet. Andere Plattformen prüfen
+die gespeicherte Identität unmittelbar vor dem PID-Signal erneut; das bietet
+keine kernel-atomare pidfd-Garantie. Bei alten Windows-Instanzen mit relativem
+Skriptpfad kann CIM den Installationspfad nicht bestätigen: Sie bleiben zur
+expliziten Prüfung durch den Betreiber unangetastet. Neue Instanzen starten
+mit absolutem Skriptpfad.
 
 ## Schwachstellen melden
 

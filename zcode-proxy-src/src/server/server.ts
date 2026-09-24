@@ -21,6 +21,7 @@ import { handleQuota } from "./routes-quota.js";
 import { collectPoolQuotaSnapshot } from "./routes-quota.js";
 import { loadAccountStore } from "../auth/account-store.js";
 import { errorResponse } from "../proxy/handler.js";
+import { healthDetails } from "../runtime/health-monitor.js";
 import type { ResponseStore } from "../responses/store.js";
 
 interface ServerOptions {
@@ -186,7 +187,9 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     }
 
     if (path === "/health" || path === "/") {
-      return new Response(JSON.stringify({ status: "ok", provider: config.provider }), {
+      // `details` is additive and synchronous: the kit manager's hung-proxy
+      // detection relies on /health answering whenever the loop runs at all.
+      return new Response(JSON.stringify({ status: "ok", provider: config.provider, details: healthDetails() }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });

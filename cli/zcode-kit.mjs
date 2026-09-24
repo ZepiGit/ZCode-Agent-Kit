@@ -6,15 +6,16 @@
 //   zcode-kit setup [--harness auto|<list>]      bootstrap + integrate detected harnesses
 //   zcode-kit integrate <harness> [--dry-run]
 //   zcode-kit run <harness> -- <args>            launch a harness wired to ZCode
-//   zcode-kit doctor [--fix] [--harness <id>] [--json]
-//   zcode-kit status
+//   zcode-kit doctor [--fix] [--harness <id>] [--json]   --fix also (re)starts a down or proven-hung proxy
+//   zcode-kit status                              includes /health details (memory, captcha, solver)
+//   zcode-kit proxy start|stop|restart|status|logs [n]
 //   zcode-kit models [--json] [--show-key]
 //   zcode-kit usage --json
 //   zcode-kit auth status|login|logout
 //   zcode-kit accounts [--json|--live]
 //   zcode-kit accounts remove|pause|resume ID [--yes]
 //   zcode-kit accounts explain --model MODEL --operation OP
-//   zcode-kit accounts doctor [--json] | accounts quota
+//   zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
 //   zcode-kit update [--version vX.Y.Z]          checkout installs only; --version = release tag
 //   zcode-kit rollback [tx-id]
 //   zcode-kit uninstall
@@ -84,6 +85,7 @@ async function main() {
     case "run": return cmdRun();
     case "doctor": return cmdDoctor();
     case "status": return cmdStatus();
+    case "proxy": return cmdProxy();
     case "models": return cmdModels();
     case "usage": return cmdUsage();
     case "auth": return cmdAuth();
@@ -105,11 +107,12 @@ function usage(code) {
   zcode-kit run <harness> -- <args>             launch harness wired to ZCode
   zcode-kit doctor [--fix] [--harness <id>] [--json]
   zcode-kit status | models [--json] [--show-key] | usage --json
+  zcode-kit proxy start|stop|restart|status|logs [n]   manage the local proxy service
   zcode-kit auth status|login [zai|bigmodel] [--import] [--account ID] [--replace]|logout
   zcode-kit accounts enable|disable
   zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes]
   zcode-kit accounts explain --model MODEL --operation OP
-  zcode-kit accounts doctor [--json] | accounts quota
+  zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
   (setup: --harness <list> limits adapters AND MCP registration; --no-mcp skips registration)
   (setup: --account-rotator y|n for unattended installs; --verbose for full installer output)
@@ -366,11 +369,28 @@ async function cmdDoctor() {
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
   const managerPath = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
+  if (flags.fix) {
+    // A down or hung proxy is the most common reason to run doctor --fix; the
+    // manager's safe start (with its hung-own proof) is the only repair path.
+    const { createManager } = await import(pathToFileURL(managerPath).href);
+    if (await createManager({ root: ROOT, home: ctx.home }).healthIdentify() !== "ours") {
+      const started = spawnSync(process.execPath, [managerPath, "start"], {
+        encoding: "utf8", timeout: 180000, stdio: flags.json ? ["ignore", "pipe", "pipe"] : "inherit",
+      });
+      const code = started.error || started.signal ? null : started.status;
+      add("proxy start (--fix)", code === 0, code === 0 ? "proxy running and healthy"
+        : `manager start exit ${code ?? "timeout"} — see zcode-kit proxy logs; next: zcode-kit proxy restart`);
+      if (!flags.json) console.log(code === 0 ? "doctor --fix: proxy started" : `doctor --fix: proxy start failed (exit ${code ?? "timeout"})`);
+    }
+  }
   const core = spawnSync(process.execPath, [managerPath, "doctor"], { encoding: "utf8", timeout: 25000 });
   if (core.error || core.signal) add("manager doctor completed", false, "manager check failed or timed out");
   // Parse the manager doctor output in BOTH modes: the text summary and exit
   // code must count the same FAILs the user is shown, not only adapter checks.
   const lines = (core.stdout ?? "").split("\n");
+  if (core.status !== 0 && !core.error && !core.signal && !lines.some(line => /^FAIL\s+/.test(line))) {
+    add("manager doctor completed", false, `manager check exited ${core.status ?? "unknown"} without a diagnostic failure result`);
+  }
   for (const line of lines) {
     const m = line.match(/^(PASS|FAIL|SKIP)\s+(.+?)(?:\s+—\s+(.*))?$/);
     if (m) checks.push({ name: m[2], ok: m[1] === "PASS" ? true : m[1] === "FAIL" ? false : null, detail: m[3] ?? "" });
@@ -407,6 +427,20 @@ async function cmdStatus() {
   const manager = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
   const res = spawnSync(process.execPath, [manager, "status"], { stdio: "inherit" });
   return res.status ?? 1;
+}
+
+// ------------------------------------------------------------------- proxy
+// Thin forwarding to the manager: it owns identity, ownership proofs and exit codes.
+async function cmdProxy() {
+  const sub = positional[1];
+  if (!["start", "stop", "restart", "status", "logs"].includes(sub)) {
+    console.error("Usage: zcode-kit proxy start|stop|restart|status|logs [n]");
+    return 2;
+  }
+  const args = [join(ROOT, "proxy", "zcode-proxy-manager.mjs"), sub];
+  if (sub === "logs" && positional[2] !== undefined) args.push(String(positional[2]));
+  const res = spawnSync(process.execPath, args, { stdio: "inherit" });
+  return res.status ?? 2;
 }
 
 // ------------------------------------------------------------------ models
@@ -545,7 +579,7 @@ async function cmdAccounts() {
     const res = runProxyCli(args, { stdio: "inherit" });
     return res.status ?? 1;
   }
-  if (sub === "doctor" || sub === "quota") {
+  if (sub === "doctor" || sub === "quota" || sub === "health") {
     const args = ["auth", "accounts", sub];
     if (flags.json === true) args.push("--json");
     const res = runProxyCli(args, { stdio: "inherit" });

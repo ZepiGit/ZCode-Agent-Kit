@@ -42,7 +42,7 @@
 `generated/` 以下のパスは kit の状態を指します。リリース版/ソースでは
 kit ディレクトリ内、npm では別の状態ディレクトリ内です。
 
-OMP は `omp --model zcode/glm-5.3-flash --thinking low` などで直接起動し、`zcode-kit run` は使いません。**現在未リリースのローカル修正:** セットアップでネイティブの Node/Bun を固定し、自動起動の事前確認は kit モジュールを OMP にインポートせず、新しい子プロセスで行います。子プロセスは最大 120 秒で終了し、失敗時は機密情報を含まないカテゴリを表示します。原因を修正し、セッションごとの 60 秒の待機時間後に再試行してください。同じセッションで復旧できます。ランタイムを移動した場合は `zcode-kit setup --harness auto` を再実行し、拡張機能を再読み込みします。ポートを使用している不明なプロセスを終了することはありません。プロキシが正常、またはセットアップが成功しただけでは、モデルの応答が完了する証拠にはなりません。
+OMP は `omp --model zcode/glm-5.3-flash --thinking low` などで直接起動し、`zcode-kit run` は使いません。セットアップでネイティブの Node/Bun を固定し、自動起動の事前確認は kit モジュールを OMP にインポートせず、新しい子プロセスで行います。子プロセスは最大 120 秒で終了し、失敗時は機密情報を含まないカテゴリを表示します。原因を修正し、セッションごとの 60 秒の待機時間後に再試行してください。同じセッションで復旧できます。ランタイムを移動した場合は `zcode-kit setup --harness auto` を再実行し、拡張機能を再読み込みします。ポートを使用している不明なプロセスを終了することはありません。プロキシが正常、またはセットアップが成功しただけでは、モデルの応答が完了する証拠にはなりません。
 
 ## オプトインのラッパー（既存 config は変更されない）
 
@@ -74,7 +74,7 @@ model: glm-5.3
 - **OpenAI 形式**： `reasoning_effort: low|high|max` + `thinking: {type: "enabled"}`
   （プロキシが Anthropic 側のフィールドに変換）。
 
-**現在未リリースのローカル修正 — Flash:** `glm-5.3-flash` は常に thinking を使用します。明示的に無効にした thinking は `low` に正規化され、明示的に選んだ `high` と `max` は維持されます。Flash の Anthropic 形式における低レベルの thinking 予算は、上記の一般的な `2048` ではなく `8000` トークンで、回答用の追加出力枠も確保します。OpenAI 形式では `reasoning_effort: low` を使用します。thinking の強度が高いという理由だけでハングと判断しないでください。直接のプロキシ経由と Claude Code で Flash の応答完了を確認済みですが、すべてのハーネスの動作確認を意味しません。
+**Flash:** `glm-5.3-flash` は常に thinking を使用します。明示的に無効にした thinking は `low` に正規化され、明示的に選んだ `high` と `max` は維持されます。Flash の Anthropic 形式における低レベルの thinking 予算は、上記の一般的な `2048` ではなく `8000` トークンで、回答用の追加出力枠も確保します。OpenAI 形式では `reasoning_effort: low` を使用します。thinking の強度が高いという理由だけでハングと判断しないでください。直接のプロキシ経由と Claude Code で Flash の応答完了を確認済みですが、すべてのハーネスの動作確認を意味しません。
 
 Windows の独立した Codex プロファイルでは制限付きトークンのサンドボックス（`windows.sandbox = "unelevated"`）を有効にします。`workspace-write` はプロジェクト内に制限され、全面的なアクセスは許可しません。OpenCode Flash は `--variant low`、`high`、`max` に対応し、既定値は `low` です。ネイティブ実行ファイル用 npm ラッパーと Brotli/deflate 圧縮のセッションストリームに対応します。Responses のツール結果のテキストと画像は保持され、不正なイベントを成功した出力と見なしません。
 
@@ -109,5 +109,5 @@ Desktop が必要な場合がありますが、プロバイダーがモデル呼
   プロバイダーによる利用枠の回復を待つ）。
 - `[3007] captcha verify failed` → 激しい再試行の後のゲートウェイ側
   アンチアビューズ。しばらく休憩する。
-- `401 start_plan_jwt_invalid` → Desktop のログインを確認し、`zcode-kit auth login zai` で更新。**現在未リリースのローカル修正:** プランが明示的に設定された Desktop 0.16.9 の現在アクティブな `zai`/`start-plan` ログインには `zcode-kit auth login zai --import` を使います。`credentials.json` が存在する場合はそれが正となり、認証情報が無効でも `config.json` へ暗黙にはフォールバックしません。新形式の `coding-plan` ログインでは通常の OAuth を使います。インポートは API キーの作成や取得を行いません。
-- Flash で `[1210]` → thinking が有効か確認し、無効にする代わりに `low`、`high`、`max` を選びます。現在未リリースのローカル修正では、無効にした thinking を `low` に正規化します。上記の Flash の注記を参照してください。
+- `401 start_plan_jwt_invalid` → Desktop のログインを確認し、`zcode-kit auth login zai` で更新。プランが明示的に設定された Desktop 0.16.9 の現在アクティブな `zai`/`start-plan` ログインには `zcode-kit auth login zai --import` を使います。`credentials.json` が存在する場合はそれが正となり、認証情報が無効でも `config.json` へ暗黙にはフォールバックしません。新形式の `coding-plan` ログインでは通常の OAuth を使います。インポートは API キーの作成や取得を行いません。
+- Flash で `[1210]` → thinking が有効か確認し、無効にする代わりに `low`、`high`、`max` を選びます。プロキシは、無効にした thinking を `low` に正規化します。上記の Flash の注記を参照してください。

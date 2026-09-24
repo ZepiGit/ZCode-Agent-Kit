@@ -58,3 +58,65 @@ zcode-kit accounts remove <ID>
 
 Gibt es kein verfügbares gespeichertes Konto, verwendet das Kit kein
 unbeteiligtes oder nicht autorisiertes Konto; die Anfrage kann dann fehlschlagen.
+
+## Erneut anmelden
+
+Ein Login mit derselben OAuth-Nutzer-ID aktualisiert das bestehende Konto
+(neue Tokens; Label, Pause und Cooldown bleiben erhalten). Der erneute Import
+identischer Anmeldedaten legt ebenfalls keinen zweiten Eintrag an. Provider und
+Pläne bleiben voneinander getrennt.
+
+Desktop-Importen kann eine verifizierte Nutzer-ID fehlen. Ein übereinstimmendes
+JWT-Subject erkennt dann nur ein mögliches Duplikat, erlaubt aber kein
+Überschreiben. Bei geänderten Tokens verweigert das Kit sowohl den stillen
+Austausch als auch einen doppelten Eintrag und nennt das bestehende Konto.
+Wähle es bei Bedarf ausdrücklich aus:
+`zcode-kit auth login zai --import --account ID --replace` (für OAuth ohne
+`--import`). Das Subject wird nie in das an den Provider gesendete `userId`
+übernommen.
+
+`--account ID` speichert immer unter der gewählten ID, auch wenn der Nutzer
+bereits unter einer anderen ID gespeichert ist. Der Login nennt dann die andere
+ID, und `zcode-kit accounts doctor` meldet `same_identity_accounts`. Ein solcher
+Alias teilt sich das Kontingent des Nutzers und bringt keine zusätzliche
+Kapazität, der Rotator behandelt ihn aber weiterhin als eigenen Eintrag (und
+versucht ihn eventuell nach dem Original); entferne den überzähligen Eintrag mit
+`zcode-kit accounts remove <ID> --yes`.
+
+## Kontostatus
+
+```sh
+zcode-kit accounts health
+zcode-kit accounts health --json
+```
+
+Zeigt je Konto eine Zeile: Urteil, Laufzeitstatus, verbleibend/gesamt je
+Kontingentpaket mit Prozent und Reset-Uhrzeit, letzte Nutzung und `*` für das
+aktive Konto, danach `usable: N of M` und die Summen des Pools. Der Befehl
+braucht den laufenden Proxy; sonst ist jedes Konto `unknown` und der Befehl
+nennt `zcode-kit proxy start`. Exit-Code 0 bedeutet: mindestens ein Konto ist
+`ok` oder `low`; 1 bedeutet: gerade keines nutzbar oder keine Live-Daten.
+
+Urteile, nach Vorrang geordnet:
+
+| Urteil | Bedeutung |
+| --- | --- |
+| `paused` | Von dir oder per Richtlinie pausiert. |
+| `blocked` | Durch Provider-, Plan- oder Allowlist-Richtlinie ausgeschlossen. |
+| `expired` / `invalid` | Login abgelaufen oder mit der aktuellen Konfiguration unbrauchbar. |
+| `auth_error` | Der Abrechnungsdienst lehnt den Login ab (401/3012); melde dich neu an. |
+| `exhausted` | Im Cooldown nach einem Kontingentfehler, bis zur angezeigten Zeit. |
+| `duplicate` | Gleiche verifizierte OAuth-ID oder identische Anmeldedaten unter den zugelassenen Konten; nur einmal abgefragt und summiert. Ein ausgelesenes JWT-Subject allein unterdrückt keine Abfrage. |
+| `no_quota_data` | Der Dienst hat geantwortet, meldet für dieses Konto aber gerade keine Kontingentpakete. Kein bestätigt gesunder Zustand. |
+| `empty` | Alle Kontingentpakete sind aufgebraucht. |
+| `low` | Mindestens ein Paket hat weniger als 10 % übrig. |
+| `ok` | Nutzbar, Kontingent vorhanden. |
+| `unknown` | Keine vollständige Live-Antwort für dieses Konto (Proxy aus, eine Kontingentabfrage fehlgeschlagen oder ein Paket mit unvollständigen Zahlen). Zählt nie als nutzbar. |
+
+JSON enthält je Konto `probeSource` (`live`, `duplicate`, `error` oder
+`not_probed`). Pausierte oder ausgeschlossene Konten bleiben sichtbar, werden
+aber nicht abgefragt; fehlende Billing-Daten bedeuten nicht null Kontingent.
+
+Kosten: Ein Aufruf stellt je eindeutigem Konto bis zu 2 Abrechnungsanfragen
+(Guthaben und Vorschau), 15 Sekunden zwischengespeichert. Er sendet keine
+Modellanfrage, löst kein Captcha und erneuert keine Tokens.

@@ -57,6 +57,15 @@ export async function restartForAccountChange(ctx) {
   const health = await manager.healthIdentify();
   if (health === "ours") {
     if (await manager.restart() !== 0) throw new Error("Account Rotator setting saved, but proxy restart failed. Run zcode-kit doctor.");
+  } else if (health === "down" && manager.readPidFile() && manager.pidAlive(manager.readPidFile().pid)) {
+    // A live recorded proxy that does not answer may be hung. start()
+    // replaces it only with the hung-own proof and refuses anything unproven,
+    // so the new setting takes effect without touching unverified processes.
+    // A dead record is not a running proxy: nothing to restart (the setting
+    // applies on the next start), and a config command must not boot one.
+    if (await manager.start() !== 0) {
+      console.warn("Account Rotator setting saved. The recorded proxy could not be verified or restarted; run zcode-kit proxy restart, then zcode-kit doctor.");
+    }
   } else if (manager.readPidFile()) {
     console.warn("Account Rotator setting saved. A running proxy could not be verified; run zcode-kit doctor before restarting it.");
   }

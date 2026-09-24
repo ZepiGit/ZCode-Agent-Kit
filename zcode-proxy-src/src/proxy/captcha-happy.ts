@@ -24,7 +24,7 @@ import { CaptchaCdnCache } from "./captcha-cdn-cache.js";
 import { normalizeCaptchaError } from "./captcha-token.js";
 import { beginCaptchaAttempt, recordCaptchaRequest, recordCaptchaLoad, recordCaptchaEvaluation,
   lastCaptchaActivity, lastCaptchaPeUrl, captchaResourceId, captchaFailureSummary,
-  startCaptchaInstance } from "./captcha-diagnostics.js";
+  captchaDiagnostics, startCaptchaInstance } from "./captcha-diagnostics.js";
 
 // ── Blocking fetch for sync XHR (self-contained builds) ────────────────────
 // happy-dom implements sync XHR by spawning `process.argv[0] -e <script>`,
@@ -56,7 +56,8 @@ const SYNC_WORKER_SRC = `
         i32[0] = 2; Atomics.notify(i32, 0);
       };
       try {
-        const res = await fetch(m.url, m.init);
+        // Bounded by the host's wait: a fetch that outlives it is abandoned.
+        const res = await fetch(m.url, { ...m.init, signal: AbortSignal.timeout(m.timeoutMs) });
         const body = Buffer.from(await res.arrayBuffer());
         const headers = {};
         for (const [k, v] of res.headers) headers[k] = v;
@@ -64,6 +65,8 @@ const SYNC_WORKER_SRC = `
         const statusText = enc.encode(res.statusText || "");
         const headersJson = enc.encode(JSON.stringify(headers));
         const setCookieJson = enc.encode(JSON.stringify(setCookie));
+        const total = statusText.length + headersJson.length + setCookieJson.length + body.length;
+        if (payloadAt + total > u8.length) { fail("sync fetch response too large"); return; }
         let off = payloadAt;
         u8.set(statusText, off); i32[2] = statusText.length; off += statusText.length;
         u8.set(headersJson, off); i32[3] = headersJson.length; off += headersJson.length;
@@ -84,20 +87,38 @@ function ensureSyncFetchWorker(): Worker {
   return _syncFetchWorker;
 }
 
+// One buffer serves every call: the thread is parked while it is in use, so
+// calls cannot overlap. A timed-out call abandons its buffer — the worker may
+// still write into it later and must not corrupt the next response.
+let _syncFetchSab: SharedArrayBuffer | null = null;
+let _syncFetchSabBusy = false;
+
 function syncFetchBlocking(url: string, init: Record<string, unknown>, timeoutMs = 30_000): {
   status: number; statusText: string; headers: Record<string, string>;
   setCookie: string[]; body: Buffer;
 } | { error: string } {
+  const reentered = _syncFetchSabBusy;
+  const sab = !reentered && _syncFetchSab
+    ? _syncFetchSab
+    : new SharedArrayBuffer(SYNC_FETCH_HEADER_BYTES + SYNC_FETCH_BUF_BYTES);
+  if (!reentered) {
+    _syncFetchSab = sab;
+    _syncFetchSabBusy = true;
+  }
   try {
     const worker = ensureSyncFetchWorker();
-    const sab = new SharedArrayBuffer(SYNC_FETCH_HEADER_BYTES + SYNC_FETCH_BUF_BYTES);
     const i32 = new Int32Array(sab);
     const u8 = new Uint8Array(sab);
-    worker.postMessage({ sab, url, init });
+    i32[0] = 0;
+    worker.postMessage({ sab, url, init, timeoutMs });
     const waitResult = Atomics.wait(i32, 0, 0, timeoutMs);
-    if (waitResult === "timed-out") return { error: "sync fetch timeout" };
+    if (waitResult === "timed-out") {
+      if (_syncFetchSab === sab) _syncFetchSab = null;
+      return { error: "sync fetch timeout" };
+    }
     const dec = new TextDecoder();
     const payloadAt = SYNC_FETCH_HEADER_BYTES;
+    if (i32[0] === 2) return { error: dec.decode(u8.subarray(payloadAt, payloadAt + i32[5])) || "sync fetch failed" };
     let off = payloadAt;
     const readSlice = (len: number) => {
       const slice = u8.subarray(off, off + len);
@@ -107,14 +128,17 @@ function syncFetchBlocking(url: string, init: Record<string, unknown>, timeoutMs
     const statusText = dec.decode(readSlice(i32[2]));
     const headers = i32[3] ? (JSON.parse(dec.decode(readSlice(i32[3]))) as Record<string, string>) : {};
     const setCookie = i32[4] ? (JSON.parse(dec.decode(readSlice(i32[4]))) as string[]) : [];
+    // Copy out: the buffer is reused by the next call.
     const body = Buffer.from(readSlice(i32[5]));
-    if (i32[0] === 2) return { error: dec.decode(u8.subarray(payloadAt, payloadAt + i32[5])) || "sync fetch failed" };
     return { status: i32[1], statusText, headers, setCookie, body };
   } catch (err: any) {
     // A crashed worker must not poison later solves — reset it.
     try { _syncFetchWorker?.terminate(); } catch {}
     _syncFetchWorker = null;
+    if (_syncFetchSab === sab) _syncFetchSab = null;
     return { error: `sync fetch error: ${err?.message ?? err}` };
+  } finally {
+    if (!reentered) _syncFetchSabBusy = false;
   }
 }
 
@@ -2276,6 +2300,11 @@ function guestErrorSummary(w, max = 4) {
   }
 }
 
+// Bundle fingerprints of the latest attempt for health reporting: known SDK
+// basenames (or opaque resource ids) and content hashes only, never URLs.
+let _lastSdkScripts: ReadonlyArray<{ filename: string; sha256: string | null }> | null = null;
+function lastCaptchaSdkScripts() { return _lastSdkScripts; }
+
 async function solveTraceless(opts, resources?: DomResources) {
   if (_domCloseFailed) throw new Error("CAPTCHA DOM cleanup failed; runtime unavailable");
   const scene = opts.scene || "11xygtvd";
@@ -2296,6 +2325,7 @@ async function solveTraceless(opts, resources?: DomResources) {
   const { window: w, browserFrame } = dom;
   let keepWindow = false;
   let solveFailed = false;
+  _lastSdkScripts = null;
   try {
     const solveStart = Date.now();
     beginCaptchaAttempt(w);
@@ -2390,6 +2420,10 @@ async function solveTraceless(opts, resources?: DomResources) {
     } catch {} // Frozen errors and failed metadata leave the original untouched.
     throw err;
   } finally {
+    try {
+      _lastSdkScripts = Object.freeze(captchaDiagnostics(w).scripts.slice(-16)
+        .map((m) => Object.freeze({ filename: m.filename, sha256: m.originalSha256 })));
+    } catch (_) {}
     // Reuse mode: on success the window stays pooled (keepWindow) for the next
     // solve — a ~48% CPU cut. On failure it is destroyed: a stalled window must
     // not poison later solves, and the retry rolls a fresh pe anyway.
@@ -2407,4 +2441,4 @@ async function solveTraceless(opts, resources?: DomResources) {
   }
 }
 
-export { solveTraceless, createDom, destroyDom };
+export { solveTraceless, createDom, destroyDom, lastCaptchaSdkScripts };

@@ -22,6 +22,8 @@ import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
 import { installGuestErrorBoundary } from "./runtime/guest-error.js";
+import { MemoryGuard, shutdownCaptchaRuntime, startEventLoopMonitor } from "./runtime/health-monitor.js";
+import { installWatchdog, respawnHookCommand, spawnRespawnHook } from "./runtime/watchdog.js";
 import {
   addAccount,
   getAccountStorePath,
@@ -30,9 +32,12 @@ import {
   updateAccountStore,
   migrateAccountStore,
   duplicateCredentialGroups,
+  sameIdentityGroups,
   rememberAccount,
 } from "./auth/account-store.js";
 import { createAccountRotator } from "./auth/account-rotator.js";
+import { accountIdentity } from "./auth/account-identity.js";
+import { buildHealthReport, parseLiveQuota, parseLiveStatus, renderHealthText, type OfflineAccount } from "./auth/account-health.js";
 
 export const VERSION = "4.6.4";
 
@@ -174,6 +179,10 @@ Usage:
                                     Explicitly migrate legacy encrypted pool data
   zcode-proxy auth accounts quota
                                     Live pool-wide quota overview (requires running proxy)
+  zcode-proxy auth accounts health [--json]
+                                    One verdict per account: state + quota (requires running proxy).
+                                    One run = up to 2 upstream billing requests per unique
+                                    account (15 s cached); no inference, captcha or token refresh
   zcode-proxy auth accounts --live
                                     Authenticated live runtime status (redacted)
   zcode-proxy claim [list|now]      List / claim weekend-plan trial packages
@@ -228,6 +237,24 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   const server = await startServer(buildServerOptions(config, auth, debug));
   const url = `http://${server.hostname}:${server.port}`;
   console.log(`zcode-proxy listening on ${url}`);
+  startEventLoopMonitor();
+  installWatchdog();
+  const memoryGuard = new MemoryGuard({
+    canRestart: () => respawnHookCommand(process.env, process.pid, "memory") !== null,
+    restart: async () => {
+      // Exit only once the manager is actually running: a proxy that stops
+      // without it stays down for good.
+      if (!(await spawnRespawnHook("memory"))) return false;
+      // The manager waits for this pid to exit before starting the
+      // replacement; give in-flight responses a bounded chance to finish.
+      shutdownCaptchaRuntime();
+      const forceExit = setTimeout(() => process.exit(0), 10_000);
+      forceExit.unref();
+      void server.close().then(() => process.exit(0));
+      return true;
+    },
+  });
+  memoryGuard.start();
   if (config.plan === "start-plan") {
     // Pre-solve the captcha token pool in the background so first requests
     // don't pay the full solve latency (in-process happy-dom backend).
@@ -254,9 +281,11 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
 
   process.on("SIGINT", () => {
     console.log("\nShutting down...");
+    shutdownCaptchaRuntime();
     server.stop(true);
   });
   process.on("SIGTERM", () => {
+    shutdownCaptchaRuntime();
     server.stop(true);
   });
 }
@@ -554,6 +583,23 @@ async function authLogin(args: string[]): Promise<void> {
     }
     console.log(`\nLogged in as ${provider} (account ${accountId}).`);
     console.log(`  Stored: ${getAccountStorePath(accountOptions.path)}`);
+    // An explicit id is honored even when it aliases a stored login; say so,
+    // because quota belongs to the upstream user, so the alias adds no capacity
+    // (the rotator itself still treats differing tokens as separate entries).
+    const identity = accountIdentity(cred);
+    if (identity) {
+      try {
+        const stored = await loadAccountStore(accountOptions);
+        const plan = stored.find((account) => account.id === accountId)?.plan ?? "";
+        const alias = stored.find((account) => account.id !== accountId
+          && account.credential.provider === cred.provider && (account.plan ?? "") === plan
+          && accountIdentity(account.credential) === identity);
+        if (alias) {
+          console.log(`Note: this login is also stored as ${alias.id}; both entries share one upstream quota, so the extra entry adds no capacity.`);
+          console.log(`Remove the extra entry with: zcode-kit accounts remove ${alias.id} --yes`);
+        }
+      } catch { /* the login itself succeeded; the hint is best effort */ }
+    }
     return;
   }
 
@@ -673,6 +719,11 @@ async function authAccounts(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "health") {
+    await healthAccounts(args.slice(1));
+    return;
+  }
+
   if (args.includes("--live")) {
     await liveAccountsRoute("/accounts/status", args.includes("--json"));
     return;
@@ -710,7 +761,8 @@ async function authAccounts(args: string[]): Promise<void> {
   if (sub && sub.startsWith("-")) {
     // `accounts --json` is the common spelling; all flags are handled below.
   } else if (sub !== undefined) {
-    console.error("Usage: zcode-proxy auth accounts [--json] | auth accounts remove ID [--yes]");
+    console.error("Usage: zcode-proxy auth accounts [--json] | auth accounts remove ID [--yes] | auth accounts health [--json]");
+    console.error("  health: up to 2 upstream billing requests per unique account (15 s cached); no inference, captcha or token refresh");
     process.exitCode = 2;
     return;
   }
@@ -803,6 +855,9 @@ async function doctorAccounts(args: string[]): Promise<void> {
     checks.push({ code: "store_readable", status: "ok", detail: `${accounts.length} account(s)` });
     const duplicateGroups = duplicateCredentialGroups(accounts);
     if (duplicateGroups.length) checks.push({ code: "duplicate_effective_credentials", status: "warning", detail: `${duplicateGroups.length} alias group(s) are counted once` });
+    for (const group of sameIdentityGroups(accounts)) {
+      checks.push({ code: "same_identity_accounts", status: "warning", detail: `ids ${group.join(",")} share one login; keep the newest and remove the others` });
+    }
     const invalidProvider = accounts.filter((account) => account.credential.provider !== config.provider).length;
     if (invalidProvider) checks.push({ code: "provider_mismatch", status: "warning", detail: `${invalidProvider} account(s)` });
     if (!config.auth.accounts?.enabled) checks.push({ code: "pool_disabled", status: "warning", detail: "legacy single-account mode is active" });
@@ -815,24 +870,76 @@ async function doctorAccounts(args: string[]): Promise<void> {
   if (checks.some((check) => check.status === "error")) process.exitCode = 1;
 }
 
+/** Authenticated GET against the local proxy; throws when it cannot be reached. */
+async function fetchLiveAccounts(path: string, timeoutMs: number): Promise<{ ok: boolean; body: unknown }> {
+  const config = loadConfig(process.env.ZCODE_PROXY_CONFIG ?? "config.yaml");
+  const key = config.auth.proxyApiKey?.trim();
+  if (!key) throw new Error("proxy API key is not configured");
+  const host = config.server.host === "::1" ? "[::1]" : config.server.host;
+  const response = await fetch(`http://${host}:${config.server.port}${path}`, {
+    headers: { authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const body = await response.json().catch(() => ({ schemaVersion: 1, error: { code: "invalid_response" } }));
+  return { ok: response.ok, body };
+}
+
 async function liveAccountsRoute(route: string, json: boolean): Promise<void> {
   try {
-    const configPath = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
-    const config = loadConfig(configPath);
-    const key = config.auth.proxyApiKey?.trim();
-    if (!key) throw new Error("proxy API key is not configured");
-    const host = config.server.host === "::1" ? "[::1]" : config.server.host;
-    const response = await fetch(`http://${host}:${config.server.port}${route}`, {
-      headers: { authorization: `Bearer ${key}` },
-      signal: AbortSignal.timeout(5_000),
-    });
-    const body = await response.json().catch(() => ({ schemaVersion: 1, error: { code: "invalid_response" } }));
+    const { ok, body } = await fetchLiveAccounts(route, 5_000);
     console.log(JSON.stringify(body, null, 2));
-    if (!response.ok) process.exitCode = 1;
+    if (!ok) process.exitCode = 1;
   } catch (err) {
     console.log(JSON.stringify({ schemaVersion: 1, source: "live-runtime", error: { code: "live_status_unavailable", message: "proxy is not reachable" } }, null, 2));
     process.exitCode = 1;
   }
+}
+
+/**
+ * Combined per-account verdict from the offline store, `/accounts/status` and
+ * `/accounts/quota`. Exit 0 only when at least one account can serve now.
+ */
+async function healthAccounts(args: string[]): Promise<void> {
+  const json = args.includes("--json");
+  let offline: OfflineAccount[] = [];
+  try {
+    const stored = await loadAccountStore(accountStoreOptions());
+    const listed = new Map(createAccountRotator(stored).list().map((record) => [record.id, record]));
+    // Mirror the quota route: the first stored entry of a login is the one
+    // that gets queried; later aliases are reported against it.
+    const duplicateOf = new Map<string, string>();
+    for (const group of [...duplicateCredentialGroups(stored), ...sameIdentityGroups(stored)]) {
+      for (const id of group.slice(1)) if (!duplicateOf.has(id)) duplicateOf.set(id, group[0]);
+    }
+    offline = stored.map((account) => ({
+      id: account.id,
+      provider: account.credential.provider,
+      plan: account.plan ?? null,
+      paused: account.paused === true,
+      state: listed.get(account.id)?.state ?? "unknown",
+      lastUsedAt: account.lastUsedAt ?? null,
+      exhaustedUntil: account.exhaustedUntil ?? null,
+      ...(duplicateOf.has(account.id) ? { duplicateOf: duplicateOf.get(account.id) } : {}),
+    }));
+  } catch (err) {
+    console.error(`Account store unavailable: ${safeAccountError(err)}`);
+  }
+  const live = async (path: string, timeoutMs: number): Promise<unknown> => {
+    try {
+      const { ok, body } = await fetchLiveAccounts(path, timeoutMs);
+      return ok ? body : null;
+    } catch { return null; }
+  };
+  // Quota fans out to upstream billing (bounded, cached 15 s), hence the longer budget.
+  const [statusBody, quotaBody] = await Promise.all([
+    live("/accounts/status", 5_000),
+    live("/accounts/quota", 20_000),
+  ]);
+  const status = parseLiveStatus(statusBody);
+  const quota = parseLiveQuota(quotaBody);
+  const report = buildHealthReport(offline, status, quota, Date.now());
+  console.log(json ? JSON.stringify(report, null, 2) : renderHealthText(report));
+  if (report.summary.usable === 0) process.exitCode = 1;
 }
 
 /**

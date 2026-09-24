@@ -3,9 +3,8 @@
 
 **Bestandsaufnahme:** Dieses Manifest beschreibt die Komponenten und Revisionen, die sich tatsächlich in diesem Repository befinden. Es behauptet nicht, dass jedes Upstream-Projekt seine neueste Version verwendet. Externe Harness-Versionen sind Referenzwerte und keine vom Kit installierten oder fest gepinnten Versionen.
 
-Die aktuellen lokalen Reparaturen sind **unveröffentlichte Änderungen**, keine
-neue Upstream-Revision und kein Beleg für ein veröffentlichtes Kit-Release.
-Dazu gehören der maßgebliche Import gemeinsamer Desktop-0.16.9-Zugangsdaten;
+Zu den Kit-Reparaturen seit der Upstream-Revision gehören der maßgebliche
+Import gemeinsamer Desktop-0.16.9-Zugangsdaten;
 streng validierte TTL für den CAPTCHA-Cache in Speicher und auf Platte sowie
 isolierte Cache-Verzeichnisse, jeweils über die verwaltete Umgebung weitergegeben;
 atomare Cache-Datenumschläge und Herkunftsangaben je geladenem Artefakt; sowie

@@ -58,6 +58,20 @@ export function isGuestOriginError(err: unknown): boolean {
   return false;
 }
 
+/**
+ * Strict variant for process-level handlers that decide between "log and
+ * continue" and "exit": only a guest source URL on an actual stack frame (or
+ * the engine-attached sourceURL) counts. A host error whose MESSAGE merely
+ * mentions a CDN URL stays fatal.
+ */
+export function hasGuestSourceFrame(err: unknown): boolean {
+  return [...errorChain(err)].some((link) => {
+    const e = link as { stack?: unknown; sourceURL?: unknown };
+    return (typeof e.sourceURL === "string" && GUEST_SCRIPT_HOST.test(e.sourceURL)) ||
+      (typeof e.stack === "string" && e.stack.split("\n").some((line) => /^\s*at\s/.test(line) && GUEST_SCRIPT_HOST.test(line)));
+  });
+}
+
 let boundaryInstalled = false;
 
 /** Headless entry points have no TUI handler for out-of-band guest callbacks. */
@@ -65,12 +79,7 @@ export function installGuestErrorBoundary(): void {
   if (boundaryInstalled) return;
   boundaryInstalled = true;
   const handle = (err: unknown): void => {
-    const guestFrame = [...errorChain(err)].some((link) => {
-      const e = link as { stack?: unknown; sourceURL?: unknown };
-      return (typeof e.sourceURL === "string" && GUEST_SCRIPT_HOST.test(e.sourceURL)) ||
-        (typeof e.stack === "string" && e.stack.split("\n").some((line) => /^\s*at\s/.test(line) && GUEST_SCRIPT_HOST.test(line)));
-    });
-    if (guestFrame) {
+    if (hasGuestSourceFrame(err)) {
       process.stderr.write(`[captcha-guest-error] ${describeGuestError(err)}\n`);
       return;
     }
@@ -84,11 +93,11 @@ export function installGuestErrorBoundary(): void {
 /** One-line render of a guest error for the log pane / stderr. */
 export function describeGuestError(err: unknown): string {
   const e = err as { name?: unknown; message?: unknown; stack?: unknown } | null;
-  const name = typeof e?.name === "string" ? e.name : "Error";
-  const message = typeof e?.message === "string" ? e.message : String(err);
+  const name = typeof e?.name === "string" ? e.name.slice(0, 64).replace(/[\r\n\t]/g, " ") : "Error";
+  const message = (typeof e?.message === "string" ? e.message : "guest callback failed").slice(0, 1024).replace(/[\r\n\t]/g, " ");
   const frame =
     typeof e?.stack === "string"
-      ? (e.stack.split("\n").find((line) => GUEST_SCRIPT_HOST.test(line)) ?? "").trim()
+      ? (e.stack.slice(0, 8192).split("\n").find((line) => GUEST_SCRIPT_HOST.test(line)) ?? "").trim().slice(0, 1024)
       : "";
   // Bundle URLs carry a 64-char content hash — keep the readable filename only.
   const source = frame.replace(/^at\s+/, "").replace(/https?:\/\/[^\s)]*\/([^/\s)]+)/, "$1");

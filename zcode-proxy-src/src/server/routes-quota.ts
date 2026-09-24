@@ -142,13 +142,18 @@ export async function collectPoolQuotaSnapshot(
         || profile.lastUsedAt || profile.createdAt || 0;
       const cacheKey = `${profile.id}:${revision}:${profile.credential.provider}:${profile.plan ?? config.plan}:${config.claim.origin}:${config.identity.deviceMid ?? ""}:${config.identity.appVersion}`;
       liveCacheKeys.add(cacheKey);
-      const identityKey = createHash("sha256").update(JSON.stringify([
-        profile.credential.provider,
-        profile.plan ?? config.plan,
-        profile.credential.apiKey,
-        profile.credential.jwt ?? "",
-        profile.credential.secret ?? "",
-      ])).digest("hex");
+      // Only authenticated OAuth identity or identical credentials can suppress
+      // a billing probe. Decoded JWT subjects are duplicate hints, not proof.
+      const userIdentity = profile.credential.userId?.trim();
+      const identityKey = createHash("sha256").update(JSON.stringify(userIdentity
+        ? [profile.credential.provider, profile.plan ?? config.plan, "user", userIdentity]
+        : [
+          profile.credential.provider,
+          profile.plan ?? config.plan,
+          profile.credential.apiKey,
+          profile.credential.jwt ?? "",
+          profile.credential.secret ?? "",
+        ])).digest("hex");
       if (seenCredentials.has(identityKey)) {
         results.push({ accountId: profile.id, provider: profile.credential.provider, plan: profile.plan ?? null, source: "duplicate", asOf: null, balances: [], errors: ["duplicate_effective_credential"] });
         continue;
@@ -219,6 +224,7 @@ async function fetchBilling(
   try {
     const resp = await fetchImpl(`${origin.replace(/\/+$/, "")}${path}`, { headers, signal: AbortSignal.timeout(BILLING_TIMEOUT_MS) });
     const text = await resp.text();
+    if (!resp.ok) return { code: resp.status };
     try {
       return JSON.parse(text) as { code?: number; msg?: string; data?: unknown };
     } catch {
@@ -278,6 +284,7 @@ export async function collectQuotaSnapshot(
 
   const balances: QuotaBalanceEntry[] = [];
   const balanceData = (balance?.data ?? {}) as { balances?: any[]; server_time?: number };
+  if (balance?.code === 0 && !Array.isArray(balanceData.balances)) errors.push("balance: provider_unknown");
   for (const b of Array.isArray(balanceData.balances) ? balanceData.balances : []) {
     // unitType/expiresAt camelCase aliases observed live alongside snake_case;
     // accept both so neither casing drops the field.

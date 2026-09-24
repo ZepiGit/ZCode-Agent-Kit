@@ -141,11 +141,14 @@ jobs:
         run: |
           grep -q "VERSION = \"${RELEASE_VERSION}\"" src/index.ts
           grep -q "\"version\": \"${RELEASE_VERSION}\"" package.json
+      # The captcha solver worker must be an extra entrypoint: `new Worker()`
+      # cannot resolve a module that is not embedded in the compiled binary.
       - name: Build binary
         run: >-
           bun build --compile --target=${{ matrix.target }}
           --define "require.resolve=undefined"
-          src/index.ts --outfile ${{ matrix.outfile }}
+          src/index.ts src/proxy/captcha-solver-worker.ts
+          --outfile ${{ matrix.outfile }}
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:

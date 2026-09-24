@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// One-shot shared startup preflight. Never stop/restart a service, guess ownership,
-// print provider bodies, or schedule recurring provider checks.
+// One-shot shared startup preflight. Never guess ownership, print provider
+// bodies, or schedule recurring provider checks. The only process it can end
+// is a proven hung own proxy, via the manager's hung-own proof in start().
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -13,8 +14,8 @@ import { diagnoseQuota } from './quota-diagnostics.mjs';
 export { diagnoseQuota, isQuotaSnapshot } from './quota-diagnostics.mjs';
 import { acquireLock, releaseLock, beginTransaction, rollbackTransaction } from '../lib/transaction.mjs';
 
-const CAUSES = new Set(['healthy', 'auth3012', 'balance1113', 'balance3001', 'auth', 'balance', 'foreign', 'startup', 'quota-unavailable', 'smoke', 'skipped', 'repair', 'unknown']);
-const ACTIONS = new Set(['safe-start', 'quota-check', 'smoke-check', 'reapply', 'none']);
+const CAUSES = new Set(['healthy', 'auth3012', 'balance1113', 'balance3001', 'auth', 'balance', 'foreign', 'startup', 'quota-unavailable', 'smoke', 'skipped', 'repair', 'hung', 'respawn', 'unknown']);
+const ACTIONS = new Set(['safe-start', 'quota-check', 'smoke-check', 'reapply', 'recover', 'respawn', 'none']);
 const RESULTS = new Set(['ok', 'failed', 'refused', 'skipped', 'warning', 'unknown']);
 const LOG_LIMIT = 64 * 1024;
 export function logHeal(ctx, { cause, action, result }) {
@@ -63,7 +64,7 @@ export const PREFLIGHT_DETAILS = {
   'output-limit': 'Preflight output exceeded its bound; inspect zcode-kit doctor and local manager logs.',
   foreign: 'Port occupied or key mismatched; listener left untouched. Run zcode-kit doctor and inspect ownership manually.',
   key: 'Local proxy key unavailable; run zcode-kit doctor and repair this installation with zcode-kit setup.',
-  startup: 'Safe start failed; run zcode-kit doctor and inspect proxy logs and manager lock ownership.',
+  startup: 'Safe start failed; run zcode-kit proxy restart, then zcode-kit doctor (inspect logs/proxy.log and manager lock ownership).',
 };
 export const PREFLIGHT_WARNINGS = {
   auth3012: 'Account authentication warning; run zcode-kit auth status.',
@@ -72,7 +73,9 @@ export const PREFLIGHT_WARNINGS = {
   balance3001: 'Account balance warning; check the account plan/quota.',
   balance: 'Account balance warning; check the account plan/quota.',
   'quota-unavailable': 'Quota check unavailable; continuing with the healthy local proxy. No retry scheduled.',
+  hung: 'Recovered an unresponsive ZCode proxy (restarted automatically).',
 };
+const DIAGNOSTIC_LINE = /^\[zcode-preflight\] cause=([a-z0-9-]+)$/;
 export function preflightFailureDetail(code) {
   const category = typeof code === 'string' && Object.hasOwn(PREFLIGHT_DETAILS, code) ? code : 'startup';
   return `${category}: ${PREFLIGHT_DETAILS[category]}`;
@@ -101,9 +104,11 @@ export async function runSessionPreflight({ root, env = process.env, timeoutMs =
     }, (err, _stdout, stderr) => {
       if (err) { reject(err); return; }
       // Do not forward runtime/provider stderr: it can contain credentials.
-      const cause = stderr.trim().match(/^\[zcode-preflight\] cause=([a-z0-9-]+)$/)?.[1];
-      if (cause && Object.hasOwn(PREFLIGHT_WARNINGS, cause)) {
-        warn(`[zcode-autostart] ${cause}: ${PREFLIGHT_WARNINGS[cause]}`);
+      // Only exact fixed-vocabulary lines become warnings (hung recovery and
+      // the quota cause can both be reported by one preflight).
+      for (const line of stderr.split(/\r?\n/)) {
+        const cause = line.trim().match(DIAGNOSTIC_LINE)?.[1];
+        if (cause && Object.hasOwn(PREFLIGHT_WARNINGS, cause)) warn(`[zcode-autostart] ${cause}: ${PREFLIGHT_WARNINGS[cause]}`);
       }
       resolve();
     });
@@ -139,13 +144,19 @@ export function startupPreflight(ctx, options = {}) {
   return work;
 }
 async function preflight(ctx, { timeoutMs = 8000 } = {}) {
-  let code;
+  let code, recovered = false;
   try {
     const { createManager } = await import('../proxy/zcode-proxy-manager.mjs');
-    code = await createManager({ root: ctx.root, home: ctx.home }).start({ waitMs: 20000 });
+    const manager = createManager({ root: ctx.root, home: ctx.home });
+    code = await manager.start({ waitMs: 20000 });
+    // The manager already logged cause=hung action=recover to heal.log.
+    recovered = manager.lastRecovery() !== null;
   }
   catch { return outcome(ctx, 4, 'startup', 'ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.', 'safe-start'); }
-  if (code !== 0) return outcome(ctx, code, code === 3 ? 'foreign' : 'startup', code === 3 ? 'ZCode port occupied or key mismatched. Listener left untouched; run zcode-kit doctor --fix or inspect ownership manually.' : 'ZCode safe start failed. Run zcode-kit doctor; inspect logs/proxy.log and manager lock ownership.', 'safe-start');
+  if (code !== 0) return outcome(ctx, code, code === 3 ? 'foreign' : 'startup', code === 3 ? 'ZCode port occupied or key mismatched. Listener left untouched; run zcode-kit doctor --fix or inspect ownership manually.' : 'ZCode safe start failed. Run zcode-kit proxy restart, then zcode-kit doctor; inspect logs/proxy.log and manager lock ownership.', 'safe-start');
+  return { ...await quotaCheck(ctx, timeoutMs), recovered };
+}
+async function quotaCheck(ctx, timeoutMs) {
   try {
     const res = await fetch(`http://127.0.0.1:${ctx.port()}/quota`, {
       headers: { authorization: `Bearer ${ctx.key()}` }, signal: AbortSignal.timeout(timeoutMs),
@@ -160,13 +171,48 @@ async function preflight(ctx, { timeoutMs = 8000 } = {}) {
   }
 }
 
-export async function setupSmoke(ctx, { env = process.env, timeoutMs = 90000 } = {}) {
+export async function setupSmoke(ctx, { env = process.env, timeoutMs = 90000, readyMs = 30000, pollMs = 1000 } = {}) {
   if ((env.CI && env.CI !== '0' && env.CI !== 'false') || env.NODE_ENV === 'test' || env.ZCODE_KIT_SKIP_SMOKE === '1' || env.ZCODE_KIT_SKIP_DEPS === '1') {
     logHeal(ctx, { cause: 'skipped', action: 'smoke-check', result: 'skipped' });
     return { code: 0, cause: 'skipped', detail: 'Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).' };
   }
   const ready = await startupPreflight(ctx);
   if (ready.code) return ready;
+  // A freshly (re)started proxy may still be minting its first captcha token;
+  // a request before that fails for reasons the user cannot act on.
+  // Local safe-start has its own ownership/recovery budget. All provider-facing
+  // readiness waits and requests share ONE smoke deadline, including the retry.
+  const deadline = Date.now() + timeoutMs;
+  const remaining = () => Math.max(0, deadline - Date.now());
+  await waitForCaptchaReady(ctx, { maxMs: Math.min(readyMs, remaining()), pollMs });
+  let result = await smokeRequest(ctx, remaining());
+  if (result.transient && remaining() > 0) {
+    await waitForCaptchaReady(ctx, { maxMs: Math.min(readyMs, remaining()), pollMs });
+    result = await smokeRequest(ctx, remaining());
+  }
+  return outcome(ctx, result.code, result.cause, result.detail, 'smoke-check');
+}
+
+/** Poll /health until the captcha pool has a token (or is not loaded). Old proxies report no details: no wait. */
+async function waitForCaptchaReady(ctx, { maxMs, pollMs }) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    let details;
+    try {
+      const res = await fetch(`http://127.0.0.1:${ctx.port()}/health`, {
+        headers: { authorization: `Bearer ${ctx.key()}` }, signal: AbortSignal.timeout(Math.max(1, Math.min(5000, deadline - Date.now()))),
+      });
+      details = (await res.json())?.details;
+    } catch { return; } // unreachable: the smoke request itself reports that
+    if (!details || typeof details !== 'object') return;
+    const captcha = details.captcha;
+    if (captcha === null || captcha === undefined || !(captcha.ready < 1)) return;
+    await new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(pollMs, deadline - Date.now()))));
+  }
+}
+
+async function smokeRequest(ctx, timeoutMs) {
+  if (timeoutMs <= 0) return { code: 1, cause: 'smoke', detail: 'Setup live smoke deadline exhausted; integrations remain configured.' };
   const marker = `ZCODE_SMOKE_${randomBytes(6).toString('hex').toUpperCase()}`;
   try {
     const response = await fetch(`http://127.0.0.1:${ctx.port()}/v1/chat/completions`, {
@@ -176,14 +222,19 @@ export async function setupSmoke(ctx, { env = process.env, timeoutMs = 90000 } =
     });
     const body = await response.json().catch(() => null);
     const diagnostic = diagnoseQuota(response.status, body);
-    if (diagnostic.code) return outcome(ctx, diagnostic.code, diagnostic.cause, diagnostic.detail, 'smoke-check');
+    if (diagnostic.code) return { code: diagnostic.code, cause: diagnostic.cause, detail: diagnostic.detail };
     const choice = body?.choices?.[0];
     const ok = response.ok && body?.model === 'glm-5.3-flash'
       && choice?.message?.role === 'assistant' && choice.finish_reason === 'stop'
       && choice.message.content?.trim() === marker;
-    return outcome(ctx, ok ? 0 : 1, 'smoke', ok ? 'Setup live smoke passed (one minimal model request).' : 'Setup live smoke failed; integrations were saved and remain configured. Run zcode-kit doctor before retrying.', 'smoke-check');
+    if (ok) return { code: 0, cause: 'smoke', detail: 'Setup live smoke passed (one minimal model request).' };
+    const rateLimited = body?.code === 1005 || body?.error?.code === 1005 || /^\[1005\]/.test(String(body?.error?.message ?? ''));
+    return {
+      code: 1, cause: 'smoke', transient: (response.status === 400 || response.status >= 500) && !rateLimited,
+      detail: 'Setup live smoke failed; integrations were saved and remain configured. Run zcode-kit doctor before retrying.',
+    };
   } catch {
-    return outcome(ctx, 1, 'smoke', 'Setup live smoke timed out/unavailable; integrations were saved and remain configured. No retry scheduled.', 'smoke-check');
+    return { code: 1, cause: 'smoke', transient: true, detail: 'Setup live smoke timed out/unavailable; integrations were saved and remain configured. Run zcode-kit doctor before retrying.' };
   }
 }
 
@@ -252,7 +303,13 @@ let entry = '';
 try { entry = realpathSync(process.argv[1] ?? ''); } catch {}
 if (entry && import.meta.url === pathToFileURL(entry).href) {
   startupPreflight(createCtx()).then(result => {
-    console.error(process.argv.includes('--diagnostic-code') ? `[zcode-preflight] cause=${CAUSES.has(result.cause) ? result.cause : 'unknown'}` : result.detail);
+    if (process.argv.includes('--diagnostic-code')) {
+      if (result.recovered) console.error('[zcode-preflight] cause=hung');
+      console.error(`[zcode-preflight] cause=${CAUSES.has(result.cause) ? result.cause : 'unknown'}`);
+    } else {
+      if (result.recovered) console.error(PREFLIGHT_WARNINGS.hung);
+      console.error(result.detail);
+    }
     process.exitCode = result.code;
   }).catch(() => { console.error('ZCode preflight failed; run zcode-kit doctor.'); process.exitCode = 2; });
 }

@@ -1,13 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 
-const solveMock = mock(async (_scene: string, _region: string, _prefix: string) => {
+const solveMock = mock(async (_scene: string, _region: string, _prefix: string, _beforeSolve?: () => void) => {
   return "x".repeat(64);
 });
+
+const recycleMock = mock((_reason: string) => {});
 
 mock.module("./captcha-solver.js", () => ({
   runCaptchaSolve: solveMock,
   shutdownCaptchaSolver: () => {},
   captchaSolverConcurrency: () => 2,
+  getCaptchaSolverStats: () => ({
+    mode: "worker",
+    alive: false,
+    busy: false,
+    queueDepth: 0,
+    generation: 0,
+    solvesSinceSpawn: 0,
+    totalSolves: 0,
+    totalFailures: 0,
+    consecutiveFailures: 0,
+    deadlineKills: 0,
+    recycles: 0,
+    lastRecycleReason: null,
+    lastRecycleAt: null,
+    lastSdkScripts: null,
+  }),
+  requestCaptchaSolverRecycle: recycleMock,
   CAPTCHA_NODE_DIR: "/tmp",
 }));
 
@@ -310,57 +329,203 @@ describe("CaptchaTokenPool deep idle", () => {
       delete process.env.CAPTCHA_TAKE_GRACE_MS;
     }
   });
+});
 
-  it("fires the IP reset once when a mint storm is detected (no successes)", async () => {
+describe("CaptchaTokenPool mint-storm breaker", () => {
+  let clock = 0;
+  // Refill/probe mints are fire-and-forget; one macrotask lets the mocked
+  // (microtask-only) solve settle. Breaker time itself is the injected clock.
+  const tick = () => Bun.sleep(0);
+  const fail = async () => { throw new Error("captcha solve stall pe=storm.js"); };
+
+  function stormPool(): InstanceType<typeof CaptchaTokenPool> {
+    return new CaptchaTokenPool({
+      poolSizeMin: 1,
+      poolSizeMax: 1,
+      tokenTtlMs: 60_000,
+      refillIntervalMs: 600_000,
+      staggerMs: 0,
+      solveRetries: 1,
+      solveConcurrency: 1,
+      emptyTakeRace: 1,
+      scaleDownIdleMs: 600_000,
+      deepIdleAfterMs: 600_000,
+      now: () => clock,
+    });
+  }
+
+  /** Each prefill runs exactly one failing single-attempt mint. */
+  async function failMints(target: InstanceType<typeof CaptchaTokenPool>, n: number): Promise<void> {
+    for (let i = 0; i < n; i++) await target.prefill(CFG);
+  }
+
+  beforeEach(() => {
+    clock = 1_000_000;
+    solveMock.mockClear();
+    recycleMock.mockClear();
+  });
+  afterEach(() => {
+    pool?.stopBackgroundRefill?.();
+    solveMock.mockImplementation(async () => "x".repeat(64));
+  });
+
+  it("reports a success rate of 1 before any mint and stays out of storm below the attempt floor", async () => {
+    pool = stormPool();
+    expect(pool.stats().mintSuccessRate10m).toBe(1);
+    expect(pool.stats().storm).toBe(false);
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 4);
+    expect(pool.stats().storm).toBe(false);
+    expect(pool.stats().mintSuccessRate10m).toBe(0);
+    expect(recycleMock).not.toHaveBeenCalled();
+  });
+
+  it("does not enter storm at exactly 20% success", async () => {
+    pool = stormPool();
+    await pool.prefill(CFG); // one success
+    pool.invalidate();
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 4);
+    expect(pool.stats().mintSuccessRate10m).toBeCloseTo(0.2);
+    expect(pool.stats().storm).toBe(false);
+    // The next failure drops the rate below 20% over ≥5 attempts.
+    await failMints(pool, 1);
+    expect(pool.stats().storm).toBe(true);
+  });
+
+  it("enters storm, recycles the solver once, and fails empty-pool takes fast", async () => {
+    pool = stormPool();
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 5);
+    expect(pool.stats().storm).toBe(true);
+    expect(recycleMock).toHaveBeenCalledTimes(1);
+    expect(recycleMock.mock.calls[0]![0]).toBe("storm");
+
+    const calls = solveMock.mock.calls.length;
+    const started = Date.now();
+    await expect(pool.takeToken(CFG)).rejects.toThrow("captcha minting degraded (storm) — retry later");
+    expect(Date.now() - started).toBeLessThan(500);
+    // Background refill stays paused during the backoff.
+    pool.requestUrgentRefill();
+    await pool.prefill(CFG);
+    await tick();
+    expect(solveMock.mock.calls.length).toBe(calls);
+    expect(recycleMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still serves cached tokens during a storm", async () => {
+    pool = stormPool();
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 5);
+    (pool as unknown as { pushToken: (p: string) => void }).pushToken(`cached:${"c".repeat(48)}`);
+    expect(await pool.takeToken(CFG)).toContain("cached:");
+  });
+
+  it("probes once per backoff, doubling the backoff up to 600 s after failed probes", async () => {
+    pool = stormPool();
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 5);
+    const probesAfter = async (advanceMs: number): Promise<number> => {
+      const before = solveMock.mock.calls.length;
+      clock += advanceMs;
+      pool.requestUrgentRefill();
+      await tick();
+      pool.requestUrgentRefill();
+      await tick();
+      return solveMock.mock.calls.length - before;
+    };
+    expect(await probesAfter(59_000)).toBe(0);
+    expect(await probesAfter(1_000)).toBe(1); // 60 s backoff elapsed → one probe, fails
+    for (const backoff of [120_000, 240_000, 480_000, 600_000, 600_000]) {
+      expect(await probesAfter(backoff - 1_000)).toBe(0);
+      expect(await probesAfter(1_000)).toBe(1);
+    }
+    expect(pool.stats().storm).toBe(true);
+    await expect(pool.takeToken(CFG)).rejects.toThrow(/degraded \(storm\)/);
+  });
+
+  it("exits the storm on a successful probe and resets the window", async () => {
+    pool = stormPool();
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 5);
+    solveMock.mockImplementation(async () => `probe:${"p".repeat(48)}`);
+    clock += 60_000;
+    pool.requestUrgentRefill();
+    await tick();
+    const stats = pool.stats();
+    expect(stats.storm).toBe(false);
+    expect(stats.mintSuccessRate10m).toBe(1);
+    expect(stats.ready).toBe(1);
+    expect(await pool.takeToken(CFG)).toContain("probe:");
+    // The take's refill mints one more success (window: 1 ok).
+    await tick();
+    pool.invalidate();
+    // A fresh episode needs a fresh run of failures, then recycles again.
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 4);
+    expect(pool.stats().storm).toBe(false);
+    await failMints(pool, 1);
+    expect(pool.stats().storm).toBe(true);
+    expect(recycleMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels solves already queued behind the one that tripped the storm", async () => {
     pool = new CaptchaTokenPool({
-      poolSizeMin: 1,
-      poolSizeMax: 10,
+      poolSizeMin: 6,
+      poolSizeMax: 6,
       tokenTtlMs: 60_000,
       refillIntervalMs: 600_000,
       staggerMs: 0,
       solveRetries: 1,
-      solveConcurrency: 4,
+      solveConcurrency: 6,
+      // With the default CPU governor prefill starts at one solve per wave and
+      // stops after that wave fails, so only one mint would run. This
+      // scenario needs all six solves queued at once behind the serial solver.
+      cpuLimitPercent: 0,
       scaleDownIdleMs: 600_000,
+      deepIdleAfterMs: 600_000,
+      now: () => clock,
     });
-    const fired: string[] = [];
-    (pool as unknown as { opts: { onCaptchaIpBlock?: (r: string) => void } }).opts.onCaptchaIpBlock =
-      (reason) => fired.push(reason);
-
-    const p = pool as unknown as {
-      noteMintFailure: (r: string) => void;
-      noteMintSuccess: () => void;
-    };
-    // 7 failures: below threshold — no fire.
-    for (let i = 0; i < 7; i++) p.noteMintFailure("captcha solve stall pe=x.js");
-    expect(fired.length).toBe(0);
-    // 8th failure crosses the threshold with zero successes — fires.
-    p.noteMintFailure("captcha solve stall pe=x.js");
-    expect(fired.length).toBe(1);
-    expect(fired[0]).toContain("mint storm");
-    // Cooldown: more failures do not re-fire immediately.
-    for (let i = 0; i < 5; i++) p.noteMintFailure("captcha solve stall pe=x.js");
-    expect(fired.length).toBe(1);
-
-    // A success inside the window suppresses the trigger entirely.
-    const poolB = new CaptchaTokenPool({
-      poolSizeMin: 1,
-      poolSizeMax: 10,
-      tokenTtlMs: 60_000,
-      refillIntervalMs: 600_000,
-      staggerMs: 0,
-      solveRetries: 1,
-      solveConcurrency: 4,
-      scaleDownIdleMs: 600_000,
+    // Serial queue like the real solver: admission (beforeSolve) runs when a
+    // queued solve reaches the front, after earlier solves settled.
+    let queue: Promise<unknown> = Promise.resolve();
+    let executed = 0;
+    solveMock.mockImplementation((_s, _r, _p, beforeSolve) => {
+      const run = queue.then(async () => {
+        beforeSolve?.();
+        executed += 1;
+        throw new Error("captcha solve stall pe=storm.js");
+      });
+      queue = run.catch(() => {});
+      return run;
     });
-    const fired2: string[] = [];
-    (poolB as unknown as { opts: { onCaptchaIpBlock?: (r: string) => void } }).opts.onCaptchaIpBlock =
-      (reason) => fired2.push(reason);
-    const p2 = poolB as unknown as {
-      noteMintFailure: (r: string) => void;
-      noteMintSuccess: () => void;
-    };
-    p2.noteMintSuccess();
-    for (let i = 0; i < 10; i++) p2.noteMintFailure("stall");
-    expect(fired2.length).toBe(0);
+    await pool.prefill(CFG, 6);
+    expect(pool.stats().storm).toBe(true);
+    // The 6th queued solve was cancelled at admission and is not a mint.
+    expect(executed).toBe(5);
+    expect((pool as unknown as { mintOutcomes: unknown[] }).mintOutcomes).toHaveLength(5);
+    expect(pool.stats().activeSolves).toBe(0);
+  });
+
+  it("counts a returned duplicate certifyId as a failed mint", async () => {
+    pool = stormPool();
+    const param = Buffer.from(JSON.stringify({ certifyId: "dup-storm", sceneId: "s" })).toString("base64");
+    solveMock.mockImplementation(async () => param);
+    await pool.prefill(CFG);
+    expect(await pool.takeToken(CFG)).toBe(param);
+    // The take's refill mints the same certifyId again → rejected as duplicate.
+    await tick();
+    expect(pool.stats().ready).toBe(0);
+    expect(pool.stats().mintSuccessRate10m).toBe(0.5);
+  });
+
+  it("forgets outcomes older than 10 minutes", async () => {
+    pool = stormPool();
+    solveMock.mockImplementation(fail);
+    await failMints(pool, 4);
+    clock += 600_001;
+    expect(pool.stats().mintSuccessRate10m).toBe(1);
+    await failMints(pool, 4);
+    expect(pool.stats().storm).toBe(false);
   });
 });

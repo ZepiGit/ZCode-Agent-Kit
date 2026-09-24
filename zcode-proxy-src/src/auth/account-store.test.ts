@@ -13,6 +13,7 @@ import {
   loadAccountStoreSnapshot,
   recoverAccountStoreLock,
   duplicateCredentialGroups,
+  sameIdentityGroups,
 } from "./account-store.js";
 
 const root = mkdtempSync(join(tmpdir(), "zcode-account-pool-"));
@@ -113,6 +114,21 @@ describe("account store", () => {
     ]);
     expect(groups).toEqual([["one", "alias"]]);
     expect(JSON.stringify(groups)).not.toContain("same-key");
+  });
+
+  it("groups different credentials of one upstream identity, leaving byte-identical aliases to the duplicate check", () => {
+    const subJwt = (sub: string) => `h.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.s`;
+    const desktop = { id: "desk", credential: { provider: "zai" as const, apiKey: "access", jwt: subJwt("user-s") } };
+    const groups = sameIdentityGroups([
+      desktop,
+      { id: "oauth", credential: { provider: "zai" as const, apiKey: "key", secret: "secret", userId: "user-s" } },
+      { id: "copy", credential: { ...desktop.credential } },
+      { id: "other", credential: { provider: "zai" as const, apiKey: "x", jwt: subJwt("user-t") } },
+      { id: "twin-a", credential: { provider: "zai" as const, apiKey: "t", jwt: subJwt("user-u") } },
+      { id: "twin-b", credential: { provider: "zai" as const, apiKey: "t", jwt: subJwt("user-u") } },
+      { id: "no-identity", credential: { provider: "zai" as const, apiKey: "access" } },
+    ]);
+    expect(groups).toEqual([["desk", "oauth", "copy"]]);
   });
 
   it("rejects an explicitly blank encryption secret", async () => {

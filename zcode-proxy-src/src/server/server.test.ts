@@ -197,6 +197,12 @@ describe("server routing", () => {
     expect(resp.status).toBe(200);
     const body = await resp.json();
     expect(body.status).toBe("ok");
+    expect(body.provider).toBe("zai");
+    // Additive process vitals (captcha section: health-monitor.test.ts).
+    expect(body.details.pid).toBe(process.pid);
+    expect(body.details.rssMB).toBeGreaterThan(0);
+    expect(typeof body.details.eventLoopLagMs).toBe("number");
+    expect(body.details).toHaveProperty("captcha");
   });
 
   it("unknown route returns 404", async () => {

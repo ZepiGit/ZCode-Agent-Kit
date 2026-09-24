@@ -24,6 +24,7 @@ import {
   encryptStorePayload,
 } from "./store.js";
 import { credentialString, type Credential } from "./types.js";
+import { accountIdentity } from "./account-identity.js";
 
 export const ACCOUNT_STORE_ENV = "ZCODE_PROXY_ACCOUNTS_PATH";
 export const ACCOUNT_STORE_DEFAULT_FILE = "accounts.json";
@@ -207,6 +208,29 @@ export function duplicateCredentialGroups(accounts: readonly AccountProfile[]): 
     }
   }
   return groups;
+}
+
+/**
+ * Account IDs that name one upstream user (same OAuth userId or login JWT
+ * subject) under different credentials within one provider and plan, e.g. an
+ * explicit `--account` alias of an already stored login. Byte-identical groups
+ * are left to duplicateCredentialGroups so one alias is not reported twice.
+ * The rotator and the pool quota route still treat these as separate entries
+ * (they compare token bytes); only doctor/health/login surface them.
+ */
+export function sameIdentityGroups(accounts: readonly AccountProfile[]): string[][] {
+  const byIdentity = new Map<string, AccountProfile[]>();
+  for (const account of accounts) {
+    const identity = accountIdentity(account.credential);
+    if (!identity) continue;
+    const key = JSON.stringify([account.credential.provider, account.plan ?? "", identity]);
+    const members = byIdentity.get(key);
+    if (members) members.push(account);
+    else byIdentity.set(key, [account]);
+  }
+  return [...byIdentity.values()]
+    .filter(members => members.length > 1 && !members.every(member => equivalentCredential(members[0], member)))
+    .map(members => members.map(member => member.id));
 }
 
 function lockPath(path: string): string {
@@ -470,13 +494,30 @@ export async function rememberAccount(credential: Credential, options: AccountSt
   const release = acquireLock(path);
   try {
     const current = await readStoreSnapshot(path);
+    const incomingIdentity = accountIdentity(credential);
     const prior = current.accounts.find(account => {
       const old = account.credential;
       if (old.provider !== credential.provider || (account.plan && options.plan && account.plan !== options.plan)) return false;
+      // Two OAuth-verified user ids decide alone: different users stay
+      // separate even if a token happens to agree.
       if (old.userId?.trim() && credential.userId?.trim()) return old.userId === credential.userId;
-      return credentialString(old) === credentialString(credential)
-        || (!!old.jwt && old.jwt === credential.jwt);
+      if (credentialString(old) === credentialString(credential) || (!!old.jwt && old.jwt === credential.jwt)) return true;
+      return false;
     });
+    if (!prior && incomingIdentity) {
+      const candidates = current.accounts.filter(account =>
+        account.credential.provider === credential.provider
+        && !(account.plan && options.plan && account.plan !== options.plan)
+        && !(account.credential.userId?.trim() && credential.userId?.trim())
+        && accountIdentity(account.credential) === incomingIdentity);
+      if (candidates.length) {
+        // A decoded JWT claim can identify a possible duplicate, but it cannot
+        // authorize replacing another stored credential. Refuse both overwrite
+        // and duplicate insertion until the operator chooses the target.
+        const ids = candidates.map(account => account.id).join(", ");
+        throw new AccountStoreError("conflict", `possible existing login: ${ids}; identity not verified — use zcode-kit auth login ${credential.provider} --account ID --replace to select the account explicitly`);
+      }
+    }
     if (prior) {
       // Preserve labels, pauses and quota state: logging in does not reset a limit.
       const fresh = { ...credential, userId: credential.userId ?? prior.credential.userId };
@@ -510,7 +551,9 @@ export async function addAccount(profile: AccountProfile, options: AddAccountOpt
     if (index >= 0) {
       const prior = accounts[index];
       accounts[index] = {
+        ...prior,
         ...account,
+        createdAt: prior.createdAt ?? account.createdAt,
         credentialRevision: Math.max(account.credentialRevision ?? 0, (prior.credentialRevision ?? 0) + 1),
       };
     }

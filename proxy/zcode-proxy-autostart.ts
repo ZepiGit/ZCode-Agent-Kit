@@ -57,9 +57,13 @@ function runPreflight(): Promise<void> {
         reject({ code });
         return;
       }
-      // Never forward runtime errors, provider text, paths or credentials.
-      const cause = stderr.trim().match(/^\[zcode-preflight\] cause=([a-z0-9-]+)$/)?.[1];
-      if (cause && Object.hasOwn(WARNINGS, cause)) console.error(`[zcode-autostart] ${cause}: ${WARNINGS[cause]}`);
+      // Never forward runtime errors, provider text, paths or credentials:
+      // only exact fixed-vocabulary lines (a hung-proxy recovery and the
+      // quota cause can both be reported by one preflight).
+      for (const line of stderr.split(/\r?\n/)) {
+        const cause = line.trim().match(/^\[zcode-preflight\] cause=([a-z0-9-]+)$/)?.[1];
+        if (cause && Object.hasOwn(WARNINGS, cause)) console.error(`[zcode-autostart] ${cause}: ${WARNINGS[cause]}`);
+      }
       resolve();
     });
   });

@@ -93,6 +93,45 @@ test("desktop combined key and OAuth key/secret match, but different provider us
   expect((await rememberAccount({ provider: "bigmodel", apiKey: "key.secret" })).id).not.toBe(first.id);
 });
 
+const subJwt = (sub: string, nonce: string) =>
+  `h.${Buffer.from(JSON.stringify({ sub, iat: 1, nonce })).toString("base64url")}.s`;
+
+test("a Desktop import candidate requires explicit replacement rather than duplicate insertion", async () => {
+  const options = { plan: "start-plan" };
+  const desktop = await rememberAccount({ provider: "zai", apiKey: "desktop-access", jwt: subJwt("user-s", "a") }, options);
+  await expect(rememberAccount({ provider: "zai", apiKey: "oauth-key", secret: "oauth-secret", userId: "user-s", jwt: subJwt("user-s", "b") }, options)).rejects.toMatchObject({code: "conflict"});
+  const accounts = await loadAccountStore();
+  expect(accounts).toHaveLength(1);
+  expect(accounts[0]).toMatchObject({ id: desktop.id, credentialRevision: 1, credential: { apiKey: "desktop-access" } });
+});
+
+test("rotated Desktop subject requires selection while another subject stays distinct", async () => {
+  const options = { plan: "start-plan" };
+  const first = await rememberAccount({ provider: "zai", apiKey: "access-1", jwt: subJwt("user-s", "a") }, options);
+  await expect(rememberAccount({ provider: "zai", apiKey: "access-2", jwt: subJwt("user-s", "b") }, options)).rejects.toMatchObject({code: "conflict"});
+  const other = await rememberAccount({ provider: "zai", apiKey: "access-3", jwt: subJwt("user-t", "c") }, options);
+  expect(other.id).not.toBe(first.id);
+  const accounts = await loadAccountStore();
+  expect(accounts).toHaveLength(2);
+  const refreshed = accounts.find(account => account.id === first.id)!;
+  expect(refreshed.credentialRevision).toBe(1);
+  expect(refreshed.credential.userId).toBeUndefined();
+  expect(refreshed.credential.apiKey).toBe("access-1");
+});
+
+test("an unverified JWT subject never merges into a different OAuth user or another plan", async () => {
+  const shared = subJwt("user-s", "a");
+  const verified = await rememberAccount({ provider: "zai", apiKey: "k1", userId: "user-t", jwt: subJwt("user-t", "a") }, { plan: "start-plan" });
+  await expect(rememberAccount({ provider: "zai", apiKey: "k2", jwt: subJwt("user-t", "b") }, { plan: "start-plan" })).rejects.toMatchObject({code: "conflict"});
+  expect((await loadAccountStore()).find(account => account.id === verified.id)?.credential.apiKey).toBe("k1");
+  const one = await rememberAccount({ provider: "zai", apiKey: "k3", userId: "user-a", jwt: shared }, { plan: "start-plan" });
+  const two = await rememberAccount({ provider: "zai", apiKey: "k4", userId: "user-b", jwt: shared }, { plan: "start-plan" });
+  expect(two.id).not.toBe(one.id);
+  const desktop = await rememberAccount({ provider: "zai", apiKey: "k5", jwt: subJwt("user-u", "a") }, { plan: "start-plan" });
+  expect((await rememberAccount({ provider: "zai", apiKey: "k6", jwt: subJwt("user-u", "b") }, { plan: "coding-plan" })).id).not.toBe(desktop.id);
+  expect((await loadAccountStore()).find(account => account.id === verified.id)?.credential.userId).toBe("user-t");
+});
+
 test("activation imports both the saved legacy account and current Desktop login idempotently", async () => {
   await saveCredential({ provider: "zai", apiKey: "saved-primary" });
   expect(login(2).status).toBe(0);

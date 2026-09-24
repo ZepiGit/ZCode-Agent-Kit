@@ -9,7 +9,7 @@ Nutze dein ZCode-Konto mit dem Coding-Assistenten, den du bereits verwendest.
 
 Behalte deinen Coding-Assistenten. Nutze deine vorhandenen ZCode-Modelle und dein Kontingent über eine lokale Verbindung.
 
-**Optionale Kontorotation:** Der Installer fragt **"Do you want to activate the Account Rotator feature? [y/n]"**. Mit `y` wird der aktuelle Login übernommen; spätere Anmeldungen über `zcode-kit auth login zai` werden als zusätzliche Konten gespeichert. Eine erneute Anmeldung beim selben Konto aktualisiert dessen Eintrag. Später aktivieren mit `zcode-kit accounts enable`; gespeicherte Konten mit `zcode-kit accounts` anzeigen. Siehe die [Dokumentation zum Account Rotator](docs/ACCOUNT_ROTATOR.de.md).
+**Optionale Kontorotation:** Der Installer fragt **"Do you want to activate the Account Rotator feature? [y/n]"**. Mit `y` wird der aktuelle Login übernommen; spätere Anmeldungen über `zcode-kit auth login zai` werden als zusätzliche Konten gespeichert. Eine erneute Anmeldung als bereits gespeicherter Nutzer aktualisiert normalerweise dessen Eintrag; die Dokumentation erklärt, wie Nutzer zugeordnet werden, und nennt die Ausnahmen. Später aktivieren mit `zcode-kit accounts enable`; gespeicherte Konten mit `zcode-kit accounts` anzeigen. `zcode-kit accounts health [--json]` zeigt auf Abruf je Konto ein Urteil aus Abrechnungsdaten. Das ist kein Beleg, dass Modellanfragen funktionieren; ein Konto ohne Kontingentdaten gilt nicht als gesund, und Konten werden nicht fortlaufend abgefragt. Siehe die [Dokumentation zum Account Rotator](docs/ACCOUNT_ROTATOR.de.md).
 
 **Der Ablauf:** Konto vorbereiten → Kit installieren → GLM-5.3(-flash) verwenden und loslegen.
 
@@ -106,7 +106,7 @@ zcode-kit run claude-code -- --model glm-5.3-flash
 
 Wähle `glm-5.3` für Text oder `glm-5.3-flash` für Text und Bilder. Die Bildunterstützung hängt auch von deinem Assistenten ab. Eine optionale MCP-Bridge stellt Werkzeuge der installierten ZCode-Laufzeit bereit; ihre Registrierung verbindet noch kein Modell.
 
-**Derzeit unveröffentlichte lokale Korrektur:** Flash verwendet immer Thinking. Anfragen mit deaktiviertem Thinking werden auf `low` normalisiert; ausdrücklich gewähltes `high` und `max` bleiben erhalten. In OMP wählst du die Stufe mit `--thinking low`, `--thinking high` oder `--thinking max`. Vollständig abgeschlossene Modellantworten mit Flash wurden über den direkten Proxy und Claude Code geprüft; das bedeutet nicht, dass jeder Assistent erfolgreich getestet wurde.
+Flash verwendet immer Thinking. Anfragen mit deaktiviertem Thinking werden auf `low` normalisiert; ausdrücklich gewähltes `high` und `max` bleiben erhalten. In OMP wählst du die Stufe mit `--thinking low`, `--thinking high` oder `--thinking max`. Vollständig abgeschlossene Modellantworten mit Flash wurden über den direkten Proxy und Claude Code geprüft; das bedeutet nicht, dass jeder Assistent erfolgreich getestet wurde.
 
 <details>
 <summary>Weitere Assistenten und Grenzen der Integration</summary>
@@ -127,23 +127,23 @@ Siehe die [Dokumentation für Assistenten](harnesses/README.de.md) und die [Supp
 </details>
 
 <details>
-<summary>Proxy manuell starten oder stoppen</summary>
+<summary>Proxy manuell starten, stoppen oder neu starten</summary>
 
-Nur für den Standardort des **Release-Installers**:
-
-**PowerShell:**
-
-```powershell
-node (Join-Path $env:LOCALAPPDATA 'zcode-agent-kit/proxy/zcode-proxy-manager.mjs') start
-```
-
-**macOS/Linux:**
+Dieselben Befehle funktionieren auf jeder Plattform sowie für Release- und npm-Installationen:
 
 ```sh
-node "$HOME/.local/share/zcode-agent-kit/proxy/zcode-proxy-manager.mjs" start
+zcode-kit proxy start
+zcode-kit proxy status
+zcode-kit proxy logs 50
+zcode-kit proxy restart
+zcode-kit proxy stop
 ```
 
-Ersetze `start` bei Bedarf durch `status`, `logs 50` oder `stop`. Ein Stopp unterbricht verbundene Clients. Bei einem eigenen Installationsort verwende dessen absoluten Pfad. Diese Standardpfade gelten nicht für npm-Installationen.
+`stop`, `restart` und jeder automatische Neustart unterbrechen verbundene Clients und laufende Anfragen; wiederhole diese Anfragen danach. Releases ohne `zcode-kit proxy` rufen `node <Installation>/proxy/zcode-proxy-manager.mjs` mit demselben Befehl auf.
+
+**Hängender Proxy:** `start`, `restart` und `stop` beenden einen nicht antwortenden Proxy nur, wenn er nachweislich zu diesem Kit gehört: Die Startfrist von 60 Sekunden ist abgelaufen, seine Startzeit stimmt mit der aufgezeichneten überein, seine Befehlszeile ist die des Kit-Proxys, und 3 aufeinanderfolgende Gesundheitsprüfungen (etwa 25 Sekunden) schlagen fehl. Ein Prozess mit unbekanntem Besitzer wird nie beendet; der Befehl meldet ihn und bricht ab. `zcode-kit doctor --fix` wendet die verwaltete Konfiguration erneut an und startet den Proxy auf dieselbe Weise, wenn er nicht läuft oder nachweislich hängt.
+
+**Automatische Neustarts:** Reagiert der Hauptthread des Proxys nicht mehr oder bleibt sein Speicherverbrauch zu hoch, fordert der Proxy beim Kit-Manager einen neuen Start an. Innerhalb von 15 Minuten werden höchstens 3 solcher Neustarts angenommen; danach, oder wenn der Neustartverlauf unlesbar ist, wird die Anforderung abgelehnt und der Proxy bleibt aus, bis du `zcode-kit proxy logs 50` prüfst und ihn startest. Eine zurückgebliebene Startsperre wird absichtlich nie übernommen: Läuft kein Start, entferne die in der Meldung genannte Sperrdatei und versuche es erneut.
 
 </details>
 
@@ -156,8 +156,9 @@ zcode-kit auth status
 
 - **Befehl nicht gefunden:** Terminal neu öffnen. Bei Release-Installationen prüfen, ob `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) oder `$HOME/.local/bin` (macOS/Linux) im PATH steht.
 - **Keine Modellantwort:** Desktop-Login und verfügbares Kontingent prüfen. Proxy starten, wenn dein Assistent ihn nicht startet. Eine lokale Gesundheitsprüfung beweist keinen Modellzugriff.
-- **OMP-Autostart (derzeit unveröffentlichte lokale Korrektur):** OMP direkt starten. Das Setup fixiert natives Node/Bun; die Erweiterung führt die Vorprüfung in einem neuen Kindprozess aus, statt Kit-Module in OMP zu importieren. Fehler melden Kategorien ohne Geheimnisse; der Kindprozess ist auf 120 Sekunden begrenzt. Ursache beheben und nach der sitzungsbezogenen Wartezeit von 60 Sekunden erneut versuchen; eine Wiederherstellung ist in derselben Sitzung möglich. Wurde die Laufzeit verschoben, `zcode-kit setup --harness auto` erneut ausführen und die Erweiterung neu laden. Unbekannte Portbesitzer bleiben unberührt.
-- **Desktop-Login importieren (derzeit unveröffentlichte lokale Korrektur):** Mit `zcode-kit auth login zai --import` den aktuell aktiven `zai`/`start-plan`-Login aus Desktop 0.16.9 importieren; ein ausdrücklich konfigurierter Plan ist erforderlich. Ist `credentials.json` vorhanden, ist diese Datei maßgeblich: Bei ungültigen Anmeldedaten erfolgt kein stiller Rückgriff auf die alte `config.json`. Moderne `coding-plan`-Logins verwenden stattdessen den normalen OAuth-Ablauf mit `zcode-kit auth login zai`; der Importer erstellt oder ermittelt keine API-Schlüssel.
+- **Proxy aus oder antwortet nicht:** `zcode-kit doctor --fix` oder `zcode-kit proxy restart` ausführen. Beendet wird nur ein nachweislich eigener, hängender Proxy; siehe den Abschnitt zum manuellen Proxy-Betrieb oben.
+- **OMP-Autostart:** OMP direkt starten. Das Setup fixiert natives Node/Bun; die Erweiterung führt die Vorprüfung in einem neuen Kindprozess aus, statt Kit-Module in OMP zu importieren. Fehler melden Kategorien ohne Geheimnisse; der Kindprozess ist auf 120 Sekunden begrenzt. Ursache beheben und nach der sitzungsbezogenen Wartezeit von 60 Sekunden erneut versuchen; eine Wiederherstellung ist in derselben Sitzung möglich. Wurde die Laufzeit verschoben, `zcode-kit setup --harness auto` erneut ausführen und die Erweiterung neu laden. Unbekannte Portbesitzer bleiben unberührt.
+- **Desktop-Login importieren:** Mit `zcode-kit auth login zai --import` den aktuell aktiven `zai`/`start-plan`-Login aus Desktop 0.16.9 importieren; ein ausdrücklich konfigurierter Plan ist erforderlich. Ist `credentials.json` vorhanden, ist diese Datei maßgeblich: Bei ungültigen Anmeldedaten erfolgt kein stiller Rückgriff auf die alte `config.json`. Moderne `coding-plan`-Logins verwenden stattdessen den normalen OAuth-Ablauf mit `zcode-kit auth login zai`; der Importer erstellt oder ermittelt keine API-Schlüssel.
 - **401 oder Port belegt:** Auf eine weitere Kit-Installation prüfen. Weder Schlüssel löschen noch einen unbekannten Prozess beenden.
 - **Setup teilweise fehlgeschlagen:** Den ausgegebenen Rollback-Befehl lesen, bevor du es erneut versuchst. Frühere Änderungen können noch vorhanden sein.
 
@@ -165,7 +166,7 @@ zcode-kit auth status
 
 Lass den Proxy nur auf localhost laufen und gib `.proxykey`, Anmeldedaten oder generierte Konfigurationsdateien niemals weiter.
 
-**Lies die [Sicherheitsrichtlinie (English)](SECURITY.md) und die [deutsche Übersetzung](SECURITY.de.md):** Der verwaltete Proxy kann CAPTCHA-JavaScript des Anbieters ohne Betriebssystem-Sandbox ausführen. Er ist nur auf Loopback erreichbar und durch einen Bearer-Key geschützt, aber diese Maßnahmen isolieren den Prozess nicht. Damit werden keine Kontobeschränkungen umgangen und der Erfolg jeder Prüfung ist nicht garantiert.
+**Lies die [Sicherheitsrichtlinie (English)](SECURITY.md) und die [deutsche Übersetzung](SECURITY.de.md):** Der verwaltete Proxy kann CAPTCHA-JavaScript des Anbieters ohne Betriebssystem-Sandbox ausführen. Er ist nur auf Loopback erreichbar und durch einen Bearer-Key geschützt, aber diese Maßnahmen isolieren den Prozess nicht. Der CAPTCHA-Worker-Thread hält den Proxy reaktionsfähig; er ist weder eine Sandbox noch eine neue Berechtigungsgrenze. Damit werden keine Kontobeschränkungen umgangen und der Erfolg jeder Prüfung ist nicht garantiert.
 
 <details>
 <summary>Kit aktualisieren oder entfernen</summary>
@@ -177,7 +178,7 @@ Lass den Proxy nur auf localhost laufen und gib `.proxykey`, Anmeldedaten oder g
 
 Bleibe beim Aktualisieren bei derselben Installationsmethode.
 
-**Integrationen entfernen:** Proxy mit `stop` über den obigen Manager-Befehl anhalten, dann `zcode-kit uninstall` ausführen. Installationsverzeichnis, Abhängigkeiten, Logs, Proxy-Schlüssel und gemeinsame Anmeldedaten bleiben erhalten; du wirst nicht aus Desktop abgemeldet. Verbliebene Dateien prüfen, bevor du etwas löschst.
+**Integrationen entfernen:** Proxy anhalten (`zcode-kit proxy stop`, siehe oben), dann `zcode-kit uninstall` ausführen. Installationsverzeichnis, Abhängigkeiten, Logs, Proxy-Schlüssel und gemeinsame Anmeldedaten bleiben erhalten; du wirst nicht aus Desktop abgemeldet. Verbliebene Dateien prüfen, bevor du etwas löschst.
 
 Bei einer npm-Installation anschließend das globale Paket mit `npm uninstall -g zcode-agent-kit` entfernen.
 

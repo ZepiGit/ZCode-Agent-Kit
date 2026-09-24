@@ -9,7 +9,7 @@ Use your ZCode account with the coding assistant you already use.
 
 Keep your coding assistant. Use your existing ZCode models and quota/tokens through a local connection.
 
-**Optional account rotation:** The installer asks **"Do you want to activate the Account Rotator feature? [y/n]"**. With `y`, the current login is imported and later `zcode-kit auth login zai` logins are saved as additional accounts. Signing in again updates the same account. Enable later with `zcode-kit accounts enable`; inspect saved accounts with `zcode-kit accounts`. See the [account rotator documentation](docs/ACCOUNT_ROTATOR.md).
+**Optional account rotation:** The installer asks **"Do you want to activate the Account Rotator feature? [y/n]"**. With `y`, the current login is imported and later `zcode-kit auth login zai` logins are saved as additional accounts. Signing in again as an already saved user normally updates that entry; the documentation explains how users are matched and the exceptions. Enable later with `zcode-kit accounts enable`; inspect saved accounts with `zcode-kit accounts`. `zcode-kit accounts health [--json]` shows one on-demand verdict per account from billing data. It is not proof that model requests work; an account without quota data is not counted as healthy, and accounts are not polled continuously. See the [account rotator documentation](docs/ACCOUNT_ROTATOR.md).
 
 **The path:** prepare your account → install the kit → Use GLM-5.3(-flash) / start working.
 
@@ -106,7 +106,7 @@ zcode-kit run claude-code -- --model glm-5.3-flash
 
 Choose `glm-5.3` for text, or `glm-5.3-flash` for text and images. Image support also depends on your assistant. An optional MCP bridge provides tools from your installed ZCode runtime; registering it is not the same as connecting a model.
 
-**Currently unreleased local repair:** Flash always uses thinking. Requests that disable thinking are normalized to `low`; explicit `high` and `max` are preserved. In OMP, select the level with `--thinking low`, `--thinking high`, or `--thinking max`. Completed model replies have been verified with Flash through the direct proxy and Claude Code; this is not a claim that every harness has passed.
+Flash always uses thinking. Requests that disable thinking are normalized to `low`; explicit `high` and `max` are preserved. In OMP, select the level with `--thinking low`, `--thinking high`, or `--thinking max`. Completed model replies have been verified with Flash through the direct proxy and Claude Code; this is not a claim that every harness has passed.
 
 <details>
 <summary>Other assistants and integration limits</summary>
@@ -127,23 +127,23 @@ See [assistant-specific documentation](harnesses/README.md) and the [support mat
 </details>
 
 <details>
-<summary>Start or stop the proxy manually</summary>
+<summary>Start, stop or restart the proxy manually</summary>
 
-For the default **release-installer** location only:
-
-**PowerShell:**
-
-```powershell
-node (Join-Path $env:LOCALAPPDATA 'zcode-agent-kit/proxy/zcode-proxy-manager.mjs') start
-```
-
-**macOS/Linux:**
+The same commands work on every platform and for release and npm installations:
 
 ```sh
-node "$HOME/.local/share/zcode-agent-kit/proxy/zcode-proxy-manager.mjs" start
+zcode-kit proxy start
+zcode-kit proxy status
+zcode-kit proxy logs 50
+zcode-kit proxy restart
+zcode-kit proxy stop
 ```
 
-Replace `start` with `status`, `logs 50`, or `stop` as needed. Stopping interrupts connected clients. For a custom location, use that installation's absolute path. These default paths do not apply to npm installs.
+`stop`, `restart` and every automatic restart interrupt connected clients and in-flight requests; retry those requests afterward. Releases without `zcode-kit proxy` run `node <installation>/proxy/zcode-proxy-manager.mjs` with the same command.
+
+**Hung proxy:** `start`, `restart` and `stop` terminate a proxy that does not answer only when it is proven to be this kit's own: it is past the 60-second startup grace, its start time matches the recorded one, its command line is the kit proxy, and 3 consecutive health checks (about 25 seconds) fail. A process whose ownership is unknown is never killed; the command reports it and stops. `zcode-kit doctor --fix` reapplies managed configuration and, if the proxy is down or proven hung, starts it the same way.
+
+**Automatic restarts:** if the proxy's main thread stops responding or its memory stays too high, the proxy asks the kit manager for a fresh start. At most 3 such restarts are accepted within 15 minutes; after that, or when the restart history is unreadable, the request is refused and the proxy stays down until you check `zcode-kit proxy logs 50` and start it. A leftover start lock is deliberately never taken over: if no start is running, remove the lock file named in the message and retry.
 
 </details>
 
@@ -156,8 +156,9 @@ zcode-kit auth status
 
 - **Command not found:** reopen the terminal. For release installs, check that `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) or `$HOME/.local/bin` (macOS/Linux) is on PATH.
 - **No model reply:** check the Desktop login and available quota. Start the proxy if your assistant does not start it. Local health does not prove model access.
-- **OMP autostart (currently unreleased local repair):** launch OMP directly. Setup pins native Node/Bun; the extension runs preflight in a fresh child instead of importing kit modules into OMP. Failures report secret-free categories; the child is limited to 120 seconds. Fix the reported cause, then retry after the 60-second per-session cooldown; recovery is possible in the same session. If the runtime moved, rerun `zcode-kit setup --harness auto` and reload the extension. Unknown port owners are left untouched.
-- **Desktop login import (currently unreleased local repair):** run `zcode-kit auth login zai --import` to import the current active Desktop 0.16.9 `zai`/`start-plan` login; an explicitly configured plan is required. If `credentials.json` exists, it is authoritative: invalid credentials do not silently fall back to legacy `config.json`. Modern `coding-plan` logins use normal OAuth with `zcode-kit auth login zai` instead; the importer does not create or resolve API keys.
+- **Proxy down or not answering:** run `zcode-kit doctor --fix` or `zcode-kit proxy restart`. Only a proven-own hung proxy is terminated; see the manual proxy section above.
+- **OMP autostart:** launch OMP directly. Setup pins native Node/Bun; the extension runs preflight in a fresh child instead of importing kit modules into OMP. Failures report secret-free categories; the child is limited to 120 seconds. Fix the reported cause, then retry after the 60-second per-session cooldown; recovery is possible in the same session. If the runtime moved, rerun `zcode-kit setup --harness auto` and reload the extension. Unknown port owners are left untouched.
+- **Desktop login import:** run `zcode-kit auth login zai --import` to import the current active Desktop 0.16.9 `zai`/`start-plan` login; an explicitly configured plan is required. If `credentials.json` exists, it is authoritative: invalid credentials do not silently fall back to legacy `config.json`. Modern `coding-plan` logins use normal OAuth with `zcode-kit auth login zai` instead; the importer does not create or resolve API keys.
 - **401 or occupied port:** check for another kit installation. Do not delete keys or kill an unknown process.
 - **Setup partly failed:** read the printed rollback command before trying again. Earlier changes may still exist.
 
@@ -165,7 +166,7 @@ zcode-kit auth status
 
 Keep the proxy on localhost and never share `.proxykey`, credentials, or generated configuration files.
 
-**Read the [security policy](SECURITY.md):** the managed proxy can execute vendor CAPTCHA JavaScript without an OS sandbox. It remains loopback-only and bearer-authenticated, but those controls are not process isolation. This does not bypass account restrictions or guarantee that every challenge succeeds.
+**Read the [security policy](SECURITY.md):** the managed proxy can execute vendor CAPTCHA JavaScript without an OS sandbox. It remains loopback-only and bearer-authenticated, but those controls are not process isolation. The CAPTCHA worker thread keeps the proxy responsive; it is not a sandbox or a new permission boundary. This does not bypass account restrictions or guarantee that every challenge succeeds.
 
 <details>
 <summary>Update or remove the kit</summary>
@@ -177,7 +178,7 @@ Keep the proxy on localhost and never share `.proxykey`, credentials, or generat
 
 Keep the same installation method when updating.
 
-**Remove integrations:** stop your proxy using the manager command above with `stop`, then run `zcode-kit uninstall`. This leaves the installation folder, dependencies, logs, proxy keys, and shared credentials behind; it does not log you out of Desktop. Inspect leftover files before deleting anything.
+**Remove integrations:** stop your proxy (`zcode-kit proxy stop`, see above), then run `zcode-kit uninstall`. This leaves the installation folder, dependencies, logs, proxy keys, and shared credentials behind; it does not log you out of Desktop. Inspect leftover files before deleting anything.
 
 For an npm installation, remove the global package afterward with `npm uninstall -g zcode-agent-kit`.
 

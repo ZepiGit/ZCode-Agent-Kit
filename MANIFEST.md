@@ -3,8 +3,7 @@
 
 **Snapshot:** This file describes the components and revisions actually present in this repository. It does not claim that every upstream project is at its latest release. External harness versions are recorded references, not versions installed or pinned by the Kit.
 
-The current local repairs are **unreleased changes**, not a new upstream pin or
-proof of a published Kit release. They include authoritative import of Desktop
+Kit repairs since the upstream pin include authoritative import of Desktop
 0.16.9 shared credentials; strictly validated memory/disk CAPTCHA cache TTL and
 isolated cache directories passed through the managed environment; atomic cache
 envelopes and per-loaded-artifact provenance; and a static saved-script
