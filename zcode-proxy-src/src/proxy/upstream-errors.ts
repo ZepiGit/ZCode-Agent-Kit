@@ -1,4 +1,5 @@
 import { decodeContentStream } from "./inflate.js";
+import { isPostWriteError } from "./ordered-transport.js";
 import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
@@ -98,8 +99,13 @@ async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Uint8Arr
   } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
+/** Bounded, non-consuming look at a JSON body for a recognised gateway error envelope (never SSE). */
+export async function inspectGatewayEnvelope(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
+  return inspect(resp);
+}
+
 async function inspect(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
-  if (resp.headers.get("content-type")?.includes("text/event-stream")) return null;
+  if ((resp.headers.get("content-type") ?? "").toLowerCase().includes("text/event-stream")) return null;
   try {
     const copy = resp.clone();
     if (!copy.body) return null;
@@ -196,7 +202,17 @@ export async function recoverAndMapUpstream(opts: {
         if (!retriedQuota) break; // served from a package with balance — done
         // A SENT retry came back exhausted: this is real evidence for the memo.
         confirmedExhausted = true;
-      } catch {
+      } catch (err) {
+        // A failure after the full request was written (flag on the error or
+        // a nested cause) may have been processed upstream: never fail over
+        // to another account on top of it (the ladder only ever re-sends on
+        // the same account, and it does not wrap this resend). The handler
+        // maps the rethrown error to a 502 without a further attempt; the
+        // original envelope body is released first.
+        if (isPostWriteError(err)) {
+          void response.body?.cancel().catch(() => {});
+          throw err;
+        }
         // The retry could not be sent (connect or captcha failure): keep the
         // current quota envelope so rotation below is not lost.
         scheduleCompleted = false;
@@ -264,9 +280,11 @@ export async function recoverAndMapUpstream(opts: {
   const type = status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : envelope?.code === 1210 || response.ok ? envelope?.type ?? "upstream_error" : "upstream_error";
   const message = envelope?.message ?? `Upstream request failed (HTTP ${status}).`;
   const result = Response.json({ error: { type, message } }, { status });
-  // Preserve retry guidance only when it is a bounded numeric delta, not arbitrary upstream data.
-  const retryAfter = response.headers.get("retry-after");
-  if (status === 429 && retryAfter && /^\d{1,6}$/.test(retryAfter)) result.headers.set("retry-after", retryAfter);
+  // Preserve retry guidance only when it is a bounded numeric delta, not
+  // arbitrary upstream data — on the statuses clients read it for (429, 503,
+  // 529), including a delay the transient ladder surfaced instead of waiting.
+  const retryAfter = response.headers.get("retry-after")?.trim();
+  if ([429, 503, 529].includes(status) && retryAfter && /^\d{1,6}$/.test(retryAfter)) result.headers.set("retry-after", retryAfter);
   const requestId = response.headers.get('x-request-id');
   if (requestId && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) result.headers.set('x-request-id', requestId);
   void response.body?.cancel().catch(() => {});

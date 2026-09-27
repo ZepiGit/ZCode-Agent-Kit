@@ -4,8 +4,7 @@
 > Traducción del original en inglés; ante cualquier discrepancia manda el
 > original en inglés.
 
-El núcleo del kit es neutral respecto al harness: un proxy HTTP local en
-`http://127.0.0.1:8457` con tres formatos estándar:
+El núcleo del kit es neutral respecto al harness: un proxy HTTP local con tres formatos estándar. Los ejemplos usan el puerto predeterminado `8457`; `zcode-kit proxy status` muestra el puerto y los datos de conexión de tu instalación:
 
 | Endpoint | Formato | Uso |
 |---|---|---|
@@ -20,11 +19,9 @@ Autenticación: `Authorization: Bearer <contenido de .proxykey>`.
 copias del código, `.proxykey` está en el directorio del kit; con npm se
 guarda fuera de `node_modules`, en el estado exclusivo de esa instalación.
 
-## Configurado automáticamente por `zcode-kit setup` (solo para harnesses detectados)
+## Configurado por `zcode-kit setup` (harnesses detectados, solo con consentimiento)
 
-`zcode-kit setup --harness auto` detecta los harnesses instalados y configura
-**solo esos**. Si únicamente se detecta OMP, no se crean configuraciones ni
-wrappers de Claude/Codex.
+`zcode-kit setup --harness auto` detecta los harnesses instalados y pregunta, por cada uno sin decisión guardada, "Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]". Un `y` configura ese harness; `n` lo omite y deja sus archivos intactos, y sin terminal se omite todo harness sin decidir. Ctrl-C detiene las preguntas (código de salida 130); lo que ya respondiste con `y` queda configurado. Si únicamente se detecta OMP, no se crean configuraciones ni wrappers de Claude/Codex. Las decisiones se guardan en un archivo por harness en `generated/harness-choices/` y forman parte de la transacción de configuración (un rollback las elimina de nuevo); `zcode-kit update` y `zcode-kit doctor --fix` solo vuelven a aplicar integraciones consentidas (un `y`, una selección explícita o `zcode-kit integrate <harness>`), y un `n` guardado se respeta hasta que `--harness`, `integrate` o `zcode-kit setup --reask` (vuelve a preguntar en una terminal) lo cambien. Una integración que el kit creó antes de preguntar se actualiza en ejecuciones desatendidas, pero nunca se convierte en consentimiento. Para ejecuciones desatendidas selecciona los harnesses con `--harness omp,codex` o `ZCODE_KIT_HARNESSES=omp,codex` (`none` omite todos los detectados); los id desconocidos son errores. El puente MCP del kit solo se registra con consentimiento aparte: una selección explícita o un `y` dado tras la nota MCP que la configuración muestra antes de la pregunta (`--no-mcp` lo desactiva); `integrate`, una actualización o una decisión guardada sin esa nota nunca lo registran. Un harness que falla no detiene a los demás: sus propios cambios parciales se deshacen, el resumen lo lista como fallido y la configuración termina con código 20 (los instaladores continúan con una advertencia).
 
 | Harness | Mecanismo | Impacto en la config existente |
 |---|---|---|
@@ -38,7 +35,7 @@ wrappers de Claude/Codex.
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` (Windows) o `~/.config/goose/custom_providers/zcode.json` (macOS/Linux) | credencial vía el helper documentado `auth.command` (resolver de clave del kit, sin shell) |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | el kit nunca toca el estado de VS Code; introduce los valores una vez en la UI |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | provider personalizado (Anthropic messages) en la UI; el kit deliberadamente no escribe kilo.jsonc |
-| Harnesses con MCP | servidor stdio `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entrada en `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (solo si se detecta); Codex: dentro del home aislado. MCP por sí solo NO cuenta como integración de modelo |
+| Harnesses con MCP | servidor stdio `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entrada en `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (solo si se detecta y se consiente); Codex: dentro del home aislado. MCP por sí solo NO cuenta como integración de modelo |
 
 Las rutas `generated/` indican el estado del kit: dentro del directorio del
 kit para versiones publicadas/código fuente y en un directorio aparte para npm.
@@ -53,6 +50,8 @@ Ejecuta OMP directamente, por ejemplo con `omp --model zcode/glm-5.3-flash --thi
 | Codex CLI | `bin\zcode-codex.cmd` | fija `CODEX_HOME=<estado-del-kit>\generated\codex-home` + `ZCODE_PROXY_KEY` y arranca el proxy bajo demanda; tu `codex` normal y `~/.codex` quedan intactos |
 
 ## Conexión manual (cualquier cliente compatible OpenAI/Anthropic)
+
+Es una vía de entrada equivalente, no un plan B. El proxy del kit debe estar en ejecución y ZCode necesita una sesión válida. `zcode-kit proxy start` (también cuando el proxy ya está en ejecución) y `zcode-kit proxy status` imprimen las URL base actuales, la clave local y los ID de modelo. Cuando el proxy no se verifica en ejecución, los valores se etiquetan como procedentes de la configuración y la salida dice `Start the proxy first: zcode-kit proxy start`. La clave completa solo aparece en una terminal interactiva; en otro caso usa `zcode-kit models --show-key`. Sustituye el puerto de ejemplo de abajo por el que muestra el comando.
 
 ```yaml
 # Formato OpenAI
@@ -105,7 +104,10 @@ nativo. Detalles: [puente MCP](../mcp/zcode-harness-mcp/README.es.md).
 ## Cuota y modos de error
 
 - `GET /quota` (autenticado) muestra los buckets de tokens por modelo.
-- Cuota agotada → HTTP 400 `[1005] exceed quota limit`. El proxy reintenta la misma cuenta con un calendario creciente (hasta ~65s) antes de cambiar de cuenta; si aún lo ves, espera a que el proveedor restablezca la cuota.
+- Cuota agotada → HTTP 400 `[1005] exceed quota limit`. El proxy reintenta la misma cuenta con un calendario creciente (hasta ~65s por defecto) antes de cambiar a otra cuenta, cuando el rotador tiene una; si aún lo ves, espera a que el proveedor restablezca la cuota.
 - `[3007] captcha verify failed` → anti-abuso del gateway. El proxy reintenta una vez con un token CAPTCHA recién emitido; si aún falla, haz una pausa.
+- Los fallos transitorios antes de cualquier salida (conexión rechazada o reiniciada, HTTP 500/502/503/504/524/529, 429 y los códigos de error del gateway que el cliente oficial reintenta) se reintentan hasta 3 veces en la misma cuenta con una espera creciente; el presupuesto es menor que el del cliente oficial (espera base de 1 s que se duplica, `Retry-After` respetado hasta 15 segundos) y la cuenta se vuelve a comprobar antes de cada reintento. Los veredictos del gateway (cuota, saldo, captcha, modelo, autenticación), los errores de la solicitud y cualquier cosa tras el inicio de la salida nunca se reintentan; un `Retry-After` superior a 15 segundos se pasa al cliente en 429, 503 y 529. Ajústalo con `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` (espera base en milisegundos, 500 por defecto, máximo 10000; `off` conserva solo el reintento de conexiones que nunca se establecieron; proxy start/restart lo transmite).
+- Un flujo que falla antes de su primer evento de contenido (un evento de error como `overloaded_error` o una conexión cortada) se reintenta como una solicitud fallida, de modo que el harness solo ve el flujo correcto; tras el primer evento de contenido no se reintenta nada. En start-plan, cada reintento tras una respuesta usa un token CAPTCHA nuevo.
+- Un flujo que el upstream corta termina con un mensaje de error en lugar de un truncamiento silencioso: los flujos de chat con `data: {"error":…}`, los de Responses con `response.failed`, los flujos Anthropic nativos con un frame `event: error` de tipo `api_error` cuyo mensaje indica la causa (`upstream_incomplete` o `upstream_stream_error`); un último frame incompleto se descarta para que el frame de error siga siendo legible. Nada se repite una vez iniciada la salida; vuelve a enviar el turno desde el harness.
 - `401 start_plan_jwt_invalid` → comprueba la sesión de Desktop y renuévala con `zcode-kit auth login zai`. Usa `zcode-kit auth login zai --import` para el login activo de `zai`/`start-plan` en Desktop 0.16.9 con un plan configurado explícitamente. Si existe `credentials.json`, es la fuente autoritativa; unas credenciales inválidas no provocan una vuelta silenciosa a `config.json`. Los logins modernos de `coding-plan` usan el OAuth normal; la importación no crea ni obtiene claves API.
 - `[1210]` con Flash → comprueba que thinking esté activado y elige `low`, `high` o `max`, en lugar de desactivarlo. El proxy normaliza thinking desactivado a `low`; consulta la nota sobre Flash anterior.

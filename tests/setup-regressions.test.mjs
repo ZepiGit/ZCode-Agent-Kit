@@ -59,6 +59,9 @@ function runSetup(home, args = []) {
       // The suite runs the kit from a source checkout (KIT has .git); tests
       // intentionally write to the disposable fake home, so opt in.
       ZCODE_KIT_ALLOW_CHECKOUT: "1",
+      // No terminal here: consent for the fake OMP is given explicitly, the
+      // way unattended installs do (a missing TTY never counts as consent).
+      ZCODE_KIT_HARNESSES: "omp",
       // Test isolation: hide the machine's real claude/codex/bun from PATH so
       // detection only sees the fake home (node.exe is spawned by absolute path).
       PATH: process.platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin:/bin",
@@ -194,7 +197,8 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
       },
       encoding: "utf8",
     });
-    assert.match(out, /re-applying integrations for detected harnesses/);
+    assert.match(out, /refreshing consented integrations/);
+    assert.match(out, /Connection details unavailable: no proxy manager in this kit layout/, "a stub manager must not abort the re-setup");
     assert.match(out, /starting the proxy on the updated code/, "update must restart the proxy after re-setup");
     assert.match(out, /stub manager: start/, "the manager must be invoked with the start subcommand");
     assert.doesNotMatch(out, /refusing to write user configs from a source checkout/);

@@ -167,8 +167,19 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
   Write-InstallStep "[4/4] Configuring your workspace"
   Push-Location $InstallDir
   try {
+    # One y/n question per detected assistant, then the Account Rotator question,
+    # read from the console; without a terminal, undecided assistants are skipped.
     node cli/zcode-kit.mjs setup --harness auto --installer
-    if ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE) - see output above" }
+    if ($LASTEXITCODE -eq 20) {
+      # The kit is installed; one or more assistants failed (see the summary).
+      Write-Host '  [WARN] some assistants could not be configured; see the summary above (the kit itself is installed)'
+    } elseif ($LASTEXITCODE -eq 130) {
+      # Ctrl-C during the questions; answers already given were applied.
+      Write-Host '  [WARN] setup was interrupted; the kit is installed and the answers given so far were applied. Finish later with: zcode-kit setup'
+    } elseif ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE) - see output above" }
+    # Installed (possibly with a warning above): callers that check
+    # $LASTEXITCODE after this script must see success, not setup's 20/130.
+    $global:LASTEXITCODE = 0
   } finally {
     Pop-Location
   }
@@ -194,6 +205,7 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
   Write-Host '  zcode-kit auth login zai    Sign in / add an account'
   Write-Host '  zcode-kit accounts          View saved accounts'
   Write-Host '  zcode-kit doctor            Check warnings and model access'
+  Write-Host '  zcode-kit proxy status      Show connection details (base URL, key, models) for manual client setup'
   Write-Host ''
 } finally {
   $env:PATH = $originalPath

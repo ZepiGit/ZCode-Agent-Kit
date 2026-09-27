@@ -55,9 +55,46 @@ else
 fi
 
 printf '%s\n' "$VERSION" | grep -Eq "$VERSION_PATTERN" || die "invalid release version; expected vX.Y.Z or vX.Y.Z-prerelease" 2
-if [ -f "$INSTALL_DIR/cli/zcode-kit.mjs" ]; then
-  command -v rsync >/dev/null 2>&1 || die "rsync required for updates" 2
-fi
+
+# Mirror a new release over an existing installation while never touching
+# machine-local state: the local proxy key, the user's proxy/config.yaml, the
+# Bun path, and the node_modules/backups/logs/generated directories (at any
+# depth, like rsync --exclude). rsync when available; otherwise a portable
+# tar pipe copies first, then entries the release no longer ships are removed.
+# ZCODE_KIT_MIRROR=portable forces the portable path (diagnostics, tests).
+mirror_portable() {
+  src=$1; dst=$2
+  # Through a file, not a pipe: without pipefail a failed or partial archive
+  # step would go unnoticed and the delete phase below would still run.
+  (cd "$src" && tar -cf "$TMP/mirror.tar" --exclude='.bun-path' --exclude='.proxykey' --exclude='config.yaml' --exclude='node_modules' \
+      --exclude='backups' --exclude='logs' --exclude='generated' .) || return 1
+  (cd "$dst" && tar -xf "$TMP/mirror.tar") || return 1
+  rm -f "$TMP/mirror.tar"
+  # Delete only after the copy succeeded. Protected names are pruned, so
+  # neither they nor anything below them is ever listed for removal. Like
+  # rsync, a directory the release dropped goes only when it is empty after
+  # its own files went: one that still holds protected state stays.
+  (cd "$dst" && find . -mindepth 1 \( -name '.bun-path' -o -name '.proxykey' -o -name 'config.yaml' -o -name 'node_modules' \
+      -o -name 'backups' -o -name 'logs' -o -name 'generated' \) -prune -o -print) > "$TMP/mirror-dst.list" || return 1
+  while IFS= read -r rel; do
+    [ -e "$src/$rel" ] || [ -L "$src/$rel" ] && continue
+    if [ -d "$dst/$rel" ] && [ ! -L "$dst/$rel" ]; then continue; fi
+    rm -f "${dst:?}/$rel" || return 1
+  done < "$TMP/mirror-dst.list"
+  # Directories deepest first; rmdir refuses a non-empty one, which is the point.
+  awk -F/ '{ print NF "\t" $0 }' "$TMP/mirror-dst.list" | sort -rn | cut -f2- | while IFS= read -r rel; do
+    if [ -d "$dst/$rel" ] && [ ! -L "$dst/$rel" ] && [ ! -e "$src/$rel" ]; then rmdir "$dst/$rel" 2>/dev/null || :; fi
+  done
+}
+mirror_release() {
+  if [ "${ZCODE_KIT_MIRROR:-}" != "portable" ] && command -v rsync >/dev/null 2>&1; then
+    # Excluded files are protected from --delete too (--delete-excluded is NOT set).
+    rsync -a --delete --exclude '.bun-path' --exclude '.proxykey' --exclude 'config.yaml' --exclude 'node_modules' \
+      --exclude 'backups' --exclude 'logs' --exclude 'generated' "$1/" "$2/"
+  else
+    mirror_portable "$1" "$2"
+  fi
+}
 printf '\n  %sZCODE  /  AGENT KIT%s\n' "$C_BOLD" "$C_RESET"
 printf '  %s\n' "$VERSION  |  Your local AI workspace"
 printf '  --------------------------------------------\n'
@@ -144,14 +181,8 @@ fi
 step "[3/4] Installing files"
 mkdir -p "$INSTALL_DIR"
 if [ -f "$INSTALL_DIR/cli/zcode-kit.mjs" ]; then
-  command -v rsync >/dev/null 2>&1 || { echo "ERROR: rsync required to update an existing installation"; exit 2; }
   printf '  Updating existing installation; keeping your configuration.\n'
-  # Excluded files are protected from --delete too (--delete-excluded is NOT
-  # set): the local proxy key and user proxy/config.yaml survive updates.
-  if ! rsync -a --delete --exclude '.bun-path' --exclude '.proxykey' --exclude 'config.yaml' --exclude 'node_modules' \
-        --exclude 'backups' --exclude 'logs' --exclude 'generated' "$SRC/" "$INSTALL_DIR/"; then
-    die "update copy failed" 1
-  fi
+  mirror_release "$SRC" "$INSTALL_DIR" || die "update copy failed" 1
 else
   cp -R "$SRC/." "$INSTALL_DIR/"
 fi
@@ -160,13 +191,27 @@ printf '%s\n' "$BUN_BIN" > "$INSTALL_DIR/.bun-path"
 cd "$INSTALL_DIR"
 ok "Application files installed"
 step "[4/4] Configuring your workspace"
-# curl | sh consumes stdin. Read answers from the controlling terminal instead.
+# curl | sh consumes stdin. Read answers (one y/n question per detected
+# assistant, then the Account Rotator question) from the controlling terminal
+# instead; without one, undecided assistants are skipped, never configured.
 run_setup() { node cli/zcode-kit.mjs setup --harness auto --installer; }
-if [ -t 1 ] && [ -r /dev/tty ]; then
-  run_setup < /dev/tty || die "setup failed; see the diagnostics above" 1
-elif ! run_setup; then
-  die "setup failed; see the diagnostics above" 1
+setup_status=0
+# `[ -r /dev/tty ]` only checks permissions; opening it proves a controlling
+# terminal exists (no terminal: ENXIO). Without one, setup gets /dev/null so
+# nothing can read the script pipe as an answer.
+if [ -t 1 ] && (exec < /dev/tty) 2>/dev/null; then
+  run_setup < /dev/tty || setup_status=$?
+else
+  run_setup < /dev/null || setup_status=$?
 fi
+case "$setup_status" in
+  0) : ;;
+  # Exit 20: the kit is installed, one or more assistants failed (see the summary).
+  20) printf '  [WARN] some assistants could not be configured; see the summary above (the kit itself is installed)\n' ;;
+  # Exit 130: Ctrl-C during the questions; answers already given were applied.
+  130) printf '  [WARN] setup was interrupted; the kit is installed and the answers given so far were applied. Finish later with: zcode-kit setup\n' ;;
+  *) die "setup failed; see the diagnostics above" 1 ;;
+esac
 
 # User-scope `zcode-kit` command in ~/.local/bin (conventionally on PATH).
 # Delete the file (or run zcode-kit uninstall) to undo.
@@ -188,4 +233,5 @@ printf '  --------------------------------------------\n'
 printf '  %-27s %s\n' 'zcode-kit auth login zai' 'Sign in / add an account'
 printf '  %-27s %s\n' 'zcode-kit accounts' 'View saved accounts'
 printf '  %-27s %s\n' 'zcode-kit doctor' 'Check warnings and model access'
+printf '  %-27s %s\n' 'zcode-kit proxy status' 'Show connection details (base URL, key, models) for manual client setup'
 printf '\n'

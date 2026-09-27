@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { commitFile } from "../lib/edit.mjs";
+import { askYesNo } from "./harness-consent.mjs";
 
 export const ACCOUNT_ROTATOR_QUESTION = "Do you want to activate the Account Rotator feature?";
 
@@ -12,18 +12,9 @@ export function rotatorChoice(value) {
   throw new Error("Account Rotator choice must be y or n (--account-rotator or ZCODE_KIT_ACCOUNT_ROTATOR).");
 }
 
-export async function askAccountRotator({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
-  if (!input.isTTY || !output.isTTY || (env.CI && !/^(0|false)$/i.test(env.CI))) return undefined;
-  const lines = createInterface({ input, output, terminal: true, prompt: `${ACCOUNT_ROTATOR_QUESTION} [y/n] ` });
-  try {
-    lines.prompt();
-    for await (const answer of lines) {
-      if (/^[yn]$/i.test(answer.trim())) return answer.trim().toLowerCase() === "y";
-      output.write("Please answer y or n.\n");
-      lines.prompt();
-    }
-    return undefined; // Closed input must never count as consent.
-  } finally { lines.close(); }
+/** Independent of the per-harness questions: same y/n rules, separate answer. */
+export function askAccountRotator(streams = {}) {
+  return askYesNo(ACCOUNT_ROTATOR_QUESTION, streams);
 }
 
 /** Record the config change in the existing setup transaction; keep YAML comments/policies. */

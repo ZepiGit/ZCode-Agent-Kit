@@ -250,7 +250,11 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
       shutdownCaptchaRuntime();
       const forceExit = setTimeout(() => process.exit(0), 10_000);
       forceExit.unref();
-      void server.close().then(() => process.exit(0));
+      // Long streams may keep close() busy past the 10 s cap: give it 6 s,
+      // then the bounded (3 s) metadata write, then exit — all inside the cap.
+      void Promise.race([server.close(), new Promise<void>((resolve) => setTimeout(resolve, 6_000))])
+        .then(() => flushAccountMetadata(auth))
+        .then(() => process.exit(0));
       return true;
     },
   });
@@ -279,15 +283,32 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   }
   if (debug) console.log(`  debug: ON`);
 
+  // Unsaved account metadata (a store write that lost a lock race) gets one
+  // last, bounded write before the process exits.
+  let stopping = false;
+  const stop = (): void => {
+    if (stopping) return;
+    stopping = true;
+    shutdownCaptchaRuntime();
+    void flushAccountMetadata(auth).finally(() => server.stop(true));
+  };
   process.on("SIGINT", () => {
     console.log("\nShutting down...");
-    shutdownCaptchaRuntime();
-    server.stop(true);
+    stop();
   });
-  process.on("SIGTERM", () => {
-    shutdownCaptchaRuntime();
-    server.stop(true);
-  });
+  process.on("SIGTERM", stop);
+}
+
+/** Bounded final write of unsaved account metadata (referenced timer: shutdown waits for it). */
+export async function flushAccountMetadata(auth: { flushPersistence?: () => Promise<void>; getPersistenceStatus?: () => { unsaved?: boolean } }, deadlineMs = 3_000): Promise<void> {
+  if (typeof auth.flushPersistence !== "function") return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    auth.flushPersistence().catch(() => {}),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, deadlineMs); }),
+  ]);
+  if (timer) clearTimeout(timer);
+  if (auth.getPersistenceStatus?.().unsaved) console.error("[accounts] shutdown: account metadata could not be written; it will be rebuilt from the next requests");
 }
 
 /**
@@ -863,6 +884,21 @@ async function doctorAccounts(args: string[]): Promise<void> {
     if (!config.auth.accounts?.enabled) checks.push({ code: "pool_disabled", status: "warning", detail: "legacy single-account mode is active" });
   } catch (err) {
     checks.push({ code: "doctor_unavailable", status: "error", detail: safeAccountError(err) });
+  }
+  // Runtime metadata (cooldowns, last use) the running proxy could not write
+  // yet: a warning, since the proxy keeps retrying in the background and the
+  // next change writes again; lost only if the proxy stops before it lands.
+  try {
+    const { ok, body } = await fetchLiveAccounts("/accounts/status", 3_000);
+    const persistence = ok && body && typeof body === "object" ? (body as { persistence?: { unsaved?: unknown; attempts?: unknown; nextRetryAt?: unknown } }).persistence : undefined;
+    if (persistence?.unsaved === true) {
+      const next = typeof persistence.nextRetryAt === "number" ? `; next retry ${new Date(persistence.nextRetryAt).toISOString()}` : "; retries paused until the next change";
+      checks.push({ code: "runtime_changes_unsaved", status: "warning", detail: `account metadata not written to the store yet (${Number(persistence.attempts) || 0} failed write(s)${next})` });
+    } else if (persistence) {
+      checks.push({ code: "runtime_changes_saved", status: "ok" });
+    }
+  } catch {
+    // proxy not running: nothing unsaved in memory
   }
   const output = { schemaVersion: 1, source: "offline", asOf: new Date().toISOString(), checks };
   if (json) console.log(JSON.stringify(output, null, 2));

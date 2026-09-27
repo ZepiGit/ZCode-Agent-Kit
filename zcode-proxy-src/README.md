@@ -2,7 +2,7 @@
 **English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 This component provides the local model proxy bundled with ZCode Agent Kit.
-The Kit manages its setup and integration with assistant tools.
+The Kit manages its setup; assistant integrations are configured only with your consent.
 
 ## Use with ZCode Agent Kit
 
@@ -49,6 +49,8 @@ Do not use those switches. The solver, its security gates, and the callable
 `show` alternative remain; debug diagnostics are metadata-only.
 
 The local repair decodes gzip, deflate, and Brotli before interpreting translated streams or JSON error envelopes. Empty or undecodable batch bodies are reported as `upstream_invalid_response`, not successful empty answers. The proxy does not substitute its daemon directory for the calling harness workspace; `ZCODE_IDENTITY_ENV_CWD` remains an explicit override.
+
+Transient failures before any output (connection refused or reset, HTTP 500/502/503/504/524/529, 429, and the gateway error codes the official client retries) are retried up to three times on the same account with a growing delay, a smaller budget than the official client's (base delay 1 s doubling, set by `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS`: base delay in milliseconds, default 500, maximum 10000; `off` keeps only the retry of never-established connections); the account is re-checked before every retry, a `Retry-After` is honoured up to 15 seconds and passed to the client above that, and gateway verdicts (quota, balance, captcha, model, authentication), request errors and anything after output has started are never retried. A stream that fails before its first content event (an error event such as `overloaded_error`, or a cut connection) is retried the same way; the client then receives the response headers once the first content event arrived (at most 15 seconds later). On start-plan, every retry after a response or a dropped connection takes a fresh captcha token. The ordered transport used for enforced client sessions retries a connection dropped before the response like the fetch path (same account; the quota failover never replays it on another account). A native Anthropic stream that ends without `message_stop` receives one terminal `event: error` frame of type `api_error` (its message names `upstream_incomplete`, or `upstream_stream_error` when the read failed); an unfinished last frame is dropped so clients see a parseable failure instead of a silent truncation.
 
 ## Security
 

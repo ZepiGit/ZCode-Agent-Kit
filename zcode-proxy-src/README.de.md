@@ -2,8 +2,8 @@
 [English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 Diese Komponente stellt den lokalen Modell-Proxy bereit, der mit dem ZCode
-Agent Kit gebündelt wird. Das Kit übernimmt Einrichtung und Integration mit
-Assistenten.
+Agent Kit gebündelt wird. Das Kit übernimmt die Einrichtung; Integrationen
+mit Assistenten werden nur mit deiner Zustimmung konfiguriert.
 
 ## Mit dem ZCode Agent Kit verwenden
 
@@ -55,6 +55,8 @@ und die aufrufbare `show`-Alternative bleiben erhalten; Debug-Diagnosen enthalte
 nur Metadaten.
 
 Die lokale Korrektur dekodiert gzip, deflate und Brotli vor der Auswertung übersetzter Streams oder JSON-Fehlerantworten. Leere oder nicht dekodierbare Batch-Antworten werden als `upstream_invalid_response` gemeldet, nicht als erfolgreiche leere Antworten. Der Proxy ersetzt das Arbeitsverzeichnis des aufrufenden Harness nicht durch sein eigenes; `ZCODE_IDENTITY_ENV_CWD` bleibt ein ausdrücklicher Override.
+
+Vorübergehende Fehler vor jeder Ausgabe (Verbindung abgelehnt oder zurückgesetzt, HTTP 500/502/503/504/524/529, 429 sowie die Gateway-Fehlercodes, die der offizielle Client wiederholt) werden bis zu dreimal auf demselben Konto mit wachsender Wartezeit wiederholt, mit kleinerem Budget als beim offiziellen Client (Basiswartezeit 1 s, verdoppelt; eingestellt über `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS`: Basiswartezeit in Millisekunden, Standard 500, maximal 10000; `off` behält nur die Wiederholung nie zustande gekommener Verbindungen); das Konto wird vor jeder Wiederholung erneut geprüft, ein `Retry-After` wird bis 15 Sekunden beachtet und darüber an den Client durchgereicht, und Gateway-Entscheidungen (Kontingent, Guthaben, Captcha, Modell, Authentifizierung), Anfragefehler und alles nach begonnener Ausgabe werden nie wiederholt. Ein Stream, der vor seinem ersten Inhalts-Event scheitert (ein Fehler-Event wie `overloaded_error` oder eine abgebrochene Verbindung), wird ebenso wiederholt; der Client erhält die Antwort-Header dann, sobald das erste Inhalts-Event da ist (höchstens 15 Sekunden später). Beim Start-Plan holt jede Wiederholung nach einer Antwort oder einem Verbindungsabbruch ein frisches Captcha-Token. Der geordnete Transport für erzwungene Client-Sitzungen wiederholt eine vor der Antwort abgebrochene Verbindung wie der Fetch-Pfad (dasselbe Konto; der Kontingent-Failover spielt sie nie auf einem anderen Konto erneut ab). Ein nativer Anthropic-Stream, der ohne `message_stop` endet, erhält einen abschließenden `event: error`-Frame vom Typ `api_error` (die Meldung nennt `upstream_incomplete`, bei fehlgeschlagenem Lesen `upstream_stream_error`); ein unvollständiger letzter Frame wird verworfen, damit Clients einen lesbaren Fehler statt einer stillen Kürzung sehen.
 
 ## Sicherheit
 

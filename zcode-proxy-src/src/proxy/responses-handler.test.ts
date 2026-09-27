@@ -194,6 +194,10 @@ describe("handleResponses", () => {
         controller.enqueue(encoder.encode(
           `event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { id: "msg_cancel", type: "message", role: "assistant", model: "glm-5.2", content: [], usage: { input_tokens: 1, output_tokens: 0 } } })}\n\n`,
         ));
+        // A content event ends the prelude (the gate holds message_start until then).
+        controller.enqueue(encoder.encode(
+          `event: content_block_start\ndata: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}\n\n`,
+        ));
       },
     });
     const fetchImpl = (async (): Promise<Response> => new Response(upstreamBody, {
@@ -221,7 +225,9 @@ describe("handleResponses", () => {
       expect(first.done).toBe(false);
 
       await expect(reader.cancel("client stopped")).resolves.toBeUndefined();
-      expect(readerCancelCalls).toBe(3);
+      // Client reader, translator reader, the prelude gate's reader on the
+      // upstream body, and the upstream's own: each layer forwards the cancel.
+      expect(readerCancelCalls).toBe(4);
     } finally {
       ReadableStreamDefaultReader.prototype.cancel = originalReaderCancel;
       try { upstreamController?.close(); } catch {}
@@ -419,7 +425,7 @@ describe("handleResponses resilience (CL-08)", () => {
 
     const resp = await handleResponses(makeReq({ model: "glm-5.2", input: "hi" }), { config: CONFIG, auth, fetchImpl });
     expect(resp.status).toBe(502);
-    expect(calls).toBe(3);
+    expect(calls).toBe(4); // MAX_TRANSIENT_ATTEMPTS: initial + 3 retries
     const body = await resp.json();
     expect(body.error.type).toBe("upstream_unreachable");
   });

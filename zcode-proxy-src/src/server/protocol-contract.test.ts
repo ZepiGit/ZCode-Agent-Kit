@@ -185,10 +185,12 @@ describe("protocol contract: /v1/messages (anthropic passthrough)", () => {
     const upstream = (async (req: Request | URL | string, init?: RequestInit): Promise<Response> => {
       const sig = init?.signal ?? (req instanceof Request ? req.signal : undefined);
       if (sig) signals.push(sig);
-      // Stream that stays open until the upstream fetch is aborted.
+      // Stream that stays open until the upstream fetch is aborted. The first
+      // content event ends the prelude, so the response headers go out.
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
           controller.enqueue(enc.encode(sse("message_start", { type: "message_start", message: { id: "m", type: "message", role: "assistant", model: "glm-5.3-flash", content: [], usage: { input_tokens: 1, output_tokens: 0 } } })));
+          controller.enqueue(enc.encode(sse("content_block_start", { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })));
         },
       });
       return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -212,6 +214,44 @@ describe("protocol contract: /v1/messages (anthropic passthrough)", () => {
       expect(signals.length).toBeGreaterThan(0);
       expect(signals[0].aborted).toBe(true);
       try { await reader.cancel(); } catch {}
+    } finally {
+      server.stop();
+      await server.close();
+    }
+  });
+
+  it("a client that leaves while the stream prelude is still open cancels the upstream at once (no wait for the prelude limit)", async () => {
+    let upstreamCancelled = false;
+    let dispatches = 0;
+    const upstream = (async (): Promise<Response> => {
+      dispatches += 1;
+      // message_start only, then silence: the prelude gate is still deciding.
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(enc.encode(sse("message_start", { type: "message_start", message: { id: "m", type: "message", role: "assistant", model: "glm-5.3-flash", content: [], usage: { input_tokens: 1, output_tokens: 0 } } })));
+        },
+        cancel() { upstreamCancelled = true; },
+      });
+      return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }) as unknown as typeof fetch;
+    const server = await startServer({ config: makeConfig({ server: { port: 0, host: "127.0.0.1" }, auth: { proxyApiKey: "contract-test-key" } }), auth: oauthAuth(), fetchImpl: upstream });
+    const ctrl = new AbortController();
+    try {
+      const pending = fetch(`http://127.0.0.1:${server.port}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "text/event-stream", authorization: "Bearer contract-test-key" },
+        body: JSON.stringify({ model: "glm-5.3-flash", max_tokens: 100, stream: true, messages: [{ role: "user", content: "hi" }] }),
+        signal: ctrl.signal,
+      }).catch(() => null);
+      const started = Date.now();
+      while (dispatches === 0 && Date.now() - started < 3000) await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 50));
+      ctrl.abort();
+      await pending;
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline && !upstreamCancelled) await new Promise((r) => setTimeout(r, 25));
+      expect(upstreamCancelled).toBe(true);
+      expect(dispatches).toBe(1); // an abort is never retried
     } finally {
       server.stop();
       await server.close();

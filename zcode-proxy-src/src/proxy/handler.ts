@@ -22,13 +22,13 @@ import { buildUpstreamHeaderPairs, buildUpstreamRequest, type UpstreamHeaderPair
 import { getDefaultEndpointRouting, type EndpointRoutingService } from "./endpoint-routing.js";
 import { getDefaultClientSigning, sendWithClientSigning, type ClientSigningManager } from "./client-signing.js";
 import { credentialString, type Credential } from "../auth/types.js";
-import { sendOrderedUpstreamRequest } from "./ordered-transport.js";
+import { isPostWriteError, sendOrderedUpstreamRequest } from "./ordered-transport.js";
 import { transformRequestBody } from "./body-transformer.js";
-import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
+import { CAPTCHA_CHALLENGE_HEADER, isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
 import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
 import { gzipSync } from "node:zlib";
-import { recoverAndMapUpstream, parseGatewayErrorEnvelope } from "./upstream-errors.js";
+import { recoverAndMapUpstream, parseGatewayErrorEnvelope, inspectGatewayEnvelope } from "./upstream-errors.js";
 export { parseGatewayErrorEnvelope } from "./upstream-errors.js";
 
 // captcha.ts is loaded lazily inside the `startPlan` branch (only path that
@@ -46,7 +46,11 @@ import { translateRequestOpenAIToAnthropic, translateResponseAnthropicToOpenAI }
 import { translateRequestAnthropicToOpenAI, translateResponseOpenAIToAnthropic } from "../translator/anthropic-to-openai.js";
 import { anthropicSseToOpenaiSse, openaiSseToAnthropicSse } from "../translator/sse-translator.js";
 import type { OpenAIChatRequest, OpenAIChatResponse, AnthropicMessagesRequest, AnthropicMessagesResponse } from "../translator/types.js";
-import { dumpPhase, dumpHeaders, dumpBody, dumpEnabled } from "./dump.js";
+import { dumpPhase, dumpHeaders, dumpBody, dumpEnabled, SENSITIVE_HEADERS } from "./dump.js";
+import { ensureAnthropicSseTerminal } from "./sse-terminal.js";
+import { gateStreamPrelude, isGatedStream, type PreludeVerdict } from "./stream-prelude.js";
+import { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
+export { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 import { inflateWithCap, decodeContentStream } from "./inflate.js";
 import { buildAnthropicMetadataUserId } from "./trace-headers.js";
 
@@ -272,27 +276,43 @@ export async function proxyRequest(
     }
   }
   try {
-    // Only explicit pre-connect errors establish that a POST was not sent.
-    // Generic resets may happen after the upstream has already accepted it.
-    // Guard rails: skip retry when the client already aborted or the ordered
-    // transport flagged the failure postWrite; re-dispatch a FRESH Request
-    // each attempt — a reused Request has its body stream marked used after
-    // the first fetch (start-plan hits the plain pass-through path where
-    // dispatch does NOT rebuild the Request).
-    let dispatchAttempt = 0;
+    // Pre-output ladder: connect failures, drops before a response and
+    // transient gateway statuses/codes are re-dispatched on the same account
+    // (exact policy at dispatchWithConnectRetry). Guard rails: no retry once
+    // the client aborted, none after a failure the ordered transport flagged
+    // postWrite, the account is re-checked before every retry, and each
+    // attempt re-dispatches a FRESH Request — a reused Request has its body
+    // stream marked used after the first fetch (start-plan hits the plain
+    // pass-through path where dispatch does NOT rebuild the Request). On
+    // start-plan a retry after a response, a drop after the write or a failed
+    // stream prelude takes a fresh pooled captcha token (the gateway may have
+    // spent the first one); a never-connected attempt keeps it, and when no
+    // fresh token can be minted the previous one is re-sent and the captcha
+    // layer below re-solves on a challenge.
     upstreamResp = await dispatchWithConnectRetry(
-      () => {
-        dispatchAttempt += 1;
-        const currentReq = dispatchAttempt === 1
-          ? upstreamReq
-          : buildUpstreamRequest(clientReq, upstreamFormat, provider, cred, transformedBody, config.identity, config.plan, captchaHeaders, clientSession);
-        return dispatch(currentReq, upstreamHeaderPairs);
+      async ({ attempt, previous }) => {
+        if (attempt === 1) return dispatch(upstreamReq, upstreamHeaderPairs);
+        if (startPlan && previous?.kind !== "connect") {
+          try {
+            const captchaModule = opts.captcha ?? await loadCaptcha();
+            const token = await captchaModule.getCaptchaToken(config.identity.appVersion);
+            captchaHeaders = { [captchaModule.RETRY_HEADERS.PARAM]: token.verifyParam, [captchaModule.RETRY_HEADERS.REGION]: token.region };
+            upstreamHeaderPairs = buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, config.identity, config.plan, captchaHeaders, clientSession);
+          } catch {
+            // keep the previous token
+          }
+        }
+        return dispatch(buildUpstreamRequest(clientReq, upstreamFormat, provider, cred, transformedBody, config.identity, config.plan, captchaHeaders, clientSession), upstreamHeaderPairs);
       },
       {
         isAborted: () => clientReq.signal.aborted,
-        onRetry: (attempt, err) => {
-          if (debug) debugError(reqId, "upstream_connect_retry", `attempt ${attempt}/${MAX_CONNECT_ATTEMPTS - 1} failed (${err.message}), retrying in ${500 * attempt}ms`);
-          console.log(`${reqId} upstream connect failed (${err.message}), retry ${attempt + 1}/${MAX_CONNECT_ATTEMPTS} in ${500 * attempt}ms`);
+        signal: clientReq.signal,
+        beforeRetry: () => accountHandleStillCurrent(auth, accountHandle),
+        // Translation mode reads a body the transport already inflated.
+        streamPrelude: (resp) => gateStreamPrelude(resp, { decoded: translateMode, signal: clientReq.signal }),
+        onRetry: (attempt, reason, delayMs) => {
+          if (debug) debugError(reqId, "upstream_transient_retry", `attempt ${attempt}/${MAX_TRANSIENT_ATTEMPTS} failed (${reason}), retrying in ${delayMs}ms`);
+          console.log(`${reqId} upstream transient failure (${reason}), retry ${attempt + 1}/${MAX_TRANSIENT_ATTEMPTS} in ${delayMs}ms`);
         },
       },
     );
@@ -332,6 +352,7 @@ export async function proxyRequest(
       captcha,
       appVersion: config.identity.appVersion,
       challengedResp: upstreamResp,
+      signal: clientReq.signal,
       debug: debug ? (message) => debugLine(reqId, message) : undefined,
       solveAndRetry: (retryHeaders) => {
         console.log(`${reqId} captcha re-solved (token ${retryHeaders[captcha.RETRY_HEADERS.PARAM].length} chars), retrying...`);
@@ -420,7 +441,10 @@ export async function proxyRequest(
   if (isSSE && upstreamResp.body) {
     const [clientBody, statsBody] = upstreamResp.body.tee();
     observeStream(reqId, format, meta, upstreamResp.status, started, statsBody, upstreamResp.headers.get("content-encoding"));
-    return passthroughResponse(upstreamResp, clientAcceptsGzip(clientReq), clientBody);
+    // Native Anthropic streams get a terminal `event: error` when the upstream
+    // ends without message_stop or the read fails (only where the bytes are
+    // readable: an uncompressed stream, or one this proxy decompresses).
+    return passthroughResponse(upstreamResp, clientAcceptsGzip(clientReq), clientBody, ensureAnthropicSseTerminal);
   }
 
   if (upstreamResp.status === 200) {
@@ -489,43 +513,268 @@ export function shouldUseOrderedTransport(config: ProxyConfig, clientSession: Cl
   return clientSession?.action === "enforce" || clientSession?.source === "explicit";
 }
 
-/** Max attempts (initial + 2 retries) for transient CONNECT-level failures. */
-export const MAX_CONNECT_ATTEMPTS = 3;
+/** Max attempts (initial + 3 retries) of the pre-output transient ladder. */
+export const MAX_TRANSIENT_ATTEMPTS = 4;
+const DEFAULT_TRANSIENT_RETRY_UNIT_MS = 500;
+const MAX_TRANSIENT_RETRY_UNIT_MS = 10_000;
+let transientRetryEnvWarned = false;
 
 /**
- * Connect-level retry ladder shared by the chat hot path and /v1/responses.
- * Only explicit pre-connect failure codes allow replay of a non-idempotent POST.
- *
- * Contract (review P1/P2, PR #34/#35):
- *   - `attemptDispatch` must dispatch a FRESH request each call — a reused
- *     Request has its body stream marked used after the first fetch.
- *   - failures flagged `postWrite` (ordered transport already wrote the full
- *     request) are never retried — the upstream may have processed it.
- *   - no retry once the client aborted (`opts.isAborted`).
+ * Operator knob for the transient ladder, mirroring ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS:
+ * ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS is the base unit of the backoff in
+ * decimal milliseconds (default 500, capped at 10000; 0 retries without
+ * waiting); "off" restores the connect-only ladder (never-connected failures
+ * only, no status or drop retries). Invalid values fall back to the default
+ * with a one-time warning. Exported for tests.
  */
-export async function dispatchWithConnectRetry(
-  attemptDispatch: () => Promise<Response>,
-  opts: { isAborted?: () => boolean; onRetry?: (attempt: number, err: Error) => void; retryDelayMs?: number } = {},
-): Promise<Response> {
-  for (let attempt = 1; ; attempt++) {
-    if (opts.isAborted?.()) throw new Error("client aborted before upstream connect");
-    try {
-      return await attemptDispatch();
-    } catch (err) {
-      const chain: Array<{ code?: unknown; postWrite?: unknown; cause?: unknown }> = [];
-      let cause: unknown = err;
-      for (let depth = 0; depth < 5 && cause !== null && typeof cause === "object"; depth += 1) {
-        const detail = cause as { code?: unknown; postWrite?: unknown; cause?: unknown };
-        chain.push(detail);
-        cause = detail.cause;
-      }
-      const connectCodes = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT"]);
-      if (chain.some(e => e.postWrite) || !chain.some(e => typeof e.code === "string" && connectCodes.has(e.code))) throw err;
-      if (attempt >= MAX_CONNECT_ATTEMPTS || opts.isAborted?.()) throw err;
-      const backoffMs = (opts.retryDelayMs ?? 500) * attempt;
-      opts.onRetry?.(attempt, err as Error);
-      await new Promise((r) => setTimeout(r, backoffMs));
+export function transientRetryPolicy(override?: number): { unitMs: number; extended: boolean } {
+  if (override !== undefined) return { unitMs: override, extended: true };
+  const raw = process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+  if (raw === undefined) return { unitMs: DEFAULT_TRANSIENT_RETRY_UNIT_MS, extended: true };
+  const trimmed = raw.trim();
+  if (trimmed.toLowerCase() === "off") return { unitMs: DEFAULT_TRANSIENT_RETRY_UNIT_MS, extended: false };
+  if (!/^[0-9]+$/.test(trimmed)) {
+    if (!transientRetryEnvWarned) {
+      transientRetryEnvWarned = true;
+      console.error(`[transient-retry] ignoring invalid ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS=${JSON.stringify(raw)} — using the default`);
     }
+    return { unitMs: DEFAULT_TRANSIENT_RETRY_UNIT_MS, extended: true };
+  }
+  return { unitMs: Math.min(Number(trimmed), MAX_TRANSIENT_RETRY_UNIT_MS), extended: true };
+}
+/** @deprecated alias kept for older callers; the ladder is sized by MAX_TRANSIENT_ATTEMPTS. */
+export const MAX_CONNECT_ATTEMPTS = MAX_TRANSIENT_ATTEMPTS;
+/** A numeric Retry-After above this is surfaced to the client instead of waited out. */
+export const TRANSIENT_RETRY_AFTER_CAP_MS = 15_000;
+
+/** Failures that prove the connection was never established. */
+const CONNECT_ERROR_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT", "ConnectionRefused"]);
+/**
+ * Connection dropped before any response bytes arrived. The official ZCode
+ * client retries this class (network failure) with backoff; the request may
+ * have reached the gateway, which is the same exposure that client accepts.
+ */
+const DROP_ERROR_CODES = new Set([
+  "ECONNRESET", "EPIPE", "ETIMEDOUT", "ECONNABORTED", "EHOSTUNREACH", "ENETUNREACH",
+  "UND_ERR_SOCKET", "UND_ERR_HEADERS_TIMEOUT", "ConnectionClosed",
+]);
+const DROP_ERROR_MESSAGES = [/socket hang up/i, /other side closed/i, /connection closed/i, /connection reset/i, /closed before sending response headers/i];
+/** TLS/certificate failures are configuration problems, never transient. */
+const NON_TRANSIENT_CODE = /^(ERR_TLS_|ERR_SSL|CERT_|UNABLE_TO_|DEPTH_ZERO_|SELF_SIGNED)/;
+/** Gateway/edge statuses the official client retries as server errors. */
+const TRANSIENT_STATUSES = new Set([500, 502, 503, 504, 524, 529]);
+// Gateway business codes (retryable vs terminal) live in gateway-codes.ts,
+// shared with the stream prelude gate.
+
+type TransientKind = "connect" | "drop" | "status";
+
+function errorChain(err: unknown): Array<{ code?: unknown; name?: unknown; message?: unknown; cause?: unknown }> {
+  const chain: Array<{ code?: unknown; name?: unknown; message?: unknown; cause?: unknown }> = [];
+  let cause: unknown = err;
+  for (let depth = 0; depth < 5 && cause !== null && typeof cause === "object"; depth += 1) {
+    const detail = cause as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown };
+    chain.push(detail);
+    cause = detail.cause;
+  }
+  return chain;
+}
+
+/**
+ * Classify a thrown dispatch error; null = not retried (unknown, abort, TLS).
+ * A failure flagged `postWrite` (the ordered transport wrote the full request
+ * before it failed) is a drop like a reset on the fetch path: no response
+ * reached the client, and the official client re-sends exactly this class —
+ * so it is never a "connect" kind (the connect-only policy leaves it alone).
+ */
+export function transientErrorKind(err: unknown): { kind: TransientKind; reason: string } | null {
+  const chain = errorChain(err);
+  if (chain.some((e) => e.name === "AbortError" || e.code === "ABORT_ERR")) return null;
+  // A TLS/certificate code anywhere in the chain wins over a socket code that wraps it.
+  if (chain.some((e) => typeof e.code === "string" && NON_TRANSIENT_CODE.test(e.code))) return null;
+  const postWrite = isPostWriteError(err);
+  for (const e of chain) {
+    if (typeof e.code !== "string") continue;
+    if (CONNECT_ERROR_CODES.has(e.code)) return { kind: postWrite ? "drop" : "connect", reason: e.code };
+    if (DROP_ERROR_CODES.has(e.code)) return { kind: "drop", reason: e.code };
+  }
+  const text = chain.map((e) => (typeof e.message === "string" ? e.message : "")).join(" | ");
+  if (DROP_ERROR_MESSAGES.some((re) => re.test(text))) return { kind: "drop", reason: "connection dropped" };
+  return null;
+}
+
+/** Retry-After as milliseconds: delta-seconds or an HTTP-date (never negative); null when absent or unparseable. */
+export function retryAfterMs(resp: Response, now: number = Date.now()): number | null {
+  const raw = resp.headers.get("retry-after")?.trim();
+  if (!raw) return null;
+  if (/^\d{1,6}$/.test(raw)) return Number(raw) * 1000;
+  const at = Date.parse(raw);
+  return Number.isNaN(at) ? null : Math.max(0, at - now);
+}
+
+/**
+ * Classify an upstream response; null = returned to the recovery layers as
+ * is. Streams are never inspected, a captcha challenge belongs to the captcha
+ * layer whatever its status, and a gateway envelope decides by its code: a
+ * terminal verdict is never retried, a code the official client retries is
+ * retried with any HTTP status (the gateway also wraps errors in HTTP 200),
+ * any other code follows the HTTP status like a body-less response.
+ */
+export async function transientResponseReason(resp: Response): Promise<string | null> {
+  const statusTransient = resp.status === 429 || TRANSIENT_STATUSES.has(resp.status);
+  if (!statusTransient && resp.status !== 200) return null;
+  if ((resp.headers.get("content-type") ?? "").toLowerCase().includes("text/event-stream")) return null;
+  if (resp.headers.get(CAPTCHA_CHALLENGE_HEADER)) return null;
+  const envelope = await inspectGatewayEnvelope(resp);
+  if (envelope) {
+    const code = envelope.code ?? -1;
+    if (TERMINAL_GATEWAY_CODES.has(code)) return null;
+    if (RETRYABLE_GATEWAY_CODES.has(code)) return `gateway code ${code}`;
+  }
+  return statusTransient ? `HTTP ${resp.status}` : null;
+}
+
+/** Admission re-check for the ladder: false when the pooled account is no longer current or cannot be verified. */
+export async function accountHandleStillCurrent(auth: AuthManager, handle: AccountHandle | undefined): Promise<boolean> {
+  if (!handle) return true;
+  const validator = (auth as AuthManager & { validateAccountHandle?: (h: AccountHandle) => Promise<boolean> }).validateAccountHandle;
+  if (typeof validator !== "function") return true;
+  try {
+    return (await validator.call(auth, handle)) === true;
+  } catch {
+    return false;
+  }
+}
+
+function transientDelayMs(kind: TransientKind, attempt: number, unitMs: number): number {
+  if (kind === "connect") return unitMs * attempt; // never connected: cheap, quick
+  // Dropped connections and gateway errors: 2x growth with up to 25% jitter,
+  // the shape the official client uses (base 2s, factor 2) at a proxy scale.
+  const base = unitMs * 2 * 2 ** (attempt - 1);
+  return Math.round(base * (1 + Math.random() * 0.25));
+}
+
+async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || signal?.aborted) return;
+  await new Promise<void>((resolve) => {
+    const done = (): void => { clearTimeout(timer); signal?.removeEventListener("abort", done); resolve(); };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
+/**
+ * Pre-output transient retry ladder shared by the chat hot path and
+ * /v1/responses. It runs strictly before any response byte reaches the
+ * client and re-dispatches the identical request on the SAME account:
+ *   - thrown connect failures (never connected) and connection drops before
+ *     a response (reset, pipe, timeout) that are not flagged `postWrite`;
+ *   - HTTP 500/502/503/504/524/529 and 429 whose body is not a terminal
+ *     gateway verdict, and the gateway codes the official client retries
+ *     (RETRYABLE_GATEWAY_CODES) with any status; a Retry-After (seconds or
+ *     HTTP-date) is honoured up to TRANSIENT_RETRY_AFTER_CAP_MS, above it
+ *     the response is surfaced.
+ *   - a 200 event stream whose prelude fails — an `event: error` of a
+ *     transient kind, or an end/read failure before the first content event
+ *     (see stream-prelude.ts) — when `opts.streamPrelude` is given; the
+ *     official client retries exactly this window.
+ * Never retried: terminal gateway verdicts (quota, balance, auth, model,
+ * captcha — their own layers handle them), captcha challenges, request
+ * validation errors, TLS/certificate failures, anything after the client
+ * aborted, and anything after a content event reached the stream.
+ *
+ * Contract (review P1/P2, PR #34/#35; transient extension after the
+ * "Continue fixes it" report):
+ *   - `attemptDispatch` must dispatch a FRESH request each call — a reused
+ *     Request has its body stream marked used after the first fetch; it
+ *     receives the attempt number and why the previous attempt is retried.
+ *   - failures flagged `postWrite` (ordered transport already wrote the full
+ *     request) are drops: re-sent on the SAME account like a reset on the
+ *     fetch path, never replayed on another account (the failover layer
+ *     keeps refusing them).
+ *   - no retry once the client aborted (`opts.isAborted` / `opts.signal`).
+ *   - `opts.beforeRetry` is consulted after every wait: false ends the ladder
+ *     with the last outcome (response returned intact, error rethrown).
+ *   - the ladder never touches the sticky account, the quota-retry memo or
+ *     the captcha layer: those run on the response it returns.
+ */
+export interface DispatchAttempt {
+  /** 1-based attempt number. */
+  attempt: number;
+  /** Why the previous attempt is being retried (absent on the first attempt). */
+  previous?: { kind: TransientKind | "stream"; reason: string };
+}
+
+export async function dispatchWithConnectRetry(
+  attemptDispatch: (context: DispatchAttempt) => Promise<Response>,
+  opts: {
+    isAborted?: () => boolean;
+    signal?: AbortSignal;
+    /** Re-check before every retry (account still current); false ends the ladder with the last outcome. */
+    beforeRetry?: () => boolean | Promise<boolean>;
+    /** Prelude gate for 200 event streams (stream-prelude.ts); absent = streams are handed on unread. */
+    streamPrelude?: (resp: Response) => Promise<PreludeVerdict>;
+    onRetry?: (attempt: number, reason: string, delayMs: number) => void;
+    /** Test seam: base unit of the backoff (default 500 ms; 0 disables waiting). */
+    retryDelayMs?: number;
+  } = {},
+): Promise<Response> {
+  const { unitMs, extended } = transientRetryPolicy(opts.retryDelayMs);
+  const aborted = (): boolean => opts.isAborted?.() === true || opts.signal?.aborted === true;
+  const admitted = async (): Promise<boolean> => (opts.beforeRetry ? (await opts.beforeRetry()) === true : true);
+  let previous: DispatchAttempt["previous"];
+  for (let attempt = 1; ; attempt++) {
+    if (aborted()) throw new Error("client aborted before upstream connect");
+    let resp: Response;
+    try {
+      resp = await attemptDispatch({ attempt, ...(previous ? { previous } : {}) });
+    } catch (err) {
+      const transient = transientErrorKind(err);
+      if (!transient || (!extended && transient.kind !== "connect") || attempt >= MAX_TRANSIENT_ATTEMPTS || aborted()) throw err;
+      const delayMs = transientDelayMs(transient.kind, attempt, unitMs);
+      opts.onRetry?.(attempt, transient.reason, delayMs);
+      await abortableWait(delayMs, opts.signal);
+      if (aborted() || !(await admitted())) throw err;
+      previous = { kind: transient.kind, reason: transient.reason };
+      continue;
+    }
+    if (!extended || attempt >= MAX_TRANSIENT_ATTEMPTS || aborted()) return resp;
+    let reason = await transientResponseReason(resp);
+    let kind: TransientKind | "stream" = "status";
+    let retryAfter: number | null = null;
+    if (reason !== null) {
+      retryAfter = retryAfterMs(resp);
+      if (retryAfter !== null && retryAfter > TRANSIENT_RETRY_AFTER_CAP_MS) return resp;
+    } else {
+      // A 200 stream may still fail before any output: read its prelude and
+      // treat an early transient error or end like a failed request. The
+      // verdict's response carries the held prelude and the untouched rest.
+      if (!opts.streamPrelude || !isGatedStream(resp)) return resp;
+      const verdict = await opts.streamPrelude(resp);
+      resp = verdict.response;
+      // The client may have left while the prelude was read: nothing further
+      // (captcha, recovery, health bookkeeping) is done for it.
+      if (aborted()) {
+        void resp.body?.cancel().catch(() => {});
+        throw new Error("client aborted during the stream prelude");
+      }
+      if (!verdict.retryable) return resp;
+      reason = `stream ${verdict.kind}: ${verdict.reason}`;
+      kind = "stream";
+    }
+    // Unit 0 means "retry without waiting" (tests, operators): it also skips a
+    // short Retry-After; the cap above still surfaces a long one.
+    const delayMs = unitMs === 0 ? 0 : retryAfter !== null ? retryAfter : transientDelayMs("status", attempt, unitMs);
+    opts.onRetry?.(attempt, reason, delayMs);
+    await abortableWait(delayMs, opts.signal);
+    // The response is released only once the retry is certain, so a refused
+    // retry hands the client an intact body.
+    if (aborted()) {
+      void resp.body?.cancel().catch(() => {});
+      throw new Error("client aborted before upstream retry");
+    }
+    if (!(await admitted())) return resp;
+    void resp.body?.cancel().catch(() => {});
+    previous = { kind, reason };
   }
 }
 
@@ -684,6 +933,8 @@ function passthroughResponse(
   upstream: Response,
   clientAcceptsGzip: boolean,
   body?: ReadableStream<Uint8Array>,
+  /** Applied to the body bytes the client will read (after any decompression here). */
+  monitor?: (body: ReadableStream<Uint8Array>) => ReadableStream<Uint8Array>,
 ): Response {
   const headers = new Headers();
   const forwardHeaders = [
@@ -705,20 +956,27 @@ function passthroughResponse(
   }
 
   const upstreamEncoding = headers.get("content-encoding")?.toLowerCase() ?? "";
+  const codings = upstreamEncoding.split(",").map((c) => c.trim()).filter((c) => c && c !== "identity");
   const source = body ?? upstream.body;
-  if (upstreamEncoding.includes("gzip") && !clientAcceptsGzip && source) {
-    const gunzip = new DecompressionStream("gzip") as unknown as ReadableWritablePair<Uint8Array, Uint8Array>;
-    const decompressed = source.pipeThrough(gunzip);
+  // Decode here when the client cannot take gzip, or when a monitor must see
+  // plain bytes (the terminal-frame guarantee for native streams): the client
+  // then gets an identity-encoded body without the now-mismatched headers.
+  const decodeForClient = codings.some((c) => c === "gzip" || c === "x-gzip") && !clientAcceptsGzip;
+  if (source && codings.length && codings.every((c) => AUTO_DECODED_ENCODINGS.has(c)) && (decodeForClient || monitor)) {
+    const decoded = decodeContentStream(source, upstreamEncoding);
     headers.delete("content-encoding");
     headers.delete("content-length");
-    return new Response(decompressed, {
+    return new Response(monitor ? monitor(decoded) : decoded, {
       status: upstream.status,
       statusText: upstream.statusText,
       headers,
     });
   }
 
-  return new Response(source, {
+  // A body in a coding this proxy cannot decode is forwarded as is and cannot
+  // be monitored; the monitor only ever sees plain bytes.
+  const clientBody = source && monitor && !codings.length ? monitor(source) : source;
+  return new Response(clientBody, {
     status: upstream.status,
     statusText: upstream.statusText,
     headers,
@@ -935,7 +1193,9 @@ function nextReqId(): string {
 }
 
 const DEBUG_BODY_PREVIEW = 200;
-const SENSITIVE_HEADERS = new Set(["authorization", "x-api-key", "cookie", "set-cookie", "proxy-authorization"]);
+// Credentials, cookies and the single-use captcha verify tokens of the
+// start-plan gateway are masked in debug output; the set is shared with the
+// dump module so both outputs agree.
 
 function debugLine(reqId: string, msg: string): void {
   console.log(`${reqId} debug: ${msg}`);

@@ -150,6 +150,16 @@ export default {
     return { changed: wrote };
   },
 
+  /** Kit-owned and bound to this installation: the managed block embeds THIS copy's key. */
+  owned(ctx) {
+    const configYaml = join(ctx.home, ".continue", "config.yaml");
+    if (!existsSync(configYaml)) return false;
+    const text = readFileSync(configYaml, "utf8");
+    const begin = text.indexOf(BLOCK_BEGIN);
+    const end = begin >= 0 ? text.indexOf(BLOCK_END, begin) : -1;
+    return begin >= 0 && end >= 0 && text.slice(begin, end).includes(`apiKey: ${JSON.stringify(ctx.key())}`);
+  },
+
   verify(ctx) {
     const configYaml = join(ctx.home, ".continue", "config.yaml");
     if (!existsSync(configYaml)) return [{ name: "continue models registered", ok: null, detail: "not installed" }];

@@ -4,7 +4,9 @@
 The optional Account Rotator keeps authorized sign-ins as separate accounts.
 While it is enabled, a successful new sign-in is saved as another account. For
 supported requests, the Kit may try another saved account if the selected one
-cannot continue. A retry is not guaranteed to succeed.
+cannot continue. A retry is not guaranteed to succeed. Transient network or
+gateway failures before any output are retried on the same account first; such
+a retry never switches the account by itself.
 
 The feature does not create accounts, reset quotas, or bypass provider rules.
 Importing a login does not grant a new quota. Use only accounts you are
@@ -113,3 +115,10 @@ probed; their absence from the billing response is not interpreted as zero quota
 Cost: one run makes up to 2 billing requests (balance and preview) per unique
 account, cached for 15 seconds. It sends no model request, solves no captcha,
 and does not refresh tokens.
+
+If the running proxy cannot write account metadata (cooldowns, last use) to the
+store — another process holds its lock, or a transient I/O error — the change
+is kept and rewritten in the background after 0.25, 1, 4 and 15 seconds; no
+request waits for it, and the next change writes again anyway.
+`zcode-kit accounts doctor` shows `runtime_changes_unsaved` while a change is
+not on disk yet. A corrupt store is not retried.

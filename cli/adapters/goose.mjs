@@ -69,6 +69,13 @@ export default {
     return { changed: true };
   },
 
+  /** Kit-owned and bound to this installation: the auth helper points at this root's key resolver. */
+  owned(ctx) {
+    const doc = readJsonSafe(join(providerDir(ctx.home), "zcode.json"));
+    const resolver = join(ctx.root, "proxy", "resolve-zcode-proxy-key.mjs").replace(/\\/g, "/");
+    return doc?.name === "zcode" && doc?.auth?.command === "node" && Array.isArray(doc.auth.args) && doc.auth.args[0] === resolver;
+  },
+
   verify(ctx) {
     const file = join(providerDir(ctx.home), "zcode.json");
     if (!existsSync(file)) return [{ name: "goose provider registered", ok: null, detail: "not installed" }];

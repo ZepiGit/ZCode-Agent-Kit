@@ -1,8 +1,8 @@
 # ZCode Proxy
 [English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · **简体中文**
 
-此组件提供 ZCode Agent Kit 随附的本地模型代理。Kit 负责其安装配置以及
-与助手工具的集成。
+此组件提供 ZCode Agent Kit 随附的本地模型代理。Kit 负责其安装配置；
+只有在获得你的同意后才配置助手集成。
 
 ## 在 ZCode Agent Kit 中使用
 
@@ -42,6 +42,8 @@ node <installation>/zcode-proxy-src/captcha-compatibility.mjs <saved-script> [re
 的 `show` 备用路径均保留；调试诊断仅包含元数据。
 
 本地修复在解析转换流或 JSON 错误响应前解码 gzip、deflate 和 Brotli。空的或无法解码的批量响应会报告为 `upstream_invalid_response`，不会视为成功的空回复。代理不会将自身进程的目录冒充为调用方工作目录；`ZCODE_IDENTITY_ENV_CWD` 仍可用于显式覆盖。
+
+输出开始前的暂时性故障（连接被拒绝或重置、HTTP 500/502/503/504/524/529、429，以及官方客户端会重试的网关错误码）会在同一账号上以递增等待最多重试三次，预算比官方客户端小（基础等待 1 秒并翻倍，由 `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` 设置：基础等待毫秒数，默认 500，上限 10000；`off` 只保留对从未建立的连接的重试）；每次重试前都会重新检查账号，`Retry-After` 最多遵守 15 秒，超过则交给客户端；网关裁定（配额、余额、验证码、模型、认证）、请求错误以及输出开始后的任何故障都不会重试。在第一个内容事件之前失败的流（如 `overloaded_error` 这类错误事件或连接被切断）也会以同样方式重试；此时客户端会在第一个内容事件到达时（最多 15 秒后）收到响应头。在 start-plan 下，每次在响应或连接断开之后的重试都会使用新的验证码令牌。用于强制客户端会话的有序传输会像 fetch 路径一样重试在响应之前断开的连接（同一账号；配额故障转移绝不会在其他账号上重放）。没有 `message_stop` 就结束的原生 Anthropic 流会收到一个类型为 `api_error` 的终止 `event: error` 帧（消息注明 `upstream_incomplete`，读取失败时为 `upstream_stream_error`）；未完成的最后一帧会被丢弃，让客户端看到可解析的故障而不是无声截断。
 
 ## 安全
 

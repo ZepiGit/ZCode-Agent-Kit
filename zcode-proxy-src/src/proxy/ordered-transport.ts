@@ -1,4 +1,4 @@
-import { connect as connectTcp, type Socket } from "node:net";
+import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { connect as connectTls, type TLSSocket } from "node:tls";
 import { decodeContentStream } from "./inflate.js";
 
@@ -24,7 +24,7 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
   const url = new URL(req.url);
   const bodyBytes = bodyToBytes(req.body);
   const requestHead = buildRequestHead(url, req.method ?? "POST", req.headers, bodyBytes.byteLength);
-  const socket = await openSocket(url);
+  const socket = await openSocket(url, req.signal);
 
   return await new Promise<Response>((resolve, reject) => {
     let headerBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
@@ -46,9 +46,11 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
     function fail(err: unknown): void {
       if (!responseStarted && postWrite) {
         // Review follow-up #2 (PR #34): the full request (head + body) was
-        // already written to the wire, so the upstream may have processed it
-        // — resending could duplicate the LLM call and consume quota twice.
-        // Flag it so the connect-retry loop in handler.ts skips this error.
+        // already written to the wire, so the upstream may have processed it.
+        // The flag keeps the quota failover from replaying it on ANOTHER
+        // account; the transient ladder may re-send it on the same account,
+        // exactly like a reset on the fetch path (the official client's
+        // network-failure class). No response byte reached the client.
         try { (err as { postWrite?: boolean }).postWrite = true; } catch {}
       }
       if (responseStarted) {
@@ -70,14 +72,13 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
     // long-TTFB reasoning request. `fail()` both rejects this promise (a bare
     // destroy() emits "close", not "error"/"end", and would leave it pending
     // forever) and errors the consumer-side body stream when the response has
-    // already started. The resulting error carries `postWrite` (the request
-    // is fully on the wire by then), so handler's connect-retry ladder skips
-    // it — combined with the `clientReq.signal.aborted` pre-check there,
-    // client aborts never enter the retry loop.
+    // already started. The error is an AbortError, which the transient
+    // ladder never retries — together with the `clientReq.signal.aborted`
+    // checks there, client aborts never enter the retry loop.
     if (req.signal) {
       const signal = req.signal;
       const onAbort = (): void => {
-        fail(new Error("client aborted during ordered upstream request"));
+        fail(Object.assign(new Error("client aborted during ordered upstream request"), { name: "AbortError" }));
       };
       if (signal.aborted) {
         onAbort();
@@ -163,7 +164,11 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
     socket.once("error", fail);
     socket.once("end", () => {
       if (!responseStarted) {
-        reject(new Error("upstream closed before sending response headers"));
+        // The request head and body are on the wire by the time `end` can
+        // arrive (writes below are synchronous), so route it through fail():
+        // the error carries `postWrite` — never failed over to another
+        // account; the ladder may re-send it on the same one (see fail()).
+        fail(new Error("upstream closed before sending response headers"));
         return;
       }
       finish();
@@ -175,23 +180,75 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
   });
 }
 
-function openSocket(url: URL): Promise<WireSocket> {
+/**
+ * Open the TCP/TLS connection. The client signal is honoured here as well:
+ * a client that disappears while the connect or TLS handshake stalls must
+ * not leave a pending socket behind (the abort listener of the request phase
+ * is only installed after this resolves).
+ */
+function openSocket(url: URL, signal?: AbortSignal): Promise<WireSocket> {
   const isHttps = url.protocol === "https:";
   if (!isHttps && url.protocol !== "http:") {
     return Promise.reject(new Error(`Unsupported upstream protocol: ${url.protocol}`));
   }
   const port = Number(url.port || (isHttps ? 443 : 80));
+  if (signal?.aborted) return Promise.reject(new Error("client aborted before the upstream connection was opened"));
+  const host = connectHost(url.hostname);
 
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      // Keep `onError` attached: a late "error" from the torn-down connect or
+      // handshake must land on a listener (an unhandled socket error would
+      // crash the process); after settling, the listener is a no-op.
+      socket.destroy();
+      reject(new Error("client aborted during the upstream connection setup"));
+    };
+    const onError = (err: unknown) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(err);
+    };
     const onConnect = () => {
-      socket.off("error", reject);
+      socket.off("error", onError);
+      signal?.removeEventListener("abort", onAbort);
       resolve(socket);
     };
+    const servername = tlsServerName(url.hostname);
     const socket: WireSocket = isHttps
-      ? connectTls({ host: url.hostname, port, servername: url.hostname }, onConnect)
-      : connectTcp({ host: url.hostname, port }, onConnect);
-    socket.once("error", reject);
+      ? connectTls({ host, port, ...(servername ? { servername } : {}) }, onConnect)
+      : connectTcp({ host, port }, onConnect);
+    socket.once("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/** `URL.hostname` keeps the brackets of an IPv6 literal; the socket API wants the bare address. */
+function connectHost(hostname: string): string {
+  return hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+}
+
+/**
+ * SNI carries host names only; Bun rejects an IP literal where Node silently
+ * drops it, so a server name is sent only for a real host name (IPv4 and
+ * bracketed or bare IPv6 literals yield undefined).
+ */
+export function tlsServerName(hostname: string): string | undefined {
+  const bare = connectHost(hostname);
+  return isIP(bare) === 0 ? bare : undefined;
+}
+
+/**
+ * True when the error (or any nested `cause`, up to five levels) was raised
+ * after the full request had been written to the upstream: such a failure
+ * must never be replayed by a retry or failover layer.
+ */
+export function isPostWriteError(err: unknown): boolean {
+  let cause: unknown = err;
+  for (let depth = 0; depth < 5 && cause !== null && typeof cause === "object"; depth += 1) {
+    const detail = cause as { postWrite?: unknown; cause?: unknown };
+    if (detail.postWrite === true) return true;
+    cause = detail.cause;
+  }
+  return false;
 }
 
 function buildRequestHead(url: URL, method: string, headers: OrderedHeaderPair[], contentLength: number): string {

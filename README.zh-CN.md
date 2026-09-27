@@ -7,7 +7,7 @@
 
 *Kit 在本机运行；模型请求会发送到 ZCode。*
 
-继续使用熟悉的编程助手，通过本地连接使用现有的 ZCode 模型和额度。
+继续使用熟悉的编程助手，通过本地连接使用现有的 ZCode 模型和额度。两种入口同样有效：为检测到的助手回答 `y`，让 Kit 为你配置；或者把输出的基础 URL 和 API 密钥自行填入任意 OpenAI 或 Anthropic 兼容客户端。
 
 **可选的账号轮换：**安装器会询问 **"Do you want to activate the Account Rotator feature? [y/n]"**。回答 `y` 后，当前登录会被导入；以后通过 `zcode-kit auth login zai` 登录的新账号会作为额外账号保存。以已保存的用户身份再次登录，通常会更新该记录；用户如何匹配及例外情况见文档。之后可以用 `zcode-kit accounts enable` 启用，用 `zcode-kit accounts` 查看保存的账号。`zcode-kit accounts health [--json]` 按需根据计费数据为每个账号显示一个判定。它不能证明模型请求可用；没有额度数据的账号不会被视为健康，也不会持续轮询账号。详见[账号轮换文档（英文）](docs/ACCOUNT_ROTATOR.md)。
 
@@ -22,11 +22,11 @@
 
 ## 第 2 步 — 安装一次 Kit
 
-在下面的正式版安装器和 npm 之间选择一种方式。正式版安装器会自动配置检测到的助手，无须再单独运行设置命令。
+在下面的正式版安装器和 npm 之间选择一种方式。正式版安装器会替你运行设置，无须再单独运行设置命令。设置会对每个检测到的助手提问一次：**"Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"**（其中是助手名称），只有回答 `y` 后才修改该助手的配置；回答 `n` 会跳过它，其设置保持不变。没有终端回答时不会新增任何配置：只有在你明确选择（见下文）或此前已同意的情况下才会配置助手，Kit 在提问之前创建的集成只会保持更新。
 
-安装器会显示四个编号步骤、简洁的助手配置结果和连接检查。详细的设置输出保存在屏幕提示的 `install.log` 中；设置 `ZCODE_KIT_VERBOSE=1` 可显示全部输出，设置 `NO_COLOR=1` 可显示纯文本。交互式安装必须对账号轮换问题回答 `y` 或 `n`。无人值守安装可设置 `ZCODE_KIT_ACCOUNT_ROTATOR=y` 或 `n`；如果没有明确回答，会保留原有设置。即使安装成功，连接检查失败仍会显示为警告。
+安装器会显示四个编号步骤、每个助手一行结果（已配置、已跳过或失败）、连接检查，以及供手动配置客户端使用的连接详情。详细的设置输出保存在屏幕提示的 `install.log` 中；设置 `ZCODE_KIT_VERBOSE=1` 可显示全部输出，设置 `NO_COLOR=1` 可显示纯文本。交互式安装会对每个助手以及（单独地）账号轮换问题询问 `y` 或 `n`；按 Ctrl-C 会停止提问，所有未回答 `y` 的项目保持不变。无人值守安装请用 `ZCODE_KIT_HARNESSES=omp,codex`（或 `none`）明确选择助手，并设置 `ZCODE_KIT_ACCOUNT_ROTATOR=y` 或 `n`；没有明确选择时，未决定的助手会被跳过，原有的账号轮换设置保持不变。回答保存在 `generated/harness-choices/` 中：之后的设置、update 或 `zcode-kit doctor --fix` 只会刷新你已同意的助手（回答 `y`、明确选择或 `zcode-kit integrate <助手>`），绝不会重新集成已跳过的助手；Kit 在提问之前创建的集成会保持更新，但只有在你回答 `y` 后才算作同意。`zcode-kit setup --reask` 会在终端中对每个检测到的助手重新提问。即使安装成功，连接检查失败仍会显示为警告。
 
-> **运行安装器之前：**安装器会下载并执行脚本、修改已检测助手的配置，还可能注册 MCP 工具。设置时也会尝试一次小型模型请求，可能消耗额度。变更会被记录，但之后若发生错误，先前的变更仍可能保留。如果安全政策有要求，请先检查安装脚本。
+> **运行安装器之前：**安装器会下载并执行脚本，只修改你回答 `y` 的助手的配置，并可能为这些助手注册 MCP 工具。设置时也会尝试一次小型模型请求，可能消耗额度。变更会被记录，但之后若发生错误，先前的变更仍可能保留。如果安全政策有要求，请先检查安装脚本。
 
 **Windows — PowerShell，无须管理员权限：**
 
@@ -47,7 +47,7 @@ curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/i
 
 默认位置：Windows 下为 `%LOCALAPPDATA%\zcode-agent-kit`；macOS/Linux 下为 `$HOME/.local/share/zcode-agent-kit`。请将此目录与工作项目分开。不要将安装目标设为主目录或源码检出目录：更新会替换目标目录里的文件。
 
-macOS/Linux 还需要 `curl`、`tar` 和 SHA-256 工具；安装 Bun 需要 `unzip`，更新需要 `rsync`。目前实际客户端验证主要针对 Windows；请参阅带日期的[支持矩阵](SUPPORT_MATRIX.json)。
+macOS/Linux 还需要 `curl`、`tar` 和 SHA-256 工具；安装 Bun 需要 `unzip`；更新时若已安装 `rsync` 则使用它，否则使用内置的 `tar`/`find` 同步。目前实际客户端验证主要针对 Windows；请参阅带日期的[支持矩阵](SUPPORT_MATRIX.json)。
 
 </details>
 
@@ -60,11 +60,29 @@ npm install -g zcode-agent-kit@latest
 zcode-kit setup --harness auto --installer
 ```
 
-npm 会安装 `zcode-kit` 和 `zcode-agent-kit` 两个命令。第二个命令会安装 Kit 的依赖项、配置检测到的助手，并询问账号轮换的 y/n 问题。安装 npm 包后请运行该命令。使用同一种安装方式，以确保命令、配置和代理属于同一份 Kit。
+npm 会安装 `zcode-kit` 和 `zcode-agent-kit` 两个命令。第二个命令会安装 Kit 的依赖项，对每个检测到的助手提出一个 y/n 问题，然后询问账号轮换的 y/n 问题。安装 npm 包后请运行该命令。使用同一种安装方式，以确保命令、配置和代理属于同一份 Kit。
 
 ## 第 3 步 — 在所选助手中使用 GLM-5.3(-flash)
 
-打开新终端并运行 `zcode-kit help`。然后在**自己的项目目录内**打开终端，不要在 Kit 目录内运行。选择已安装的助手：
+打开新终端并运行 `zcode-kit help`。然后在**自己的项目目录内**打开终端，不要在 Kit 目录内运行。选择已安装的助手，或使用手动连接详情接入任意其他客户端：
+
+**手动：基础 URL + API 密钥（任意 OpenAI 或 Anthropic 兼容客户端）**
+
+Kit 无须配置你的助手。启动本地代理并复制它输出的连接详情；代理运行期间，`zcode-kit proxy status` 会再次显示这些信息：
+
+```sh
+zcode-kit proxy start
+```
+
+```text
+Connection details (local ZCode proxy, running and verified)
+  OpenAI-compatible base URL:    http://127.0.0.1:8457/v1   (POST /chat/completions, POST /responses, GET /models)
+  Anthropic-compatible base URL: http://127.0.0.1:8457      (POST /v1/messages)
+  API key (Bearer / x-api-key):  <你的本地代理密钥>
+  Model IDs:                     glm-5.3, glm-5.3-flash
+```
+
+填入与客户端 API 格式匹配的基础 URL，把密钥作为 API 密钥或认证令牌填入，并选择一个模型 ID。完整密钥只会在交互式终端中输出；`zcode-kit models --show-key` 可为脚本输出密钥，代理未运行时 `zcode-kit proxy status` 会把这些值标记为未验证。此方式仍需要 Kit 的代理以及有额度的 ZCode 登录；它只省去让 Kit 为你配置助手这一步。端口来自你的 `proxy/config.yaml`。
 
 **OMP：**
 
@@ -86,7 +104,7 @@ zcode-kit run codex -- exec "Reply with ok" -m glm-5.3-flash
 
 这些命令会自动启动或检查代理。收到 `ok` 回复才表示第一次模型调用成功；仅有设置成功的消息不足以证明模型可用。
 
-**收到回复了吗？**对于这次请求，你的账号、代理和所选助手已协同工作。现在可以在自己的项目中使用该助手。
+**收到回复了吗？**对于这次请求，你的账号、代理和所选客户端已协同工作。现在可以在自己的项目中使用它。
 
 **没有回复？**请使用下方“获取帮助”中的检查项；额度耗尽无法靠重新安装解决。
 
@@ -118,7 +136,7 @@ Flash 始终启用 thinking。禁用 thinking 的请求会被规范化为 `low`�
 | pi | 手动启动代理，然后运行 `pi --model zcode/glm-5.3`。 |
 | Goose | 手动启动代理，然后运行 `goose session --provider zcode`。 |
 | Continue | 先打开并配置 Continue。运行 `zcode-kit integrate continue`，启动代理，再在界面中选模型。 |
-| Cline / Kilo Code | 将生成的配置值填入扩展的界面并启动代理。正式版安装会在安装目录中生成 `generated/cline-zcode-values.md` 或 `generated/kilo-zcode-values.md`。 |
+| Cline / Kilo Code | 为该助手回答 `y` 后，将生成的配置值填入扩展的界面并启动代理。正式版安装随后会在安装目录中生成 `generated/cline-zcode-values.md` 或 `generated/kilo-zcode-values.md`。 |
 
 直接运行 OMP，不要通过 `zcode-kit run` 启动。只有 Claude Code、Codex、Aider 和 OpenCode 提供 Kit 启动器。Codex 使用隔离的配置环境；你平时使用的设置和技能不会自动继承。Claude Code 的路由属于社区兼容方案。存在适配器并不保证每个客户端或版本都经过实际测试。
 
@@ -139,11 +157,11 @@ zcode-kit proxy restart
 zcode-kit proxy stop
 ```
 
-`stop`、`restart` 以及任何自动重启都会中断已连接的客户端和进行中的请求；之后请重试这些请求。没有 `zcode-kit proxy` 的版本请使用相同的子命令运行 `node <安装目录>/proxy/zcode-proxy-manager.mjs`。
+`stop`、`restart` 以及任何自动重启都会中断已连接的客户端和进行中的请求；之后请重试这些请求。没有 `zcode-kit proxy` 的版本请使用相同的子命令运行 `node <安装目录>/proxy/zcode-proxy-manager.mjs`。一旦验证代理属于本安装，`start` 和 `status` 会输出连接详情（基础 URL、密钥、模型 ID）；已停止的代理会报告为未运行，其配置值也会相应标注。
 
 **挂起的代理：**只有在证明无响应的代理属于本 Kit 时，`start`、`restart` 和 `stop` 才会终止它：已超过 60 秒启动宽限期、启动时间与记录一致、命令行是 Kit 代理，并且连续 3 次健康检查（约 25 秒）失败。归属未知的进程绝不会被终止；命令会报告情况并停止。`zcode-kit doctor --fix` 会重新应用受管配置；如果代理未运行或经证明已挂起，也会以同样方式启动它。
 
-**自动重启：**如果代理主线程停止响应或内存持续过高，代理会请求 Kit 管理器重新启动它。15 分钟内最多接受 3 次此类重启；超过次数或重启历史无法读取时，请求会被拒绝，代理保持停止，直到你检查 `zcode-kit proxy logs 50` 并启动它。遗留的启动锁会被刻意保留、从不自动接管：如果没有正在进行的启动，请删除消息中指明的锁文件后重试。
+**自动重启：**如果代理主线程停止响应或内存持续过高，代理会请求 Kit 管理器重新启动它。15 分钟内最多接受 3 次此类重启；超过次数或重启历史无法读取时，请求会被拒绝，代理保持停止，直到你检查 `zcode-kit proxy logs 50` 并启动它。遗留的启动锁绝不会被自动接管：如果没有正在进行的启动，请删除消息中指明的锁文件后重试。
 
 </details>
 
@@ -155,12 +173,18 @@ zcode-kit auth status
 ```
 
 - **找不到命令：**重新打开终端。对于正式版安装，请检查 `%LOCALAPPDATA%\Microsoft\WindowsApps`（Windows）或 `$HOME/.local/bin`（macOS/Linux）是否位于 PATH 中。
-- **模型没有回复：**检查 Desktop 登录状态和可用额度。如果助手不会自动启动代理，请手动启动。本地健康检查不能证明模型可访问。
+- **设置时跳过了助手：**下次回答 `y`，运行 `zcode-kit integrate <助手>`（多个助手用 `zcode-kit setup --harness <列表>`），或运行 `zcode-kit setup --reask` 对每个检测到的助手重新提问。没有终端时，用 `ZCODE_KIT_HARNESSES` 选择助手。
+- **手动配置客户端：**代理运行期间，`zcode-kit proxy status` 会输出基础 URL、密钥和模型 ID；完整密钥只在交互式终端显示（否则使用 `zcode-kit models --show-key`）。
+- **一次选择多个助手：**`zcode-kit setup --select` 会显示检测到的助手的编号列表，而不是逐个提问（输入 `1,3`、`all` 或 `none`）；选中的会被配置，其余检测到的记录为已跳过。它需要终端；与通过 `--harness`/`ZCODE_KIT_HARNESSES` 进行的显式选择同时使用时会被忽略，并会替换每个检测到的助手已保存的回答。
+- **忘记已保存的回答：**`zcode-kit doctor` 会报告无法读取或没有对应助手的决定文件；`zcode-kit doctor --forget <助手>` 可删除其中一个（集成保持不变，下次设置会再次询问；可用 `zcode-kit rollback` 撤销）。
+- **脚本与监控：**`zcode-kit proxy status --json` 输出一个包含状态、基础 URL 和模型 ID 的 JSON 对象；仅当 Kit 自己的代理正在运行时才包含配额（也只有此时退出码为 0）；其中从不包含密钥。
+- **服务商迁移了网关？**`zcode-kit doctor --upstream` 会将 Kit 代理使用的网关与 ZCode 客户端当前收到的服务商配置进行比较（最多向 zcode.z.ai 及其 CDN 发送三个不带凭据的请求；仅在显式指定时运行）。
+- **模型没有回复：**检查 Desktop 登录状态和可用额度。如果客户端不会自动启动代理，请手动启动。本地健康检查不能证明模型可访问。
 - **代理未运行或无响应：**运行 `zcode-kit doctor --fix` 或 `zcode-kit proxy restart`。只会终止经证明属于本 Kit 的挂起代理；参阅上方手动管理代理部分。
 - **OMP 自启动：**直接启动 OMP。设置过程固定原生 Node/Bun；扩展在新的子进程中执行预检查，而不是将 Kit 模块导入 OMP。失败时会报告不含秘密信息的错误类别；子进程最长运行 120 秒。修复所报告的原因后，等待该会话的 60 秒冷却时间再重试；可在同一会话中恢复。若运行时位置已变更，请重新运行 `zcode-kit setup --harness auto` 并重新加载扩展。不会干预占用端口的未知进程。
 - **导入 Desktop 登录：**运行 `zcode-kit auth login zai --import`，导入 Desktop 0.16.9 当前激活的 `zai`/`start-plan` 登录；必须已明确配置计划。只要存在 `credentials.json`，就以它为准；凭据无效时不会静默回退到旧的 `config.json`。新版 `coding-plan` 登录应改用 `zcode-kit auth login zai` 进行常规 OAuth 登录；导入器不会创建或获取 API 密钥。
 - **401 或端口被占用：**检查是否存在另一份 Kit。不要删除密钥，也不要终止不认识的进程。
-- **设置中途失败：**重试前先阅读输出中的回滚命令。此前的变更可能仍在。
+- **设置中途失败：**某个助手失败不会撤销其他助手；它自身的部分变更会被撤回，安装器会带着警告继续。重试前先阅读输出中的回滚命令。此前的变更可能仍在。
 
 ## 使用真实项目数据之前
 

@@ -310,6 +310,16 @@ export default {
     return { changed };
   },
 
+  /** Kit-owned and bound to this installation: the managed block embeds THIS copy's key. */
+  owned(ctx) {
+    const modelsYml = join(ctx.home, ".omp", "agent", "models.yml");
+    if (!existsSync(modelsYml)) return false;
+    const text = readFileSync(modelsYml, "utf8");
+    if (!text.includes(MARKER_BEGIN) || !text.includes(MARKER_END)) return false;
+    const block = text.slice(text.indexOf(MARKER_BEGIN), text.indexOf(MARKER_END));
+    return block.includes(`apiKey: ${JSON.stringify(ctx.key())}`);
+  },
+
   verify(ctx) {
     const agentDir = join(ctx.home, ".omp", "agent");
     const checks = [];

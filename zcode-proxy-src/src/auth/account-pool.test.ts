@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { AuthManager } from "./manager.js";
 import { createAccountRotator } from "./account-rotator.js";
+import { AccountStoreError } from "./account-store.js";
 import { resolveClaimJwt } from "../claim/runtime.js";
 
 const first = { id: "one", credential: { apiKey: "pool-one", provider: "zai" as const } };
@@ -63,6 +64,119 @@ describe("AuthManager account pool", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(writes).toBe(2);
     expect(snapshots[1]).toContain("two:61000");
+  });
+
+  it("keeps a failed metadata write unsaved and rewrites it in the background until it lands (lock contention)", async () => {
+    const rotator = createAccountRotator([first, second], { now: () => 1_000 });
+    let failuresLeft = 2;
+    const written: string[] = [];
+    const auth = new AuthManager({
+      accountRotator: rotator,
+      persistenceRetryDelaysMs: [1, 1, 1],
+      persistAccounts: async (profiles) => {
+        if (failuresLeft > 0) {
+          failuresLeft -= 1;
+          throw new AccountStoreError("locked", "store locked by another process");
+        }
+        written.push(profiles.map((p) => `${p.id}:${p.exhaustedUntil ?? 0}`).join(","));
+      },
+    });
+    auth.markCredentialExhausted(first.credential, "1005");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const failed = auth.getPersistenceStatus();
+    expect(failed.state).toBe("error");
+    expect(failed.unsaved).toBe(true);
+    expect(failed.nextRetryAt).toBeDefined();
+    await auth.settlePersistence();
+    expect(written.length).toBe(1);
+    expect(written[0]).toContain("one:61000"); // the quarantine reached the store
+    const clean = auth.getPersistenceStatus();
+    expect(clean.state).toBe("clean");
+    expect(clean.unsaved).toBe(false);
+    expect(clean.attempts).toBe(0);
+  });
+
+  it("stops after the bounded schedule and never retries a corrupt store; the next change starts over", async () => {
+    const rotator = createAccountRotator([first, second], { now: () => 1_000 });
+    let calls = 0;
+    const auth = new AuthManager({
+      accountRotator: rotator,
+      persistenceRetryDelaysMs: [1, 1],
+      persistAccounts: async () => { calls += 1; throw new AccountStoreError("locked", "busy"); },
+    });
+    auth.markCredentialExhausted(first.credential, "1005");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await auth.settlePersistence();
+    expect(calls).toBe(3); // inline write + 2 scheduled retries
+    const spent = auth.getPersistenceStatus();
+    expect(spent.unsaved).toBe(true);
+    expect(spent.nextRetryAt).toBeUndefined();
+    expect(spent.attempts).toBe(3);
+
+    let corruptCalls = 0;
+    const corrupt = new AuthManager({
+      accountRotator: createAccountRotator([first, second], { now: () => 1_000 }),
+      persistenceRetryDelaysMs: [1, 1],
+      persistAccounts: async () => { corruptCalls += 1; throw new AccountStoreError("corrupt", "cannot decrypt"); },
+    });
+    corrupt.markCredentialExhausted(first.credential, "1005");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await corrupt.settlePersistence();
+    expect(corruptCalls).toBe(1);
+    expect(corrupt.getPersistenceStatus().unsaved).toBe(true);
+    expect(corrupt.getPersistenceStatus().nextRetryAt).toBeUndefined();
+  });
+
+  it("a new change after a spent schedule starts the full schedule again; flushPersistence writes at once (shutdown)", async () => {
+    const rotator = createAccountRotator([first, second], { now: () => 1_000 });
+    let failing = true;
+    let calls = 0;
+    const written: string[] = [];
+    const auth = new AuthManager({
+      accountRotator: rotator,
+      persistenceRetryDelaysMs: [1],
+      persistAccounts: async (profiles) => {
+        calls += 1;
+        if (failing) throw new AccountStoreError("locked", "busy");
+        written.push(profiles.map((p) => `${p.id}:${p.exhaustedUntil ?? 0}`).join(","));
+      },
+    });
+    auth.markCredentialExhausted(first.credential, "1005");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await auth.settlePersistence();
+    expect(calls).toBe(2); // inline + the single scheduled retry
+    auth.markCredentialExhausted(second.credential, "1113"); // new change: fresh schedule
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(auth.getPersistenceStatus().nextRetryAt).toBeDefined();
+    failing = false;
+    await auth.flushPersistence();
+    expect(written.length).toBe(1);
+    expect(written[0]).toContain("two:61000");
+    expect(auth.getPersistenceStatus().unsaved).toBe(false);
+    await auth.settlePersistence();
+  });
+
+  it("a new change supersedes a scheduled retry and writes the newest snapshot inline", async () => {
+    const rotator = createAccountRotator([first, second], { now: () => 1_000 });
+    let failFirst = true;
+    const written: string[] = [];
+    const auth = new AuthManager({
+      accountRotator: rotator,
+      persistenceRetryDelaysMs: [60_000],
+      persistAccounts: async (profiles) => {
+        if (failFirst) { failFirst = false; throw new Error("EBUSY"); }
+        written.push(profiles.map((p) => `${p.id}:${p.exhaustedUntil ?? 0}`).join(","));
+      },
+    });
+    auth.markCredentialExhausted(first.credential, "1005");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(auth.getPersistenceStatus().nextRetryAt).toBeDefined();
+    auth.markCredentialExhausted(second.credential, "1113");
+    await auth.settlePersistence(); // returns without waiting 60 s: the retry was cancelled
+    expect(written.length).toBe(1);
+    expect(written[0]).toContain("one:61000");
+    expect(written[0]).toContain("two:61000");
+    expect(auth.getPersistenceStatus().unsaved).toBe(false);
   });
 
   it("does not fall back to the legacy credential store for pool claims", async () => {

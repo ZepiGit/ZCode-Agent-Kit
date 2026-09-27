@@ -104,6 +104,18 @@ export default {
     return { changed: wrote };
   },
 
+  /** Kit-owned and bound to this installation: marker present and the key resolver points at this root. */
+  owned(ctx) {
+    const modelsJson = join(ctx.home, ".pi", "agent", "models.json");
+    if (!existsSync(modelsJson)) return false;
+    try {
+      const current = parseJsonc(readFileSync(modelsJson, "utf8"))?.providers?.zcode;
+      return !!current && current["x-zcode-agent-kit"]?.managed === true && current.apiKey === zcodeProvider(ctx).apiKey;
+    } catch {
+      return false;
+    }
+  },
+
   verify(ctx) {
     const modelsJson = join(ctx.home, ".pi", "agent", "models.json");
     if (!existsSync(modelsJson)) return [{ name: "pi provider registered", ok: null, detail: "not installed" }];

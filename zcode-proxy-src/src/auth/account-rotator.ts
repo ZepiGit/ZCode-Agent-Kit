@@ -115,11 +115,17 @@ function sameCredential(a: Credential, b: Credential): boolean {
     && a.jwt === b.jwt && a.userId === b.userId && a.expiresAt === b.expiresAt;
 }
 
-/** Hash the effective upstream identity, never retaining the token itself. */
+/**
+ * Hash the effective upstream identity, never retaining the token itself.
+ * Only the authentication material counts: two profiles that send the same
+ * wire token are one upstream identity even when one of them carries a
+ * `userId` (OAuth login) and the other does not (desktop import), so a
+ * quarantine of either blocks both.
+ */
 function effectiveIdentity(credential: Credential, plan?: AccountPlan): string {
   const token = plan === "start-plan" ? credential.jwt ?? "" : credentialString(credential);
   return createHash("sha256")
-    .update(JSON.stringify([credential.provider, plan ?? "", token, credential.userId ?? ""]))
+    .update(JSON.stringify([credential.provider, plan ?? "", token]))
     .digest("hex");
 }
 
@@ -287,7 +293,12 @@ export class AccountRotator {
       ? candidates.find((candidate) => candidate.id === this.activeAccountId)
       : undefined;
     const account = active ?? candidates[0];
-    this.activeAccountId = account.id;
+    // Only inference moves the sticky pointer. Billing/quota lookups and
+    // async job submissions require a JWT the active account may lack;
+    // serving them from another profile must not switch the identity that
+    // later inference requests use.
+    const inference = options.operation === undefined || options.operation === "inference";
+    if (inference) this.activeAccountId = account.id;
     account.lastUsedAt = now;
     this.lastSelectedId = account.id;
     return {
@@ -449,7 +460,10 @@ export class AccountRotator {
       else if (!this.isPlanCompatible(account)) state = "invalid";
       else if (isExpired(credential, now)) state = "expired";
       else if (account.exhaustedUntil !== undefined && account.exhaustedUntil > now) state = "exhausted";
-      else if (account.id === this.lastSelectedId) state = "active";
+      // "active" is the sticky inference account; a lookup served by another
+      // profile must not move the marker (it falls back to the last selection
+      // only while no inference account exists yet).
+      else if (account.id === (this.activeAccountId ?? this.lastSelectedId)) state = "active";
       const preview = maskCredential(credential);
       return {
         id: account.id,

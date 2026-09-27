@@ -2,7 +2,8 @@
 [English (original)](README.md) · [Deutsch](README.de.md) · **Español** · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 Este componente proporciona el proxy local de modelos incluido en ZCode Agent
-Kit. El Kit se encarga de configurarlo e integrarlo con los asistentes.
+Kit. El Kit se encarga de su configuración; las integraciones con asistentes
+solo se configuran con tu consentimiento.
 
 ## Uso con ZCode Agent Kit
 
@@ -54,6 +55,8 @@ sus controles de seguridad y la alternativa invocable `show`; los diagnósticos 
 depuración contienen únicamente metadatos.
 
 La corrección local decodifica gzip, deflate y Brotli antes de interpretar los flujos traducidos o las respuestas de error JSON. Los cuerpos vacíos o imposibles de decodificar se notifican como `upstream_invalid_response`, no como respuestas vacías correctas. El proxy no sustituye el directorio del asistente por el de su proceso; `ZCODE_IDENTITY_ENV_CWD` sigue siendo una anulación explícita.
+
+Los fallos transitorios antes de cualquier salida (conexión rechazada o reiniciada, HTTP 500/502/503/504/524/529, 429 y los códigos de error del gateway que el cliente oficial reintenta) se reintentan hasta tres veces en la misma cuenta con una espera creciente, con un presupuesto menor que el del cliente oficial (espera base de 1 s que se duplica, fijada por `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS`: espera base en milisegundos, 500 por defecto, máximo 10000; `off` conserva solo el reintento de conexiones nunca establecidas); la cuenta se vuelve a comprobar antes de cada reintento, un `Retry-After` se respeta hasta 15 segundos y por encima se pasa al cliente, y los veredictos del gateway (cuota, saldo, captcha, modelo, autenticación), los errores de la solicitud y cualquier cosa tras el inicio de la salida nunca se reintentan. Un flujo que falla antes de su primer evento de contenido (un evento de error como `overloaded_error` o una conexión cortada) se reintenta igual; el cliente recibe entonces las cabeceras de la respuesta cuando llega el primer evento de contenido (como mucho 15 segundos después). En start-plan, cada reintento tras una respuesta o una conexión cortada usa un token CAPTCHA nuevo. El transporte ordenado de las sesiones de cliente forzadas reintenta una conexión cortada antes de la respuesta igual que la ruta fetch (misma cuenta; la conmutación por cuota nunca la repite en otra cuenta). Un flujo Anthropic nativo que termina sin `message_stop` recibe un frame final `event: error` de tipo `api_error` (su mensaje indica `upstream_incomplete`, o `upstream_stream_error` si falló la lectura); un último frame incompleto se descarta para que los clientes vean un fallo legible en lugar de un truncamiento silencioso.
 
 ## Seguridad
 
