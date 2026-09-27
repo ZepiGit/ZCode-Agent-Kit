@@ -141,7 +141,7 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
  * set of 0-based indexes, or undefined when the answer is invalid.
  */
 export function parseSelection(answer, count) {
-  const text = answer.toLowerCase();
+  const text = answer.trim().toLowerCase();
   if (text === "all") return new Set([...Array(count).keys()]);
   if (text === "none") return new Set();
   const parts = text.split(/[\s,]+/).filter(Boolean);

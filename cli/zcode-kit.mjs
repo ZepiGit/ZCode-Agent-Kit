@@ -149,7 +149,7 @@ function usage(code) {
    --select shows one numbered list instead: chosen = configured, the other detected ones = skipped)
   (doctor: --forget <harness> removes a stored decision (the integration stays; setup asks again);
    --upstream compares the kit's gateway with the provider config the ZCode client receives — network, opt-in)
-  (proxy status --json: one object, connection details without the key)
+  (proxy status --json: one object, connection details without the key; exit 0 only when this kit's proxy answers)
   (setup: --account-rotator y|n for unattended installs; --verbose for full installer output)
   (proxy start/status and setup print the connection details for manual client setup;
    the key is shown in full only on an interactive terminal — export: zcode-kit models --show-key)
@@ -607,14 +607,15 @@ async function forgetDecision() {
   assertNotCheckoutWrite();
   ensureState(ctx);
   acquireLock(BACKUP_DIR);
-  const tx = beginTransaction(BACKUP_DIR, `zcode-kit doctor --forget ${id}`);
+  let tx = null;
   let txId = null;
   let result;
   try {
+    tx = beginTransaction(BACKUP_DIR, `zcode-kit doctor --forget ${id}`);
     result = forgetHarnessChoice(ctx, tx, id);
   } finally {
     let finishErr = null;
-    try { txId = tx.finish(); } catch (err) { finishErr = err; }
+    try { if (tx) txId = tx.finish(); } catch (err) { finishErr = err; }
     releaseLock(join(BACKUP_DIR, ".setup-lock"));
     if (finishErr) console.error(`WARN: recording the transaction failed (${finishErr.message})`);
   }

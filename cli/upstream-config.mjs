@@ -7,8 +7,9 @@
 // and overrides its bundled table with it; older app versions get a provider
 // list in data.providers[] instead. When the vendor moves a gateway, the
 // client follows at once while the kit keeps its compiled constants — this
-// check makes that visible. Opt-in (two unauthenticated GETs to the vendor),
-// never part of the default doctor; nothing secret is sent.
+// check makes that visible. Opt-in (at most three unauthenticated GETs to
+// the vendor and its CDN), never part of the default doctor; nothing secret
+// is sent.
 import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { configuredModelIds } from "./connection-details.mjs";
@@ -65,9 +66,28 @@ export function resolveUpstreamOrigin(env = process.env) {
 async function getJson(url, fetchImpl, signal) {
   const res = await fetchImpl(url, { method: "GET", redirect: "error", credentials: "omit", signal });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
-  if (text.length > MAX_BYTES) throw new Error("response too large");
-  return JSON.parse(text);
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_BYTES) {
+    void res.body?.cancel().catch(() => {});
+    throw new Error("response too large");
+  }
+  // Read with a byte cap: the header may be absent or wrong.
+  const chunks = [];
+  let total = 0;
+  const reader = res.body?.getReader();
+  if (reader) {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_BYTES) {
+        void reader.cancel().catch(() => {});
+        throw new Error("response too large");
+      }
+      chunks.push(value);
+    }
+  }
+  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
 }
 
 /**
@@ -168,7 +188,8 @@ export async function upstreamChecks(configPath, { fetchImpl = fetch, env = proc
     // Older app versions get a provider list without the plan gateways; the
     // current client's view is what the vendor actually routes, so compare
     // against it as well when the configured version says nothing.
-    if (checks.length === 1 && checks[0].ok === null && upstream.shape === "legacy" && target.appVersion !== REFERENCE_APP_VERSION) {
+    const covered = Boolean(KIT_GATEWAY_BASES[target.plan]?.[target.provider]);
+    if (covered && checks.length === 1 && checks[0].ok === null && upstream.shape === "legacy" && target.appVersion !== REFERENCE_APP_VERSION) {
       const current = await fetchUpstreamProviders({ appVersion: REFERENCE_APP_VERSION, origin, fetchImpl, timeoutMs });
       return compareUpstream({ ...target, appVersion: REFERENCE_APP_VERSION }, current).map((c) => ({ ...c, detail: `${c.detail} (as served to app ${REFERENCE_APP_VERSION}; the kit announces ${target.appVersion})` }));
     }

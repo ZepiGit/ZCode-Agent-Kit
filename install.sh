@@ -64,8 +64,12 @@ printf '%s\n' "$VERSION" | grep -Eq "$VERSION_PATTERN" || die "invalid release v
 # ZCODE_KIT_MIRROR=portable forces the portable path (diagnostics, tests).
 mirror_portable() {
   src=$1; dst=$2
-  (cd "$src" && tar -cf - --exclude='.bun-path' --exclude='.proxykey' --exclude='config.yaml' --exclude='node_modules' \
-      --exclude='backups' --exclude='logs' --exclude='generated' .) | (cd "$dst" && tar -xf -) || return 1
+  # Through a file, not a pipe: without pipefail a failed or partial archive
+  # step would go unnoticed and the delete phase below would still run.
+  (cd "$src" && tar -cf "$TMP/mirror.tar" --exclude='.bun-path' --exclude='.proxykey' --exclude='config.yaml' --exclude='node_modules' \
+      --exclude='backups' --exclude='logs' --exclude='generated' .) || return 1
+  (cd "$dst" && tar -xf "$TMP/mirror.tar") || return 1
+  rm -f "$TMP/mirror.tar"
   # Delete only after the copy succeeded. Protected names are pruned, so
   # neither they nor anything below them is ever listed for removal. Like
   # rsync, a directory the release dropped goes only when it is empty after

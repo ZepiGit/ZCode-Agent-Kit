@@ -250,7 +250,11 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
       shutdownCaptchaRuntime();
       const forceExit = setTimeout(() => process.exit(0), 10_000);
       forceExit.unref();
-      void server.close().then(() => flushAccountMetadata(auth)).then(() => process.exit(0));
+      // Long streams may keep close() busy past the 10 s cap: give it 6 s,
+      // then the bounded (3 s) metadata write, then exit — all inside the cap.
+      void Promise.race([server.close(), new Promise<void>((resolve) => setTimeout(resolve, 6_000))])
+        .then(() => flushAccountMetadata(auth))
+        .then(() => process.exit(0));
       return true;
     },
   });

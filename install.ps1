@@ -177,6 +177,9 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
       # Ctrl-C during the questions; answers already given were applied.
       Write-Host '  [WARN] setup was interrupted; the kit is installed and the answers given so far were applied. Finish later with: zcode-kit setup'
     } elseif ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE) - see output above" }
+    # Installed (possibly with a warning above): callers that check
+    # $LASTEXITCODE after this script must see success, not setup's 20/130.
+    $global:LASTEXITCODE = 0
   } finally {
     Pop-Location
   }

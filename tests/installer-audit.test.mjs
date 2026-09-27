@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -223,6 +223,10 @@ printf 'setup ran\\n'`);
         "zcode-proxy-src/node_modules/x/index.js": "x\n",
       };
       for (const [rel, body] of Object.entries(existing)) { mkdirSync(join(install, rel, ".."), { recursive: true }); writeFileSync(join(install, rel), body); }
+      // An installed file is older than the release (rsync's quick check
+      // compares size and mtime; same-second fixtures would look unchanged).
+      const old = new Date("2020-01-01T00:00:00Z");
+      for (const rel of Object.keys(existing)) utimesSync(join(install, rel), old, old);
       const result = runSh({ bin, home, install, temp, log, extraEnv: { RELEASE_DIR: release, ...(mode === "portable" ? { ZCODE_KIT_MIRROR: "portable" } : {}) } });
       assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
       assert.match(result.stdout, /Updating existing installation; keeping your configuration/);
@@ -295,7 +299,10 @@ exit $rc
   const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", wrapper, INSTALL_PS1], { encoding: "utf8", timeout: 30_000 });
   return { result, install };
 }
-const PS1_RELEASE = { "package.json": '{"name":"zcode-agent-kit"}', "cli/zcode-kit.mjs": "// release v2", "zcode-proxy-src/package.json": "{}" };
+// Like a real release, it ships proxy/ and zcode-proxy-src/: robocopy /MIR
+// purges a whole directory the release no longer ships, protected files inside
+// included (a real release never drops these two).
+const PS1_RELEASE = { "package.json": '{"name":"zcode-agent-kit"}', "cli/zcode-kit.mjs": "// release v2", "proxy/config.example.yaml": "port: 1", "zcode-proxy-src/package.json": "{}" };
 const pwshAvailable = () => process.platform === "win32" && spawnSync("pwsh", ["-NoProfile", "-Command", "1"], { encoding: "utf8" }).status === 0;
 
 test("install.ps1 repeat install (robocopy /MIR): local state survives, files the release dropped are removed", { skip: process.platform !== "win32" }, (t) => {

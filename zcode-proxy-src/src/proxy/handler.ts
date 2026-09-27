@@ -751,6 +751,12 @@ export async function dispatchWithConnectRetry(
       if (!opts.streamPrelude || !isGatedStream(resp)) return resp;
       const verdict = await opts.streamPrelude(resp);
       resp = verdict.response;
+      // The client may have left while the prelude was read: nothing further
+      // (captcha, recovery, health bookkeeping) is done for it.
+      if (aborted()) {
+        void resp.body?.cancel().catch(() => {});
+        throw new Error("client aborted during the stream prelude");
+      }
       if (!verdict.retryable) return resp;
       reason = `stream ${verdict.kind}: ${verdict.reason}`;
       kind = "stream";

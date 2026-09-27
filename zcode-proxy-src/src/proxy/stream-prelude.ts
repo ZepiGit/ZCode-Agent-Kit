@@ -58,9 +58,14 @@ function concatAll(parts: readonly Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** Split text that ends exactly at a frame boundary into its frames (blank-line separated). */
+/**
+ * Split text that ends exactly at a frame boundary into its frames. Line
+ * endings are normalized first so every mix lastFrameEnd accepts (CRLF, LF,
+ * CR, e.g. `\n\r\n`) splits the same way; only classification sees this, the
+ * forwarded bytes are untouched.
+ */
 function splitFrames(text: string): string[] {
-  return text.split(/\r\n\r\n|\n\n|\r\r/).filter((frame) => frame.length > 0);
+  return text.replace(/\r\n|\r/g, "\n").split("\n\n").filter((frame) => frame.length > 0);
 }
 
 /**
@@ -228,7 +233,12 @@ export async function gateStreamPrelude(resp: Response, opts: { timeoutMs?: numb
       return finish("passthrough", false, "client aborted during the prelude", undefined, { error: new Error("client aborted") });
     }
     if (raced === TIMEOUT) return finish("passthrough", false, "prelude undecided within the time limit", inflight);
-    if ("failure" in raced) return finish("eof", true, "stream failed in the prelude", undefined, raced.failure);
+    if ("failure" in raced) {
+      // Decoded here and nothing decodable yet: most likely a mislabelled or
+      // corrupt coding — deterministic, so a retry would only cost requests.
+      if (codings.length && heldBytes === 0 && pending.length === 0) return finish("passthrough", false, "body could not be decoded", undefined, raced.failure);
+      return finish("eof", true, "stream failed in the prelude", undefined, raced.failure);
+    }
     const { done, value } = raced.read;
     if (done) return finish("eof", true, "stream ended in the prelude");
     pending = pending.length ? concatAll([pending, value]) : value;

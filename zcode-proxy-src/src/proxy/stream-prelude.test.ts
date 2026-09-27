@@ -182,6 +182,19 @@ describe("gateStreamPrelude", () => {
     expect(cancelled).toBe(true);
   });
 
+  it("splits frames with mixed line endings exactly like the frame-end scanner (no swallowed content frame)", async () => {
+    const mixed = 'event: ping\ndata: {"type":"ping"}\n\r\nevent: content_block_start\r\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\r\n\r\n';
+    const verdict = await gateStreamPrelude(sse([START, mixed, OVERLOADED]));
+    expect(verdict.kind).toBe("content");
+    expect(await verdict.response.text()).toBe(START + mixed + OVERLOADED);
+  });
+
+  it("a body that cannot be decoded is handed on, never retried (deterministic, not a network failure)", async () => {
+    const verdict = await gateStreamPrelude(sse(["not gzip at all"], { headers: { "content-encoding": "gzip" } }));
+    expect(verdict.retryable).toBe(false);
+    expect(verdict.reason).toContain("decoded");
+  });
+
   it("understands CRLF frames", async () => {
     const crlf = (s: string): string => s.replace(/\n/g, "\r\n");
     const verdict = await gateStreamPrelude(sse([crlf(START), crlf(OVERLOADED)]));
