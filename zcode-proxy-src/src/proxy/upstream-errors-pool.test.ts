@@ -128,6 +128,29 @@ describe("account-pool upstream recovery", () => {
     }
   });
 
+  it("never fails over when the same-account retry died after the request was written (possible duplicate execution)", async () => {
+    const auth = poolAuth();
+    const sent: string[] = [];
+    const pending = recoverAndMapUpstream({
+      response: Response.json({ code: 1005, msg: "redacted upstream text" }, { status: 200 }),
+      auth,
+      credential: first,
+      plan: "coding-plan",
+      signal: new AbortController().signal,
+      quotaRetryDelaysMs: [0],
+      resend: async (credential) => {
+        sent.push(credential.apiKey);
+        const err = new Error("socket closed after the request was written") as Error & { postWrite?: boolean };
+        err.postWrite = true;
+        throw err;
+      },
+    });
+    await expect(pending).rejects.toThrow(/after the request was written/);
+    // The retry went to the same account only; account two never received the prompt.
+    expect(sent).toEqual(["pool-one"]);
+    expect(auth.listAccounts().find((a) => a.id === "two")?.state).not.toBe("exhausted");
+  });
+
   it("aborts during the retry wait without sending anything or memoizing", async () => {
     // Legacy auth (no rotator): canResendCredential reflects only the retry
     // memo, so this pins that an aborted schedule proves nothing. In pool

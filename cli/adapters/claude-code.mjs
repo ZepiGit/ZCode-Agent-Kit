@@ -41,6 +41,11 @@ export default {
     return { changed: wrote.wrote };
   },
 
+  /** The generated settings file lives in this installation's state: kit-owned by construction. */
+  owned(ctx) {
+    return existsSync(join(ctx.generated, "claude-zcode-settings.json"));
+  },
+
   verify(ctx) {
     const settingsPath = join(ctx.generated, "claude-zcode-settings.json");
     return [{ name: "claude adapter artifact", ok: existsSync(settingsPath), detail: settingsPath }];

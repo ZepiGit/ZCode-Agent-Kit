@@ -1,8 +1,8 @@
 # ZCode Proxy
 [English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · **简体中文**
 
-此组件提供 ZCode Agent Kit 随附的本地模型代理。Kit 负责其安装配置以及
-与助手工具的集成。
+此组件提供 ZCode Agent Kit 随附的本地模型代理。Kit 负责其安装配置；
+只有在获得你的同意后才配置助手集成。
 
 ## 在 ZCode Agent Kit 中使用
 

@@ -51,6 +51,11 @@ Start the proxy first: \`node proxy/zcode-proxy-manager.mjs start\`
     return { changed: true, manualConfirmationRequired: true };
   },
 
+  /** The values sheet lives in this installation's state: kit-owned by construction. */
+  owned(ctx) {
+    return existsSync(join(ctx.generated, "kilo-zcode-values.md"));
+  },
+
   verify(ctx) {
     return [{ name: "kilo values sheet", ok: existsSync(join(ctx.generated, "kilo-zcode-values.md")), detail: "generated — GUI entry still required" }];
   },

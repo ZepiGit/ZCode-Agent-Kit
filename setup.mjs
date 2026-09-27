@@ -31,7 +31,10 @@ if (mode === "--postinstall-hint") {
 } else {
   const only = argv.find((a) => a.startsWith("--only="));
   const args = ["setup"];
-  if (only) args.push(`--harness=${only.slice(7)}`);
+  // Legacy `mcp` token: MCP registration follows the selected harnesses and
+  // is not a harness id itself.
+  const harnesses = only ? only.slice(7).split(",").map((s) => s.trim()).filter((s) => s && s !== "mcp") : null;
+  if (only && harnesses.length) args.push(`--harness=${harnesses.join(",")}`);
   const res = spawnSync(process.execPath, [kit, ...args], { stdio: "inherit" });
   process.exit(res.status ?? 1);
 }

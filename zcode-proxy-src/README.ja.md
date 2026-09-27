@@ -2,8 +2,8 @@
 [English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · **日本語** · [简体中文](README.zh-CN.md)
 
 このコンポーネントは、ZCode Agent Kit に同梱されるローカルモデル
-プロキシを提供します。セットアップとアシスタントとの連携は Kit が
-管理します。
+プロキシを提供します。セットアップは Kit が管理し、アシスタントとの
+連携は同意を得た場合だけ設定します。
 
 ## ZCode Agent Kit での使用
 

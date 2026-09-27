@@ -43,6 +43,11 @@ args = ["${mcpEntry}/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     return { changed: wrote };
   },
 
+  /** The isolated CODEX_HOME lives in this installation's state: kit-owned by construction. */
+  owned(ctx) {
+    return existsSync(join(ctx.generated, "codex-home", "config.toml"));
+  },
+
   verify(ctx) {
     return [{ name: "codex adapter artifact", ok: existsSync(join(ctx.generated, "codex-home", "config.toml")), detail: "generated/codex-home/config.toml" }];
   },

@@ -3,8 +3,7 @@
 
 > 本ドキュメントは英語原文の翻訳です。相違がある場合は英語版が正となります。
 
-キットの中核はハーネス非依存です。`http://127.0.0.1:8457` で待ち受ける
-ローカル HTTP プロキシが、3 つの標準形式を提供します：
+キットの中核はハーネス非依存です。ローカル HTTP プロキシが 3 つの標準形式を提供します。以下の例はデフォルトポート `8457` を使います。実際のポートと接続情報は `zcode-kit proxy status` が表示します：
 
 | エンドポイント | 形式 | 用途 |
 |---|---|---|
@@ -19,11 +18,9 @@
 チェックアウトでは kit 内に `.proxykey` を置きます。npm インストールでは
 `node_modules` の外にあるインストール固有の状態ディレクトリに保存します。
 
-## `zcode-kit setup` による自動セットアップ（検出されたハーネスのみ）
+## `zcode-kit setup` によるセットアップ（検出されたハーネス、同意がある場合のみ）
 
-`zcode-kit setup --harness auto` はインストール済みのハーネスを検出し、
-**その対象だけ**を設定します。OMP しかない場合、Claude/Codex の設定や
-生成ラッパーは作られません。
+`zcode-kit setup --harness auto` はインストール済みのハーネスを検出し、保存済みの決定がないハーネスごとに "Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]" と質問します。`y` でそのハーネスを設定し、`n` はスキップしてファイルに触れません。ターミナルがなければ未決定のハーネスはすべてスキップされます。Ctrl-C で質問を中止できます（終了コード 130）。すでに `y` と答えたものは設定されたままです。OMP しかない場合、Claude/Codex の設定や生成ラッパーは作られません。決定はハーネスごとに 1 ファイルとして `generated/harness-choices/` に保存され、セットアップのトランザクションの一部です（ロールバックで再び削除されます）。`zcode-kit update` と `zcode-kit doctor --fix` は同意済みの統合（`y`、明示的な選択、または `zcode-kit integrate <harness>`）だけを再適用し、保存された `n` は `--harness`、`integrate`、または `zcode-kit setup --reask`（ターミナルで再質問）で変えるまで尊重されます。質問より前に kit が作成した統合は無人実行でも更新されますが、同意と見なされることはありません。無人実行では `--harness omp,codex` または `ZCODE_KIT_HARNESSES=omp,codex` でハーネスを選択します（`none` は検出されたすべてをスキップ）。不明な id はエラーです。MCP の登録も同じ同意に従います。1 つのハーネスが失敗しても他は止まりません。そのハーネス自身の部分的な書き込みは元に戻され、サマリーに失敗として表示され、セットアップは終了コード 1 で終わります（インストーラーは警告を出して続行します）。
 
 | ハーネス | 仕組み | 既存 config への影響 |
 |---|---|---|
@@ -37,7 +34,7 @@
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json`（Windows）または `~/.config/goose/custom_providers/zcode.json`（macOS/Linux） | 認証情報は文書化された `auth.command` ヘルパー経由（kit のキーリゾルバ、シェルなし） |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | kit は VS Code の状態に一切触れない。UI で一度だけ値を入力する |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | UI でカスタム provider（Anthropic messages）を設定。kilo.jsonc は意図的に書かない |
-| MCP 対応ハーネス | stdio サーバー `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：`~/.omp/agent/mcp.json` にエントリー。Claude Code：`claude mcp add`（検出時のみ）。Codex：隔離 home 内。MCP 単体はモデル統合としてカウントされない |
+| MCP 対応ハーネス | stdio サーバー `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：`~/.omp/agent/mcp.json` にエントリー。Claude Code：`claude mcp add`（検出され同意した場合のみ）。Codex：隔離 home 内。MCP 単体はモデル統合としてカウントされない |
 
 `generated/` 以下のパスは kit の状態を指します。リリース版/ソースでは
 kit ディレクトリ内、npm では別の状態ディレクトリ内です。
@@ -52,6 +49,8 @@ OMP は `omp --model zcode/glm-5.3-flash --thinking low` などで直接起動�
 | Codex CLI | `bin\zcode-codex.cmd` | `CODEX_HOME=<kit の状態>\generated\codex-home` + `ZCODE_PROXY_KEY` を設定し、必要時にプロキシを起動。通常の `codex` と `~/.codex` は変更されない |
 
 ## 手動での接続（OpenAI/Anthropic 対応の任意のクライアント）
+
+これは同等の入口であり、代替手段ではありません。kit のプロキシが起動しており、ZCode に有効なログインが必要です。`zcode-kit proxy start`（すでに起動中の場合も）と `zcode-kit proxy status` は現在のベース URL、ローカルキー、モデル ID を表示します。プロキシの起動が検証できない場合、値は設定由来としてラベル付けされ、出力に `Start the proxy first: zcode-kit proxy start` と表示されます。完全なキーは対話的なターミナルでのみ表示されます。それ以外では `zcode-kit models --show-key` を使ってください。以下の例のポートは、コマンドが表示するポートに置き換えてください。
 
 ```yaml
 # OpenAI 形式

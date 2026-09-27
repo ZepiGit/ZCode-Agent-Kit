@@ -196,7 +196,12 @@ export async function recoverAndMapUpstream(opts: {
         if (!retriedQuota) break; // served from a package with balance — done
         // A SENT retry came back exhausted: this is real evidence for the memo.
         confirmedExhausted = true;
-      } catch {
+      } catch (err) {
+        // A failure after the full request was written may have been
+        // processed upstream: never fail over to another account on top of
+        // it (the connect ladder refuses the same replay). The handler maps
+        // the rethrown error to a 502 without a further attempt.
+        if ((err as { postWrite?: unknown } | null)?.postWrite) throw err;
         // The retry could not be sent (connect or captcha failure): keep the
         // current quota envelope so rotation below is not lost.
         scheduleCompleted = false;

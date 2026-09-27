@@ -22,5 +22,11 @@ export function setupOutput(ctx, compact = false) {
     ok(text) { if (compact) console.log(`  ${paint("32", "[OK]")}   ${text}`); },
     skip(text) { if (compact) console.log(`  [SKIP] ${text}`); },
     warn(text) { console.log(`  ${paint("33", "[WARN]")} ${text}`); },
+    // Per-harness results are shown in both modes: the answer to a consent
+    // question deserves an immediate, visible outcome.
+    result(tag, text) {
+      const label = tag === "ok" ? paint("32", "[OK]") + "  " : tag === "skip" ? "[SKIP]" : paint("31", "[FAIL]");
+      console.log(`  ${label} ${text}`);
+    },
   };
 }

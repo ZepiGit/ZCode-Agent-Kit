@@ -2,8 +2,8 @@
 [English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 Diese Komponente stellt den lokalen Modell-Proxy bereit, der mit dem ZCode
-Agent Kit gebündelt wird. Das Kit übernimmt Einrichtung und Integration mit
-Assistenten.
+Agent Kit gebündelt wird. Das Kit übernimmt die Einrichtung; Integrationen
+mit Assistenten werden nur mit deiner Zustimmung konfiguriert.
 
 ## Mit dem ZCode Agent Kit verwenden
 

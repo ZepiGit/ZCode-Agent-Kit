@@ -160,13 +160,22 @@ printf '%s\n' "$BUN_BIN" > "$INSTALL_DIR/.bun-path"
 cd "$INSTALL_DIR"
 ok "Application files installed"
 step "[4/4] Configuring your workspace"
-# curl | sh consumes stdin. Read answers from the controlling terminal instead.
+# curl | sh consumes stdin. Read answers (one y/n question per detected
+# assistant, then the Account Rotator question) from the controlling terminal
+# instead; without one, undecided assistants are skipped, never configured.
 run_setup() { node cli/zcode-kit.mjs setup --harness auto --installer; }
+setup_status=0
 if [ -t 1 ] && [ -r /dev/tty ]; then
-  run_setup < /dev/tty || die "setup failed; see the diagnostics above" 1
-elif ! run_setup; then
-  die "setup failed; see the diagnostics above" 1
+  run_setup < /dev/tty || setup_status=$?
+else
+  run_setup || setup_status=$?
 fi
+case "$setup_status" in
+  0) : ;;
+  # Exit 1: the kit is installed, one or more assistants failed (see the summary).
+  1) printf '  [WARN] some assistants could not be configured; see the summary above (the kit itself is installed)\n' ;;
+  *) die "setup failed; see the diagnostics above" 1 ;;
+esac
 
 # User-scope `zcode-kit` command in ~/.local/bin (conventionally on PATH).
 # Delete the file (or run zcode-kit uninstall) to undo.
@@ -188,4 +197,5 @@ printf '  --------------------------------------------\n'
 printf '  %-27s %s\n' 'zcode-kit auth login zai' 'Sign in / add an account'
 printf '  %-27s %s\n' 'zcode-kit accounts' 'View saved accounts'
 printf '  %-27s %s\n' 'zcode-kit doctor' 'Check warnings and model access'
+printf '  %-27s %s\n' 'zcode-kit proxy status' 'Show connection details (base URL, key, models) for manual client setup'
 printf '\n'

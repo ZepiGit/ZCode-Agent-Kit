@@ -2,7 +2,8 @@
 [English (original)](README.md) · [Deutsch](README.de.md) · **Español** · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 Este componente proporciona el proxy local de modelos incluido en ZCode Agent
-Kit. El Kit se encarga de configurarlo e integrarlo con los asistentes.
+Kit. El Kit se encarga de su configuración; las integraciones con asistentes
+solo se configuran con tu consentimiento.
 
 ## Uso con ZCode Agent Kit
 

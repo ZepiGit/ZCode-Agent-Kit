@@ -1,4 +1,4 @@
-import { connect as connectTcp, type Socket } from "node:net";
+import { connect as connectTcp, isIP, type Socket } from "node:net";
 import { connect as connectTls, type TLSSocket } from "node:tls";
 import { decodeContentStream } from "./inflate.js";
 
@@ -24,7 +24,7 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
   const url = new URL(req.url);
   const bodyBytes = bodyToBytes(req.body);
   const requestHead = buildRequestHead(url, req.method ?? "POST", req.headers, bodyBytes.byteLength);
-  const socket = await openSocket(url);
+  const socket = await openSocket(url, req.signal);
 
   return await new Promise<Response>((resolve, reject) => {
     let headerBuffer: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
@@ -175,22 +175,43 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
   });
 }
 
-function openSocket(url: URL): Promise<WireSocket> {
+/**
+ * Open the TCP/TLS connection. The client signal is honoured here as well:
+ * a client that disappears while the connect or TLS handshake stalls must
+ * not leave a pending socket behind (the abort listener of the request phase
+ * is only installed after this resolves).
+ */
+function openSocket(url: URL, signal?: AbortSignal): Promise<WireSocket> {
   const isHttps = url.protocol === "https:";
   if (!isHttps && url.protocol !== "http:") {
     return Promise.reject(new Error(`Unsupported upstream protocol: ${url.protocol}`));
   }
   const port = Number(url.port || (isHttps ? 443 : 80));
+  if (signal?.aborted) return Promise.reject(new Error("client aborted before the upstream connection was opened"));
 
   return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      socket.off("error", onError);
+      socket.destroy();
+      reject(new Error("client aborted during the upstream connection setup"));
+    };
+    const onError = (err: unknown) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(err);
+    };
     const onConnect = () => {
-      socket.off("error", reject);
+      socket.off("error", onError);
+      signal?.removeEventListener("abort", onAbort);
       resolve(socket);
     };
+    // SNI carries host names only; Bun rejects an IP literal where Node
+    // silently drops it, so send it only for a real host name.
+    const servername = isIP(url.hostname) === 0 ? url.hostname : undefined;
     const socket: WireSocket = isHttps
-      ? connectTls({ host: url.hostname, port, servername: url.hostname }, onConnect)
+      ? connectTls({ host: url.hostname, port, ...(servername ? { servername } : {}) }, onConnect)
       : connectTcp({ host: url.hostname, port }, onConnect);
-    socket.once("error", reject);
+    socket.once("error", onError);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 

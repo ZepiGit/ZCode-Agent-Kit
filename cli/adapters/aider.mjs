@@ -28,6 +28,11 @@ ZCODE_AIDER_DEFAULT_MODEL=openai/glm-5.3
     return { changed: true };
   },
 
+  /** The env export lives in this installation's state: kit-owned by construction. */
+  owned(ctx) {
+    return existsSync(join(ctx.generated, "aider-zcode.env"));
+  },
+
   verify(ctx) {
     return [{ name: "aider launcher env", ok: existsSync(join(ctx.generated, "aider-zcode.env")), detail: "generated/aider-zcode.env" }];
   },

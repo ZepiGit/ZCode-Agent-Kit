@@ -7,7 +7,7 @@ Use your ZCode account with the coding assistant you already use.
 
 *The kit runs locally; model requests go to ZCode.*
 
-Keep your coding assistant. Use your existing ZCode models and quota/tokens through a local connection.
+Keep your coding assistant. Use your existing ZCode models and quota/tokens through a local connection. Two equal ways in: let the kit configure a detected assistant after you answer `y` for it, or take the printed base URL and API key into any OpenAI- or Anthropic-compatible client yourself.
 
 **Optional account rotation:** The installer asks **"Do you want to activate the Account Rotator feature? [y/n]"**. With `y`, the current login is imported and later `zcode-kit auth login zai` logins are saved as additional accounts. Signing in again as an already saved user normally updates that entry; the documentation explains how users are matched and the exceptions. Enable later with `zcode-kit accounts enable`; inspect saved accounts with `zcode-kit accounts`. `zcode-kit accounts health [--json]` shows one on-demand verdict per account from billing data. It is not proof that model requests work; an account without quota data is not counted as healthy, and accounts are not polled continuously. See the [account rotator documentation](docs/ACCOUNT_ROTATOR.md).
 
@@ -22,11 +22,11 @@ Keep your coding assistant. Use your existing ZCode models and quota/tokens thro
 
 ## Step 2 — Install the kit once
 
-Choose the release installer or npm below. The release installer sets up detected assistants automatically, so there is no separate setup command to run afterward.
+Choose the release installer or npm below. The release installer runs setup for you, so there is no separate setup command to run afterward. Setup asks one question per detected assistant, **"Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"** (with the assistant's name), and changes that assistant's configuration only after a `y`; `n` skips it and leaves its settings untouched. Without a terminal answer an assistant is configured only when you select it explicitly (see below) or consented earlier.
 
-The installer shows four numbered stages, compact assistant results and a connection check. Detailed setup output is saved to the displayed `install.log`; set `ZCODE_KIT_VERBOSE=1` for full output and `NO_COLOR=1` for plain text. Interactive installs require `y` or `n` for Account Rotator. For unattended installs, set `ZCODE_KIT_ACCOUNT_ROTATOR=y` or `n`; without an explicit answer the existing setting is preserved. A failed connection check remains a warning even when installation succeeds.
+The installer shows four numbered stages, one result line per assistant (configured, skipped or failed), a connection check and the connection details for manual client setup. Detailed setup output is saved to the displayed `install.log`; set `ZCODE_KIT_VERBOSE=1` for full output and `NO_COLOR=1` for plain text. Interactive installs ask `y` or `n` per assistant and, separately, for Account Rotator; Ctrl-C stops the questions and leaves everything you have not answered `y` to untouched. For unattended installs, select assistants explicitly with `ZCODE_KIT_HARNESSES=omp,codex` (or `none`) and set `ZCODE_KIT_ACCOUNT_ROTATOR=y` or `n`; without an explicit selection, undecided assistants are skipped and the existing Account Rotator setting is preserved. Answers are stored under `generated/harness-choices/`: a later setup, update or `zcode-kit doctor --fix` refreshes only assistants you consented to (a `y`, an explicit selection or `zcode-kit integrate <assistant>`) and never re-integrates a skipped one; an integration the kit created before it asked is kept current but only counts as consent once you answer `y`. `zcode-kit setup --reask` asks every detected assistant again on a terminal. A failed connection check remains a warning even when installation succeeds.
 
-> **Before you run the installer:** it downloads and executes a script, changes configuration for detected assistants, and may register MCP tools. Setup also attempts a small model request that can use quota. Changes are recorded, but a later failure can leave earlier changes in place. Inspect the installer if required by your security policy.
+> **Before you run the installer:** it downloads and executes a script, changes configuration only for assistants you answer `y` to, and may register MCP tools for those. Setup also attempts a small model request that can use quota. Changes are recorded, but a later failure can leave earlier changes in place. Inspect the installer if required by your security policy.
 
 **Windows — PowerShell, without administrator rights:**
 
@@ -60,11 +60,29 @@ npm install -g zcode-agent-kit@latest
 zcode-kit setup --harness auto --installer
 ```
 
-npm installs the `zcode-kit` and `zcode-agent-kit` commands. The second command installs the kit's dependencies, configures detected assistants and asks the Account Rotator y/n question. Run it after installing the npm package. Use one installation method to keep your command, configuration and proxy tied to the same kit copy.
+npm installs the `zcode-kit` and `zcode-agent-kit` commands. The second command installs the kit's dependencies, asks one y/n question per detected assistant and then the Account Rotator y/n question. Run it after installing the npm package. Use one installation method to keep your command, configuration and proxy tied to the same kit copy.
 
 ## Step 3 — Use GLM-5.3(-flash) in your harness of choice
 
-Open a new terminal and run `zcode-kit help`. Then open a terminal **inside your own project**, not the kit folder. Choose the assistant you installed:
+Open a new terminal and run `zcode-kit help`. Then open a terminal **inside your own project**, not the kit folder. Choose the assistant you installed, or use the manual connection details with any other client:
+
+**Manual: base URL + API key (any OpenAI- or Anthropic-compatible client)**
+
+The kit does not have to configure your assistant. Start the local proxy and copy the connection details it prints; `zcode-kit proxy status` shows them again while the proxy runs:
+
+```sh
+zcode-kit proxy start
+```
+
+```text
+Connection details (local ZCode proxy, running and verified)
+  OpenAI-compatible base URL:    http://127.0.0.1:8457/v1   (POST /chat/completions, POST /responses, GET /models)
+  Anthropic-compatible base URL: http://127.0.0.1:8457      (POST /v1/messages)
+  API key (Bearer / x-api-key):  <your local proxy key>
+  Model IDs:                     glm-5.3, glm-5.3-flash
+```
+
+Enter the base URL that matches your client's API format, the key as the API key or auth token, and one of the model IDs. The full key is printed only in an interactive terminal; `zcode-kit models --show-key` prints it for scripts, and `zcode-kit proxy status` labels the values as unverified while the proxy is not running. This path still needs the kit's proxy and a ZCode login with quota; it only removes the automatic assistant configuration. The port comes from your `proxy/config.yaml`.
 
 **OMP:**
 
@@ -86,7 +104,7 @@ zcode-kit run codex -- exec "Reply with ok" -m glm-5.3-flash
 
 These commands start/check the proxy automatically. A reply of `ok` confirms the first model call. A successful setup message alone does not.
 
-**Got the reply?** Your account, proxy, and selected assistant worked together for that request. You can now use that assistant in your project.
+**Got the reply?** Your account, proxy, and the client you chose worked together for that request. You can now use it in your project.
 
 **No reply?** Use the checks under “Get help” below; reinstalling will not fix an exhausted quota.
 
@@ -118,7 +136,7 @@ Flash always uses thinking. Requests that disable thinking are normalized to `lo
 | pi | Start the proxy manually, then run `pi --model zcode/glm-5.3`. |
 | Goose | Start the proxy manually, then run `goose session --provider zcode`. |
 | Continue | Open/configure Continue first. Run `zcode-kit integrate continue`, start the proxy, then select the model in the UI. |
-| Cline / Kilo Code | Copy the generated values into the extension UI and start the proxy. Setup creates `generated/cline-zcode-values.md` or `generated/kilo-zcode-values.md` inside a release installation. |
+| Cline / Kilo Code | After a `y` for that assistant, copy the generated values into the extension UI and start the proxy. Setup then creates `generated/cline-zcode-values.md` or `generated/kilo-zcode-values.md` inside a release installation. |
 
 Run OMP directly, not through `zcode-kit run`. Only Claude Code, Codex, Aider, and OpenCode have kit launchers. Codex uses an isolated profile; your usual personal settings and skills do not automatically carry over. Claude Code routing is community compatibility. An adapter is not a guarantee that every client/version has been live-tested.
 
@@ -139,7 +157,7 @@ zcode-kit proxy restart
 zcode-kit proxy stop
 ```
 
-`stop`, `restart` and every automatic restart interrupt connected clients and in-flight requests; retry those requests afterward. Releases without `zcode-kit proxy` run `node <installation>/proxy/zcode-proxy-manager.mjs` with the same command.
+`stop`, `restart` and every automatic restart interrupt connected clients and in-flight requests; retry those requests afterward. Releases without `zcode-kit proxy` run `node <installation>/proxy/zcode-proxy-manager.mjs` with the same command. `start` and `status` print the connection details (base URLs, key, model IDs) once the proxy is verified as this installation's own; a stopped proxy is reported as not running and its configured values are labelled as such.
 
 **Hung proxy:** `start`, `restart` and `stop` terminate a proxy that does not answer only when it is proven to be this kit's own: it is past the 60-second startup grace, its start time matches the recorded one, its command line is the kit proxy, and 3 consecutive health checks (about 25 seconds) fail. A process whose ownership is unknown is never killed; the command reports it and stops. `zcode-kit doctor --fix` reapplies managed configuration and, if the proxy is down or proven hung, starts it the same way.
 
@@ -155,12 +173,14 @@ zcode-kit auth status
 ```
 
 - **Command not found:** reopen the terminal. For release installs, check that `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) or `$HOME/.local/bin` (macOS/Linux) is on PATH.
-- **No model reply:** check the Desktop login and available quota. Start the proxy if your assistant does not start it. Local health does not prove model access.
+- **Assistant skipped during setup:** answer `y` next time, run `zcode-kit integrate <assistant>` (`zcode-kit setup --harness <list>` for several), or `zcode-kit setup --reask` to be asked again for every detected assistant. Without a terminal, select assistants with `ZCODE_KIT_HARNESSES`.
+- **Manual client setup:** `zcode-kit proxy status` prints the base URLs, key and model IDs while the proxy runs; the full key only in an interactive terminal (`zcode-kit models --show-key` otherwise).
+- **No model reply:** check the Desktop login and available quota. Start the proxy if your client does not start it. Local health does not prove model access.
 - **Proxy down or not answering:** run `zcode-kit doctor --fix` or `zcode-kit proxy restart`. Only a proven-own hung proxy is terminated; see the manual proxy section above.
 - **OMP autostart:** launch OMP directly. Setup pins native Node/Bun; the extension runs preflight in a fresh child instead of importing kit modules into OMP. Failures report secret-free categories; the child is limited to 120 seconds. Fix the reported cause, then retry after the 60-second per-session cooldown; recovery is possible in the same session. If the runtime moved, rerun `zcode-kit setup --harness auto` and reload the extension. Unknown port owners are left untouched.
 - **Desktop login import:** run `zcode-kit auth login zai --import` to import the current active Desktop 0.16.9 `zai`/`start-plan` login; an explicitly configured plan is required. If `credentials.json` exists, it is authoritative: invalid credentials do not silently fall back to legacy `config.json`. Modern `coding-plan` logins use normal OAuth with `zcode-kit auth login zai` instead; the importer does not create or resolve API keys.
 - **401 or occupied port:** check for another kit installation. Do not delete keys or kill an unknown process.
-- **Setup partly failed:** read the printed rollback command before trying again. Earlier changes may still exist.
+- **Setup partly failed:** one assistant failing does not undo the others; its own partial changes are reverted and the installer continues with a warning. Read the printed rollback command before trying again. Earlier changes may still exist.
 
 ## Before you use real project data
 

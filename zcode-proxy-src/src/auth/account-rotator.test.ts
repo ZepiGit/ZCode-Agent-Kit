@@ -91,4 +91,36 @@ describe("account rotator", () => {
     expect(rotator.list().find((a) => a.id === "a")?.state).toBe("paused");
     expect(rotator.list().find((a) => a.id === "b")?.state).toBe("paused");
   });
+
+  it("keeps the inference account sticky when a billing/quota/async lookup needs a JWT it lacks", () => {
+    const rotator = createAccountRotator([
+      { id: "key-only", credential: { provider: "zai", apiKey: "key-a" } },
+      { id: "with-jwt", credential: { provider: "zai", apiKey: "key-b", jwt: "jwt-b" } },
+    ]);
+    expect(rotator.getCredentialHandle().id).toBe("key-only");
+    for (const operation of ["billing", "quota", "async"] as const) {
+      // The lookup is served by the JWT-bearing profile ...
+      expect(rotator.getCredentialHandle({ operation }).id).toBe("with-jwt");
+      // ... but inference stays on the account it was using: a control-plane
+      // lookup is not an allowed switch reason.
+      expect(rotator.getCredentialHandle().id).toBe("key-only");
+      expect(rotator.getCredentialHandle({ operation: "inference" }).id).toBe("key-only");
+    }
+    expect(rotator.getSelectedId()).toBe("key-only");
+  });
+
+  it("treats the same wire token as one identity regardless of userId metadata", () => {
+    const rotator = createAccountRotator([
+      { id: "imported", credential: { provider: "zai", apiKey: "k", jwt: "jwt-same" } },
+      { id: "oauth", credential: { provider: "zai", apiKey: "k", jwt: "jwt-same", userId: "user-1" } },
+      { id: "other", credential: { provider: "zai", apiKey: "k2", jwt: "jwt-other", userId: "user-2" } },
+    ], { plan: "start-plan" });
+    const first = rotator.getCredentialHandle();
+    expect(first.id).toBe("imported");
+    expect(rotator.handleForId("oauth")?.effectiveIdentity).toBe(first.effectiveIdentity);
+    rotator.markExhausted(first, "1005");
+    // The quarantined token must not be resent through its metadata alias.
+    expect(rotator.getCredentialHandle().id).toBe("other");
+    expect(rotator.canResendHandle(rotator.handleForId("oauth")!)).toBe(false);
+  });
 });

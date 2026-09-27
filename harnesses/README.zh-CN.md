@@ -3,8 +3,7 @@
 
 > 本文为英文原文的翻译；如有出入，以英文原版为准。
 
-kit 的核心与具体 harness 无关：一个监听 `http://127.0.0.1:8457` 的本地
-HTTP 代理，支持三种标准格式：
+kit 的核心与具体 harness 无关：一个提供三种标准格式的本地 HTTP 代理。下面的示例使用默认端口 `8457`；你安装的实际端口和连接信息由 `zcode-kit proxy status` 显示：
 
 | 端点 | 格式 | 用途 |
 |---|---|---|
@@ -18,10 +17,9 @@ HTTP 代理，支持三种标准格式：
 `zcode-kit setup` 在本地生成密钥。正式版和源码检出将 `.proxykey`
 保存在 Kit 目录；npm 安装则保存在 `node_modules` 之外的专用状态目录。
 
-## 由 `zcode-kit setup` 自动配置（仅针对检测到的 harness）
+## 由 `zcode-kit setup` 配置（检测到的 harness，仅在同意后）
 
-`zcode-kit setup --harness auto` 检测已安装的 harness，并**只配置这些**。
-如果只装了 OMP，就不会创建 Claude/Codex 的配置或生成包装器文件。
+`zcode-kit setup --harness auto` 检测已安装的 harness，并对每个没有已保存决定的 harness 提问："Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"。回答 `y` 才配置该 harness；`n` 会跳过它且不触碰其文件，没有终端时所有未决定的 harness 都会被跳过。按 Ctrl-C 会停止提问（退出码 130）；已经回答 `y` 的仍保持配置。如果只装了 OMP，就不会创建 Claude/Codex 的配置或生成包装器文件。决定以每个 harness 一个文件的形式保存在 `generated/harness-choices/` 中，并属于设置事务的一部分（回滚会再次删除它们）；`zcode-kit update` 和 `zcode-kit doctor --fix` 只重新应用已同意的集成（回答 `y`、明确选择或 `zcode-kit integrate <harness>`），已保存的 `n` 会一直被遵守，直到通过 `--harness`、`integrate` 或 `zcode-kit setup --reask`（在终端中重新提问）更改。Kit 在提问之前创建的集成会在无人值守运行时刷新，但绝不会被视为同意。无人值守运行时用 `--harness omp,codex` 或 `ZCODE_KIT_HARNESSES=omp,codex` 选择 harness（`none` 跳过所有检测到的 harness）；未知 id 视为错误。MCP 注册遵循同样的同意。某个 harness 失败不会阻止其他 harness：它自身的部分写入会被撤销，汇总中将其列为失败，设置以退出码 1 结束（安装器会带着警告继续）。
 
 | Harness | 机制 | 对现有配置的影响 |
 |---|---|---|
@@ -35,7 +33,7 @@ HTTP 代理，支持三种标准格式：
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json`（Windows）或 `~/.config/goose/custom_providers/zcode.json`（macOS/Linux） | 凭据通过文档化的 `auth.command` 助手（kit 密钥解析器，无 shell） |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | kit 绝不触碰 VS Code 状态；在 UI 中手动录入一次即可 |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | 在 UI 中配置自定义 provider（Anthropic messages）；kit 有意不写 kilo.jsonc |
-| 支持 MCP 的 harness | stdio 服务器 `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：写入 `~/.omp/agent/mcp.json`；Claude Code：`claude mcp add`（仅在检测到时）；Codex：隔离 home 内。仅 MCP 不算作模型集成 |
+| 支持 MCP 的 harness | stdio 服务器 `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：写入 `~/.omp/agent/mcp.json`；Claude Code：`claude mcp add`（仅在检测到且已同意时）；Codex：隔离 home 内。仅 MCP 不算作模型集成 |
 
 `generated/` 下的路径指向 Kit 状态：正式版/源码安装位于 Kit
 目录中；npm 安装位于单独的状态目录中。
@@ -50,6 +48,8 @@ HTTP 代理，支持三种标准格式：
 | Codex CLI | `bin\zcode-codex.cmd` | 设置 `CODEX_HOME=<Kit 状态>\generated\codex-home` + `ZCODE_PROXY_KEY` 并按需启动代理；你平时的 `codex` 和 `~/.codex` 不受影响 |
 
 ## 手动接入（任何支持 OpenAI/Anthropic 的客户端）
+
+这是同等的入口，而不是备选方案。Kit 代理必须在运行，且 ZCode 需要有效登录。`zcode-kit proxy start`（包括代理已在运行时）和 `zcode-kit proxy status` 会输出当前的基础 URL、本地密钥和模型 ID。当代理未被验证为正在运行时，这些值会标注为来自配置，输出中会提示 `Start the proxy first: zcode-kit proxy start`。完整密钥只会在交互式终端中显示；其他情况请使用 `zcode-kit models --show-key`。请把下面示例中的端口替换为命令显示的端口。
 
 ```yaml
 # OpenAI 格式

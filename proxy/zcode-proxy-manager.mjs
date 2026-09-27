@@ -36,6 +36,8 @@ import { createCtx } from "../cli/context.mjs";
 import { logHeal } from "../cli/heal.mjs";
 import { processCommandLine, resolveBun } from "../lib/process.mjs";
 import { proxyEnv } from "../lib/proxy-env.mjs";
+import { configuredModelIds, configuredServer, connectionDetailsLines, shouldRevealKey } from "../cli/connection-details.mjs";
+import { readHarnessChoices } from "../cli/harness-consent.mjs";
 
 // ------------------------------------------------------------------ factory
 const MANAGER_PATH = fileURLToPath(import.meta.url);
@@ -862,8 +864,55 @@ try {
       } catch (err) {
         console.log(`  quota: unavailable (${err.message})`);
       }
+      console.log("");
+      await printConnectionDetails("running");
+    } else if (state === "down") {
+      // Not running: configured values are still useful for manual client
+      // setup, but they are labelled as unverified — never as "running".
+      console.log("");
+      await printConnectionDetails("configured");
+    } else if (state === "foreign") {
+      console.log(`  connection details withheld: port ${portOrNull()} is answered by a service that is not this kit's proxy`);
+    } else if (state === "nokey") {
+      console.log(`  connection details unavailable: ${KEY_FILE} missing — run setup first`);
     }
     return state === "ours" ? 0 : 1;
+  }
+
+  /**
+   * Connection details for manual client setup. `source` "running" is only
+   * passed by callers that verified /health answered as ours; model ids then
+   * come from the live /v1/models list, otherwise from the config file. The
+   * key is read, never generated or rotated here.
+   */
+  async function connectionDetails(source) {
+    let models = configuredModelIds(CONFIG);
+    if (source === "running") {
+      try {
+        const res = await fetch(`${base()}/v1/models`, { headers: { Authorization: `Bearer ${readKey()}` }, signal: AbortSignal.timeout(5000) });
+        const j = await res.json();
+        const ids = (j?.data ?? []).map((m) => m?.id).filter((id) => typeof id === "string" && id.length > 0);
+        if (res.ok && ids.length) models = ids;
+      } catch {
+        // config list stays
+      }
+    }
+    const server = configuredServer(CONFIG);
+    return connectionDetailsLines({ port: loadPort(), key: readKey(), models, source, reveal: shouldRevealKey(), host: server.host, responsesEnabled: server.responsesEnabled });
+  }
+
+  async function printConnectionDetails(source) {
+    let lines;
+    try {
+      // "running" is re-proven right before printing: a proxy that stopped
+      // between the start/status check and now must not be shown as verified.
+      if (source === "running" && await healthIdentify(2500) !== "ours") source = "configured";
+      lines = await connectionDetails(source);
+    } catch (err) {
+      console.log(`  connection details unavailable: ${err.message}`);
+      return;
+    }
+    for (const line of lines) console.log(line);
   }
 
   /** /health `details` (newer proxies only); null when absent or unreadable. */
@@ -1005,9 +1054,17 @@ try {
     // OMP checks only apply when OMP is actually installed here; a Codex-only
     // user must not get FAIL lines about OMP.
     const ompInstalled = !!OMP_AGENT && existsSync(join(OMP_AGENT, "models.yml"));
-    if (ompInstalled) {
+    // Only a consented or kit-managed OMP integration is checked: a declined
+    // or never-answered harness is a choice, not a failed check.
+    const ompChoice = readHarnessChoices({ generated: GENERATED }).harnesses.omp?.decision;
+    const ompManaged = (() => {
+      try { return readFileSync(join(OMP_AGENT, "models.yml"), "utf8").includes("# >>> zcode-kit (managed block)"); } catch { return false; }
+    })();
+    if (ompInstalled && (ompChoice === "configured" || (ompChoice !== "skipped" && ompManaged))) {
       add("omp provider registered", ompHasZcode(), "zcode block in ~/.omp/agent/models.yml");
       add("extension installed", existsSync(OMP_AGENT + "/extensions/zcode-proxy-autostart.ts"), "~/.omp/agent/extensions/zcode-proxy-autostart.ts");
+    } else if (ompInstalled) {
+      add("omp integration", null, ompChoice === "skipped" ? "not configured (your choice) — zcode-kit integrate omp to change" : "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp");
     } else {
       add("omp integration", null, "OMP not installed — skipped");
     }
@@ -1094,7 +1151,7 @@ try {
 
   return {
     start, stop, restart, respawn, status, doctor, logs, healthIdentify, readPidFile, verifyOwnProcess, proveHungOwn,
-    pidAlive, processStartMs, killOwned, lastRecovery: () => lastRecovery,
+    pidAlive, processStartMs, killOwned, lastRecovery: () => lastRecovery, connectionDetails, printConnectionDetails,
     LOG_FILE, PID_FILE, CONFIG, KEY_FILE, LOG_DIR, RESPAWN_FILE,
   };
 }
@@ -1105,9 +1162,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   async function main() {
     const cmd = process.argv[2] ?? "help";
     switch (cmd) {
-      case "start": process.exit(await m.start()); break;
+      // After a successful start (including "already running") the operator
+      // gets the connection details of the verified instance.
+      case "start": {
+        const code = await m.start();
+        if (code === 0) { console.log(""); await m.printConnectionDetails("running"); }
+        process.exit(code);
+        break;
+      }
       case "stop": process.exit(await m.stop()); break;
-      case "restart": process.exit(await m.restart()); break;
+      case "restart": {
+        const code = await m.restart();
+        if (code === 0) { console.log(""); await m.printConnectionDetails("running"); }
+        process.exit(code);
+        break;
+      }
       case "status": process.exit(await m.status()); break;
       case "doctor": process.exit(await m.doctor()); break;
       case "logs": process.exit(m.logs(Number(process.argv[3] ?? 40) || 40)); break;

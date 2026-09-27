@@ -935,7 +935,9 @@ function nextReqId(): string {
 }
 
 const DEBUG_BODY_PREVIEW = 200;
-const SENSITIVE_HEADERS = new Set(["authorization", "x-api-key", "cookie", "set-cookie", "proxy-authorization"]);
+// Captcha verify tokens are single-use bearer material for the start-plan
+// gateway: debug output masks them like credentials.
+const SENSITIVE_HEADERS = new Set(["authorization", "x-api-key", "cookie", "set-cookie", "proxy-authorization", "x-aliyun-captcha-verify-param"]);
 
 function debugLine(reqId: string, msg: string): void {
   console.log(`${reqId} debug: ${msg}`);

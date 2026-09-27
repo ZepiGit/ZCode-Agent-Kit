@@ -94,6 +94,18 @@ export default {
     return { changed: wrote };
   },
 
+  /** Kit signature and this installation's proxy port (the entry carries no other identity). */
+  owned(ctx) {
+    const target = configPath(ctx.home);
+    if (!existsSync(target)) return false;
+    try {
+      const current = parseJsonc(readFileSync(target, "utf8"))?.provider?.zcode;
+      return isKitOwned(current) && current.options.baseURL === `http://127.0.0.1:${ctx.port()}/v1`;
+    } catch {
+      return false;
+    }
+  },
+
   verify(ctx) {
     const target = configPath(ctx.home);
     if (!existsSync(target)) return [{ name: "opencode provider registered", ok: null, detail: "not installed" }];

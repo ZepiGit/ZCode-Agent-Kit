@@ -108,6 +108,35 @@ describe("sendOrderedUpstreamRequest — abort propagation", () => {
     }
   });
 
+  it("aborts during connection setup: a stalled TLS handshake is torn down promptly", async () => {
+    // A plain TCP listener that never answers the TLS ClientHello: the connect
+    // phase stalls before the request-phase abort listener could exist.
+    const { createServer: createTcpServer } = await import("node:net");
+    let accepted = 0;
+    const tcp = createTcpServer(() => { accepted += 1; });
+    await new Promise<void>((r) => tcp.listen(0, "127.0.0.1", r));
+    try {
+      const port = (tcp.address() as AddressInfo).port;
+      const controller = new AbortController();
+      const started = Date.now();
+      const promise = sendOrderedUpstreamRequest({
+        url: `https://127.0.0.1:${port}/v1/messages`,
+        method: "POST",
+        headers: [["content-type", "application/json"]],
+        body: "{}",
+        signal: controller.signal,
+      });
+      expect(await waitFor(() => accepted > 0)).toBe(true);
+      controller.abort();
+      // The contract: the pending connect settles promptly with the abort
+      // error instead of waiting for the OS handshake timeout.
+      await expect(promise).rejects.toThrow(/abort/);
+      expect(Date.now() - started).toBeLessThan(5000);
+    } finally {
+      tcp.close();
+    }
+  });
+
   it("pre-aborted signal: rejects before anything reaches the wire", async () => {
     const s = await startSilentServer();
     try {

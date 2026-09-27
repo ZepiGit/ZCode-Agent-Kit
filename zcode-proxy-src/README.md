@@ -2,7 +2,7 @@
 **English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
 This component provides the local model proxy bundled with ZCode Agent Kit.
-The Kit manages its setup and integration with assistant tools.
+The Kit manages its setup; assistant integrations are configured only with your consent.
 
 ## Use with ZCode Agent Kit
 

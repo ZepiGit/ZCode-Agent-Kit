@@ -1,8 +1,10 @@
 # Harness Adapters — How Other Agent CLIs Use the Local Proxy
 **English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-The core of the kit is harness-neutral: a local HTTP proxy at
-`http://127.0.0.1:8457` with three standard formats:
+The core of the kit is harness-neutral: a local HTTP proxy with three
+standard formats. The examples below use the default port `8457`;
+`zcode-kit proxy status` prints the port and connection values of your
+installation:
 
 | Endpoint | Format | Used by |
 |---|---|---|
@@ -17,11 +19,29 @@ Authentication: `Authorization: Bearer <contents of .proxykey>`.
 `.proxykey` lives in the kit directory; npm installs keep it in a separate
 installation-specific state directory, outside `node_modules`.
 
-## Set up automatically by `zcode-kit setup` (only for detected harnesses)
+## Set up by `zcode-kit setup` (detected harnesses, only with consent)
 
-`zcode-kit setup --harness auto` detects installed harnesses and configures
-**only those**. A user with only OMP gets no Claude/Codex configuration or
-generated wrapper files.
+`zcode-kit setup --harness auto` detects installed harnesses and asks, for each
+one without a stored decision, "Configure ZCode as a provider with its
+supported models in <HARNESS>? [y/n]". A `y` configures that harness; `n`
+skips it and leaves its files untouched, and without a terminal every
+undecided harness is skipped. Ctrl-C stops the questions (exit code 130);
+what you already answered `y` to stays configured. A user with only OMP gets
+no Claude/Codex configuration or generated wrapper files.
+
+Decisions are stored one file per harness under `generated/harness-choices/`
+and are part of the setup transaction (a rollback removes them again).
+`zcode-kit update` and `zcode-kit doctor --fix` re-apply only consented
+integrations (a `y`, an explicit selection or `zcode-kit integrate
+<harness>`); a stored `n` is respected until `--harness`, `integrate` or
+`zcode-kit setup --reask` (asks again on a terminal) changes it. An
+integration the kit created before it asked is refreshed on unattended runs
+but never turned into consent. For unattended runs select harnesses with
+`--harness omp,codex` or `ZCODE_KIT_HARNESSES=omp,codex` (`none` skips all
+detected harnesses); unknown ids are errors. MCP registration follows the
+same consent. One failing harness does not stop the others: its own partial
+writes are undone, the summary lists it as failed and setup exits 1 (the
+installer continues with a warning).
 
 | Harness | Mechanism | Impact on existing config |
 |---|---|---|
@@ -35,7 +55,7 @@ generated wrapper files.
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` (Windows) or `~/.config/goose/custom_providers/zcode.json` (macOS/Linux) | credential via documented `auth.command` helper (kit key resolver, no shell) |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | the kit never touches VS Code state; enter the values once in the UI |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | custom provider (Anthropic messages) in the UI; the kit deliberately does not write kilo.jsonc |
-| MCP-capable harnesses | stdio server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entry in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (only if detected); Codex: inside the isolated home. MCP alone does NOT count as model integration |
+| MCP-capable harnesses | stdio server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entry in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (only if detected and consented); Codex: inside the isolated home. MCP alone does NOT count as model integration |
 
 Paths under `generated/` refer to kit state: the kit directory for release
 installs/source checkouts, or the separate state directory for npm installs.
@@ -50,6 +70,15 @@ Run OMP directly, for example `omp --model zcode/glm-5.3-flash --thinking low`, 
 | Codex CLI | `bin\zcode-codex.cmd` | sets `CODEX_HOME=<kit state>\generated\codex-home` + `ZCODE_PROXY_KEY` and starts the proxy on demand; your normal `codex` and `~/.codex` stay untouched |
 
 ## Wiring a client manually (any OpenAI-/Anthropic-capable client)
+
+This is an equal entry point, not a fallback. The kit proxy must be running
+and ZCode needs a valid login. `zcode-kit proxy start` (also when the proxy is
+already running) and `zcode-kit proxy status` print the current base URLs,
+local key and model IDs. While the proxy is not verified running, the values
+are labelled as coming from configuration and the output says `Start the
+proxy first: zcode-kit proxy start`. The full key appears only in an
+interactive terminal; otherwise use `zcode-kit models --show-key`. Replace the
+example port below with the port the command shows.
 
 ```yaml
 # OpenAI format
