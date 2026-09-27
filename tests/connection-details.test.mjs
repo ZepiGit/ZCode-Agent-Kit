@@ -149,6 +149,50 @@ test("status on the own running proxy prints verified details with live model id
   assert.deepEqual({ text: readFileSync(keyFile, "utf8"), mtime: statSync(keyFile).mtimeMs }, before, "status never creates or rotates the key");
 });
 
+test("status --json: one parseable object, redacted connection block for the own proxy, never the key", async (t) => {
+  server = await mockProxy();
+  const port = server.address().port;
+  const root = kitRoot(port);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = await capture(() => createManager({ root, home: root }).status({ json: true }));
+  assert.equal(r.code, 0);
+  const j = JSON.parse(r.text); // nothing but the object on stdout
+  assert.equal(j.schemaVersion, 1);
+  assert.equal(j.health, "ours");
+  assert.equal(j.port, port);
+  assert.equal(j.connection.source, "running");
+  assert.equal(j.connection.openaiBaseUrl, `http://127.0.0.1:${port}/v1`);
+  assert.equal(j.connection.anthropicBaseUrl, `http://127.0.0.1:${port}`);
+  assert.deepEqual(j.connection.models, ["mock-a", "mock-b"]);
+  assert.equal(j.connection.modelsSource, "live");
+  assert.deepEqual(j.connection.key, { redacted: true, export: "zcode-kit models --show-key" });
+  assert.deepEqual(j.quota, []);
+  assert.ok(!r.text.includes(KEY), "the key never appears in JSON");
+});
+
+test("status --json: a stopped proxy reports configured values, a foreign port reports no connection", async (t) => {
+  const probe = await mockProxy(); const port = probe.address().port; probe.close();
+  const root = kitRoot(port);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const down = await capture(() => createManager({ root, home: root }).status({ json: true }));
+  assert.equal(down.code, 1);
+  const d = JSON.parse(down.text);
+  assert.equal(d.health, "down");
+  assert.equal(d.connection.source, "configured");
+  assert.equal(d.connection.modelsSource, "config");
+  assert.deepEqual(d.connection.models, ["glm-5.3", "glm-5.3-flash"]);
+  assert.equal(d.quota, null);
+  server = await mockProxy({ mode: "wrong-key" });
+  const foreignRoot = kitRoot(server.address().port);
+  t.after(() => rmSync(foreignRoot, { recursive: true, force: true }));
+  const foreign = await capture(() => createManager({ root: foreignRoot, home: foreignRoot }).status({ json: true }));
+  assert.equal(foreign.code, 1);
+  const f = JSON.parse(foreign.text);
+  assert.equal(f.health, "foreign");
+  assert.equal(f.connection, null);
+  assert.ok(!foreign.text.includes(KEY));
+});
+
 test("status on a stopped proxy labels configured values and never claims a running proxy", async (t) => {
   const probe = await mockProxy(); const port = probe.address().port; probe.close();
   const root = kitRoot(port);

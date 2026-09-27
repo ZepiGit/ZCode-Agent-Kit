@@ -46,9 +46,11 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
     function fail(err: unknown): void {
       if (!responseStarted && postWrite) {
         // Review follow-up #2 (PR #34): the full request (head + body) was
-        // already written to the wire, so the upstream may have processed it
-        // — resending could duplicate the LLM call and consume quota twice.
-        // Flag it so the connect-retry loop in handler.ts skips this error.
+        // already written to the wire, so the upstream may have processed it.
+        // The flag keeps the quota failover from replaying it on ANOTHER
+        // account; the transient ladder may re-send it on the same account,
+        // exactly like a reset on the fetch path (the official client's
+        // network-failure class). No response byte reached the client.
         try { (err as { postWrite?: boolean }).postWrite = true; } catch {}
       }
       if (responseStarted) {
@@ -70,14 +72,13 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
     // long-TTFB reasoning request. `fail()` both rejects this promise (a bare
     // destroy() emits "close", not "error"/"end", and would leave it pending
     // forever) and errors the consumer-side body stream when the response has
-    // already started. The resulting error carries `postWrite` (the request
-    // is fully on the wire by then), so handler's connect-retry ladder skips
-    // it — combined with the `clientReq.signal.aborted` pre-check there,
-    // client aborts never enter the retry loop.
+    // already started. The error is an AbortError, which the transient
+    // ladder never retries — together with the `clientReq.signal.aborted`
+    // checks there, client aborts never enter the retry loop.
     if (req.signal) {
       const signal = req.signal;
       const onAbort = (): void => {
-        fail(new Error("client aborted during ordered upstream request"));
+        fail(Object.assign(new Error("client aborted during ordered upstream request"), { name: "AbortError" }));
       };
       if (signal.aborted) {
         onAbort();
@@ -165,8 +166,8 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
       if (!responseStarted) {
         // The request head and body are on the wire by the time `end` can
         // arrive (writes below are synchronous), so route it through fail():
-        // the error carries `postWrite` and no retry or failover layer may
-        // resend it — the upstream may have processed the request already.
+        // the error carries `postWrite` — never failed over to another
+        // account; the ladder may re-send it on the same one (see fail()).
         fail(new Error("upstream closed before sending response headers"));
         return;
       }

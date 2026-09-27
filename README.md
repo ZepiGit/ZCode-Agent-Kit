@@ -47,7 +47,7 @@ Run from any directory. No clone is needed. The installer runs setup and can ins
 
 Defaults: `%LOCALAPPDATA%\zcode-agent-kit` on Windows; `$HOME/.local/share/zcode-agent-kit` on macOS/Linux. Keep this folder separate from your working projects. Never point an installer at your home folder or source checkout: updates replace files at the destination.
 
-macOS/Linux also need `curl`, `tar`, and a SHA-256 utility; Bun bootstrap needs `unzip`, and updates need `rsync`. Current live-client validation is Windows-focused; see the dated [support matrix](SUPPORT_MATRIX.json).
+macOS/Linux also need `curl`, `tar`, and a SHA-256 utility; Bun bootstrap needs `unzip`; updates use `rsync` when it is installed and a built-in `tar`/`find` mirror otherwise. Current live-client validation is Windows-focused; see the dated [support matrix](SUPPORT_MATRIX.json).
 
 </details>
 
@@ -175,6 +175,10 @@ zcode-kit auth status
 - **Command not found:** reopen the terminal. For release installs, check that `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) or `$HOME/.local/bin` (macOS/Linux) is on PATH.
 - **Assistant skipped during setup:** answer `y` next time, run `zcode-kit integrate <assistant>` (`zcode-kit setup --harness <list>` for several), or `zcode-kit setup --reask` to be asked again for every detected assistant. Without a terminal, select assistants with `ZCODE_KIT_HARNESSES`.
 - **Manual client setup:** `zcode-kit proxy status` prints the base URLs, key and model IDs while the proxy runs; the full key only in an interactive terminal (`zcode-kit models --show-key` otherwise).
+- **Choose several assistants at once:** `zcode-kit setup --select` shows one numbered list of the detected assistants instead of one question each (`1,3`, `all` or `none`); the chosen ones are configured, the other detected ones are recorded as skipped.
+- **Forget a stored answer:** `zcode-kit doctor` reports unreadable or orphaned decision files; `zcode-kit doctor --forget <assistant>` removes one (the integration stays, the next setup asks again; undo with `zcode-kit rollback`).
+- **Scripts and monitoring:** `zcode-kit proxy status --json` prints one JSON object with health, base URLs, model IDs and quota; it never contains the key.
+- **Vendor moved a gateway?** `zcode-kit doctor --upstream` compares the gateway the kit's proxy uses with the provider configuration the ZCode client currently receives (two requests to zcode.z.ai, no credentials; only when you ask for it).
 - **No model reply:** check the Desktop login and available quota. Start the proxy if your client does not start it. Local health does not prove model access.
 - **Proxy down or not answering:** run `zcode-kit doctor --fix` or `zcode-kit proxy restart`. Only a proven-own hung proxy is terminated; see the manual proxy section above.
 - **OMP autostart:** launch OMP directly. Setup pins native Node/Bun; the extension runs preflight in a fresh child instead of importing kit modules into OMP. Failures report secret-free categories; the child is limited to 120 seconds. Fix the reported cause, then retry after the 60-second per-session cooldown; recovery is possible in the same session. If the runtime moved, rerun `zcode-kit setup --harness auto` and reload the extension. Unknown port owners are left untouched.

@@ -205,9 +205,10 @@ export async function recoverAndMapUpstream(opts: {
       } catch (err) {
         // A failure after the full request was written (flag on the error or
         // a nested cause) may have been processed upstream: never fail over
-        // to another account on top of it (the transient ladder refuses the
-        // same replay). The handler maps the rethrown error to a 502 without
-        // a further attempt; the original envelope body is released first.
+        // to another account on top of it (the ladder only ever re-sends on
+        // the same account, and it does not wrap this resend). The handler
+        // maps the rethrown error to a 502 without a further attempt; the
+        // original envelope body is released first.
         if (isPostWriteError(err)) {
           void response.body?.cancel().catch(() => {});
           throw err;

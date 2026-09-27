@@ -47,7 +47,7 @@ curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/i
 
 默认位置：Windows 下为 `%LOCALAPPDATA%\zcode-agent-kit`；macOS/Linux 下为 `$HOME/.local/share/zcode-agent-kit`。请将此目录与工作项目分开。不要将安装目标设为主目录或源码检出目录：更新会替换目标目录里的文件。
 
-macOS/Linux 还需要 `curl`、`tar` 和 SHA-256 工具；安装 Bun 需要 `unzip`，更新需要 `rsync`。目前实际客户端验证主要针对 Windows；请参阅带日期的[支持矩阵](SUPPORT_MATRIX.json)。
+macOS/Linux 还需要 `curl`、`tar` 和 SHA-256 工具；安装 Bun 需要 `unzip`；更新时若已安装 `rsync` 则使用它，否则使用内置的 `tar`/`find` 同步。目前实际客户端验证主要针对 Windows；请参阅带日期的[支持矩阵](SUPPORT_MATRIX.json)。
 
 </details>
 
@@ -175,6 +175,10 @@ zcode-kit auth status
 - **找不到命令：**重新打开终端。对于正式版安装，请检查 `%LOCALAPPDATA%\Microsoft\WindowsApps`（Windows）或 `$HOME/.local/bin`（macOS/Linux）是否位于 PATH 中。
 - **设置时跳过了助手：**下次回答 `y`，运行 `zcode-kit integrate <助手>`（多个助手用 `zcode-kit setup --harness <列表>`），或运行 `zcode-kit setup --reask` 对每个检测到的助手重新提问。没有终端时，用 `ZCODE_KIT_HARNESSES` 选择助手。
 - **手动配置客户端：**代理运行期间，`zcode-kit proxy status` 会输出基础 URL、密钥和模型 ID；完整密钥只在交互式终端显示（否则使用 `zcode-kit models --show-key`）。
+- **一次选择多个助手：**`zcode-kit setup --select` 会显示检测到的助手的编号列表，而不是逐个提问（输入 `1,3`、`all` 或 `none`）；选中的会被配置，其余检测到的记录为已跳过。
+- **忘记已保存的回答：**`zcode-kit doctor` 会报告无法读取或没有对应助手的决定文件；`zcode-kit doctor --forget <助手>` 可删除其中一个（集成保持不变，下次设置会再次询问；可用 `zcode-kit rollback` 撤销）。
+- **脚本与监控：**`zcode-kit proxy status --json` 输出一个包含状态、基础 URL、模型 ID 和配额的 JSON 对象；其中从不包含密钥。
+- **服务商迁移了网关？**`zcode-kit doctor --upstream` 会将 Kit 代理使用的网关与 ZCode 客户端当前收到的服务商配置进行比较（向 zcode.z.ai 发送两个请求，不带凭据；仅在显式指定时运行）。
 - **模型没有回复：**检查 Desktop 登录状态和可用额度。如果客户端不会自动启动代理，请手动启动。本地健康检查不能证明模型可访问。
 - **代理未运行或无响应：**运行 `zcode-kit doctor --fix` 或 `zcode-kit proxy restart`。只会终止经证明属于本 Kit 的挂起代理；参阅上方手动管理代理部分。
 - **OMP 自启动：**直接启动 OMP。设置过程固定原生 Node/Bun；扩展在新的子进程中执行预检查，而不是将 Kit 模块导入 OMP。失败时会报告不含秘密信息的错误类别；子进程最长运行 120 秒。修复所报告的原因后，等待该会话的 60 秒冷却时间再重试；可在同一会话中恢复。若运行时位置已变更，请重新运行 `zcode-kit setup --harness auto` 并重新加载扩展。不会干预占用端口的未知进程。

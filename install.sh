@@ -55,9 +55,42 @@ else
 fi
 
 printf '%s\n' "$VERSION" | grep -Eq "$VERSION_PATTERN" || die "invalid release version; expected vX.Y.Z or vX.Y.Z-prerelease" 2
-if [ -f "$INSTALL_DIR/cli/zcode-kit.mjs" ]; then
-  command -v rsync >/dev/null 2>&1 || die "rsync required for updates" 2
-fi
+
+# Mirror a new release over an existing installation while never touching
+# machine-local state: the local proxy key, the user's proxy/config.yaml, the
+# Bun path, and the node_modules/backups/logs/generated directories (at any
+# depth, like rsync --exclude). rsync when available; otherwise a portable
+# tar pipe copies first, then entries the release no longer ships are removed.
+# ZCODE_KIT_MIRROR=portable forces the portable path (diagnostics, tests).
+mirror_portable() {
+  src=$1; dst=$2
+  (cd "$src" && tar -cf - --exclude='.bun-path' --exclude='.proxykey' --exclude='config.yaml' --exclude='node_modules' \
+      --exclude='backups' --exclude='logs' --exclude='generated' .) | (cd "$dst" && tar -xf -) || return 1
+  # Delete only after the copy succeeded. Protected names are pruned, so
+  # neither they nor anything below them is ever listed for removal. Like
+  # rsync, a directory the release dropped goes only when it is empty after
+  # its own files went: one that still holds protected state stays.
+  (cd "$dst" && find . -mindepth 1 \( -name '.bun-path' -o -name '.proxykey' -o -name 'config.yaml' -o -name 'node_modules' \
+      -o -name 'backups' -o -name 'logs' -o -name 'generated' \) -prune -o -print) > "$TMP/mirror-dst.list" || return 1
+  while IFS= read -r rel; do
+    [ -e "$src/$rel" ] || [ -L "$src/$rel" ] && continue
+    if [ -d "$dst/$rel" ] && [ ! -L "$dst/$rel" ]; then continue; fi
+    rm -f "${dst:?}/$rel" || return 1
+  done < "$TMP/mirror-dst.list"
+  # Directories deepest first; rmdir refuses a non-empty one, which is the point.
+  awk -F/ '{ print NF "\t" $0 }' "$TMP/mirror-dst.list" | sort -rn | cut -f2- | while IFS= read -r rel; do
+    if [ -d "$dst/$rel" ] && [ ! -L "$dst/$rel" ] && [ ! -e "$src/$rel" ]; then rmdir "$dst/$rel" 2>/dev/null || :; fi
+  done
+}
+mirror_release() {
+  if [ "${ZCODE_KIT_MIRROR:-}" != "portable" ] && command -v rsync >/dev/null 2>&1; then
+    # Excluded files are protected from --delete too (--delete-excluded is NOT set).
+    rsync -a --delete --exclude '.bun-path' --exclude '.proxykey' --exclude 'config.yaml' --exclude 'node_modules' \
+      --exclude 'backups' --exclude 'logs' --exclude 'generated' "$1/" "$2/"
+  else
+    mirror_portable "$1" "$2"
+  fi
+}
 printf '\n  %sZCODE  /  AGENT KIT%s\n' "$C_BOLD" "$C_RESET"
 printf '  %s\n' "$VERSION  |  Your local AI workspace"
 printf '  --------------------------------------------\n'
@@ -144,14 +177,8 @@ fi
 step "[3/4] Installing files"
 mkdir -p "$INSTALL_DIR"
 if [ -f "$INSTALL_DIR/cli/zcode-kit.mjs" ]; then
-  command -v rsync >/dev/null 2>&1 || { echo "ERROR: rsync required to update an existing installation"; exit 2; }
   printf '  Updating existing installation; keeping your configuration.\n'
-  # Excluded files are protected from --delete too (--delete-excluded is NOT
-  # set): the local proxy key and user proxy/config.yaml survive updates.
-  if ! rsync -a --delete --exclude '.bun-path' --exclude '.proxykey' --exclude 'config.yaml' --exclude 'node_modules' \
-        --exclude 'backups' --exclude 'logs' --exclude 'generated' "$SRC/" "$INSTALL_DIR/"; then
-    die "update copy failed" 1
-  fi
+  mirror_release "$SRC" "$INSTALL_DIR" || die "update copy failed" 1
 else
   cp -R "$SRC/." "$INSTALL_DIR/"
 fi

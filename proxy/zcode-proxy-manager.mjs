@@ -36,7 +36,7 @@ import { createCtx } from "../cli/context.mjs";
 import { logHeal } from "../cli/heal.mjs";
 import { processCommandLine, resolveBun } from "../lib/process.mjs";
 import { proxyEnv } from "../lib/proxy-env.mjs";
-import { configuredModelIds, configuredServer, connectionDetailsLines, shouldRevealKey } from "../cli/connection-details.mjs";
+import { configuredModelIds, configuredServer, connectionDetailsLines, connectionDetailsObject, shouldRevealKey } from "../cli/connection-details.mjs";
 import { readHarnessChoices } from "../cli/harness-consent.mjs";
 
 // ------------------------------------------------------------------ factory
@@ -839,7 +839,8 @@ try {
   }
 
   // ----------------------------------------------------------------- status
-  async function status() {
+  async function status({ json = false } = {}) {
+    if (json) return statusJson();
     const pidInfo = readPidFile();
     const state = await healthIdentify();
     console.log(`port:      ${portOrNull()}`);
@@ -880,12 +881,50 @@ try {
   }
 
   /**
-   * Connection details for manual client setup. `source` "running" is only
-   * passed by callers that verified /health answered as ours; model ids then
-   * come from the live /v1/models list, otherwise from the config file. The
-   * key is read, never generated or rotated here.
+   * `status --json`: one object on stdout and nothing else. Connection
+   * details only for the own proxy (running) or a stopped one (configured);
+   * a foreign listener or a missing key yields none. The key itself is never
+   * part of the JSON. Exit code as the text status: 0 only when ours.
    */
-  async function connectionDetails(source) {
+  async function statusJson() {
+    const pidInfo = readPidFile();
+    const state = await healthIdentify();
+    const out = {
+      schemaVersion: 1,
+      port: portOrNull(),
+      pid: pidInfo ? { pid: pidInfo.pid, startedAt: pidInfo.startedIso ?? null, alive: pidAlive(pidInfo.pid) } : null,
+      health: state,
+      connection: null,
+      quota: null,
+    };
+    if (state === "ours" || state === "down") {
+      let source = state === "ours" ? "running" : "configured";
+      // Re-proven right before reporting, like the text output.
+      if (source === "running" && await healthIdentify(2500) !== "ours") source = "configured";
+      try {
+        out.connection = connectionDetailsObject(await connectionFacts(source));
+      } catch (err) {
+        out.connection = null;
+        out.connectionError = String(err?.message ?? err).slice(0, 200);
+      }
+    }
+    if (state === "ours") {
+      try {
+        const q = await fetch(`${base()}/quota`, { headers: { Authorization: `Bearer ${readKey()}` }, signal: AbortSignal.timeout(8000) });
+        const j = await q.json().catch(() => null);
+        out.quota = q.ok && Array.isArray(j?.balances)
+          ? j.balances.map((b) => ({ name: String(b.showName ?? ""), remaining: b.remainingUnits ?? null, total: b.totalUnits ?? null, unit: b.unitType ?? null, expiresAt: Number.isFinite(b.expiresAt) ? new Date(b.expiresAt * 1000).toISOString() : null }))
+          : { error: `HTTP ${q.status}` };
+      } catch {
+        out.quota = { error: "unavailable" };
+      }
+    }
+    console.log(JSON.stringify(out, null, 2));
+    return state === "ours" ? 0 : 1;
+  }
+
+  /** Port, models (live list when the own proxy answers) and listener facts; never the key. */
+  async function connectionFacts(source) {
     let models = configuredModelIds(CONFIG);
     let modelsSource = "config";
     if (source === "running") {
@@ -899,7 +938,18 @@ try {
       }
     }
     const server = configuredServer(CONFIG);
-    return connectionDetailsLines({ port: loadPort(), key: readKey(), models, modelsSource, source, reveal: shouldRevealKey(), host: server.host, responsesEnabled: server.responsesEnabled });
+    return { port: loadPort(), models, modelsSource, source, host: server.host, responsesEnabled: server.responsesEnabled };
+  }
+
+  /**
+   * Connection details for manual client setup. `source` "running" is only
+   * passed by callers that verified /health answered as ours; model ids then
+   * come from the live /v1/models list, otherwise from the config file. The
+   * key is read, never generated or rotated here.
+   */
+  async function connectionDetails(source) {
+    const facts = await connectionFacts(source);
+    return connectionDetailsLines({ ...facts, key: readKey(), reveal: shouldRevealKey() });
   }
 
   async function printConnectionDetails(source) {
@@ -1178,7 +1228,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         process.exit(code);
         break;
       }
-      case "status": process.exit(await m.status()); break;
+      case "status": process.exit(await m.status({ json: process.argv.includes("--json") })); break;
       case "doctor": process.exit(await m.doctor()); break;
       case "logs": process.exit(m.logs(Number(process.argv[3] ?? 40) || 40)); break;
       case "respawn": {

@@ -51,8 +51,10 @@ import { askAccountRotator, configureAccountRotator, restartForAccountChange, ro
 import { setupOutput } from "./setup-output.mjs";
 import {
   ABORTED, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, consentStatus, consentedForRepair, createPrompter, decideHarness,
-  isUnreadableChoice, ownedIntegration, readHarnessChoices, recordHarnessChoice, resolveHarnessSelection,
+  decisionFileChecks, forgetHarnessChoice, isUnreadableChoice, ownedIntegration, parseSelection, readHarnessChoices,
+  recordHarnessChoice, resolveHarnessSelection, storedDecisionIds,
 } from "./harness-consent.mjs";
+import { upstreamChecks } from "./upstream-config.mjs";
 import { ACCOUNT_ROTATOR_QUESTION } from "./account-setup.mjs";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,7 +87,7 @@ function parseArgs(argv) {
     if (a.startsWith("--")) {
       const eq = a.indexOf("=");
       if (eq !== -1) flags[a.slice(2, eq)] = a.slice(eq + 1);
-      else if (["fix", "json", "dry-run", "no-mcp", "yes", "help", "show-key", "installer", "verbose", "import", "paste", "replace", "live", "reask"].includes(a.slice(2))) flags[a.slice(2)] = true;
+      else if (["fix", "json", "dry-run", "no-mcp", "yes", "help", "show-key", "installer", "verbose", "import", "paste", "replace", "live", "reask", "select", "upstream"].includes(a.slice(2))) flags[a.slice(2)] = true;
       else flags[a.slice(2)] = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[++i] : true;
     } else positional.push(a);
   }
@@ -126,12 +128,12 @@ async function main() {
 function usage(code) {
   console.log(`zcode-kit — local ZCode provider for your own agent harnesses
 
-  zcode-kit setup [--harness auto|omp,pi,...|none]   bootstrap + one y/n question per detected harness
+  zcode-kit setup [--harness auto|omp,pi,...|none] [--select]   bootstrap + one y/n question per detected harness
   zcode-kit integrate <harness> [--dry-run]     explicit consent for one harness
   zcode-kit run <harness> -- <args>             launch harness wired to ZCode
-  zcode-kit doctor [--fix] [--harness <id>] [--json]
-  zcode-kit status | models [--json] [--show-key] | usage --json
-  zcode-kit proxy start|stop|restart|status|logs [n]   manage the local proxy service
+  zcode-kit doctor [--fix] [--harness <id>] [--json] [--upstream] | doctor --forget <harness>
+  zcode-kit status [--json] | models [--json] [--show-key] | usage --json
+  zcode-kit proxy start|stop|restart|status [--json]|logs [n]   manage the local proxy service
   zcode-kit auth status|login [zai|bigmodel] [--import] [--account ID] [--replace]|logout
   zcode-kit accounts enable|disable
   zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes]
@@ -143,7 +145,11 @@ function usage(code) {
    without a terminal, undecided harnesses are skipped — never configured silently)
   (setup: --harness <list> or ${HARNESS_SELECTION_ENV}=<list> selects harnesses without questions (unattended);
    none skips all; the selection also limits MCP registration; --no-mcp skips registration;
-   answers are remembered under generated/harness-choices/ — --reask asks again)
+   answers are remembered under generated/harness-choices/ — --reask asks again;
+   --select shows one numbered list instead: chosen = configured, the other detected ones = skipped)
+  (doctor: --forget <harness> removes a stored decision (the integration stays; setup asks again);
+   --upstream compares the kit's gateway with the provider config the ZCode client receives — network, opt-in)
+  (proxy status --json: one object, connection details without the key)
   (setup: --account-rotator y|n for unattended installs; --verbose for full installer output)
   (proxy start/status and setup print the connection details for manual client setup;
    the key is shown in full only on an interactive terminal — export: zcode-kit models --show-key)
@@ -250,6 +256,38 @@ async function cmdSetup() {
     if (!explicit && !detectedIds.length) {
       console.log("  No supported assistant detected. The connection details below work with any OpenAI- or Anthropic-compatible client.");
     }
+    // `--select`: one numbered list instead of one question per harness.
+    // Every detected harness gets a decision (chosen = configured, the rest
+    // = skipped); an explicit selection wins, and without a terminal the flag
+    // changes nothing.
+    let selection = null;
+    if (flags.select === true) {
+      if (explicit) {
+        console.log(`  note: --select ignored — the explicit selection (${explicit.source === "flag" ? "--harness" : HARNESS_SELECTION_ENV}) decides.`);
+      } else if (!interactive) {
+        console.log("  note: --select needs an interactive terminal — ignored (stored decisions apply).");
+      } else if (detectedIds.length) {
+        const labels = await Promise.all(detectedIds.map(async (id) => (await loadAdapter(id)).default.label));
+        console.log("\n  Detected assistants:");
+        detectedIds.forEach((id, i) => {
+          const stored = choices.harnesses[id]?.decision;
+          console.log(`    ${i + 1}) ${labels[i]}${stored ? ` (currently ${stored})` : ""}`);
+        });
+        const bridgeFor = detectedIds.filter((id) => mcpBridgeAvailable && (id === "omp" || id === "claude-code"));
+        if (bridgeFor.length) console.log(`  note: selecting ${bridgeFor.map((id) => labels[detectedIds.indexOf(id)]).join(" or ")} also registers the kit's MCP bridge "zcode-harness" there (skip with --no-mcp).`);
+        try {
+          const chosen = await prompter.askLine(
+            "  Configure ZCode as a provider with its supported models in which assistants? (numbers, all, none) ",
+            (answer) => parseSelection(answer, detectedIds.length),
+            "  Please enter numbers from the list (e.g. 1,3), all, or none.",
+          );
+          if (chosen !== undefined) selection = new Set([...chosen].map((i) => detectedIds[i]));
+        } catch (err) {
+          if (err?.code !== ABORTED) throw err;
+          abortedByUser = true;
+        }
+      }
+    }
     const mcpIds = [];
     for (const id of ADAPTER_IDS) {
       const { default: adapter } = await loadAdapter(id);
@@ -267,11 +305,12 @@ async function cmdSetup() {
       const mcpOffered = interactive && mcpBridgeAvailable && (id === "omp" || id === "claude-code");
       // The question text is fixed; what a y implies beyond the provider
       // entry is said before it (existing integration, MCP bridge).
-      const ask = interactive ? (question) => {
-        if (owned) console.log(`  note: an existing kit integration for ${adapter.label} was found; y keeps it current, n leaves it untouched.`);
-        if (mcpOffered) console.log(`  note: y also registers the kit's MCP bridge "zcode-harness" for ${adapter.label} (skip with --no-mcp).`);
-        return prompter.ask(question);
-      } : null;
+      const ask = selection ? async () => selection.has(id)
+        : interactive ? (question) => {
+          if (owned) console.log(`  note: an existing kit integration for ${adapter.label} was found; y keeps it current, n leaves it untouched.`);
+          if (mcpOffered) console.log(`  note: y also registers the kit's MCP bridge "zcode-harness" for ${adapter.label} (skip with --no-mcp).`);
+          return prompter.ask(question);
+        } : null;
       let decision;
       try {
         decision = await decideHarness({
@@ -283,7 +322,8 @@ async function cmdSetup() {
           unreadable: isUnreadableChoice(choices, id),
           owned,
           explicit,
-          reask: flags.reask === true,
+          // A --select answer covers every detected harness, stored or not.
+          reask: flags.reask === true || selection !== null,
           ask,
           mcpOffered,
           mcpAllowed: !flags["no-mcp"],
@@ -548,7 +588,45 @@ async function cmdRun() {
 }
 
 // ------------------------------------------------------------------ doctor
+/**
+ * `doctor --forget <id>`: remove one stored harness decision (readable or
+ * not) through a transaction; the integration itself stays as it is and the
+ * next setup asks again.
+ */
+async function forgetDecision() {
+  const id = typeof flags.forget === "string" ? flags.forget.trim() : "";
+  const stored = storedDecisionIds(ctx);
+  if (!id || (!ADAPTER_IDS.includes(id) && !stored.includes(id))) {
+    console.error(`Usage: zcode-kit doctor --forget <harness> (known: ${ADAPTER_IDS.join(", ")}${stored.length ? `; stored: ${stored.join(", ")}` : ""})`);
+    return 2;
+  }
+  if (!stored.includes(id)) {
+    console.log(`No stored decision for ${id}; nothing to forget.`);
+    return 0;
+  }
+  assertNotCheckoutWrite();
+  ensureState(ctx);
+  acquireLock(BACKUP_DIR);
+  const tx = beginTransaction(BACKUP_DIR, `zcode-kit doctor --forget ${id}`);
+  let txId = null;
+  let result;
+  try {
+    result = forgetHarnessChoice(ctx, tx, id);
+  } finally {
+    let finishErr = null;
+    try { txId = tx.finish(); } catch (err) { finishErr = err; }
+    releaseLock(join(BACKUP_DIR, ".setup-lock"));
+    if (finishErr) console.error(`WARN: recording the transaction failed (${finishErr.message})`);
+  }
+  if (result?.removed) {
+    console.log(`Decision for ${id} removed. Its integration is unchanged; the next zcode-kit setup asks again.`);
+    if (txId) console.log(`transaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
+  }
+  return 0;
+}
+
 async function cmdDoctor() {
+  if (flags.forget !== undefined) return forgetDecision();
   const ids = flags.harness ? String(flags.harness).split(",").map(s => s.trim()).filter(Boolean) : [...ADAPTER_IDS];
   for (const id of ids) requireHarness(id);
   const detected = detectHarnesses(ctx.home);
@@ -609,6 +687,16 @@ async function cmdDoctor() {
     }
     for (const c of adapter.verify(ctx)) checks.push({ name: `${id}: ${c.name}`, ok: c.ok, detail: c.detail ?? "" });
   }
+  // The decision files themselves: an unreadable one silently blocks every
+  // refresh of its harness, so it is reported with the way out.
+  for (const c of decisionFileChecks(ctx, ADAPTER_IDS, detected, choices)) {
+    if (flags.harness && !ids.some((id) => c.name.startsWith(`${id}:`))) continue;
+    checks.push(c);
+  }
+  // Opt-in: the only doctor check that talks to the vendor (two unauthenticated GETs).
+  if (flags.upstream === true) {
+    for (const c of await upstreamChecks(join(ROOT, "proxy", "config.yaml"))) checks.push(c);
+  }
 
   const failed = checks.filter((c) => c.ok === false).length;
   const skipped = checks.filter((c) => c.ok === null).length;
@@ -627,7 +715,7 @@ async function cmdDoctor() {
 // ------------------------------------------------------------------ status
 async function cmdStatus() {
   const manager = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
-  const res = spawnSync(process.execPath, [manager, "status"], { stdio: "inherit" });
+  const res = spawnSync(process.execPath, [manager, "status", ...(flags.json === true ? ["--json"] : [])], { stdio: "inherit" });
   return res.status ?? 1;
 }
 
@@ -641,6 +729,7 @@ async function cmdProxy() {
   }
   const args = [join(ROOT, "proxy", "zcode-proxy-manager.mjs"), sub];
   if (sub === "logs" && positional[2] !== undefined) args.push(String(positional[2]));
+  if (sub === "status" && flags.json === true) args.push("--json");
   const res = spawnSync(process.execPath, args, { stdio: "inherit" });
   return res.status ?? 2;
 }

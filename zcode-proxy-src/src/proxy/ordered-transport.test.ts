@@ -137,10 +137,11 @@ describe("sendOrderedUpstreamRequest — abort propagation", () => {
     }
   });
 
-  it("flags an upstream close before response headers as postWrite (never replayed by any layer)", async () => {
+  it("flags an upstream close before response headers as postWrite (the failover layer never replays it on another account)", async () => {
     // The request head and body are on the wire before `end` can arrive, so
-    // the failure must carry the postWrite mark the retry and failover layers
-    // refuse — the upstream may have processed the request.
+    // the failure must carry the postWrite mark: the quota failover refuses to
+    // replay it on another account (the upstream may have processed the
+    // request); the transient ladder may re-send it on the same account.
     const { createServer: createTcpServer } = await import("node:net");
     let requests = 0;
     const tcp = createTcpServer((socket) => { socket.once("data", () => { requests += 1; socket.end(); }); });

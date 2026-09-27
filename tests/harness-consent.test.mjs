@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { execFile, spawn, spawnSync } from "node:child_process";
 import {
   ABORTED, HARNESS_CHOICES_DIR, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, askYesNo, consentStatus, consentedForRepair,
-  createPrompter, decideHarness, harnessQuestion, readHarnessChoices, recordHarnessChoice, resolveHarnessSelection,
+  createPrompter, decideHarness, harnessQuestion, parseSelection, readHarnessChoices, recordHarnessChoice, resolveHarnessSelection,
 } from "../cli/harness-consent.mjs";
 import { ACCOUNT_ROTATOR_QUESTION, askAccountRotator } from "../cli/account-setup.mjs";
 import { beginTransaction, rollbackTransaction } from "../lib/transaction.mjs";
@@ -573,6 +573,62 @@ test("--no-mcp with an explicit selection records provider consent only; later r
   assert.equal(after.mcp, true, "integrate neither grants nor revokes the MCP consent recorded earlier");
 });
 
+test("parseSelection: numbers, all, none; anything else is asked again", () => {
+  assert.deepEqual([...parseSelection("1,3", 3)], [0, 2]);
+  assert.deepEqual([...parseSelection(" 2  1 ", 3)].sort(), [0, 1]);
+  assert.deepEqual([...parseSelection("ALL", 2)], [0, 1]);
+  assert.equal(parseSelection("none", 2).size, 0);
+  for (const bad of ["", "0", "4", "1,x", "1-2", "y"]) assert.equal(parseSelection(bad, 3), undefined, bad);
+});
+
+test("--select without a terminal or next to an explicit selection changes nothing", async (t) => {
+  const f = fixture(t);
+  const r = await run(f, ["setup", "--select"]);
+  assert.equal(r.code, 0, r.text);
+  assert.match(r.stdout, /--select needs an interactive terminal — ignored/);
+  assert.match(r.stdout, /\[SKIP\] OMP \/ Oh My Pi — no interactive consent/);
+  assert.equal(choicesOf(f), null);
+  const e = await run(f, ["setup", "--select", "--harness", "pi"]);
+  assert.equal(e.code, 0, e.text);
+  assert.match(e.stdout, /--select ignored — the explicit selection \(--harness\) decides/);
+  assert.deepEqual(choicesOf(f), { pi: "configured/flag" });
+});
+
+test("doctor reports decision files (unreadable = FAIL with the way out, undetected/unknown = SKIP); --forget removes one through a transaction", async (t) => {
+  const f = fixture(t);
+  writeChoice(f, "omp", "configured");
+  writeChoice(f, "codex", "skipped"); // not detected in this fixture
+  writeFileSync(f.choice("pi"), "{ broken");
+  writeFileSync(f.choice("mystery"), JSON.stringify({ schema: 1, harness: "mystery", decision: "skipped", source: "x", decidedAt: "" }));
+  const doctor = await run(f, ["doctor", "--json"]);
+  const checks = JSON.parse(doctor.stdout.slice(doctor.stdout.indexOf("{"))).checks;
+  const by = (name) => checks.find((c) => c.name === name);
+  assert.equal(by("pi: decision file")?.ok, false, "an unreadable decision is a failure");
+  assert.match(by("pi: decision file").detail, /zcode-kit doctor --forget pi/);
+  assert.equal(by("codex: decision file")?.ok, null);
+  assert.match(by("codex: decision file").detail, /not detected/);
+  assert.equal(by("mystery: decision file")?.ok, null);
+  assert.equal(by("omp: decision file"), undefined, "a readable decision of a detected harness needs no line");
+  const piBefore = readFileSync(f.pi, "utf8");
+  const brokenBytes = readFileSync(f.choice("pi"));
+  const forget = await run(f, ["doctor", "--forget", "pi"]);
+  assert.equal(forget.code, 0, forget.text);
+  assert.match(forget.stdout, /Decision for pi removed\. Its integration is unchanged; the next zcode-kit setup asks again\./);
+  assert.equal(existsSync(f.choice("pi")), false);
+  assert.equal(readFileSync(f.pi, "utf8"), piBefore, "the integration itself is never touched");
+  const tx = forget.stdout.match(/undo with: zcode-kit rollback (\S+)/)?.[1];
+  assert.ok(tx, forget.stdout);
+  const rb = await run(f, ["rollback", tx]);
+  assert.equal(rb.code, 0, rb.text);
+  assert.deepEqual(readFileSync(f.choice("pi")), brokenBytes, "rollback restores the file byte for byte");
+  assert.equal((await run(f, ["doctor", "--forget", "goose"])).code, 0, "no decision: nothing to forget");
+  const unknown = await run(f, ["doctor", "--forget", "nonsense"]);
+  assert.equal(unknown.code, 2);
+  assert.equal((await run(f, ["doctor", "--forget"])).code, 2, "a missing id changes nothing");
+  assert.equal((await run(f, ["doctor", "--forget", "mystery"])).code, 0, "a stored unknown id can be removed");
+  assert.equal(existsSync(f.choice("mystery")), false);
+});
+
 test("rolling back a setup removes the decisions it recorded together with the integration", async (t) => {
   const f = fixture(t);
   const r = await run(f, ["setup", "--harness", "omp"]);
@@ -647,6 +703,28 @@ test("interactive setup asks per harness and applies the answers", { skip: !scri
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/, "n never deletes an existing integration");
   assert.ok(JSON.parse(readFileSync(f.pi, "utf8")).providers.zcode);
   assert.deepEqual(choicesOf(f), { omp: "skipped/interactive", pi: "configured/interactive" });
+});
+
+test("setup --select: one numbered list, invalid answers repeat, chosen = configured, the rest = skipped, no per-harness question", { skip: !script }, async (t) => {
+  const f = fixture(t);
+  const r = await runPty(f, ["setup", "--select"], [
+    { after: "(numbers, all, none)", send: "7\n" },
+    { after: "Please enter numbers from the list", send: "2\n" },
+    { after: "[y/n]", send: "n\n" },
+  ]);
+  assert.equal(r.code, 0, `${r.out}\n${r.stderr}`);
+  assert.match(r.out, /1\) OMP \/ Oh My Pi\s*\n\s*2\) pi/);
+  assert.match(r.out, /note: selecting OMP \/ Oh My Pi also registers the kit's MCP bridge/);
+  assert.doesNotMatch(r.out, /in OMP \/ Oh My Pi\? \[y\/n\]/, "no per-harness question");
+  assert.match(r.out, /\[SKIP\] OMP \/ Oh My Pi — answered n/);
+  assert.match(r.out, /\[OK\]\s+pi/);
+  assert.deepEqual(choicesOf(f), { omp: "skipped/interactive", pi: "configured/interactive" });
+  assert.equal(existsSync(f.mcp), false, "the bridge only for a chosen harness");
+  const all = await runPty(f, ["setup", "--select"], [{ after: "(numbers, all, none)", send: "all\n" }, { after: "[y/n]", send: "n\n" }]);
+  assert.equal(all.code, 0, `${all.out}\n${all.stderr}`);
+  assert.match(all.out, /1\) OMP \/ Oh My Pi \(currently skipped\)/, "stored decisions are shown");
+  assert.deepEqual(choicesOf(f), { omp: "configured/interactive", pi: "configured/interactive" });
+  assert.ok(existsSync(f.mcp), "chosen after the MCP note: bridge registered");
 });
 
 test("Ctrl-C during the questions stops setup: answered harnesses stay, the rest is skipped, exit 130", { skip: !script }, async (t) => {

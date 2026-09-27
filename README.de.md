@@ -47,7 +47,7 @@ Der Aufruf funktioniert aus jedem Verzeichnis. Du musst das Repository nicht klo
 
 Standardorte: `%LOCALAPPDATA%\zcode-agent-kit` unter Windows; `$HOME/.local/share/zcode-agent-kit` unter macOS/Linux. Halte dieses Verzeichnis von deinen Projekten getrennt. Gib niemals dein Home-Verzeichnis oder einen Quellcode-Checkout als Installationsziel an: Updates ersetzen Dateien im Zielverzeichnis.
 
-macOS/Linux benötigen außerdem `curl`, `tar` und ein SHA-256-Werkzeug; zum Einrichten von Bun ist `unzip` nötig, für Updates `rsync`. Die aktuelle Prüfung mit realen Clients konzentriert sich auf Windows; siehe die datierte [Support-Matrix](SUPPORT_MATRIX.json).
+macOS/Linux benötigen außerdem `curl`, `tar` und ein SHA-256-Werkzeug; zum Einrichten von Bun ist `unzip` nötig; Updates nutzen `rsync`, falls installiert, sonst einen eingebauten Abgleich mit `tar`/`find`. Die aktuelle Prüfung mit realen Clients konzentriert sich auf Windows; siehe die datierte [Support-Matrix](SUPPORT_MATRIX.json).
 
 </details>
 
@@ -175,6 +175,10 @@ zcode-kit auth status
 - **Befehl nicht gefunden:** Terminal neu öffnen. Bei Release-Installationen prüfen, ob `%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) oder `$HOME/.local/bin` (macOS/Linux) im PATH steht.
 - **Assistent beim Setup übersprungen:** Beim nächsten Mal `y` antworten, `zcode-kit integrate <Assistent>` ausführen (`zcode-kit setup --harness <Liste>` für mehrere) oder mit `zcode-kit setup --reask` alle erkannten Assistenten erneut abfragen lassen. Ohne Terminal Assistenten mit `ZCODE_KIT_HARNESSES` auswählen.
 - **Manuelle Client-Einrichtung:** `zcode-kit proxy status` gibt Basis-URLs, Schlüssel und Modell-IDs aus, solange der Proxy läuft; den vollständigen Schlüssel nur in einem interaktiven Terminal (sonst `zcode-kit models --show-key`).
+- **Mehrere Assistenten auf einmal wählen:** `zcode-kit setup --select` zeigt eine nummerierte Liste der erkannten Assistenten statt einer Frage pro Assistent (`1,3`, `all` oder `none`); die gewählten werden eingerichtet, die übrigen erkannten als übersprungen gespeichert.
+- **Gespeicherte Antwort vergessen:** `zcode-kit doctor` meldet unlesbare oder verwaiste Entscheidungsdateien; `zcode-kit doctor --forget <Assistent>` entfernt eine davon (die Integration bleibt, das nächste Setup fragt erneut; rückgängig mit `zcode-kit rollback`).
+- **Skripte und Monitoring:** `zcode-kit proxy status --json` gibt ein JSON-Objekt mit Zustand, Basis-URLs, Modell-IDs und Kontingent aus; der Schlüssel ist nie enthalten.
+- **Gateway beim Anbieter umgezogen?** `zcode-kit doctor --upstream` vergleicht das Gateway, das der Proxy des Kits nutzt, mit der Provider-Konfiguration, die der ZCode-Client aktuell erhält (zwei Anfragen an zcode.z.ai, ohne Zugangsdaten; nur auf ausdrücklichen Wunsch).
 - **Keine Modellantwort:** Desktop-Login und verfügbares Kontingent prüfen. Proxy starten, wenn dein Client ihn nicht startet. Eine lokale Gesundheitsprüfung beweist keinen Modellzugriff.
 - **Proxy aus oder antwortet nicht:** `zcode-kit doctor --fix` oder `zcode-kit proxy restart` ausführen. Beendet wird nur ein nachweislich eigener, hängender Proxy; siehe den Abschnitt zum manuellen Proxy-Betrieb oben.
 - **OMP-Autostart:** OMP direkt starten. Das Setup fixiert natives Node/Bun; die Erweiterung führt die Vorprüfung in einem neuen Kindprozess aus, statt Kit-Module in OMP zu importieren. Fehler melden Kategorien ohne Geheimnisse; der Kindprozess ist auf 120 Sekunden begrenzt. Ursache beheben und nach der sitzungsbezogenen Wartezeit von 60 Sekunden erneut versuchen; eine Wiederherstellung ist in derselben Sitzung möglich. Wurde die Laufzeit verschoben, `zcode-kit setup --harness auto` erneut ausführen und die Erweiterung neu laden. Unbekannte Portbesitzer bleiben unberührt.

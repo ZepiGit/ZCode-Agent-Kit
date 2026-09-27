@@ -249,8 +249,11 @@ describe("transient pre-output retry ladder", () => {
     expect(transientErrorKind(Object.assign(new Error("x"), { code: "ECONNREFUSED" }))?.kind).toBe("connect");
     expect(transientErrorKind(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } }))?.kind).toBe("drop");
     expect(transientErrorKind(new Error("socket hang up"))?.kind).toBe("drop");
-    expect(transientErrorKind(Object.assign(new Error("x"), { code: "ECONNRESET", postWrite: true }))).toBeNull();
-    expect(transientErrorKind(Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("y"), { postWrite: true }) }))).toBeNull();
+    // postWrite (ordered transport wrote the request): a drop like on the fetch path, never a "connect"
+    expect(transientErrorKind(Object.assign(new Error("x"), { code: "ECONNRESET", postWrite: true }))?.kind).toBe("drop");
+    expect(transientErrorKind(Object.assign(new Error("x"), { code: "ECONNREFUSED", postWrite: true }))?.kind).toBe("drop");
+    expect(transientErrorKind(Object.assign(new Error("upstream closed before sending response headers"), { postWrite: true }))?.kind).toBe("drop");
+    expect(transientErrorKind(Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("y"), { postWrite: true }) }))).toBeNull(); // unknown failure shape
     expect(transientErrorKind(Object.assign(new Error("cert"), { code: "CERT_HAS_EXPIRED" }))).toBeNull();
     expect(transientErrorKind(Object.assign(new Error("socket"), { code: "UND_ERR_SOCKET", cause: Object.assign(new Error("cert"), { code: "CERT_HAS_EXPIRED" }) }))).toBeNull(); // TLS anywhere in the chain wins
     expect(transientErrorKind(Object.assign(new Error("aborted"), { name: "AbortError" }))).toBeNull();

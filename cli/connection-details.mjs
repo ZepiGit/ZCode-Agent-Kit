@@ -50,6 +50,33 @@ export function isLoopbackHost(host) {
   return host === "localhost" || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host);
 }
 
+function baseUrlFor(host, port) {
+  const urlHost = isIP(host) === 6 ? `[${host}]` : isLoopbackHost(host) ? "127.0.0.1" : host;
+  return `http://${urlHost}:${port}`;
+}
+
+/**
+ * Machine-readable connection details (`proxy status --json`). The key is
+ * never included, whatever the terminal: JSON is for programs and logs, and
+ * `zcode-kit models --show-key` stays the explicit export.
+ */
+export function connectionDetailsObject({ port, models = DEFAULT_MODEL_IDS, modelsSource = "config", source = "configured", host = "127.0.0.1", responsesEnabled = true }) {
+  const base = baseUrlFor(host, port);
+  return {
+    source: source === "running" ? "running" : "configured",
+    openaiBaseUrl: `${base}/v1`,
+    anthropicBaseUrl: base,
+    routes: {
+      openai: responsesEnabled ? ["POST /chat/completions", "POST /responses", "GET /models"] : ["POST /chat/completions", "GET /models"],
+      anthropic: ["POST /v1/messages"],
+    },
+    models: [...models],
+    modelsSource: modelsSource === "live" ? "live" : "config",
+    key: { redacted: true, export: "zcode-kit models --show-key" },
+    loopback: isLoopbackHost(host),
+  };
+}
+
 /**
  * Plain-text lines (no colour, no emojis). `source` is "running" only when
  * the caller verified the proxy answered as this installation's own.
@@ -57,8 +84,7 @@ export function isLoopbackHost(host) {
 export function connectionDetailsLines({ port, key, models = DEFAULT_MODEL_IDS, modelsSource = "config", source = "configured", reveal = false, host = "127.0.0.1", responsesEnabled = true, indent = "  " }) {
   const loopback = isLoopbackHost(host);
   // An IPv6 literal needs brackets in a URL; the loopback one is [::1], not 127.0.0.1.
-  const urlHost = isIP(host) === 6 ? `[${host}]` : loopback ? "127.0.0.1" : host;
-  const base = `http://${urlHost}:${port}`;
+  const base = baseUrlFor(host, port);
   const keyText = reveal && typeof key === "string" && key.length ? key : REDACTED_KEY;
   const verified = source === "running";
   const openaiRoutes = responsesEnabled ? "POST /chat/completions, POST /responses, GET /models" : "POST /chat/completions, GET /models";

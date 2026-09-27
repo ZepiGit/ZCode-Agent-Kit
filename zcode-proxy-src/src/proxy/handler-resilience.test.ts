@@ -119,19 +119,33 @@ describe("dispatchWithConnectRetry — replay safety (C1-02)", () => {
     }
   });
 
-  it("never retries an allowlisted error flagged postWrite", async () => {
+  it("retries a drop flagged postWrite on the same account (parity with the fetch path); the connect-only policy leaves it alone", async () => {
     let calls = 0;
-    const postWrite = Object.assign(new Error("connect refused after write"), {
-      code: "ECONNREFUSED",
+    const postWrite = Object.assign(new Error("upstream closed before sending response headers"), {
+      code: "ECONNRESET",
       postWrite: true,
     });
-
-    await expect(dispatchWithConnectRetry(async () => {
+    const resp = await dispatchWithConnectRetry(async () => {
       calls += 1;
-      throw postWrite;
-    }, { retryDelayMs: 0 })).rejects.toBe(postWrite);
+      if (calls === 1) throw postWrite;
+      return new Response("ok");
+    }, { retryDelayMs: 0 });
+    expect(resp.status).toBe(200);
+    expect(calls).toBe(2);
 
-    expect(calls).toBe(1);
+    const previous = process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+    process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = "off";
+    try {
+      calls = 0;
+      await expect(dispatchWithConnectRetry(async () => {
+        calls += 1;
+        throw postWrite;
+      })).rejects.toBe(postWrite);
+      expect(calls).toBe(1);
+    } finally {
+      if (previous === undefined) delete process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+      else process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = previous;
+    }
   });
 });
 
@@ -257,5 +271,100 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
     expect(resp.status).toBe(200);
     const body = await resp.json();
     expect(body.choices[0].message.content).toBe("resilience reply");
+  });
+
+  function mockCaptcha(): { minted: () => number } {
+    let seq = 0;
+    mock.module("./captcha.js", () => ({
+      detectCaptchaChallenge: (resp: Response): string | null => resp.headers.get("x-aliyun-captcha-verify-param"),
+      getCaptchaToken: async () => { seq += 1; return { verifyParam: `fresh-${seq}`, region: "sgp" }; },
+      RETRY_HEADERS: { PARAM: "x-aliyun-captcha-verify-param", REGION: "x-aliyun-captcha-verify-region" },
+    }));
+    return { minted: () => seq };
+  }
+  const chatReq = (stream = false): Request => new Request("http://localhost:8080/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "glm-4.6", max_tokens: 16, stream, messages: [{ role: "user", content: "hi" }] }),
+  });
+  const START = 'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_p","type":"message","role":"assistant","model":"glm-4.6","content":[],"usage":{"input_tokens":1,"output_tokens":0}}}\n\n';
+  const BLOCK = 'event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n';
+  const DELTA = 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}\n\n';
+  const STOP = 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+  const OVERLOADED = 'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n';
+  const INVALID = 'event: error\ndata: {"type":"error","error":{"type":"invalid_request_error","message":"bad"}}\n\n';
+  const sse = (text: string): Response => new Response(text, { status: 200, headers: { "content-type": "text/event-stream" } });
+
+  it("re-dispatches a stream that fails in its prelude (before any content) on the same account with a fresh captcha token; the client sees only the good stream", async () => {
+    const captcha = mockCaptcha();
+    const seen: Array<{ auth: string | null; token: string | null }> = [];
+    const fetchMock = mock(async (req: Request): Promise<Response> => {
+      seen.push({ auth: req.headers.get("authorization"), token: req.headers.get("x-aliyun-captcha-verify-param") });
+      return seen.length === 1 ? sse(START + OVERLOADED) : sse(START + BLOCK + DELTA + STOP);
+    });
+    const auth = new AuthManager();
+    auth.setOAuthCredential({ apiKey: PLAN_KEY, provider: "zai", jwt: PLAN_JWT });
+    const previous = process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+    process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = "0";
+    try {
+      const resp = await proxyRequest(chatReq(true), "anthropic", { config: TEST_CONFIG, auth, fetchImpl: fetchMock as any });
+      expect(resp.status).toBe(200);
+      const text = await resp.text();
+      expect(seen.length).toBe(2);
+      expect(seen[0].auth).toBe(seen[1].auth); // same account
+      expect(seen[0].token).toBe("fresh-1");
+      expect(seen[1].token).toBe("fresh-2"); // a response-based retry never re-sends a possibly spent token
+      expect(captcha.minted()).toBe(2);
+      expect(text).toBe(START + BLOCK + DELTA + STOP); // the failed prelude never reached the client
+      expect(text).not.toContain("overloaded_error");
+    } finally {
+      if (previous === undefined) delete process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+      else process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = previous;
+    }
+  });
+
+  it("never retries a terminal error in the prelude, and never anything after the first content event", async () => {
+    mockCaptcha();
+    const auth = new AuthManager();
+    auth.setOAuthCredential({ apiKey: PLAN_KEY, provider: "zai", jwt: PLAN_JWT });
+    let calls = 0;
+    const terminal = await proxyRequest(chatReq(true), "anthropic", {
+      config: TEST_CONFIG, auth, fetchImpl: mock(async () => { calls += 1; return sse(START + INVALID); }) as any,
+    });
+    expect(await terminal.text()).toBe(START + INVALID);
+    expect(calls).toBe(1);
+    calls = 0;
+    const late = await proxyRequest(chatReq(true), "anthropic", {
+      config: TEST_CONFIG, auth, fetchImpl: mock(async () => { calls += 1; return sse(START + BLOCK + OVERLOADED); }) as any,
+    });
+    expect(await late.text()).toBe(START + BLOCK + OVERLOADED);
+    expect(calls).toBe(1);
+  });
+
+  it("keeps the captcha token after a never-connected attempt and mints a fresh one after a drop post-write", async () => {
+    mockCaptcha();
+    const tokens: Array<string | null> = [];
+    let calls = 0;
+    const fetchMock = mock(async (req: Request): Promise<Response> => {
+      calls += 1;
+      tokens.push(req.headers.get("x-aliyun-captcha-verify-param"));
+      if (calls === 1) throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+      if (calls === 2) throw Object.assign(new Error("reset after write"), { code: "ECONNRESET" });
+      return new Response(ANTHROPIC_OK, { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const auth = new AuthManager();
+    auth.setOAuthCredential({ apiKey: PLAN_KEY, provider: "zai", jwt: PLAN_JWT });
+    const previous = process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+    process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = "0";
+    try {
+      const resp = await proxyRequest(chatReq(), "anthropic", { config: TEST_CONFIG, auth, fetchImpl: fetchMock as any });
+      expect(resp.status).toBe(200);
+      expect(calls).toBe(3);
+      expect(tokens[1]).toBe(tokens[0]); // never connected: the token was not seen by the gateway
+      expect(tokens[2]).not.toBe(tokens[1]); // a drop may have spent it
+    } finally {
+      if (previous === undefined) delete process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+      else process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = previous;
+    }
   });
 });

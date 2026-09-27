@@ -1,12 +1,35 @@
 import { createHash } from "node:crypto";
 import { credentialString, isExpired, type Credential } from "./types.js";
-import type { AccountProfile } from "./account-store.js";
+import { AccountStoreError, type AccountProfile } from "./account-store.js";
 import { AccountRotator, NoUsableAccountError, type AccountHandle, type AccountOperation } from "./account-rotator.js";
+
+/**
+ * Wait schedule for a failed account-metadata write (store lock held by
+ * another process, transient I/O): the change stays marked unsaved and is
+ * rewritten on this schedule in the background, without holding any request.
+ */
+export const DEFAULT_PERSISTENCE_RETRY_DELAYS_MS: readonly number[] = [250, 1_000, 4_000, 15_000];
+
+/** Redacted persistence state for /health, `accounts health` and doctor. */
+export interface PersistenceStatus {
+  state: "clean" | "dirty" | "error";
+  code?: string;
+  /** Time of the last failure (ms since epoch). */
+  at?: number;
+  /** Failed writes since the last successful one. */
+  attempts: number;
+  /** True while a change is not on disk yet (write pending, retrying, or given up). */
+  unsaved: boolean;
+  /** Next scheduled background retry, when one is pending. */
+  nextRetryAt?: number;
+}
 
 export interface CredentialSource {
   plan?: string;
   /** Clock seam for bounded transient persistence retry; defaults to Date.now. */
   now?: () => number;
+  /** Background retry schedule after a failed metadata write (default DEFAULT_PERSISTENCE_RETRY_DELAYS_MS). */
+  persistenceRetryDelaysMs?: readonly number[];
   /** Opaque revision of the existing desktop source; never an upstream call. */
   importRevision?: () => string;
   persistCredential?: (credential: Credential) => Promise<boolean>;
@@ -21,6 +44,12 @@ export interface CredentialSource {
   refreshAccountPool?: () => Promise<void>;
   /** Persist scheduler metadata (exhaustion/reset markers) after rotation. */
   persistAccounts?: (accounts: readonly AccountProfile[]) => Promise<void>;
+}
+
+/** A locked store, a lost race or an I/O error is worth a background retry; a corrupt or invalid store is not. */
+function isRetryablePersistenceError(err: unknown): boolean {
+  if (err instanceof AccountStoreError) return err.code === "locked" || err.code === "persistence" || err.code === "conflict";
+  return true;
 }
 
 function valid(cred: Credential | null, allowExpired = false): cred is Credential {
@@ -48,8 +77,11 @@ export class AuthManager {
   private poolRecoveries = new Map<string, Promise<AccountHandle | null>>();
   private poolPersistence: Promise<void> | undefined;
   private poolPersistenceDirty = false;
+  private persistenceRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  private persistenceRetryIndex = 0;
+  private persistenceSettleWaiters: Array<() => void> = [];
   private readonly sameCredentialRetryBlockedUntil = new Map<string, number>();
-  private persistenceStatus: { state: "clean" | "dirty" | "error"; code?: string; at?: number; attempts: number } = { state: "clean", attempts: 0 };
+  private persistenceStatus: PersistenceStatus = { state: "clean", attempts: 0, unsaved: false };
   constructor(private source: CredentialSource = {}) {}
 
   /** True when an explicitly enabled account pool is authoritative. */
@@ -152,8 +184,36 @@ export class AuthManager {
   }
 
   /** Redacted machine-readable persistence state for doctor/live status. */
-  getPersistenceStatus(): Readonly<{ state: "clean" | "dirty" | "error"; code?: string; at?: number; attempts: number }> {
+  getPersistenceStatus(): Readonly<PersistenceStatus> {
     return { ...this.persistenceStatus };
+  }
+
+  /**
+   * Shutdown: write unsaved account metadata now instead of on the background
+   * schedule. Resolves when that one attempt ended (success or failure); the
+   * caller bounds it with its own deadline and may inspect getPersistenceStatus().
+   */
+  async flushPersistence(): Promise<void> {
+    if (!this.persistenceStatus.unsaved) {
+      if (this.poolPersistence) await this.poolPersistence;
+      return;
+    }
+    await this.persistAccounts();
+  }
+
+  /** Await the in-flight metadata write and every scheduled background retry (tests). */
+  async settlePersistence(): Promise<void> {
+    for (;;) {
+      if (this.poolPersistence) {
+        await this.poolPersistence;
+        continue;
+      }
+      if (this.persistenceRetryTimer) {
+        await new Promise<void>((resolve) => this.persistenceSettleWaiters.push(resolve));
+        continue;
+      }
+      return;
+    }
   }
 
   /** Re-read the authoritative store and validate an admitted request handle. */
@@ -273,7 +333,11 @@ export class AuthManager {
     const rotator = this.source.accountRotator;
     if (!persist || !rotator) return Promise.resolve();
     this.poolPersistenceDirty = true;
-    this.persistenceStatus = { state: "dirty", attempts: this.persistenceStatus.attempts };
+    this.persistenceStatus = { ...this.persistenceStatus, state: "dirty", unsaved: true, nextRetryAt: undefined };
+    // A fresh inline pass supersedes a scheduled background retry: it writes
+    // the newest snapshot, and a failure re-arms the full schedule from there.
+    this.cancelPersistenceRetry();
+    this.persistenceRetryIndex = 0;
     if (this.poolPersistence) return this.poolPersistence;
     // One writer owns the store at a time. A failure/health change arriving
     // while encryption or I/O is pending sets dirty again; the next pass uses
@@ -281,26 +345,65 @@ export class AuthManager {
     // Queue the first pass so the shared promise is installed even when an
     // injected writer throws synchronously. Clear it in the loop's own final
     // microtask so no completed promise can absorb a later dirty update.
-    this.poolPersistence = Promise.resolve().then(async () => {
-      try {
-        let passes = 0;
-        do {
-          passes += 1;
-          this.poolPersistenceDirty = false;
-          try {
-            await persist(rotator.profiles());
-            this.persistenceStatus = { state: "clean", attempts: this.persistenceStatus.attempts };
-          } catch {
-            this.persistenceStatus = { state: "error", code: "ACCOUNT_STORE_PERSISTENCE_FAILED", at: Date.now(), attempts: this.persistenceStatus.attempts + 1 };
-            // Do not spin forever while a lock or disk is unavailable. The
-            // live state remains usable only after the next authoritative
-            // refresh succeeds; diagnostics expose this failure explicitly.
-            this.poolPersistenceDirty = false;
-          }
-        } while (this.poolPersistenceDirty && passes < 3);
-      } finally { this.poolPersistence = undefined; }
-    });
+    this.poolPersistence = Promise.resolve().then(() => this.runPersistencePasses(persist, rotator));
     return this.poolPersistence;
+  }
+
+  private async runPersistencePasses(persist: NonNullable<CredentialSource["persistAccounts"]>, rotator: AccountRotator): Promise<void> {
+    try {
+      let passes = 0;
+      do {
+        passes += 1;
+        this.poolPersistenceDirty = false;
+        try {
+          await persist(rotator.profiles());
+          this.persistenceRetryIndex = 0;
+          this.persistenceStatus = { state: "clean", attempts: 0, unsaved: this.poolPersistenceDirty };
+        } catch (err) {
+          const now = this.source.now?.() ?? Date.now();
+          this.persistenceStatus = {
+            state: "error", code: "ACCOUNT_STORE_PERSISTENCE_FAILED", at: now,
+            attempts: this.persistenceStatus.attempts + 1, unsaved: true,
+          };
+          // The change is kept, never dropped: a store lock held by another
+          // process or a transient I/O error is rewritten on a bounded
+          // background schedule (no request waits for it); a store that cannot
+          // be used at all (corrupt, invalid) is left to the operator, and the
+          // next metadata change starts a fresh inline write anyway.
+          if (isRetryablePersistenceError(err)) this.schedulePersistenceRetry(persist, rotator);
+          return;
+        }
+      } while (this.poolPersistenceDirty && passes < 3);
+      if (this.poolPersistenceDirty) {
+        // Changes kept arriving during three passes: continue in the
+        // background instead of leaving the newest snapshot unwritten.
+        this.persistenceStatus = { ...this.persistenceStatus, state: "dirty", unsaved: true };
+        this.schedulePersistenceRetry(persist, rotator);
+      }
+    } finally { this.poolPersistence = undefined; }
+  }
+
+  private schedulePersistenceRetry(persist: NonNullable<CredentialSource["persistAccounts"]>, rotator: AccountRotator): void {
+    const delays = this.source.persistenceRetryDelaysMs ?? DEFAULT_PERSISTENCE_RETRY_DELAYS_MS;
+    if (this.persistenceRetryIndex >= delays.length) return; // schedule spent: the next change starts over
+    const delay = delays[this.persistenceRetryIndex++];
+    const now = this.source.now?.() ?? Date.now();
+    this.persistenceStatus = { ...this.persistenceStatus, nextRetryAt: now + delay };
+    this.persistenceRetryTimer = setTimeout(() => {
+      this.persistenceRetryTimer = undefined;
+      this.poolPersistenceDirty = true;
+      this.persistenceStatus = { ...this.persistenceStatus, nextRetryAt: undefined };
+      const pass = this.poolPersistence ?? (this.poolPersistence = Promise.resolve().then(() => this.runPersistencePasses(persist, rotator)));
+      void pass.finally(() => { for (const resolve of this.persistenceSettleWaiters.splice(0)) resolve(); });
+    }, delay);
+    this.persistenceRetryTimer.unref?.();
+  }
+
+  private cancelPersistenceRetry(): void {
+    if (!this.persistenceRetryTimer) return;
+    clearTimeout(this.persistenceRetryTimer);
+    this.persistenceRetryTimer = undefined;
+    for (const resolve of this.persistenceSettleWaiters.splice(0)) resolve();
   }
 
   /**

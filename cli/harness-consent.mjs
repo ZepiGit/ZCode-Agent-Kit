@@ -11,7 +11,7 @@
 // consented to. A kit-owned integration that predates the questions (proven
 // by the adapter's `owned(ctx)`) is refreshed on unattended runs but never
 // turned into consent: the next interactive run still asks.
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { commitFile, ensureDir } from "../lib/edit.mjs";
@@ -111,12 +111,49 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
         output.write("Please answer y or n.\n");
       }
     },
+    /**
+     * One free-form line, validated by `parse` (returns undefined to ask
+     * again, printing `retryHint`). Undefined without a terminal or on closed
+     * input; Ctrl-C rejects with ABORTED like `ask`.
+     */
+    async askLine(promptText, parse, retryHint) {
+      if (!interactive) return undefined;
+      ensure();
+      for (;;) {
+        const line = await nextLine(promptText);
+        if (line === undefined) return undefined;
+        const value = parse(line.trim());
+        if (value !== undefined) return value;
+        output.write(`${retryHint}\n`);
+      }
+    },
     close() {
       closed = true;
       if (rl) { const current = rl; rl = null; current.close(); }
       settleWaiters();
     },
   };
+}
+
+/**
+ * Parse the `setup --select` answer for a numbered list of `count` entries:
+ * "all", "none", or 1-based numbers separated by commas/spaces. Returns the
+ * set of 0-based indexes, or undefined when the answer is invalid.
+ */
+export function parseSelection(answer, count) {
+  const text = answer.toLowerCase();
+  if (text === "all") return new Set([...Array(count).keys()]);
+  if (text === "none") return new Set();
+  const parts = text.split(/[\s,]+/).filter(Boolean);
+  if (!parts.length) return undefined;
+  const chosen = new Set();
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return undefined;
+    const n = Number(part);
+    if (n < 1 || n > count) return undefined;
+    chosen.add(n - 1);
+  }
+  return chosen;
 }
 
 /** Single y/n question on its own terminal session (see createPrompter). */
@@ -295,9 +332,62 @@ export function consentedForRepair(ctx, ids, detected, adapters, choices = readH
 }
 
 /** Doctor view of a harness that is neither explicitly requested nor consented. */
+/** Ids that have a decision file on disk (readable or not), including unknown ids. */
+export function storedDecisionIds(ctx) {
+  const dir = harnessChoicesDir(ctx);
+  try {
+    return readdirSync(dir).filter((name) => /^[a-z0-9-]+\.json$/.test(name)).map((name) => name.slice(0, -".json".length)).sort();
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Doctor checks for the decision files themselves (ok: true PASS, false FAIL,
+ * null SKIP): an unreadable file blocks every refresh of its harness, so it
+ * is a failure with the way out; a decision for a harness that is not
+ * installed (any more) or for an unknown id is kept and only noted.
+ */
+export function decisionFileChecks(ctx, knownIds, detected, choices = readHarnessChoices(ctx)) {
+  const checks = [];
+  if (choices.unreadable.includes("*")) {
+    checks.push({ name: "harness decisions", ok: false, detail: `${harnessChoicesDir(ctx)} unreadable — check its permissions; every harness counts as undecided` });
+    return checks;
+  }
+  const ids = storedDecisionIds(ctx);
+  for (const id of ids) {
+    const known = knownIds.includes(id);
+    if (choices.unreadable.includes(id)) {
+      checks.push({ name: `${id}: decision file`, ok: false, detail: `unreadable — the harness counts as undecided and is never refreshed; fix it or remove it: zcode-kit doctor --forget ${id}` });
+    } else if (!known) {
+      checks.push({ name: `${id}: decision file`, ok: null, detail: `unknown harness id — ignored; remove it with: zcode-kit doctor --forget ${id}` });
+    } else if (!detected[id]) {
+      checks.push({ name: `${id}: decision file`, ok: null, detail: `kept (${choices.harnesses[id].decision}), but ${id} is not detected — used again when it is installed; remove with: zcode-kit doctor --forget ${id}` });
+    }
+  }
+  if (ids.length && !checks.some((c) => c.ok === false)) {
+    checks.push({ name: "harness decisions", ok: true, detail: `${ids.length} stored decision(s) readable` });
+  }
+  return checks;
+}
+
+/**
+ * Remove one stored decision through the transaction (a rollback restores
+ * it). The integration itself is never touched: the next setup asks again.
+ * Works on unreadable files too. Returns { removed, file }.
+ */
+export function forgetHarnessChoice(ctx, tx, id) {
+  if (!/^[a-z0-9-]+$/.test(id)) throw new Error(`invalid harness id "${id}"`);
+  const file = join(harnessChoicesDir(ctx), `${id}.json`);
+  if (!existsSync(file)) return { removed: false, file };
+  tx.touch(file);
+  unlinkSync(file);
+  return { removed: true, file };
+}
+
 export function consentStatus(ctx, id, adapter, detected, choices = readHarnessChoices(ctx)) {
   if (!detected) return { verify: false, detail: "not detected — skipped" };
-  if (isUnreadableChoice(choices, id)) return { verify: false, detail: "decision file unreadable — fix or remove it (see zcode-kit setup)" };
+  if (isUnreadableChoice(choices, id)) return { verify: false, detail: `decision file unreadable — fix it or remove it: zcode-kit doctor --forget ${id}` };
   const stored = choices.harnesses[id]?.decision;
   if (stored === "configured") return { verify: true };
   if (stored === "skipped") return { verify: false, detail: "not configured (your choice) — zcode-kit integrate " + id + " to change" };

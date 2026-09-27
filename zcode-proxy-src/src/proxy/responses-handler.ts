@@ -25,6 +25,7 @@ import type { AccountHandle } from "../auth/account-rotator.js";
 import { buildUpstreamRequest, buildUpstreamHeaderPairs, type UpstreamHeaderPair } from "./upstream.js";
 import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
 import { accountHandleStillCurrent, dispatchWithConnectRetry } from "./handler.js";
+import { gateStreamPrelude } from "./stream-prelude.js";
 import { recoverAndMapUpstream } from "./upstream-errors.js";
 import type * as CaptchaExports from "./captcha.js";
 
@@ -260,11 +261,29 @@ export async function handleResponses(
   try {
     // Pre-output transient ladder shared with the chat hot path (handler.ts):
     // fresh Request per dispatch (built inside `dispatch`), bounded backoff,
-    // same account, no retry once the client aborted.
-    upstreamResp = await dispatchWithConnectRetry(() => dispatch(upstreamHeaders), {
+    // same account, no retry once the client aborted, stream prelude gated.
+    // On start-plan a retry after a response, a drop after the write or a
+    // failed prelude takes a fresh pooled captcha token; a never-connected
+    // attempt keeps it, and a mint failure keeps the previous one.
+    let attemptHeaders = upstreamHeaders;
+    upstreamResp = await dispatchWithConnectRetry(async ({ attempt, previous }) => {
+      if (attempt > 1 && startPlan && previous?.kind !== "connect") {
+        try {
+          const captcha = opts.captcha ?? (await loadCaptcha());
+          const token = await captcha.getCaptchaToken(opts.config.identity.appVersion);
+          captchaHeaders = { [captcha.RETRY_HEADERS.PARAM]: token.verifyParam, [captcha.RETRY_HEADERS.REGION]: token.region };
+          attemptHeaders = buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, opts.config.identity, opts.config.plan, captchaHeaders, undefined);
+        } catch {
+          // keep the previous token
+        }
+      }
+      return dispatch(attemptHeaders);
+    }, {
       isAborted: () => clientReq.signal.aborted,
       signal: clientReq.signal,
       beforeRetry: () => accountHandleStillCurrent(opts.auth, accountHandle),
+      // Responses always translates: fetch has already inflated the body.
+      streamPrelude: (resp) => gateStreamPrelude(resp, { decoded: true, signal: clientReq.signal }),
       onRetry: (attempt, reason, delayMs) => {
         console.log(`[responses] upstream transient failure (${reason}), retry ${attempt + 1} in ${delayMs}ms`);
       },

@@ -122,3 +122,11 @@ aber nicht abgefragt; fehlende Billing-Daten bedeuten nicht null Kontingent.
 Kosten: Ein Aufruf stellt je eindeutigem Konto bis zu 2 Abrechnungsanfragen
 (Guthaben und Vorschau), 15 Sekunden zwischengespeichert. Er sendet keine
 Modellanfrage, löst kein Captcha und erneuert keine Tokens.
+
+Kann der laufende Proxy Kontodaten (Sperrzeiten, letzte Nutzung) nicht in den
+Speicher schreiben — ein anderer Prozess hält die Sperre, oder ein
+vorübergehender E/A-Fehler —, bleibt die Änderung erhalten und wird nach 0,25,
+1, 4 und 15 Sekunden im Hintergrund erneut geschrieben; keine Anfrage wartet
+darauf, und die nächste Änderung schreibt ohnehin neu. `zcode-kit accounts doctor`
+zeigt `runtime_changes_unsaved`, solange eine Änderung noch nicht gespeichert
+ist. Ein beschädigter Speicher wird nicht erneut versucht.

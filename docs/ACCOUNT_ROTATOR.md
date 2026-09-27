@@ -115,3 +115,10 @@ probed; their absence from the billing response is not interpreted as zero quota
 Cost: one run makes up to 2 billing requests (balance and preview) per unique
 account, cached for 15 seconds. It sends no model request, solves no captcha,
 and does not refresh tokens.
+
+If the running proxy cannot write account metadata (cooldowns, last use) to the
+store — another process holds its lock, or a transient I/O error — the change
+is kept and rewritten in the background after 0.25, 1, 4 and 15 seconds; no
+request waits for it, and the next change writes again anyway.
+`zcode-kit accounts doctor` shows `runtime_changes_unsaved` while a change is
+not on disk yet. A corrupt store is not retried.
