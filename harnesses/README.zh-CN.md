@@ -100,9 +100,9 @@ GLM-5.3-Flash 已通过代理路径验证。原生目录中存在模型条目，
 ## 配额与错误形态
 
 - `GET /quota`（需认证）显示各模型的令牌桶。
-- 配额耗尽 → HTTP 400 `[1005] exceed quota limit`。代理会按递增间隔重试同一账号（最长约65秒），然后切换账号；如果仍然出现，请等待服务商恢复额度。
+- 配额耗尽 → HTTP 400 `[1005] exceed quota limit`。代理会按递增间隔重试同一账号（默认最长约65秒），然后在轮换器有其他账号时切换账号；如果仍然出现，请等待服务商恢复额度。
 - `[3007] captcha verify failed` → 网关反滥用机制。代理会使用新获取的 CAPTCHA 令牌自动重试一次；如果仍然失败，请暂停片刻。
-- 输出开始前的暂时性故障（连接被拒绝或重置、HTTP 500/502/503/504/524/529、带较短 `Retry-After` 的 429）会在同一账号上以递增等待最多重试 3 次，与官方客户端一致。已识别的网关错误码、认证或模型错误以及输出开始后的任何故障都不会重试；超过 15 秒的 `Retry-After` 会直接交给客户端处理。可用 `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` 调整（基础等待毫秒数，默认 500，上限 10000；`off` 只保留对从未建立的连接的重试；proxy start/restart 会传递该值）。
-- 被上游中断的流会以错误结束，而不是无声截断：聊天流为 `data: {"error":…}`，Responses 流为 `response.failed`，原生 Anthropic 流为一个 `event: error` 帧（`upstream_incomplete` 或 `upstream_stream_error`）。输出开始后不会重放任何内容；请从 harness 重新发送该轮。
+- 输出开始前的暂时性故障（连接被拒绝或重置、HTTP 500/502/503/504/524/529、429，以及官方客户端会重试的网关错误码）会在同一账号上以递增等待最多重试 3 次；预算比官方客户端小（基础等待 1 秒并翻倍，`Retry-After` 最多遵守 15 秒），每次重试前都会重新检查账号。网关裁定（配额、余额、验证码、模型、认证）、请求错误以及输出开始后的任何故障都不会重试；超过 15 秒的 `Retry-After` 会在 429、503 和 529 上直接交给客户端。可用 `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` 调整（基础等待毫秒数，默认 500，上限 10000；`off` 只保留对从未建立的连接的重试；proxy start/restart 会传递该值）。
+- 被上游中断的流会以错误结束，而不是无声截断：聊天流为 `data: {"error":…}`，Responses 流为 `response.failed`，原生 Anthropic 流为一个类型为 `api_error` 的 `event: error` 帧，其消息说明原因（`upstream_incomplete` 或 `upstream_stream_error`）；未完成的最后一帧会被丢弃，以保证错误帧可解析。输出开始后不会重放任何内容；请从 harness 重新发送该轮。
 - `401 start_plan_jwt_invalid` → 检查 Desktop 登录，并通过 `zcode-kit auth login zai` 更新。对于 Desktop 0.16.9 当前激活且已明确配置计划的 `zai`/`start-plan` 登录，使用 `zcode-kit auth login zai --import`。只要存在 `credentials.json`，就以它为准；凭据无效时不会静默回退到 `config.json`。新版 `coding-plan` 登录使用常规 OAuth；导入不会创建或获取 API 密钥。
 - Flash 返回 `[1210]` → 检查是否已启用 thinking，并选择 `low`、`high` 或 `max`，而不是禁用它。代理会将禁用的 thinking 规范化为 `low`；参见上方 Flash 说明。

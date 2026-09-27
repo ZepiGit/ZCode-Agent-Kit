@@ -70,6 +70,9 @@ test("formatter: a verified proxy says when the model list came from configurati
   const v6 = connectionDetailsLines({ port: 1, key: KEY, host: "::1" }).join("\n");
   assert.match(v6, /http:\/\/\[::1\]:1\/v1/);
   assert.doesNotMatch(v6, /WARNING/);
+  const v6Global = connectionDetailsLines({ port: 1, key: KEY, host: "fd00::5" }).join("\n");
+  assert.match(v6Global, /http:\/\/\[fd00::5\]:1\/v1/, "every IPv6 literal gets brackets in the URL");
+  assert.match(v6Global, /WARNING: server.host is fd00::5/);
 });
 
 test("configuredServer reads host and the Responses switch, with template defaults when absent", (t) => {

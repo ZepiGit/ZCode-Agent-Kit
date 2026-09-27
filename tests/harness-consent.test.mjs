@@ -127,6 +127,7 @@ test("decideHarness: explicit lists win, stored decisions stand, answers decide,
   assert.equal((await decideHarness({ ...base, explicit: flag, ask: yes })).action, "ignore");
   const selected = await decideHarness({ ...base, id: "pi", explicit: flag, detected: false, ask: yes });
   assert.deepEqual(selected, { action: "configure", source: "flag", reason: "selected via --harness", record: true, consent: true, mcp: true }, "an explicit selection is documented to cover the MCP bridge");
+  assert.equal((await decideHarness({ ...base, id: "pi", explicit: flag, detected: false, ask: yes, mcpAllowed: false })).mcp, false, "--no-mcp: an explicit selection never records MCP consent");
   // MCP consent is separate from provider consent: a y covers the bridge only
   // when the MCP note was shown before the question; stored decisions carry it.
   assert.equal(y.mcp, false, "y without the MCP note is provider consent only");
@@ -494,7 +495,7 @@ test("an unreadable decision file blocks the refresh shortcut and is left alone;
   assert.equal(readFileSync(f.choice("omp"), "utf8"), "{ broken", "still never overwritten");
 });
 
-test("one failing harness does not stop the others: its partial writes are undone, summary distinguishes configured and failed, exit 1", async (t) => {
+test("one failing harness does not stop the others: its partial writes are undone, summary distinguishes configured and failed, exit 20", async (t) => {
   const f = fixture(t);
   writeFileSync(f.pi, "{ this is not json");
   const r = await run(f, ["setup", "--harness", "omp,pi"]);
@@ -549,6 +550,27 @@ test("integrate records provider consent only: a later setup refreshes the harne
   assert.equal(r3.code, 0, r3.text);
   assert.equal(existsSync(f.mcp), true, "an explicit selection is documented MCP consent");
   assert.equal(JSON.parse(readFileSync(f.choice("omp"), "utf8")).mcp, true);
+});
+
+test("--no-mcp with an explicit selection records provider consent only; later runs never register the declined bridge; integrate keeps a recorded MCP consent", async (t) => {
+  const f = fixture(t);
+  const r1 = await run(f, ["setup", "--harness", "omp", "--no-mcp"]);
+  assert.equal(r1.code, 0, r1.text);
+  assert.match(r1.stdout, /\[OK\]\s+OMP \/ Oh My Pi/);
+  assert.equal(existsSync(f.mcp), false, "--no-mcp skips the bridge");
+  assert.equal(JSON.parse(readFileSync(f.choice("omp"), "utf8")).mcp, undefined, "a declined bridge is not stored as consent");
+  const r2 = await run(f, ["setup"]);
+  assert.equal(r2.code, 0, r2.text);
+  assert.equal(existsSync(f.mcp), false, "a later plain setup never registers the bridge the user declined");
+  const r3 = await run(f, ["setup", "--harness", "omp"]);
+  assert.equal(r3.code, 0, r3.text);
+  assert.equal(existsSync(f.mcp), true, "selecting the harness again without --no-mcp is the documented MCP consent");
+  assert.equal(JSON.parse(readFileSync(f.choice("omp"), "utf8")).mcp, true);
+  const r4 = await run(f, ["integrate", "omp"]);
+  assert.equal(r4.code, 0, r4.text);
+  const after = JSON.parse(readFileSync(f.choice("omp"), "utf8"));
+  assert.equal(after.source, "integrate");
+  assert.equal(after.mcp, true, "integrate neither grants nor revokes the MCP consent recorded earlier");
 });
 
 test("rolling back a setup removes the decisions it recorded together with the integration", async (t) => {

@@ -286,6 +286,7 @@ async function cmdSetup() {
           reask: flags.reask === true,
           ask,
           mcpOffered,
+          mcpAllowed: !flags["no-mcp"],
         });
       } catch (err) {
         if (err?.code !== ABORTED) throw err;
@@ -523,8 +524,10 @@ async function cmdIntegrate() {
     adapter.apply(ctx, tx, (m) => console.log(m));
     // An explicit integrate command is consent for this harness: later
     // setup/update/repair runs keep it current without asking again. It is
-    // not MCP consent (integrate never registers the bridge).
-    if (!recordHarnessChoice(ctx, tx, readHarnessChoices(ctx), id, "configured", "integrate")) {
+    // not MCP consent (integrate never registers the bridge), and it neither
+    // grants nor revokes an MCP consent recorded earlier.
+    const choices = readHarnessChoices(ctx);
+    if (!recordHarnessChoice(ctx, tx, choices, id, "configured", "integrate", undefined, { mcp: choices.harnesses[id]?.mcp === true })) {
       console.log(`WARN: the decision for ${id} was not recorded — its decision file is unreadable; fix or remove it (see zcode-kit setup).`);
     }
   } finally {

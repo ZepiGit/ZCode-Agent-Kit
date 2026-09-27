@@ -25,6 +25,7 @@ import {
   urgentCaptchaRefill,
   type CaptchaConfig,
 } from "./captcha-pool.js";
+import { CAPTCHA_CHALLENGE_HEADER } from "./captcha-retry.js";
 
 // /health must never import this module (it would start the solver machinery
 // on a plain health probe), so the module announces itself instead.
@@ -44,7 +45,7 @@ registerCaptchaRuntime({
   shutdown: () => shutdownCaptcha(),
 });
 
-const CAPTCHA_HEADER = "x-aliyun-captcha-verify-param";
+const CAPTCHA_HEADER = CAPTCHA_CHALLENGE_HEADER;
 const REGION_HEADER = "x-aliyun-captcha-verify-region";
 const CONFIGS_API = "https://zcode.z.ai/api/v1/client/configs";
 

@@ -21,6 +21,9 @@ import type * as CaptchaExports from "./captcha.js";
 /** Shape the callers pass in — satisfied by the real captcha module or test fakes. */
 export type CaptchaModuleLike = Pick<typeof CaptchaExports, "detectCaptchaChallenge" | "getCaptchaToken" | "RETRY_HEADERS">;
 
+/** Response header of the gateway's captcha challenge (the header variant); captcha.ts reuses it. */
+export const CAPTCHA_CHALLENGE_HEADER = "x-aliyun-captcha-verify-param";
+
 /** Magic strings of the in-body challenge, for both JSON spacing styles. */
 export const IN_BODY_CHALLENGE_MARKERS = ['"code":3007', '"code": 3007'] as const;
 

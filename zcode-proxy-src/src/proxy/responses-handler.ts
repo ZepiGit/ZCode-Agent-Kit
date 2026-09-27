@@ -24,7 +24,7 @@ import type { AuthManager } from "../auth/manager.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
 import { buildUpstreamRequest, buildUpstreamHeaderPairs, type UpstreamHeaderPair } from "./upstream.js";
 import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
-import { dispatchWithConnectRetry } from "./handler.js";
+import { accountHandleStillCurrent, dispatchWithConnectRetry } from "./handler.js";
 import { recoverAndMapUpstream } from "./upstream-errors.js";
 import type * as CaptchaExports from "./captcha.js";
 
@@ -264,6 +264,7 @@ export async function handleResponses(
     upstreamResp = await dispatchWithConnectRetry(() => dispatch(upstreamHeaders), {
       isAborted: () => clientReq.signal.aborted,
       signal: clientReq.signal,
+      beforeRetry: () => accountHandleStillCurrent(opts.auth, accountHandle),
       onRetry: (attempt, reason, delayMs) => {
         console.log(`[responses] upstream transient failure (${reason}), retry ${attempt + 1} in ${delayMs}ms`);
       },

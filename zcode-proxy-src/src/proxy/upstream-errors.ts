@@ -105,7 +105,7 @@ export async function inspectGatewayEnvelope(resp: Response): Promise<{ status: 
 }
 
 async function inspect(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
-  if (resp.headers.get("content-type")?.includes("text/event-stream")) return null;
+  if ((resp.headers.get("content-type") ?? "").toLowerCase().includes("text/event-stream")) return null;
   try {
     const copy = resp.clone();
     if (!copy.body) return null;
@@ -279,9 +279,11 @@ export async function recoverAndMapUpstream(opts: {
   const type = status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : envelope?.code === 1210 || response.ok ? envelope?.type ?? "upstream_error" : "upstream_error";
   const message = envelope?.message ?? `Upstream request failed (HTTP ${status}).`;
   const result = Response.json({ error: { type, message } }, { status });
-  // Preserve retry guidance only when it is a bounded numeric delta, not arbitrary upstream data.
-  const retryAfter = response.headers.get("retry-after");
-  if (status === 429 && retryAfter && /^\d{1,6}$/.test(retryAfter)) result.headers.set("retry-after", retryAfter);
+  // Preserve retry guidance only when it is a bounded numeric delta, not
+  // arbitrary upstream data — on the statuses clients read it for (429, 503,
+  // 529), including a delay the transient ladder surfaced instead of waiting.
+  const retryAfter = response.headers.get("retry-after")?.trim();
+  if ([429, 503, 529].includes(status) && retryAfter && /^\d{1,6}$/.test(retryAfter)) result.headers.set("retry-after", retryAfter);
   const requestId = response.headers.get('x-request-id');
   if (requestId && /^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) result.headers.set('x-request-id', requestId);
   void response.body?.cancel().catch(() => {});

@@ -54,7 +54,9 @@ for (const route of ["openai", "anthropic", "responses"]) describe(`${route} saf
     expect(resp.status).toBe(status);
     expect(await resp.text()).not.toContain("PRIVATE_FIXTURE");
     expect(resp.headers.get("set-cookie")).toBeNull();
-    if (status === 429) expect(resp.headers.get("retry-after")).toBe("7");
+    // A bounded numeric Retry-After survives the mapping on the statuses
+    // clients read it for (429, 503, 529); a 500 carries none.
+    expect(resp.headers.get("retry-after")).toBe(status === 429 || status === 503 ? "7" : null);
     // 429/500/503 without a recognised gateway envelope are transient for
     // the pre-output ladder: retried on the same credential until the budget
     // is spent, then surfaced unchanged. 400/401/403 are request verdicts.

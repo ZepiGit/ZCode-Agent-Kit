@@ -239,19 +239,21 @@ export function ownedIntegration(adapter, ctx) {
  *   - otherwise the harness is asked; y configures, n skips, no answer skips
  *     without changing the stored decision.
  * `consent` marks decisions that authorize the provider integration; `mcp`
- * marks the narrower consent for the kit's MCP bridge: an explicit selection,
- * or a y given after the MCP note was shown (`mcpOffered`), or a stored
- * decision that recorded it. A refresh, an `integrate` decision or a y
- * without the note never registers MCP.
+ * marks the narrower consent for the kit's MCP bridge: an explicit selection
+ * unless the bridge was declined (`mcpAllowed` false with --no-mcp), or a y
+ * given after the MCP note was shown (`mcpOffered`), or a stored decision
+ * that recorded it. A refresh, an `integrate` decision or a y without the
+ * note never registers MCP.
  */
-export async function decideHarness({ id, label, detected, stored, storedMcp = false, unreadable = false, owned = false, explicit, reask = false, ask, mcpOffered = false }) {
+export async function decideHarness({ id, label, detected, stored, storedMcp = false, unreadable = false, owned = false, explicit, reask = false, ask, mcpOffered = false, mcpAllowed = true }) {
   const via = (source) => (source === "flag" ? "--harness" : HARNESS_SELECTION_ENV);
   // Re-asking needs a terminal: without one, stored decisions keep standing.
   const reasking = reask && typeof ask === "function";
   if (explicit) {
-    // An explicit selection is documented to cover the MCP bridge (--no-mcp
-    // opts out), so it records MCP consent as well.
-    if (explicit.ids.includes(id)) return { action: "configure", source: explicit.source, reason: `selected via ${via(explicit.source)}`, record: true, consent: true, mcp: true };
+    // An explicit selection is documented to cover the MCP bridge, so it
+    // records MCP consent as well — unless --no-mcp declined the bridge, in
+    // which case nothing must remember it as consented.
+    if (explicit.ids.includes(id)) return { action: "configure", source: explicit.source, reason: `selected via ${via(explicit.source)}`, record: true, consent: true, mcp: mcpAllowed === true };
     if (explicit.none && detected) return { action: "skip", source: explicit.source, reason: `${via(explicit.source)}=none`, record: true, consent: false };
     return { action: "ignore", source: explicit.source, reason: "not selected", record: false, consent: false };
   }

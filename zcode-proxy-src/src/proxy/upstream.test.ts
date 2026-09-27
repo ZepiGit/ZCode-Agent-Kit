@@ -563,12 +563,10 @@ describe("proxyRequest", () => {
   });
 
   it("appends one terminal error event when the native Anthropic stream ends before message_stop", async () => {
-    const truncated = [
-      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"glm-4.6","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}',
-      '',
-      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}',
-      '',
-    ].join("\n");
+    const { ANTHROPIC_INCOMPLETE_EVENT } = await import("./sse-terminal.js");
+    const truncated =
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"glm-4.6","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}\n\n' +
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n';
     const fetchMock = mock(async (): Promise<Response> => new Response(truncated, { status: 200, headers: { "content-type": "text/event-stream" } }));
     const auth = oauthAuth();
     const clientReq = makeClientReq('{"model":"glm-4.6","messages":[],"stream":true}');
@@ -577,9 +575,29 @@ describe("proxyRequest", () => {
     expect(resp.status).toBe(200);
     const text = await resp.text();
     expect(fetchMock).toHaveBeenCalledTimes(1); // no replay after bytes were forwarded
-    expect(text.startsWith(truncated)).toBe(true);
-    expect(text.endsWith('event: error\ndata: {"type":"error","error":{"type":"upstream_incomplete","message":"Upstream stream ended before message_stop"}}\n\n')).toBe(true);
+    expect(text).toBe(truncated + ANTHROPIC_INCOMPLETE_EVENT);
     expect(text).not.toContain("event: message_stop"); // no fabricated stop event
+  });
+
+  it("keeps the terminal guarantee for a gzip-compressed native stream by forwarding it decoded, dropping a cut frame", async () => {
+    const { ANTHROPIC_INCOMPLETE_EVENT } = await import("./sse-terminal.js");
+    const { gzipSync } = await import("node:zlib");
+    const complete =
+      'event: message_start\ndata: {"type":"message_start","message":{"id":"msg_1"}}\n\n' +
+      'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}\n\n';
+    const cut = 'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel';
+    const fetchMock = mock(async (): Promise<Response> => new Response(gzipSync(Buffer.from(complete + cut)), {
+      status: 200, headers: { "content-type": "text/event-stream", "content-encoding": "gzip" },
+    }));
+    const auth = oauthAuth();
+    const clientReq = makeClientReq('{"model":"glm-4.6","messages":[],"stream":true}', { "accept-encoding": "gzip" });
+
+    const resp = await proxyRequest(clientReq, "anthropic", { config: testConfig, auth, fetchImpl: fetchMock as any });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get("content-encoding")).toBeNull(); // decoded so the frames could be watched
+    const text = await resp.text();
+    expect(text).toBe(complete + ANTHROPIC_INCOMPLETE_EVENT);
+    for (const frame of text.split("\n\n").filter(Boolean)) expect(() => JSON.parse(frame.split("\ndata: ")[1])).not.toThrow();
   });
 
   it("passes the Anthropic batch response through with raw-decompress transport", async () => {

@@ -8,6 +8,7 @@
 // `zcode-kit models --show-key` remains the explicit opt-in for exporting the
 // key to another program.
 import { existsSync, readFileSync } from "node:fs";
+import { isIP } from "node:net";
 
 export const DEFAULT_MODEL_IDS = ["glm-5.3", "glm-5.3-flash"];
 export const REDACTED_KEY = "(redacted: not an interactive terminal — print it with: zcode-kit models --show-key)";
@@ -55,8 +56,8 @@ export function isLoopbackHost(host) {
  */
 export function connectionDetailsLines({ port, key, models = DEFAULT_MODEL_IDS, modelsSource = "config", source = "configured", reveal = false, host = "127.0.0.1", responsesEnabled = true, indent = "  " }) {
   const loopback = isLoopbackHost(host);
-  // An IPv6-only listener is reachable as [::1], not as 127.0.0.1.
-  const urlHost = host === "::1" ? "[::1]" : loopback ? "127.0.0.1" : host;
+  // An IPv6 literal needs brackets in a URL; the loopback one is [::1], not 127.0.0.1.
+  const urlHost = isIP(host) === 6 ? `[${host}]` : loopback ? "127.0.0.1" : host;
   const base = `http://${urlHost}:${port}`;
   const keyText = reveal && typeof key === "string" && key.length ? key : REDACTED_KEY;
   const verified = source === "running";
