@@ -4,7 +4,9 @@
 The optional Account Rotator keeps authorized sign-ins as separate accounts.
 While it is enabled, a successful new sign-in is saved as another account. For
 supported requests, the Kit may try another saved account if the selected one
-cannot continue. A retry is not guaranteed to succeed.
+cannot continue. A retry is not guaranteed to succeed. Transient network or
+gateway failures before any output are retried on the same account first; such
+a retry never switches the account by itself.
 
 The feature does not create accounts, reset quotas, or bypass provider rules.
 Importing a login does not grant a new quota. Use only accounts you are

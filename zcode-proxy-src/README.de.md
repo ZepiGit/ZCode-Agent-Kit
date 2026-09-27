@@ -56,6 +56,8 @@ nur Metadaten.
 
 Die lokale Korrektur dekodiert gzip, deflate und Brotli vor der Auswertung übersetzter Streams oder JSON-Fehlerantworten. Leere oder nicht dekodierbare Batch-Antworten werden als `upstream_invalid_response` gemeldet, nicht als erfolgreiche leere Antworten. Der Proxy ersetzt das Arbeitsverzeichnis des aufrufenden Harness nicht durch sein eigenes; `ZCODE_IDENTITY_ENV_CWD` bleibt ein ausdrücklicher Override.
 
+Vorübergehende Fehler vor jeder Ausgabe (Verbindung abgelehnt oder zurückgesetzt, HTTP 500/502/503/504/524/529, 429 mit kurzem `Retry-After`) werden wie beim offiziellen Client bis zu dreimal auf demselben Konto mit wachsender Wartezeit wiederholt; erkannte Gateway-Fehlercodes, Authentifizierungs- oder Modellfehler und alles nach begonnener Ausgabe werden nie wiederholt. Ein nativer Anthropic-Stream, der ohne `message_stop` endet, erhält einen abschließenden `event: error`-Frame (`upstream_incomplete`, bei fehlgeschlagenem Lesen `upstream_stream_error`), damit Clients den Fehler statt einer stillen Kürzung sehen.
+
 ## Sicherheit
 
 Der Proxy ist für den vertrauenswürdigen lokalen Einsatz gedacht. Betreibe ihn

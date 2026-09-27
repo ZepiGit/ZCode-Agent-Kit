@@ -21,11 +21,11 @@
 //   zcode-kit uninstall
 //
 // Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
-// 4 safe-start refused (lock/ownership) · 5 auth/identity failure · 130 setup
-// aborted with Ctrl-C. Unknown harness names are errors, not no-ops. `setup`
-// exits 0 once the consented integrations are saved even if the optional live
-// smoke request fails (it prints a warning); it exits 1 when one harness
-// failed while the others were configured.
+// 4 safe-start refused (lock/ownership) · 5 auth/identity failure · 20 setup:
+// one harness failed while the others were configured · 130 setup aborted
+// with Ctrl-C. Unknown harness names are errors, not no-ops. `setup` exits 0
+// once the consented integrations are saved even if the optional live smoke
+// request fails (it prints a warning).
 import { beginTransaction, acquireLock, releaseLock, rollbackTransaction, listTransactions } from "../lib/transaction.mjs";
 import { detectHarnesses } from "../lib/detect.mjs";
 import { createCtx, bootstrap, kitRoot } from "./context.mjs";
@@ -60,6 +60,12 @@ import { isAbsolute, join, normalize } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
 const ADAPTER_IDS = ["omp", "pi", "claude-code", "codex", "opencode", "cline", "kilo-code", "aider", "continue", "goose"];
+// setup: the kit is configured but at least one harness failed. A dedicated
+// code (not 1, which Node uses for an uncaught error or a failed import) so
+// the installers and `update` can tell a partial success from a crash.
+const EXIT_HARNESS_FAILED = 20;
+// setup: interrupted with Ctrl-C; answers already given were applied.
+const EXIT_ABORTED = 130;
 
 function loadAdapter(id) {
   // eslint-disable-next-line no-bitwise
@@ -142,8 +148,9 @@ function usage(code) {
   (proxy start/status and setup print the connection details for manual client setup;
    the key is shown in full only on an interactive terminal — export: zcode-kit models --show-key)
 
-Exit codes: 0 ok · 1 checks failed (setup: at least one harness failed, the others are configured) ·
-2 runtime error · 3 port/foreign conflict · 4 safe-start refused · 5 auth/identity failure ·
+Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
+4 safe-start refused · 5 auth/identity failure ·
+20 setup: at least one harness failed, the others are configured ·
 130 setup aborted with Ctrl-C (answers already given were applied)
 
 Harnesses: ${ADAPTER_IDS.join(", ")}`);
@@ -254,11 +261,15 @@ async function cmdSetup() {
         continue;
       }
       const owned = detected[id] ? ownedIntegration(adapter, ctx) : false;
+      // MCP consent is separate from provider consent: a y covers the bridge
+      // only when this note was shown before the question (interactive) or
+      // the harness was selected explicitly; stored decisions carry it as a flag.
+      const mcpOffered = interactive && mcpBridgeAvailable && (id === "omp" || id === "claude-code");
       // The question text is fixed; what a y implies beyond the provider
       // entry is said before it (existing integration, MCP bridge).
       const ask = interactive ? (question) => {
         if (owned) console.log(`  note: an existing kit integration for ${adapter.label} was found; y keeps it current, n leaves it untouched.`);
-        if (mcpBridgeAvailable && (id === "omp" || id === "claude-code")) console.log(`  note: y also registers the kit's MCP bridge "zcode-harness" for ${adapter.label} (skip with --no-mcp).`);
+        if (mcpOffered) console.log(`  note: y also registers the kit's MCP bridge "zcode-harness" for ${adapter.label} (skip with --no-mcp).`);
         return prompter.ask(question);
       } : null;
       let decision;
@@ -268,11 +279,13 @@ async function cmdSetup() {
           label: adapter.label,
           detected: Boolean(detected[id]),
           stored: choices.harnesses[id]?.decision,
+          storedMcp: choices.harnesses[id]?.mcp === true,
           unreadable: isUnreadableChoice(choices, id),
           owned,
           explicit,
           reask: flags.reask === true,
           ask,
+          mcpOffered,
         });
       } catch (err) {
         if (err?.code !== ABORTED) throw err;
@@ -284,7 +297,10 @@ async function cmdSetup() {
       }
       if (decision.action === "ignore") continue;
       if (decision.action === "skip") {
-        if (decision.record) recordHarnessChoice(ctx, tx, choices, id, "skipped", decision.source);
+        if (decision.record) {
+          try { recordHarnessChoice(ctx, tx, choices, id, "skipped", decision.source); }
+          catch (err) { ui.warn(`could not record the decision for ${adapter.label} (${err.message})`); }
+        }
         if (decision.reason === NO_CONSENT_HINT) undecided = true;
         outcome.skipped.push({ id, label: adapter.label, reason: decision.reason });
         ui.result("skip", `${adapter.label} — ${decision.reason}`);
@@ -296,14 +312,21 @@ async function cmdSetup() {
       try {
         const applied = adapter.apply(ctx, tx, (m) => { ui.detail(m); skipped ||= /\bskipped\b/i.test(m); warning ||= /\bWARN:/i.test(m); });
         manual = applied?.manualConfirmationRequired === true;
-        if (decision.record) recordHarnessChoice(ctx, tx, choices, id, "configured", decision.source);
+        if (decision.record) recordHarnessChoice(ctx, tx, choices, id, "configured", decision.source, undefined, { mcp: decision.mcp === true });
       } catch (err) {
         // One harness must not take the others down, and a half-applied
         // integration must not stay behind: undo this harness's own writes.
-        const undone = tx.restoreSince(savepoint);
-        const note = undone.conflicts.length
-          ? ` (left in place, check manually: ${undone.conflicts.join(", ")})`
-          : undone.restored.length + undone.removed.length ? " (its partial changes were undone)" : "";
+        // The undo itself must not abort the run either — it reports instead.
+        let undone = { restored: [], removed: [], conflicts: [] };
+        let note = "";
+        try {
+          undone = tx.restoreSince(savepoint);
+          note = undone.conflicts.length
+            ? ` (left in place, check manually: ${undone.conflicts.join(", ")})`
+            : undone.restored.length + undone.removed.length ? " (its partial changes were undone)" : "";
+        } catch (undoErr) {
+          note = ` (its partial changes could not be undone: ${undoErr.message}; see zcode-kit rollback)`;
+        }
         outcome.failed.push({ id, label: adapter.label, error: err.message + note });
         ui.result("fail", `${adapter.label} — ${err.message}${note}`);
         continue;
@@ -318,9 +341,11 @@ async function cmdSetup() {
         : warning ? " — review the warning above" : "";
       outcome.configured.push({ id, label: adapter.label, refreshed: decision.action === "refresh", manual });
       ui.result("ok", adapter.label + suffix);
-      if (decision.consent) mcpIds.push(id);
+      if (decision.mcp === true) mcpIds.push(id);
     }
-    // MCP registration follows consent, never a refresh of a pre-existing integration.
+    // MCP registration follows the separate MCP consent (explicit selection,
+    // a y after the MCP note, or a stored decision that recorded it) — never
+    // a refresh, an `integrate` decision or a y given without the note.
     await integrateMcp(tx, detected, mcpIds, (...args) => ui.detail(...args));
     ui.step("Account Rotator");
     console.log("\n  Keep authorized logins as separate encrypted accounts.");
@@ -335,7 +360,7 @@ async function cmdSetup() {
       }
     }
     if (choice === undefined) {
-      console.log("  Account Rotator setting unchanged (no interactive answer).");
+      console.log(abortedByUser ? "  Account Rotator question skipped (aborted); setting unchanged." : "  Account Rotator setting unchanged (no interactive answer).");
       console.log("  Enable later: zcode-kit accounts enable");
     } else {
       const result = configureAccountRotator(ctx, tx, choice, runProxyCli);
@@ -380,11 +405,18 @@ async function cmdSetup() {
       ui.warn(`connection details unavailable: the proxy manager could not be loaded (${err.message})`);
     }
   }
-  if (manager) await manager.printConnectionDetails(await manager.healthIdentify() === "ours" ? "running" : "configured");
-  else console.log("  Connection details unavailable: no proxy manager in this kit layout (see zcode-kit proxy status after a full install).");
+  if (manager) {
+    // Same rules as `proxy status`: verified own proxy → running; nothing on
+    // the port → configured values; a foreign service → details withheld
+    // (never the key next to a URL that is not ours).
+    const identity = await manager.healthIdentify();
+    if (identity === "ours" || identity === "down") await manager.printConnectionDetails(identity === "ours" ? "running" : "configured");
+    else if (identity === "foreign") console.log("  Connection details withheld: the configured port is answered by a service that is not this kit's proxy (see zcode-kit proxy status).");
+    else console.log(`  Connection details unavailable (${identity}); see zcode-kit proxy status.`);
+  } else console.log("  Connection details unavailable: no proxy manager in this kit layout (see zcode-kit proxy status after a full install).");
   if (compact) console.log(`\n  Setup log: ${ui.logPath}`);
-  if (abortedByUser) return 130;
-  return outcome.failed.length ? 1 : 0;
+  if (abortedByUser) return EXIT_ABORTED;
+  return outcome.failed.length ? EXIT_HARNESS_FAILED : 0;
 }
 
 function sameInstallationPath(candidate, expected) {
@@ -490,8 +522,11 @@ async function cmdIntegrate() {
     console.log(`== integrate ${id}: ${adapter.label} ==`);
     adapter.apply(ctx, tx, (m) => console.log(m));
     // An explicit integrate command is consent for this harness: later
-    // setup/update/repair runs keep it current without asking again.
-    recordHarnessChoice(ctx, tx, readHarnessChoices(ctx), id, "configured", "integrate");
+    // setup/update/repair runs keep it current without asking again. It is
+    // not MCP consent (integrate never registers the bridge).
+    if (!recordHarnessChoice(ctx, tx, readHarnessChoices(ctx), id, "configured", "integrate")) {
+      console.log(`WARN: the decision for ${id} was not recorded — its decision file is unreadable; fix or remove it (see zcode-kit setup).`);
+    }
   } finally {
     let finishErr = null;
     try { txId = tx.finish(); } catch (err) { finishErr = err; }
@@ -912,14 +947,19 @@ function finishUpdate(harnessArgs, txId = null) {
     stdio: "inherit",
     env: { ...process.env, ZCODE_KIT_ALLOW_CHECKOUT: "1" },
   });
-  // Exit 1 = one or more harnesses failed but the kit itself is fine: the
-  // proxy must still come back. Anything else is a real setup failure.
-  const harnessFailures = res.status === 1;
-  if (res.status !== 0 && !harnessFailures) {
+  // Exit 20 = one or more harnesses failed but the kit itself is fine; exit
+  // 130 = the user interrupted the questions (answers given were applied).
+  // In both cases the proxy must still come back. Anything else is a real
+  // setup failure.
+  const harnessFailures = res.status === EXIT_HARNESS_FAILED;
+  const aborted = res.status === EXIT_ABORTED;
+  const partialExit = harnessFailures ? EXIT_HARNESS_FAILED : aborted ? EXIT_ABORTED : 0;
+  if (res.status !== 0 && !harnessFailures && !aborted) {
     console.error("update: setup failed — the kit files are updated; inspect the output above and rerun `zcode-kit setup`.");
     return res.status ?? 2;
   }
   if (harnessFailures) console.error("update: some assistants could not be configured (see the summary above); the proxy is started anyway.");
+  if (aborted) console.error("update: setup was interrupted; the kit files are updated and the answers given so far were applied — finish with `zcode-kit setup`. The proxy is started anyway.");
   // update stopped the proxy before mutating files, so it must come back
   // here: an update that returns with a dead proxy is not done. The
   // manager `start` is idempotent (already-running exits 0) and safe-starts
@@ -930,7 +970,7 @@ function finishUpdate(harnessArgs, txId = null) {
   if (!existsSync(managerPath)) {
     console.log("update: no proxy manager in this kit layout — skipping the proxy start.");
     if (txId) console.log(`transaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
-    return harnessFailures ? 1 : 0;
+    return partialExit;
   }
   console.log("update: starting the proxy on the updated code...");
   const started = spawnSync(process.execPath, [managerPath, "start"], { stdio: "inherit" });
@@ -939,7 +979,7 @@ function finishUpdate(harnessArgs, txId = null) {
     return started.status ?? 2;
   }
   if (txId) console.log(`transaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
-  return harnessFailures ? 1 : 0;
+  return partialExit;
 }
 
 // ---------------------------------------------------------------- rollback

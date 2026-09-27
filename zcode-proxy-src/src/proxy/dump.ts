@@ -35,8 +35,12 @@ if (DUMP_PATH) {
   );
 }
 
-/** Header names whose values must be masked before dumping. */
-const SENSITIVE_HEADERS = new Set([
+/**
+ * Header names whose values must be masked before dumping or debug-logging
+ * (shared with handler.ts so both outputs mask the same set: credentials,
+ * cookies and the single-use captcha verify tokens of the start-plan gateway).
+ */
+export const SENSITIVE_HEADERS = new Set([
   "authorization",
   "x-api-key",
   "proxy-authorization",

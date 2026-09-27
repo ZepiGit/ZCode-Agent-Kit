@@ -19,7 +19,7 @@ kit 的核心与具体 harness 无关：一个提供三种标准格式的本地 
 
 ## 由 `zcode-kit setup` 配置（检测到的 harness，仅在同意后）
 
-`zcode-kit setup --harness auto` 检测已安装的 harness，并对每个没有已保存决定的 harness 提问："Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"。回答 `y` 才配置该 harness；`n` 会跳过它且不触碰其文件，没有终端时所有未决定的 harness 都会被跳过。按 Ctrl-C 会停止提问（退出码 130）；已经回答 `y` 的仍保持配置。如果只装了 OMP，就不会创建 Claude/Codex 的配置或生成包装器文件。决定以每个 harness 一个文件的形式保存在 `generated/harness-choices/` 中，并属于设置事务的一部分（回滚会再次删除它们）；`zcode-kit update` 和 `zcode-kit doctor --fix` 只重新应用已同意的集成（回答 `y`、明确选择或 `zcode-kit integrate <harness>`），已保存的 `n` 会一直被遵守，直到通过 `--harness`、`integrate` 或 `zcode-kit setup --reask`（在终端中重新提问）更改。Kit 在提问之前创建的集成会在无人值守运行时刷新，但绝不会被视为同意。无人值守运行时用 `--harness omp,codex` 或 `ZCODE_KIT_HARNESSES=omp,codex` 选择 harness（`none` 跳过所有检测到的 harness）；未知 id 视为错误。MCP 注册遵循同样的同意。某个 harness 失败不会阻止其他 harness：它自身的部分写入会被撤销，汇总中将其列为失败，设置以退出码 1 结束（安装器会带着警告继续）。
+`zcode-kit setup --harness auto` 检测已安装的 harness，并对每个没有已保存决定的 harness 提问："Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"。回答 `y` 才配置该 harness；`n` 会跳过它且不触碰其文件，没有终端时所有未决定的 harness 都会被跳过。按 Ctrl-C 会停止提问（退出码 130）；已经回答 `y` 的仍保持配置。如果只装了 OMP，就不会创建 Claude/Codex 的配置或生成包装器文件。决定以每个 harness 一个文件的形式保存在 `generated/harness-choices/` 中，并属于设置事务的一部分（回滚会再次删除它们）；`zcode-kit update` 和 `zcode-kit doctor --fix` 只重新应用已同意的集成（回答 `y`、明确选择或 `zcode-kit integrate <harness>`），已保存的 `n` 会一直被遵守，直到通过 `--harness`、`integrate` 或 `zcode-kit setup --reask`（在终端中重新提问）更改。Kit 在提问之前创建的集成会在无人值守运行时刷新，但绝不会被视为同意。无人值守运行时用 `--harness omp,codex` 或 `ZCODE_KIT_HARNESSES=omp,codex` 选择 harness（`none` 跳过所有检测到的 harness）；未知 id 视为错误。Kit 的 MCP 桥接只有在单独同意后才会注册：明确选择，或在设置于提问前显示 MCP 提示后回答 `y`（`--no-mcp` 可关闭）；`integrate`、刷新或没有该提示的已保存决定绝不会注册它。某个 harness 失败不会阻止其他 harness：它自身的部分写入会被撤销，汇总中将其列为失败，设置以退出码 20 结束（安装器会带着警告继续）。
 
 | Harness | 机制 | 对现有配置的影响 |
 |---|---|---|
@@ -102,5 +102,7 @@ GLM-5.3-Flash 已通过代理路径验证。原生目录中存在模型条目，
 - `GET /quota`（需认证）显示各模型的令牌桶。
 - 配额耗尽 → HTTP 400 `[1005] exceed quota limit`。代理会按递增间隔重试同一账号（最长约65秒），然后切换账号；如果仍然出现，请等待服务商恢复额度。
 - `[3007] captcha verify failed` → 网关反滥用机制。代理会使用新获取的 CAPTCHA 令牌自动重试一次；如果仍然失败，请暂停片刻。
+- 输出开始前的暂时性故障（连接被拒绝或重置、HTTP 500/502/503/504/524/529、带较短 `Retry-After` 的 429）会在同一账号上以递增等待最多重试 3 次，与官方客户端一致。已识别的网关错误码、认证或模型错误以及输出开始后的任何故障都不会重试；超过 15 秒的 `Retry-After` 会直接交给客户端处理。可用 `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` 调整（基础等待毫秒数，默认 500，上限 10000；`off` 只保留对从未建立的连接的重试；proxy start/restart 会传递该值）。
+- 被上游中断的流会以错误结束，而不是无声截断：聊天流为 `data: {"error":…}`，Responses 流为 `response.failed`，原生 Anthropic 流为一个 `event: error` 帧（`upstream_incomplete` 或 `upstream_stream_error`）。输出开始后不会重放任何内容；请从 harness 重新发送该轮。
 - `401 start_plan_jwt_invalid` → 检查 Desktop 登录，并通过 `zcode-kit auth login zai` 更新。对于 Desktop 0.16.9 当前激活且已明确配置计划的 `zai`/`start-plan` 登录，使用 `zcode-kit auth login zai --import`。只要存在 `credentials.json`，就以它为准；凭据无效时不会静默回退到 `config.json`。新版 `coding-plan` 登录使用常规 OAuth；导入不会创建或获取 API 密钥。
 - Flash 返回 `[1210]` → 检查是否已启用 thinking，并选择 `low`、`high` 或 `max`，而不是禁用它。代理会将禁用的 thinking 规范化为 `low`；参见上方 Flash 说明。

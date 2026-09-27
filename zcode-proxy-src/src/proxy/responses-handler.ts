@@ -258,11 +258,15 @@ export async function handleResponses(
     }
   }
   try {
-    // Connect-retry ladder mirrors the chat hot path (handler.ts): 3 attempts,
-    // fresh Request per dispatch (built inside `dispatch`), 500ms×attempt
-    // backoff, no retry once the client aborted.
+    // Pre-output transient ladder shared with the chat hot path (handler.ts):
+    // fresh Request per dispatch (built inside `dispatch`), bounded backoff,
+    // same account, no retry once the client aborted.
     upstreamResp = await dispatchWithConnectRetry(() => dispatch(upstreamHeaders), {
       isAborted: () => clientReq.signal.aborted,
+      signal: clientReq.signal,
+      onRetry: (attempt, reason, delayMs) => {
+        console.log(`[responses] upstream transient failure (${reason}), retry ${attempt + 1} in ${delayMs}ms`);
+      },
     });
   } catch (err) {
     return errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.");
@@ -280,6 +284,7 @@ export async function handleResponses(
         captcha,
         appVersion: opts.config.identity.appVersion,
         challengedResp: upstreamResp,
+        signal: clientReq.signal,
         debug: debug ? (message) => console.log(`[responses] ${message}`) : undefined,
         solveAndRetry: (retryHeaders) => dispatch(
           buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, opts.config.identity, opts.config.plan, retryHeaders, undefined),

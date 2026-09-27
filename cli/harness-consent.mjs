@@ -178,7 +178,10 @@ export function readHarnessChoices(ctx) {
     try {
       const entry = JSON.parse(readFileSync(file, "utf8"));
       if (!entry || entry.schema !== 1 || (entry.decision !== "configured" && entry.decision !== "skipped")) throw new Error("unsupported format");
-      result.harnesses[id] = { decision: entry.decision, source: String(entry.source ?? "unknown"), decidedAt: String(entry.decidedAt ?? "") };
+      // `mcp` is separate consent for the kit's MCP bridge (recorded only
+      // after the MCP note was shown or the harness was selected explicitly);
+      // absent means no MCP consent, never "implied".
+      result.harnesses[id] = { decision: entry.decision, source: String(entry.source ?? "unknown"), decidedAt: String(entry.decidedAt ?? ""), mcp: entry.mcp === true };
     } catch (err) {
       result.unreadable.push(id);
       result.errors.push(`${file}: ${err.message} — fix or remove the file; ${id} counts as undecided until then`);
@@ -191,17 +194,22 @@ export function isUnreadableChoice(choices, id) {
   return choices.unreadable.includes("*") || choices.unreadable.includes(id);
 }
 
-/** Record one decision through the transaction (rollback of that setup removes it again). */
-export function recordHarnessChoice(ctx, tx, choices, id, decision, source, now = () => new Date().toISOString()) {
-  if (ctx.dryRun) return choices;
-  if (isUnreadableChoice(choices, id)) return choices; // never overwrite what could not be read
+/**
+ * Record one decision through the transaction (rollback of that setup removes
+ * it again). `mcp` records consent for the kit's MCP bridge separately from
+ * the provider consent; it is never inferred from a stored decision.
+ * Returns false when nothing could be recorded (unreadable decision file).
+ */
+export function recordHarnessChoice(ctx, tx, choices, id, decision, source, now = () => new Date().toISOString(), { mcp = false } = {}) {
+  if (ctx.dryRun) return true;
+  if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
   const previous = choices.harnesses[id];
-  if (previous && previous.decision === decision && previous.source === source) return choices;
-  const entry = { schema: 1, harness: id, decision, source, decidedAt: now() };
+  if (previous && previous.decision === decision && previous.source === source && previous.mcp === mcp) return true;
+  const entry = { schema: 1, harness: id, decision, source, decidedAt: now(), ...(mcp ? { mcp: true } : {}) };
   ensureDir(ctx, harnessChoicesDir(ctx));
   commitFile(ctx, tx, join(harnessChoicesDir(ctx), `${id}.json`), JSON.stringify(entry, null, 2) + "\n");
-  choices.harnesses[id] = { decision, source, decidedAt: entry.decidedAt };
-  return choices;
+  choices.harnesses[id] = { decision, source, decidedAt: entry.decidedAt, mcp };
+  return true;
 }
 
 /** A kit-owned integration bound to THIS installation (adapter proof, never a shape guess). */
@@ -230,31 +238,38 @@ export function ownedIntegration(adapter, ctx) {
  *     terminal and only refreshed (no consent recorded, no MCP) otherwise;
  *   - otherwise the harness is asked; y configures, n skips, no answer skips
  *     without changing the stored decision.
- * `consent` marks decisions that authorize MCP registration for the harness.
+ * `consent` marks decisions that authorize the provider integration; `mcp`
+ * marks the narrower consent for the kit's MCP bridge: an explicit selection,
+ * or a y given after the MCP note was shown (`mcpOffered`), or a stored
+ * decision that recorded it. A refresh, an `integrate` decision or a y
+ * without the note never registers MCP.
  */
-export async function decideHarness({ id, label, detected, stored, unreadable = false, owned = false, explicit, reask = false, ask }) {
+export async function decideHarness({ id, label, detected, stored, storedMcp = false, unreadable = false, owned = false, explicit, reask = false, ask, mcpOffered = false }) {
   const via = (source) => (source === "flag" ? "--harness" : HARNESS_SELECTION_ENV);
   // Re-asking needs a terminal: without one, stored decisions keep standing.
   const reasking = reask && typeof ask === "function";
   if (explicit) {
-    if (explicit.ids.includes(id)) return { action: "configure", source: explicit.source, reason: `selected via ${via(explicit.source)}`, record: true, consent: true };
+    // An explicit selection is documented to cover the MCP bridge (--no-mcp
+    // opts out), so it records MCP consent as well.
+    if (explicit.ids.includes(id)) return { action: "configure", source: explicit.source, reason: `selected via ${via(explicit.source)}`, record: true, consent: true, mcp: true };
     if (explicit.none && detected) return { action: "skip", source: explicit.source, reason: `${via(explicit.source)}=none`, record: true, consent: false };
     return { action: "ignore", source: explicit.source, reason: "not selected", record: false, consent: false };
   }
   if (!detected) return { action: "ignore", source: "detect", reason: "not detected", record: false, consent: false };
   if (unreadable) {
     const answer = ask ? await ask(harnessQuestion(label)) : undefined;
-    if (answer === true) return { action: "configure", source: "interactive", reason: "answered y (decision file unreadable — not recorded)", record: false, consent: true };
+    if (answer === true) return { action: "configure", source: "interactive", reason: "answered y (decision file unreadable — not recorded)", record: false, consent: true, mcp: mcpOffered };
     return { action: "skip", source: "none", reason: answer === false ? "answered n (decision file unreadable — not recorded)" : "decision file unreadable — fix or remove it", record: false, consent: false };
   }
-  if (stored === "configured" && !reasking) return { action: "configure", source: "stored", reason: "previously configured", record: false, consent: true };
+  if (stored === "configured" && !reasking) return { action: "configure", source: "stored", reason: "previously configured", record: false, consent: true, mcp: storedMcp === true };
   if (stored === "skipped" && !reasking) return { action: "skip", source: "stored", reason: `previously skipped (change with: zcode-kit integrate ${id}, setup --harness ${id}, or setup --reask)`, record: false, consent: false };
   if (!ask) {
     if (owned) return { action: "refresh", source: "existing", reason: "existing kit integration refreshed; consent not recorded (answer once on a terminal or select it explicitly)", record: false, consent: false };
     return { action: "skip", source: "none", reason: NO_CONSENT_HINT, record: false, consent: false };
   }
   const answer = await ask(harnessQuestion(label));
-  if (answer === true) return { action: "configure", source: "interactive", reason: "answered y", record: true, consent: true, note: owned ? "existing kit integration found; y keeps it current" : undefined };
+  // A y covers the MCP bridge only when the MCP note was shown before the question.
+  if (answer === true) return { action: "configure", source: "interactive", reason: "answered y", record: true, consent: true, mcp: mcpOffered, note: owned ? "existing kit integration found; y keeps it current" : undefined };
   if (answer === false) return { action: "skip", source: "interactive", reason: "answered n", record: true, consent: false };
   if (owned) return { action: "refresh", source: "existing", reason: "existing kit integration refreshed; no answer, consent not recorded", record: false, consent: false };
   return { action: "skip", source: "none", reason: NO_CONSENT_HINT, record: false, consent: false };

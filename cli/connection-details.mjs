@@ -53,18 +53,23 @@ export function isLoopbackHost(host) {
  * Plain-text lines (no colour, no emojis). `source` is "running" only when
  * the caller verified the proxy answered as this installation's own.
  */
-export function connectionDetailsLines({ port, key, models = DEFAULT_MODEL_IDS, source = "configured", reveal = false, host = "127.0.0.1", responsesEnabled = true, indent = "  " }) {
+export function connectionDetailsLines({ port, key, models = DEFAULT_MODEL_IDS, modelsSource = "config", source = "configured", reveal = false, host = "127.0.0.1", responsesEnabled = true, indent = "  " }) {
   const loopback = isLoopbackHost(host);
-  const base = `http://${loopback ? "127.0.0.1" : host}:${port}`;
+  // An IPv6-only listener is reachable as [::1], not as 127.0.0.1.
+  const urlHost = host === "::1" ? "[::1]" : loopback ? "127.0.0.1" : host;
+  const base = `http://${urlHost}:${port}`;
   const keyText = reveal && typeof key === "string" && key.length ? key : REDACTED_KEY;
   const verified = source === "running";
   const openaiRoutes = responsesEnabled ? "POST /chat/completions, POST /responses, GET /models" : "POST /chat/completions, GET /models";
+  // With a verified proxy the ids come from its live model list; say so when
+  // that list was unavailable and the configured list is shown instead.
+  const modelsNote = verified && modelsSource !== "live" ? "   (from configuration; live model list unavailable)" : "";
   const lines = [
     `${indent}Connection details (local ZCode proxy, ${verified ? "running and verified" : "from configuration; proxy not verified running"})`,
     `${indent}  OpenAI-compatible base URL:    ${base}/v1   (${openaiRoutes})`,
     `${indent}  Anthropic-compatible base URL: ${base}      (POST /v1/messages)`,
     `${indent}  API key (Bearer / x-api-key):  ${keyText}`,
-    `${indent}  Model IDs:                     ${models.join(", ")}`,
+    `${indent}  Model IDs:                     ${models.join(", ")}${modelsNote}`,
     `${indent}  Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required.` +
       (verified ? "" : " Start the proxy first: zcode-kit proxy start"),
   ];

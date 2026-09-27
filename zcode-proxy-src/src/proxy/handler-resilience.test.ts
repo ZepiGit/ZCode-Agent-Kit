@@ -83,18 +83,40 @@ describe("dispatchWithConnectRetry — replay safety (C1-02)", () => {
     }
   });
 
-  it("does not retry an unknown fetch failure that may have happened after the POST body was sent", async () => {
-    let calls = 0;
-    const unknownReset = Object.assign(new TypeError("fetch failed"), {
-      cause: { code: "ECONNRESET" },
-    });
+  it("retries a connection drop before any response (reset/pipe/timeout), like the official client", async () => {
+    // Transient extension: a reset before response headers is retried on the
+    // same account — the request may have reached the gateway, which is the
+    // exposure the official ZCode client accepts for this class too.
+    for (const dropped of [
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } }),
+      Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_SOCKET" } }),
+      new Error("socket hang up"),
+    ]) {
+      let calls = 0;
+      const response = await dispatchWithConnectRetry(async () => {
+        calls += 1;
+        if (calls === 1) throw dropped;
+        return new Response("ok");
+      }, { retryDelayMs: 0 });
+      expect(response.status).toBe(200);
+      expect(calls).toBe(2);
+    }
+  });
 
-    await expect(dispatchWithConnectRetry(async () => {
-      calls += 1;
-      throw unknownReset;
-    }, { retryDelayMs: 0 })).rejects.toBe(unknownReset);
-
-    expect(calls).toBe(1);
+  it("does not retry an unknown failure, a TLS failure or an abort", async () => {
+    for (const fatal of [
+      new Error("something unrelated"),
+      Object.assign(new Error("certificate has expired"), { code: "CERT_HAS_EXPIRED" }),
+      Object.assign(new Error("aborted"), { name: "AbortError" }),
+    ]) {
+      let calls = 0;
+      await expect(dispatchWithConnectRetry(async () => {
+        calls += 1;
+        throw fatal;
+      }, { retryDelayMs: 0 })).rejects.toBe(fatal);
+      expect(calls).toBe(1);
+    }
   });
 
   it("never retries an allowlisted error flagged postWrite", async () => {
@@ -166,6 +188,32 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
     expect(calls).toBe(2);
     expect(seenCaptchaHeaders[0]).toBe("tok-1");
     expect(seenCaptchaHeaders[1]).toBe("tok-2");
+    expect(resp.status).toBe(200);
+    const body = await resp.json();
+    expect(body.choices[0].message.content).toBe("resilience reply");
+  });
+
+  it("retries a gateway 503 before any output on the SAME credential and without touching the quota layer", async () => {
+    const authHeaders: (string | null)[] = [];
+    let calls = 0;
+    const fetchMock = mock(async (req: Request): Promise<Response> => {
+      calls += 1;
+      authHeaders.push(req.headers.get("authorization"));
+      if (calls === 1) return new Response("<html>bad gateway</html>", { status: 503, headers: { "content-type": "text/html" } });
+      return new Response(ANTHROPIC_OK, { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    const auth = new AuthManager();
+    auth.setOAuthCredential({ apiKey: PLAN_KEY, provider: "zai", jwt: PLAN_JWT });
+    const clientReq = new Request("http://localhost:8080/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"model":"glm-4.6","messages":[{"role":"user","content":"hi"}]}',
+    });
+
+    const resp = await proxyRequest(clientReq, "openai", { config: TEST_CONFIG, auth, fetchImpl: fetchMock as any });
+    expect(calls).toBe(2);
+    expect(authHeaders[0]).toBe(authHeaders[1]); // same account, fresh request
     expect(resp.status).toBe(200);
     const body = await resp.json();
     expect(body.choices[0].message.content).toBe("resilience reply");

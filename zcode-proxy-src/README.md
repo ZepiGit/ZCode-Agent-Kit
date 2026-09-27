@@ -50,6 +50,8 @@ Do not use those switches. The solver, its security gates, and the callable
 
 The local repair decodes gzip, deflate, and Brotli before interpreting translated streams or JSON error envelopes. Empty or undecodable batch bodies are reported as `upstream_invalid_response`, not successful empty answers. The proxy does not substitute its daemon directory for the calling harness workspace; `ZCODE_IDENTITY_ENV_CWD` remains an explicit override.
 
+Transient failures before any output (connection refused or reset, HTTP 500/502/503/504/524/529, 429 with a short `Retry-After`) are retried up to three times on the same account with a growing delay, as the official client does; recognised gateway error codes, authentication or model errors, and anything after output has started are never retried (`ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` sets the base delay in milliseconds, default 500; `off` keeps only the retry of never-established connections). A native Anthropic stream that ends without `message_stop` receives one terminal `event: error` frame (`upstream_incomplete`, or `upstream_stream_error` when the read failed) so clients see the failure instead of a silent truncation.
+
 ## Security
 
 The proxy is intended for trusted local use. Keep it on the local machine and

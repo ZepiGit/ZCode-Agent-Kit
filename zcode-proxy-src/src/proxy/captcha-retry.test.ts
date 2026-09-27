@@ -91,6 +91,45 @@ function fakeCaptcha(opts?: { failSolve?: boolean }): CaptchaModuleLike {
 }
 
 describe("retryOnCaptchaChallenge", () => {
+  it("does not resend when the client aborted while the fresh token was being solved", async () => {
+    const controller = new AbortController();
+    let resends = 0;
+    const captcha: CaptchaModuleLike = {
+      ...fakeCaptcha(),
+      getCaptchaToken: async () => {
+        controller.abort(); // the client disappears mid-solve
+        return { verifyParam: "fresh-token", region: "cn" };
+      },
+    };
+    const outcome = await retryOnCaptchaChallenge({
+      captcha,
+      appVersion: "3.11.2",
+      challengedResp: new Response(bytesBody(challengeBytes()), { status: 400, headers: { "content-type": "application/json" } }),
+      signal: controller.signal,
+      solveAndRetry: async () => { resends += 1; return new Response("must not happen", { status: 200 }); },
+      mapError: (err, phase) => new Response(`${phase}:${err.message}`, { status: 502 }),
+    });
+    expect(resends).toBe(0);
+    expect(outcome.ok).toBe(false);
+    expect(await outcome.resp.text()).toMatch(/^dispatch:client aborted/);
+  });
+
+  it("does not even solve when the client had already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let solves = 0;
+    const captcha: CaptchaModuleLike = { ...fakeCaptcha(), getCaptchaToken: async () => { solves += 1; return { verifyParam: "t", region: "cn" }; } };
+    const outcome = await retryOnCaptchaChallenge({
+      captcha, appVersion: "3.11.2",
+      challengedResp: new Response(bytesBody(challengeBytes()), { status: 400, headers: { "content-type": "application/json" } }),
+      signal: controller.signal,
+      solveAndRetry: async () => new Response("must not happen"),
+      mapError: (err, phase) => new Response(`${phase}:${err.message}`, { status: 502 }),
+    });
+    expect(solves).toBe(0);
+    expect(outcome.ok).toBe(false);
+  });
+
   it("cancels the challenged body, re-solves, and re-dispatches once with fresh headers", async () => {
     let cancelled = false;
     const challenged = new Response(bytesBody(challengeBytes()), {

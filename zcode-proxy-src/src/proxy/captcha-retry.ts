@@ -81,6 +81,12 @@ export interface CaptchaRetryArgs {
   mapError: (err: Error, phase: "solver" | "dispatch") => Response;
   /** Optional debug line sink. */
   debug?: (message: string) => void;
+  /**
+   * Client abort signal: a client that disappeared while the fresh token was
+   * being solved must not trigger the resend (it would spend a token and
+   * quota on a request nobody reads).
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -94,19 +100,23 @@ export interface CaptchaRetryArgs {
  * upstream `!ok` branch would wrap the error body a second time.
  */
 export async function retryOnCaptchaChallenge(args: CaptchaRetryArgs): Promise<{ ok: true; resp: Response } | { ok: false; resp: Response }> {
-  const { captcha, appVersion, challengedResp, solveAndRetry, mapError, debug } = args;
+  const { captcha, appVersion, challengedResp, solveAndRetry, mapError, debug, signal } = args;
   debug?.("captcha challenge — re-solving and retrying once");
   try {
     await challengedResp.body?.cancel();
   } catch {
     // already drained/cancelled
   }
+  if (signal?.aborted) return { ok: false, resp: mapError(new Error("client aborted before the captcha retry"), "dispatch") };
   let fresh: { verifyParam: string; region: string };
   try {
     fresh = await captcha.getCaptchaToken(appVersion);
   } catch (err) {
     return { ok: false, resp: mapError(err as Error, "solver") };
   }
+  // Re-check after the solve: it can take seconds, and a resend for a gone
+  // client is a wasted token and a replay nobody asked for.
+  if (signal?.aborted) return { ok: false, resp: mapError(new Error("client aborted before the captcha retry"), "dispatch") };
   const retryHeaders: Record<string, string> = {
     [captcha.RETRY_HEADERS.PARAM]: fresh.verifyParam,
     [captcha.RETRY_HEADERS.REGION]: fresh.region,

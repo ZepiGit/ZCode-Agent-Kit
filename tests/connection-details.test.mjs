@@ -60,6 +60,18 @@ test("formatter: Responses route follows the config switch, a non-loopback host 
   assert.doesNotMatch(localhost, /WARNING/);
 });
 
+test("formatter: a verified proxy says when the model list came from configuration; an IPv6 loopback listener keeps its URL", () => {
+  const fromConfig = connectionDetailsLines({ port: 1, key: KEY, source: "running", modelsSource: "config" }).join("\n");
+  assert.match(fromConfig, /Model IDs:.*\(from configuration; live model list unavailable\)/);
+  const live = connectionDetailsLines({ port: 1, key: KEY, source: "running", modelsSource: "live" }).join("\n");
+  assert.doesNotMatch(live, /live model list unavailable/);
+  const unverified = connectionDetailsLines({ port: 1, key: KEY, source: "configured", modelsSource: "config" }).join("\n");
+  assert.doesNotMatch(unverified, /live model list unavailable/, "only a verified proxy has a live list to miss");
+  const v6 = connectionDetailsLines({ port: 1, key: KEY, host: "::1" }).join("\n");
+  assert.match(v6, /http:\/\/\[::1\]:1\/v1/);
+  assert.doesNotMatch(v6, /WARNING/);
+});
+
 test("configuredServer reads host and the Responses switch, with template defaults when absent", (t) => {
   const dir = mkdtempSync(join(tmpdir(), "kit-conn-srv-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

@@ -170,9 +170,12 @@ $bunExe = @(Get-Command bun -CommandType Application -ErrorAction Stop)[0].Sourc
     # One y/n question per detected assistant, then the Account Rotator question,
     # read from the console; without a terminal, undecided assistants are skipped.
     node cli/zcode-kit.mjs setup --harness auto --installer
-    if ($LASTEXITCODE -eq 1) {
+    if ($LASTEXITCODE -eq 20) {
       # The kit is installed; one or more assistants failed (see the summary).
       Write-Host '  [WARN] some assistants could not be configured; see the summary above (the kit itself is installed)'
+    } elseif ($LASTEXITCODE -eq 130) {
+      # Ctrl-C during the questions; answers already given were applied.
+      Write-Host '  [WARN] setup was interrupted; the kit is installed and the answers given so far were applied. Finish later with: zcode-kit setup'
     } elseif ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE) - see output above" }
   } finally {
     Pop-Location

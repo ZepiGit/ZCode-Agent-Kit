@@ -126,7 +126,14 @@ test("decideHarness: explicit lists win, stored decisions stand, answers decide,
   const flag = { ids: ["pi"], none: false, source: "flag" };
   assert.equal((await decideHarness({ ...base, explicit: flag, ask: yes })).action, "ignore");
   const selected = await decideHarness({ ...base, id: "pi", explicit: flag, detected: false, ask: yes });
-  assert.deepEqual(selected, { action: "configure", source: "flag", reason: "selected via --harness", record: true, consent: true });
+  assert.deepEqual(selected, { action: "configure", source: "flag", reason: "selected via --harness", record: true, consent: true, mcp: true }, "an explicit selection is documented to cover the MCP bridge");
+  // MCP consent is separate from provider consent: a y covers the bridge only
+  // when the MCP note was shown before the question; stored decisions carry it.
+  assert.equal(y.mcp, false, "y without the MCP note is provider consent only");
+  assert.equal((await decideHarness({ ...base, ask: yes, mcpOffered: true })).mcp, true);
+  assert.equal(stored.mcp, false, "a stored decision without the flag never implies MCP");
+  assert.equal((await decideHarness({ ...base, stored: "configured", storedMcp: true, ask: count })).mcp, true);
+  assert.equal((await decideHarness({ ...base, owned: true, ask: null })).mcp, undefined, "a refresh never registers MCP");
   const selectedOverSkip = await decideHarness({ ...base, id: "pi", stored: "skipped", explicit: flag, ask: null });
   assert.equal(selectedOverSkip.action, "configure", "an explicit selection overrides a stored n");
   const noneSel = { ids: [], none: true, source: "env" };
@@ -186,7 +193,10 @@ test("harness choices: one file per harness, malformed files fail closed and are
   writeFileSync(join(dir, "codex.json"), JSON.stringify({ schema: 1, decision: "maybe" }));
   writeFileSync(join(dir, "notes.txt"), "ignored");
   const loaded = readHarnessChoices(f.ctx);
-  assert.deepEqual(loaded.harnesses, { omp: { decision: "configured", source: "flag", decidedAt: "2026-01-01T00:00:00.000Z" } });
+  assert.deepEqual(loaded.harnesses, { omp: { decision: "configured", source: "flag", decidedAt: "2026-01-01T00:00:00.000Z", mcp: false } }, "a decision without the flag never implies MCP consent");
+  writeFileSync(join(dir, "aider.json"), JSON.stringify({ schema: 1, harness: "aider", decision: "configured", source: "interactive", decidedAt: "", mcp: true }));
+  assert.equal(readHarnessChoices(f.ctx).harnesses.aider.mcp, true);
+  rmSync(join(dir, "aider.json"));
   assert.deepEqual(loaded.unreadable.sort(), ["codex", "pi"], "malformed and unknown decisions count as unreadable, never as consent");
   assert.equal(loaded.errors.length, 2);
   assert.ok(loaded.errors.every((e) => /fix or remove the file/.test(e)));
@@ -298,6 +308,16 @@ test("transaction savepoint/restoreSince undoes only the ops of one failed harne
   assert.equal(readFileSync(foreign, "utf8"), "changed by someone else\n", "a file changed meanwhile is left alone");
   assert.equal(readFileSync(kept, "utf8"), "first harness\n", "ops before the savepoint stay applied");
   assert.deepEqual(tx.ops.map((op) => op.kind), ["modify", "modify", "external"], "conflicts and externals stay journalled");
+  // A later touch of a file with the same basename must not reuse the kept
+  // conflict op's backup name (its backup would be overwritten).
+  const conflictBackup = join(tx.dir, tx.ops[1].backup);
+  assert.equal(readFileSync(conflictBackup, "utf8"), "original\n");
+  mkdirSync(join(f.root, "sub"));
+  const sameName = join(f.root, "sub", "foreign.txt");
+  writeFileSync(sameName, "second original\n");
+  commitFile(ctx, tx, sameName, "kit write two\n");
+  assert.notEqual(tx.ops[tx.ops.length - 1].backup, tx.ops[1].backup, "backup names never collide after restoreSince");
+  assert.equal(readFileSync(conflictBackup, "utf8"), "original\n", "the kept conflict backup is intact");
   const id = tx.finish();
   const rolled = rollbackTransaction(f.backupDir, id);
   assert.equal(readFileSync(kept, "utf8"), "before\n", "the finished transaction still rolls back the kept op");
@@ -478,7 +498,7 @@ test("one failing harness does not stop the others: its partial writes are undon
   const f = fixture(t);
   writeFileSync(f.pi, "{ this is not json");
   const r = await run(f, ["setup", "--harness", "omp,pi"]);
-  assert.equal(r.code, 1, r.text);
+  assert.equal(r.code, 20, `exit 20 = kit configured, a harness failed (never 1, which a crash also yields)\n${r.text}`);
   assert.match(r.stdout, /\[OK\]\s+OMP \/ Oh My Pi/);
   assert.match(r.stdout, /\[FAIL\] pi — .*not valid JSON/);
   assert.match(r.stdout, /Assistants: 1 configured, 0 skipped, 1 failed/);
@@ -514,6 +534,23 @@ test("no detected harness is not an error; integrate records consent; doctor rep
   assert.equal(readFileSync(g.omp, "utf8"), ompBefore, "doctor --fix never integrates a skipped harness");
 });
 
+test("integrate records provider consent only: a later setup refreshes the harness but never registers MCP from it", async (t) => {
+  const f = fixture(t);
+  const r1 = await run(f, ["integrate", "omp"]);
+  assert.equal(r1.code, 0, r1.text);
+  assert.deepEqual(choicesOf(f), { omp: "configured/integrate" });
+  assert.equal(existsSync(f.mcp), false, "integrate never registers the bridge");
+  const r2 = await run(f, ["setup"]);
+  assert.equal(r2.code, 0, r2.text);
+  assert.match(r2.stdout, /\[OK\]\s+OMP \/ Oh My Pi\s*$/m, "stored consent refreshes the provider integration");
+  assert.equal(existsSync(f.mcp), false, "a stored decision without MCP consent never registers the bridge");
+  assert.equal(JSON.parse(readFileSync(f.choice("omp"), "utf8")).mcp, undefined, "the flag is not invented later");
+  const r3 = await run(f, ["setup", "--harness", "omp"]);
+  assert.equal(r3.code, 0, r3.text);
+  assert.equal(existsSync(f.mcp), true, "an explicit selection is documented MCP consent");
+  assert.equal(JSON.parse(readFileSync(f.choice("omp"), "utf8")).mcp, true);
+});
+
 test("rolling back a setup removes the decisions it recorded together with the integration", async (t) => {
   const f = fixture(t);
   const r = await run(f, ["setup", "--harness", "omp"]);
@@ -530,6 +567,9 @@ test("rolling back a setup removes the decisions it recorded together with the i
 // order, y configures, n skips, the rotator question follows separately, and
 // Ctrl-C stops the questions without touching what was not consented to.
 const script = process.platform === "linux" && spawnSync("script", ["--version"], { stdio: "ignore" }).status === 0;
+// The interactive proofs must not vanish silently from CI: Linux runners
+// ship util-linux, so a missing `script` there is an environment error.
+if (process.platform === "linux" && process.env.CI && !script) throw new Error("script(1) is required on Linux CI for the pty tests");
 /**
  * Run the CLI on a pty. `input` is either a string typed ahead before the
  * first question, or [{ after, send }] pairs typed once `after` appeared in

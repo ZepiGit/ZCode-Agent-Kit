@@ -5,7 +5,9 @@ Der optionale Account Rotator verwaltet autorisierte Logins als getrennte
 Konten. Ist er aktiviert, wird ein erfolgreicher neuer Login als weiteres
 Konto gespeichert. Bei unterstützten Anfragen kann das Kit ein anderes
 gespeichertes Konto versuchen, wenn das ausgewählte Konto nicht fortfahren
-kann. Ein erneuter Versuch ist nicht garantiert erfolgreich.
+kann. Ein erneuter Versuch ist nicht garantiert erfolgreich. Vorübergehende
+Netz- oder Gateway-Fehler vor jeder Ausgabe werden zuerst auf demselben Konto
+wiederholt; ein solcher Wiederholungsversuch wechselt das Konto nie von sich aus.
 
 Die Funktion erstellt keine Konten, setzt keine Kontingente zurück und umgeht
 keine Provider-Regeln. Der Import eines Logins gewährt kein neues Kontingent.

@@ -419,7 +419,7 @@ describe("handleResponses resilience (CL-08)", () => {
 
     const resp = await handleResponses(makeReq({ model: "glm-5.2", input: "hi" }), { config: CONFIG, auth, fetchImpl });
     expect(resp.status).toBe(502);
-    expect(calls).toBe(3);
+    expect(calls).toBe(4); // MAX_TRANSIENT_ATTEMPTS: initial + 3 retries
     const body = await resp.json();
     expect(body.error.type).toBe("upstream_unreachable");
   });

@@ -43,6 +43,8 @@ node <installation>/zcode-proxy-src/captcha-compatibility.mjs <saved-script> [re
 
 本地修复在解析转换流或 JSON 错误响应前解码 gzip、deflate 和 Brotli。空的或无法解码的批量响应会报告为 `upstream_invalid_response`，不会视为成功的空回复。代理不会将自身进程的目录冒充为调用方工作目录；`ZCODE_IDENTITY_ENV_CWD` 仍可用于显式覆盖。
 
+输出开始前的暂时性故障（连接被拒绝或重置、HTTP 500/502/503/504/524/529、带较短 `Retry-After` 的 429）会与官方客户端一样在同一账号上以递增等待最多重试三次；已识别的网关错误码、认证或模型错误以及输出开始后的任何故障都不会重试。没有 `message_stop` 就结束的原生 Anthropic 流会收到一个终止的 `event: error` 帧（`upstream_incomplete`，读取失败时为 `upstream_stream_error`），让客户端看到故障而不是无声截断。
+
 ## 安全
 
 该代理面向可信的本地环境。请仅在本机运行，并保护登录信息和配置数据。

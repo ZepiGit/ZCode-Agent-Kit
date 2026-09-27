@@ -151,6 +151,33 @@ describe("account-pool upstream recovery", () => {
     expect(auth.listAccounts().find((a) => a.id === "two")?.state).not.toBe("exhausted");
   });
 
+  it("never fails over when the pooled resend died after the write with the mark on a nested cause", async () => {
+    const rotator = createAccountRotator([{ id: "one", credential: first }, { id: "two", credential: second }]);
+    const auth = new AuthManager({ accountRotator: rotator });
+    const handle = rotator.getCredentialHandle();
+    const sent: string[] = [];
+    const pending = recoverAndMapUpstream({
+      response: Response.json({ code: 1005, msg: "redacted upstream text" }, { status: 200 }),
+      auth,
+      credential: handle.credential,
+      handle,
+      plan: "coding-plan",
+      signal: new AbortController().signal,
+      quotaRetryDelaysMs: [0],
+      resend: async () => { throw new Error("bare resend must not be used"); },
+      resendHandle: async (next) => {
+        sent.push(next.id);
+        // A wrapped transport error: the postWrite mark sits on the cause.
+        const inner = Object.assign(new Error("upstream closed before sending response headers"), { postWrite: true });
+        throw new Error("dispatch failed", { cause: inner });
+      },
+    });
+    await expect(pending).rejects.toThrow(/dispatch failed/);
+    expect(sent).toEqual(["one"]);
+    expect(auth.listAccounts().find((a) => a.id === "two")?.state).not.toBe("exhausted");
+    expect(rotator.getCredentialHandle().id).toBe("one"); // the sticky account did not move
+  });
+
   it("aborts during the retry wait without sending anything or memoizing", async () => {
     // Legacy auth (no rotator): canResendCredential reflects only the retry
     // memo, so this pins that an aborted schedule proves nothing. In pool

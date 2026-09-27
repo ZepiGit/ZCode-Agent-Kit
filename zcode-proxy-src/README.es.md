@@ -56,6 +56,8 @@ depuración contienen únicamente metadatos.
 
 La corrección local decodifica gzip, deflate y Brotli antes de interpretar los flujos traducidos o las respuestas de error JSON. Los cuerpos vacíos o imposibles de decodificar se notifican como `upstream_invalid_response`, no como respuestas vacías correctas. El proxy no sustituye el directorio del asistente por el de su proceso; `ZCODE_IDENTITY_ENV_CWD` sigue siendo una anulación explícita.
 
+Los fallos transitorios antes de cualquier salida (conexión rechazada o reiniciada, HTTP 500/502/503/504/524/529, 429 con un `Retry-After` corto) se reintentan hasta tres veces en la misma cuenta con una espera creciente, como hace el cliente oficial; los códigos de error del gateway reconocidos, los errores de autenticación o de modelo y cualquier cosa tras el inicio de la salida nunca se reintentan. Un flujo Anthropic nativo que termina sin `message_stop` recibe un frame final `event: error` (`upstream_incomplete`, o `upstream_stream_error` si falló la lectura) para que los clientes vean el fallo en lugar de un truncamiento silencioso.
+
 ## Seguridad
 
 El proxy está pensado para un uso local de confianza. Mantenlo en el equipo

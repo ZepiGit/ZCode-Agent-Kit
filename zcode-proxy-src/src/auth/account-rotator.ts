@@ -293,9 +293,10 @@ export class AccountRotator {
       ? candidates.find((candidate) => candidate.id === this.activeAccountId)
       : undefined;
     const account = active ?? candidates[0];
-    // Only inference moves the sticky pointer. Billing/quota/async lookups
-    // require a JWT the active account may lack; serving them from another
-    // profile must not switch the identity that later inference requests use.
+    // Only inference moves the sticky pointer. Billing/quota lookups and
+    // async job submissions require a JWT the active account may lack;
+    // serving them from another profile must not switch the identity that
+    // later inference requests use.
     const inference = options.operation === undefined || options.operation === "inference";
     if (inference) this.activeAccountId = account.id;
     account.lastUsedAt = now;
@@ -459,7 +460,10 @@ export class AccountRotator {
       else if (!this.isPlanCompatible(account)) state = "invalid";
       else if (isExpired(credential, now)) state = "expired";
       else if (account.exhaustedUntil !== undefined && account.exhaustedUntil > now) state = "exhausted";
-      else if (account.id === this.lastSelectedId) state = "active";
+      // "active" is the sticky inference account; a lookup served by another
+      // profile must not move the marker (it falls back to the last selection
+      // only while no inference account exists yet).
+      else if (account.id === (this.activeAccountId ?? this.lastSelectedId)) state = "active";
       const preview = maskCredential(credential);
       return {
         id: account.id,

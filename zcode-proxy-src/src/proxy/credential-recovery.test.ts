@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { AuthManager } from "../auth/manager.js";
-import { proxyRequest } from "./handler.js";
+import { MAX_TRANSIENT_ATTEMPTS, proxyRequest } from "./handler.js";
 import { handleResponses } from "./responses-handler.js";
 import type { ProxyConfig } from "../config/types.js";
 import { gzipSync } from "node:zlib";
@@ -11,9 +11,16 @@ import { fixtureSecret } from "../test-fixtures.js";
 // handler-level tests pin. Pool tests exercise the multi-attempt schedule.
 const previousRetryDelaysEnv = process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
 process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS = "0";
+// The pre-output transient ladder (429/5xx, drops) would otherwise wait
+// 1s/2s/4s (or a short Retry-After) between its attempts; unit 0 keeps the
+// attempts and drops the waits.
+const previousTransientUnitEnv = process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = "0";
 afterAll(() => {
   if (previousRetryDelaysEnv === undefined) delete process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS;
   else process.env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS = previousRetryDelaysEnv;
+  if (previousTransientUnitEnv === undefined) delete process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS;
+  else process.env.ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS = previousTransientUnitEnv;
 });
 
 const OLD_KEY = fixtureSecret("recovery-old");
@@ -48,7 +55,10 @@ for (const route of ["openai", "anthropic", "responses"]) describe(`${route} saf
     expect(await resp.text()).not.toContain("PRIVATE_FIXTURE");
     expect(resp.headers.get("set-cookie")).toBeNull();
     if (status === 429) expect(resp.headers.get("retry-after")).toBe("7");
-    expect(calls).toBe(1);
+    // 429/500/503 without a recognised gateway envelope are transient for
+    // the pre-output ladder: retried on the same credential until the budget
+    // is spent, then surfaced unchanged. 400/401/403 are request verdicts.
+    expect(calls).toBe(status === 429 || status >= 500 ? MAX_TRANSIENT_ATTEMPTS : 1);
   });
   for (const code of [3012, 401, 3001]) test(`retries code ${code} once with changed credential before output`, async () => {
     let imports = 0;

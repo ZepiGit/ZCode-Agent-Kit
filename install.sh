@@ -165,15 +165,20 @@ step "[4/4] Configuring your workspace"
 # instead; without one, undecided assistants are skipped, never configured.
 run_setup() { node cli/zcode-kit.mjs setup --harness auto --installer; }
 setup_status=0
-if [ -t 1 ] && [ -r /dev/tty ]; then
+# `[ -r /dev/tty ]` only checks permissions; opening it proves a controlling
+# terminal exists (no terminal: ENXIO). Without one, setup gets /dev/null so
+# nothing can read the script pipe as an answer.
+if [ -t 1 ] && (exec < /dev/tty) 2>/dev/null; then
   run_setup < /dev/tty || setup_status=$?
 else
-  run_setup || setup_status=$?
+  run_setup < /dev/null || setup_status=$?
 fi
 case "$setup_status" in
   0) : ;;
-  # Exit 1: the kit is installed, one or more assistants failed (see the summary).
-  1) printf '  [WARN] some assistants could not be configured; see the summary above (the kit itself is installed)\n' ;;
+  # Exit 20: the kit is installed, one or more assistants failed (see the summary).
+  20) printf '  [WARN] some assistants could not be configured; see the summary above (the kit itself is installed)\n' ;;
+  # Exit 130: Ctrl-C during the questions; answers already given were applied.
+  130) printf '  [WARN] setup was interrupted; the kit is installed and the answers given so far were applied. Finish later with: zcode-kit setup\n' ;;
   *) die "setup failed; see the diagnostics above" 1 ;;
 esac
 

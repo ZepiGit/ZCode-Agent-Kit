@@ -1,4 +1,5 @@
 import { decodeContentStream } from "./inflate.js";
+import { isPostWriteError } from "./ordered-transport.js";
 import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
@@ -96,6 +97,11 @@ async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Uint8Arr
     }
     return Buffer.concat(chunks);
   } finally { void reader.cancel().catch(() => {}); reader.releaseLock(); }
+}
+
+/** Bounded, non-consuming look at a JSON body for a recognised gateway error envelope (never SSE). */
+export async function inspectGatewayEnvelope(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
+  return inspect(resp);
 }
 
 async function inspect(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
@@ -197,11 +203,15 @@ export async function recoverAndMapUpstream(opts: {
         // A SENT retry came back exhausted: this is real evidence for the memo.
         confirmedExhausted = true;
       } catch (err) {
-        // A failure after the full request was written may have been
-        // processed upstream: never fail over to another account on top of
-        // it (the connect ladder refuses the same replay). The handler maps
-        // the rethrown error to a 502 without a further attempt.
-        if ((err as { postWrite?: unknown } | null)?.postWrite) throw err;
+        // A failure after the full request was written (flag on the error or
+        // a nested cause) may have been processed upstream: never fail over
+        // to another account on top of it (the transient ladder refuses the
+        // same replay). The handler maps the rethrown error to a 502 without
+        // a further attempt; the original envelope body is released first.
+        if (isPostWriteError(err)) {
+          void response.body?.cancel().catch(() => {});
+          throw err;
+        }
         // The retry could not be sent (connect or captcha failure): keep the
         // current quota envelope so rotation below is not lost.
         scheduleCompleted = false;

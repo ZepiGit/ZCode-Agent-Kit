@@ -109,6 +109,18 @@ describe("account rotator", () => {
     expect(rotator.getSelectedId()).toBe("key-only");
   });
 
+  it("list() marks the inference account active even right after a lookup served by another profile", () => {
+    const rotator = createAccountRotator([
+      { id: "key-only", credential: { provider: "zai", apiKey: "key-a" } },
+      { id: "with-jwt", credential: { provider: "zai", apiKey: "key-b", jwt: "jwt-b" } },
+    ]);
+    expect(rotator.getCredentialHandle().id).toBe("key-only");
+    expect(rotator.getCredentialHandle({ operation: "quota" }).id).toBe("with-jwt");
+    const states = Object.fromEntries(rotator.list().map((a) => [a.id, a.state]));
+    expect(states).toEqual({ "key-only": "active", "with-jwt": "ready" });
+    expect(rotator.getCredentialHandle({ operation: "inference" }).id).toBe("key-only");
+  });
+
   it("treats the same wire token as one identity regardless of userId metadata", () => {
     const rotator = createAccountRotator([
       { id: "imported", credential: { provider: "zai", apiKey: "k", jwt: "jwt-same" } },

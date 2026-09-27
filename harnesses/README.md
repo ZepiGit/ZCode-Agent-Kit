@@ -38,10 +38,13 @@ integrations (a `y`, an explicit selection or `zcode-kit integrate
 integration the kit created before it asked is refreshed on unattended runs
 but never turned into consent. For unattended runs select harnesses with
 `--harness omp,codex` or `ZCODE_KIT_HARNESSES=omp,codex` (`none` skips all
-detected harnesses); unknown ids are errors. MCP registration follows the
-same consent. One failing harness does not stop the others: its own partial
-writes are undone, the summary lists it as failed and setup exits 1 (the
-installer continues with a warning).
+detected harnesses); unknown ids are errors. The kit's MCP bridge is
+registered only with separate consent: an explicit selection, or a `y` given
+after the MCP note that setup prints before the question (`--no-mcp` opts
+out); `integrate`, a refresh or a stored decision without that note never
+register it. One failing harness does not stop the others: its own partial
+writes are undone, the summary lists it as failed and setup exits with code
+20 (the installers continue with a warning).
 
 | Harness | Mechanism | Impact on existing config |
 |---|---|---|
@@ -133,5 +136,7 @@ establish native-provider acceptance. Details:
 - `GET /quota` (authenticated) shows the token buckets per model.
 - Quota exhausted → HTTP 400 `[1005] exceed quota limit`. The proxy retries the same account on a growing schedule (up to ~65s) before failing over; if you still see it, wait for the provider to restore quota.
 - `[3007] captcha verify failed` → gateway anti-abuse. The proxy retries once with a freshly minted captcha token; if it still fails, take a pause.
+- Transient failures before any output (connection refused or reset, HTTP 500/502/503/504/524/529, 429 with a short `Retry-After`) are retried up to 3 times on the same account with a growing delay, mirroring the official client. A recognised gateway error code, an authentication or model error, and anything after output has started are never retried; a `Retry-After` above 15 seconds is passed to the client instead. Tune with `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` (base delay in milliseconds, default 500, capped at 10000; `off` keeps only the retry of connections that were never established; proxy start/restart passes it through).
+- A stream that the upstream cuts off ends with an error payload instead of a silent truncation: chat streams get `data: {"error":…}`, Responses streams `response.failed`, native Anthropic streams one `event: error` frame (`upstream_incomplete` or `upstream_stream_error`). Nothing is replayed after output has started; send the turn again from the harness.
 - `401 start_plan_jwt_invalid` → check your Desktop login and renew it with `zcode-kit auth login zai`. Use `zcode-kit auth login zai --import` for the current active Desktop 0.16.9 `zai`/`start-plan` login with an explicitly configured plan. Existing `credentials.json` is authoritative; invalid credentials do not silently fall back to `config.json`. Modern `coding-plan` logins use normal OAuth instead; import does not create or resolve API keys.
 - `[1210]` with Flash → check that thinking is enabled and choose `low`, `high`, or `max`, rather than disabling it. The proxy normalizes disabled thinking to `low`; see the Flash note above.

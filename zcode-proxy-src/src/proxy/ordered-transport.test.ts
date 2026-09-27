@@ -13,7 +13,7 @@
 import { describe, it, expect } from "bun:test";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { sendOrderedUpstreamRequest } from "./ordered-transport.js";
+import { isPostWriteError, sendOrderedUpstreamRequest, tlsServerName } from "./ordered-transport.js";
 import { proxyRequest } from "./handler.js";
 import { AuthManager } from "../auth/manager.js";
 import type { ProxyConfig, ProxyIdentity } from "../config/types.js";
@@ -135,6 +135,44 @@ describe("sendOrderedUpstreamRequest — abort propagation", () => {
     } finally {
       tcp.close();
     }
+  });
+
+  it("flags an upstream close before response headers as postWrite (never replayed by any layer)", async () => {
+    // The request head and body are on the wire before `end` can arrive, so
+    // the failure must carry the postWrite mark the retry and failover layers
+    // refuse — the upstream may have processed the request.
+    const { createServer: createTcpServer } = await import("node:net");
+    let requests = 0;
+    const tcp = createTcpServer((socket) => { socket.once("data", () => { requests += 1; socket.end(); }); });
+    await new Promise<void>((r) => tcp.listen(0, "127.0.0.1", r));
+    try {
+      const port = (tcp.address() as AddressInfo).port;
+      let caught: unknown;
+      try {
+        await sendOrderedUpstreamRequest({
+          url: `http://127.0.0.1:${port}/v1/messages`,
+          method: "POST",
+          headers: [["content-type", "application/json"]],
+          body: "{}",
+        });
+      } catch (err) {
+        caught = err;
+      }
+      expect((caught as Error).message).toMatch(/closed before sending response headers/);
+      expect((caught as { postWrite?: boolean }).postWrite).toBe(true);
+      expect(isPostWriteError(caught)).toBe(true);
+      expect(isPostWriteError(new Error("wrapped", { cause: caught }))).toBe(true);
+      expect(requests).toBe(1);
+    } finally {
+      tcp.close();
+    }
+  });
+
+  it("tlsServerName: host names only; IPv4 and IPv6 literals (bracketed or bare) get no SNI", () => {
+    expect(tlsServerName("api.example.com")).toBe("api.example.com");
+    expect(tlsServerName("127.0.0.1")).toBeUndefined();
+    expect(tlsServerName("[::1]")).toBeUndefined();
+    expect(tlsServerName("::1")).toBeUndefined();
   });
 
   it("pre-aborted signal: rejects before anything reaches the wire", async () => {

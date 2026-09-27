@@ -887,18 +887,19 @@ try {
    */
   async function connectionDetails(source) {
     let models = configuredModelIds(CONFIG);
+    let modelsSource = "config";
     if (source === "running") {
       try {
         const res = await fetch(`${base()}/v1/models`, { headers: { Authorization: `Bearer ${readKey()}` }, signal: AbortSignal.timeout(5000) });
         const j = await res.json();
         const ids = (j?.data ?? []).map((m) => m?.id).filter((id) => typeof id === "string" && id.length > 0);
-        if (res.ok && ids.length) models = ids;
+        if (res.ok && ids.length) { models = ids; modelsSource = "live"; }
       } catch {
-        // config list stays
+        // config list stays, labelled as such
       }
     }
     const server = configuredServer(CONFIG);
-    return connectionDetailsLines({ port: loadPort(), key: readKey(), models, source, reveal: shouldRevealKey(), host: server.host, responsesEnabled: server.responsesEnabled });
+    return connectionDetailsLines({ port: loadPort(), key: readKey(), models, modelsSource, source, reveal: shouldRevealKey(), host: server.host, responsesEnabled: server.responsesEnabled });
   }
 
   async function printConnectionDetails(source) {
