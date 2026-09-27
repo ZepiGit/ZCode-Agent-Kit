@@ -13,7 +13,6 @@ import { InteractionManager } from "./interactions/manager.js";
 import { RuntimeManager } from "./runtime/manager.js";
 import { TaskManager } from "./tasks/manager.js";
 import { SettingsManager } from "./settings/manager.js";
-import { RuntimeManagerHolder } from "./mcp/runtime-holder.js";
 import { serveStdio, serveHttp, type BridgeServerOptions } from "./mcp/server.js";
 import type { ToolContext } from "./mcp/tools.js";
 import type { ResourceContext } from "./mcp/resources.js";
@@ -80,7 +79,6 @@ async function main(): Promise<void> {
   if (runtimeInfo) {
     runtime = new RuntimeManager(config, runtimeInfo, interactions);
     runtimeHolder.current = runtime;
-    RuntimeManagerHolder.set(runtime);
     tasks = new TaskManager(runtime, interactions, store, config);
     tasks.restore();
     const wiring = tasks.attach();
@@ -118,6 +116,7 @@ async function main(): Promise<void> {
     startedAt: new Date().toISOString(),
   };
   const resourceCtx: ResourceContext = {
+    runtime: toolCtx.runtime,
     tasks: toolCtx.tasks,
     interactions,
     settings,

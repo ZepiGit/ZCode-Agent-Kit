@@ -50,7 +50,6 @@ export default {
   label: "pi",
   protocol: "pi custom provider (models.json, anthropic-messages)",
   primarySource: "https://github.com/badlogic/pi-mono — packages/coding-agent/docs/models.md (checked 2026-09-13)",
-  detect: (home) => existsSync(join(home, ".pi", "agent")) || detectOnPath("pi"),
 
   apply(ctx, tx, log) {
     const agentDir = join(ctx.home, ".pi", "agent");
@@ -136,14 +135,4 @@ export default {
  */
 function setManagedProvider(original, doc) {
   return setTopLevelKey(original, 'providers', doc.providers);
-}
-
-import { execFileSync } from "node:child_process";
-function detectOnPath(cmd) {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
 }

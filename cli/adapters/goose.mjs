@@ -20,13 +20,6 @@ export default {
   label: "Goose",
   protocol: "OpenAI-compatible custom provider (engine: openai, full endpoint URL)",
   primarySource: "https://goose-docs.ai/docs/getting-started/providers/ (checked 2026-09-13)",
-  detect: (home) => {
-    if (process.platform === "win32") {
-      const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
-      return existsSync(join(appData, "Block", "goose"));
-    }
-    return existsSync(join(home, ".config", "goose")) || detectOnPath("goose");
-  },
 
   apply(ctx, tx, log) {
     const dir = providerDir(ctx.home);
@@ -89,15 +82,5 @@ function readJsonSafe(file) {
     return JSON.parse(readFileSync(file, "utf8"));
   } catch {
     return null;
-  }
-}
-
-import { execFileSync } from "node:child_process";
-function detectOnPath(cmd) {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
   }
 }

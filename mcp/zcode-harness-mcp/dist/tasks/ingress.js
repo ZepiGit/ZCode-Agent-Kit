@@ -66,7 +66,6 @@ export class TaskIngress {
             if (t.record.state !== "starting")
                 t.record.state = "running";
             t.persist();
-            t.quietPolls = 0;
         }
         else if (type === "turn.failed") {
             const err = payload.error;
@@ -79,7 +78,6 @@ export class TaskIngress {
             t.onTerminal();
         }
         else if (type === "turn.completed") {
-            t.quietPolls = 0;
             void this.checkQuiet(t);
         }
         else {
@@ -171,7 +169,6 @@ export class TaskIngress {
                 t.persist();
                 return;
             }
-            t.quietPolls = 0;
         }
         t.warnings.push("turn.completed but projection never became quiet within the confirmation window");
         rec.state = "unknown";

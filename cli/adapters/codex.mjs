@@ -11,7 +11,6 @@ export default {
   label: "Codex CLI",
   protocol: "Responses API (wire_api = \"responses\") via local proxy",
   primarySource: "https://developers.openai.com/codex/config-advanced/ (checked 2026-09-13; codex 0.153.4 rejects wire_api=\"chat\")",
-  detect: (home) => existsSync(join(home, ".codex")) || detectOnPath("codex"),
 
   apply(ctx, tx, log) {
     const port = ctx.port();
@@ -52,13 +51,3 @@ args = ["${mcpEntry}/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     return [{ name: "codex adapter artifact", ok: existsSync(join(ctx.generated, "codex-home", "config.toml")), detail: "generated/codex-home/config.toml" }];
   },
 };
-
-import { execFileSync } from "node:child_process";
-function detectOnPath(cmd) {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-}

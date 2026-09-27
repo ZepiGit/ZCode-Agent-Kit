@@ -49,7 +49,6 @@ function cap(
 
 export const BRIDGE_VERSION = "0.1.0";
 export const TARGET_PROTOCOL = "ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher inspected; live validation pending)";
-export const HARNESS_FINGERPRINT = "sha256-16 of bundle, see zcode_health";
 
 export const CAPABILITIES: Capability[] = [
   // ---- session lifecycle -------------------------------------------------

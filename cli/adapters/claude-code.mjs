@@ -12,7 +12,6 @@ export default {
   label: "Claude Code",
   protocol: "Anthropic-compatible endpoint (CLI --settings env override)",
   primarySource: "https://code.claude.com/docs/en/llm-gateway (checked 2026-09-13)",
-  detect: (home) => existsSync(join(home, ".claude")) || detectOnPath("claude"),
 
   apply(ctx, tx, log) {
     const port = ctx.port();
@@ -51,13 +50,3 @@ export default {
     return [{ name: "claude adapter artifact", ok: existsSync(settingsPath), detail: settingsPath }];
   },
 };
-
-import { execFileSync } from "node:child_process";
-function detectOnPath(cmd) {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-}

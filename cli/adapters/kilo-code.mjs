@@ -12,14 +12,6 @@ export default {
   label: "Kilo Code",
   protocol: "Anthropic Messages / OpenAI-compatible custom provider (extension UI)",
   primarySource: "https://kilo.ai/docs/ai-providers/openai-compatible (checked 2026-09-13)",
-  detect: (home) => {
-    const ext = join(home, ".vscode", "extensions");
-    try {
-      return existsSync(ext) && readdirSafe(ext).some((d) => /^kilocode\.kilo-code/i.test(d));
-    } catch {
-      return false;
-    }
-  },
 
   apply(ctx, tx, log) {
     ensureDir(ctx, ctx.generated);
@@ -60,12 +52,3 @@ Start the proxy first: \`node proxy/zcode-proxy-manager.mjs start\`
     return [{ name: "kilo values sheet", ok: existsSync(join(ctx.generated, "kilo-zcode-values.md")), detail: "generated — GUI entry still required" }];
   },
 };
-
-import { readdirSync } from "node:fs";
-function readdirSafe(dir) {
-  try {
-    return readdirSync(dir);
-  } catch {
-    return [];
-  }
-}

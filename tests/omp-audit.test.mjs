@@ -13,7 +13,7 @@ const YAML = requireFromProxy("yaml");
 const SYNTHETIC_KEY = "synthetic-omp-audit-key_20260917";
 
 function fixture(models, config = null) {
-  const home = mkdtempSync(join(tmpdir(), "zcode-omp-audit-"));
+  const home = mkdtempSync(join(tmpdir(), "zcode-omp-audit-o'brien-"));
   const agentDir = join(home, ".omp", "agent");
   const stateDir = join(home, ".zcode-kit-test-state");
   mkdirSync(agentDir, { recursive: true });
@@ -177,6 +177,23 @@ test("OMP second apply is byte-identical", () => {
     assert.equal(readFileSync(f.modelsYml, "utf8"), modelsOnce);
     assert.equal(readFileSync(f.configYml, "utf8"), configOnce);
     assert.equal(readFileSync(join(f.agentDir, "extensions", "zcode-proxy-autostart.ts"), "utf8"), extensionOnce);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test("OMP removes only disabledProviders entries and preserves unrelated lists and quoted paths", () => {
+  const f = fixture(
+    "providers:\n  openai: {}\n",
+    "disabledProviders:\n  - zcode\n  - zai\nallowTools:\n  - zcode\n  - bash\nnested:\n  inner:\n    - zcode\n",
+  );
+  try {
+    f.apply();
+    const value = parse(readFileSync(f.configYml, "utf8"));
+    assert.deepEqual(value.disabledProviders, ["zai"]);
+    assert.deepEqual(value.allowTools, ["zcode", "bash"]);
+    assert.deepEqual(value.nested.inner, ["zcode"]);
+    assert.deepEqual(value.extensions, [join(f.agentDir, "extensions", "zcode-proxy-autostart.ts").replace(/\\/g, "/")]);
   } finally {
     f.cleanup();
   }

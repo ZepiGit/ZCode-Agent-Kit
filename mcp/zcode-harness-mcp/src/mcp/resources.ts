@@ -3,6 +3,7 @@
  * The same content is available through tools for clients without resource
  * support (parity requirement).
  */
+import type { RuntimeManager } from "../runtime/manager.js";
 import type { TaskManager } from "../tasks/manager.js";
 import type { InteractionManager } from "../interactions/manager.js";
 import type { SettingsManager } from "../settings/manager.js";
@@ -14,6 +15,7 @@ import { safeJsonStringify } from "../security/redact.js";
 import { parseSessionId } from "../protocol/types.js";
 
 export interface ResourceContext {
+  runtime: RuntimeManager;
   tasks: TaskManager;
   interactions: InteractionManager;
   settings: SettingsManager;
@@ -67,10 +69,8 @@ export async function readResource(ctx: ResourceContext, uri: string): Promise<{
   if (mSession) {
     const sessionId = parseSessionId(mSession[1]!);
     if (!sessionId) throw new Error(`invalid session id in ${uri}`);
-    const { RuntimeManagerHolder } = await import("./runtime-holder.js");
-    const runtime = RuntimeManagerHolder.get();
-    await sessionInScope(runtime, ctx.allowlist, sessionId);
-    return send(safeJsonStringify(await runtime.ipcSessionRead(sessionId)));
+    await sessionInScope(ctx.runtime, ctx.allowlist, sessionId);
+    return send(safeJsonStringify(await ctx.runtime.ipcSessionRead(sessionId)));
   }
 
   const mArtifact = uri.match(/^zcode:\/\/artifacts\/(.+)$/);

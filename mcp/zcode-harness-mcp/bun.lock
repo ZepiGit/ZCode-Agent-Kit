@@ -6,7 +6,6 @@
       "name": "zcode-harness-mcp",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.30.0",
-        "zod": "^4.6.2",
       },
       "devDependencies": {
         "@types/node": "^26.0.0",

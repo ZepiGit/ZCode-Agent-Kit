@@ -13,21 +13,6 @@ const ENV_SECRET = "ZCODE_PROXY_CREDENTIAL_SECRET";
 /** Optional high-entropy key material supplied by a secret manager. */
 const ENV_MASTER_KEY = "ZCODE_PROXY_CREDENTIAL_MASTER_KEY";
 export const CREDENTIAL_STORE_FORMAT_VERSION = 2;
-export const CREDENTIAL_MASTER_KEY_ENV = ENV_MASTER_KEY;
-
-/** Generate printable high-entropy key material for headless setup. */
-export function generateCredentialMasterKey(): string {
-  return randomBytes(32).toString("base64url");
-}
-
-export type CredentialKeySource = "master-key" | "explicit-secret" | "machine-compat";
-
-/** Redacted diagnostic describing where encryption material comes from. */
-export function credentialKeySource(): CredentialKeySource {
-  if (process.env[ENV_MASTER_KEY] !== undefined) return "master-key";
-  if (process.env[ENV_SECRET] !== undefined) return "explicit-secret";
-  return "machine-compat";
-}
 // Audit H6: test suites must never run against the real login store. The
 // store file path is injectable via env; when unset the historical location
 // is used and behavior is unchanged.

@@ -11,11 +11,6 @@
 /** Ticket lifecycle states reported by the server. */
 export type TicketState = "queued" | "ready" | "active" | "settled" | "expired" | "not_found";
 
-/** Non-terminal states — ticket may still become `ready`. */
-export const TICKET_PENDING_STATES: readonly TicketState[] = ["queued"] as const;
-/** Terminal states — no further transitions; ticket can be settled. */
-export const TICKET_TERMINAL_STATES: readonly TicketState[] = ["settled", "expired", "not_found"] as const;
-
 export function isTicketReady(s: TicketState): boolean {
   return s === "ready" || s === "active";
 }
@@ -88,14 +83,4 @@ export class OffPeakCredentialsUnavailableError extends Error {
     super(message);
     this.name = "OffPeakCredentialsUnavailableError";
   }
-}
-
-/** Detects the upstream "off-peak-ticket-expired" error signal in any error message. */
-export function isOffPeakTicketExpiredError(e: unknown): boolean {
-  if (e == null) return false;
-  if (typeof e === "string") return e.includes("off-peak-ticket-expired");
-  if (e instanceof Error) {
-    return e.message.includes("off-peak-ticket-expired") || e.name === "OffPeakTicketExpiredError";
-  }
-  return false;
 }

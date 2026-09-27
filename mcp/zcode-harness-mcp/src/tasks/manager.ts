@@ -181,7 +181,6 @@ export class TaskManager {
   private internalFromRecord(rec: TaskRecord): TaskInternal {
     const t: TaskInternal = {
       record: rec,
-      quietPolls: 0,
       turnRevision: 0,
       acceptingEvents: false,
       inputPending: false,
@@ -608,7 +607,7 @@ export class TaskManager {
       return cached;
     }
     if (rec.sessionId && rec.usage === null && this.runtime.running && TERMINAL_STATES.includes(rec.state)) {
-      await this.captureUsage(t);
+      await this.ingress.captureUsage(t);
     }
     let responseText = t.accumulatedText;
     let completeness: TaskResultV1["completeness"] = responseText && state === "completed"
@@ -687,20 +686,6 @@ export class TaskManager {
       this.store.writeJson(`tasks/${taskId}.result.json`, result);
     }
     return result;
-  }
-
-  private async captureUsage(t: TaskInternal): Promise<void> {
-    try {
-      const usage = await this.runtime.ipcSessionUsage(t.record.sessionId);
-      t.record.usage = {
-        totalTokens: Number(usage?.totalTokens ?? 0),
-        inputTokens: Number(usage?.inputTokens ?? 0),
-        outputTokens: Number(usage?.outputTokens ?? 0),
-        source: "session/usage IPC",
-      };
-    } catch (err) {
-      t.warnings.push(`usage read failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
   }
 
   stopAll(reason = "bridge shutting down"): void {

@@ -542,8 +542,6 @@ export function transientRetryPolicy(override?: number): { unitMs: number; exten
   }
   return { unitMs: Math.min(Number(trimmed), MAX_TRANSIENT_RETRY_UNIT_MS), extended: true };
 }
-/** @deprecated alias kept for older callers; the ladder is sized by MAX_TRANSIENT_ATTEMPTS. */
-export const MAX_CONNECT_ATTEMPTS = MAX_TRANSIENT_ATTEMPTS;
 /** A numeric Retry-After above this is surfaced to the client instead of waited out. */
 export const TRANSIENT_RETRY_AFTER_CAP_MS = 15_000;
 

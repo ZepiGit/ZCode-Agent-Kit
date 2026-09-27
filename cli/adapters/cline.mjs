@@ -14,14 +14,6 @@ export default {
   label: "Cline",
   protocol: "OpenAI-compatible provider settings (entered in the extension UI)",
   primarySource: "https://docs.cline.bot/provider-config/openai-compatible (checked 2026-09-13; no documented CLI/config-file interface)",
-  detect: (home) => {
-    const ext = join(home, ".vscode", "extensions");
-    try {
-      return existsSync(ext) && readdirSafe(ext).some((d) => /^saoudrizwan\.claude-dev/i.test(d));
-    } catch {
-      return false;
-    }
-  },
 
   apply(ctx, tx, log) {
     ensureDir(ctx, ctx.generated);
@@ -56,12 +48,3 @@ Start the proxy first: \`node proxy/zcode-proxy-manager.mjs start\`
     return [{ name: "cline values sheet", ok: existsSync(join(ctx.generated, "cline-zcode-values.md")), detail: "generated — GUI entry still required" }];
   },
 };
-
-import { readdirSync } from "node:fs";
-function readdirSafe(dir) {
-  try {
-    return readdirSync(dir);
-  } catch {
-    return [];
-  }
-}

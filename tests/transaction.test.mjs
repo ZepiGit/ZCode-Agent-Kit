@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, unlinkSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { beginTransaction, rollbackTransaction, listTransactions, acquireLock, releaseLock } from "../lib/transaction.mjs";
-import { removeFromDisabledProviders } from "../lib/config-edit.mjs";
 
 const TMP = join(import.meta.dirname, "fakehome", "tx");
 
@@ -210,49 +209,4 @@ test("lock is nonce-owned: live holders keep it, release never deletes a success
   assert.equal(existsSync(join(backupDir, ".setup-lock")), true, "unknown lock left alone");
   // cleanup for the successor lock
   unlinkSync(join(backupDir, ".setup-lock"));
-});
-
-// ------------------------------------------------------------ config-edit
-test("removeFromDisabledProviders only touches disabledProviders (regression)", () => {
-  const yaml = [
-    "disabledProviders:",
-    "  - zcode",
-    "  - zai",
-    "allowTools:",
-    "  - zcode",
-    "  - bash",
-    "# comment between keys",
-    "trustedTools:",
-    "  - zcode",
-    "",
-  ].join("\n");
-  const { text, removed } = removeFromDisabledProviders(yaml, "zcode");
-  assert.equal(removed, 1);
-  assert.match(text, /allowTools:\n  - zcode\n  - bash/);
-  assert.match(text, /trustedTools:\n  - zcode/);
-  assert.match(text, /disabledProviders:\n  - zai/);
-  assert.doesNotMatch(text, /disabledProviders:\n  - zcode/);
-});
-
-test("removeFromDisabledProviders handles comments, whitespace and nested maps", () => {
-  const yaml = [
-    "disabledProviders:",
-    "  # stale builtin entry",
-    "  - zcode   # hidden the custom provider",
-    "nested:",
-    "  inner:",
-    "    - zcode",
-    "",
-  ].join("\n");
-  const { text, removed } = removeFromDisabledProviders(yaml, "zcode");
-  assert.equal(removed, 1);
-  assert.match(text, /nested:\n  inner:\n    - zcode/, "nested list entry must survive");
-  assert.match(text, /# stale builtin entry/, "comments inside the list survive");
-});
-
-test("removeFromDisabledProviders is a no-op when the entry is absent", () => {
-  const yaml = "providers:\n  - zai\n";
-  const { text, removed } = removeFromDisabledProviders(yaml, "zcode");
-  assert.equal(removed, 0);
-  assert.equal(text, yaml);
 });

@@ -2,12 +2,6 @@
  * Wire types of the ZCode Protocol (as implemented by zcode.cjs app-server,
  * verified live against 0.16.5). NDJSON over stdio, no `jsonrpc` envelope.
  */
-export function isServerRequest(m) {
-    return m.method !== undefined && m.id !== undefined;
-}
-export function isNotification(m) {
-    return m.method !== undefined && m.id === undefined;
-}
 /** Build a workspace ref the way the app-server expects it (verified live). */
 export function workspaceRef(workspacePath) {
     const p = workspacePath.replace(/[\\/]+$/, "");

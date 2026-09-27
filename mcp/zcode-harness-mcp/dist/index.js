@@ -13,7 +13,6 @@ import { InteractionManager } from "./interactions/manager.js";
 import { RuntimeManager } from "./runtime/manager.js";
 import { TaskManager } from "./tasks/manager.js";
 import { SettingsManager } from "./settings/manager.js";
-import { RuntimeManagerHolder } from "./mcp/runtime-holder.js";
 import { serveStdio, serveHttp } from "./mcp/server.js";
 import { setLogLevel } from "./util/log.js";
 import { createLogger } from "./util/log.js";
@@ -72,7 +71,6 @@ async function main() {
     if (runtimeInfo) {
         runtime = new RuntimeManager(config, runtimeInfo, interactions);
         runtimeHolder.current = runtime;
-        RuntimeManagerHolder.set(runtime);
         tasks = new TaskManager(runtime, interactions, store, config);
         tasks.restore();
         const wiring = tasks.attach();
@@ -109,6 +107,7 @@ async function main() {
         startedAt: new Date().toISOString(),
     };
     const resourceCtx = {
+        runtime: toolCtx.runtime,
         tasks: toolCtx.tasks,
         interactions,
         settings,

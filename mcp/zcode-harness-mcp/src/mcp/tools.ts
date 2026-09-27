@@ -18,14 +18,6 @@ import { sessionInScope, sessionWorkspaceOf, workspaceIdentity } from "../securi
 import { workspaceRef, parseSessionId } from "../protocol/types.js";
 import { redactDeep, safeJsonStringify } from "../security/redact.js";
 
-const log = {
-  info: (msg: string, data?: unknown): void => {
-    /* tool calls are logged at the server layer */
-    void msg;
-    void data;
-  },
-};
-
 export interface ToolContext {
   config: BridgeConfig;
   runtime: RuntimeManager;

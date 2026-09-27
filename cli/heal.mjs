@@ -4,8 +4,6 @@
 // is a proven hung own proxy, via the manager's hung-own proof in start().
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { execFile } from 'node:child_process';
-import { resolveCommand, resolveBun } from '../lib/process.mjs';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
@@ -39,21 +37,6 @@ function outcome(ctx, code, cause, detail, action = 'quota-check') {
   return { code, cause, detail };
 }
 
-// OMP's session gate: one full preflight initially, then cached local-only
-// health checks. Failed starts have the same cooldown, never a per-turn loop.
-export function createSessionPreflight({ health, run, now = Date.now, ttlMs = 60000 }) {
-  let nextCheck = 0, attempted = false, pending = null;
-  return function ensure() {
-    if (pending) return pending;
-    if (now() < nextCheck) return Promise.resolve();
-    pending = (async () => {
-      const first = !attempted; attempted = true;
-      if (first || !await health()) await run();
-    })().finally(() => { nextCheck = now() + ttlMs; pending = null; });
-    return pending;
-  };
-}
-
 // The adapter embeds this fixed vocabulary in the standalone OMP extension;
 // the host never needs to import this installation's modules.
 export const PREFLIGHT_DETAILS = {
@@ -75,65 +58,6 @@ export const PREFLIGHT_WARNINGS = {
   'quota-unavailable': 'Quota check unavailable; continuing with the healthy local proxy. No retry scheduled.',
   hung: 'Recovered an unresponsive ZCode proxy (restarted automatically).',
 };
-const DIAGNOSTIC_LINE = /^\[zcode-preflight\] cause=([a-z0-9-]+)$/;
-export function preflightFailureDetail(code) {
-  const category = typeof code === 'string' && Object.hasOwn(PREFLIGHT_DETAILS, code) ? code : 'startup';
-  return `${category}: ${PREFLIGHT_DETAILS[category]}`;
-}
-function preflightError(code) {
-  return Object.assign(new Error(preflightFailureDetail(code)), { code });
-}
-
-// Reuse the kit's native resolver (including .bun-path), never an OMP execPath
-// or a shell shim. All output is captured: -p stdout belongs to the model.
-export async function runSessionPreflight({ root, env = process.env, timeoutMs = 120000, warn = console.error }) {
-  const file = join(root, 'cli', 'heal.mjs');
-  try {
-    if (!statSync(root).isDirectory() || !statSync(file).isFile()) throw new Error();
-  } catch { throw preflightError('installation'); }
-  const childEnv = { ...env };
-  if (process.platform === 'win32') {
-    const pathKey = Object.hasOwn(env, 'PATH') ? 'PATH' : Object.keys(env).find(key => key.toLowerCase() === 'path');
-    for (const key of Object.keys(childEnv)) if (key.toLowerCase() === 'path') delete childEnv[key];
-    if (pathKey) childEnv.PATH = env[pathKey];
-  }
-  const launch = runtime => new Promise((resolve, reject) => {
-    execFile(runtime, [file, '--diagnostic-code'], {
-      cwd: root, env: childEnv, timeout: timeoutMs, windowsHide: true,
-      shell: false, windowsVerbatimArguments: false, maxBuffer: 64 * 1024,
-    }, (err, _stdout, stderr) => {
-      if (err) { reject(err); return; }
-      // Do not forward runtime/provider stderr: it can contain credentials.
-      // Only exact fixed-vocabulary lines become warnings (hung recovery and
-      // the quota cause can both be reported by one preflight).
-      for (const line of stderr.split(/\r?\n/)) {
-        const cause = line.trim().match(DIAGNOSTIC_LINE)?.[1];
-        if (cause && Object.hasOwn(PREFLIGHT_WARNINGS, cause)) warn(`[zcode-autostart] ${cause}: ${PREFLIGHT_WARNINGS[cause]}`);
-      }
-      resolve();
-    });
-  });
-  let runtime;
-  try { runtime = resolveCommand(process.platform === 'win32' ? 'node.exe' : 'node', childEnv); }
-  catch (err) { if (err.code !== 'ENOENT') throw preflightError('runtime-denied'); }
-  try {
-    if (runtime) {
-      try { await launch(runtime); return; }
-      catch (err) { if (err.code !== 'ENOENT') throw err; }
-    }
-    try { runtime = resolveBun(root, childEnv); }
-    catch { throw preflightError('runtime-unavailable'); }
-    await launch(runtime);
-  } catch (err) {
-    if (err.code === 'runtime-unavailable') throw err;
-    const code = err.code === 'ENOENT' ? 'runtime-unavailable'
-      : err.code === 'EACCES' || err.code === 'EPERM' ? 'runtime-denied'
-      : err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ? 'output-limit'
-      : err.killed || err.code === 'ETIMEDOUT' ? 'timeout'
-      : err.code === 3 ? 'foreign' : err.code === 5 ? 'key' : 'startup';
-    throw preflightError(code);
-  }
-}
 
 const inFlight = new Map();
 export function startupPreflight(ctx, options = {}) {

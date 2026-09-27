@@ -321,31 +321,6 @@ test('doctor --fix --harness uses a guarded transaction and keeps JSON parseable
   assert.equal(refused.code, 2); assert.match(refused.stderr, /checkout/);
   assert.equal(listTransactions(ctx.backupDir).length, 1);
 });
-test('OMP session rechecks local health and recovers after failure without per-turn quota calls', async () => {
-  const { createSessionPreflight } = await api();
-  assert.equal(typeof createSessionPreflight, 'function');
-  let time = 1000, runs = 0, healthy = false, fail = true;
-  const ensure = createSessionPreflight({ now: () => time, ttlMs: 100, health: async () => healthy, run: async () => { runs++; if (fail) throw new Error('synthetic startup failure'); healthy = true; } });
-  await assert.rejects(ensure());
-  await ensure(); assert.equal(runs, 1, 'failure cooldown suppresses repeated attempts');
-  time += 101; fail = false;
-  await Promise.all([ensure(), ensure()]); assert.equal(runs, 2);
-  time += 101; await ensure(); assert.equal(runs, 2, 'healthy TTL only calls local health');
-  time += 101; healthy = false; await ensure(); assert.equal(runs, 3, 'later proxy crash can restart safely');
-});
-test('OMP preflight captures child stdout and forwards only secret-free warning categories', async t => {
-  const ctx = fixture(t); const quotaBody = snapshot(['balance: 3012 SECRET']); await mock(t, ctx, { quotaBody });
-  cpSync(join(ROOT, 'cli'), join(ctx.root, 'cli'), { recursive: true });
-  cpSync(join(ROOT, 'lib'), join(ctx.root, 'lib'), { recursive: true });
-  cpSync(join(ROOT, 'proxy', 'zcode-proxy-manager.mjs'), join(ctx.root, 'proxy', 'zcode-proxy-manager.mjs'));
-  const runner = join(ctx.root, 'runner.mjs');
-  writeFileSync(runner, `import { runSessionPreflight } from './cli/heal.mjs'; await runSessionPreflight({ root: ${JSON.stringify(ctx.root)} });`);
-  const result = await runNode(runner, [], runtimeEnv(ctx));
-  assert.equal(result.code, 0, result.stderr);
-  assert.equal(result.stdout, '');
-  assert.match(result.stderr, /auth3012/);
-  assert.doesNotMatch(result.stderr, /SECRET|Bearer|synthetic-local-key/);
-});
 function runtimeEnv(ctx, path = dirname(process.execPath)) {
   const env = { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home };
   for (const key of Object.keys(env)) if (key.toLowerCase() === 'path' || key === 'ZCODE_KIT_BUN') delete env[key];
@@ -359,145 +334,106 @@ function childPreflight(t, source) {
   writeFileSync(join(root, 'cli', 'heal.mjs'), source);
   return { ...ctx, root };
 }
-
-test('OMP launches native Node with literal spaced paths, kit cwd and deterministic child PATH', async t => {
-  const ctx = childPreflight(t, `
-    import { writeFileSync } from 'node:fs';
-    writeFileSync('launch.json', JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2), path: process.env.PATH }));
-    console.log('SECRET child stdout');
-    console.error('SECRET child stderr');
+function generateExtension(ctx, port = ctx.port()) {
+  mkdirSync(join(ctx.root, 'proxy'), { recursive: true });
+  cpSync(join(ROOT, 'proxy', 'zcode-proxy-autostart.ts'), join(ctx.root, 'proxy', 'zcode-proxy-autostart.ts'));
+  const agent = join(ctx.home, '.omp', 'agent'); mkdirSync(agent, { recursive: true });
+  writeFileSync(join(agent, 'models.yml'), 'providers:\n  unrelated:\n    apiKey: keep\n');
+  writeFileSync(join(agent, 'config.yml'), 'theme: dark\n');
+  omp.apply({ ...ctx, proxySrc: join(ROOT, 'zcode-proxy-src'), port: () => port }, { touch() {} }, () => {});
+  return join(agent, 'extensions', 'zcode-proxy-autostart.ts');
+}
+async function runExtension(ctx, { timeoutMs, runtime, env = runtimeEnv(ctx, '') } = {}) {
+  const extension = generateExtension(ctx);
+  let source = readFileSync(extension, 'utf8');
+  // Exercise production launch/error handling with bounded fixture limits.
+  if (timeoutMs) source = source.replace('const START_TIMEOUT_MS = 120_000;', `const START_TIMEOUT_MS = ${timeoutMs};`);
+  if (runtime) source = source.replace(/^const RUNTIME = .*;$/m, () => `const RUNTIME = ${JSON.stringify(runtime)};`);
+  writeFileSync(extension, source);
+  const runner = join(ctx.root, 'extension-runner.mjs');
+  writeFileSync(runner, `
+    import extension from ${JSON.stringify(pathToFileURL(extension).href)};
+    let hook;
+    extension({ on(_event, handler) { hook = handler; } });
+    await hook({}, { model: { provider: 'zcode' } });
   `);
-  const { runSessionPreflight } = await api();
-  const nativeDir = join(ctx.root, 'native runtime'); mkdirSync(nativeDir);
-  cpSync(process.execPath, join(nativeDir, process.platform === 'win32' ? 'node.exe' : 'node'));
-  const env = runtimeEnv(ctx, nativeDir);
-  if (process.platform === 'win32') env.Path = join(ctx.root, 'nonexistent inherited path');
-  const warnings = [];
-  await runSessionPreflight({ root: ctx.root, env, warn: message => warnings.push(message) });
-  const launch = JSON.parse(readFileSync(join(ctx.root, 'launch.json'), 'utf8'));
-  assert.equal(launch.cwd, ctx.root);
-  assert.deepEqual(launch.args, ['--diagnostic-code']);
-  assert.equal(launch.path, nativeDir);
-  assert.deepEqual(warnings, [], 'arbitrary child output must not become diagnostics');
+  const result = await runNode(runner, [], env, resolveBun(ROOT));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout, '', 'child stdout must not reach model output');
+  assert.doesNotMatch(result.stderr, /SECRET|Bearer|synthetic-local-key/);
+  return result.stderr;
+}
+
+test('generated OMP preflight captures output and forwards only secret-free quota warnings', async t => {
+  const ctx = fixture(t); await mock(t, ctx, { quotaBody: snapshot(['balance: 3012 SECRET']) });
+  cpSync(join(ROOT, 'cli'), join(ctx.root, 'cli'), { recursive: true });
+  cpSync(join(ROOT, 'lib'), join(ctx.root, 'lib'), { recursive: true });
+  cpSync(join(ROOT, 'proxy', 'zcode-proxy-manager.mjs'), join(ctx.root, 'proxy', 'zcode-proxy-manager.mjs'));
+  assert.match(await runExtension(ctx), /auth3012:/);
 });
 
-test('OMP surfaces a hung-proxy recovery alongside the quota warning, and nothing else', async t => {
+test('generated OMP launches pinned Node with literal paths and kit cwd even without PATH', async t => {
+  const ctx = childPreflight(t, `
+    import { writeFileSync } from 'node:fs';
+    writeFileSync('launch.json', JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2), path: process.env.PATH, bun: Boolean(process.versions.bun) }));
+    console.log('SECRET child stdout'); console.error('SECRET child stderr');
+  `);
+  const env = runtimeEnv(ctx, '');
+  if (process.platform === 'win32') env.Path = join(ctx.root, 'nonexistent inherited path');
+  assert.equal(await runExtension(ctx, { env }), '');
+  assert.deepEqual(JSON.parse(readFileSync(join(ctx.root, 'launch.json'), 'utf8')), {
+    cwd: ctx.root, args: ['--diagnostic-code'], path: '', bun: false,
+  });
+});
+
+test('generated OMP surfaces recovery and quota warnings and ignores arbitrary child text', async t => {
   const ctx = childPreflight(t, `
     console.error('[zcode-preflight] cause=hung');
     console.error('[zcode-preflight] cause=auth3012');
     console.error('Bearer SECRET [zcode-preflight] cause=hung');
   `);
-  const { runSessionPreflight, PREFLIGHT_WARNINGS } = await api();
-  const warnings = [];
-  await runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx), warn: message => warnings.push(message) });
-  assert.deepEqual(warnings, [
-    `[zcode-autostart] hung: ${PREFLIGHT_WARNINGS.hung}`,
-    `[zcode-autostart] auth3012: ${PREFLIGHT_WARNINGS.auth3012}`,
-  ]);
-});
-
-test('OMP ignores Windows shell shims during native runtime discovery', { skip: process.platform !== 'win32' }, async t => {
-  const ctx = childPreflight(t, 'process.exitCode = 0;');
-  const shimDir = join(ctx.root, 'shim bin'); mkdirSync(shimDir);
-  writeFileSync(join(shimDir, 'node.cmd'), '@echo off\r\necho invoked>shim-ran\r\n');
-  const { runSessionPreflight } = await api();
-  await assert.rejects(runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx, shimDir) }), { code: 'runtime-unavailable' });
-  assert.equal(existsSync(join(ctx.root, 'shim-ran')), false);
-});
-
-test('OMP uses the kit native Bun path when Node is absent from the child PATH', async t => {
-  const ctx = childPreflight(t, `
-    import { writeFileSync } from 'node:fs';
-    writeFileSync('runtime.json', JSON.stringify({ bun: Boolean(process.versions.bun), cwd: process.cwd() }));
-  `);
-  writeFileSync(join(ctx.root, '.bun-path'), resolveBun(ROOT));
-  const { runSessionPreflight } = await api();
-  await runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx, '') });
-  assert.deepEqual(JSON.parse(readFileSync(join(ctx.root, 'runtime.json'), 'utf8')), { bun: true, cwd: ctx.root });
-});
-
-test('OMP runtime discovery failure cools down and recovers after PATH repair', async t => {
-  const ctx = childPreflight(t, `import { writeFileSync } from 'node:fs'; writeFileSync('started', 'yes');`);
-  const { createSessionPreflight, runSessionPreflight } = await api();
-  let time = 1000, attempts = 0;
-  const env = runtimeEnv(ctx, '');
-  const ensure = createSessionPreflight({ now: () => time, ttlMs: 100, health: async () => false, run: () => {
-    attempts++;
-    return runSessionPreflight({ root: ctx.root, env });
-  } });
-  await assert.rejects(ensure(), { code: 'runtime-unavailable' });
-  env.PATH = dirname(process.execPath);
-  await ensure();
-  assert.equal(attempts, 1);
-  assert.equal(existsSync(join(ctx.root, 'started')), false);
-  time += 101;
-  await Promise.all([ensure(), ensure()]);
-  assert.equal(attempts, 2);
-  assert.equal(readFileSync(join(ctx.root, 'started'), 'utf8'), 'yes');
+  const { PREFLIGHT_WARNINGS } = await api();
+  assert.equal(await runExtension(ctx),
+    `[zcode-autostart] hung: ${PREFLIGHT_WARNINGS.hung}\n[zcode-autostart] auth3012: ${PREFLIGHT_WARNINGS.auth3012}\n`);
 });
 
 for (const [exitCode, category] of [[3, 'foreign'], [5, 'key'], [4, 'startup']]) {
-  test(`OMP reports secret-free ${category} failure without launching another runtime`, async t => {
+  test(`generated OMP reports secret-free ${category} failure without a second launch`, async t => {
     const ctx = childPreflight(t, `
       import { appendFileSync } from 'node:fs';
       appendFileSync('attempts', 'x');
       console.log('SECRET stdout'); console.error('Bearer SECRET stderr'); process.exitCode = ${exitCode};
     `);
-    // A configured fallback must not rerun a child that actually launched.
-    writeFileSync(join(ctx.root, '.bun-path'), process.execPath);
-    const { runSessionPreflight } = await api();
-    await assert.rejects(runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx) }), err => {
-      assert.equal(err.code, category);
-      assert.doesNotMatch(err.message, /SECRET|Bearer/);
-      return true;
-    });
+    assert.match(await runExtension(ctx), new RegExp(`${category}:`));
     assert.equal(readFileSync(join(ctx.root, 'attempts'), 'utf8'), 'x');
   });
 }
 
-test('OMP retries a failed native child only after cooldown and recovers in the same session', async t => {
-  const ctx = childPreflight(t, `
-    import { existsSync, writeFileSync } from 'node:fs';
-    if (!existsSync('attempted')) { writeFileSync('attempted', 'yes'); process.exitCode = 4; }
-    else writeFileSync('recovered', 'yes');
-  `);
-  const { createSessionPreflight, runSessionPreflight } = await api();
-  let time = 1000;
-  const ensure = createSessionPreflight({ now: () => time, ttlMs: 100, health: async () => existsSync(join(ctx.root, 'recovered')), run: () => runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx) }) });
-  await assert.rejects(ensure(), { code: 'startup' });
-  await ensure(); assert.equal(existsSync(join(ctx.root, 'recovered')), false);
-  time += 100; await ensure();
-  assert.equal(readFileSync(join(ctx.root, 'recovered'), 'utf8'), 'yes');
-});
-
-test('OMP bounds hung and noisy preflight children without exposing their output', async t => {
-  const { runSessionPreflight } = await api();
+test('generated OMP bounds hung and noisy children and diagnoses missing files/runtimes', async t => {
   const hung = childPreflight(t, 'setInterval(() => {}, 1000);');
-  await assert.rejects(runSessionPreflight({ root: hung.root, env: runtimeEnv(hung), timeoutMs: 150 }), { code: 'timeout' });
+  assert.match(await runExtension(hung, { timeoutMs: 150 }), /timeout:/);
   const noisy = childPreflight(t, `process.stdout.write('SECRET'.repeat(20000));`);
-  await assert.rejects(runSessionPreflight({ root: noisy.root, env: runtimeEnv(noisy) }), err => {
-    assert.equal(err.code, 'output-limit');
-    assert.doesNotMatch(err.message, /SECRET/);
-    return true;
-  });
+  assert.match(await runExtension(noisy), /output-limit:/);
   rmSync(join(noisy.root, 'cli', 'heal.mjs'));
-  await assert.rejects(runSessionPreflight({ root: noisy.root, env: runtimeEnv(noisy) }), { code: 'installation' });
+  assert.match(await runExtension(noisy), /installation:/);
+  const missing = childPreflight(t, 'process.exitCode = 0;');
+  assert.match(await runExtension(missing, { runtime: join(missing.root, 'missing-runtime') }), /runtime-unavailable:/);
 });
 
-test('OMP child preflight refuses a real foreign listener without quota calls or pid mutation', async t => {
+test('generated OMP refuses a real foreign listener without quota calls or pid mutation', async t => {
   const ctx = fixture(t); const hits = await mock(t, ctx, { foreign: true });
   cpSync(join(ROOT, 'cli'), join(ctx.root, 'cli'), { recursive: true });
   cpSync(join(ROOT, 'lib'), join(ctx.root, 'lib'), { recursive: true });
   cpSync(join(ROOT, 'proxy', 'zcode-proxy-manager.mjs'), join(ctx.root, 'proxy', 'zcode-proxy-manager.mjs'));
   const pid = join(ctx.root, 'logs', 'proxy.pid');
   const record = JSON.stringify({ pid: process.pid, startedMs: 1 }); writeFileSync(pid, record);
-  const { runSessionPreflight } = await api();
-  await assert.rejects(runSessionPreflight({ root: ctx.root, env: runtimeEnv(ctx) }), { code: 'foreign' });
+  assert.match(await runExtension(ctx), /foreign:/);
   assert.equal(readFileSync(pid, 'utf8'), record);
   assert.deepEqual(hits, ['/health']);
   const response = await fetch(`http://127.0.0.1:${ctx.port()}/still-alive`);
   assert.equal(response.status, 401, 'the foreign listener still serves requests');
 });
+
 
 test('generated OMP extension recovers after disk module repair without restarting its Bun host', async t => {
   const brokenModule = `
@@ -518,13 +454,7 @@ test('generated OMP extension recovers after disk module repair without restarti
     }
   `;
   const ctx = childPreflight(t, brokenModule);
-  mkdirSync(join(ctx.root, 'proxy'));
-  cpSync(join(ROOT, 'proxy', 'zcode-proxy-autostart.ts'), join(ctx.root, 'proxy', 'zcode-proxy-autostart.ts'));
-  const agent = join(ctx.home, '.omp', 'agent'); mkdirSync(agent, { recursive: true });
-  writeFileSync(join(agent, 'models.yml'), 'providers:\n  unrelated:\n    apiKey: keep\n');
-  writeFileSync(join(agent, 'config.yml'), 'theme: dark\n');
-  omp.apply({ ...ctx, proxySrc: join(ROOT, 'zcode-proxy-src'), port: () => 8457 }, { touch() {} }, () => {});
-  const extension = join(agent, 'extensions', 'zcode-proxy-autostart.ts');
+  const extension = generateExtension(ctx, 8457);
   const runner = join(ctx.root, 'extension-runner.mjs');
   writeFileSync(runner, `
     import assert from 'node:assert/strict';

@@ -317,7 +317,7 @@ test("task lifecycle: start → events → wait → complete → result", async 
     assert.equal(result.status, "completed");
     assert.equal(result.responseText, "FAKE-OK");
     assert.equal(result.partial, false);
-    assert.ok(result.usage.cumulative.totalTokens >= 0);
+    assert.equal(result.usage.cumulative.totalTokens, 42);
     assert.equal(result.requestedModel, null);
     assert.match(result.effectiveModel.modelId, /FAKE-Main|FAKE-Lite/);
     assert.ok(result.fileChanges.modified.includes("fixture-output.txt"));
@@ -329,6 +329,8 @@ test("task lifecycle: start → events → wait → complete → result", async 
     const parsed = JSON.parse(text);
     assert.equal(parsed.taskId, started.taskId);
     assert.equal(parsed.status, "completed");
+    const session = await c.result("resources/read", { uri: `zcode://sessions/${result.sessionId}` });
+    assert.equal(JSON.parse(session.contents[0].text).projection.sessionId, result.sessionId);
   } finally {
     await c.stop();
   }

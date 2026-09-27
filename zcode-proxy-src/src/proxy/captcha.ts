@@ -16,13 +16,11 @@
 import { requestCaptchaSolverRecycle, shutdownCaptchaSolver } from "./captcha-solver.js";
 import { registerCaptchaRuntime } from "../runtime/health-monitor.js";
 import {
-  configureCaptchaPool,
   getCaptchaPoolStats,
   prefillCaptchaPool,
   takeCaptchaToken,
   startCaptchaPoolRefill,
   stopCaptchaPool,
-  urgentCaptchaRefill,
   type CaptchaConfig,
 } from "./captcha-pool.js";
 import { CAPTCHA_CHALLENGE_HEADER } from "./captcha-retry.js";
@@ -106,20 +104,6 @@ export async function startCaptchaPool(appVersion: string): Promise<void> {
     // loop: it is what runs the storm probe and resumes after a pause.
     startCaptchaPoolRefill(cfg as CaptchaConfig);
   }
-}
-
-/** Request an urgent refill burst (e.g. after a challenge/retry). */
-export function urgentCaptcha(): void {
-  if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA !== '1') return;
-  urgentCaptchaRefill();
-}
-
-export function captchaPoolStats(): { ready: number; target: number; activeSolves: number } {
-  return getCaptchaPoolStats();
-}
-
-export function configureCaptchaSolving(opts: Parameters<typeof configureCaptchaPool>[0]): void {
-  configureCaptchaPool(opts);
 }
 
 export const RETRY_HEADERS = { PARAM: CAPTCHA_HEADER, REGION: REGION_HEADER };

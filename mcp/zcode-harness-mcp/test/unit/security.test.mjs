@@ -5,9 +5,47 @@ import { redactDeep, safeJsonStringify } from "../../dist/security/redact.js";
 import { WorkspaceAllowlist, normalizeWorkspacePath, resolveInsideWorkspace, isWithinRoot } from "../../dist/security/allowlist.js";
 import { parseSessionId, workspaceRef } from "../../dist/protocol/types.js";
 import { parseConfig } from "../../dist/config.js";
+import { readResource } from "../../dist/mcp/resources.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+test("session resources use their own runtime and check scope before reading", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "resource-scope-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const allowlist = new WorkspaceAllowlist([root]);
+  const contexts = ["first", "second"].map(owner => ({
+    allowlist,
+    runtime: {
+      async call(method) {
+        assert.equal(method, "session/list");
+        return { sessions: [{ sessionId: "sess_shared", workspace: { workspacePath: root } }] };
+      },
+      async ipcSessionRead(sessionId) {
+        assert.equal(sessionId, "sess_shared");
+        return { owner, apiKey: "synthetic-secret" };
+      },
+    },
+  }));
+  for (const i of [0, 1, 0]) {
+    const resource = await readResource(contexts[i], "zcode://sessions/sess_shared");
+    assert.deepEqual(JSON.parse(resource.contents[0].text), {
+      owner: i === 0 ? "first" : "second", apiKey: "<redacted>",
+    });
+  }
+  let reads = 0;
+  const denied = {
+    allowlist,
+    runtime: {
+      async call() {
+        return { sessions: [{ sessionId: "sess_foreign", workspace: { workspacePath: path.dirname(root) } }] };
+      },
+      async ipcSessionRead() { reads++; },
+    },
+  };
+  await assert.rejects(readResource(denied, "zcode://sessions/sess_foreign"), /allowlist/);
+  assert.equal(reads, 0);
+});
 
 test("redactDeep masks secret keys and token shapes", () => {
   const input = {

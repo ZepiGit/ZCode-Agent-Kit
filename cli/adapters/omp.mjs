@@ -139,10 +139,6 @@ function editConfigYaml(ctx, text, extensionPath) {
   return { text: changed ? String(doc) : text, changed };
 }
 
-export function yamlSingleQuoted(s) {
-  return `'${s.replace(/'/g, "''")}'`;
-}
-
 function ompProviderBlock(ctx, port, indent = "  ") {
   const rootPath = ctx.root.replace(/\\/g, "/");
   const block = `${MARKER_BEGIN}
@@ -217,7 +213,6 @@ export default {
   label: "OMP / Oh My Pi",
   protocol: "OMP native provider (anthropic-messages + output_config.effort)",
   primarySource: "https://omp.sh/docs/custom-models (checked 2026-09-13)",
-  detect: (home) => existsSync(join(home, ".omp", "agent")),
 
   apply(ctx, tx, log) {
     const agentDir = join(ctx.home, ".omp", "agent");

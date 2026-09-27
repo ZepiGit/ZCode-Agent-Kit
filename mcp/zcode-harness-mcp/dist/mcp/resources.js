@@ -46,10 +46,8 @@ export async function readResource(ctx, uri) {
         const sessionId = parseSessionId(mSession[1]);
         if (!sessionId)
             throw new Error(`invalid session id in ${uri}`);
-        const { RuntimeManagerHolder } = await import("./runtime-holder.js");
-        const runtime = RuntimeManagerHolder.get();
-        await sessionInScope(runtime, ctx.allowlist, sessionId);
-        return send(safeJsonStringify(await runtime.ipcSessionRead(sessionId)));
+        await sessionInScope(ctx.runtime, ctx.allowlist, sessionId);
+        return send(safeJsonStringify(await ctx.runtime.ipcSessionRead(sessionId)));
     }
     const mArtifact = uri.match(/^zcode:\/\/artifacts\/(.+)$/);
     if (mArtifact) {

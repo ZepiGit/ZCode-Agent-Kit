@@ -127,7 +127,6 @@ export default {
   label: "Continue",
   protocol: "OpenAI-compatible (provider: openai, apiBase → /v1)",
   primarySource: "https://docs.continue.dev/customize/model-providers/top-level/openai (checked 2026-09-13; schema v1)",
-  detect: (home) => existsSync(join(home, ".continue")),
 
   apply(ctx, tx, log) {
     const configYaml = join(ctx.home, ".continue", "config.yaml");

@@ -4,13 +4,6 @@ import { validateArguments } from "./validate.js";
 import { sessionInScope, sessionWorkspaceOf, workspaceIdentity } from "../security/session.js";
 import { workspaceRef } from "../protocol/types.js";
 import { redactDeep, safeJsonStringify } from "../security/redact.js";
-const log = {
-    info: (msg, data) => {
-        /* tool calls are logged at the server layer */
-        void msg;
-        void data;
-    },
-};
 function str(args, key, required = true) {
     const v = args[key];
     if (typeof v === "string" && v.length > 0)

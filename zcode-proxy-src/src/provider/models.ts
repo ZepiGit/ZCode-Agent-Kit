@@ -57,8 +57,3 @@ export const MODELS: ModelDef[] = [
     efforts: ["low", "high", "max"],
   },
 ];
-
-/** Registry lookup; unknown ids get null (callers decide how to be honest about it). */
-export function findModel(id: string): ModelDef | null {
-  return MODELS.find((m) => m.id === id) ?? null;
-}

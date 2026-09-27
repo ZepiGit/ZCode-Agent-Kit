@@ -3,7 +3,6 @@ function cap(id, title, description, backend, direction, availability, implement
 }
 export const BRIDGE_VERSION = "0.1.0";
 export const TARGET_PROTOCOL = "ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher inspected; live validation pending)";
-export const HARNESS_FINGERPRINT = "sha256-16 of bundle, see zcode_health";
 export const CAPABILITIES = [
     // ---- session lifecycle -------------------------------------------------
     cap("session.create", "Create a session", "Create a harness session in a workspace (blocks until runtime preferences are answered).", "session/create", "client_call", "available", "implemented", "live_verified", "zcode_session_create", "live probe: result.session.sessionId + protocol {ZCode Protocol,1}"),

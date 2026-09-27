@@ -54,7 +54,6 @@ export default {
   label: "OpenCode",
   protocol: "OpenAI-compatible (ai-sdk openai-compatible → /v1/chat/completions)",
   primarySource: "https://opencode.ai/docs/providers/ (checked 2026-09-13)",
-  detect: (home) => detectOnPath("opencode") || existsSync(configPath(home)),
 
   apply(ctx, tx, log) {
     const target = configPath(ctx.home);
@@ -120,12 +119,3 @@ export default {
 };
 
 import { dirname } from "node:path";
-import { execFileSync } from "node:child_process";
-function detectOnPath(cmd) {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-}

@@ -35,7 +35,6 @@ export interface IngressTaskRecord {
 
 export interface IngressTask<R extends IngressTaskRecord = IngressTaskRecord> {
   record: R;
-  quietPolls: number;
   turnRevision: number;
   acceptingEvents: boolean;
   accumulatedText: string;
@@ -111,7 +110,6 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
     if (type === "turn.started") {
       if (t.record.state !== "starting") t.record.state = "running";
       t.persist();
-      t.quietPolls = 0;
     } else if (type === "turn.failed") {
       const err = (payload as { error?: { message?: string } }).error;
       const msg = err?.message ?? "turn failed";
@@ -122,7 +120,6 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
       t.persist();
       t.onTerminal();
     } else if (type === "turn.completed") {
-      t.quietPolls = 0;
       void this.checkQuiet(t);
     } else {
       this.ingressDerived(t, type, payload);
@@ -208,7 +205,6 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
         t.persist();
         return;
       }
-      t.quietPolls = 0;
     }
     t.warnings.push("turn.completed but projection never became quiet within the confirmation window");
     rec.state = "unknown";
@@ -217,7 +213,7 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
     t.onTerminal();
   }
 
-  private async captureUsage(t: IngressTask<R>): Promise<void> {
+  async captureUsage(t: IngressTask<R>): Promise<void> {
     try {
       const usage = await this.runtime.ipcSessionUsage(t.record.sessionId);
       t.record.usage = {

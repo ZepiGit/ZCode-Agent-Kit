@@ -28,14 +28,6 @@ export interface ZcodeResponse {
 
 export type ZcodeIncomingMessage = ZcodeRequest | ZcodeNotification | ZcodeResponse;
 
-export function isServerRequest(m: ZcodeIncomingMessage): m is ZcodeRequest {
-  return (m as ZcodeRequest).method !== undefined && (m as ZcodeRequest).id !== undefined;
-}
-
-export function isNotification(m: ZcodeIncomingMessage): m is ZcodeNotification {
-  return (m as ZcodeNotification).method !== undefined && (m as ZcodeRequest).id === undefined;
-}
-
 export interface WorkspaceRef {
   workspaceKey: string;
   workspacePath: string;

@@ -11,7 +11,6 @@ export default {
   label: "Aider",
   protocol: "OpenAI-compatible via OPENAI_API_BASE + openai/<model> mapping",
   primarySource: "https://aider.chat/docs/llms/openai-compat.html (checked 2026-09-13)",
-  detect: (home) => detectOnPath("aider") || detectOnPath("aider-chat"),
 
   apply(ctx, tx, log) {
     ensureDir(ctx, ctx.generated);
@@ -37,13 +36,3 @@ ZCODE_AIDER_DEFAULT_MODEL=openai/glm-5.3
     return [{ name: "aider launcher env", ok: existsSync(join(ctx.generated, "aider-zcode.env")), detail: "generated/aider-zcode.env" }];
   },
 };
-
-import { execFileSync } from "node:child_process";
-function detectOnPath(cmd) {
-  try {
-    execFileSync(process.platform === "win32" ? "where" : "which", [cmd], { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
-}

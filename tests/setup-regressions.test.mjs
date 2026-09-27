@@ -6,7 +6,6 @@ import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, cpSync } fr
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
-import { yamlSingleQuoted } from "../cli/adapters/omp.mjs";
 import { createCtx, ensureRuntimeFiles } from "../cli/context.mjs";
 
 const KIT = join(import.meta.dirname, "..");
@@ -206,11 +205,6 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
   } finally {
     rmSync(base, { recursive: true, force: true });
   }
-});
-
-test("yamlSingleQuoted escapes apostrophes (paths with quotes cannot break YAML)", () => {
-  assert.equal(yamlSingleQuoted("C:/Users/o'brien/kit/x.mjs"), "'C:/Users/o''brien/kit/x.mjs'");
-  assert.equal(yamlSingleQuoted("C:/plain/path.mjs"), "'C:/plain/path.mjs'");
 });
 
 // Models the real-world migration case: a machine with the previous-generation
