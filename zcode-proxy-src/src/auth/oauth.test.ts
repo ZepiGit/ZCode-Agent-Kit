@@ -6,7 +6,6 @@
  * flow (localhost callback + token exchange). All upstream calls are mocked
  * via `fetchImpl` injection.
  *
- * @see _reverse/NOTEPAD.md "Method 1: OAuth Flow"
  */
 import { describe, it, expect } from "bun:test";
 import { ZaiOAuthClient, BigmodelOAuthClient, parsePastedCallbackUrl } from "./oauth.js";

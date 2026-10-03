@@ -1,6 +1,5 @@
 /**
  * OpenAI-format route handlers: /v1/chat/completions + /v1/models.
- * @see .omo/plans/zcode-proxy.md Task 7
  */
 import { proxyRequest, type ProxyHandlerOptions } from "../proxy/handler.js";
 import { MODELS } from "../provider/models.js";

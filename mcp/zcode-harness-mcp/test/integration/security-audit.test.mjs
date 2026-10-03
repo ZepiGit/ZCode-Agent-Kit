@@ -1,5 +1,5 @@
 /**
- * Audit regressions (D-01, D-02, D-04, D-05, D-07, D-09, D-11, V3-04):
+ * Security regressions:
  * every scenario is driven through the real MCP interface against the fixture
  * harness. The fixture seeds one session in a NON-allowlisted workspace.
  */

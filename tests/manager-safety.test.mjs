@@ -1,4 +1,4 @@
-// Manager safety proofs with harmless mock processes (audit §7):
+// Manager safety proofs with harmless mock processes:
 //   - a foreign service on the port is never killed
 //   - an unverifiable identity (no key) never triggers a kill
 //   - a reused pid (start time mismatch) never triggers a kill
@@ -147,7 +147,7 @@ test("stop is fail-closed when the live start time is undeterminable (start-unkn
   try {
     writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: dummy.pid, startedMs: Date.now() }) + "\n");
     // Platform limitation simulated: the start time cannot be queried at all —
-    // PID reuse cannot be ruled out, so the kill must be refused (audit §7).
+    // PID reuse cannot be ruled out, so the kill must be refused.
     const m = createManager({ root, home: TMP, processStartMsImpl: () => null });
     const code = await m.stop();
     assert.equal(code, 4, "undeterminable start time must refuse the kill, not proceed");

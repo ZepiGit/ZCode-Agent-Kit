@@ -8,6 +8,7 @@
  */
 import {
   existsSync,
+  readdirSync,
   mkdirSync,
   readFileSync,
   unlinkSync,
@@ -15,7 +16,7 @@ import {
   rmSync,
   renameSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { homedir, hostname } from "node:os";
 import { randomUUID } from "node:crypto";
 import {
@@ -271,20 +272,47 @@ function parseLockRecord(raw: string): LockRecord | undefined {
 
 function ownerIsAlive(record: LockRecord): boolean {
   if (record.host !== hostname()) return true;
+  if (record.pid === process.pid) return true;
+  let processExists = true;
+  try {
+    process.kill(record.pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
+    processExists = true;
+  }
   if (record.processStartToken !== undefined) {
     const current = processStartToken(record.pid);
     if (current !== undefined && current !== record.processStartToken) return false;
-    // Without a comparable start token, fail closed. PID alone is not enough
-    // to prove ownership after process reuse, including for our own PID.
-    if (current === undefined) return true;
+    // A live process whose start time cannot be read is kept as the owner.
+    // ESRCH above already proved that a crashed process is gone.
+    return processExists;
   }
-  if (record.pid === process.pid) return true;
+  return processExists;
+}
+
+function abandonedTempFiles(path: string): string[] {
+  const prefix = `${basename(path)}.tmp-`;
+  const files: string[] = [];
   try {
-    process.kill(record.pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
+    for (const name of readdirSync(dirname(path))) {
+      if (!name.startsWith(prefix)) continue;
+      const match = name.slice(prefix.length).match(/^(\d+)-/);
+      if (!match) continue;
+      const pid = Number(match[1]);
+      if (Number.isInteger(pid) && pid > 0 && !ownerIsAlive({ pid, host: hostname(), nonce: "temp-file-owner-123456", createdAt: 0 })) {
+        files.push(join(dirname(path), name));
+      }
+    }
+  } catch {}
+  return files;
+}
+
+function removeAbandonedTempFiles(path: string): number {
+  let removed = 0;
+  for (const file of abandonedTempFiles(path)) {
+    try { unlinkSync(file); removed++; } catch {}
   }
+  return removed;
 }
 
 /**
@@ -309,6 +337,7 @@ export function recoverAccountStoreLock(pathOrOptions: string | AccountStoreOpti
     const quarantine = `${lock}.recovered-${process.pid}-${Math.random().toString(16).slice(2)}`;
     renameSync(lock, quarantine);
     try { unlinkSync(quarantine); } catch {}
+    removeAbandonedTempFiles(path);
     return true;
   } catch { return false; }
 }
@@ -323,18 +352,27 @@ function acquireLock(path: string): () => void {
     createdAt: Date.now(),
     ...(processStartToken(process.pid) === undefined ? {} : { processStartToken: processStartToken(process.pid) }),
   };
-  try {
-    writeFileSync(lock, JSON.stringify(record), { encoding: "utf8", mode: 0o600, flag: "wx" });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      let detail = "account store is locked by another process";
-      try {
-        const owner = parseLockRecord(readFileSync(lock, "utf8"));
-        if (owner && !ownerIsAlive(owner)) detail = "account store lock owner is gone; run explicit lock recovery";
-      } catch {}
-      throw new AccountStoreError("locked", detail);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(lock, JSON.stringify(record), { encoding: "utf8", mode: 0o600, flag: "wx" });
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw new AccountStoreError("persistence", `cannot create account store lock ${lock}: ${(error as Error).message}`);
+      }
+      let owner: LockRecord | undefined;
+      try { owner = parseLockRecord(readFileSync(lock, "utf8")); } catch {}
+      const ownerAlive = owner ? ownerIsAlive(owner) : undefined;
+      if (attempt === 0 && owner && ownerAlive === false && recoverAccountStoreLock(path, owner.nonce)) continue;
+      const ownerText = owner
+        ? ownerAlive === false
+          ? ` (owner pid ${owner.pid} is gone)`
+          : ownerAlive === true
+            ? ` (owner pid ${owner.pid}${owner.host === hostname() ? " is active" : ` on ${owner.host}`})`
+            : " (owner record is unreadable)"
+        : "";
+      throw new AccountStoreError("locked", `account store lock present at ${lock}${ownerText}; run \"zcode-kit accounts unlock\"`);
     }
-    throw new AccountStoreError("persistence", `cannot create account store lock: ${(error as Error).message}`);
   }
   return () => {
     try {
@@ -345,9 +383,46 @@ function acquireLock(path: string): () => void {
       unlinkSync(lock);
     } catch (error) {
       // An unexpected lock disappearance must not hide a successful mutation.
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        process.stderr.write(`[accounts] warning: could not release lock ${lock}: ${(error as Error).message}\n`);
+      }
     }
   };
+}
+
+export interface AccountStoreUnlockResult {
+  recovered: boolean;
+  removedTempFiles: number;
+  forced: boolean;
+}
+
+/**
+ * Remove a stale account-store lock through the same atomic quarantine path
+ * used by automatic recovery. `force` is an explicit operator override for a
+ * lock whose owner may still be running; it is never used by normal writes.
+ */
+export function unlockAccountStore(
+  pathOrOptions: string | AccountStoreOptions = {},
+  force = false,
+): AccountStoreUnlockResult {
+  const path = typeof pathOrOptions === "string" ? pathOrOptions : accountStorePath(pathOrOptions.path);
+  const lock = lockPath(path);
+  let recovered = false;
+  if (force) {
+    try {
+      const quarantine = `${lock}.forced-${process.pid}-${Math.random().toString(16).slice(2)}`;
+      renameSync(lock, quarantine);
+      try { unlinkSync(quarantine); } catch {}
+      recovered = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new AccountStoreError("persistence", `cannot remove account store lock ${lock}: ${(error as Error).message}`);
+      }
+    }
+  } else {
+    recovered = recoverAccountStoreLock(path);
+  }
+  return { recovered, removedTempFiles: removeAbandonedTempFiles(path), forced: force };
 }
 
 async function readStoreSnapshot(path: string): Promise<AccountStoreSnapshot> {

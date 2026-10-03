@@ -1,6 +1,6 @@
 /**
  * ZCode system-prompt assembly — a faithful mirror of the desktop client's
- * ContextBuilder (ZCode 3.11.2, `_reverse/zcode.cjs` `Hre`/`nct`).
+ * ContextBuilder (ZCode 3.11.2).
  *
  * The gateway does content inspection — if it doesn't see the ZCode identity
  * blocks in the `system` field, it rejects with 3012 "method not allowed".
@@ -42,7 +42,6 @@
  * the single-file binary via the json import attribute).
  *
  * @see zcode_system.json
- * @see PROMPT.md
  */
 // Inlined as a build-time constant (Bun `json` import attribute / esbuild json
 // loader) so it ships inside the single-file compiled binary — a runtime

@@ -1,6 +1,5 @@
 /**
  * Type definitions for OpenAI and Anthropic API formats.
- * @see .omo/plans/zcode-proxy.md Task 5
  * @see https://platform.openai.com/docs/api-reference/chat
  * @see https://docs.anthropic.com/en/api/messages
  */

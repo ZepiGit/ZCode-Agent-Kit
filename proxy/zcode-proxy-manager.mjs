@@ -231,7 +231,7 @@ export function createManager({
         if (m) bootTimeMs = Number(m[1]) * 1000;
       }
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-      const starttime = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19]);
+      const starttime = Number(stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/)[19]);
       if (Number.isFinite(starttime) && bootTimeMs !== null) {
         return bootTimeMs + (starttime * 1000) / 100; // CLK_TCK is 100 on Linux
       }
@@ -729,7 +729,7 @@ try {
       return 4;
     }
     if (verdict === "start-unknown") {
-      // Fail-closed (audit §7): when the live start time cannot be determined,
+      // Fail-closed: when the live start time cannot be determined,
       // PID-reuse cannot be ruled out — never kill on doubtful evidence.
       logLine(`ERROR: start time of pid ${pidInfo.pid} is not determinable — PID reuse cannot be ruled out, refusing to kill. Find the process manually: netstat -ano | findstr :${portStr}`);
       return 4;

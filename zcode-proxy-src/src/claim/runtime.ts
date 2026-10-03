@@ -103,7 +103,7 @@ export async function runClaimCli(config: ProxyConfig, mode: "list" | "now"): Pr
   } catch (err) {
     if (err instanceof ClaimPreviewError && err.status === 404) {
       console.log("No claimable plans: the campaign endpoint is not deployed yet (404).");
-      console.log("Weekend campaigns typically go live shortly before the window — keep the proxy");
+      console.log("Campaigns typically go live shortly before their window — keep the proxy");
       console.log("serving with claim.enabled, or re-run this command later.");
       return;
     }
@@ -118,7 +118,15 @@ export async function runClaimCli(config: ProxyConfig, mode: "list" | "now"): Pr
   if (mode === "list") return;
 
   const wanted = config.claim.planId.trim();
-  const target = wanted ? plans.find((p) => p.planId === wanted) : [...plans].sort((a, b) => b.priority - a.priority)[0];
+  const builderEvent = plans.find((plan) => {
+    const text = [plan.planId, plan.name, plan.description,
+      ...plan.entitlements.flatMap((e) => [e.entitlementId, e.showName, ...e.capabilities])]
+      .join(" ").toLowerCase();
+    return /builder[\s_-]*event|event[\s_-]*builder|builder[\s_-]*(?:token|grant)/u.test(text);
+  });
+  const target = wanted
+    ? plans.find((p) => p.planId === wanted)
+    : builderEvent ?? [...plans].sort((a, b) => b.priority - a.priority)[0];
   if (!target) {
     console.error(`Configured claim.planId "${wanted}" not in the preview list.`);
     process.exit(1);

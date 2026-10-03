@@ -1,4 +1,4 @@
-// Installer regression proofs (audit H2): the POSIX installer must keep
+// Installer regression proofs: the POSIX installer must keep
 // working on stock macOS (no coreutils sha256sum) and on Apple Silicon
 // (native arm64 bun), and the checksum helper must actually fall back.
 import { test } from "node:test";

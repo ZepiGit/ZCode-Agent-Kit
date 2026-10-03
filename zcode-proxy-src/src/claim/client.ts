@@ -1,7 +1,8 @@
 /**
- * HTTP client for ZCode's manual-claim billing endpoints (weekend plans).
+ * HTTP client for ZCode's manual-claim billing endpoints (campaign plans,
+ * including Builder Event token grants when advertised by the service).
  *
- * Mirrors the ZCode 3.10 desktop client's `getManualClaimPlanPreviews` /
+ * Mirrors the ZCode desktop client's `getManualClaimPlanPreviews` /
  * `claimManualPlan`:
  *   - `GET  {origin}/api/v1/zcode-plan/billing/preview?app_version=&platform=`
  *   - `POST {origin}/api/v1/zcode-plan/billing/claim`  body `{plan_id}`
@@ -10,14 +11,13 @@
  * verify param/region (same token source as the start-plan gateway),
  * `X-ZCode-App-Version` and `X-Platform` (part of server-side eligibility).
  *
- * Since the 0828 weekend campaign the gateway REJECTS preview/claim with
+ * The gateway rejects preview/claim with
  * biz 3001 "parameter error" unless the request carries a UUID-format
  * `X-Device-Mid` (empirically verified 2026-08-28: only that header is
  * validated; non-UUID values still 3001). Pass `identity` so both calls
  * carry the full identity set minus `X-ZCode-Agent` — same header set the
  * endpoint-routing config fetch uses for zcode.z.ai control-plane calls.
  *
- * @see _reverse/NOTEPAD.md (billing/claim endpoints section).
  */
 import type { ClaimablePlan, ClaimOutcome, PlanEntitlement } from "./types.js";
 import { classifyClaimCode } from "./types.js";

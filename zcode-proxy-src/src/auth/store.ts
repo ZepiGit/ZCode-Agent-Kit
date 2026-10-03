@@ -1,6 +1,5 @@
 /**
  * Encrypted file-based credential store.
- * @see .omo/plans/zcode-proxy.md Task 14
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, renameSync, realpathSync } from "node:fs";
 import { join, dirname, win32 } from "node:path";
@@ -13,7 +12,7 @@ const ENV_SECRET = "ZCODE_PROXY_CREDENTIAL_SECRET";
 /** Optional high-entropy key material supplied by a secret manager. */
 const ENV_MASTER_KEY = "ZCODE_PROXY_CREDENTIAL_MASTER_KEY";
 export const CREDENTIAL_STORE_FORMAT_VERSION = 2;
-// Audit H6: test suites must never run against the real login store. The
+// Test suites must never run against the real login store. The
 // store file path is injectable via env; when unset the historical location
 // is used and behavior is unchanged.
 const ENV_STORE_PATH = "ZCODE_PROXY_CREDENTIALS_PATH";
@@ -24,7 +23,7 @@ function storeFile(): string {
 }
 
 /**
- * Derive the AES-GCM key as SHA-256(seed) (audit R2-13). The previous XOR-fold
+ * Derive the AES-GCM key as SHA-256(seed) . The previous XOR-fold
  * construction was a pseudo-KDF: a seed shorter than 32 bytes left zero blocks
  * in the key. Scope note: on default machine-derived seeds the security gain
  * is ~0 (any same-user process can re-derive the seed either way, 0o600 only

@@ -13,7 +13,7 @@ const PREFLIGHT = ROOT + "/cli/heal.mjs";
 const FAILURE_DETAILS: Record<string, string> = JSON.parse("__ZCODE_OM_FAILURE_DETAILS__");
 const WARNINGS: Record<string, string> = JSON.parse("__ZCODE_OM_WARNINGS__");
 // Above the manager's bounded wait: do not interrupt normal detached-child
-// bookkeeping (audit F-10). All output is captured; -p stdout is model-only.
+// bookkeeping. All output is captured; -p stdout is model-only.
 const START_TIMEOUT_MS = 120_000;
 const HEALTH_TTL_MS = 60_000;
 

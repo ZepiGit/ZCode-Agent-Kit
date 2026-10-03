@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir, hostname } from "node:os";
 import { join } from "node:path";
 import {
@@ -10,6 +10,7 @@ import {
   loadAccountStore,
   removeAccount,
   saveAccountStore,
+  updateAccountStore,
   loadAccountStoreSnapshot,
   recoverAccountStoreLock,
   duplicateCredentialGroups,
@@ -82,6 +83,31 @@ describe("account store", () => {
     clearAccountStore();
     writeFileSync(`${path}.lock`, "{pid: 1}", { encoding: "utf8", flag: "w" });
     await expect(saveAccountStore([])).rejects.toMatchObject({ code: "locked" });
+  });
+
+  it("automatically recovers a dead lock and removes its abandoned temp file", async () => {
+    mkdirSync(join(root, "nested"), { recursive: true });
+    const lock = `${path}.lock`;
+    const abandoned = `${path}.tmp-999999-deadbeef`;
+    writeFileSync(lock, JSON.stringify({ pid: 999999, host: hostname(), nonce: "dead-owner-nonce-123456", createdAt: Date.now() }));
+    writeFileSync(abandoned, "orphan");
+
+    await saveAccountStore([profile("recovered")]);
+
+    expect(await loadAccountStore()).toEqual([profile("recovered")]);
+    expect(() => readFileSync(lock)).toThrow();
+    expect(() => readFileSync(abandoned)).toThrow();
+  });
+
+  it("does not let a lock-release error mask a successful mutation", async () => {
+    await saveAccountStore([profile("one")]);
+    const lock = `${path}.lock`;
+    await expect(updateAccountStore(async (accounts) => {
+      rmSync(lock, { force: true });
+      mkdirSync(lock);
+      return accounts;
+    })).resolves.toEqual(expect.objectContaining({ revision: 2 }));
+    rmSync(lock, { recursive: true, force: true });
   });
 
   it("uses an authoritative revision and rejects stale compare-and-swap writes", async () => {

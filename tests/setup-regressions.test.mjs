@@ -1,4 +1,4 @@
-// setup.mjs integration regressions against a fake home (audit §12.A lite):
+// setup.mjs integration regressions against a fake home:
 // run 1 applies, run 2 is a no-op, rollback undoes run 1 exactly.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -148,7 +148,7 @@ test("setup refuses to write user configs from a checkout without opt-in", () =>
   assert.equal(existsSync(join(home, ".omp", "agent", "extensions")), false, "nothing written into the fake home");
 });
 
-// Audit H3: `zcode-kit update` ends with a re-setup, which used to die on the
+// `zcode-kit update` ends with a re-setup, which used to die on the
 // checkout-write guard — update requires a checkout, yet could never finish on
 // one. Explicitly running `update` is itself the opt-in, so cmdUpdate sets
 // ZCODE_KIT_ALLOW_CHECKOUT=1 for its own re-setup step. Proven end-to-end

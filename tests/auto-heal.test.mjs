@@ -283,7 +283,7 @@ test('manager doctor honors isolated ZCODE_PROXY_CREDENTIALS_PATH', async t => {
   try { await createManager({ root: ctx.root, home: ctx.home }).doctor(); }
   finally { console.log = original; if (previous === undefined) delete process.env.ZCODE_PROXY_CREDENTIALS_PATH; else process.env.ZCODE_PROXY_CREDENTIALS_PATH = previous; }
   // The explicit store path is honored, and a file that merely exists is no
-  // longer reported as a working credential store (audit F-05).
+  // longer reported as a working credential store.
   const line = messages.find(m => /^\w+\s+credentials store/.test(m));
   assert.ok(line, messages.join('\n'));
   assert.match(line, /ZCODE_PROXY_CREDENTIALS_PATH \(explicit store\)/);

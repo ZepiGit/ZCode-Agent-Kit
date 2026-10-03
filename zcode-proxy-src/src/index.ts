@@ -1,6 +1,5 @@
 /**
  * Entry point — load config, create auth manager, start proxy server.
- * @see .omo/plans/zcode-proxy.md Task 7
  */
 import { loadConfig } from "./config/loader.js";
 import { createStoredAuthManagerWithAccounts } from "./auth/runtime.js";
@@ -34,6 +33,7 @@ import {
   duplicateCredentialGroups,
   sameIdentityGroups,
   rememberAccount,
+  unlockAccountStore,
 } from "./auth/account-store.js";
 import { createAccountRotator } from "./auth/account-rotator.js";
 import { accountIdentity } from "./auth/account-identity.js";
@@ -177,6 +177,8 @@ Usage:
                                     Read-only encrypted-pool/config diagnostics
   zcode-proxy auth accounts migrate
                                     Explicitly migrate legacy encrypted pool data
+  zcode-proxy auth accounts unlock [--force]
+                                    Recover an abandoned account-store lock
   zcode-proxy auth accounts quota
                                     Live pool-wide quota overview (requires running proxy)
   zcode-proxy auth accounts health [--json]
@@ -185,7 +187,7 @@ Usage:
                                     account (15 s cached); no inference, captcha or token refresh
   zcode-proxy auth accounts --live
                                     Authenticated live runtime status (redacted)
-  zcode-proxy claim [list|now]      List / claim weekend-plan trial packages
+  zcode-proxy claim [list|now]      List / claim campaign token packages
   zcode-proxy version               Show version
   zcode-proxy help                  Show this help
 
@@ -235,8 +237,20 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   if (debug) printDebugBanner(config, path, cred);
 
   const server = await startServer(buildServerOptions(config, auth, debug));
+  let claimScheduler: { stop(): void } | null = null;
   const url = `http://${server.hostname}:${server.port}`;
   console.log(`zcode-proxy listening on ${url}`);
+  const configuredCaptchaProxy = process.env.ZCODE_PROXY_UPSTREAM_PROXY?.trim();
+  let egress = "direct";
+  if (configuredCaptchaProxy) {
+    try {
+      const parsed = new URL(configuredCaptchaProxy);
+      egress = `explicit proxy ${parsed.protocol}//${parsed.hostname}${parsed.port ? `:${parsed.port}` : ""}`;
+    } catch {
+      egress = "explicit proxy (invalid URL; requests will fail)";
+    }
+  }
+  console.log(`  captcha egress: ${egress}`);
   startEventLoopMonitor();
   installWatchdog();
   const memoryGuard = new MemoryGuard({
@@ -247,6 +261,8 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
       if (!(await spawnRespawnHook("memory"))) return false;
       // The manager waits for this pid to exit before starting the
       // replacement; give in-flight responses a bounded chance to finish.
+      claimScheduler?.stop();
+      claimScheduler = null;
       shutdownCaptchaRuntime();
       const forceExit = setTimeout(() => process.exit(0), 10_000);
       forceExit.unref();
@@ -269,8 +285,8 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   if (config.claim.enabled && config.claim.auto) {
     import("./claim/runtime.js")
       .then((m) => {
-        m.startAutoClaim(config, auth);
-        console.log(`  claim: auto ON (poll ${Math.round(config.claim.pollIntervalMs / 1000)}s)`);
+        claimScheduler = m.startAutoClaim(config, auth);
+        console.log(`  claim: Builder Event auto-claim ON (poll ${Math.round(config.claim.pollIntervalMs / 1000)}s)`);
       })
       .catch((err) => console.error(`[claim] scheduler failed to start: ${(err as Error).message}`));
   }
@@ -289,6 +305,8 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
   const stop = (): void => {
     if (stopping) return;
     stopping = true;
+    claimScheduler?.stop();
+    claimScheduler = null;
     shutdownCaptchaRuntime();
     void flushAccountMetadata(auth).finally(() => server.stop(true));
   };
@@ -381,6 +399,8 @@ async function runAndroid(): Promise<void> {
     if (!s) return { ok: false, error: "not_running" };
     try {
       s.stop(false);
+      claimScheduler?.stop();
+      claimScheduler = null;
       serverRef.current = null;
       console.log("zcode-proxy stopped");
       return { ok: true };
@@ -431,7 +451,7 @@ async function runAndroid(): Promise<void> {
     import("./claim/runtime.js")
       .then((m) => {
         claimScheduler = m.startAutoClaim(config, auth);
-        console.log(`[claim] auto ON (poll ${Math.round(config.claim.pollIntervalMs / 1000)}s; waits for login)`);
+        console.log(`[claim] Builder Event auto-claim ON (poll ${Math.round(config.claim.pollIntervalMs / 1000)}s; waits for login)`);
       })
       .catch((err) => console.error(`[claim] scheduler failed to start: ${(err as Error).message}`));
   }
@@ -456,6 +476,8 @@ async function runAndroid(): Promise<void> {
     onStopProxy: stopProxy,
     onSetConfig: setConfig,
     onShutdown: async () => {
+      claimScheduler?.stop();
+      claimScheduler = null;
       serverRef.current?.stop(true);
     },
   });
@@ -465,9 +487,11 @@ async function runAndroid(): Promise<void> {
   console.log(`plan: ${config.plan}`);
 
   process.on("SIGINT", () => {
+    claimScheduler?.stop();
     void controlListener.close().then(() => serverRef.current?.stop(true));
   });
   process.on("SIGTERM", () => {
+    claimScheduler?.stop();
     void controlListener.close().then(() => serverRef.current?.stop(true));
   });
 }
@@ -665,7 +689,7 @@ function safeAccountError(err: unknown): string {
   // AccountStoreError messages are intentionally short, but never echo an
   // arbitrary provider/error string in a CLI surface that promises redaction.
   const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code) : "";
-  if (["invalid", "locked", "corrupt", "conflict"].includes(code)) return (err as Error).message;
+  if (["invalid", "locked", "corrupt", "conflict", "persistence"].includes(code)) return (err as Error).message;
   return "account store operation failed";
 }
 
@@ -698,6 +722,32 @@ async function authAccounts(args: string[]): Promise<void> {
       console.log(JSON.stringify({ schemaVersion: 1, source: "offline", migrated: result.migrationPerformed, revision: result.revision, accountCount: result.accounts.length }, null, 2));
     } catch (err) {
       console.error(`Account store migration failed: ${safeAccountError(err)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  if (sub === "unlock") {
+    const force = args.includes("--force");
+    const unknown = args.filter((arg) => arg !== "unlock" && arg !== "--force");
+    if (unknown.length > 0) {
+      console.error("Usage: zcode-proxy auth accounts unlock [--force]");
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const options = accountStoreOptions();
+      const result = unlockAccountStore(options, force);
+      if (!result.recovered && !force) {
+        console.error("No abandoned account-store lock was recovered; a live or unreadable lock requires --force.");
+        process.exitCode = 1;
+        return;
+      }
+      const lockPath = `${getAccountStorePath(options.path)}.lock`;
+      console.log(`${result.forced ? "Forced unlock" : "Unlocked"}: ${lockPath}`);
+      if (result.removedTempFiles > 0) console.log(`Removed abandoned temporary files: ${result.removedTempFiles}`);
+    } catch (err) {
+      console.error(`Account-store unlock failed: ${safeAccountError(err)}`);
       process.exitCode = 1;
     }
     return;
@@ -782,7 +832,7 @@ async function authAccounts(args: string[]): Promise<void> {
   if (sub && sub.startsWith("-")) {
     // `accounts --json` is the common spelling; all flags are handled below.
   } else if (sub !== undefined) {
-    console.error("Usage: zcode-proxy auth accounts [--json] | auth accounts remove ID [--yes] | auth accounts health [--json]");
+    console.error("Usage: zcode-proxy auth accounts [--json] | accounts remove ID [--yes] | accounts unlock [--force] | accounts health [--json]");
     console.error("  health: up to 2 upstream billing requests per unique account (15 s cached); no inference, captcha or token refresh");
     process.exitCode = 2;
     return;

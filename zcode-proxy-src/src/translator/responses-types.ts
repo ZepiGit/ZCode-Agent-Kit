@@ -11,7 +11,6 @@
  * Scope (P1.0): request body, batch response, and streaming SSE events covering
  * text / reasoning / function_call / web_search_call outputs. The streaming
  * event set mirrors what Codex CLI consumes (verified against the Vercel AI SDK
- * Responses provider in `_reverse/zcode.cjs` L1814 and sub2api's bridge).
  */
 
 // ─────────────────────────────────────────────

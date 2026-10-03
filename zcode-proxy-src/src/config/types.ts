@@ -1,6 +1,5 @@
 /**
  * Configuration types for zcode-proxy.
- * @see .omo/plans/zcode-proxy.md Task 2
  */
 
 /** Provider endpoint configuration (one per upstream provider). */
@@ -42,8 +41,7 @@ export interface AuthConfig {
 
 /**
  * Identity headers injected on every upstream request to mimic the ZCode
- * desktop client. Mirrors the `pio` builder in the reverse-engineered bundle
- * (`_reverse/zcode.cjs`); see `_reverse/NOTEPAD.md` "How Credential is Used".
+ * desktop client. Mirrors the client's identity header builder.
  *
  * Resolution: env var (matches ZCode's own convention) → YAML override → default.
  * `appVersion` must be printable ASCII (`/^[\x20-\x7e]+$/`); non-conforming
@@ -113,7 +111,6 @@ export interface McpConfig {
  * credential lacking the JWT makes the route entry return 400
  * `async_credentials_unavailable`.
  *
- * @see _reverse/NOTEPAD.md "Off-Peak / Idle Plan" section for full upstream protocol.
  */
 export interface AsyncConfig {
   /** Enable the `/async/*` routes. Default `false`. */
@@ -137,8 +134,8 @@ export interface AsyncConfig {
 }
 
 /**
- * Manual claim ("weekend plan") — mirrors the ZCode 3.10 desktop client's
- * `manualClaimPlan` feature: periodically list claimable trial plans
+ * Manual claim campaigns — mirrors the ZCode client's `manualClaimPlan`
+ * feature: periodically list claimable plans, including Builder Event token
  * (`GET {origin}/api/v1/zcode-plan/billing/preview`) and, when one is
  * available, claim it (`POST {origin}/api/v1/zcode-plan/billing/claim`) with
  * the OAuth JWT and an Aliyun captcha token. Claimed plans grant Start-Plan
@@ -146,7 +143,6 @@ export interface AsyncConfig {
  *
  * Requires `auth.mode: oauth` (claim uses `Authorization: Bearer ${jwt}`).
  *
- * @see _reverse/NOTEPAD.md "Manual Claim Plan" section for the protocol.
  */
 export interface ClaimConfig {
   /** Enable the claim subsystem (CLI `claim` command + auto scheduler). Default `true`. */
@@ -159,14 +155,14 @@ export interface ClaimConfig {
   pollIntervalMs: number;
   /** Backoff after a failed claim attempt in ms. Default `600000` (10 min). */
   cooldownMs: number;
-  /** Optional `plan_id` to claim; empty string claims the highest-priority preview. Default `""`. */
+  /** Optional `plan_id` to claim; empty prefers Builder Event, then priority. Default `""`. */
   planId: string;
 }
 
 /**
  * Provider endpoint routing — mirrors the ZCode client's
  * `ProviderEndpointRoutingService`: periodically fetch
- * `GET {configUrl}/api/v1/agent/configs` and rewrite matching upstream URLs
+ * `GET {configUrl}/api/v1/client/configs?app_version=&platform=` and rewrite matching upstream URLs
  * per the server-controlled `data.proxyEndpoint.mapping` table. As of
  * 2026-08-19 only the coding-plan Anthropic endpoints are mapped (to
  * `zcode.z.ai/api/v1/ultra[-zai]/...`); resolution is generic so future
@@ -175,21 +171,21 @@ export interface ClaimConfig {
 export interface EndpointRoutingConfig {
   /** Enable URL remapping. Default `true`. */
   enabled: boolean;
-  /** Base origin of the agent-configs endpoint. Default `"https://zcode.z.ai"`. */
+  /** Base origin of the client-configs endpoint. Default `"https://zcode.z.ai"`. */
   origin: string;
 }
 
 /**
  * Client request signing V4 — mirrors the ZCode 3.9.1
- * `ClientRequestSigningV4Signer`. When enabled, the proxy probes the same
- * feature gate the client uses (`GET {origin}/api/v1/agent/configs` →
+ * `ClientRequestSigningV4Signer`. When explicitly enabled, the proxy probes
+ * the legacy compatibility gate at `{origin}/api/v1/client/configs` →
  * `data.codingPlanSignature.enable`) and, only if the server turns the feature
  * on, signs coding-plan upstream requests (handshake + Ed25519 + proof-of-work,
  * with the client's fail-open retry ladder). Start-plan and off-peak paths are
  * permanently exempt.
  */
 export interface ClientSigningConfig {
-  /** Enable gate probing + signing. Default `true`. */
+  /** Enable legacy gate probing + signing. Default `false`. */
   enabled: boolean;
   /** Base origin of the feature-gate endpoint. Default `"https://zcode.z.ai"`. */
   origin: string;

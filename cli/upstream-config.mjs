@@ -44,7 +44,7 @@ export function readProxyTarget(configPath) {
   try { if (configPath && existsSync(configPath)) text = readFileSync(configPath, "utf8"); } catch { text = ""; }
   const top = (key) => text.match(new RegExp(`^${key}:[ \\t]*["']?([A-Za-z0-9._-]+)["']?[ \\t]*(?:#.*)?$`, "m"))?.[1];
   const appVersion = text.match(/^identity:[ \t]*\r?\n(?:[ \t]+.*\r?\n)*?[ \t]+appVersion:[ \t]*["']?([0-9A-Za-z._-]+)["']?/m)?.[1];
-  return { provider: top("provider") ?? "zai", plan: top("plan") ?? "start-plan", appVersion: appVersion ?? "3.11.2", models: configuredModelIds(configPath) };
+  return { provider: top("provider") ?? "zai", plan: top("plan") ?? "start-plan", appVersion: appVersion ?? REFERENCE_APP_VERSION, models: configuredModelIds(configPath) };
 }
 
 function isLoopbackUrl(url) {

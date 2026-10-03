@@ -76,8 +76,8 @@ models:
 identity:
   # Mirrors process.env.ZCODE_APP_VERSION in the ZCode bundle.
   # Must be printable ASCII; non-conforming values fall back to the default.
-  # Default: "3.11.2" (current ZCode release). Override to match your real client.
-  appVersion: "3.11.2"
+  # Default: "3.14.3" (current ZCode release). Override to match your real client.
+  appVersion: "3.14.3"
   # X-Title suffix → "Z Code@{sourceTitle}". Default "cli".
   sourceTitle: "cli"
   # HTTP-Referer URL. Default "https://zcode.z.ai".
@@ -98,8 +98,9 @@ clientIdentity:
   maxSessions: 1024
 
 # Server-controlled upstream URL remapping (mirrors the ZCode client's
-# ProviderEndpointRoutingService). The proxy periodically fetches
-# {origin}/api/v1/agent/configs and rewrites matching upstream URLs per the
+# ProviderEndpointRoutingService). Known official gateway routes are applied
+# immediately; the proxy also periodically fetches
+# {origin}/api/v1/client/configs?app_version=&platform= and rewrites matching upstream URLs per the
 # returned proxyEndpoint.mapping table (currently the coding-plan Anthropic
 # endpoints -> zcode.z.ai ultra endpoints). Fail-open: any fetch/parse error
 # keeps the original URLs. Env override: ZCODE_ENDPOINT_ROUTING=false.
@@ -107,15 +108,16 @@ endpointRouting:
   enabled: true
   origin: "https://zcode.z.ai"
 
-# Client request signing V4 (mirrors the ZCode 3.9.1 ClientRequestSigningV4Signer).
-# When enabled, the proxy probes {origin}/api/v1/agent/configs (cached 1h) and,
+# Legacy client request signing V4 (mirrors the ZCode 3.9.1 client).
+# It is disabled by default because current ZCode releases no longer advertise
+# the gate. When explicitly enabled, the proxy probes {origin}/api/v1/client/configs (cached 1h) and,
 # only if the server sets data.codingPlanSignature.enable=true, signs coding-plan
 # requests: handshake against {provider}/api/paas/c1f3a7e2/v2/client, Ed25519
 # signature + proof-of-work headers on every request, fail-open retry ladder
 # (two 401 VERIFY rejections -> permanent unsigned bypass). Start-plan and
 # off-peak paths are never signed. Env override: ZCODE_CLIENT_SIGNING=false.
 clientSigning:
-  enabled: true
+  enabled: false
   origin: "https://zcode.z.ai"
 
 logging:

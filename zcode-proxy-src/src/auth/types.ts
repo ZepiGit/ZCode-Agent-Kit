@@ -1,7 +1,5 @@
 /**
  * Credential and auth type definitions.
- * @see .omo/plans/zcode-proxy.md Task 4
- * @see _reverse/NOTEPAD.md "How Credential is Used"
  */
 import type { ProviderId } from "../provider/types.js";
 

@@ -1,11 +1,11 @@
 /**
- * Tests for the two resilience behaviors added after the PR #34 review:
+ * Tests for the two resilience behaviors:
  *
  * 1. In-body captcha challenge detection: a start-plan upstream response with
  *    HTTP 400 + {"code":3007,...} in the JSON body (no captcha header) must
  *    be treated as a captcha challenge and retried with a fresh token.
  * 2. Connect-retry freshness: after a connect-level failure, the retried
- *    dispatch must receive a FRESH Request. Review follow-up #1 (PR #34):
+ *    dispatch must receive a FRESH Request.
  *    a `req.bodyUsed === false` assertion is vacuous in a mock (mock fetch
  *    never consumes the body), so freshness is pinned by OBJECT IDENTITY —
  *    the second call must receive a different Request instance.
@@ -149,7 +149,7 @@ describe("dispatchWithConnectRetry — replay safety (C1-02)", () => {
   });
 });
 
-describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
+describe("proxyRequest — start-plan resilience", () => {
   it("retries an in-body 3007 captcha challenge with a fresh token", async () => {
     // Mock the captcha module: config enabled, token take returns distinct
     // tokens per call so we can assert the retry used a FRESH token.
@@ -235,7 +235,7 @@ describe("proxyRequest — start-plan resilience (PR #34 review P1/P3)", () => {
 
   it("retries a connect failure with a FRESH Request (identity-pinned)", async () => {
     // Upstream: first call = connect-level failure (the bug shape), second
-    // call = success. Review follow-up #1 (PR #34): a mock fetch never
+    // call = success. A mock fetch never
     // consumes the Request body, so a `req.bodyUsed === false` assertion is
     // vacuous — it passes even if the handler re-dispatches the SAME Request
     // object. Pin freshness by OBJECT IDENTITY instead: the second call must

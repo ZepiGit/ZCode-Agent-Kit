@@ -1,7 +1,7 @@
 /**
  * HTTP client for ZCode's off-peak ticket-queue backend.
  *
- * Implements the 4 control-plane endpoints documented in `_reverse/NOTEPAD.md`:
+ * Implements the four control-plane endpoints used by the upstream queue:
  *   - `GET  /ticket/availability`        — probe queue availability
  *   - `POST /ticket`                     — take a number (queue entry)
  *   - `POST /ticket/status`              — batch poll ticket states
@@ -11,7 +11,6 @@
  * 4xx on `settle` resolves as success (server already cleaned up — see `settleOne`
  * in the bundle). Other 4xx/5xx throw `OffPeakServerError`.
  *
- * @see _reverse/NOTEPAD.md "Off-Peak / Idle Plan" → "Endpoints" / "Headers"
  */
 import type {
   AvailabilityResult,

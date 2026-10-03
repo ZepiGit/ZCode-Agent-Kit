@@ -1,6 +1,5 @@
 /**
  * Tests for coding plan key resolver.
- * @see .omo/plans/zcode-proxy.md Task 10
  */
 import { describe, it, expect } from "bun:test";
 import { KeyResolver } from "./resolver.js";

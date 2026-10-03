@@ -1,7 +1,7 @@
 /**
  * Regression tests for the GET /quota billing snapshot (routes-quota.ts).
  *
- * Covers the review round for PR #41 commit 66959ae:
+ * Covers the quota response contract:
  *  - the platform/arch fingerprint must be built from real values with env
  *    overrides (never `identity.platform/arch` → "undefined-undefined");
  *  - empty/whitespace env overrides fall back instead of producing `-x64`;
@@ -205,7 +205,7 @@ describe("collectQuotaSnapshot response mapping", () => {
     expect(snap.balances[0].totalUnits).toBe(100);
     expect(snap.balances[0].expiresAt).toBe(1735689600);
     // Unknown/garbage values are null — an invented 0 would make a partially
-    // known balance look exhausted (audit §10: no fabricated zeros).
+    // known balance look exhausted.
     expect(snap.balances[0].usedUnits).toBeNull(); // "x" is garbage
     expect(snap.balances[1].totalUnits).toBeNull(); // NaN
     expect(snap.balances[1].usedUnits).toBeNull(); // null upstream
@@ -304,7 +304,7 @@ describe("handleQuota singleflight + cache", () => {
     clearQuotaCache();
   });
 
-  // Audit backlog: a failed collection propagates to every joiner, is not
+  // A failed collection propagates to every joiner, is not
   // cached, and the next call starts exactly one fresh collection.
   it("a failed collection fans out to joiners and is retried cleanly", async () => {
     clearQuotaCache();
@@ -322,7 +322,7 @@ describe("handleQuota singleflight + cache", () => {
     clearQuotaCache();
   });
 
-  // Audit backlog: the TTL is anchored at COMPLETION, not request start — a
+  // The TTL is anchored at COMPLETION, not request start — a
   // slow collection must still be served fresh from cache immediately after.
   it("TTL starts at completion: slow collection stays cached right after finishing", async () => {
     clearQuotaCache();

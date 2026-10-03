@@ -17,7 +17,6 @@
  * chunked `application/json` response that emits legal leading whitespace during
  * wait (defeats client TCP idle) and writes the final aggregated JSON at the end.
  *
- * @see .omo/plans/async-off-peak-bridge.md §3 for full design.
  */
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";

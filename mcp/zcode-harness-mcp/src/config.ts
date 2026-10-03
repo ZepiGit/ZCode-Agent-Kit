@@ -19,7 +19,7 @@ export interface BridgeConfig {
   /**
    * Whether MCP clients may select the harness "yolo" permission mode
    * (no permission prompts). Off by default: it would let a client bypass
-   * the interaction policy entirely (audit D-02). Operator opt-in only.
+   * the interaction policy entirely. Operator opt-in only.
    */
   allowYolo: boolean;
   /** Bearer token required by HTTP transport (stdio needs none). */

@@ -13,14 +13,14 @@
  * hard-throws there; skipping is a deliberate fail-open deviation. Both
  * providers now issue two-part keys, which sign normally.
  *
- * Full protocol: `_reverse/NOTEPAD.md` "Client Request Signing V4".
+ * Full protocol: the client request signing contract.
  */
 import type { UpstreamHeaderPair } from "./upstream.js";
 import { buildIdentityHeaders, identityCacheKey } from "./identity.js";
 import type { ProxyIdentity } from "../config/types.js";
 
 const DEFAULT_ORIGIN = "https://zcode.z.ai";
-const GATE_PATH = "/api/v1/agent/configs";
+const GATE_PATH = "/api/v1/client/configs";
 const HANDSHAKE_PATH = "/api/paas/c1f3a7e2/v2/client";
 const APP_ID = "zcode";
 const POW_BITS = 8;
@@ -430,7 +430,7 @@ export class ClientSigningManager {
     const now = this.now();
     let outcome: "enabled" | "disabled" | "unavailable";
     try {
-      outcome = await this.fetchGate(cred);
+      outcome = await this.fetchGate();
     } catch {
       state.gateNegUntil = now + GATE_FAILURE_COOLDOWN_MS;
       return false;
@@ -449,9 +449,9 @@ export class ClientSigningManager {
     return state.gateEnabled;
   }
 
-  private async fetchGate(cred: SigningCredential): Promise<"enabled" | "disabled" | "unavailable"> {
-    // sYr (bundle) builds the gate-fetch identity set WITHOUT X-ZCode-Agent and
-    // X-Device-Mid; Bxi appends x-api-key only — this fetch carries no Accept header.
+  private async fetchGate(): Promise<"enabled" | "disabled" | "unavailable"> {
+    // The current client-configs endpoint is public. Never attach the coding
+    // credential to this control-plane request.
     const identityHeaders = Object.fromEntries(
       Object.entries(buildIdentityHeaders(this.identity))
         .filter(([name]) => name !== "X-ZCode-Agent" && name !== "X-Device-Mid"),
@@ -459,10 +459,15 @@ export class ClientSigningManager {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), GATE_TIMEOUT_MS);
     try {
-      const resp = await this.fetchImpl(this.gateUrl, {
+      const gateUrl = new URL(this.gateUrl);
+      gateUrl.searchParams.set("app_version", this.identity.appVersion);
+      const platform = process.env.ZCODE_IDENTITY_PLATFORM?.trim() || process.platform;
+      const arch = process.env.ZCODE_IDENTITY_ARCH?.trim() || process.arch;
+      gateUrl.searchParams.set("platform", `${platform}-${arch}`);
+      const resp = await this.fetchImpl(gateUrl.href, {
         method: "GET",
-        headers: { ...identityHeaders, "x-api-key": cred.credential },
-        redirect: "manual",
+        headers: { ...identityHeaders, Accept: "application/json" },
+        redirect: "error",
         signal: controller.signal,
       });
       if (!resp.ok) return "unavailable";

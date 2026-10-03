@@ -5,7 +5,6 @@
  * the same code runs on Bun (dev mode, source TS) and on Node (Android bundle).
  * Bun supports `node:http` natively; Node has no `Bun.serve` equivalent.
  *
- * @see .omo/plans/zcode-proxy.md Task 7
  */
 import { createServer, type Server } from "node:http";
 import { Readable } from "node:stream";

@@ -1,7 +1,7 @@
 /**
  * Shared captcha (3007) challenge detection + single-retry flow.
  *
- * The challenge arrives in two variants (observed 2026-08-29, PR #38):
+ * The challenge arrives in two variants:
  *   1. response-header variant — `x-aliyun-captcha-verify-param` set on a
  *      non-2xx response (`captcha.detectCaptchaChallenge`);
  *   2. in-body variant — HTTP 400 with `{"code":3007,...}` in the JSON body

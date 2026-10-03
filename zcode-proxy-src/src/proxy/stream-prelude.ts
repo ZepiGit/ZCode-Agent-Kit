@@ -20,7 +20,7 @@
  */
 import { decodeContentStream } from "./inflate.js";
 import { lastFrameEnd } from "./sse-terminal.js";
-import { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
+import { normalizeGatewayCode, RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 
 export const PRELUDE_DECIDE_TIMEOUT_MS = 15_000;
 export const MAX_PRELUDE_BYTES = 256 * 1024;
@@ -114,11 +114,13 @@ export function classifyStreamError(data: string): { retryable: boolean; reason:
   const error = outer.error && typeof outer.error === "object" ? (outer.error as Record<string, unknown>) : outer;
   const type = typeof error.type === "string" ? error.type : "";
   const message = typeof error.message === "string" ? error.message : "";
-  const bracket = /^\[(\d{3,4})\]/.exec(message);
-  const code = bracket ? Number(bracket[1])
-    : Number.isInteger(error.code) ? (error.code as number)
-    : Number.isInteger(outer.code) ? (outer.code as number)
-    : undefined;
+  // Gateway errors use numeric codes, while AI-SDK/provider errors can expose
+  // symbolic values such as `rate_limit_error` in the same field. Normalize
+  // both forms before checking the shared official mapping.
+  const bracket = /^\[([0-9]{3,6}|[A-Za-z][A-Za-z0-9_.-]*)\]/.exec(message);
+  const code = bracket
+    ? normalizeGatewayCode(bracket[1])
+    : normalizeGatewayCode(error.code) ?? normalizeGatewayCode(outer.code) ?? normalizeGatewayCode(type);
   if (code !== undefined && TERMINAL_GATEWAY_CODES.has(code)) return { retryable: false, reason: `error event: gateway code ${code}` };
   if (code !== undefined && RETRYABLE_GATEWAY_CODES.has(code)) return { retryable: true, reason: `error event: gateway code ${code}` };
   if (TERMINAL_ERROR_TYPES.has(type)) return { retryable: false, reason: `error event: ${type}` };

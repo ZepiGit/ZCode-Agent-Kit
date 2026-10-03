@@ -1,5 +1,5 @@
-// Transaction module proofs (audit §7: backup/rollback) and the scoped
-// disabledProviders edit (audit §7 regression: global regex removed `- zcode`
+// Transaction module proofs (backup/rollback) and the scoped
+// disabledProviders edit (global regex removed `- zcode`
 // from ANY list).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -157,7 +157,7 @@ test("parallel setups are locked out; stale locks are refused fail-closed", () =
   releaseLock(lock2);
 });
 
-// Audit backlog: EPERM from process.kill(pid, 0) means "exists, not ours to
+// EPERM from process.kill(pid, 0) means "exists, not ours to
 // signal" — the holder must count as ALIVE (fail-closed), not dead.
 test("pidAlive treats EPERM as alive (fail-closed lock decision)", () => {
   const backupDir = freshDir("lock-eperm");

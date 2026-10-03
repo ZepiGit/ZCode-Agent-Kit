@@ -45,7 +45,7 @@ export async function sendOrderedUpstreamRequest(req: OrderedUpstreamRequest): P
 
     function fail(err: unknown): void {
       if (!responseStarted && postWrite) {
-        // Review follow-up #2 (PR #34): the full request (head + body) was
+        // The full request (head + body) was
         // already written to the wire, so the upstream may have processed it.
         // The flag keeps the quota failover from replaying it on ANOTHER
         // account; the transient ladder may re-send it on the same account,

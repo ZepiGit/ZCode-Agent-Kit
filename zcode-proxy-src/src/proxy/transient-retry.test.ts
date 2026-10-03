@@ -139,6 +139,25 @@ describe("transient pre-output retry ladder", () => {
     expect((await plain200.json()).id).toBe("msg"); // a real message is never inspected away
   });
 
+  it("retries official symbolic provider codes and keeps symbolic quota codes terminal", async () => {
+    for (const code of ["rate_limit_error", "engine_overloaded_error"]) {
+      let calls = 0;
+      const resp = await dispatchWithConnectRetry(async () => {
+        calls += 1;
+        return calls < 2 ? json(200, { code, msg: "private" }) : new Response("ok");
+      }, { retryDelayMs: 0 });
+      expect(resp.status).toBe(200);
+      expect(calls).toBe(2);
+    }
+    let calls = 0;
+    const terminal = await dispatchWithConnectRetry(async () => {
+      calls += 1;
+      return json(429, { code: "insufficient_quota", msg: "private" });
+    }, { retryDelayMs: 0 });
+    expect(terminal.status).toBe(429);
+    expect(calls).toBe(1);
+  });
+
   it("hands a captcha challenge to the captcha layer even on a transient status", async () => {
     let calls = 0;
     const resp = await dispatchWithConnectRetry(async () => { calls += 1; return html(503, { [CAPTCHA_CHALLENGE_HEADER]: "challenge" }); }, { retryDelayMs: 0 });

@@ -1,6 +1,5 @@
 /**
  * Tests for config loader.
- * @see .omo/plans/zcode-proxy.md Task 2
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -160,10 +159,10 @@ logging:
       defaultModel: "",
     });
     expect(cfg.claim).toEqual({
-      // ZAK-001 remediation: fail-closed defaults — an omitted claim block
-      // must NOT enable automatic trial claiming.
-      enabled: false,
-      auto: false,
+      // Builder Event token auto-claim starts when the authenticated preview
+      // endpoint advertises a plan; no JWT means an idle scheduler.
+      enabled: true,
+      auto: true,
       origin: "https://zcode.z.ai",
       pollIntervalMs: 300000,
       cooldownMs: 600000,
@@ -322,11 +321,11 @@ claim:
     expect(cfg.claim.pollIntervalMs).toBe(45000);
   });
 
-  // Audit backlog: full precedence matrix — env > YAML > default(false).
-  it("claim precedence: env > YAML > fail-closed default", () => {
-    // 1. default: neither YAML nor env → false/false
-    expect(loadConfig(writeYaml(`\n`)).claim.enabled).toBe(false);
-    expect(loadConfig(writeYaml(`\n`)).claim.auto).toBe(false);
+  // Full precedence matrix — env > YAML > automatic Builder Event default.
+  it("claim precedence: env > YAML > automatic Builder Event default", () => {
+    // 1. default: neither YAML nor env → true/true
+    expect(loadConfig(writeYaml(`\n`)).claim.enabled).toBe(true);
+    expect(loadConfig(writeYaml(`\n`)).claim.auto).toBe(true);
 
     // 2. YAML true, no env → true
     const yamlTrue = writeYaml(`
@@ -453,7 +452,7 @@ server:
     }
   });
 
-  // Audit backlog: spelling variants that could sneak past a sloppy allowlist.
+  // Spelling variants that could sneak past a sloppy allowlist.
   it("rejects loopback lookalikes (malformed IPv4, mapped IPv6, expanded IPv6)", () => {
     for (const host of ["127.0.0.01", "127.0.0.1.", "::ffff:127.0.0.1", "0:0:0:0:0:0:0:1"]) {
       const path = writeYaml(`
@@ -507,7 +506,7 @@ models:
     const path = writeYaml(`
 `);
     const cfg = loadConfig(path);
-    expect(cfg.identity.appVersion).toBe("3.11.2");
+    expect(cfg.identity.appVersion).toBe("3.14.3");
     expect(cfg.identity.sourceTitle).toBe("cli");
     expect(cfg.identity.refererOrigin).toBe("https://zcode.z.ai");
   });
@@ -541,6 +540,6 @@ identity:
   appVersion: "v3.3.3-中文"
 `);
     const cfg = loadConfig(path);
-    expect(cfg.identity.appVersion).toBe("3.11.2");
+    expect(cfg.identity.appVersion).toBe("3.14.3");
   });
 });

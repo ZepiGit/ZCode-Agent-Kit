@@ -1,6 +1,5 @@
 /**
  * Tests for server routing and proxy API key auth.
- * @see .omo/plans/zcode-proxy.md Task 7
  */
 import { describe, it, expect } from "bun:test";
 import { createFetchHandler, startServer } from "./server.js";
@@ -257,7 +256,7 @@ describe("proxy API key auth", () => {
     }
   });
 
-  // Audit backlog: every accepted loopback spelling must produce a working bind.
+  // Every accepted loopback spelling must produce a working bind.
   it("startServer binds the accepted loopback host forms (localhost, ::1)", async () => {
     for (const host of ["localhost", "::1"]) {
       const config = withAuth(TEST_KEY);
@@ -479,7 +478,7 @@ describe("route handler exports", () => {
     expect(flash!.context_window).toBe(1_000_000);
     expect(flash!.max_tokens).toBe(128_000);
     expect(flash!.visibility).toBe("list");
-    // Only the verified effort levels are advertised (audit: no invented
+    // Only the verified effort levels are advertised (no invented
     // medium/xhigh entries).
     const efforts = flash!.supported_reasoning_levels.map((l) => l.effort);
     expect(efforts).toEqual(["low", "high", "max"]);

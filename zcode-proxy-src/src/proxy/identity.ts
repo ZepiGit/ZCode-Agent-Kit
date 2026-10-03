@@ -3,7 +3,7 @@
  * headers so the proxy is indistinguishable from the official client at the
  * fingerprinting layer.
  *
- * TWO distinct bundle functions are mirrored (ZCode 3.11.2, `_reverse/zcode.cjs`):
+ * TWO distinct client builders are mirrored (ZCode 3.11.2):
  *
  *   1. `csn` = buildCliZCodeSourceHeaders (CLI LLM path, wrapped by `x4i`
  *      which appends `X-ZCode-Agent: "glm"` as the LAST header) — used for
@@ -36,7 +36,6 @@
  *   - ZCODE_IDENTITY_CLIENT_TIMEZONE   (default: Intl timezone, e.g. "Asia/Shanghai")
  *   - ZCODE_IDENTITY_DEVICE_MID        (no default; omitted unless set)
  *
- * @see _reverse/NOTEPAD.md "How Credential is Used for LLM Calls"
  */
 import os from "node:os";
 import { basename } from "node:path";

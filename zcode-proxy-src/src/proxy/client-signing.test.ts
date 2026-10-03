@@ -11,7 +11,7 @@ const identity: ProxyIdentity = { appVersion: "3.8.1", sourceTitle: "cli", refer
 const CRED = "testkey.testsecret";
 const API_KEY_ID = "testkey";
 const API_KEY_SECRET = "testsecret";
-const GATE_URL = "https://zcode.z.ai/api/v1/agent/configs";
+const GATE_URL = `https://zcode.z.ai/api/v1/client/configs?app_version=3.8.1&platform=${process.platform}-${process.arch}`;
 const HANDSHAKE_URL = "https://api.z.ai/api/paas/c1f3a7e2/v2/client";
 const LLM_URL = "https://api.z.ai/api/coding/paas/v4/chat/completions";
 const STARTPLAN_URL = "https://zcode.z.ai/api/v1/zcode-plan/chat/completions";
@@ -136,7 +136,7 @@ describe("ClientSigningManager.sign", () => {
     expect(powDigest[0]).toBe(0);
   });
 
-  it("attaches the sYr gate header set (no X-ZCode-Agent, no X-Device-Mid, no Accept) on the gate fetch", async () => {
+  it("uses the public client-configs gate without sending a credential", async () => {
     const fixture = await buildHandshakeFixture();
     let gateHeaders: Headers | undefined;
     const manager = new ClientSigningManager({
@@ -155,10 +155,10 @@ describe("ClientSigningManager.sign", () => {
     });
     await manager.sign(LLM_URL, BASE_PAIRS, { credential: CRED, appVersion: "3.8.1" });
     expect(gateHeaders).toBeDefined();
-    expect(gateHeaders!.get("x-api-key")).toBe(CRED);
+    expect(gateHeaders!.get("x-api-key")).toBeNull();
     expect(gateHeaders!.get("x-zcode-agent")).toBeNull();
     expect(gateHeaders!.get("x-device-mid")).toBeNull();
-    expect(gateHeaders!.get("accept")).toBeNull();
+    expect(gateHeaders!.get("accept")).toBe("application/json");
     expect(gateHeaders!.get("user-agent")).toBe("ZCode/3.8.1");
   });
 

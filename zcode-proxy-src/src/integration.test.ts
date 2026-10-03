@@ -1,6 +1,5 @@
 /**
  * Integration tests — end-to-end proxy tests with mock upstream.
- * @see .omo/plans/zcode-proxy.md Task 13
  */
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -30,8 +29,7 @@ function findFreePort(): number {
   return 0;
 }
 
-// The former config.test.yaml fixture (removed in f6aa147) inlined as a temp
-// file so the suite stays self-contained.
+// Keep the fixture inlined as a temporary file so the suite stays self-contained.
 let configDir: string;
 
 function writeTestConfig(): string {
