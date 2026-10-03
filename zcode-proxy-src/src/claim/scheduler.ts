@@ -1,6 +1,8 @@
 /**
  * Auto-claim scheduler — polls the manual-claim preview endpoint and claims
- * weekend/trial plans the moment they become available (first-come-first-served:
+ * the highest-priority server-advertised campaign plan when it becomes
+ * available. Builder Event token plans are preferred when present so they do
+ * not wait behind an unrelated campaign:
  * the server caps daily claims with biz code 1005).
  *
  * Backoff semantics per failure kind (biz codes from the desktop client):
@@ -48,6 +50,7 @@ export type TickResult =
 export class ClaimScheduler {
   private stopped = false;
   private holdUntil = 0;
+  private readonly planHolds = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly now: () => number;
   private readonly log: (message: string) => void;
@@ -98,8 +101,8 @@ export class ClaimScheduler {
     try {
       plans = await client.getPreviews();
     } catch (err) {
-      // 404 = campaign endpoint not deployed yet (the expected pre-launch state
-      // for weekend plans); poll at normal cadence instead of error backoff.
+      // 404 = campaign endpoint not deployed yet; poll at normal cadence
+      // instead of error backoff.
       if (err instanceof ClaimPreviewError && err.status === 404) {
         this.holdUntil = nowMs + this.deps.config.pollIntervalMs;
         return { action: "idle" };
@@ -111,9 +114,10 @@ export class ClaimScheduler {
       return { action: "idle" };
     }
 
-    const target = this.pickPlan(plans);
+    const target = this.pickPlan(plans, nowMs);
     if (!target) {
-      // Configured planId not in the current preview list — plain poll cadence.
+      // A held plan must not stop us from noticing a newly published campaign.
+      // Keep polling even when the only currently visible plan is cooling down.
       this.holdUntil = nowMs + this.deps.config.pollIntervalMs;
       return { action: "idle" };
     }
@@ -134,13 +138,15 @@ export class ClaimScheduler {
 
     if (outcome.ok) {
       const endsAtMs = outcome.endsAt !== undefined ? outcome.endsAt * 1000 : undefined;
-      this.holdUntil = endsAtMs ?? nowMs + this.deps.config.pollIntervalMs;
+      this.planHolds.set(target.planId, endsAtMs ?? nowMs + this.deps.config.pollIntervalMs);
+      this.holdUntil = nowMs + this.deps.config.pollIntervalMs;
       this.log(`claim: claimed plan ${target.planId}${outcome.startsAt !== undefined ? ` (activates ${new Date(outcome.startsAt * 1000).toISOString()})` : ""}`);
       return { action: "claimed", planId: target.planId, startsAt: outcome.startsAt, endsAt: outcome.endsAt };
     }
 
     const holdMs = this.holdForFailure(outcome.failureKind, outcome.failureEndsAt, nowMs);
-    this.holdUntil = nowMs + holdMs;
+    this.planHolds.set(target.planId, nowMs + holdMs);
+    this.holdUntil = nowMs + this.deps.config.pollIntervalMs;
     this.log(`claim: ${outcome.failureKind} (${outcome.code}) — ${outcome.message}; retry in ${Math.round(holdMs / 1000)}s`);
     if (outcome.failureKind === "login_required") {
       this.stop();
@@ -148,11 +154,21 @@ export class ClaimScheduler {
     return { action: "failed", outcome, holdMs };
   }
 
-  private pickPlan(plans: ClaimablePlan[]): ClaimablePlan | null {
+  private pickPlan(plans: ClaimablePlan[], nowMs: number): ClaimablePlan | null {
+    const available = plans.filter((plan) => (this.planHolds.get(plan.planId) ?? 0) <= nowMs);
     const wanted = this.deps.config.planId?.trim();
-    if (wanted) return plans.find((p) => p.planId === wanted) ?? null;
-    // Server order first, highest priority breaks ties (stable sort).
-    const sorted = [...plans].sort((a, b) => b.priority - a.priority);
+    if (wanted) return available.find((p) => p.planId === wanted) ?? null;
+    // The preview endpoint is the source of truth for campaign types. Prefer
+    // Builder Event token grants when they are present; otherwise server order
+    // first, with priority breaking ties (stable sort).
+    const builderEvent = available.find((plan) => {
+      const text = [plan.planId, plan.name, plan.description,
+        ...plan.entitlements.flatMap((e) => [e.entitlementId, e.showName, ...e.capabilities])]
+        .join(" ").toLowerCase();
+      return /builder[\s_-]*event|event[\s_-]*builder|builder[\s_-]*(?:token|grant)/u.test(text);
+    });
+    if (builderEvent) return builderEvent;
+    const sorted = [...available].sort((a, b) => b.priority - a.priority);
     return sorted[0] ?? null;
   }
 

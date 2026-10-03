@@ -3,6 +3,7 @@ import { isPostWriteError } from "./ordered-transport.js";
 import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
+import { normalizeGatewayCode, RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES, type GatewayCode } from "./gateway-codes.js";
 
 /**
  * Same-account retry schedule for a clean 1005/1113 envelope (see
@@ -54,7 +55,19 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   return promise;
 }
 
-export function parseGatewayErrorEnvelope(body: string): { status: number; type: string; message: string; code?: number; resetAt?: number } | null {
+export interface GatewayErrorEnvelope {
+  status: number;
+  type: string;
+  message: string;
+  code?: GatewayCode;
+  resetAt?: number;
+}
+
+function numericGatewayCode(code: GatewayCode | undefined): number | undefined {
+  return typeof code === "number" ? code : undefined;
+}
+
+export function parseGatewayErrorEnvelope(body: string): GatewayErrorEnvelope | null {
   if (!body || body.length > 65536) return null;
   let obj: any;
   try { obj = JSON.parse(body); } catch { return null; }
@@ -68,19 +81,35 @@ export function parseGatewayErrorEnvelope(body: string): { status: number; type:
       message: "[1210] Invalid thinking configuration. This model requires thinking; use effort low, high, or max.",
     };
   }
-  if (!Number.isInteger(obj.code) || obj.code === 0 || obj.code === 200) return null;
-  const code: number = obj.code;
-  const status = code === 401 ? 401 : code === 1005 || code === 1113 || code === 3001 ? 400
-    : code === 3006 || code === 3007 || code === 3012 ? 403 : code === 429 ? 429 : 502;
+  const nestedError = obj.error && typeof obj.error === "object" && !Array.isArray(obj.error)
+    ? obj.error as Record<string, unknown>
+    : undefined;
+  const rawCode = obj.code !== undefined ? obj.code : nestedError?.code ?? nestedError?.type;
+  const code = normalizeGatewayCode(rawCode);
+  // Preserve the old safety boundary for arbitrary provider strings: only
+  // symbolic codes in the official mapping are treated as gateway errors.
+  if (code === undefined || code === 0 || code === 200
+    || (typeof code === "string" && !RETRYABLE_GATEWAY_CODES.has(code) && !TERMINAL_GATEWAY_CODES.has(code))) return null;
+  const numericCode = numericGatewayCode(code);
+  let status = 502;
+  if (numericCode === 401) status = 401;
+  else if (numericCode === 1005 || numericCode === 1113 || numericCode === 3001
+    || (typeof code === "string" && TERMINAL_GATEWAY_CODES.has(code))) status = 400;
+  else if (numericCode === 3006 || numericCode === 3007 || numericCode === 3012) status = 403;
+  else if (code === "rate_limit_reached_error" || code === "rate_limit_error" || numericCode === 429) status = 429;
   const type = status === 400 ? "invalid_request_error" : status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : "upstream_error";
-  const message = code === 1005 ? "exceed quota limit" : code === 1113 ? "Insufficient balance" : code === 3001 ? "upstream balance or request rejected"
-    : code === 3007 ? "captcha verify failed" : code === 3006 ? "model not allowed" : code === 3012 ? "upstream authorization rejected" : code === 401 ? "upstream authentication rejected" : "upstream request failed";
+  const message = numericCode === 1005 ? "exceed quota limit" : numericCode === 1113 ? "Insufficient balance" : numericCode === 3001 ? "upstream balance or request rejected"
+    : numericCode === 3007 ? "captcha verify failed" : numericCode === 3006 ? "model not allowed" : numericCode === 3012 ? "upstream authorization rejected" : numericCode === 401 ? "upstream authentication rejected"
+    : code === "insufficient_quota" || code === "credit_balance_exhausted" ? "upstream quota exhausted"
+    : code === "rate_limit_reached_error" || code === "rate_limit_error" ? "upstream rate limit reached"
+    : code === "engine_overloaded_error" || code === "overloaded_error" ? "upstream overloaded"
+    : "upstream request failed";
   const resetRaw = obj.resetAt ?? obj.reset_at ?? obj.data?.resetAt ?? obj.data?.reset_at;
   const resetNumber = typeof resetRaw === "number" && Number.isFinite(resetRaw) && resetRaw > 0
     ? (resetRaw < 1_000_000_000_000 ? resetRaw * 1000 : resetRaw)
     : undefined;
   // Never echo upstream msg, error objects, URLs, cookies, or credentials.
-  return { status, type, message: `[${code}] ${message}`, code, ...(resetNumber === undefined ? {} : { resetAt: resetNumber }) };
+  return { status, type, message: `[${String(code)}] ${message}`, code, ...(resetNumber === undefined ? {} : { resetAt: resetNumber }) };
 }
 
 async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Uint8Array | null> {
@@ -100,11 +129,11 @@ async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Uint8Arr
 }
 
 /** Bounded, non-consuming look at a JSON body for a recognised gateway error envelope (never SSE). */
-export async function inspectGatewayEnvelope(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
+export async function inspectGatewayEnvelope(resp: Response): Promise<GatewayErrorEnvelope | null> {
   return inspect(resp);
 }
 
-async function inspect(resp: Response): Promise<{ status: number; type: string; message: string; code?: number; resetAt?: number } | null> {
+async function inspect(resp: Response): Promise<GatewayErrorEnvelope | null> {
   if ((resp.headers.get("content-type") ?? "").toLowerCase().includes("text/event-stream")) return null;
   try {
     const copy = resp.clone();
@@ -158,7 +187,7 @@ export async function recoverAndMapUpstream(opts: {
   // suppresses further same-account retries until the reset window.
   // 3007 (captcha verify failed) is deliberately NOT retried here: the
   // handler captcha-retry layer already owns one fresh-token resend for it.
-  const quotaEnvelope = envelope !== null && [1005, 1113].includes(envelope.code ?? -1);
+  const quotaEnvelope = envelope !== null && [1005, 1113].includes(numericGatewayCode(envelope.code) ?? -1);
   if (quotaEnvelope && !streaming && !opts.signal.aborted) {
     let confirmedExhausted = false;
     let scheduleCompleted = true;
@@ -184,7 +213,7 @@ export async function recoverAndMapUpstream(opts: {
           : await opts.resend(activeCredential);
         const retriedEnvelope = await inspect(retried);
         const retriedStreaming = retried.headers.get("content-type")?.includes("text/event-stream") === true;
-        const retriedQuota = retriedEnvelope !== null && [1005, 1113].includes(retriedEnvelope.code ?? -1);
+        const retriedQuota = retriedEnvelope !== null && [1005, 1113].includes(numericGatewayCode(retriedEnvelope.code) ?? -1);
         // Adopt the retry only when it succeeded or is itself a quota
         // envelope; any other failure (5xx, 429, captcha) keeps the current
         // quota envelope so the rotation below still fails over.
@@ -223,7 +252,7 @@ export async function recoverAndMapUpstream(opts: {
     // retry must have returned a quota envelope and no abort, admission
     // denial, non-quota failure or transport error may have interrupted the
     // schedule — an interrupted one is inconclusive, not evidence.
-    if (scheduleCompleted && confirmedExhausted && envelope !== null && [1005, 1113].includes(envelope.code ?? -1)) {
+    if (scheduleCompleted && confirmedExhausted && envelope !== null && [1005, 1113].includes(numericGatewayCode(envelope.code) ?? -1)) {
       opts.auth.blockSameCredentialRetry?.(activeHandle ?? activeCredential, envelope.resetAt);
     }
   }
@@ -231,8 +260,9 @@ export async function recoverAndMapUpstream(opts: {
   // legacy single-account manager may still recover 401/3012 through its
   // desktop-import path; pool mode itself rejects those signals in
   // AuthManager, preventing accidental rotation on auth/model errors.
-  const rotationCode = code !== 1210 && (response.status === 401 || [3012, 401, 1005, 1113, 3001].includes(code ?? -1))
-    ? (code ?? (response.status === 401 ? 401 : undefined))
+  const numericCode = numericGatewayCode(code);
+  const rotationCode = numericCode !== 1210 && (response.status === 401 || [3012, 401, 1005, 1113, 3001].includes(numericCode ?? -1))
+    ? (numericCode ?? (response.status === 401 ? 401 : undefined))
     : undefined;
   if (!streaming && !opts.signal.aborted && rotationCode !== undefined) {
     const pooledContext = activeHandle && (opts.auth.isAccountPoolEnabled?.() ?? false);
@@ -270,14 +300,14 @@ export async function recoverAndMapUpstream(opts: {
   // particular this is the normal path for SSE: the header is not proof that
   // the model completed, but it must never be turned into `envelope!.status`.
   if (response.ok && !envelope) return response;
-  if (envelope && [1005, 1113, 3001].includes(envelope.code ?? -1)) {
+  if (envelope && [1005, 1113, 3001].includes(numericGatewayCode(envelope.code) ?? -1)) {
     // If the one permitted failover request also reports exhaustion, quarantine
     // that second account before returning the mapped error. This prevents the
     // next request from selecting it repeatedly while the reset window lasts.
     opts.auth.markCredentialExhausted?.(activeHandle ?? activeCredential, String(envelope.code), envelope.resetAt);
   }
   const status = response.ok ? envelope!.status : response.status;
-  const type = status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : envelope?.code === 1210 || response.ok ? envelope?.type ?? "upstream_error" : "upstream_error";
+  const type = status === 401 ? "authentication_error" : status === 403 ? "permission_error" : status === 429 ? "rate_limit_error" : numericGatewayCode(envelope?.code) === 1210 || response.ok ? envelope?.type ?? "upstream_error" : "upstream_error";
   const message = envelope?.message ?? `Upstream request failed (HTTP ${status}).`;
   const result = Response.json({ error: { type, message } }, { status });
   // Preserve retry guidance only when it is a bounded numeric delta, not

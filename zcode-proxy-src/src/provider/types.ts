@@ -1,6 +1,5 @@
 /**
  * Provider and model type definitions.
- * @see .omo/plans/zcode-proxy.md Task 3
  */
 
 /** Supported provider identifiers. */

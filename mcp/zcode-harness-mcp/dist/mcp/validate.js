@@ -1,6 +1,6 @@
 /**
  * Minimal JSON-Schema argument validation for the tool inputSchemas declared
- * in tools.ts (audit D-09: the low-level SDK Server does not validate
+ * in tools.ts (the low-level SDK Server does not validate
  * `arguments`, so enum/type/required/additionalProperties were never
  * enforced). Supports exactly the subset those schemas use: object with
  * properties/required/additionalProperties, string (enum), number/integer

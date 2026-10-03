@@ -131,7 +131,7 @@ if ! command -v bun >/dev/null 2>&1; then
   printf '  Installing Bun v1.4.2 for your user...\n'
   BUN_DIR="$HOME/.bun"
   # SHA256 of the bun-v1.4.2 release artifacts (upstream SHASUMS256.txt).
-  # Audit H2c: native arm64 assets so Apple Silicon / ARM Linux do not fall
+  # Native arm64 assets keep Apple Silicon / ARM Linux from falling
   # back to x64-under-emulation.
   BUN_LINUX_X64_SHA256="36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913"
   BUN_LINUX_AARCH64_SHA256="54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7"

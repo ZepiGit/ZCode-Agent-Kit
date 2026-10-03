@@ -51,6 +51,17 @@ describe("parseGatewayErrorEnvelope", () => {
     expect(r?.status).toBe(502);
   });
 
+  test("accepts mapped provider strings and numeric strings without echoing provider text", () => {
+    const rate = parseGatewayErrorEnvelope('{"code":"rate_limit_error","msg":"private provider detail"}');
+    expect(rate).toEqual({ status: 429, type: "rate_limit_error", message: "[rate_limit_error] upstream rate limit reached", code: "rate_limit_error" });
+    const quota = parseGatewayErrorEnvelope('{"code":"insufficient_quota","msg":"private provider detail"}');
+    expect(quota?.status).toBe(400);
+    expect(quota?.message).toBe("[insufficient_quota] upstream quota exhausted");
+    expect(parseGatewayErrorEnvelope('{"code":"1302","msg":"retry"}')?.code).toBe(1302);
+    expect(parseGatewayErrorEnvelope('{"type":"error","error":{"type":"overloaded_error","message":"private"}}')?.status).toBe(502);
+    expect(parseGatewayErrorEnvelope('{"code":"unrecognized_provider_code","msg":"private"}')).toBeNull();
+  });
+
   test("accepts normal message responses untouched", () => {
     expect(parseGatewayErrorEnvelope('{"id":"msg_1","type":"message","content":[]}')).toBeNull();
     expect(parseGatewayErrorEnvelope('{"code":1005,"msg":"x","content":[{"type":"text","text":"hi"}]}')).toBeNull();

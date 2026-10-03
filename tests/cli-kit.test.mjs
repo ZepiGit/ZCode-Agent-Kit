@@ -1,5 +1,5 @@
 // zcode-kit CLI tests: JSONC editor, new adapters against fake homes,
-// dry-run semantics, idempotency, unknown-harness errors (audit §12.A lite).
+// dry-run semantics, idempotency, unknown-harness errors.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
@@ -375,7 +375,7 @@ test("CLI: integrate --dry-run writes nothing", () => {
   }
 });
 
-// ------------------------------------------- audit test backlog: dry-run matrix
+// ------------------------------------------- test backlog: dry-run matrix
 import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
 
@@ -521,18 +521,17 @@ test("opencode adapter is byte-idempotent on a commented config", async () => {
   }
 });
 
-// Audit backlog: no kit-shipped config may enable automatic trial claiming —
-// the claim block in BOTH example configs must be fail-closed false, and no
-// kit launcher may set the enabling env var for its child processes.
-test("shipped proxy configs keep claim disabled (no auto-trial-claiming)", async () => {
+// Shipped proxy configs enable the authenticated Builder Event auto-claim
+// scheduler; no launcher needs to inject enabling environment variables.
+test("shipped proxy configs enable Builder Event auto-claiming", async () => {
   const { createRequire } = await import("node:module");
   const req = createRequire(join(KIT, "zcode-proxy-src", "package.json"));
   const yaml = req("yaml");
   for (const f of ["proxy/config.example.yaml", "zcode-proxy-src/config.example.yaml"]) {
     const doc = yaml.parse(readFileSync(join(KIT, f), "utf8"));
     const claim = doc?.claim ?? {};
-    assert.equal(claim.enabled, false, `${f}: claim.enabled must be false`);
-    assert.equal(claim.auto, false, `${f}: claim.auto must be false`);
+    assert.equal(claim.enabled, true, `${f}: claim.enabled must be true`);
+    assert.equal(claim.auto, true, `${f}: claim.auto must be true`);
   }
   for (const f of readdirSync(join(KIT, "bin"))) {
     const text = readFileSync(join(KIT, "bin", f), "utf8");

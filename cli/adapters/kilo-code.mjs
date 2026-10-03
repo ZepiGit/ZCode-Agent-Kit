@@ -2,7 +2,7 @@
 // "Custom provider" dialog (Provider API incl. Anthropic Messages). The kit
 // prepares the exact values; entering them is manual-confirmation-required.
 // kilo.jsonc model-level tuning is documented only sparsely upstream — the
-// kit does not guess its schema (audit: no invented interfaces).
+// kit does not guess its schema.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";

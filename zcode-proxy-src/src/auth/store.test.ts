@@ -1,6 +1,5 @@
 /**
  * Tests for encrypted credential store.
- * @see .omo/plans/zcode-proxy.md Task 14
  */
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { saveCredential, saveCredentialIfUnchanged, loadCredential, clearCredential, getStorePath } from "./store.js";
@@ -19,7 +18,7 @@ const BIGMODEL_KEY = fixtureSecret("store-bigmodel");
 const LEGACY_KEY = fixtureSecret("store-legacy");
 /** Encryption secret that must NOT decrypt anything written under TEST_SECRET. */
 const FOREIGN_SECRET = wrongSecret("store-encryption-secret");
-// Audit H6 regression guard: this suite runs against an injected temp store
+// Regression guard: this suite runs against an injected temp store
 // (ZCODE_PROXY_CREDENTIALS_PATH) so it can never wipe a real login at
 // ~/.zcode-proxy/credentials.json.
 const TEST_STORE_DIR = join(tmpdir(), `zcode-proxy-store-test-${Date.now()}-${process.pid}`);

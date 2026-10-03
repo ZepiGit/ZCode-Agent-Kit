@@ -7,7 +7,7 @@
 //   node setup.mjs --list-transactions    # show recorded transaction ids
 //
 // Since the zcode-kit CLI exists, this file is a thin shim delegating to
-// cli/zcode-kit.mjs — same behavior, one implementation (audit §6: no
+// cli/zcode-kit.mjs — same behavior, one implementation (no
 // duplicated setup logic). Legacy flags map as: --only=<list> → --harness=<list>.
 import { spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";

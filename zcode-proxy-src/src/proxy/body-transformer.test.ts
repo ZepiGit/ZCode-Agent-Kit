@@ -1,6 +1,5 @@
 /**
  * Tests for body transformer.
- * @see _reverse/NOTEPAD.md "How Credential is Used for LLM Calls"
  */
 import { describe, it, expect } from "bun:test";
 import { transformRequestBody } from "./body-transformer.js";

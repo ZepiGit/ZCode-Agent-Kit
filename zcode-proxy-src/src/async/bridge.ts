@@ -1,6 +1,6 @@
 /**
  * Async bridge: core state machine turning sync client stream expectation
- * into off-peak async reality. See `.omo/plans/async-off-peak-bridge.md` §3.
+ * into off-peak async reality.
  *
  * State machine:
  *   WAIT   (queued)            → poll every pollIntervalMs (signal-aware); emit keepalives

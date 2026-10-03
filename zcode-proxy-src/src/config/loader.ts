@@ -1,6 +1,5 @@
 /**
  * YAML config loader with env-var overrides and validation.
- * @see .omo/plans/zcode-proxy.md Task 2
  */
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
@@ -47,7 +46,7 @@ const DEFAULTS = {
   ZAI_OPENAI_BASE: "https://api.z.ai/api/coding/paas/v4",
   BIGMODEL_ANTHROPIC_BASE: "https://open.bigmodel.cn/api/anthropic",
   BIGMODEL_OPENAI_BASE: "https://open.bigmodel.cn/api/coding/paas/v4",
-  APP_VERSION: "3.11.2",
+  APP_VERSION: "3.14.3",
   SOURCE_TITLE: "cli",
   REFERER_ORIGIN: "https://zcode.z.ai",
   CLIENT_IDENTITY_MODE: "observe" as const,
@@ -69,19 +68,20 @@ const DEFAULTS = {
   ASYNC_SETTLE_TIMEOUT_MS: 8000,
   ASYNC_CONTROL_TIMEOUT_MS: 15000,
   ASYNC_DEFAULT_MODEL: "",
-  // Fail-closed (ZAK-001 remediation): a config that omits the claim block or
-  // only names it must NOT enable automatic trial claiming. Enabling requires
-  // an explicit `claim.enabled: true` / `claim.auto: true` (or env override) —
-  // kit-shipped configs never set them.
-  CLAIM_ENABLED: false,
-  CLAIM_AUTO: false,
+  // Builder Event token plans are claimed as soon as the authenticated
+  // preview endpoint advertises them. The scheduler remains idle without a
+  // JWT and treats an unavailable campaign endpoint as a normal poll result.
+  CLAIM_ENABLED: true,
+  CLAIM_AUTO: true,
   CLAIM_ORIGIN: "https://zcode.z.ai",
   CLAIM_POLL_INTERVAL_MS: 300000,
   CLAIM_COOLDOWN_MS: 600000,
   CLAIM_PLAN_ID: "",
   ENDPOINT_ROUTING_ENABLED: true,
   ENDPOINT_ROUTING_ORIGIN: "https://zcode.z.ai",
-  CLIENT_SIGNING_ENABLED: true,
+  // The current ZCode 3.14.3 service no longer advertises this legacy gate.
+  // Keep the implementation available as an explicit compatibility opt-in.
+  CLIENT_SIGNING_ENABLED: false,
   CLIENT_SIGNING_ORIGIN: "https://zcode.z.ai",
   ACCOUNTS_ENABLED: false,
 };

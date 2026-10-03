@@ -1,10 +1,8 @@
 /**
  * Tests for the start-plan system-prompt assembly (ContextBuilder mirror).
- * Golden assertions anchor the byte-exact 3.11.2 bundle shapes:
- * `_reverse/zcode.cjs` `Hre` (assembleSystemMessages), `T9o`
- * (buildEnvInfoSection), `u9o` (identity), `Ylt` (desktop context), `wTr`
- * (dynamic behavior), `STr` (context management), `Vre`/`tct`/`blt`
- * (currentDate context_prefix), `pK` (formatLocalIsoDate).
+ * Golden assertions anchor the byte-exact 3.11.2 client shapes:
+ * `assembleSystemMessages`, `buildEnvironmentSection`, identity and context
+ * sections, and the current-date context prefix.
  */
 import { describe, it, expect } from "bun:test";
 import {

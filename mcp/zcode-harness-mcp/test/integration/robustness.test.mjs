@@ -80,8 +80,8 @@ test("persistence: task survives bridge restart as interrupted, results stay rea
   }
 });
 
-test("read-only invoke gate: session/goal is not invocable via zcode_operation_invoke (H5)", async () => {
-  // Audit H5: the invoke allowlist contained session/goal, whose action enum
+test("read-only invoke gate: session/goal is not invocable via zcode_operation_invoke", async () => {
+  // The invoke allowlist contained session/goal, whose action enum
   // includes mutating verbs (set/replace/pause/resume/clear) — so --read-only
   // was bypassable. Mutating access must go through zcode_session_goal, which
   // enforces requireWritable.

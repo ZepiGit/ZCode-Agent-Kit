@@ -1,6 +1,5 @@
 /**
  * SSE event translator — converts streaming events between OpenAI and Anthropic formats.
- * @see .omo/plans/zcode-proxy.md Task 12
  * @see https://docs.anthropic.com/en/api/messages-streaming
  */
 import type { AnthropicStreamEvent, AnthropicUsage, OpenAIStreamChunk, OpenAIStreamToolCall, OpenAIUsage } from "./types.js";

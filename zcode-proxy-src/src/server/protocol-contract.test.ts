@@ -1,6 +1,5 @@
 /**
  * End-to-end protocol contract tests against controlled mock upstreams
- * (audit §10). Real route handlers via createFetchHandler — no hand-mocked
  * protocol layer:
  *   /v1/messages    — anthropic passthrough: SSE chunk boundaries incl. split
  *                     multi-byte UTF-8, thinking blocks, error mid-stream,

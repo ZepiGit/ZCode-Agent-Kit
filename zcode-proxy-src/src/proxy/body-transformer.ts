@@ -8,7 +8,7 @@
  *   0. Anthropic glm-5.3-flash + disabled thinking → enabled low (or an
  *      explicit supported effort), adding the budget once for answer room.
  *   1. OpenAI + `stream: true` → inject `stream_options.include_usage: true`
- *      (matches `@ai-sdk/openai-compatible` default in `_reverse/zcode.cjs`).
+ *      (matches the upstream client's default).
  *   2. start-plan → prepend ZCode gateway system blocks. OpenAI upstream gets
  *      system messages; Anthropic-shaped input gets the Anthropic `system` field.
  *   3. Anthropic format → clear existing `cache_control` markers on all
@@ -21,7 +21,6 @@
  *      `metadata: { user_id }` (bundle `E2e`/`UIo` device/session blob —
  *      value assembled by the caller via buildAnthropicMetadataUserId).
  *
- * @see _reverse/NOTEPAD.md "How Credential is Used for LLM Calls"
  */
 import type { Format } from "../translator/types.js";
 import { normalizeGlm53FlashThinking, applyAnthropicThinkingCompat } from "../provider/reasoning.js";

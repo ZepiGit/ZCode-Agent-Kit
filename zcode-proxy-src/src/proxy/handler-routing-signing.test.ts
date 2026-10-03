@@ -113,7 +113,7 @@ async function buildSigningManagerFixture(): Promise<{ manager: ClientSigningMan
     identity: IDENTITY,
     fetchImpl: (async (input: RequestInfo | URL) => {
       const url = String(input instanceof Request ? input.url : input);
-      if (url.endsWith("/api/v1/agent/configs")) {
+      if (new URL(url).pathname === "/api/v1/client/configs") {
         return new Response(JSON.stringify({ code: 0, data: { codingPlanSignature: { enable: true } } }), { status: 200 });
       }
       if (url.endsWith("/api/paas/c1f3a7e2/v2/client")) {

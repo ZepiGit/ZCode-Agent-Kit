@@ -30,7 +30,7 @@ models:
   - glm-5.3
   - glm-5.3-flash
 identity:
-  appVersion: "3.11.2"
+  appVersion: "3.14.3"
   sourceTitle: "cli"
   refererOrigin: "https://zcode.z.ai"
   # Generated once at first `auth login` (stable device identity).
@@ -41,15 +41,27 @@ responses:
   store:
     maxEntries: 1000
     ttlMs: 86400000
-# Trial auto-claim and off-peak queue deliberately disabled.
+# Builder Event token auto-claim is enabled for authenticated sessions. The
+# scheduler stays idle until a JWT is available and polls the same preview
+# endpoint used by the Claim button.
+claim:
+  enabled: true
+  auto: true
+  origin: "https://zcode.z.ai"
+  pollIntervalMs: 300000
+  cooldownMs: 600000
+  # Empty prefers Builder Event tokens, then highest-priority campaigns.
+  planId: ""
+
+# Off-peak queue deliberately disabled.
+# Optional CAPTCHA egress proxy (only for CAPTCHA requests; ambient
+# HTTP_PROXY/HTTPS_PROXY variables are ignored):
+#   ZCODE_PROXY_UPSTREAM_PROXY=http://proxy.example:8080
 async:
   enabled: false
-claim:
-  enabled: false
-  auto: false
 endpointRouting:
   enabled: true
 clientSigning:
-  enabled: true
+  enabled: false
 logging:
   level: info

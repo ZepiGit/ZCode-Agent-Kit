@@ -1,6 +1,5 @@
 /**
  * Tests for SSE event translator.
- * @see .omo/plans/zcode-proxy.md Task 12
  */
 import { describe, it, expect } from "bun:test";
 import { anthropicSseToOpenaiSse, openaiSseToAnthropicSse, parseSSEChunk } from "./sse-translator.js";

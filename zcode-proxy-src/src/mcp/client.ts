@@ -1,7 +1,6 @@
 /**
  * Minimal MCP (Model Context Protocol) JSON-RPC client for GLM's remote MCP
- * servers. Designed for the GLM wire shape verified by live probing (see
- * `_reverse/NOTEPAD.md` and the exploration notes):
+ * servers. Designed for the GLM wire shape used by the upstream service:
  *
  *   - Transport: Streamable HTTP over POST; responses are ALWAYS
  *     `text/event-stream` (server ignores `Accept: application/json`).

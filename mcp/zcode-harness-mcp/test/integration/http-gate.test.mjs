@@ -166,7 +166,7 @@ test("http gate: declared oversized content-length refused without body", async 
   }
 });
 
-// Audit backlog (AUD-006): slow writer — the 413 must arrive BEFORE the
+// Slow writer: slow writer — the 413 must arrive BEFORE the
 // client finishes the upload, so the request slot is freed immediately.
 test("http gate: oversized slow writer receives 413 before EOF", async () => {
   const probe = http.createServer();
@@ -218,7 +218,7 @@ test("http gate: oversized slow writer receives 413 before EOF", async () => {
   }
 });
 
-// Audit backlog: exact raw-byte boundary — a body of exactly MAX_BODY_BYTES
+// Exact raw-byte boundary — a body of exactly MAX_BODY_BYTES
 // (valid JSON padded with whitespace) passes; one byte more is refused.
 test("http gate: raw-byte boundary at exactly 4 MiB", async () => {
   const probe = http.createServer();
@@ -268,7 +268,7 @@ test("http gate: raw-byte boundary at exactly 4 MiB", async () => {
   }
 });
 
-// Audit backlog: abandoned upload — a client that dies mid-body must not
+// Abandoned upload — a client that dies mid-body must not
 // wedge the bridge; the next request is served normally.
 test("http gate: abandoned upload leaves the bridge healthy", async () => {
   const probe = http.createServer();

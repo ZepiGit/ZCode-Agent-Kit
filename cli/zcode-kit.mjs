@@ -14,6 +14,7 @@
 //   zcode-kit auth status|login|logout
 //   zcode-kit accounts [--json|--live]
 //   zcode-kit accounts remove|pause|resume ID [--yes]
+//   zcode-kit accounts unlock [--force]
 //   zcode-kit accounts explain --model MODEL --operation OP
 //   zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
 //   zcode-kit update [--version vX.Y.Z]          checkout: fast-forward; npm: npm install; release: verified tarball mirror
@@ -136,7 +137,7 @@ function usage(code) {
   zcode-kit proxy start|stop|restart|status [--json]|logs [n]   manage the local proxy service
   zcode-kit auth status|login [zai|bigmodel] [--import] [--account ID] [--replace]|logout
   zcode-kit accounts enable|disable
-  zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes]
+  zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes] | accounts unlock [--force]
   zcode-kit accounts explain --model MODEL --operation OP
   zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
@@ -863,6 +864,12 @@ async function cmdAccounts() {
     const res = runProxyCli(args, { stdio: "inherit" });
     return res.status ?? 1;
   }
+  if (sub === "unlock") {
+    const args = ["auth", "accounts", "unlock"];
+    if (flags.force === true) args.push("--force");
+    const res = runProxyCli(args, { stdio: "inherit" });
+    return res.status ?? 1;
+  }
   if (sub === "explain") {
     const args = ["auth", "accounts", "explain"];
     if (flags.model !== undefined) args.push("--model", String(flags.model));
@@ -878,7 +885,7 @@ async function cmdAccounts() {
     return res.status ?? 1;
   }
   if (sub !== undefined && sub !== "--json" && sub !== "--live") {
-    console.error("Usage: zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes]");
+    console.error("Usage: zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes] | accounts unlock [--force]");
     return 2;
   }
   const args = ["auth", "accounts"];
@@ -1032,7 +1039,7 @@ function stopProxyIfRunning() {
 
 function finishUpdate(harnessArgs, txId = null) {
   console.log("update: refreshing consented integrations (stored answers are respected; new harnesses are asked only on a terminal)...");
-  // Audit H3: explicitly running `update` IS the opt-in the checkout-write
+  // Explicitly running `update` is the opt-in the checkout-write
   // guard asks for. Fresh process so the updated modules (not the ones
   // already loaded by this process) apply the integrations.
   const res = spawnSync(process.execPath, [join(ROOT, "cli", "zcode-kit.mjs"), "setup", ...harnessArgs], {

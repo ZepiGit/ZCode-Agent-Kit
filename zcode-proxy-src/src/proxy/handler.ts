@@ -1,7 +1,7 @@
 /**
  * Main proxy handler — routes requests, injects auth, forwards, and streams responses.
  *
- * **v2.6 upstream reality (post-PR #34)**: BOTH plan tiers post an
+ * **Current upstream behavior**: BOTH plan tiers post an
  * Anthropic-format upstream — coding-plan mirrors the real ZCode client
  * (api.z.ai/api/anthropic → ultra via endpoint routing); start-plan posts to
  * zcode.z.ai's Anthropic gateway with the plan JWT. Consequently:
@@ -11,7 +11,6 @@
  *   forwarded with body transforms only ("passthrough" mode,
  *   `decompress: false`).
  *
- * @see .omo/plans/zcode-proxy.md Task 6
  */
 import type { Format } from "../translator/types.js";
 import type { ProxyConfig } from "../config/types.js";
@@ -680,8 +679,7 @@ async function abortableWait(ms: number, signal?: AbortSignal): Promise<void> {
  * validation errors, TLS/certificate failures, anything after the client
  * aborted, and anything after a content event reached the stream.
  *
- * Contract (review P1/P2, PR #34/#35; transient extension after the
- * "Continue fixes it" report):
+ * Contract for transient extensions:
  *   - `attemptDispatch` must dispatch a FRESH request each call — a reused
  *     Request has its body stream marked used after the first fetch; it
  *     receives the attempt number and why the previous attempt is retried.

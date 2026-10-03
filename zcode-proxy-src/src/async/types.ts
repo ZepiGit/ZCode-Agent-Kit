@@ -5,7 +5,6 @@
  * The client converts them to camelCase on the way out; callers never see the
  * raw server shape.
  *
- * @see _reverse/NOTEPAD.md "Off-Peak / Idle Plan" section for upstream protocol.
  */
 
 /** Ticket lifecycle states reported by the server. */

@@ -1,6 +1,5 @@
 /**
  * OpenAI → Anthropic request translator and Anthropic → OpenAI response translator.
- * @see .omo/plans/zcode-proxy.md Task 11
  */
 import type {
   OpenAIChatRequest,

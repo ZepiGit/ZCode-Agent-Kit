@@ -1,12 +1,12 @@
 /**
- * Types for the manual-claim ("weekend plan") subsystem — mirrors the ZCode
- * 3.10 desktop client's `manualClaimPlan` feature.
+ * Types for the manual-claim campaign subsystem — mirrors the ZCode client's
+ * `manualClaimPlan` feature. The API can advertise weekend, Builder Event,
+ * and future campaign plan types through the same preview envelope.
  *
  * Server biz codes → failure kinds match the desktop client's `$vt` mapper:
  * 1001 notFound, 1002 unavailable, 1003 alreadyClaimed, 1004 ineligible,
  * 1005 quotaExhausted, 3001 invalidRequest, 3007 captcha, 401 loginRequired.
  *
- * @see _reverse/NOTEPAD.md "Manual Claim Plan" section.
  */
 
 /** One entitlement inside a claimable plan (normalized from snake_case upstream). */
@@ -19,11 +19,11 @@ export interface PlanEntitlement {
   grantUnits: number;
   period: string;
   priority: number;
-  /** Unix seconds when the entitlement activates (weekend plans activate late). */
+  /** Unix seconds when the entitlement activates. */
   effectiveAt?: number;
 }
 
-/** A claimable trial plan from `GET /api/v1/zcode-plan/billing/preview`. */
+/** A claimable campaign plan from `GET /api/v1/zcode-plan/billing/preview`. */
 export interface ClaimablePlan {
   planId: string;
   name: string;

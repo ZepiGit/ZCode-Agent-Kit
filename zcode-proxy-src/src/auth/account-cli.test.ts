@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   addAccount,
@@ -161,5 +161,38 @@ describe("zcode-proxy auth accounts CLI", () => {
     const result = runProxy(["auth", "accounts", "migrate"]);
     expect(result.status).toBe(0);
     expect(JSON.parse(stdout(result))).toMatchObject({ migrated: false, accountCount: 1 });
+  });
+
+  it("recovers an abandoned lock and its temporary file from the CLI", () => {
+    const lockPath = `${storePath}.lock`;
+    writeFileSync(lockPath, JSON.stringify({
+      pid: 999_999_999,
+      host: hostname(),
+      nonce: "dead-lock-nonce-123456",
+      createdAt: Date.now() - 60_000,
+    }), "utf8");
+    const tempPath = `${storePath}.tmp-999999999-abandoned`;
+    writeFileSync(tempPath, "orphan", "utf8");
+    const result = runProxy(["auth", "accounts", "unlock"]);
+    expect(result.status).toBe(0);
+    expect(stdout(result)).toContain("Unlocked");
+    expect(() => readFileSync(lockPath, "utf8")).toThrow();
+    expect(() => readFileSync(tempPath, "utf8")).toThrow();
+  });
+
+  it("requires --force before removing a live lock", () => {
+    const lockPath = `${storePath}.lock`;
+    writeFileSync(lockPath, JSON.stringify({
+      pid: process.pid,
+      host: process.env.HOSTNAME ?? "localhost",
+      nonce: "live-lock-nonce-123456",
+      createdAt: Date.now(),
+    }), "utf8");
+    const refused = runProxy(["auth", "accounts", "unlock"]);
+    expect(refused.status).toBe(1);
+    expect(stdout(refused) + stderr(refused)).toMatch(/--force/);
+    const forced = runProxy(["auth", "accounts", "unlock", "--force"]);
+    expect(forced.status).toBe(0);
+    expect(() => readFileSync(lockPath, "utf8")).toThrow();
   });
 });

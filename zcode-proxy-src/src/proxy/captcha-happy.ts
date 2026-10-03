@@ -16,7 +16,7 @@
  */
 import { GlobalWindow as Window, PropertySymbol } from "happy-dom";
 import WindowBrowserContext from "happy-dom/lib/window/WindowBrowserContext.js";
-import { ProxyAgent, setGlobalDispatcher } from "undici";
+import { ProxyAgent } from "undici";
 import crypto from "node:crypto";
 import vm from "node:vm";
 import { Worker } from "node:worker_threads";
@@ -57,7 +57,16 @@ const SYNC_WORKER_SRC = `
       };
       try {
         // Bounded by the host's wait: a fetch that outlives it is abandoned.
-        const res = await fetch(m.url, { ...m.init, signal: AbortSignal.timeout(m.timeoutMs) });
+        let dispatcher;
+        if (m.proxyUrl) {
+          const { ProxyAgent } = require("undici");
+          dispatcher = new ProxyAgent(m.proxyUrl);
+        }
+        const res = await fetch(m.url, {
+          ...m.init,
+          ...(dispatcher ? { dispatcher } : {}),
+          signal: AbortSignal.timeout(m.timeoutMs),
+        });
         const body = Buffer.from(await res.arrayBuffer());
         const headers = {};
         for (const [k, v] of res.headers) headers[k] = v;
@@ -110,7 +119,7 @@ function syncFetchBlocking(url: string, init: Record<string, unknown>, timeoutMs
     const i32 = new Int32Array(sab);
     const u8 = new Uint8Array(sab);
     i32[0] = 0;
-    worker.postMessage({ sab, url, init, timeoutMs });
+    worker.postMessage({ sab, url, init, timeoutMs, proxyUrl: CAPTCHA_PROXY_URL });
     const waitResult = Atomics.wait(i32, 0, 0, timeoutMs);
     if (waitResult === "timed-out") {
       if (_syncFetchSab === sab) _syncFetchSab = null;
@@ -156,11 +165,15 @@ const _DEBUG = /^(1|true|yes)$/i.test(
   process.env.CAPTCHA_DEBUG || process.env.CAPTCHA_DEBUG_BODIES || "",
 );
 
-const proxyUrl = process.env.HTTP_PROXY || process.env.HTTPS_PROXY;
-if (proxyUrl) {
-  try {
-    setGlobalDispatcher(new ProxyAgent(proxyUrl));
-  } catch (_) {}
+// Captcha traffic may use an explicitly configured upstream proxy. Ambient
+// HTTP(S)_PROXY variables are intentionally ignored: this process is a long
+// lived daemon and must not inherit a proxy meant for an unrelated command.
+const CAPTCHA_PROXY_URL = process.env.ZCODE_PROXY_UPSTREAM_PROXY?.trim() || undefined;
+let _captchaProxyAgent;
+function captchaFetch(input, init = {}) {
+  if (!CAPTCHA_PROXY_URL) return globalThis.fetch(input, init);
+  _captchaProxyAgent ??= new ProxyAgent(CAPTCHA_PROXY_URL);
+  return globalThis.fetch(input, { ...init, dispatcher: _captchaProxyAgent });
 }
 
 // ── Globals shared across solves ────────────────────────────────────────────
@@ -372,7 +385,7 @@ function storeSetCookies(res, url) {
 // All frame requests (scripts, XHR, fetch, images) funnel through here.
 export function makeInterceptor(bypassPeCache = false, resources = {}) {
   const cache = resources.cache ?? defaultCdnCache();
-  const fetchAsync = resources.fetch ?? globalThis.fetch;
+  const fetchAsync = resources.fetch ?? captchaFetch;
   const fetchSync = resources.syncFetch ?? syncFetchBlocking;
   const bypassed = new Set();
   const cacheable = (request) => isCdnUrl(request.url) && String(request.method || "GET").toUpperCase() === "GET";
@@ -408,7 +421,7 @@ export function makeInterceptor(bypassPeCache = false, resources = {}) {
           const hit = cached(url);
           const entry = hit ?? await cache.load(url, async () => {
             // No automatic redirects: an allowed CDN must not redirect the
-            // worker/global fetch to a forbidden destination.
+            // worker fetch to a forbidden destination.
             const res = await fetchAsync(url, { method: "GET", headers: request.headers, redirect: "error" });
             if (res.status !== 200) throw new Error("CDN response was not 200");
             const body = Buffer.from(await res.arrayBuffer());
@@ -423,7 +436,8 @@ export function makeInterceptor(bypassPeCache = false, resources = {}) {
           return new w.Response("", { status: 503, statusText: "CDN fetch failed" });
         }
       }
-      // Passthrough via global fetch (undici; honors global ProxyAgent).
+      // Passthrough through the captcha-scoped fetch. Ambient proxy settings
+      // are intentionally ignored unless ZCODE_PROXY_UPSTREAM_PROXY is set.
       try {
         const init = { method: request.method, headers: {} };
         request.headers.forEach((value, key) => {
@@ -1748,7 +1762,7 @@ async function createDom(region: string, prefix: string, resources?: DomResource
     cookies = _cookieCache.cookies;
   } else {
     try {
-      const res = await fetch("https://zcode.z.ai/", {
+      const res = await captchaFetch("https://zcode.z.ai/", {
         headers: {
           "User-Agent": fp.userAgent,
           "sec-ch-ua": '"Chromium";v="' + fp.uaMajor + '", "Not)A;Brand";v="24"',
@@ -1978,8 +1992,8 @@ const _hostSetTimeout = globalThis.setTimeout;
 // host-global snapshot skips descriptors whose getter is in here: a wave
 // that starts inside a previous wave's grace period finds OUR OWN stale
 // accessors still on `g`, and saving them would "restore" window accessors
-// at removal — permanently pinning the first closed window (review-caught
-// 2026-08-31). Host getters (Bun's navigator/self accessors) are never in
+// The temporary DOM snapshot must not restore host accessors.
+// The host getters (Bun's navigator/self accessors) are never in
 // this set and always flow to the restore path.
 const _aliasGetters = new WeakSet<object>();
 

@@ -1,7 +1,6 @@
 /**
  * Tests for identity header builder.
- * Mirrors `pio` in the current ZCode bundle (`_reverse/zcode.cjs`).
- * @see _reverse/NOTEPAD.md "How Credential is Used for LLM Calls"
+ * Mirrors the current ZCode client identity builder.
  */
 import { describe, it, expect } from "bun:test";
 import os from "node:os";

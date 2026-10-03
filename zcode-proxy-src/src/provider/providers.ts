@@ -1,7 +1,5 @@
 /**
  * Z.AI and Bigmodel provider definitions.
- * @see .omo/plans/zcode-proxy.md Task 3
- * @see _reverse/NOTEPAD.md "Provider Endpoints"
  */
 import type { ProviderDef, ProviderId } from "./types.js";
 

@@ -4,15 +4,12 @@
  * kit adapters and tests derive from here; no parallel model lists.
  *
  * Hardcoded to the exact models available on the Z.AI / Bigmodel coding-plan
- * tier. This replaces the previous `_reverse/models_catalog.json` import,
- * removing that runtime dependency. Update this list when new GLM models are
- * released or specs change.
+ * tier. The list is kept in source so the proxy has no runtime catalog
+ * dependency. Update it when new GLM models are released or specs change.
  *
- * Field provenance (audit §9 — decide from primary sources/tests, not guesses):
- * - contextWindow / maxOutputTokens: ZCode 3.11.2 `_reverse/models_catalog.json`
- *   (zai/bigmodel entries identical). The 128_000 maxOutputTokens is the
- *   catalog value; it wins over the kit setup's historical 131_072.
- * - inputModalities: "v"-suffixed catalog models are vision models; glm-5.3-flash
+ * Values are pinned to the supported client release and verified by provider
+ * tests. The 128_000 maxOutputTokens value wins over the kit setup's historical
+ * 131_072. `inputModalities` marks vision models; glm-5.3-flash
  *   image input was verified live through this proxy (kit image test). Absent
  *   field = text-only.
  * - efforts: only levels proven live against the start-plan gateway for that
@@ -20,7 +17,6 @@
  *   {2048,16384,32768}). Other reasoning models have NO efforts field here —
  *   their accepted levels are unverified and must not be advertised.
  *
- * @see .omo/plans/zcode-proxy.md Task 3
  */
 import type { ModelDef } from "./types.js";
 

@@ -67,8 +67,8 @@ models:
 identity:
   # Mirrors process.env.ZCODE_APP_VERSION in the ZCode bundle.
   # Must be printable ASCII; non-conforming values fall back to the default.
-  # Default: "3.11.2" (current ZCode release). Override to match your real client.
-  appVersion: "3.11.2"
+  # Default: "3.14.3" (current ZCode release). Override to match your real client.
+  appVersion: "3.14.3"
   # X-Title suffix → "Z Code@{sourceTitle}". Default "cli".
   sourceTitle: "cli"
   # HTTP-Referer URL. Default "https://zcode.z.ai".
@@ -143,41 +143,44 @@ async:
   # Optional model override; empty uses the request's `model`.
   defaultModel: ""
 
-# Manual claim ("weekend plan") — mirrors the ZCode 3.10 desktop client's
-# manualClaimPlan feature. When enabled, the proxy periodically lists claimable
-# trial plans ({origin}/api/v1/zcode-plan/billing/preview) and auto-claims the
-# highest-priority one ({origin}/api/v1/zcode-plan/billing/claim) using the
-# OAuth JWT + an Aliyun captcha token (same solver as start-plan). Weekend
-# campaigns are quota-limited first-come-first-served; claimed plans activate
+# Manual claim campaigns — mirrors the ZCode client's manualClaimPlan feature.
+# When enabled, the proxy periodically lists all claimable plans (including
+# Builder Event token plans) from {origin}/api/v1/zcode-plan/billing/preview
+# and auto-claims the Builder Event plan when present; otherwise it selects
+# the highest-priority plan from that response via
+# {origin}/api/v1/zcode-plan/billing/claim using the
+# OAuth JWT + an Aliyun captcha token (same solver as start-plan). Campaigns
+# are quota-limited first-come-first-served; claimed plans activate
 # at the campaign's `starts_at` and land as Start-Plan quota.
 #
 # IMPORTANT: requires a logged-in credential (claim uses the JWT from
 # `auth login`), and identity.appVersion must be >= the campaign's minimum
-# client version (default 3.11.2) or the server rejects with `ineligible`.
+# client version (default 3.14.3) or the server rejects with `ineligible`.
 #
 # Env overrides: ZCODE_CLAIM_ENABLED, ZCODE_CLAIM_AUTO, ZCODE_CLAIM_ORIGIN,
 # ZCODE_CLAIM_POLL_INTERVAL_MS.
 claim:
-  # Off by default (AUD-013: matches the loader's fail-closed defaults).
   # `true` = the scheduler polls the preview endpoint every 5 min and
-  # idles until a campaign goes live (404 preview = nothing to claim).
+  # idles until a campaign (including Builder Event) goes live.
   # `false` = CLI-only (`zcode-proxy claim [list|now]` still works).
-  enabled: false
+  enabled: true
   # Auto-claim in the background while serving. `false` = CLI-only
   # (`zcode-proxy claim` still works when `enabled: true`).
-  auto: false
+  auto: true
   origin: "https://zcode.z.ai"
   # Preview poll cadence (5 min default).
   pollIntervalMs: 300000
   # Backoff after failed attempts (10 min default); quota_exhausted /
   # already_claimed back off to the server-provided next window instead.
   cooldownMs: 600000
-  # Optional: claim a specific plan_id. Empty = highest-priority preview.
+  # Optional: claim a specific plan_id. Empty = Builder Event first when
+  # present, otherwise highest-priority preview.
   planId: ""
 
 # Server-controlled upstream URL remapping (mirrors the ZCode client's
-# ProviderEndpointRoutingService). The proxy periodically fetches
-# {origin}/api/v1/agent/configs and rewrites matching upstream URLs per the
+# ProviderEndpointRoutingService). Known official gateway routes are applied
+# immediately; the proxy also periodically fetches
+# {origin}/api/v1/client/configs?app_version=&platform= and rewrites matching upstream URLs per the
 # returned proxyEndpoint.mapping table (currently the coding-plan Anthropic
 # endpoints -> zcode.z.ai ultra endpoints). Fail-open: any fetch/parse error
 # keeps the original URLs. Env override: ZCODE_ENDPOINT_ROUTING=false.
@@ -185,15 +188,16 @@ endpointRouting:
   enabled: true
   origin: "https://zcode.z.ai"
 
-# Client request signing V4 (mirrors the ZCode 3.9.1 ClientRequestSigningV4Signer).
-# When enabled, the proxy probes {origin}/api/v1/agent/configs (cached 1h) and,
+# Legacy client request signing V4 (mirrors the ZCode 3.9.1 client).
+# It is disabled by default because current ZCode releases no longer advertise
+# the gate. When explicitly enabled, the proxy probes {origin}/api/v1/client/configs (cached 1h) and,
 # only if the server sets data.codingPlanSignature.enable=true, signs coding-plan
 # requests: handshake against {provider}/api/paas/c1f3a7e2/v2/client, Ed25519
 # signature + proof-of-work headers on every request, fail-open retry ladder
 # (two 401 VERIFY rejections -> permanent unsigned bypass). Start-plan and
 # off-peak paths are never signed. Env override: ZCODE_CLIENT_SIGNING=false.
 clientSigning:
-  enabled: true
+  enabled: false
   origin: "https://zcode.z.ai"
 
 logging:

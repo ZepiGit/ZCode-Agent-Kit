@@ -72,6 +72,21 @@ describe("gateStreamPrelude", () => {
     expect(gateway.reason).toContain("1302");
   });
 
+  it("accepts the official numeric and symbolic gateway business-code mapping", () => {
+    for (const code of [1008, 1261, 1304, 1308, 1309, 1310, 1311, 1313, 1314, 1315, 1316, 1317, 1318, 1319, 1320, 1321, 2056, 20097]) {
+      expect(classifyStreamError(JSON.stringify({ code, msg: "terminal" })).retryable).toBe(false);
+    }
+    for (const code of ["insufficient_quota", "credit_balance_exhausted", "organization_spend_limit_exceeded"]) {
+      expect(classifyStreamError(JSON.stringify({ code, msg: "terminal" })).retryable).toBe(false);
+    }
+    for (const code of ["rate_limit_error", "rate_limit_reached_error", "engine_overloaded_error", "overloaded_error"]) {
+      expect(classifyStreamError(JSON.stringify({ code, msg: "retry" })).retryable).toBe(true);
+      expect(classifyStreamError(JSON.stringify({ type: code, message: "retry" })).retryable).toBe(true);
+    }
+    // Numeric codes are sometimes serialized as strings by the provider.
+    expect(classifyStreamError(JSON.stringify({ code: "1302", msg: "retry" })).retryable).toBe(true);
+  });
+
   it("decides at the first content event: an error after it is the client's to see, never a retry", async () => {
     const verdict = await gateStreamPrelude(sse([START, BLOCK, OVERLOADED]));
     expect(verdict.kind).toBe("content");

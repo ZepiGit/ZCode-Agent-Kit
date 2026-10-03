@@ -1,5 +1,5 @@
 // Shared CLI context: paths, bootstrap (migrated from setup.mjs unchanged in
-// behavior, with the audit fixes).
+// behavior).
 import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, closeSync, renameSync, statSync } from "node:fs";
 import { createHash, randomBytes } from "node:crypto";
 import { dirname, join, resolve } from "node:path";

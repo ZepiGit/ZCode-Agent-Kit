@@ -1,5 +1,5 @@
 // Assembles the npm launcher package under pack/dist from the tracked repo
-// sources (allowlist-driven — audit §11: explicit package allowlists, never
+// sources (allowlist-driven — explicit package allowlists, never
 // "publish the directory"). The launcher package contains the kit sources;
 // `npm install -g zcode-agent-kit` then runs the kit's setup, which installs
 // the proxy/bridge dependencies with bun (versioned, frozen lockfile).

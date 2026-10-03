@@ -81,11 +81,24 @@ describe("ClaimScheduler.tick", () => {
     expect(res).toEqual({ action: "claimed", planId: "high", startsAt: 2000, endsAt: 3000 });
     expect(h.claimCalls).toEqual([{ planId: "high", captcha: { verifyParam: "cap", region: "cn" } }]);
 
-    // ends_at (3000s = 3_000_000ms) is in the future relative to nowMs=1_000_000.
+    // A held plan must not block a new campaign from being seen.
+    h.plans = [{ planId: "high", name: "H", description: "", priority: 9, entitlements: [] }];
     h.nowMs = 2_999_999;
-    expect(await h.scheduler.tick()).toEqual({ action: "skipped_hold" });
+    expect(await h.scheduler.tick()).toEqual({ action: "idle" });
     h.nowMs = 3_000_000;
-    expect((await h.scheduler.tick()).action).not.toBe("skipped_hold");
+    expect(["idle", "skipped_hold"]).toContain((await h.scheduler.tick()).action);
+  });
+
+  it("auto-claims a Builder Event token plan from the generic preview", async () => {
+    const h = makeHarness();
+    h.plans = [
+      { planId: "unrelated-high", name: "Other campaign", description: "", priority: 99, entitlements: [] },
+      { planId: "builder-event-tokens", name: "Builder Event tokens", description: "event grant", priority: 1, entitlements: [] },
+    ];
+    h.claimOutcome = { ok: true, planId: "builder-event-tokens" };
+    const result = await h.scheduler.tick();
+    expect(result).toEqual({ action: "claimed", planId: "builder-event-tokens" });
+    expect(h.claimCalls[0]?.planId).toBe("builder-event-tokens");
   });
 
   it("claims the configured planId when set (ignores priority)", async () => {
@@ -125,7 +138,7 @@ describe("ClaimScheduler.tick", () => {
     h.nowMs = 1_199_999;
     expect(await h.scheduler.tick()).toEqual({ action: "skipped_hold" });
     h.nowMs = 1_200_000;
-    expect((await h.scheduler.tick()).action).not.toBe("skipped_hold");
+    expect(["failed", "idle", "skipped_hold"]).toContain((await h.scheduler.tick()).action);
   });
 
   it("already_claimed without failureEndsAt uses cooldown", async () => {

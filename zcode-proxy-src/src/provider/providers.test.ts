@@ -1,6 +1,5 @@
 /**
  * Tests for provider definitions and model catalog.
- * @see .omo/plans/zcode-proxy.md Task 3
  */
 import { describe, it, expect } from "bun:test";
 import { getProvider, ZAI_PROVIDER, BIGMODEL_PROVIDER } from "./providers.js";
@@ -57,7 +56,7 @@ describe("models", () => {
   });
 
   it("contextWindow + maxOutputTokens match the 3.11.2 catalog per model", () => {
-    // Synced against _reverse/models_catalog.json (zai == bigmodel entries).
+    // Synced against the supported client model catalog.
     const byId = Object.fromEntries(MODELS.map((m) => [m.id, m]));
     expect(byId["glm-4.5-air"]).toMatchObject({ contextWindow: 131_072, maxOutputTokens: 98_304 });
     expect(byId["glm-4.6"]).toMatchObject({ contextWindow: 200_000, maxOutputTokens: 131_072 });

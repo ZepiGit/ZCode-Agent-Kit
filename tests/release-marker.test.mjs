@@ -1,4 +1,4 @@
-// Audit backlog: version-bound release gate — a marker for a different
+// Version-bound release gate — a marker for a different
 // version must keep the generated package private, and the package-internal
 // verifier must reject a version changed after the build.
 import { test } from "node:test";

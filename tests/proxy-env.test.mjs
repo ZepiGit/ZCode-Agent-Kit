@@ -40,7 +40,13 @@ test('managed env removes ambient solver overrides including Windows casing vari
     ZCODE_PROXY_CREDENTIALS_PATH: 'C:/store/credentials.json',
     ZCODE_PROXY_CREDENTIAL_SECRET: 'keep',
     ZCODE_PROXY_ACCOUNTS_PATH: 'C:/store/accounts.json',
+    HTTP_PROXY: 'http://corporate-proxy:8080',
     HTTPS_PROXY: 'http://corporate-proxy:8080',
+    http_proxy: 'http://corporate-proxy:8080',
+    https_proxy: 'http://corporate-proxy:8080',
+    ALL_PROXY: 'http://corporate-proxy:8080',
+    all_proxy: 'http://corporate-proxy:8080',
+    ZCODE_PROXY_UPSTREAM_PROXY: 'http://explicit-proxy:8080',
   };
   const snapshot = { ...source };
   const env = proxyEnv({ config: 'C:/kit/proxy/config.yaml' }, source);
@@ -51,7 +57,10 @@ test('managed env removes ambient solver overrides including Windows casing vari
   assert.equal(env.ZCODE_PROXY_CREDENTIALS_PATH, source.ZCODE_PROXY_CREDENTIALS_PATH);
   assert.equal(env.ZCODE_PROXY_CREDENTIAL_SECRET, 'keep');
   assert.equal(env.ZCODE_PROXY_ACCOUNTS_PATH, source.ZCODE_PROXY_ACCOUNTS_PATH);
-  assert.equal(env.HTTPS_PROXY, source.HTTPS_PROXY);
+  for (const name of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']) {
+    assert.equal(env[name], undefined, name);
+  }
+  assert.equal(env.ZCODE_PROXY_UPSTREAM_PROXY, source.ZCODE_PROXY_UPSTREAM_PROXY);
   assert.deepEqual(source, snapshot);
 });
 

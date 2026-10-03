@@ -1,6 +1,5 @@
 /**
  * Tests for OpenAI ↔ Anthropic translators.
- * @see .omo/plans/zcode-proxy.md Task 11
  */
 import { describe, it, expect } from "bun:test";
 import {

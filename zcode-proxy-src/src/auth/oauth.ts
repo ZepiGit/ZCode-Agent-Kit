@@ -18,7 +18,6 @@
  *   authorize at `bigmodel.cn/login?appId&redirect&state`, then exchange the
  *   returned code at the shared zcode.z.ai token endpoint.
  *
- * @see _reverse/NOTEPAD.md "Method 1: OAuth Flow"
  */
 import type { ProviderId } from "../provider/types.js";
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from "node:http";

@@ -290,7 +290,7 @@ export async function collectQuotaSnapshot(
     // accept both so neither casing drops the field.
     const expiresAt = toFiniteNumber(b.expires_at ?? b.expiresAt);
     const unitType = b.unit_type ?? b.unitType;
-    // Unknown/NaN numbers stay null (audit §10): an invented 0 would make a
+    // Unknown/NaN numbers stay null : an invented 0 would make a
     // partially-known balance look exhausted/empty.
     balances.push({
       showName: String(b.show_name ?? ""),

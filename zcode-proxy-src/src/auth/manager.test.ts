@@ -1,6 +1,5 @@
 /**
  * Tests for credential types and auth manager.
- * @see .omo/plans/zcode-proxy.md Task 4
  */
 import { describe, it, expect } from "bun:test";
 import { credentialString, isExpired } from "./types.js";

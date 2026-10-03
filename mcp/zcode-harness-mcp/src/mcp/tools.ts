@@ -114,7 +114,7 @@ function parseModelRef(args: Record<string, unknown>): { providerId: string; mod
 }
 
 /** Invoke a whitelisted read-only native operation. */
-// Audit H5: session/goal was removed — its action enum includes mutating
+// session/goal was removed — its action enum includes mutating
 // verbs (set/replace/pause/resume/clear), so listing it here let --read-only
 // bypass requireWritable. Mutating access goes through zcode_session_goal.
 const INVOKE_ALLOWLIST = new Set([
