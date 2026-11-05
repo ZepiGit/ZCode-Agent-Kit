@@ -36,6 +36,10 @@ while :; do
     printf '%s avail_kb=%s total_kb=%s avail_pct=%s swap_used_kb=%s\n' \
       "$(date -u +%FT%TZ)" "$avail" "$total" "$pct" "$(( swt - swf ))"
     ps -eo pid,rss,comm --sort=-rss --no-headers | head -10 | sed 's/^/  /'
+    printf '  procs=%s by-comm(rss_mb,count):' "$(ps -e --no-headers | wc -l)"
+    ps -eo rss=,comm= | awk '{r[$2]+=$1; c[$2]++} END {for (k in r) printf "%d %s %d\n", r[k]/1024, k, c[k]}' \
+      | sort -rn | head -6 | awk '{printf " %s=%sMB/%s", $2, $1, $3}'
+    printf '\n'
   } >> "$LOG"
   if [ "$pct" -lt "$THRESHOLD_PCT" ]; then
     victims=$( { grep -E '^[0-9]+$' "$PIDFILE" 2>/dev/null; tagged_pids; } | sort -un)

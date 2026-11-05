@@ -15,3 +15,8 @@
 - 2026-11-05 Baseline green: kit 267/278 (11 Windows/opt-in skips), proxy 1288/1288, mcp 95/96, compile, pack, golden mock. See METRICS.md.
 - 2026-11-05 Spawned research: node-lts, bun (general-purpose/opus, substitute for sol).
 - 2026-11-05 No git identity on this machine; every commit in this run goes through tools/gitc.sh (ZepiGit noreply identity via env vars, no git config change).
+- 2026-11-05 Orchestrator prompt saved as .scratch/kit-overhaul/PROMPT.md (stable pointer for subagents and resume).
+- 2026-11-05 Spawned 1B diagnosis lead (general-purpose/opus for sol; worktree /home/AgentKit/wt/diagnosis-memory, branch diagnosis/memory, port 18457) and 1C UX lead (general-purpose/opus for fable; worktrees /home/AgentKit/wt/ux-capture, /home/AgentKit/wt/prototype-ux, port 18458).
+- 2026-11-05 Phase 0 isolation proof delegated to 1B (must precede any process start). No kit is installed on this machine, so the real-instance risk is limited to the ZCode harness processes, which this run never touches.
+- 2026-11-05T23:46:12Z Memory dip to 16 % avail at 23:43:32Z with no large single process in the top-10 view; sentinel restarted with process count + per-command RSS sums to attribute future dips.
+- 2026-11-05T23:56:27Z Research done: node-lts (floor >=24, CI 24+26), bun (pin 1.4.4; no in-process hard cap possible -> separate OS process), happy-dom (^21.0.4, security fix; CSS/iframe loading flags; interceptor abort gap). Spawned undici-yaml, mcp-sdk.
