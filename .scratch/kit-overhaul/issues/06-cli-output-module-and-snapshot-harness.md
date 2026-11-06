@@ -242,3 +242,54 @@ Spec stories: 89, 106, 107, 108, 123
    
    Only an artifact from such a run may be committed as `tests/ux-before/windows/`. If the leg fails, the `ux-before-now-Windows` artifact holds the fresh capture, and every failed prep step now prints its status, signal and streams (the `git clone` cause in particular).
 3. `test-kit` (ubuntu/windows × Node 24/26): `npm run test` green, including `tests/ux-before-capture.test.mjs`. The Linux end-to-end test is skipped on win32, and `json-superset`'s live part stays skipped on win32 until leg 2 is green.
+
+### 2026-11-06 — implementer, round 3 (staging/06 pre-merge CI)
+
+**Result reported by the orchestrator** (log `overhaul-tools/uxbefore-win-2.log`)
+- `test-kit` 4/4 and `ux-before` ubuntu were green.
+- `ux-before` windows: the baseline step ended `captures: 189 ok, 4 failed`.
+- All four failures were the fixture `git clone --no-local -q --bare …` of `update-checkout`/`update-checkout-dirty` (pipe, ci), with status `3221225477` (0xC0000005, git.exe crashed). The other 8 differences were `unexpected:` files for the same captures.
+- The same clones **succeeded in the equivalence step**, where the fresh capture has those files.
+
+**Cause.** The two steps ran under different shells. The baseline step was `shell: bash` (Git Bash) and the equivalence step used the runner default (pwsh). Under Git Bash, PATH starts with `Git\mingw64\bin`, so the fixture PATH (`winPath()`, which took the first `git.exe`) used the raw mingw64 binary instead of the `Git\cmd` launcher. The fixture env also inherited the MSYS shell state (`MSYSTEM`, `EXEPATH`, `MSYS`, `ORIGINAL_PATH`, `SHLVL`, `PWD`, …) alongside the narrow fixture PATH. The two steps also differed in environment, which an equivalence baseline must not.
+
+**Fixes (test tooling and CI only)**
+- `host.mjs`:
+  - `windowsGitDir(PATH, { exists })`: any `git.exe` inside a Git for Windows tree (`mingw64\bin`, `usr\bin`, `bin`, `cmd`) maps to that tree's `cmd` launcher; a git elsewhere is used as found;
+  - `fixtureBaseEnv(env, { windows })`: the fixture env filter, moved from `capture.mjs`. On Windows it also drops `PATH`/`TEMP`/`TMP` (any case) and the Git Bash variables, and keeps the Windows runtime (`SystemRoot`, `WINDIR`, `PATHEXT`, `ComSpec`, `HOMEDRIVE`, `HOMEPATH`, …). On POSIX it is exactly the original filter.
+- `ci.yml`: the "Windows baseline from the base commit" step runs under `shell: pwsh`, the equivalence step's shell, with an exit-code check after each native command; `GITHUB_ENV` is written as UTF-8 without a BOM (pwsh 7).
+- `tests/ux-before-capture.test.mjs` (+4 tests, now 15):
+  - the git-dir mapping for the bash, pwsh/cmd, trailing-backslash, non-Git-for-Windows and no-git cases;
+  - the Windows env filter (exact kept set);
+  - the POSIX filter pin;
+  - a workflow guard (the baseline step is `shell: pwsh`, the equivalence step has no shell override);
+  - a wiring check that `capture.mjs` builds the env and the Windows git dir through `host.mjs`.
+
+**Evidence**
+- `t06-r3-green1`: 15/15.
+- Mutation proofs (`t06-mutants3`; every file restored, `git status` shows only the intended changes). All 7 killed, 1 failing test each:
+  - **W1:** no launcher mapping;
+  - **W2:** MSYSTEM leaks;
+  - **W3:** EXEPATH leaks;
+  - **W4:** baseline step back to bash;
+  - **W5:** `capture.mjs` without `windowsGitDir`;
+  - **W6:** `capture.mjs` with an unfiltered env;
+  - **W7:** the Windows filter applied on POSIX.
+- `t06-r3-sub`: 140 Linux captures (all `update-*` incl. `update-checkout`, all `doctor-*`, `accounts-list`, `setup-explicit`) against the baseline: 0 differences. The POSIX path is unchanged.
+- Full suites at this head (no tip merge, as instructed):
+  - `npm run test` (`t06-r3-full-kit`): 514 tests, 503 pass, 0 fail, 11 skipped;
+  - `npm run test:proxy`: 1343 pass, 0 fail;
+  - `npm run test:mcp`: 95 pass, 0 fail, 1 skipped;
+  - wiring guard: 0 unwired.
+
+**What CI must show (staging/06 or the merge)**
+1. `ux-before / windows-latest`:
+   - the pwsh step "Windows baseline from the base commit" ends with `captures: N ok, 0 failed` (N ≈ 193, matching round 2's 189 + 4);
+   - `update/update-checkout` and `update/update-checkout-dirty` (pipe and ci) show an exit code, not `ERROR git clone`;
+   - the step "Before-equivalence (byte for byte)" passes 1/1 with no `unexpected:`, `differs:` or `baseline capture error` line.
+   
+   Commit the `ux-before-windows-baseline` artifact of that run as `tests/ux-before/windows/` only if both hold.
+2. `ux-before / ubuntu-latest`: still green (no Linux behaviour changed).
+3. `test-kit` 4/4: green with the 15 tests of `tests/ux-before-capture.test.mjs`. The two env/git tests and the workflow guard also run on the windows legs; the Linux end-to-end test is skipped there.
+
+If windows still fails: the `ux-before-now-Windows` artifact holds the fresh capture, and the failure text names the git command with its status and both streams.
