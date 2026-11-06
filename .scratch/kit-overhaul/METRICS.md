@@ -73,6 +73,17 @@ No budget is loosened past the Phase 1B baseline. Against the diagnosis loop's o
 
 Linux reference check on the ticket 02 branch (Bun 1.4.2, 2026-11-06, `/home/AgentKit/overhaul-tools/t02-memloop/linux-job/`): numbers in line with the ticket 01 run (S3/short kit 849 MB, launcher 78.2, bridge 85.9 MB; S2 cost per generation 1,050 MB, retained 685 MB, CDN +149 MB). S1/burst1 is flaky at its 250 MB HWM budget on the integration tip too: HWM 256.7 MB in the job, reruns 237.7 / 236.7 / 264.6 MB on the branch and 236.6 / 299.2 / 237.5 MB on the tip (3f4e41a).
 
+### S3 OMP stub-host leg, Linux, Bun 1.4.2 (ticket 03, 2026-11-06)
+
+`node tests/memory/run.mjs S3 --variant omp` (in the job: `S3/omp`, expected RED → 35). Five stub Bun hosts run the generated OMP extension at once; a second round kills the first starter with its process tree. Branch `ticket/03-s3-omp-stub-host` @ 50c027b, Node 26.7.0, port 19030. Run dirs: `/home/AgentKit/overhaul-tools/t03-memloop/{red1,red2,job-s3}/`.
+
+| Round | OMP preflights at once (≤ 1) | Spawned | Host's own cost (waiter gate ≤ 5 MB) | Cause lines in waiters | Verdict |
+|---|---|---|---|---|---|
+| omp-5 | 5 | 5 | starters +3.6 to +3.9 MB; no waiters | (no waiters) | RED → 35 |
+| omp-5-kill-starter | 5 | 5 | starters +3.2 to +3.9 MB; no waiters | (no waiters) | RED → 35 |
+
+Same run: kit total 373 MB (≤ 596), preflight peak 73.9 MB (≤ 76), proxy 60 MB; the host (34.7 MB per process) is not kit footprint. Measurement floor of the stub host (no-op hook) +0.6 to +0.75 MB; a stat + `fetch` waiter shape +2.9 to +3.3 MB. A throwaway single-flight prototype turned the variant GREEN in 4 of 4 runs with waiters at +3.3 to +4.1 MB (ticket 03 Comments). Windows: pending CI, after ticket 02 is re-merged.
+
 ## Current
 
 (pending)
