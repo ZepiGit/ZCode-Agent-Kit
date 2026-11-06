@@ -62,6 +62,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol (if accepted) | high | 13 | needs-triage |
 | 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol (if accepted) | medium | — | needs-triage |
 | 58 | [Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)](58-solver-recycle-and-failure-semantics.md) | sol | high | 19, 25, 28 | ready-for-agent |
+| 59 | [Proxy-side effort normalisation and the Kilo `/v1/models` sheet line](59-proxy-effort-normalisation-and-kilo-models-line.md) | sol | medium | — | needs-triage |
 
 ## Initial frontier
 

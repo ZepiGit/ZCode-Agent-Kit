@@ -41,3 +41,4 @@
 - 2026-11-06T07:45:44Z Pushed integration branch; draft PR #13 opened (https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13). CI runs on pull_request.
 - 2026-11-06T08:07:03Z Merged t50 (c2ee3d1 green). t14 done (d5a49e3) -> merger. Notes for t18/t33 appended from t14 decisions.
 - 2026-11-06T08:21:56Z Merged t14 (b3b8ece green: kit 295/306, proxy 1303, mcp 95/96). 3 merges done (04, 50, 14): memory-loop short run deferred to the t01 merge because the loop is not on the integration branch yet and none of the 3 touched memory paths (adapters, test wiring, log formatting). Spawned t51. Pushing.
+- 2026-11-06T09:03:22Z Merged t51 (ead458f green: kit 303/314). t51 left 2 MEDIUM items with evidence (Claude effort, pi thinkingLevelMap) -> needs-triage ticket 59. Observations 0014 (mutation check for preservation tests) and 0015 (schema vs wire) logged; brief updated for this run.
