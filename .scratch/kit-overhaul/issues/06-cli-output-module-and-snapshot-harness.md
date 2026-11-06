@@ -2,7 +2,7 @@
 
 **Blocked by:** 05 (Shared width core and token set (two renderers, one token set))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -338,3 +338,5 @@ If windows still fails: the `ux-before-now-Windows` artifact holds the fresh cap
 3. `test-kit` 4/4: green with the 19 tests. The two Linux end-to-end tests are skipped on win32; the normalisation, env, git-dir and workflow tests run there too.
 
 - 2026-11-06 (orchestrator): first merge 5155b1d was reverted (f8be074); fix rounds 2-4 staged on staging/06 for pre-merge CI via draft PR #15.
+
+- Merged 2026-11-06 as 97bd0c0 (merge of `staging/06` at 1ba62de, which already holds the revert of the revert 635276c and fix rounds 2-4), after the pre-merge CI gate: draft PR #15, run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42267516015 green on all 7 jobs (test-kit 4/4, ux-before ubuntu + windows, memory-budget). Windows BEFORE baseline: the run's `ux-before-windows-baseline` artifact (261 files, INDEX `193 ok, 0 failed`) committed byte for byte as `tests/ux-before/windows/` in c8c88e9 (`-text`, so `install-ps1-static/source-excerpt.txt` keeps its CRs); the CI capture step now skips because `tests/ux-before/windows/manifest.json` exists. Fast suite on the merged tree: kit 506/517 (0 fail, 11 skipped), proxy 1343/1343 (90 files), mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged; no lockfile changes. Logs: reports/merge-06-{npm-ci,kit,proxy,mcp}.log. Open follow-up from decision 3: the win32 skip of `json-superset`'s live part can now be removed (not done in this merge).
