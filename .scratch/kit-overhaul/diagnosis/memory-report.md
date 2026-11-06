@@ -36,7 +36,7 @@ Verdicts below use the loop's current rules. Two runs were evaluated before the 
 
 - RSS grows by **+4.1 MB per solve**. The JS heap retained after a forced full GC grows by **+2.5 MB per solve**. A minimal guest (no globals, timers or listeners) still retains 0.9 MB per solve (`data/S2-gc.worker-heap.jsonl`).
 - Long profile (2,000 solves) is a sawtooth: ten generations, each peaking at 0.9–1.0 GB RSS (worker heap 585–679 MB), HWM 1,068 MB. Recycling bounds the growth, but only at about 1 GB.
-- With a guest that keeps heap inside one generation (phase B), **686 MB** stays retained until the heap trigger fires. That trigger is 768 MB of JS heap, measured inside the worker after a solve. Recycling then returns all of it (687 MB back within 5 s).
+- With a guest that keeps heap inside one generation (phase B), **686 MB of RSS** stays retained with no recycle (worker heap 571 MB). That is still below the heap trigger: 768 MB of JS heap, measured inside the worker after a solve. In the long run (30 such solves) the heap trigger fired once mid-phase, and the next generation was back at 619 MB of retained RSS by the explicit recycle. A recycle then returns all of it (687 MB back within 5 s).
 
 **Dominators** (JSC heap snapshot taken in the worker after 12 solves with a marker class; analyzer in `diag-scripts/retainers*.py`):
 - 240,000 marker objects are present, which is 12 windows × 20,000. Every window of the generation is alive.
