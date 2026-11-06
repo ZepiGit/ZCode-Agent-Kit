@@ -71,3 +71,5 @@ Spec stories: 139, 140
 - The proxy typecheck joins `test-kit` in ticket 11.
 
 Merged 2026-11-06 as 8f59b2d; fast suite: kit 287/298 (0 fail, 11 skipped), proxy 1288/1288, mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged. Logs: reports/merge-04-{npm-ci,test,proxy,mcp}.log. CI legs (AC 3/4) pending CI after push.
+
+- 2026-11-06 (orchestrator): pending-CI criteria verified on draft PR #13, run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42182894607: test-kit ubuntu/windows × Node 24/26 all green. METRICS.md links filled in.
