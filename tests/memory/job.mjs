@@ -3,28 +3,33 @@
 // JOB), each under a hard memory cap and a timeout, then the expected-RED
 // ratchet (lib/ratchet.mjs) over the outcomes.
 //
-//   node tests/memory/job.mjs [--os linux] [--out DIR] [--cap auto|systemd|prlimit|none] [--only KEY,KEY]
+//   node tests/memory/job.mjs [--os linux|windows] [--out DIR] [--cap auto|systemd|prlimit|jobobject|none] [--only KEY,KEY]
 //
-// Caps (--cap auto picks the first that works):
-//   systemd  `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`,
-//            verified by reading the scope's memory.max from inside it;
-//   prlimit  `prlimit --as=2×cap` per process (address space, a coarse
-//            fallback where no user systemd manager is reachable);
-//   none     only when the caller already runs the job under a cap.
-// Every run also gets `timeout --kill-after=30`.
+// Caps (--cap auto picks the first that works; lib/caps.mjs):
+//   systemd    `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`,
+//              verified by reading the scope's memory.max from inside it;
+//   prlimit    `prlimit --as=2×cap` per process (address space, a coarse
+//              fallback where no user systemd manager is reachable);
+//   jobobject  Windows: a Job Object with the job memory limit and
+//              kill-on-close, read back before the run starts;
+//   none       only when the caller already runs the job under a cap.
+// Every run also gets a timeout (`timeout --kill-after=30` on Linux; on
+// Windows the job kills the wrapper, and closing the Job Object kills the tree).
 //
 // Writes <out>/job-summary.json and <out>/job-summary.md (also appended to
 // $GITHUB_STEP_SUMMARY when set); each run's samples.csv and summary.json
 // stay under <out>/<scenario>-<variant>/. Exit 0 when the ratchet holds,
 // 1 when it does not, 2 when the job itself cannot run.
 // --only runs a subset (local use): runs left out are reported, not failed.
-import { spawn, spawnSync } from "node:child_process";
+// Runs RED only on commit (Windows) are listed for the owner (build-time gate 3).
+import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JOB, osLeg, parseRunKey } from "./lib/catalogue.mjs";
 import { checkRatchet, issueIdsIn, readExpectedRed } from "./lib/ratchet.mjs";
 import { assertSafeRun } from "./lib/isolated-kit.mjs";
+import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -36,6 +41,8 @@ const CAP = { "S1/burst16": "4G", "S1/burst32": "6G", S2: "4G" };
 const TIMEOUT_S = { S5: 1800 };
 const DEFAULT_CAP = "3G";
 const DEFAULT_TIMEOUT_S = 1200;
+// Windows runs are slower (PowerShell polls, process start-up): twice the timeout.
+const TIMEOUT_FACTOR = { windows: 2 };
 
 function parseArgs(argv) {
   const out = { os: osLeg(), out: resolve(ROOT, ".memloop", "job"), cap: "auto", only: null };
@@ -49,44 +56,19 @@ function parseArgs(argv) {
   return out;
 }
 
-const bytes = (size) => Number(size.replace(/G$/, "")) * 1024 ** 3;
-
-/** Does a user systemd scope apply MemoryMax here? Reads memory.max from inside the scope. */
-function systemdScopeWorks() {
-  const want = 64 * 1024 * 1024;
-  const r = spawnSync("systemd-run", ["--user", "--scope", "--quiet", "-p", `MemoryMax=${want}`, "-p", "MemorySwapMax=0", "--", "sh", "-c", 'cat "/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max"'], { encoding: "utf8", timeout: 30_000 });
-  return r.status === 0 && r.stdout.trim() === String(want) ? { ok: true } : { ok: false, why: (r.stderr || r.stdout || String(r.error ?? "")).trim().split("\n").slice(-1)[0] };
-}
-
-function chooseCap(requested) {
-  if (requested === "none") return { cap: "none" };
-  if (process.platform !== "linux") return { error: `no cap mechanism for ${process.platform} yet (the windows leg uses a Job Object, ticket 02)` };
-  if (requested === "systemd" || requested === "auto") {
-    const s = systemdScopeWorks();
-    if (s.ok) return { cap: "systemd" };
-    if (requested === "systemd") return { error: `systemd-run --user scope with MemoryMax is not available: ${s.why}` };
-    console.error(`memory-budget: systemd user scope unavailable (${s.why}); falling back to prlimit`);
-  }
-  if (spawnSync("prlimit", ["--version"]).status === 0) return { cap: "prlimit" };
-  return { error: "neither a systemd user scope nor prlimit is available: the job never runs uncapped" };
-}
-
-function commandFor(cap, size, timeoutS, args) {
-  const inner = ["timeout", "--kill-after=30", String(timeoutS), process.execPath, join(HERE, "run.mjs"), ...args];
-  if (cap === "systemd") return ["systemd-run", "--user", "--scope", "--quiet", "-p", `MemoryMax=${size}`, "-p", "MemorySwapMax=0", "--", ...inner];
-  if (cap === "prlimit") return ["prlimit", `--as=${2 * bytes(size)}`, "--", ...inner];
-  return inner;
-}
-
-function runOne(argv, logPath) {
+function runOne({ argv, timeoutMs }, logPath) {
   return new Promise((resolveRun) => {
     const t0 = Date.now();
-    const child = spawn(argv[0], argv.slice(1), { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] });
-    const log = (b) => { process.stdout.write(b); appendFileSync(logPath, b); };
+    const child = spawn(argv[0], argv.slice(1), { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let tail = "";
+    const log = (b) => { process.stdout.write(b); appendFileSync(logPath, b); tail = (tail + b).slice(-8192); };
     child.stdout.on("data", log);
     child.stderr.on("data", log);
-    child.on("close", (code, signal) => resolveRun({ code: code ?? 2, signal, durationS: Math.round((Date.now() - t0) / 1000) }));
-    child.on("error", (err) => resolveRun({ code: 2, signal: null, durationS: 0, error: String(err) }));
+    // Windows: no `timeout` binary; killing the wrapper closes its Job Object, which kills the tree.
+    let timedOut = false;
+    const timer = timeoutMs ? setTimeout(() => { timedOut = true; child.kill(); }, timeoutMs) : null;
+    child.on("close", (code, signal) => { if (timer) clearTimeout(timer); resolveRun({ code: timedOut ? 124 : code ?? 2, signal, durationS: Math.round((Date.now() - t0) / 1000), job: parseJobReport(tail) }); });
+    child.on("error", (err) => { if (timer) clearTimeout(timer); resolveRun({ code: 2, signal: null, durationS: 0, error: String(err), job: null }); });
   });
 }
 
@@ -103,9 +85,16 @@ function markdown({ os, cap, ratchet, results, partial }) {
   const lines = [`## memory-budget (${os}, short profile): ${ratchet.ok ? "ratchet holds" : "ratchet FAILED"}`, "", `cap: ${cap} · node ${process.version}${partial ? " · partial run (--only)" : ""}`, "", "| run | outcome | expected-RED | red checks | s |", "|---|---|---|---|---|"];
   for (const row of ratchet.rows) {
     const r = results.find((x) => x.key === row.key);
-    lines.push(`| ${row.key} | ${row.outcome} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} |`);
+    lines.push(`| ${row.key} | ${row.outcome}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
+  const overheads = results.filter((r) => r.samplerOverhead?.polls);
+  if (overheads.length) {
+    const mb = (kb) => Math.round(kb / 1024);
+    lines.push("", "Sampler overhead (the Windows poller, excluded from every verdict): " + overheads.map((r) => `${r.key} ${mb(r.samplerOverhead.peakCommitKb)} MB commit / ${mb(r.samplerOverhead.peakRssKb)} MB WS, poll ${r.samplerOverhead.pollMsMedian} ms (max ${r.samplerOverhead.pollMsMax})`).join("; "));
+  }
+  const onlyCommit = results.filter((r) => r.redOnlyOnCommit);
+  if (onlyCommit.length) lines.push("", "RED only on commit (working set within budget) — raised to the owner, never adjusted silently (build-time gate 3):", ...onlyCommit.map((r) => `- ${r.key}: ${r.redChecks.join(", ")} (working set: ${r.workingSetRedChecks.join(", ") || "green"})`));
   return lines.join("\n") + "\n";
 }
 
@@ -135,13 +124,16 @@ async function main() {
     const runArgs = [scenario, "--profile", profile, ...(variant ? ["--variant", variant] : []), "--out", dir];
     console.log(`\n── ${key} ──`);
     const size = CAP[key] ?? CAP[scenario] ?? DEFAULT_CAP;
-    const r = await runOne(commandFor(capChoice.cap, size, TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S, runArgs), join(dir, "run.log"));
+    const cmd = commandFor(capChoice.cap, size, (TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S) * (TIMEOUT_FACTOR[args.os] ?? 1), runArgs, { runScript: join(HERE, "run.mjs") });
+    const r = await runOne(cmd, join(dir, "run.log"));
     const summary = readSummary(dir);
     // run.mjs exits 0/1/2; anything else (timeout 124, a cap kill 137 / SIGKILL) is a harness failure.
-    const exitCode = [0, 1, 2].includes(r.code) ? r.code : 2;
-    const why = exitCode === 2 && !summary?.error ? (r.code === 124 ? "timed out" : r.code === 137 || r.signal === "SIGKILL" ? `killed (memory cap ${size}?)` : `exit ${r.code}${r.signal ? ` ${r.signal}` : ""}`) : null;
+    let exitCode = [0, 1, 2].includes(r.code) ? r.code : 2;
+    let why = exitCode === 2 && !summary?.error ? (r.code === 124 ? "timed out" : r.code === 137 || r.signal === "SIGKILL" || (r.job?.applied && r.job.peakBytes >= 0.95 * bytes(size)) ? `killed (memory cap ${size}?)` : `exit ${r.code}${r.signal ? ` ${r.signal}` : ""}`) : null;
+    // A Job Object run counts only if the wrapper proved the cap (never uncapped).
+    if (capChoice.cap === "jobobject" && r.code !== 124 && !r.job?.applied) { exitCode = 2; why = `Job Object cap not applied: ${r.job?.error ?? "no @@JOB report"}`; }
     if (why) console.log(`${key}: harness failure: ${why}`);
-    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why });
+    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, ...(r.job ? { jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why });
   }
 
   const ratchet = checkRatchet({ expected, os: args.os, results, issueIds });
