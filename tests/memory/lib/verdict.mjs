@@ -211,7 +211,9 @@ export function rowsForMetric(rows, metric) {
     ...r,
     procs: r.procs.map((p) => (metric === "commit"
       ? { ...p, rssKb: p.commitKb ?? p.rssKb }
-      : { ...p, hwmKb: p.wsPeakKb ?? p.hwmKb })),
+      // A Windows row read back from samples.csv has no working-set peak (not a
+      // CSV column) and its hwm_kb is the commit peak: judge the sampled working set only.
+      : { ...p, hwmKb: p.wsPeakKb ?? (p.commitKb !== null && p.commitKb !== undefined ? 0 : p.hwmKb) })),
   }));
 }
 

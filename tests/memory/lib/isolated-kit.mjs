@@ -22,7 +22,7 @@
 // unless ZCODE_MEMLOOP_ALLOW=1 (CI) is set.
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { copyFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,6 +36,22 @@ export function bunPath(env = process.env) {
   const found = (r.stdout ?? "").trim().split(/\r?\n/)[0];
   if (!found) throw new Error("bun not found: put it on PATH or set ZCODE_KIT_BUN");
   return found;
+}
+
+/**
+ * The run's own bun executable (Windows sampler run token, spec §1): a hard
+ * link, or a copy across volumes, of the bun in use, under the run directory
+ * whose name is the run id. Every Bun process the run starts through
+ * ZCODE_KIT_BUN (the manager's proxy, the S2 body) then carries the id in its
+ * executable path, also after its parent exited.
+ */
+export function prepareRunBun(runDir, env = process.env) {
+  const src = bunPath(env);
+  const dir = join(runDir, "bun");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, process.platform === "win32" ? "bun.exe" : "bun");
+  try { linkSync(src, path); } catch { copyFileSync(src, path); }
+  return { path, remove() { try { rmSync(dir, { recursive: true, force: true }); } catch {} } };
 }
 
 export function assertSafeEnvironment(port) {

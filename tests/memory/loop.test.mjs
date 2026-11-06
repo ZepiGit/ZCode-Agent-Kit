@@ -9,9 +9,12 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseSamplesCsv, roleOf, startSampler, supported, survivors } from "./lib/sampler.mjs";
+import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sampler.mjs";
+import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 
-const linuxOnly = { skip: supported() ? false : `no sampler on ${process.platform} yet (ticket 02)` };
+// The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
+const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
+const windowsOnly = { skip: process.platform === "win32" ? false : "live Windows sampler self-test (windows-latest legs)" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test("a solver process is its own role, whatever runtime starts it", () => {
@@ -122,4 +125,124 @@ test("a detached child whose parent exited is still found as a survivor", linuxO
   } finally {
     try { process.kill(orphanPid, "SIGKILL"); } catch {}
   }
+});
+
+// ── The windows leg's cap (ticket 02): a Job Object per run ─────────────────
+test("on Windows the job caps every run with a Job Object (job memory + kill-on-close) and its own timeout", () => {
+  assert.deepEqual(chooseCap("auto", { platform: "win32" }), { cap: "jobobject" });
+  const c = commandFor("jobobject", "3G", 1200, ["S1", "--profile", "short"], { node: "C:\\node\\node.exe", runScript: "D:\\kit\\tests\\memory\\run.mjs" });
+  assert.equal(c.argv[0], "powershell.exe");
+  assert.deepEqual(c.argv.slice(1, 5), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"]);
+  assert.equal(c.timeoutMs, 1230 * 1000, "timeout plus the 30 s kill-after the Linux leg gives `timeout`");
+  const script = Buffer.from(c.argv.at(-1), "base64").toString("utf16le");
+  assert.match(script, /\b3221225472\b/, "3G in bytes");
+  assert.match(script, /'C:\\node\\node\.exe'/);
+  assert.match(script, /'D:\\kit\\tests\\memory\\run\.mjs', 'S1', '--profile', 'short'/);
+});
+
+test("the Linux caps are unchanged: systemd scope or prlimit around timeout --kill-after=30", () => {
+  const args = ["S1", "--profile", "short"];
+  const s = commandFor("systemd", "3G", 1200, args, { node: "/usr/bin/node", runScript: "/kit/run.mjs" });
+  assert.deepEqual(s, { argv: ["systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax=3G", "-p", "MemorySwapMax=0", "--", "timeout", "--kill-after=30", "1200", "/usr/bin/node", "/kit/run.mjs", ...args], timeoutMs: null });
+  const p = commandFor("prlimit", "3G", 1200, args, { node: "/usr/bin/node", runScript: "/kit/run.mjs" });
+  assert.deepEqual(p.argv.slice(0, 3), ["prlimit", `--as=${6 * 1024 ** 3}`, "--"]);
+});
+
+test("the Job Object wrapper's report says whether the cap was applied and how close the run came to it", () => {
+  assert.deepEqual(parseJobReport("noise\n@@JOB applied=1 limit=3221225472 peak=1610612736\n"), { applied: true, limitBytes: 3221225472, peakBytes: 1610612736 });
+  assert.deepEqual(parseJobReport("@@JOB applied=0 error=AssignProcessToJobObject failed (5)\n"), { applied: false, error: "AssignProcessToJobObject failed (5)" });
+  assert.equal(parseJobReport("no report"), null);
+});
+
+// ── Live Windows self-tests (spec §1; run on the windows-latest legs) ───────
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const waitFor = async (fn, ms = 15_000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await sleep(250); } };
+
+test("Windows: the units self-test against Get-Process PrivateMemorySize64 passes on the live process table", windowsOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-units-"));
+  try {
+    const sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=units-${process.pid}`, csvPath: join(dir, "samples.csv") });
+    const ready = await sampler.ready;
+    await sampler.stop();
+    assert.equal(ready.units.ok, true, ready.units.reason);
+    assert.ok(ready.units.compared >= 5, `compared ${ready.units.compared}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Windows: a deliberately orphaned detached process is found, by the run token and through a parent seen earlier", windowsOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-orphan-"));
+  const id = `orphan-${process.pid}-${Date.now()}`;
+  const marker = `ZCODE_MEMLOOP_RUN=${id}`;
+  const pids = [];
+  // The parent starts a detached grandchild and exits; `token` puts the run id in the grandchild's command line.
+  const orphanVia = async (token, parentLivesMs) => {
+    const code = `const c = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", ${token ? JSON.stringify(id) : '"no-token"'}], { detached: true, stdio: "ignore" }); console.log(c.pid); c.unref(); setTimeout(() => process.exit(0), ${parentLivesMs});`;
+    const parent = spawn(process.execPath, ["-e", code], { stdio: ["ignore", "pipe", "inherit"] });
+    let out = "";
+    parent.stdout.on("data", (b) => { out += b; });
+    await new Promise((r) => parent.on("close", r));
+    pids.push(Number(out.trim()));
+    return { orphan: Number(out.trim()), parent: parent.pid };
+  };
+  try {
+    const sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
+    await sampler.ready;
+    const byToken = await orphanVia(true, 0); // parent gone before any poll could see it
+    const byTree = await orphanVia(false, 3000); // parent seen by the polls, grandchild without the token
+    const found = await waitFor(() => { const s = scan(marker).map((p) => p.pid); return s.includes(byToken.orphan) && s.includes(byTree.orphan) ? s : null; });
+    assert.ok(found, "both orphans in the live scan");
+    await sampler.stop();
+    const after = survivors(marker);
+    assert.deepEqual(after.map((s) => s.pid).sort(), [byToken.orphan, byTree.orphan].sort(), "a fresh poll after stop still finds both");
+    assert.equal(after.find((s) => s.pid === byTree.orphan).ppid, byTree.parent, "Windows keeps the dead parent's pid");
+  } finally {
+    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Windows: the sampler excludes its own poller by pid and records the poller's overhead", windowsOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-self-"));
+  try {
+    const sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=self-${process.pid}`, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
+    await sampler.ready;
+    await sleep(2500);
+    const pollerPid = sampler.pollerPid;
+    const seen = scan(`ZCODE_MEMLOOP_RUN=self-${process.pid}`).map((p) => p.pid);
+    const rows = await sampler.stop();
+    const o = sampler.overhead();
+    assert.ok(!seen.includes(pollerPid) && rows.every((r) => r.procs.every((p) => p.pid !== pollerPid)), "the poller is never sampled");
+    assert.equal(o.pid, pollerPid);
+    assert.ok(o.polls >= 2 && o.peakCommitKb > 0 && o.peakRssKb > 0 && o.pollMsMax > 0, JSON.stringify(o));
+    await sleep(500);
+    assert.equal(alive(pollerPid), false, "the poller is reaped on stop");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+const PROBE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32", "job-probe.mjs");
+const runCapped = (size, args, timeoutS = 60) => {
+  const { argv } = commandFor("jobobject", size, timeoutS, args, { runScript: PROBE });
+  return spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: 120_000 });
+};
+
+test("Windows: the Job Object cap is applied and read back, and an allocation past it fails", windowsOnly, () => {
+  const ok = runCapped("1G", ["alloc", "256"]);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  const rep = parseJobReport(ok.stderr);
+  assert.equal(rep.applied, true, ok.stderr);
+  assert.equal(rep.limitBytes, 1024 ** 3);
+  assert.ok(rep.peakBytes >= 256 * 1048576, `peak ${rep.peakBytes}`);
+  const over = runCapped("1G", ["alloc", "2048"]);
+  assert.notEqual(over.status, 0, "2 GB inside a 1 GB job cannot succeed");
+  assert.doesNotMatch(over.stdout, /ALLOC_OK/);
+});
+
+test("Windows: closing the Job Object kills a detached grandchild (nothing escapes the cap)", windowsOnly, async () => {
+  const r = runCapped("1G", ["detach"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const grandchild = Number((r.stdout.match(/GRANDCHILD (\d+)/) ?? [])[1]);
+  assert.ok(grandchild > 0, r.stdout);
+  const gone = await waitFor(() => !alive(grandchild), 10_000);
+  if (!gone) { try { process.kill(grandchild, "SIGKILL"); } catch {} }
+  assert.ok(gone, "the grandchild died with the job");
 });
