@@ -54,3 +54,4 @@
 - 2026-11-06T15:23:59Z Reverted t06 merge as f8be074 (new ux-before job red on ubuntu: git-version-dependent remote progress text in update-checkout; on windows: mangled proxy path + tar failures). t06 implementer resumed to fix; t07 paused (blocked by 06) until the re-merge.
 - 2026-11-06T15:27:49Z Process change: tickets with pending-CI criteria get a pre-merge CI run via a draft PR from the ticket branch into the integration branch (ci.yml triggers on any pull_request); merge only on green. Observation 0017 logged.
 - 2026-11-06T16:10:51Z Pre-merge CI for t02 via staging/02 + draft PR #14 (run 42246379763): evidence gate works; windows proxy runs fail on CRLF config template, 2 windows test fixtures call TIMEOUT.EXE. t02 implementer resumed (round 3). S2/S5 ran on windows.
+- 2026-11-06T16:30:08Z Restaged: staging/02 fdce519 (PR #14, fix round 3) and staging/06 (PR #15, fix round 2). Waiting for CI; t03/t07/t60 paused on these.
