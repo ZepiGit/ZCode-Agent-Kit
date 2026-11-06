@@ -32,3 +32,5 @@ ADR: 0014 (Round 4 amendment), 0015 (Round 4 amendment)
 Spec stories: 55, 56
 
 ## Comments
+
+- 2026-11-06 (orchestrator, from ticket 14): generate the stop token as 32 random bytes base64url (43 chars, same shape as the proxy key) and add it to the manager's knownSecrets() so event-line redaction masks it (see ticket 14 Comments).

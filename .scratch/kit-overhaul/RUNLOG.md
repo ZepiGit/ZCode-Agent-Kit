@@ -39,3 +39,4 @@
 - 2026-11-06T07:27:30Z Phase 4 start. Spawned implementers (general-purpose/opus): t01 (sol), t04 (glm), t14 (glm). Queue next: 50, then frontier as it opens.
 - 2026-11-06T07:41:46Z Merged t04 (8f59b2d, green: kit 287/298, proxy 1288, mcp 95/96). Spawned t50. First merge -> push + draft PR.
 - 2026-11-06T07:45:44Z Pushed integration branch; draft PR #13 opened (https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13). CI runs on pull_request.
+- 2026-11-06T08:07:03Z Merged t50 (c2ee3d1 green). t14 done (d5a49e3) -> merger. Notes for t18/t33 appended from t14 decisions.

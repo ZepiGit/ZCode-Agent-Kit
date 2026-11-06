@@ -33,3 +33,5 @@ ADR: 0009, 0015
 Spec stories: 74, 75, 77, 78, 79
 
 ## Comments
+
+- 2026-11-06 (orchestrator, from ticket 14): pass every line the proxy writes through redactLine() from lib/event-line.mjs / zcode-proxy-src/src/log/event-line.mjs in the size-capped writer (ticket 14 left existing proxy stdout lines unredacted at write time).
