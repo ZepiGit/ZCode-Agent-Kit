@@ -1,0 +1,42 @@
+STATIC EXCERPT (not a run): install.ps1 user-facing output statements; pwsh unavailable on the capture host.
+
+  37: function Write-InstallLine([string]$Text, [string]$Color = 'Cyan') {
+  38:   if ($useColor) { Write-Host $Text -ForegroundColor $Color }
+  39:   else { Write-Host $Text }
+  41: function Write-InstallStep([string]$Text) { Write-Host ''; Write-InstallLine "  $Text" }
+  42: function Write-InstallOk([string]$Text) { Write-InstallLine "  [OK]   $Text" 'Green' }
+  51: if (Test-Path -LiteralPath (Join-Path $InstallDir '.git')) { throw 'Refusing to overwrite a checkout (.git).' }
+  54:   if (-not $target.PSIsContainer -or ($target.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Install target must be a directory, not a link.' }
+  57:     if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'cli\zcode-kit.mjs')) -or -not (Test-Path -LiteralPath $package)) { throw 'Non-empty target is not a zcode-agent-kit install.' }
+  58:     if ((Get-Content -LiteralPath $package -Raw | ConvertFrom-Json).name -ne 'zcode-agent-kit') { throw 'Non-empty target is a foreign installation.' }
+  61: if ($env:ZCODE_KIT_VERSION -and $env:ZCODE_KIT_VERSION -notmatch $VersionPattern) { throw 'Invalid release version: ZCODE_KIT_VERSION must be vX.Y.Z or vX.Y.Z-prerelease.' }
+  72:     throw "could not resolve the latest release from the GitHub API - pin one with `$env:ZCODE_KIT_VERSION (e.g. 'v0.2.0'). Detail: $($_.Exception.Message)"
+  75: if ($Version -notmatch $VersionPattern) { throw 'Invalid release version returned by release metadata.' }
+  79: Write-Host ''
+  81: Write-Host "  $Version  |  Your local AI workspace"
+  82: Write-Host '  --------------------------------------------'
+  83: Write-Host "  Install to  $InstallDir"
+  95:   Write-Error "node >= 20 is required but not found on PATH. Install from https://nodejs.org and re-run."
+  98:   Write-Host "  Downloading Bun v1.4.2 (bun-windows-x64.zip)..."
+ 102:   try { Invoke-WebRequest -Uri "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip" -OutFile $bunZip } catch { throw "Bun download failed: $($_.Exception.Message)" }
+ 105:     Write-Error "bun download hash mismatch:`n  expected $bunSha`n  actual   $actual`nAborting."
+ 110:   if (-not (Test-Bun)) { Write-Error "bun installed but not runnable - add it to PATH and re-run." }
+ 120:   try { Invoke-WebRequest -Uri "$BaseUrl/$Tarball" -OutFile $archive } catch { throw "Release archive download failed: $($_.Exception.Message)" }
+ 121:   try { Invoke-WebRequest -Uri "$BaseUrl/checksums.txt" -OutFile $checksums } catch { throw "Checksum download failed: $($_.Exception.Message)" }
+ 125:   if ($checksumLines.Count -ne 1) { throw "checksums.txt must contain exactly one valid entry for $Tarball" }
+ 129:     Write-Error "release archive hash mismatch:`n  expected $expected`n  actual   $actual`nAborting."
+ 144:   if ($LASTEXITCODE -ne 0) { Write-Error "archive extraction failed (tar exit $LASTEXITCODE) - aborting." }
+ 147:     Write-Error "unexpected archive layout - aborting."
+ 157:     Write-Host "  Updating existing installation; keeping your configuration."
+ 159:     if ($LASTEXITCODE -ge 8) { throw "update copy failed (robocopy exit $LASTEXITCODE) - aborting." }
+ 175:       Write-Host '  [WARN] some assistants could not be configured; see the summary above (the kit itself is installed)'
+ 178:       Write-Host '  [WARN] setup was interrupted; the kit is installed and the answers given so far were applied. Finish later with: zcode-kit setup'
+ 179:     } elseif ($LASTEXITCODE -ne 0) { throw "setup failed (exit $LASTEXITCODE) - see output above" }
+ 199:     Write-Host "  note: could not create the zcode-kit shim ($($_.Exception.Message))"
+ 202:   Write-Host ""
+ 204:   Write-Host '  --------------------------------------------'
+ 205:   Write-Host '  zcode-kit auth login zai    Sign in / add an account'
+ 206:   Write-Host '  zcode-kit accounts          View saved accounts'
+ 207:   Write-Host '  zcode-kit doctor            Check warnings and model access'
+ 208:   Write-Host '  zcode-kit proxy status      Show connection details (base URL, key, models) for manual client setup'
+ 209:   Write-Host ''
