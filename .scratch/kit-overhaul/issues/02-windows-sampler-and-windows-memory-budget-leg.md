@@ -366,3 +366,91 @@ Re-judging run 4's artefact under the new rules predicts exactly the calibrated 
 - Linux job `--only S3/short,S7/short`: unchanged output, no backstop check, the ratchet holds (`reports/t02-r6-job-smoke.log`).
 
 **Left for the orchestrator:** the spec §18 metric sentence and S1/S3 rows, the RUNLOG deviation, and the ticket 16/17/20/37 text from Round 7 are not edited on this branch.
+
+### 2026-11-06 — implementer, round 7 (pre-merge CI run 42281731448 on staging/02 0f324a7: ubuntu S3/hung HARNESS FAILURE)
+
+Branch `ticket/02-windows-sampler`, code head 6d8e8e0. Commits: e890635 (scenario + gate), 3e107d4 (merge of the integration tip acb857e), 6d8e8e0 (sampler), plus this note. Bun 1.4.2, ports 19020–19027. Artefacts: `/home/AgentKit/overhaul-tools/ci-art/42281731448-t02r7/`, with the earlier ubuntu legs next to it (`<run>-t02r7-linux/`).
+
+**Root cause: the gate was right, S3/hung really did not run.**
+- In CI the killed start lock holder had already spawned the proxy but had not written `proxy.pid` yet (`proxy/zcode-proxy-manager.mjs:615–632`).
+- `manager start` then answered 0 (healthy) with no pid record. `hungRound` skipped both hung rounds (`hung-10-with-stale-lock.skipped: 0`, `hung-10.skipped: 0`), and only kill-holder-10 ran: 9 s, 13 samples, no launcher.
+- The 8 other ubuntu S3/hung legs downloaded (staging/02 runs 42246379763, 42252896054, 42265988296, 42281646419; integration runs 42252974778, 42265998740, 42275502649, 42286030477) all ran 187–189 s with the three rounds and a pid file that matches the listener.
+- The integration branch passes only because it has no evidence gate: the same 9 s run would be "RED as listed" there.
+
+**Fix 1: the hung round tests the state the killed start leaves; it does not skip it** (`scenarios/s3-concurrency.mjs` `hungTarget` / `makeHungRound`).
+- It freezes the proxy the pid record names, if that is a process of this run. Otherwise it freezes the single proxy of this run that serves the isolated port. The target is noted as `<round>.target` with `via: pid-record | listener`.
+- No proxy of this run, none on the port, two on it, a recorded pid that is not ours, or a failed start is still a skipped round, noted with its reason. Only marked processes are ever frozen. The target is chosen after the 65 s grace, so Windows' next poll sees the proxy.
+
+**Fix 2: the gate, made stronger** (`lib/completeness.mjs`). These are now a harness failure, whatever the run's time and roles:
+- any `<round>.skipped` note;
+- any missing `notes.rounds` entry, per key: S3/short has the four short-profile rounds, S3/hung has kill-holder-10, hung-10-with-stale-lock and hung-10.
+
+The 15 s floor and the roles are unchanged.
+
+**Fix 3, found while proving fix 1: the Linux sampler kept a pre-exec role for life** (`lib/sampler.mjs`).
+- In a local run (`t02-r7-hungA`) the holder `node cli/heal.mjs` was killed inside `spawn()`. Its proxy was first sampled before its exec (6 MB, the parent's command line). The `pid:starttime` cache kept role `preflight` for all 475 samples.
+- So that run had no proxy role, and the gate rightly said "role proxy never seen".
+- A marked process is now re-read whenever its `/proc/<pid>/cmdline` changed. A process cached as not ours stays not ours: a fork inherits its parent's environment.
+- Windows is unaffected: CreateProcess has its final command line from the start, and every CIM poll reads it.
+
+**RED → GREEN** (logs in `reports/`):
+- Hung round: `t02-r7-red1`, 3/3 failing on the refactored pre-fix logic. The CI state test got `actual: []`: nothing frozen, no round. GREEN: `t02-r7-green1`.
+- Gate: the old `completeness.mjs` was restored in place (`t02-r7-red2`), and 2 tests fail. The replayed CI summary was already a harness failure, but only through the floor and the launcher, not the skip. The busy run with a skipped round passed as ok. GREEN: `t02-r7-green1`.
+- Sampler: `t02-r7-red3`. A real `sh` → exec into `…/zcode-proxy-src/src/index.ts serve` stayed `other`. The first attempt passed vacuously because the `sh -c` string itself matched the proxy pattern; it now execs from a script file. GREEN: `t02-r7-green2`.
+- Adversarial, from the gate's purpose:
+  - the CI run's own `summary.json` (fixture `ci-42281731448-s3-hung-summary.json`, replayed through the job with `FAKE_RUN_MODE=replay`) stays HARNESS FAILURE, with "round hung-10-with-stale-lock skipped" and "round hung-10 never ran";
+  - a 300 s, 900-sample S3/hung with every role seen but one hung round skipped, or simply missing, is a harness failure, and so is the pre-fix bare `0` note;
+  - the scenario never freezes a recorded pid that is not ours, and never guesses between two listeners.
+- Mutants in a scratch copy (`t02-r7-mut{R..V}`), all killed; the copy was restored and diffed identical:
+  - R, listener fallback removed: the CI-state test fails;
+  - S, skip check removed: 2 gate tests fail;
+  - T, round list removed: 2 gate tests fail;
+  - U, cache without the cmdline check: the exec test fails;
+  - V, recorded pid not checked against ours: the "never a guess" test fails.
+
+**The CI state, reproduced locally** (scratch copies only: a 5 s sleep before `writePidFile` widens the killed-start window; the kit in the branch is unchanged):
+
+| harness | runs | result |
+|---|---|---|
+| f4b0034 (pre-fix) | 2 | HARNESS FAILURE: "scenario ran 11 s, below the S3 floor of 15 s; role launcher never seen", both rounds `.skipped: 0`, orphan proxy, "proxy healthy but no pid file" (the CI run exactly) |
+| e890635 (fix 1+2) | 2 | RED as listed (ticket 16), 166 s, 442 / 450 samples, launcher 5, both targets `via: listener`; ratchet holds |
+
+**Memory loop, Linux, short profile (real kit):**
+- Baseline f4b0034, `--only S3/hung` ×4 (`t02-r7-base0..3`): 191–192 s, the race not hit, ratchet holds.
+- Merge 3e107d4:
+  - job `--only S3/short,S3/hung` (`t02-r7-s3-job`): S3/short RED 33 s / 119 samples; S3/hung RED 189 s / 541; the ratchet holds;
+  - `hungB`: RED 189 s;
+  - `hungA`: the natural race before the exec, found fix 3.
+- Head 6d8e8e0:
+  - job `--only S3/short,S3/hung` (`t02-r7-s3-job2`): S3/short RED (ticket 37) 33 s / 120 samples, all 7 roles; S3/hung RED (ticket 16) 189 s / 540; **the ratchet holds**;
+  - `hungC`: 238 s / 642;
+  - `hungD`: the natural race again, the proxy first sampled as `preflight` then `proxy` ×468, target `via: listener`, RED 160 s / 470;
+  - `hungE`: 190 s / 549.
+  - All hold the ratchet. No budget or list entry changed. The S3/hung kit peak stays in its ticket-01 range on recorded-proxy runs.
+
+**Kit finding for tickets 16/17 (not fixed here, B-scope of the kit lifecycle):**
+- On Linux too, a start killed between fork and `writePidFile` leaves an unrecorded, healthy proxy:
+  - every stop says "proxy healthy but no pid file — refusing to guess", and the proxy ends as an orphan;
+  - frozen, it makes the next 10 launches start a second proxy (`simultaneous-proxies 2`, 10/10 failed).
+- This is the Linux face of the Windows killed-start finding (round 4: a record without a start time). The window spans `spawn()` itself and the gap to the first `writePidFile`.
+
+**Tests (head 6d8e8e0 unless noted):**
+- `npm run test`: 593 tests, 577 pass, 0 fail, 16 skipped (`t02-r7-kit2`).
+- `npm run test:proxy`: 1343 pass, 0 fail, 90 files (`t02-r7-proxy`).
+- `npm run test:mcp`: 96 tests, 95 pass, 0 fail, 1 skipped; `git status` clean after the build (`t02-r7-mcp`).
+- The proxy and mcp suites ran on 3e107d4. 6d8e8e0 changes only `tests/memory/lib/sampler.mjs` and `tests/memory/loop.test.mjs`, which neither suite loads.
+
+**Merge of the tip (3e107d4), resolved by hand.** The tip carries the revert c252676:
+- tests/memory: the branch versions. staging/02's tests/memory equals f4b0034's, and the tip has not changed tests/memory since.
+- ci.yml: staging/02's repaired file. The tip has not changed `.github` since 0fc27fc.
+- package.json: the tip's list (ticket 07's `cli-commands`) plus `win-sampler.test.mjs`.
+- METRICS: the branch's Windows section.
+- This file: the orchestrator's merge/claim/revert notes, then rounds 2–6.
+- Check: the merged tree equals staging/02 0f324a7, plus the tip's 15 files since 0fc27fc (each identical to the tip except package.json), plus this round's files.
+
+**Pre-existing test change (C2):** "run evidence: S3 is proven by its proxy, launchers and preflights …" (round 4) gains `notes.rounds` in its fixture summary. The gate now requires S3's rounds; its assertions are unchanged.
+
+**Left for others:**
+- Tickets 16/17: the Linux unrecorded-proxy window above.
+- Out of scope here: the windows `S1/burst1 → 20` entry and Round 8's condition 1 `ws_peak_kb` check (Owner Proxy round 8; `expected-red.json` untouched).
+- CI must show next: ubuntu S3/hung passes the gate with all three rounds (a run that hits the window shows `via: listener` and stays RED as listed). Windows S3/hung keeps its three rounds (161 s in this run).
