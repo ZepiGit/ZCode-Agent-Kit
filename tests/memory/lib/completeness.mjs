@@ -16,7 +16,9 @@
 export const EVIDENCE = {
   S1: { minDurationS: 10, minSamples: 5, roles: ["proxy"] },
   S2: { minDurationS: 60, minSamples: 30, roles: ["scenario"] },
-  S3: { minDurationS: 15, minSamples: 10, roles: ["proxy", "launcher", "preflight", "mcp-bridge"] },
+  // No mcp-bridge: a bridge starts only after a launch succeeds, and S3 measures
+  // launches that fail (S3/hung on Windows: 21 of 21, CI run 42252896054).
+  S3: { minDurationS: 15, minSamples: 10, roles: ["proxy", "launcher", "preflight"] },
   S4: { minDurationS: 60, minSamples: 30, roles: ["proxy", "manager"] },
   S5: { minDurationS: 120, minSamples: 60, roles: ["mcp-bridge"] },
   S6: { minDurationS: 1, minSamples: 1, roles: [] },

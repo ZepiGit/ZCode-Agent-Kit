@@ -83,6 +83,7 @@ export function splitCommandLine(line) {
 }
 
 const TOOLING = /^(?:powershell|pwsh|netstat|conhost|where)\.exe$/i;
+const FIXTURE_ROLES = new Set(["mock-upstream", "scenario", "fake-harness"]);
 
 // FILETIME values as decimal strings: compare as BigInt (they exceed 2^53).
 const time = (s) => { try { return BigInt(s || "0"); } catch { return 0n; } };
@@ -147,12 +148,20 @@ export function createKitTracker({ rootPid, token }) {
         grew = false;
         for (const p of members.values()) if (!tooling.has(p.pid) && tooling.has(p.ppid)) { tooling.add(p.pid); grew = true; }
       }
+      const roles = new Map();
+      for (const p of members.values()) roles.set(p.pid, tooling.has(p.pid) ? "tooling" : roleOf(p.commandLine ? splitCommandLine(p.commandLine) : [p.executablePath ?? p.name ?? ""]));
+      // A console host belongs to its owner: under a fixture (mock, scenario,
+      // fake harness) it is that fixture, never kit footprint. Under a kit
+      // process it stays "other" (kit footprint, but not a second proxy).
+      for (const p of members.values()) {
+        if (/^conhost\.exe$/i.test(p.name ?? "") && FIXTURE_ROLES.has(roles.get(p.ppid))) roles.set(p.pid, roles.get(p.ppid));
+      }
       const out = [];
       for (const p of members.values()) {
         known.set(p.pid, p.created);
         const argv = p.commandLine ? splitCommandLine(p.commandLine) : [p.executablePath ?? p.name ?? ""];
         out.push({
-          pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: tooling.has(p.pid) ? "tooling" : roleOf(argv), comm: p.name,
+          pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: roles.get(p.pid), comm: p.name,
           rssKb: p.rssKb, hwmKb: p.hwmKb, commitKb: p.commitKb, wsPeakKb: p.wsPeakKb, threads: p.threads, fds: p.fds,
           cmd: argv.slice(0, 4).map((a) => a.split(/[\\/]/).slice(-2).join("/")).join(" ").slice(0, 120),
         });
