@@ -6,7 +6,9 @@
 //                                 the CSV header exist, then exit 0 (no summary.json)
 //   FAKE_RUN_MODE=green-empty     a GREEN summary.json whose sampler saw nothing
 //   FAKE_RUN_MODE=green-complete  a GREEN summary.json with real-looking evidence
-import { mkdirSync, writeFileSync } from "node:fs";
+//   FAKE_RUN_MODE=replay          writes FAKE_RUN_SUMMARY (a real run's summary.json)
+//                                 and exits with the code its outcome implies
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -19,6 +21,11 @@ mkdirSync(dir, { recursive: true });
 writeFileSync(join(dir, "samples.csv"), "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb\n");
 const mode = process.env.FAKE_RUN_MODE;
 if (mode === "exit0-nothing") process.exit(0);
+if (mode === "replay") {
+  const replayed = readFileSync(process.env.FAKE_RUN_SUMMARY, "utf8");
+  writeFileSync(join(dir, "summary.json"), replayed);
+  process.exit(JSON.parse(replayed).outcome === "RED" ? 1 : 0);
+}
 const role = (maxCount) => ({ peakMB: 100, peakProcMB: 100, peakHwmMB: 120, maxCount, maxFds: 10, maxThreads: 10, distinctPids: maxCount, peakHeapMB: null });
 const complete = mode === "green-complete";
 // Consistent with the OS it runs on: a Windows run is judged on commit with a passed units self-test.

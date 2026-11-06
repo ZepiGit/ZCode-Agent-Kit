@@ -14,6 +14,7 @@ import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { whileFrozen } from "./lib/freeze.mjs";
+import { makeHungRound } from "./scenarios/s3-concurrency.mjs";
 
 // The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
 const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
@@ -260,9 +261,9 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
 // CI run 42221794531 (windows): every run exited 0 after writing the CSV
 // header, no summary, no sample, and the job called all 13 runs GREEN.
 const FAKE_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-run.mjs");
-function fakeJob(mode, only = "S1/short") {
+function fakeJob(mode, only = "S1/short", env = {}) {
   const home = mkdtempSync(join(tmpdir(), "memloop-fakejob-"));
-  const r = runJob(["--os", "linux", "--only", only, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: mode });
+  const r = runJob(["--os", "linux", "--only", only, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: mode, ...env });
   let report = null;
   try { report = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8")); } catch {}
   rmSync(home, { recursive: true, force: true });
@@ -330,10 +331,40 @@ test("`--cap none` on Windows runs the run script directly under the job's own t
 // ── CI run 42252896054 (windows): S3/hung printed a complete RED verdict and
 // was turned into a harness failure because no MCP bridge was seen — every
 // launch failed on Windows, so no session ever started a bridge.
+const S3_HUNG_ROUNDS = [{ name: "kill-holder-10" }, { name: "hung-10-with-stale-lock" }, { name: "hung-10" }];
 test("run evidence: S3 is proven by its proxy, launchers and preflights; a bridge exists only after a launch succeeds", () => {
-  const s3 = (roles) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 150, samples: 500, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: 1 }])), notes: { sampler: {} } });
+  const s3 = (roles) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 150, samples: 500, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: 1 }])), notes: { sampler: {}, rounds: S3_HUNG_ROUNDS } });
   assert.deepEqual(runEvidence(s3(["proxy", "launcher", "preflight"]), { key: "S3/hung", exitCode: 1 }), { ok: true, problems: [] });
   assert.match(runEvidence(s3(["proxy", "preflight"]), { key: "S3/hung", exitCode: 1 }).problems.join(), /role launcher never seen/);
+});
+
+// ── CI run 42281731448 (ubuntu): S3/hung skipped both hung rounds, ran 9 s and
+// printed a RED verdict. A run that did not run its rounds stays a harness
+// failure — through the job, and however long and busy the rest of it was.
+const CI_S3_HUNG = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ci-42281731448-s3-hung-summary.json");
+
+test("job: the S3/hung run of CI 42281731448 (hung rounds skipped, RED verdict) is a harness failure", () => {
+  const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: CI_S3_HUNG });
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /round hung-10-with-stale-lock skipped/);
+  assert.match(result.error, /round hung-10 never ran/);
+  assert.equal(r.status, 1, "the ratchet fails on a harness failure");
+});
+
+test("run evidence: an S3 round that was skipped or never ran fails the run, whatever its time and roles", () => {
+  const busy = (notes) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 300, samples: 900, summary: { proxy: { maxCount: 1 }, launcher: { maxCount: 5 }, preflight: { maxCount: 9 } }, notes: { sampler: {}, ...notes } });
+  assert.equal(runEvidence(busy({ rounds: S3_HUNG_ROUNDS }), { key: "S3/hung", exitCode: 1 }).ok, true);
+  const skipped = runEvidence(busy({ rounds: S3_HUNG_ROUNDS.slice(0, 2), "hung-10.skipped": { startCode: 0, reason: "no pid record, 0 proxies of this run serve port 18457" } }), { key: "S3/hung", exitCode: 1 });
+  assert.equal(skipped.ok, false);
+  assert.match(skipped.problems.join(), /round hung-10 skipped: no pid record, 0 proxies/);
+  // The pre-fix note was the bare start code (0): still a skip.
+  assert.match(runEvidence(busy({ rounds: S3_HUNG_ROUNDS, "hung-10.skipped": 0 }), { key: "S3/hung", exitCode: 1 }).problems.join(), /round hung-10 skipped: manager start exited 0/);
+  // No note at all, the round is simply missing.
+  assert.match(runEvidence(busy({ rounds: S3_HUNG_ROUNDS.slice(0, 1) }), { key: "S3/hung", exitCode: 1 }).problems.join(), /round hung-10-with-stale-lock never ran.*round hung-10 never ran/);
+  assert.match(runEvidence(busy({}), { key: "S3/hung", exitCode: 0 }).problems.join(), /round kill-holder-10 never ran/);
+  // S3/short likewise needs its four short-profile rounds.
+  const short = { ...busy({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }] }), key: "S3/short" };
+  assert.match(runEvidence(short, { key: "S3/short", exitCode: 1 }).problems.join(), /round kill-holder-10 never ran/);
 });
 
 // The loop freezes its own hung proxy (S3); whatever happens in between, it
@@ -349,6 +380,53 @@ test("whileFrozen thaws after the work, after a failing work, and a failed thaw 
   await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw, alive }), /round failed/);
   assert.deepEqual(calls, ["freeze 7", "work", "thaw 7", "freeze 8", "thaw 8"]);
   await assert.rejects(whileFrozen(9, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); }, alive: () => true }), /could not thaw pid 9 .*0xC000000B/);
+});
+
+// ── CI run 42281731448 (ubuntu, staging/02): S3/hung ran 9 s. The killed start
+// lock holder had spawned the proxy but not yet written proxy.pid, so
+// `manager start` answered 0 (healthy) with no pid record, both hung rounds
+// were skipped, and only kill-holder-10 ran (8 of 9 earlier ubuntu runs: 188 s).
+// The hung round freezes the run's own proxy that serves the isolated port;
+// it never freezes a process that is not this run's, and it never guesses.
+function fakeHungRound({ record = null, ours = [], listening = {}, startCode = 0 } = {}) {
+  const calls = [], notes = {};
+  const kit = { port: 19026, manager: async () => ({ code: startCode, out: "", err: "" }), pidRecord: () => record };
+  const hungRound = makeHungRound({
+    kit, proxies: () => ours.map((pid) => ({ pid, role: "proxy", key: `${pid}` })), portsOf: (pid) => listening[pid] ?? [],
+    round: async (name) => { calls.push(`round ${name}`); }, note: (k, v) => { notes[k] = v; },
+    freeze: (pid) => calls.push(`freeze ${pid}`), thaw: (pid) => calls.push(`thaw ${pid}`), alive: () => true, graceMs: 0,
+  });
+  return { hungRound, calls, notes };
+}
+
+test("S3 hung round: a proxy the killed start left without a pid record is frozen and the round runs (CI run 42281731448)", async () => {
+  const { hungRound, calls, notes } = fakeHungRound({ record: null, ours: [3723], listening: { 3723: [19026] } });
+  await hungRound("hung-10-with-stale-lock");
+  assert.deepEqual(calls, ["freeze 3723", "round hung-10-with-stale-lock", "thaw 3723"]);
+  assert.deepEqual(notes, { "hung-10-with-stale-lock.target": { pid: 3723, via: "listener", recordedPid: null } });
+});
+
+test("S3 hung round: the recorded proxy is frozen as before", async () => {
+  const { hungRound, calls, notes } = fakeHungRound({ record: { pid: 41, startedMs: 1 }, ours: [41], listening: { 41: [19026] } });
+  await hungRound("hung-10");
+  assert.deepEqual(calls, ["freeze 41", "round hung-10", "thaw 41"]);
+  assert.deepEqual(notes, { "hung-10.target": { pid: 41, via: "pid-record", recordedPid: 41 } });
+});
+
+test("S3 hung round: nothing of this run to freeze is a skipped round, never a guess", async () => {
+  const cases = {
+    "no proxy at all": { ours: [] },
+    "our proxy is not on the isolated port": { ours: [50], listening: { 50: [9999] } },
+    "two of our proxies serve the port": { ours: [51, 52], listening: { 51: [19026], 52: [19026] } },
+    "the recorded pid is not a process of this run": { record: { pid: 1, startedMs: 1 }, ours: [] },
+    "start failed": { startCode: 4, ours: [53], listening: { 53: [19026] } },
+  };
+  for (const [label, c] of Object.entries(cases)) {
+    const { hungRound, calls, notes } = fakeHungRound(c);
+    await hungRound("hung-10");
+    assert.deepEqual(calls, [], label);
+    assert.ok(notes["hung-10.skipped"], `${label}: the skip is noted`);
+  }
 });
 
 test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery) needs no thaw", async () => {

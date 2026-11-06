@@ -25,13 +25,24 @@ export const EVIDENCE = {
   S7: { minDurationS: 30, minSamples: 15, roles: ["proxy"] },
 };
 
+// The rounds a run must have completed (`notes.rounds` names). CI run
+// 42281731448 (ubuntu): S3/hung skipped both hung rounds and still printed a
+// RED verdict; time and roles caught it only because kill-holder-10 is short.
+// A run that skipped a round did not run its scenario, however long the rest
+// took. The long profile repeats the race rounds (#1, #2) and adds hung-10 to
+// S3/short; these lists are the short profile's, a subset of the long one's.
+export const ROUNDS = {
+  "S3/short": ["race-5#0", "race-10#0", "race-10-preflight#0", "kill-holder-10"],
+  "S3/hung": ["kill-holder-10", "hung-10-with-stale-lock", "hung-10"],
+};
+
 const OUTCOME_OF_EXIT = { 0: "GREEN", 1: "RED" };
 
 /**
  * summary: the run's parsed summary.json, or null when there is none.
  * Returns { ok, problems }. An exit 2 is already a harness failure and needs no evidence.
  */
-export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE }) {
+export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, rounds = ROUNDS }) {
   if (exitCode !== 0 && exitCode !== 1) return { ok: true, problems: [] };
   if (!summary) return { ok: false, problems: [`exit ${exitCode} but no summary.json: the run never finished its scenario`] };
   const problems = [];
@@ -45,6 +56,14 @@ export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE }) {
     if (!(summary.durationS >= floor.minDurationS)) problems.push(`scenario ran ${summary.durationS ?? 0} s, below the ${scenario} floor of ${floor.minDurationS} s`);
     for (const role of floor.roles) if (!(summary.summary?.[role]?.maxCount >= 1)) problems.push(`role ${role} never seen`);
   }
+  const notes = summary.notes ?? {};
+  for (const [k, v] of Object.entries(notes)) {
+    if (!k.endsWith(".skipped")) continue;
+    const why = v && typeof v === "object" ? v.reason ?? JSON.stringify(v) : `manager start exited ${v}`;
+    problems.push(`round ${k.slice(0, -".skipped".length)} skipped: ${why}`);
+  }
+  const ran = new Set((Array.isArray(notes.rounds) ? notes.rounds : []).map((r) => r?.name));
+  for (const name of rounds[key] ?? []) if (!ran.has(name)) problems.push(`round ${name} never ran`);
   if (summary.platform === "win32" && summary.metric !== "commit") problems.push(`windows run with metric ${summary.metric ?? "none"}: no commit_kb was sampled`);
   if (summary.metric === "commit" && summary.notes?.sampler?.units?.ok !== true) problems.push("the units self-test did not pass");
   return { ok: problems.length === 0, problems };
