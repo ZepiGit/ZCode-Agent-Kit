@@ -135,8 +135,17 @@ jobs:
         run: |
           cd zcode-proxy-src && bun install --frozen-lockfile
           cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile
+      # A measurement run (Round 8 Q1 condition 2, ticket 60) replaces the
+      # ratchet with N fresh S1/burst1 runs. It is on only while the one-run
+      # marker tests/memory/measure-burst1 (holding N) is committed on the
+      # branch under test; a test fails while it exists, so it never merges.
       - name: Memory loop (short profile) and expected-RED ratchet
+        if: hashFiles('tests/memory/measure-burst1') == ''
         run: node tests/memory/job.mjs --out "${{ runner.temp }}/memloop"
+      - name: S1/burst1 measurement (only with the tests/memory/measure-burst1 marker)
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/job.mjs --measure-burst1 "$(cat tests/memory/measure-burst1)" --out "${{ runner.temp }}/memloop"
       - name: Upload memory loop artefacts
         if: always()
         uses: actions/upload-artifact@v7
@@ -145,6 +154,8 @@ jobs:
           path: |
             ${{ runner.temp }}/memloop/job-summary.json
             ${{ runner.temp }}/memloop/job-summary.md
+            ${{ runner.temp }}/memloop/measure-S1-burst1.json
+            ${{ runner.temp }}/memloop/measure-S1-burst1.md
             ${{ runner.temp }}/memloop/**/run.log
             ${{ runner.temp }}/memloop/**/samples.csv
             ${{ runner.temp }}/memloop/**/summary.json

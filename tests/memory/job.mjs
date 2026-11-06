@@ -5,6 +5,15 @@
 //
 //   node tests/memory/job.mjs [--os linux|windows] [--out DIR] [--cap auto|systemd|prlimit|jobobject|none] [--only KEY,KEY]
 //                             [--run-script PATH]   (tests only: a stand-in for run.mjs)
+//   node tests/memory/job.mjs --measure-burst1 N [--os …] [--out DIR] [--cap …]
+//
+// --measure-burst1 N (off unless given; CI switches it on only while the
+// marker file tests/memory/measure-burst1 exists, see ci.yml): instead of the
+// job and its ratchet, N fresh, isolated S1/burst1 runs one after another,
+// each under the same cap, timeout and evidence gate as a job run, recorded in
+// <out>/measure-S1-burst1.{json,md} (lib/measure.mjs, Round 8 Q1 condition 2)
+// and appended to $GITHUB_STEP_SUMMARY. Exit 0 when every run is a valid
+// observation, 2 otherwise. It never decides n or the expected-RED list.
 //
 // Caps (--cap auto picks the first that works; lib/caps.mjs):
 //   systemd    `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`,
@@ -39,6 +48,7 @@ import { assertSafeRun } from "./lib/isolated-kit.mjs";
 import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
 import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
+import { measureMarkdown, measureObservation, measureReport, parseMeasureCount } from "./lib/measure.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -61,6 +71,7 @@ function parseArgs(argv) {
     else if (argv[i] === "--cap") out.cap = argv[++i];
     else if (argv[i] === "--only") out.only = argv[++i].split(",").filter(Boolean);
     else if (argv[i] === "--run-script") out.runScript = resolve(argv[++i]); // tests: a stand-in for run.mjs
+    else if (argv[i] === "--measure-burst1") out.measure = parseMeasureCount(argv[++i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
   return out;
@@ -87,6 +98,16 @@ function readSummary(dir) {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name, "summary.json");
     if (existsSync(p)) { try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; } }
+  }
+  return null;
+}
+
+/** The run's samples.csv text (in run.mjs's run directory under `dir`), or null. */
+function readSamples(dir) {
+  if (!existsSync(dir)) return null;
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name, "samples.csv");
+    if (existsSync(p)) { try { return readFileSync(p, "utf8"); } catch { return null; } }
   }
   return null;
 }
@@ -138,7 +159,7 @@ async function main() {
     issueIds = issueIdsIn(join(ROOT, ".scratch", "kit-overhaul", "issues"));
   } catch (err) { console.error(`memory-budget: cannot read the expected-RED list or the issues: ${err.message}`); return 2; }
   mkdirSync(args.out, { recursive: true });
-  console.log(`memory-budget: ${selected.length} runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}`);
+  console.log(args.measure ? `memory-budget: S1/burst1 measurement, ${args.measure} fresh runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}` : `memory-budget: ${selected.length} runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}`);
 
   // One fresh run of a key into `dir`, capped and timed out: its job result.
   async function runIn(key, dir) {
@@ -163,6 +184,28 @@ async function main() {
       memoryChecks: (summary?.checks ?? []).filter((c) => c.commitValue !== undefined).map((c) => ({ name: c.name, red: c.red, gate: c.gate, commitMB: c.commitValue, wsMB: c.wsValue, budget: c.budget })),
       error: why ?? summary?.error ?? r.error ?? null };
     return { result, summary };
+  }
+
+  if (args.measure) {
+    // Measurement mode (Round 8 Q1 condition 2): the distribution, no verdict, no ratchet.
+    const key = "S1/burst1";
+    const rule = repetitionRule(key);
+    const reps = [];
+    for (let i = 1; i <= args.measure; i++) {
+      console.log(`\n── ${key} measurement run ${i} of ${args.measure} ──`);
+      const dir = join(args.out, "measure-S1-burst1", `rep-${i}`);
+      const { result, summary } = await runIn(key, dir);
+      const obs = measureObservation({ rep: i, result, summary, csvText: readSamples(dir), rule });
+      console.log(`${key} measurement run ${i}: ${obs.outcome}, gate ${obs.gateMB ?? "—"} MB${obs.valid ? "" : ` (invalid: ${obs.problems.join("; ")})`}`);
+      reps.push(obs);
+    }
+    const report = { ...measureReport(reps, { key, os: args.os, requested: args.measure, rule }), cap: capChoice.cap, node: process.version };
+    writeFileSync(join(args.out, "measure-S1-burst1.json"), JSON.stringify(report, null, 2));
+    const md = measureMarkdown(report);
+    writeFileSync(join(args.out, "measure-S1-burst1.md"), md);
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+    console.log(`\n${md}`);
+    return report.complete ? 0 : 2;
   }
 
   const results = [];

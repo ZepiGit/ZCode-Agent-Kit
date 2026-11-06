@@ -466,3 +466,108 @@ test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery)
   assert.equal(r, "round");
   assert.deepEqual(thawed, []);
 });
+
+// ── S1/burst1 at the job seam: the median rule and the measurement mode (ticket 60) ──
+// The fake run's burst1 mode writes proxy samples and judges them with the real
+// osVerdict, in the Linux or the Windows shape (fixtures/fake-run.mjs).
+function burst1Job(args, { shape = "linux", peaks, env = {} } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-burst1-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const os = shape === "win32" ? "windows" : "linux";
+  const r = runJob(["--os", os, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN, ...args], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "burst1", FAKE_RUN_SHAPE: shape, FAKE_RUN_PEAKS: JSON.stringify(peaks), GITHUB_STEP_SUMMARY: stepSummary, ...env });
+  const read = (p) => { try { return readFileSync(join(home, "job", p), "utf8"); } catch { return null; } };
+  const json = (p) => { const t = read(p); return t === null ? null : JSON.parse(t); };
+  const files = (() => { try { return readdirSync(join(home, "job")); } catch { return []; } })();
+  const out = { r, files, job: json("job-summary.json"), measure: json("measure-S1-burst1.json"), measureMd: read("measure-S1-burst1.md"), stepSummary: readFileSync(stepSummary, "utf8"), repDirs: (() => { try { return readdirSync(join(home, "job", "S1-burst1")); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return out;
+}
+
+test("job: S1/burst1 runs n fresh repetitions (n from budgets.mjs REPEATED) and the ratchet sees one verdict", async () => {
+  const { REPEATED } = await import("./lib/budgets.mjs");
+  const n = REPEATED["S1/burst1"].n;
+  const peaks = Array.from({ length: n }, (_, i) => ({ rss: i === 1 ? 270 : 230 + i }));
+  const { r, job, repDirs } = burst1Job(["--only", "S1/burst1"], { peaks });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(repDirs.filter((d) => d.startsWith("rep-")).sort(), Array.from({ length: n }, (_, i) => `rep-${i + 1}`).sort());
+  assert.deepEqual(job.rows.map((x) => [x.key, x.outcome]), [["S1/burst1", "GREEN"]]);
+  assert.equal(job.results[0].repetitions.length, n);
+  assert.equal(job.results[0].median.n, n);
+});
+
+test("measurement mode is off by default: the ratchet step runs unless the marker file exists, and the marker is not committed", () => {
+  const ci = readFileSync(join(KIT_ROOT, ".github", "workflows", "ci.yml"), "utf8");
+  const job = ci.slice(ci.indexOf("\n  memory-budget:"));
+  const step = (name) => job.slice(job.indexOf(`- name: ${name}`)).split(/\n      - /)[0];
+  assert.match(step("Memory loop (short profile) and expected-RED ratchet"), /if: hashFiles\('tests\/memory\/measure-burst1'\) == ''/);
+  const measure = step("S1/burst1 measurement");
+  assert.match(measure, /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/);
+  assert.match(measure, /--measure-burst1 "\$\(cat tests\/memory\/measure-burst1\)"/);
+  assert.match(step("Upload memory loop artefacts"), /measure-S1-burst1\.json[\s\S]*measure-S1-burst1\.md/);
+  // A measurement run turns the ratchet off; a committed marker must never reach the integration branch.
+  assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-burst1"), false, "tests/memory/measure-burst1 is a one-run switch: delete it before the pre-merge run");
+});
+
+test("measurement mode: N fresh sequential S1/burst1 runs on Windows, each with WS gate, sampled WS, ws_peak_kb, commit, proxy count, units and Job Object", () => {
+  const peaks = [{ ws: 234.3, wsPeak: 255, commit: 422 }, { ws: 222, wsPeak: 222, commit: 365.2 }, { ws: 240, wsPeak: 246, commit: 410 }, { ws: 248.3, wsPeak: 262, commit: 424.5 }];
+  const { r, files, job, measure, measureMd, stepSummary, repDirs } = burst1Job(["--measure-burst1", "4"], { shape: "win32", peaks });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(job, null, "a measurement run is not a ratchet run");
+  assert.ok(files.includes("measure-S1-burst1.md"));
+  assert.deepEqual(repDirs, [], "the job's own S1/burst1 set does not run");
+  assert.equal(measure.key, "S1/burst1");
+  assert.equal(measure.os, "windows");
+  assert.equal(measure.requested, 4);
+  assert.equal(measure.reps.length, 4);
+  assert.deepEqual(measure.reps.map((x) => x.rep), [1, 2, 3, 4]);
+  const first = measure.reps[0];
+  assert.deepEqual(
+    { gate: first.gate, gateMB: first.gateMB, sampledMB: first.sampledMB, wsPeakKb: first.wsPeakKb, commitMB: first.commitMB, proxyCount: first.proxyCount, unitsOk: first.unitsOk, jobApplied: first.jobApplied, gateConsistent: first.gateConsistent, valid: first.valid, outcome: first.outcome },
+    { gate: "ws", gateMB: 255, sampledMB: 234.3, wsPeakKb: 261120, commitMB: 422, proxyCount: 1, unitsOk: true, jobApplied: true, gateConsistent: true, valid: true, outcome: "RED" },
+  );
+  assert.deepEqual(measure.reps.map((x) => x.gateMB), [255, 222, 246, 262]);
+  assert.deepEqual([measure.valid, measure.aboveBudget, measure.p, measure.overCeiling, measure.maxMB, measure.medianMB], [4, 2, 0.5, [], 262, 250.5]);
+  assert.equal(measure.budgetMB, 250);
+  assert.equal(measure.ceilingMB, 400);
+  // P(median RED) for each odd n ≤ 9 at the measured p (informational: Round 8 Q1 condition 3 decides).
+  assert.deepEqual(Object.keys(measure.medianRedProbability), ["3", "5", "7", "9"]);
+  assert.equal(measure.medianRedProbability["3"], 0.5);
+  for (const text of [measureMd, stepSummary]) {
+    assert.match(text, /S1\/burst1 measurement \(windows, 4 fresh runs\)/);
+    assert.match(text, /\| 1 \| RED \| 255 \| 234\.3 \| 261120 \| 422 \| 1 \| ok \| applied \|/);
+    assert.match(text, /above 250 MB: 2 of 4 \(p = 0\.5\)/);
+  }
+});
+
+test("measurement mode: a missing or zero PeakWorkingSetSize, a failed units self-test or no Job Object makes a run invalid, and the measurement exits 2", () => {
+  const peaks = [{ ws: 230, wsPeak: 240, commit: 400 }, { ws: 222, wsPeak: 0, commit: 365.2 }, { ws: 231, wsPeak: 241, commit: 401, job: false }, { ws: 232, wsPeak: 242, commit: 402, units: false }];
+  const { r, measure } = burst1Job(["--measure-burst1", "4"], { shape: "win32", peaks });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.deepEqual(measure.reps.map((x) => x.valid), [true, false, false, false]);
+  assert.match(measure.reps[1].problems.join(), /ws_peak_kb missing or 0/);
+  assert.match(measure.reps[2].problems.join(), /Job Object not applied/);
+  assert.match(measure.reps[3].problems.join(), /units self-test/);
+  assert.equal(measure.valid, 1);
+  assert.equal(measure.complete, false);
+});
+
+test("measurement mode on Linux: the gate is max(sampled RSS, VmHWM), no commit, no Job Object", () => {
+  const { r, measure } = burst1Job(["--measure-burst1", "3"], { peaks: [{ rss: 200, hwm: 236.5 }, { rss: 190, hwm: 267.4 }, { rss: 180, hwm: 235.5 }] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(measure.reps.map((x) => [x.gate, x.gateMB, x.sampledMB, x.peakMB, x.commitMB, x.jobApplied, x.gateConsistent, x.valid]), [
+    ["rss", 236.5, 200, 236.5, null, null, true, true],
+    ["rss", 267.4, 190, 267.4, null, null, true, true],
+    ["rss", 235.5, 180, 235.5, null, null, true, true],
+  ]);
+  assert.deepEqual([measure.aboveBudget, measure.valid, measure.complete], [1, 3, true]);
+});
+
+test("measurement mode rejects a count that is not a whole number from 1 to 50 before anything runs", () => {
+  for (const bad of ["0", "51", "2.5", "x", ""]) {
+    const { r, files } = burst1Job(["--measure-burst1", bad], { peaks: [] });
+    assert.equal(r.status, 2, `${bad}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /--measure-burst1/);
+    assert.deepEqual(files, [], bad);
+  }
+});
