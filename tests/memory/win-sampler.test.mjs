@@ -76,6 +76,20 @@ test("the loop's own tooling (netstat, PowerShell started by the loop root, thei
   assert.equal(v.checks.find((c) => c.name === "peak:kit").value, 252.4);
 });
 
+test("a console host belongs to a fixture owner (never kit footprint) but stays kit 'other' under a kit process", () => {
+  const base = parseCimCsv(fixture("cim-poll.csv"));
+  const like = (pid, ppid, name, commandLine) => ({ ...base.find((p) => p.pid === 3000), pid, ppid, name, executablePath: `C:\\x\\${name}`, commandLine, created: "134070000190000000" });
+  const extra = [
+    like(2900, 2000, "node.exe", '"C:\\node.exe" D:\\kit\\mcp\\zcode-harness-mcp\\test\\fixture\\fake-harness.mjs --version'),
+    like(2901, 2900, "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"),
+    like(2902, 2100, "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"),
+    like(2903, 2400, "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"),
+  ];
+  const kit = createKitTracker(RUN).select([...base, ...extra], { selfPid: 2200 });
+  const role = (pid) => kit.find((p) => p.pid === pid)?.role;
+  assert.deepEqual([role(2900), role(2901), role(2902), role(2903)], ["fake-harness", "fake-harness", "mock-upstream", "other"]);
+});
+
 test("the units self-test passes when commit_kb matches Get-Process PrivateMemorySize64", () => {
   const r = unitsSelfTest(parseCimCsv(fixture("cim-poll.csv")), parseGetProcessCsv(fixture("get-process.csv")));
   assert.equal(r.ok, true, r.reason);

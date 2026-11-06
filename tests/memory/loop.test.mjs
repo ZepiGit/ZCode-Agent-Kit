@@ -13,6 +13,7 @@ import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sa
 import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
+import { whileFrozen } from "./lib/freeze.mjs";
 
 // The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
 const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
@@ -316,4 +317,33 @@ test("`--cap none` on Windows runs the run script directly under the job's own t
   const args = ["S1", "--profile", "short"];
   assert.deepEqual(commandFor("none", "3G", 60, args, { node: "C:\\node.exe", runScript: "D:\\run.mjs", platform: "win32" }), { argv: ["C:\\node.exe", "D:\\run.mjs", ...args], timeoutMs: 90_000 });
   assert.deepEqual(commandFor("none", "3G", 60, args, { node: "/usr/bin/node", runScript: "/kit/run.mjs", platform: "linux" }), { argv: ["timeout", "--kill-after=30", "60", "/usr/bin/node", "/kit/run.mjs", ...args], timeoutMs: null });
+});
+
+// ── CI run 42252896054 (windows): S3/hung printed a complete RED verdict and
+// was turned into a harness failure because no MCP bridge was seen — every
+// launch failed on Windows, so no session ever started a bridge.
+test("run evidence: S3 is proven by its proxy, launchers and preflights; a bridge exists only after a launch succeeds", () => {
+  const s3 = (roles) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 150, samples: 500, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: 1 }])), notes: { sampler: {} } });
+  assert.deepEqual(runEvidence(s3(["proxy", "launcher", "preflight"]), { key: "S3/hung", exitCode: 1 }), { ok: true, problems: [] });
+  assert.match(runEvidence(s3(["proxy", "preflight"]), { key: "S3/hung", exitCode: 1 }).problems.join(), /role launcher never seen/);
+});
+
+// The loop freezes its own hung proxy (S3); whatever happens in between, it
+// is thawed, and a thaw that fails makes the run a harness failure — a
+// process the loop left frozen is never reported as a kit orphan.
+test("whileFrozen thaws after the work, after a failing work, and a failed thaw fails the run", async () => {
+  const calls = [];
+  const freeze = (pid) => calls.push(`freeze ${pid}`);
+  const thaw = (pid) => calls.push(`thaw ${pid}`);
+  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw }), 42);
+  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw }), /round failed/);
+  assert.deepEqual(calls, ["freeze 7", "work", "thaw 7", "freeze 8", "thaw 8"]);
+  await assert.rejects(whileFrozen(9, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); }, alive: () => true }), /could not thaw pid 9 .*0xC000000B/);
+});
+
+test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery) needs no thaw", async () => {
+  const thawed = [];
+  const r = await whileFrozen(10, async () => "round", { freeze: () => {}, thaw: (pid) => { thawed.push(pid); throw new Error("kill ESRCH"); }, alive: () => false });
+  assert.equal(r, "round");
+  assert.deepEqual(thawed, []);
 });

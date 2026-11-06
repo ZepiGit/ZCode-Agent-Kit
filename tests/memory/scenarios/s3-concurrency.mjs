@@ -29,6 +29,7 @@ import { scan, portsOf } from "../lib/sampler.mjs";
 import { PROCESSES, s3Budgets } from "../lib/budgets.mjs";
 import { osLeg } from "../lib/catalogue.mjs";
 import { resumeProcess, suspendProcess } from "../lib/win-process.mjs";
+import { whileFrozen } from "../lib/freeze.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // SIGSTOP/SIGCONT; Windows has no stop signal: NtSuspendProcess/NtResumeProcess.
@@ -120,9 +121,9 @@ export async function run(ctx) {
     const pid = kit.pidRecord()?.pid;
     if (start.code !== 0 || !pid) return ctx.note(`${name}.skipped`, start.code);
     await sleep(65_000); // past the manager's 60 s startup grace
-    freeze(pid); // our own proxy, frozen: /health stops answering
-    try { await round(name, 10, { kind: "mixed" }); }
-    finally { try { thaw(pid); } catch {} }
+    // Our own proxy, frozen: /health stops answering. It is always thawed, and
+    // a failed thaw ends the run as a harness failure (lib/freeze.mjs).
+    await whileFrozen(pid, () => round(name, 10, { kind: "mixed" }), { freeze, thaw });
   };
   const killHolder = async () => {
     await round("kill-holder-10", 10, {
@@ -187,6 +188,9 @@ export async function run(ctx) {
     cleanup.staleLockRemoved = true;
   }
   cleanup.finalStop = await stopAll("final");
+  // What the kit recorded for a proxy it could not stop (a pid record without a
+  // start time makes every stop fail closed: evidence for the orphan check).
+  if (cleanup.finalStop.proxiesLeft) cleanup.pidRecordLeft = kit.pidRecord();
   ctx.note("cleanup", cleanup);
   await session.stop();
 
