@@ -39,6 +39,12 @@ const REQUIRED_FILES = [
   "bin/zcode-claude.cmd",
   "bin/zcode-codex.cmd",
   "scripts/verify-release-marker.mjs",
+  // ADR-0011: the width core and token set shared by the CLI (lib/term/) and
+  // the proxy TUI, with their type declarations.
+  "zcode-proxy-src/src/tui/width-core.mjs",
+  "zcode-proxy-src/src/tui/width-core.d.mts",
+  "zcode-proxy-src/src/tui/tokens.mjs",
+  "zcode-proxy-src/src/tui/tokens.d.mts",
 ];
 
 const SECRET_PATTERNS = [
