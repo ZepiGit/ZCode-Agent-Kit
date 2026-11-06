@@ -1,0 +1,1 @@
+update: --version expects a release tag like v0.2.11 (got "latest").

@@ -1,0 +1,19 @@
+y
+n
+n
+y
+y
+n
+n
+
+  ZCODE  /  AGENT KIT
+  v1.2.3  |  Your local AI workspace
+  --------------------------------------------
+  Install to  <FIXTURE>/install
+
+  [1/4] Checking runtime
+  [OK]   Node.js and Bun available
+
+  [2/4] Downloading and verifying release
+
+  [ERROR] archive hash mismatch\n  expected 0000000000000000000000000000000000000000000000000000000000000000\n  actual   003cf6108f5a6ce5e077a8e219d62beb7a5ac338dc53cec764b1564bde9174c9

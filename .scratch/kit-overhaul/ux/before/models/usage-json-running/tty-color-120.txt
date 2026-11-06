@@ -1,0 +1,30 @@
+{
+  "provider": "zai",
+  "serverTime": 1793880000,
+  "jwt": {
+    "ageHours": 5.2,
+    "issuedAt": 1793910289
+  },
+  "balances": [
+    {
+      "showName": "GLM Coding Lite",
+      "remainingUnits": 4120,
+      "totalUnits": 6000,
+      "usedUnits": 1880,
+      "unitType": "prompts",
+      "expiresAt": 1798761600
+    },
+    {
+      "showName": "Start Plan Bonus",
+      "remainingUnits": 35,
+      "totalUnits": 200,
+      "usedUnits": 165,
+      "unitType": "prompts",
+      "expiresAt": 1796083200
+    }
+  ],
+  "claimablePlans": [],
+  "errors": [],
+  "asOf": "<TS>",
+  "cached": false
+}

@@ -1,0 +1,8 @@
+{
+  "logged_in": true,
+  "errors": [],
+  "jwt": {
+    "ageHours": 5.2,
+    "issuedAt": 1793910366
+  }
+}
