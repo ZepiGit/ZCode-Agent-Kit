@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -80,3 +80,5 @@ Spec stories: 88
 - No new config key or `ZCODE_PROXY_*` env override: n/a.
 
 **For later tickets:** proxy code uses `import { createEventLogger } from "<rel>/log/event-line.mjs"` with a component name (`memory`, `recycle`, `shed`, `supervisor`, `solver`, `log`). Manager code uses `logEvent("WARN", "lock takeover", { … })`.
+
+- Merged 2026-11-06 as b3b8ece; fast suite: kit 295/306 (0 fail, 11 skipped), proxy 1303/1303, mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged. Logs: reports/merge-14-{npmci,test,proxy,mcp}.log.
