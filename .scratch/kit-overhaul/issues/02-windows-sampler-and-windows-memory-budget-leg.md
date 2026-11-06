@@ -305,3 +305,12 @@ There is no second proxy and no double count. The holder was killed before it sp
   - No `could not thaw` harness failure.
 - **memory-budget windows, other runs:** no harness failure. `other` in the S3 roles no longer includes fixture conhosts.
 - **test-kit:** 4/4 green; **memory-budget ubuntu:** green.
+
+### 2026-11-06 — implementer, round 5 (staging/02 82de0da: only test-kit windows/26 red)
+
+`loop.test.mjs` "whileFrozen thaws after the work, …" used the fake pids 7 and 8 without an `alive` function, so it asked the host's process table. On windows-latest/26 the host answered "gone" for pid 8 and the thaw was skipped (`/home/AgentKit/overhaul-tools/t02-win26-r4.log`). This was a test defect, not a harness defect.
+- **Reproduced on Linux:** with the default liveness forced to "gone" in a scratch copy, the test failed exactly as on Windows (`actual: ['freeze 7','work','freeze 8']`, `reports/t02-r5-red1.log`).
+- **Fix:** the test injects `alive: () => true`. It is now OS-neutral: with the host liveness forced to "gone" it still passes (`t02-r5-hostgone`).
+- **Mutation proof:** `whileFrozen` without a thaw after a failing round → the test fails (`t02-r5-mutK`).
+- **Suites:** `npm run test`: 398 tests, 382 pass, 0 fail, 16 skipped.
+- `expected-red.json` is untouched.

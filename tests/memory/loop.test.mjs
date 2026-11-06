@@ -335,8 +335,10 @@ test("whileFrozen thaws after the work, after a failing work, and a failed thaw 
   const calls = [];
   const freeze = (pid) => calls.push(`freeze ${pid}`);
   const thaw = (pid) => calls.push(`thaw ${pid}`);
-  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw }), 42);
-  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw }), /round failed/);
+  // Fake pids: liveness is injected, never asked of the host (Windows and Linux answer differently for pid 7/8).
+  const alive = () => true;
+  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw, alive }), 42);
+  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw, alive }), /round failed/);
   assert.deepEqual(calls, ["freeze 7", "work", "thaw 7", "freeze 8", "thaw 8"]);
   await assert.rejects(whileFrozen(9, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); }, alive: () => true }), /could not thaw pid 9 .*0xC000000B/);
 });
