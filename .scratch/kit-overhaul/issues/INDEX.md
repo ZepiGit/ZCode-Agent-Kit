@@ -63,6 +63,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol (if accepted) | medium | — | needs-triage |
 | 58 | [Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)](58-solver-recycle-and-failure-semantics.md) | sol | high | 19, 25, 28 | ready-for-agent |
 | 59 | [Proxy-side effort normalisation and the Kilo `/v1/models` sheet line](59-proxy-effort-normalisation-and-kilo-models-line.md) | sol | medium | — | needs-triage |
+| 60 | [S1/burst1 judged on the median of n fresh runs, every run ≤ 400 MB](60-s1-burst1-median-rule.md) | sol | medium | 01, 02 | ready-for-agent |
 
 ## Initial frontier
 
