@@ -3,7 +3,7 @@
 Status: ready-for-agent
 
 Feature: `kit-overhaul`. Integration branch: `overhaul/stability-terminal-ux`.
-Source of every decision below: `DECISIONS.md` (Owner Proxy Rounds 1–3, Charter v1), `GLOSSARY.md` and `docs/adr/`. Where a round question and its decision differ, the decision (with its conditions, and with the replacements for REJECTED parts) is what this spec states.
+Source of every decision below: `DECISIONS.md` (Owner Proxy Rounds 1–4, Charter v1; the Round 4 corrections are listed at the end of Further Notes), `GLOSSARY.md` and `docs/adr/`. Where a round question and its decision differ, the decision (with its conditions, and with the replacements for REJECTED parts) is what this spec states.
 
 ## Problem Statement
 
@@ -26,7 +26,7 @@ Whatever the overhaul changes, users and scripts must not notice a regression. C
 
 From the user's point of view, after this change:
 
-- **The kit stays inside a fixed memory budget.** Solves run in a separate solver process under an OS-enforced solver cap (300 MB): a Job Object on Windows, a verified cgroup scope on Linux, sampling where no kernel cap exists. The solver process is recycled well before the cap, dies with the proxy, and only one exists at a time. Admission caps in-flight bytes at 64 MB. A request that cannot be admitted in time is shed with 503 + `Retry-After` in the endpoint's own error shape, never with 429 and never with a connection reset. The health supervisor watches the proxy's own memory footprint against 512/1024 MB. Ten parallel harness sessions fit in ≤ 596 MB of summed RSS on Linux and ≤ 600 MB of commit on Windows.
+- **The kit stays inside a fixed memory budget.** Solves run in a separate solver process under an OS-enforced solver cap (300 MB): a Job Object on Windows, a verified cgroup scope on Linux, sampling where no kernel cap exists. The solver process is recycled well before the cap, dies with the proxy, and only one exists at a time. Admission caps in-flight bytes at 64 MB. A request that cannot be admitted in time is shed with 503 + `Retry-After` in the endpoint's own error shape, never with 429 and never with a connection reset. The health supervisor watches the proxy's own memory footprint against 512/1024 MB. Ten parallel harness sessions fit in ≤ 596 MB of summed RSS on Linux on Node ≥ 26.1 (launcher handover; not claimed on Node 24; macOS unverified, owner action) and ≤ 600 MB of commit on Windows.
 - **There is always exactly one proxy, never zero.** A stale start lock is taken over only on proof, so a killed start no longer blocks every later launch. An orphaned proxy is adopted, not duplicated. A respawn drains only after the manager has acknowledged that its restart budget is reserved, so a refused respawn leaves the proxy serving. `proxy stop` and `restart` run a real graceful stop on Windows too, through an authenticated loopback stop request.
 - **Every growing store has a bound** and a test that proves it: CDN cache in memory and on disk, stall counters, MCP task registry and files, per-task arrays and text, the TUI log pane, and `proxy.log` (rotated by the proxy while it runs, with early output kept in a small capped file).
 - **Users can see the memory state.** `proxy status`, its `--json`, `/health` details, `doctor` (four new checks) and the proxy TUI show per-process RSS and memory footprint, the solver cap, the enforcement mode, the restart budget and admission counters. Every WARN comes with an exact next command.
@@ -66,7 +66,7 @@ From the user's point of view, after this change:
 26. As a kit user, I want the proxy's health supervisor to sample memory footprint (commit charge on Windows) against a soft limit of 512 MB and a hard limit of 1024 MB, each held for 3 samples 15 s apart, so that a runaway proxy is caught long before it threatens the machine.
 27. As a kit user, I want the soft limit to only WARN and log, so that a busy proxy is not restarted needlessly.
 28. As an operator, I want the memory thresholds configurable in `config.yaml` and tested with an injected sampler, so that the defaults can be tuned safely.
-29. As a user running ten parallel harness sessions on Linux, I want the kit footprint to stay at or below 596 MB of summed RSS, so that a fleet of agents fits on an ordinary machine.
+29. As a user running ten parallel harness sessions on Linux, I want the kit footprint to stay at or below 596 MB of summed RSS on Node ≥ 26.1 (launcher handover; not claimed on Node 24; macOS unverified, owner action), so that a fleet of agents fits on an ordinary machine.
 30. As a Windows user running ten parallel sessions, I want the kit footprint to stay at or below 600 MB of commit, so that the primary platform gets the same guarantee.
 31. As an OMP user, I want parallel OMP hosts to share one preflight, with the other hosts waiting inside their own process, so that five simultaneous starts cost one preflight process instead of five.
 32. As an OMP user whose host waited on another host's preflight, I want to still see that preflight's `cause=` warnings, and to run my own preflight if the shared one failed or timed out, so that no diagnostic is lost.
@@ -96,7 +96,7 @@ From the user's point of view, after this change:
 53. As a kit user, I want a hung proxy's watchdog path to self-terminate after the acknowledgement or refusal within a bounded wait, so that a hung proxy never lingers and the next preflight starts a fresh one.
 54. As a Windows user, I want `proxy stop` and `proxy restart` to run the proxy's graceful sequence, including the account-metadata flush, so that stopping on the primary platform no longer means a hard kill.
 55. As a security-conscious user, I want the stop request accepted only on loopback, after Host, Origin and bearer checks, and only with a per-spawn 256-bit stop token compared in constant time, so that no harness holding the proxy key can stop the proxy.
-56. As a security-conscious user, I want the stop token never shown in logs, status, JSON, doctor, snapshots or error text, and stripped from the solver's environment, so that it cannot leak.
+56. As a security-conscious user, I want the stop token never shown in logs, status, JSON, doctor, snapshots or error text, freshly generated for every proxy spawn (overwriting any inherited value), and stripped from the solver's and the respawn hook's environments, so that it cannot leak or be reused by the next proxy.
 57. As a kit user, I want the manager to force a stop only after the proxy's own deadline plus a margin, so that a stop never kills the proxy in the middle of its flush.
 58. As a kit user stopping an older proxy, I want the manager to fall back to today's signals or `TerminateProcess` when the proxy does not know the stop request, so that stop keeps working across versions.
 59. As a kit user, I want `proxy stop` and `restart` to show progress on a TTY while the grace period runs, and to stay line-based off a TTY, so that I know the command is not stuck.
@@ -139,7 +139,7 @@ From the user's point of view, after this change:
 ### Terminal UX
 
 89. As a kit user, I want every command to render through one design language (aligned rows, verdict last, glyph plus word), so that all output reads the same way.
-90. As a script author, I want `doctor` check rows off a TTY to keep exactly `PASS|FAIL|SKIP  <name> — <detail>` with today's check names, with `WARN` as the only new word, so that my greps keep working.
+90. As a script author, I want `doctor` check rows off a TTY to keep exactly `^(PASS|FAIL|SKIP|WARN)  <name>( — <detail>)?$` (separator ` — `, U+2014, byte-for-byte in every glyph tier) with today's check names, followed by whitespace-indented `why:`/`next:` lines, with `WARN` as the only new word, so that my greps keep working.
 91. As a script author, I want `WARN` never to change an exit code, and no check that FAILs today to become a WARN, so that exit codes stay what they were.
 92. As a kit user, I want `doctor` to show each check once, with one verdict line and a problem count first when anything failed, so that I get the answer at once and nothing is printed twice.
 93. As a script author, I want reports and data on stdout and every diagnostic on stderr, so that `zcode-kit run … | jq` sees only the harness's output.
@@ -155,7 +155,7 @@ From the user's point of view, after this change:
 103. As a kit user, I want help grouped by task, with examples first, environment variables and exit codes, and a `--help` for every command, so that I can find what I need at 80 columns.
 104. As a kit user, I want a usage error to print a two-line message on stderr and exit 2, not the whole help page, so that the mistake is obvious.
 105. As a kit user, I want the connection details printed once per command, unboxed and within 80 columns, with the key shown only on an interactive TTY, so that I can copy values cleanly and the key stays protected.
-106. As a user on a non-UTF-8 code page or Windows 10 conhost, I want glyphs to fall back to the wgl4 or ascii glyph tier while the words stay the same, so that output never turns into boxes or mojibake.
+106. As a user on a non-UTF-8 code page or Windows 10 conhost, I want glyphs to fall back to the wgl4 or ascii glyph tier while the words stay the same (off a TTY the check-row separator ` — ` and the verdict words never change with the tier), so that output never turns into boxes or mojibake.
 107. As a colour-blind user or a NO_COLOR user, I want every state carried by a glyph and a word, and no escape sequences at all in line mode when colour is off, so that I lose nothing without colour.
 108. As a CI user, I want progress only as animated lines on a TTY, and as plain start and result lines elsewhere, so that logs stay clean.
 109. As a user at 80 columns, I want widths computed with a grapheme-correct width core (CJK, emoji, VS16), so that alignment holds with any text.
@@ -204,15 +204,15 @@ Every module below uses the glossary's vocabulary. Interfaces are named where a 
 
 ### 0. Order of work
 
-The order follows PROMPT §7 Phase 3, with one recorded deviation:
-1. The memory loop with budgets, the process-count harness and the Windows sampler (the guardrail).
+The order follows PROMPT §7 Phase 3, with two recorded deviations (RUNLOG + ADR-0016):
+1. The memory loop with budgets, the process-count harness, the Windows sampler **and the `memory-budget` CI job on ubuntu and windows with the expected-RED list** (the guardrail). **Deviation 2:** PROMPT principle 8 puts the memory budget job last; it lands here, because the expected-RED list exists so that the job can land first (Round 2 Q14 cond 1) and the Bun 1.4.2 Windows reference run is the draft PR's first CI run on the loop code merged before the toolchain batch (Round 3 Q9 cond 1, Round 4 Q5 D2).
 2. Prefactors: the output module with its snapshot harness, then the CLI command-module split.
-3. Upgrade batches 1–3. **Deviation:** they land *before* the memory fixes, so that the fixes are measured on the target runtime (Round 1 Q15, Q16 cond 4; Round 2 Q15). This goes into RUNLOG and an ADR.
+3. Upgrade batches 1–3. **Deviation 1:** they land *before* the memory fixes, so that the fixes are measured on the target runtime (Round 1 Q15, Q16 cond 4; Round 2 Q15). The proxy typecheck already moved into batch 1 (Round 2 Q15 cond 1).
 4. Memory and process fixes. Each starts RED on the upgraded runtime. If an upgrade alone turns a scenario GREEN, the fix ticket is re-scoped with that evidence.
 5. UX migration batches, then the TUI.
 6. Observability.
 7. Docs and translations.
-8. CI guardrails.
+8. The remaining CI guardrails (snapshot-update refusal, test-wiring guard).
 
 ### 1. Memory loop and budgets (guardrail; lands first)
 
@@ -235,7 +235,8 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
   - the list is empty at the Phase 6 gate.
 - **Baselines:**
   - the Linux reference is Bun 1.4.2 (`METRICS.md`);
-  - Windows records two runs before any memory fix merges: the Bun 1.4.2 reference run (the loop merges before the toolchain batch, and the draft PR's first CI run measures it) and the Bun 1.4.4 attribution run right after the toolchain batch;
+  - the `memory-budget` CI job (ubuntu and windows, expected-RED list) lands together with the loop in step 1, so the Windows reference baseline exists before step 3;
+  - Windows records two runs before any memory fix merges: the Bun 1.4.2 reference run (the loop and its CI job merge before the toolchain batch, and the draft PR's first CI run measures it) and the Bun 1.4.4 attribution run right after the toolchain batch;
   - if the sampler cannot run on the pre-upgrade code, the 1.4.4 run becomes the reference, with the reason in RUNLOG;
   - a scenario that is RED only on commit goes back to the owner. It is never adjusted silently.
 
@@ -266,11 +267,12 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
   - the queue is pumped onto the next generation;
   - only these abnormal exits count toward the **5 per 10 min** solver restart budget, after which solves fail fast. Planned recycles never count;
   - the budget limits process restarts and never resubmits a solve, so it is not a new retry policy (ADR-0002 cond 7, B1);
-  - during fail-fast, and when a bounded solve queue overflows, solve requests get the ADR-0004 shed contract with `Retry-After` = the time until the window reopens. A crash alone never sheds.
+  - during fail-fast, solve requests get the ADR-0004 shed contract with `Retry-After` = the time until the window reopens. A crash alone never sheds;
+  - the solve queue is bounded by its callers (one in-flight solve per pool, §7). Only if no caller-side bound can be shown is a count bound added; that count then goes into §7 and its overflow sheds under ADR-0004.
 - **Lifetime:** the solver process spawns lazily on the first solve, stays alive while solves arrive, and exits after 10 min idle, which is not an abnormal exit. An idle exit releases the cap container. Prewarm is off by default.
 - **Environment parity (B1):**
   - the child receives `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA`, the CDN cache variables and the egress setting (§13), and the guest error boundary is installed in the child as well;
-  - the child environment excludes `ZCODE_KIT_RESPAWN_*` and `ZCODE_KIT_STOP_TOKEN`;
+  - the solver process and the respawn hook environments exclude `ZCODE_KIT_STOP_TOKEN`, and the solver process environment also excludes `ZCODE_KIT_RESPAWN_*` (§4);
   - the child never runs the watchdog or the respawn hook.
 - The child's stdout and stderr are piped to the parent and written through the parent's log writer (§8), with line content unchanged.
 - The cold start (spawn + handshake + module load) is measured on Linux and Windows and recorded in METRICS. If it exceeds 4.5 s, it comes back as a finding. The deadline is not moved silently.
@@ -307,7 +309,7 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
 - **Graceful stop request (Round 3 Q3):**
   - **route:** `POST /__kit/stop` on the existing loopback listener. It sits after the Host, Origin and bearer checks and also requires a per-spawn 256-bit stop-token header. Both are compared in constant time, length included. No CORS allowance is added;
   - **when the proxy was spawned without a stop token** (TUI-hosted, standalone), the route answers the same `404 not_found_error` as an unknown route;
-  - **stop-token storage:** it reaches the proxy as `ZCODE_KIT_STOP_TOKEN` (allowlisted in `proxyEnv`) and is stored as an additive field in `proxy.pid`. On Windows, `proxy.pid` is protected by the user-profile ACL, the same as the proxy key;
+  - **stop-token storage:** it reaches the proxy as `ZCODE_KIT_STOP_TOKEN` and is stored as an additive field in `proxy.pid`. `proxyEnv` already passes `ZCODE_KIT_*` through, so an allowlist entry would do nothing; the real risk is an ambient value inherited through the respawn chain (the respawn hook is spawned with the proxy's own environment). Therefore (Round 4 Q4): the manager sets the variable explicitly at **every** proxy spawn (next to `ZCODE_KIT_RESPAWN_NODE`/`_MANAGER`, or inside `proxyEnv` the way `ZCODE_PROXY_CONFIG` is set), overwriting any inherited value; the token is freshly generated per spawn and equals the value written to `proxy.pid`; and the proxy strips it from the environment it gives the respawn hook, as it does for the solver process. On Windows, `proxy.pid` is protected by the user-profile ACL, the same as the proxy key;
   - **response:** the request has no body, bypasses admission and answers `202` before the drain. It triggers the single graceful sequence (§5);
   - **trigger path:** the manager sends the request on Windows **and** POSIX after the identity proof. On a 404/401/403 or a connection error, POSIX falls back to SIGTERM (still a handled trigger) and Windows goes straight to `TerminateProcess` (an old proxy, today's behaviour);
   - **force path:** `recoverHung`, the startup timeout and foreign-port paths in `start`, and the golden-path crash injection (through an explicit force helper) skip the request and force directly. Only `stop`, `restart` and update use the graceful request.
@@ -319,7 +321,8 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
   - a late acknowledgement leads to "healthy and ours → already running, 0", never to a second proxy, and a test proves exactly 1 proxy with the slot consumed;
   - a backwards wall-clock jump fails safe (keep serving), because matching on `pid` + `at > requestTime` cannot pick up an earlier event;
   - the watchdog path waits at most 10 s for an acknowledgement or refusal, then self-terminates regardless and logs which outcome it saw;
-  - **log dir in the proxy env:** the logs directory reaches the proxy through one additive variable, `ZCODE_KIT_LOG_DIR`, allowlisted in `proxyEnv` with a test, and nothing else in the proxy env contract changes;
+  - **log dir in the proxy env (Round 4 Q4):** the logs directory reaches the proxy through one additive variable, `ZCODE_KIT_LOG_DIR`, which the manager sets explicitly at every proxy spawn to its own logs directory, overwriting any inherited value (same place as the stop token). Nothing else in the proxy env contract changes. The variable is **internal**, documented like `ZCODE_KIT_RESPAWN_*` and not in the user env-var list. A proxy started without it (TUI-hosted, standalone) keeps today's behaviour: no size-capped file writer opened by path and no respawn acknowledgement wait, because no manager hook exists (ADR-0008 cond 5);
+  - **env tests (seam 8 `proxy-env` suite + seam 2):** with ambient bogus values for both variables, the spawned proxy receives the manager's logs dir and a new token; the token in the proxy's environment equals the one in `proxy.pid`; the respawn hook's environment has no stop token; two consecutive spawns get different tokens;
   - old proxies meeting a new manager keep today's behaviour, and this is documented.
 - On a TTY, `proxy stop` and `restart` show progress during the grace period. Off a TTY they stay line-based.
 
@@ -337,8 +340,14 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
   - hosts that find the token wait in-host, with a stat poll plus the existing in-host `healthy()` fetch and no new process. The wait never exceeds today's `START_TIMEOUT_MS`;
   - the token is released in `finally`, and a stale token (holder dead, or older than `START_TIMEOUT_MS`) is taken over on proof;
   - the token is separate from the start lock, whose protocol does not change, and the extension keeps its rule of no kit modules in the long-lived host;
-  - **cause-line channel (decided here):** the starter writes a small result record next to the token, atomically and with mode `0o600`. It holds the starter's pid and start time, its exit code, its fixed-vocabulary `cause=` lines and a timestamp. A waiter that sees a healthy proxy reads the record and prints those cause lines in its own host before skipping its first-call preflight. A waiter whose starter failed or timed out runs its own preflight, so the failure categories and the "Next … may retry" text stay per host;
-  - an old extension (before re-setup) keeps spawning preflights, which is harmless under the start lock.
+  - **cause-line channel (Round 4 Q2, binding conditions):** the starter writes a small result record next to the token, and waiters read it:
+    1. **write before release:** the starter writes the record by temp file + rename with mode `0o600`, on every outcome (success, failure, timeout), and **before** it releases the token in `finally`, so a waiter never sees a released token without that attempt's record;
+    2. **one attempt per record:** the record carries the same identity as the token (host pid, host start time and a per-attempt nonce). A waiter accepts it only if the identity equals the token it observed while waiting and the record's timestamp is not earlier than the waiter's own wait start. Any other record is stale and is never printed, so a record from an earlier start or another installation's clock is never replayed;
+    3. **no matching record counts as a starter failure:** a token released without a matching record, or a token proven stale because the holder is dead, leads the waiter to apply the existing ADR-0013 takeover-by-proof and become the new starter with its own preflight; the other waiters keep waiting on the new token. "≤ 1 concurrent OMP preflight process" therefore holds in the killed-starter case, and no diagnostic is dropped silently;
+    4. **bounded, fixed-vocabulary content:** only the exit code and the fixed-vocabulary `cause=` lines, with no paths, keys or free text, capped (≤ 4 KB / ≤ 16 lines). The waiter validates every line against the fixed vocabulary before printing it in its host; a corrupt or oversized record is treated as "no matching record" (condition 3);
+    5. **one file:** a fixed name, overwritten per attempt, counted toward S4's log-dir file budget (≤ 8, loop-encoded). Waiters never delete it;
+    6. a waiter that sees a healthy proxy and a matching record prints those cause lines in its own host before skipping its first-call preflight. A waiter whose starter failed or timed out runs its own preflight, so the failure categories and the "Next … may retry" text stay per host. The channel is an amendment line in ADR-0013 (cond 3);
+  - an old extension (before re-setup) neither writes nor reads the record and keeps spawning preflights, which is harmless under the start lock.
 - **(b) MCP bridge:**
   - the HTTP transport is imported lazily, with no behaviour change in HTTP mode;
   - `--max-semi-space-size=1` goes on the bridge command line in the generated harness MCP entries, never in `NODE_OPTIONS`;
@@ -347,7 +356,7 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
 - **(c) Solver lifetime:** lazy spawn and idle exit, as in §2.
 - **(d) `process.execve` handover in `zcode-kit run`:**
   - **when:** only when the platform is POSIX, `typeof process.execve === "function"`, Node ≥ 26.1, and the target is resolved on PATH and passes `access(X_OK)`. Otherwise the launcher stays resident as today, and pre-validation keeps today's "run: …" error with exit 2;
-  - **opt-out:** **`ZCODE_KIT_RESIDENT_LAUNCHER=1`** forces the resident launcher, documented in help and README;
+  - **opt-out (Round 4 Q3):** **`ZCODE_KIT_RESIDENT_LAUNCHER=1`** forces the resident launcher. The value convention is exactly `"1"`, as for `ZCODE_KIT_SKIP_DEPS` and `ZCODE_KIT_ALLOW_CHECKOUT`; any other value leaves the default. The launcher reads it before the handover decision, and with it set the resident path behaves byte for byte as today (asserted by the seam 5 spawn test). On Windows it has no effect, because the launcher is always resident. No other code path reads it. It is a user-visible variable (one-way door once released), documented in `--help` (environment section), in README × 5 next to the Node ≥ 26.1 note and in the release-notes entry for the handover;
   - **before the handover:** the `ready.detail` line, any `heal.log` write and all cleanup finish first (exit handlers do not run after execve). Then SIGPIPE/SIGXFSZ are re-armed (add and remove a listener), and the `ExperimentalWarning` is suppressed for this call only;
   - **visible change:** a harness killed by a signal now reports that signal (for example 143) where today it reports exit 1. Release notes announce it; exit codes 0/7/130 are unchanged;
   - **platforms:** macOS execve is unverified (owner action). README and the release notes state that the lower footprint on Linux/macOS needs Node ≥ 26.1. On Node 24 the S3 total is not claimed.
@@ -363,6 +372,7 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
 | CDN cache, memory | ≤ 64 MB and ≤ 256 entries; resets with each solver generation |
 | CDN cache, disk | ≤ 256 MB (oldest first); prunes by age only entries already expired at max(14 days, configured TTL); pruned at start and after each write; skips temp files and files being written, tolerates `ENOENT` |
 | Stall counters | 1,024 entries, count only, oldest first, no TTL, generation-scoped |
+| Solver queue | bounded by its callers (one in-flight solve per pool; today `captcha-pool` clamps solve concurrency to 1). The ticket states the bound with evidence and pins it with a seam 3 test. Only if no caller-side bound can be shown is a count bound added here, with its overflow shed under ADR-0004 |
 | MCP task registry | terminal tasks evicted at > 500 or > 7 days, whichever comes first; non-terminal never; `*.result.json` pruned with the task; startup restore loads only retained tasks; the idempotency key is forgotten on eviction |
 | Per-task arrays | warnings 200, errors 200, tool calls 1,000 |
 | Task response text | 4 MiB UTF-8, bounded during ingestion (head 1 MiB frozen, rolling 3 MiB tail, dropped-byte count) |
@@ -375,7 +385,7 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
   - `completeness: partial`, with the truncation note merged into the end-state explanation after the terminal-state override, so the override cannot erase it;
   - the additive field `truncated: { droppedBytes }`;
   - the transcript fallback gets the same cap, and results cached before the change are served as stored;
-  - the tool description, the MCP API doc and the release notes carry the sentence: "Idempotency keys are remembered for as long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after that the same key starts a new task." `dist/` is regenerated by the build (B5).
+  - the tool description, the MCP API doc (`docs/MCP_API.md`) and the release notes describe the 4 MiB cap (first 1 MiB + last 3 MiB), the `[… N bytes truncated …]` marker, the `truncated` field and the idempotency window, with the sentence: "Idempotency keys are remembered for as long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after that the same key starts a new task." `dist/` is regenerated by the build (B5).
 
 ### 8. `proxy.log` ownership (Round 2 Q4, Round 3 Q5)
 
@@ -386,12 +396,12 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
   - once the writer is open, console, stdout and stderr go through it, and line content stays as it is today.
 - **The manager:**
   - keeps appending `[manager <ISO>] …` lines;
-  - rotates only under the start lock and only when no live recorded proxy exists. Today's rotation before lock acquisition is removed;
-  - creates every log file with mode `0o600`, and the logs directory with `0o700`.
-- **The early-output file:**
-  - inherited stdio goes to `proxy.early.log`, which is truncated at each start and capped at 1 MB;
+  - rotates only under the start lock and only when no live recorded proxy exists. Today's rotation before lock acquisition is removed.
+- **File modes bind every creator (Round 3 Q5 cond 2, Round 4 D4):** every creator of a log-dir file creates it with mode `0o600`, and the logs directory with `0o700`: the manager, the proxy writer on open and on reopen after rotation, the watchdog's by-path append, the creation of the early log, and the OMP extension if it creates the logs directory. This applies to `proxy.log`, `proxy.log.1`, the early log, the autostart token and its result record.
+- **The early log (`proxy.early.log`):**
+  - inherited stdio goes to the early log, which is truncated at each start and capped at 1 MB;
   - the proxy's writer enforces the cap: it checks the file's size at each rotation check and truncates it in place after writing a marker event to `proxy.log`;
-  - before **any** truncation of a non-empty early file, the manager appends its last 64 KB to `proxy.log` behind a marker line. Start failure, respawn and crash are cases of this rule, and the golden-path classifier keeps reading only `proxy.log`;
+  - before **any** truncation of a non-empty early log, the manager appends its last 64 KB to `proxy.log` behind a marker line. Start failure, respawn and crash are cases of this rule, and the golden-path classifier keeps reading only `proxy.log`;
   - watchdog lines may be appended to `proxy.log` by path (mode `0o600`), which is preferred.
 - **Readers and foreign handles:** `proxy logs N` reads `.1` + current. If a foreign handle blocks the rename, the writer keeps appending, retries at every check and logs one WARN event line. Nothing is lost, and the case is documented.
 
@@ -426,7 +436,7 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
 
 - **Output interface** (design-language §9): `heading`, `kv`, `check({status: pass|fail|warn|skip, name, detail, why, next})`, `result({status: ok|fail|warn|skip|info, label, detail})`, `table`, `connection`, `verdict`, `next` and `data`/`json` on stdout; `error`, `warn`, `note` and `step(...) → Progress` on stderr. Prompts stay in the consent prompter, render through the stderr capabilities, and appear only when stdin and stderr are TTYs. Compact setup becomes a thin adapter over `Out`, with the setup log as a second sink.
 - **Binding rules:**
-  - off a TTY, check rows are exactly `^(PASS|FAIL|SKIP|WARN)  <name> — <detail>$` with today's check names, followed by indented `why:`/`next:` lines. New display labels appear on a TTY only, and JSON check names stay byte-stable;
+  - off a TTY, check rows keep the separator ` — ` (U+2014) byte-for-byte in every glyph tier. The ascii copy mapping does not apply to the check-row separator or the verdict words. The grammar is `^(PASS|FAIL|SKIP|WARN)  <name>( — <detail>)?$`, with today's check names, followed by whitespace-indented `why:`/`next:` lines (Round 4 D1; ADR-0001 rule 1). New display labels appear on a TTY only, and JSON check names stay byte-stable;
   - line mode has no box chrome. The TUI has exactly one box, the status header (Round 2 Q9 narrows ADR-0001 rule 2, see Further Notes);
   - the `doctor` lead line states the problem count only;
   - TUI memory rows show the enforced solver cap;
@@ -515,7 +525,7 @@ The order follows PROMPT §7 Phase 3, with one recorded deviation:
 - Each batch is green before the next.
 - **CI layout:**
   - `test-kit` runs {ubuntu-latest, windows-latest} × {Node 24, 26} with the kit, proxy, proxy typecheck and MCP suites;
-  - a separate `memory-budget` job (Node 26) runs per OS with the short profile and artefacts: ubuntu S1–S7, windows S1, S2 (offline fixture), S3, S4, S5 and S7. S6 stays ubuntu-only. Each job runs under hard caps and timeouts (a `systemd-run --user` scope or `prlimit` on ubuntu, a Job Object on windows), with `ZCODE_MEMLOOP_ALLOW=1` only there;
+  - a separate `memory-budget` job (Node 26) runs per OS with the short profile and artefacts; it lands in step 1 with the memory loop and the expected-RED list, before batch 1 (§0, deviation 2), and batch 1 only moves its Bun pin to 1.4.4: ubuntu S1–S7, windows S1, S2 (offline fixture), S3, S4, S5 and S7. S6 stays ubuntu-only. Each job runs under hard caps and timeouts (a `systemd-run --user` scope or `prlimit` on ubuntu, a Job Object on windows), with `ZCODE_MEMLOOP_ALLOW=1` only there;
   - snapshot tests run inside `npm run test`. `release.yml` changes only in versions and runs on Node 26, and the publish job's Node 24 OIDC requirement stays satisfied;
   - the update and upstream-config tests join `npm run test`, and a guard fails on any kit test file that no script references;
   - the long memory profile stays local.
@@ -567,7 +577,8 @@ On Bun, captcha fetches use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`, and 
   - SUPPORT_MATRIX.json (date, Node/Bun versions, tested harness versions reconciled with MANIFEST);
   - MANIFEST*;
   - EFFORT_MAPPING* only where affected;
-  - the five MCP bridge READMEs, brought to parity and stating the Node 24 floor.
+  - the five MCP bridge READMEs, brought to parity and stating the Node 24 floor;
+  - `docs/MCP_API.md` (the 4 MiB cap with head/tail marker, the `truncated` field and the idempotency window, §7).
 - **SECURITY (+de):**
   - replace the worker-thread statement: the solver is now a separate OS process with a memory cap, and still not a sandbox (same user, files, network, credentials);
   - replace the "start lock is never taken over automatically" statement with the takeover rules;
@@ -575,7 +586,7 @@ On Bun, captcha fetches use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`, and 
   - state that `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA` keeps its meaning;
   - state the stop-token protections.
 - **README × 5 also covers:**
-  - the new config keys, log rotation and the early-output file;
+  - the new config keys, log rotation and the early log (`proxy.early.log`);
   - MCP task retention and the idempotency window;
   - enforcement modes per OS, including the Linux delegated-controller section that `doctor` links to;
   - the 503 shed, the stderr routing and the rotator asked once;
@@ -592,12 +603,13 @@ On Bun, captcha fetches use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`, and 
   - memory thresholds 1536/3072 → 512/1024 MB (respawns become more likely);
   - solver recycle count 200 → 100;
   - MCP task retention 500/7 days and the idempotency window;
+  - MCP task text capped at 4 MiB with a head/tail marker;
   - CDN disk pruning;
   - log rotation while running and `proxy.early.log`;
   - the Bun 1.4.4 requirement;
   - compact setup by default;
   - the Windows graceful stop;
-  - the execve handover's signal exit status and its opt-out;
+  - the execve handover's signal exit status and its opt-out `ZCODE_KIT_RESIDENT_LAUNCHER=1`;
   - the nested proxy workflows deleted.
 
 ### 17. Tracker docs and PR (Round 1 Q20/Q21)
@@ -614,7 +626,7 @@ PROMPT §9, restated with the budgets the rounds tightened. Initial budgets are 
 | Scenario | Budget | Baseline | Source |
 |---|---|---|---|
 | S1–S5 growth | ≤ 5 % per 1,000 work units after warm-up, and no upward trend across 3 consecutive windows | S1 long 0.07 %/1k; S5 ~42 %/1k | §9, loop |
-| S1 proxy main steady state | ≤ 160 MB steady; ≤ 250 MB peak (§9 ceiling for steady-state RSS: 250 MB) | plateau 127 MB, HWM 182 MB | §9; memory report §6 as adopted in Round 2 Q1 |
+| S1 proxy main steady state | ≤ 160 MB steady; ≤ 250 MB peak (§9 ceiling for steady-state RSS: 250 MB) | plateau 127 MB, HWM 182 MB | memory-report §6 (steady ≤ 160 MB tightens §9's 250 MB with Phase 1 evidence; peak ≤ 250 MB kept), loop |
 | S1 burst HWM | ≤ 400 MB at 16 and ≤ 600 MB at 32 concurrent 10.8 MB bodies (the byte cap alone: 64 × ~4.5 + ~90 ≈ 380 MB) | 998 / 1,619 MB | ADR-0004 |
 | S2 solver | each solver process hard-capped at 300 MB and recycled at 80 % (240 MB) footprint, count backstop 100; solver cost per generation ≤ 300 MB; retained before recycle ≤ 300 MB; hung-solve reclaim ≤ 64 MB; one solver generation at a time | per generation 0.9–1.0 GB, HWM 1,068 MB; retained 686 MB | ADR-0002, Round 2 Q2, loop |
 | S2 CDN memory | ≤ 64 MB and ≤ 256 entries | +151 MB / 600 URLs | ADR-0009, loop |
@@ -641,7 +653,7 @@ PROMPT §9, restated with the budgets the rounds tightened. Initial budgets are 
 - The respawn wait (30 s) is greater than the acknowledgement wait (10 s) + `STOP_GRACE_MS` (10 s) + `STOP_EXIT_MARGIN_MS`. The manager force point comes after the proxy's deadline.
 
 **BOUNDS**
-Every cache, store and buffer in §7 and §8 has an enforced max size and/or TTL, each covered by a test, including the admission queue (count and 15 s) and the byte cap.
+Every cache, store and buffer in §7 and §8 has an enforced max size and/or TTL, each covered by a test, including the admission queue (count and 15 s), the byte cap and the solver queue (caller-side bound stated with evidence and pinned by a seam 3 test, or a count bound with ADR-0004 shed).
 
 **COMPATIBILITY**
 - All pre-existing tests pass unchanged, or each change is justified in its ticket.
@@ -706,7 +718,10 @@ Open, /pr-shaped and not merged.
 **Seams.** These are the fewest that cover the spec. Each is the highest point that can observe its properties, and existing seams are reused wherever possible. The list is mirrored in `seams.md` for the Owner Proxy.
 
 1. **Memory loop (process level). Exists, extended.**
-   - **Covers:** S1–S7 budgets, per-role peaks, process counts, orphans, the expected-RED ratchet, and the S3 OMP stub-host leg.
+   - **Covers:**
+     - S1–S7 budgets, per-role peaks, process counts, orphans and the expected-RED ratchet;
+     - the solver process-level claims (Round 4 Q1 add. 2; ADR-0002 cond 2, Round 3 Q10 cond 2): **0 solver processes after the proxy is SIGKILLed**, **an idle exit leaves 0 solver processes** (and releases the cap container), and **≤ 1 solver process per proxy at every sample**, asserted by the S2/S4 orphan checks; on the windows leg the proof is Job Object reaping;
+     - the S3 OMP stub-host leg, which also asserts that **each waiter host printed the starter's `cause=` lines** whenever the starter's preflight emitted any, with 5 hosts and in the killed-starter case (Round 4 Q1 add. 4).
    - **Prior art (test suites unless stated):** the loop on the `diagnosis/memory` branch (scenarios, sampler, verdict) and its pinned RED-rule tests.
    - **New:** the Windows sampler adapter with its units and orphan self-tests, the `commit_kb` column, role budgets for S3 part (b), the OMP stub-host leg, and the expected-RED schema.
 2. **Lifecycle module interface (`createManager` with injected process table and timings, plus the manager CLI spawned). Exists.**
@@ -716,12 +731,15 @@ Open, /pr-shaped and not merged.
      - the stop request's fallbacks and shared deadlines;
      - respawn acknowledgement, refusal, late ack and clock jump;
      - manager-side log rotation under the lock, and file modes;
+     - `proxy logs N` reading across `proxy.log.1` and `proxy.log`, and the golden-path classifier reading the tail-copy marker (Round 4 Q1 add. 5);
+     - the per-spawn env at the spawned proxy: the token in the proxy's environment equals `proxy.pid`, two consecutive spawns get different tokens (Round 4 Q4);
      - the frozen CLI exit codes 0–5.
    - **Prior art (test suites unless stated):** `manager-safety`, `manager-audit` (respawn budget, hung proof, PID reuse), the golden-path verification script.
 3. **Solver dispatcher interface (`configureCaptchaSolver({ backendModule })` + stats, with fixture backends), now with a transport choice. Exists, extended.**
    - **Covers:**
-     - the child-process and thread adapters behind the same interface: byte-identical solve inputs and outputs, the cap handshake, one generation, recycle triggers (footprint 80 %, count 100, idle, deadline), abnormal-exit counting and fail-fast with `Retry-After`;
-     - env parity and stripping, spawn from source vs compiled, idle exit releasing the container, 0 solver processes after the proxy is SIGKILLed;
+     - the child-process and thread adapters behind the same interface: byte-identical solve inputs and outputs, the cap handshake, the ordering logic of one solver generation at a time, recycle triggers (footprint 80 %, count 100, idle, deadline), abnormal-exit counting and fail-fast with `Retry-After`;
+     - the solver queue's caller-side bound (one in-flight solve per pool), or its count bound and shed if one has to be added;
+     - env parity and stripping, spawn from source vs compiled. The process-level reaping claims (SIGKILL, idle exit, ≤ 1 per proxy) belong to seam 1, because a dispatcher-level test cannot SIGKILL its own test runner;
      - egress routing for `captchaFetch` and the sync-XHR path;
      - the CDN memory and stall bounds inside a generation.
    - **Prior art (test suites unless stated):** the captcha-solver suite with its solver-backend fixture, `captcha-cdn-cache`, `captcha-happy`.
@@ -730,16 +748,17 @@ Open, /pr-shaped and not merged.
      - admission: the byte cap, queued bodies left unread, the FIFO bounds, the 503 + `Retry-After` shed in each endpoint's error shape, never 429;
      - `/__kit/stop`: auth order, the stop token, 404 without a token, 202, the admission bypass, the listener staying open during the drain;
      - the observability fields as an additive JSON superset;
-     - the log writer: rotation, the early-file cap and tail copy, foreign handles;
+     - the log writer: rotation, the early log's cap and tail copy, foreign handles;
      - the supervisor through the drain behaviour.
    - **Prior art (test suites unless stated):** `server`, `protocol-contract`, `handler-resilience`; `health-monitor` and `watchdog` (injected sampler, `watchdogStep`, `spawnFn`) for the supervisor's thresholds at module level.
 5. **CLI command records → output module with forced capabilities, plus a few CLI spawn tests. New snapshot suite on top of existing spawn tests.**
    - **Covers:**
      - every command in every C3 variant;
-     - the off-TTY check grammar regex, `WARN`, the verdict and lead lines;
+     - the off-TTY check grammar regex `^(PASS|FAIL|SKIP|WARN)  <name>( — <detail>)?$` (separator ` — ` byte-for-byte in every glyph tier, whitespace-indented `why:`/`next:` lines), `WARN`, the verdict and lead lines;
      - what/why/next, help, the connection details and the reveal rules;
      - exit codes asserted on `{ exitCode, records }`;
      - stream routing and exit codes through real spawns;
+     - **the `process.execve` handover (Round 4 Q1 add. 1),** spawning `zcode-kit run` against a fake harness executable on POSIX: with Node ≥ 26.1 the harness runs under the launcher's pid (no launcher resident); on Node < 26.1, with `ZCODE_KIT_RESIDENT_LAUNCHER=1`, or with a non-executable target the launcher stays resident; a missing harness still gives `run: …` and exit 2; stderr carries no `ExperimentalWarning`; the `ready.detail` line and the `heal.log` write happen before the handover; a harness killed by SIGTERM reports 143; exit codes 0, 7 and 130 are unchanged. The windows-latest leg asserts the resident path with signal and exit-code forwarding as today;
      - the JSON key/type superset;
      - the PowerShell 5.1 stderr gate on windows-latest.
    - **Prior art (test suites unless stated):** `cli-kit`, `cli-audit`, `setup-regressions`, the connection-details suite (reveal rules), and the BEFORE capture script and snapshots from Phase 1C, which provide the pre-change baseline.
@@ -765,15 +784,17 @@ Open, /pr-shaped and not merged.
      - the Bun 1.4.4 hashes;
      - the adapter HIGH and confirmed MEDIUM fixes, byte-idempotent;
      - the bridge flag in the generated MCP entries;
-     - the OMP extension's generated in-host token logic;
+     - the OMP extension's generated in-host token logic, and its waiter cause-line record logic (write before release, identity match, stale/corrupt/oversized records rejected, fixed-vocabulary validation; Round 4 Q2);
+     - the preflight check of the OMP autostart's pinned Node path against the floor (Round 1 Q14 cond 2);
+     - the per-spawn environment rules (Round 4 Q4): `ZCODE_KIT_LOG_DIR` and `ZCODE_KIT_STOP_TOKEN` are set by the manager and overwrite ambient bogus values, and the stop token is absent from the respawn hook's environment;
      - the rotator decision migration;
      - every migration replayed twice through the transaction.
-   - **Prior art (test suites unless stated):** `installer-audit`, `installer`, `adapter-audit`, `omp-audit`, `transaction-audit`, `account-setup`, the proxy-env suite (allowlist for `ZCODE_KIT_LOG_DIR`, `ZCODE_KIT_STOP_TOKEN` and the new config overrides).
+   - **Prior art (test suites unless stated):** `installer-audit`, `installer`, `adapter-audit`, `omp-audit`, `transaction-audit`, `account-setup`, the proxy-env suite (the per-spawn overwrite of `ZCODE_KIT_LOG_DIR` and `ZCODE_KIT_STOP_TOKEN`, and the allowlist for the new `ZCODE_PROXY_*` config overrides).
 9. **Repository guards. New, small.**
    - **Covers:** the test-script wiring guard; the expected-RED schema (unknown scenario, missing ticket file) and the ratchet; CI refusing `UPDATE_SNAPSHOTS`; `verify-payload` requiring the shared output files.
    - **Prior art (test suites unless stated):** `release-audit`, `state-audit`, the pack payload verifier.
 
-Windows-only proofs run inside seams 2, 3, 4, 5 and 8 on the windows-latest leg, not as a separate seam: `proxy.log` rename with readers, the stop-request flush, Job Object reaping and the PowerShell 5.1 stderr gate.
+Windows-only proofs run inside seams 1, 2, 3, 4, 5 and 8 on the windows-latest leg, not as a separate seam: `proxy.log` rename with readers, the stop-request flush, Job Object reaping after the proxy is SIGKILLed (seam 1), the resident launcher's signal and exit-code forwarding (seam 5) and the PowerShell 5.1 stderr gate.
 
 ## Out of Scope
 
@@ -793,17 +814,16 @@ Windows-only proofs run inside seams 2, 3, 4, 5 and 8 on the windows-latest leg,
 ## Further Notes
 
 - **ADR alignment and flagged deviations:**
-  - **ADR-0001 rule 2** ("box chrome only in the TUI header card and the log-pane card") is narrowed by Round 2 Q9 cond 3: the header is the only box, and the log pane gets an unboxed title line. The Owner Proxy ruled that this narrows an upper bound and does not contradict it. The ADR should get an amendment line.
+  - **ADR-0001 rule 2** ("box chrome only in the TUI header card and the log-pane card") is narrowed by Round 2 Q9 cond 3: the header is the only box, and the log pane gets an unboxed title line. The Owner Proxy ruled that this narrows an upper bound and does not contradict it. ADR-0001 records this in its Round 2 amendment.
   - **ADR-0004's open consequence** (how a shed reaches connected clients) is settled by ADR-0008 cond 2 and Round 2 Q2 cond 1.
   - **ADR-0002 cond 7** ("no new retry policy") is kept: the solver restart budget limits process restarts and never resubmits a solve (Round 2 Q2 cond 2).
   - **ADR-0003** supersedes the AUD-001 "no automatic takeover" comments and the matching README and SECURITY lines. They are updated with the implementation.
   - **The upgrade-before-fix ordering** deviates from PROMPT §7 Phase 3 principle 4. It is justified by Round 1 Q15/Q16 and recorded per Round 2 Q15 cond 2.
-- **ADRs in force for this spec:** 0001–0015. The later ones cover the health supervisor and respawn handoff (0008), bounded stores and task retention (0009), the observability contract (0010), the output topology (0011), the lock protocol version and stored-state migrations (0012), the launcher handover with in-host single-flight (0013), the graceful stop request (0014) and the respawn acknowledgement (0015). Tickets link the ADR that governs them.
-- **Two choices this spec makes where the rounds delegated them to the spec:**
-  - the waiter cause-line channel (§6 a: a result record next to the autostart token);
-  - the names of the two new env vars: `ZCODE_KIT_RESIDENT_LAUNCHER=1` for the launcher opt-out, and `ZCODE_KIT_LOG_DIR` for the log dir in the proxy env.
-  
-  Both are two-way doors until released. They fill the slots that ADR-0013 cond 3/6 and ADR-0015 cond 1 leave to the spec.
+  - **The `memory-budget` CI job landing in step 1** (with the loop and the expected-RED list) is a second deviation, from PROMPT §7 Phase 3 principle 8. It is justified by Round 2 Q14 cond 1 and Round 3 Q9 cond 1 and was required by Round 4 Q5 D2. Both deviations are recorded in RUNLOG and in ADR-0016.
+- **ADRs in force for this spec:** 0001–0016 (0016 records the two work-order deviations). The later ones cover the health supervisor and respawn handoff (0008), bounded stores and task retention (0009), the observability contract (0010), the output topology (0011), the lock protocol version and stored-state migrations (0012), the launcher handover with in-host single-flight (0013), the graceful stop request (0014) and the respawn acknowledgement (0015). Tickets link the ADR that governs them.
+- **Choices the rounds delegated to the spec, confirmed in Round 4:**
+  - the waiter cause-line channel (§6 a: a result record next to the autostart token), accepted with conditions (Round 4 Q2; ADR-0013 amendment);
+  - the names of the two new env vars: `ZCODE_KIT_RESIDENT_LAUNCHER=1` for the launcher opt-out (Round 4 Q3: a public variable, a one-way door once released; ADR-0013 amendment), and `ZCODE_KIT_LOG_DIR` for the log dir in the proxy env (Round 4 Q4: an internal variable set by the manager at every spawn; ADR-0015 and ADR-0014 amendments).
 - **Owner actions** (recorded in OWNER-ACTIONS.md with copy-paste commands; each related criterion is marked "unverified — owner action"):
   - **A1:** measure a live vendor-SDK solve against the 300 MB cap. If it does not fit, that is a new owner question; the ceiling is not loosened.
   - **A2:** Windows worker termination and the Ctrl-C stale lock on PowerShell 5.1/7, conhost and Windows Terminal, plus real conhost rendering and an `install.ps1` run.
@@ -822,3 +842,19 @@ Windows-only proofs run inside seams 2, 3, 4, 5 and 8 on the windows-latest leg,
   - `reports/drift.md`;
   - `ux/ux-audit.md` (A-01–A-27), `ux/design-language.md`, `ux/handoff-prototype.md` (prototype `prototype/terminal-ux` @ d27b890);
   - `research/*.md`.
+- **Round 4 corrections applied (2026-11-06, DECISIONS.md Round 4):**
+  - **D1:** §10 binding rule, Story 90, Story 106 and the seam 5 regex: off a TTY the separator ` — ` stays byte-for-byte in every glyph tier, the detail is optional (`( — <detail>)?`), and the ascii copy mapping never touches the separator or the verdict words.
+  - **D2:** §0 step 1 now includes the `memory-budget` CI job on ubuntu and windows with the expected-RED list; step 8 is only the remaining guardrails; §1 Baselines and §12 CI layout updated; recorded as a second PROMPT §7 deviation (RUNLOG + ADR-0016).
+  - **D3:** §4 "allowlisted in `proxyEnv`" replaced for both variables by the manager's per-spawn overwrite, the fresh token equal to `proxy.pid`, and stripping from the respawn hook; §2 lists the hook among environments without the token; Story 56 updated.
+  - **D4:** §8 file-mode rule moved to its own bullet binding every creator (manager, proxy writer on open/reopen, watchdog by-path append, early log, OMP extension) and every log-dir file incl. the autostart token and its result record.
+  - **D5:** §7 truncation docs now describe the 4 MiB cap (1 MiB head + 3 MiB tail), the marker, the `truncated` field and the idempotency window; `docs/MCP_API.md` added to §16 scope; "MCP task text capped at 4 MiB with a head/tail marker" added to the release notes list.
+  - **D6:** Solution bullet and Story 29 qualified: ≤ 596 MB on Node ≥ 26.1 (launcher handover), not claimed on Node 24, macOS unverified (owner action).
+  - **D7:** §7 gains a "Solver queue" row (bounded by its callers, evidence + seam 3 test; count bound and ADR-0004 shed only if needed); §2 failure semantics and §18 BOUNDS aligned.
+  - **D8:** "early-output file" replaced by "early log (`proxy.early.log`)" in §8, §16 and seam 4.
+  - **D9:** §18 S1 steady-state source corrected to memory-report §6 (tightening §9 with Phase 1 evidence), loop.
+  - **D10:** Further Notes: ADR-0001 already records the Round 2 Q9 narrowing in its amendment.
+  - **D11:** Testing Decisions and `seams.md` updated with the Q1 additions below.
+  - **Q1:** seam 5 gains the execve handover spawn tests; seam 1 owns the solver process-level claims (SIGKILL reaping, idle exit, ≤ 1 per proxy; Job Object on windows) while seam 3 keeps one-generation ordering logic; seam 8 gains the pinned-Node-path preflight check, the waiter cause-line record logic and the per-spawn env rules; seam 1's S3 OMP leg asserts waiter cause lines (5 hosts and killed starter); seam 2 gains `proxy logs N` across both files and the tail-copy marker.
+  - **Q2:** §6 (a) cause-line channel rewritten with the six binding conditions (write before release, per-attempt identity, no record = starter failure with takeover, bounded validated content, one file in the S4 budget, old extensions ignore it); ADR-0013 amended.
+  - **Q4:** `ZCODE_KIT_LOG_DIR` and `ZCODE_KIT_STOP_TOKEN` set by the manager at every spawn, overwriting inherited values; token stripped from the respawn hook; `ZCODE_KIT_LOG_DIR` internal (TUI/standalone keep today's behaviour); four env tests; ADR-0014 and ADR-0015 amended.
+  - **Q3 (for completeness):** §6 (d) opt-out `ZCODE_KIT_RESIDENT_LAUNCHER` takes exactly `"1"`, has no effect on Windows, is documented in `--help`, README × 5 and the release notes, and is read nowhere else; ADR-0013 amended.

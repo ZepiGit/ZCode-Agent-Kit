@@ -26,3 +26,9 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 
 - Old proxies meeting a new manager keep today's behaviour; the gap cannot be fixed from the manager side and is documented.
 - A cross-version handoff contract: the `respawn.json` event shape is now read by the proxy and cannot change without breaking it.
+
+## Amended 2026-11-06 (Round 4, Q4)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 4, Q4.
+
+- **Condition 1: the variable is `ZCODE_KIT_LOG_DIR`, set by the manager at every spawn.** It "survives `proxyEnv`" because `ZCODE_KIT_*` already passes through; an allowlist entry would be a no-op. The manager sets it explicitly at every proxy spawn to its own logs directory, overwriting any inherited value, so a respawned chain never points a new proxy at a stale logs dir. It is internal (documented like `ZCODE_KIT_RESPAWN_*`, not a user setting). A proxy started without it (TUI-hosted, standalone) keeps today's behaviour: no size-capped writer opened by path and no acknowledgement wait, since no manager hook exists. Test: with an ambient bogus value the spawned proxy receives the manager's logs dir.

@@ -35,3 +35,9 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 - **TERM=dumb and non-TTY refuse the TUI (Q9, condition 2)** and print the line-mode commands, instead of rendering a degraded frame.
 - **The manager CLI keeps the legacy grammar (Q7, condition 2).** `node proxy/zcode-proxy-manager.mjs doctor` stays in the off-TTY grammar of rule 1. Only `zcode-kit doctor` stops parsing its text.
 - **Where the code lives** is recorded in [ADR-0011](0011-shared-output-code-two-renderers-one-token-set.md): two renderers over one token set and one width core.
+
+## Amended 2026-11-06 (Round 4, Q5 D1)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 4, Q5 (deviation D1).
+
+- **Rule 1's grammar is stated exactly.** Off a TTY, check rows keep the separator ` — ` (U+2014) byte-for-byte in every glyph tier. The ascii copy mapping of design-language §3.2 (`—`→`-`) does not apply to the check-row separator or the verdict words. The grammar is `^(PASS|FAIL|SKIP|WARN)  <name>( — <detail>)?$`: the detail is optional, as it is today, and the row is followed by whitespace-indented `why:`/`next:` lines. The `ux/before/doctor/*` pipe, `TERM=dumb` and ascii-locale snapshots and the existing parser pin this.

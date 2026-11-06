@@ -27,3 +27,9 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 
 - The endpoint and the `proxy.pid` field meet old and new kits during updates. An old proxy answers 404 and gets today's stop.
 - Old managers never send the request, so a new proxy stopped by an old manager behaves as today.
+
+## Amended 2026-11-06 (Round 4, Q4)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 4, Q4 (and Q5 deviation D3).
+
+- **Condition 1: the token is overwritten at every spawn and never inherited.** `proxyEnv` already passes `ZCODE_KIT_*` through, so no allowlist entry is involved; the risk is an ambient value inherited through the respawn chain. The manager therefore sets `ZCODE_KIT_STOP_TOKEN` explicitly at every proxy spawn, overwriting any inherited value, with a freshly generated token equal to the one written to `proxy.pid`. The proxy strips the token from the environment it gives the respawn hook, as it does for the solver process. Tests: with an ambient bogus value the spawned proxy receives a new token; the token in its environment equals `proxy.pid`; the respawn hook's environment has no stop token; two consecutive spawns get different tokens.

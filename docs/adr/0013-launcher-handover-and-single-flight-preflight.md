@@ -30,3 +30,10 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 
 - `run` on POSIX with Node ≥ 26.1 no longer has a kit process for the life of the harness session; signals reach the harness directly.
 - The bridge flags (`--max-semi-space-size=1` on the bridge command line, never in `NODE_OPTIONS`) and lazy HTTP loading from the same answer are a two-way door and are not part of this record.
+
+## Amended 2026-11-06 (Round 4, Q2 and Q3)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 4, Q2 and Q3.
+
+- **Condition 3: the channel is a result record next to the autostart token (Q2).** The starter writes it by temp file + rename with mode `0o600` on every outcome and before it releases the token. The record carries the token's identity (host pid, host start time, per-attempt nonce); a waiter accepts it only if that identity equals the token it observed and the record is not older than its own wait start. A released or proven-stale token without a matching record counts as a starter failure: the waiter takes over by proof and runs its own preflight, so ≤ 1 concurrent OMP preflight process still holds. The record holds only the exit code and fixed-vocabulary `cause=` lines (≤ 4 KB / ≤ 16 lines), each validated before printing; a corrupt or oversized record counts as no record. It is one fixed-name file, overwritten per attempt, counted in S4's log-dir file budget, never deleted by waiters. Old extensions neither write nor read it.
+- **Condition 6: the opt-out is `ZCODE_KIT_RESIDENT_LAUNCHER=1` (Q3).** Only the exact value `"1"` forces the resident launcher; with it set the resident path behaves byte for byte as today. It has no effect on Windows and no other code path reads it. It is documented in `--help`, README × 5 next to the Node ≥ 26.1 note and the release notes. Once released it is a public env var (a one-way door).
