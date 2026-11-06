@@ -1,0 +1,5 @@
+  ✓ OK    OMP / Oh My Pi            provider, key resolver, autostart extension
+  ✗ FAIL  OpenCode                  provider.zcode missing from opencode.json
+  ! WARN  Codex                     launcher not on PATH
+  – SKIP  Claude Code               declined
+  • INFO  Account Rotator disabled

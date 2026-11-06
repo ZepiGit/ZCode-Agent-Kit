@@ -1,0 +1,44 @@
+  extension already current
+  models.yml already up to date
+  config.yml already up to date
+PASS  bun available — <BUN> (1.4.2)
+PASS  config exists — <KIT>/proxy/config.yaml
+PASS  key file exists — <KIT>/.proxykey
+PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+PASS  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine
+PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
+PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
+PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
+PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
+PASS  codex adapter artifact — generated/codex-home/config.toml
+PASS  proxy reachable + identity — health=ours
+PASS  account auth valid — valid
+PASS  start-plan JWT age (info) — 5.2h since issue — age is informational, validity is the auth check above
+doctor: 0 skipped, 0 failed — OK
+PASS  bun available — <BUN> (1.4.2)
+PASS  config exists — <KIT>/proxy/config.yaml
+PASS  key file exists — <KIT>/.proxykey
+PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+PASS  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine
+PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
+PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
+PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
+PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
+PASS  codex adapter artifact — generated/codex-home/config.toml
+PASS  proxy reachable + identity — health=ours
+PASS  account auth valid — valid
+PASS  start-plan JWT age (info) — 5.2h since issue — age is informational, validity is the auth check above
+PASS  omp: omp provider registered — providers.zcode in models.yml
+PASS  omp: omp key resolver — key current
+PASS  omp: omp extension installed
+SKIP  pi: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate pi
+SKIP  claude-code: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate claude-code
+PASS  codex: codex adapter artifact — generated/codex-home/config.toml
+SKIP  opencode: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate opencode
+SKIP  cline: integration — not detected — skipped
+SKIP  kilo-code: integration — not detected — skipped
+SKIP  aider: integration — not detected — skipped
+SKIP  continue: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate continue
+SKIP  goose: integration — not detected — skipped
+PASS  harness decisions — 2 stored decision(s) readable
+doctor: 8 skipped, 0 failed — OK

@@ -1,0 +1,13 @@
+[manager <TS>] starting zcode-proxy ...
+zcode-proxy listening on http://127.0.0.1:18458
+  captcha egress: direct
+  provider: zai
+  plan: start-plan
+  models: 2 available
+  /v1/responses: ON
+r001 ANT glm-5.3 200 stream 812ms→6.4s 1830tok 286t/s
+r002 OAI glm-5.3-flash 200 stream 390ms→2.1s 402tok 191t/s
+r003 ANT glm-5.3 429 batch 233ms
+[captcha] solver recycled (rss-budget) generation=3
+r004 OAI glm-5.3-flash 200 batch 412ms 18tok 44t/s
+[manager <TS>] started (pid <PID>) — healthy on http://127.0.0.1:18458
