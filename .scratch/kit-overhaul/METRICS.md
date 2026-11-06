@@ -90,7 +90,38 @@ The first job run with the rule (`/home/AgentKit/overhaul-tools/t60-memloop/job-
 
 ### Windows reference run, Bun 1.4.2 (ticket 02)
 
-**Pending CI (orchestrator verifies after merge+push).** The reference run is the windows leg of the `memory-budget` job (`node tests/memory/job.mjs` on windows-latest, Node 26, Bun 1.4.2, short profile: S1 all variants, S2, S3 short + hung, S4, S5, S7). Each run is capped by a Job Object (job memory limit + kill-on-close, read back) and timed out. The metric is commit (`PrivatePageCount`; per-process peak = `PeakPageFileUsage`), and each `summary.json` carries the working-set verdict next to it (`workingSet`, `redOnlyOnCommit`) and the sampler's units self-test and overhead (`notes.sampler`). Record per run here: outcome, the key commit numbers against the same budgets as the Linux table, any run RED only on commit (raised to the owner, build-time gate 3), and the poller overhead (peak commit / working set, poll ms). If the sampler cannot run on this pre-upgrade code, the reason goes to RUNLOG and ticket 11's Bun 1.4.4 run becomes the reference.
+Run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42265988296 (`pull/14` merge of staging/02 82de0da, 2026-11-06). This is the first clean windows run (Round 7 Q2 condition 1). Run 3 (42252896054) corroborates it.
+- **Environment:** runner image windows-2025-vs2026 20261103.298.1 (Windows Server 2025), Node v26.13.0, Bun 1.4.2+744846f84, short profile.
+- **Caps:** every run in a Job Object with the job memory limit and kill-on-close, read back (`@@JOB applied=1` on all 13 runs). No harness failure.
+- **Units self-test:** passed in every run (S5: 133 processes compared, commit and WS ratios 1.0, hwm/commit 1.173).
+- **Artefact:** `/home/AgentKit/overhaul-tools/t02-ci-artifact-42265988296/`. Log: `t02-winmem-4.log`.
+
+Values are MB per run:
+- **commit:** `PrivatePageCount`, with the peak from `PeakPageFileUsage`.
+- **WS:** sampled working set. Run 4's CSVs predate `ws_peak_kb`, so its PeakWorkingSetSize lives only in the live WS verdict (`workingSet.redChecks`).
+- **"R7":** the outcome under Round 7's rules, re-judged from the artefact: WS gates the per-process peak and steady of proxy, launcher, bridge and preflight; the S3 total is ≤ 514 commit; paced runs have the 512 MB proxy commit backstop.
+- **Poller:** the poller's own peak commit / WS and its median / max poll time, excluded from every verdict.
+
+| Run | Samples | Key numbers, commit / sampled WS | Run-4 verdict | WS verdict (live, with PeakWorkingSetSize) | R7 | Poller |
+|---|---|---|---|---|---|---|
+| S1/short | 258 | proxy peak 347.7 / 155.7; steady 283.3 / 112.6; growth 2.09 %/1k; proxy max commit sample 325.8 | RED only on commit (procPeak, steady) | GREEN | GREEN (unlisted) | 108 / 125 MB, 30 / 173 ms |
+| S1/burst1 | 19 | proxy peak 422 / 234.3 | RED | RED (procPeak:proxy) | RED → 20 | 121 / 138, 30 / 82 |
+| S1/burst4 | 19 | proxy peak 561.6 / 290.3 | RED | RED | RED → 19 | 122 / 138, 30 / 86 |
+| S1/burst16 | 21 | proxy peak 1,095.4 / 758.7 | RED | RED | RED → 19 | 121 / 138, 32 / 86 |
+| S1/burst32 | 23 | proxy peak 1,604.9 / 1,188.7 | RED | RED | RED → 19 | 122 / 139, 38 / 73 |
+| S1/bigbody | 78 | proxy peak 491.6 / 279.6 | RED | RED | RED → 19 | 122 / 139, 32 / 71 |
+| S1/stalled | 321 | proxy peak 452.3 / 275.0; max commit sample 437 | RED | RED | RED → 61 | 122 / 139, 32 / 375 |
+| S2/short | 180 | host peak 1,269.7 / 1,016.3; cost per generation 1,101.7 / 914.3; growth 14.35 %/1k | RED | RED | RED → 58 (all on commit) | 123 / 140, 34 / 100 |
+| S3/short | 133 | kit total 734.5 / 698.6; proxy 187.9 / 57.0; launcher 40.0 / 61.8; bridge 78.6 / 72.1; preflight 31.9 / 56.7; orphans 1, failed launches 1, stale lock 1 | RED | RED | RED → 37 (total > 514; orphan, lock) | 145 / 161, 34 / 123 |
+| S3/hung | 532 | kit total 456.8 / 603.8; proxy 186.3 / 58.7; orphans 1, failed launches 21, stale locks 2 | RED | RED | RED → 16 (total GREEN at 514) | 144 / 161, 29 / 126 |
+| S4/short | 319 | proxy max commit sample 186.9; stale lock after Ctrl-C, 2 unstoppable proxies after Ctrl-C, respawn with stale lock | RED | RED | RED → 17 | 122 / 138, 36 / 70 |
+| S5/short | 714 | bridge peak 89.8 / 74.3; growth 22.01 %/1k, no trend (net 4.6 %, 0 rising windows); reboot cost 4; 0 task failures | GREEN | GREEN | GREEN (entry removed) | 122 / 139, 31 / 64 |
+| S7/short | 87 | proxy peak 401.5 / 189.2; max commit sample 363.1; `proxy.log` RED | RED | RED | RED → 34 (`proxy.log` only) | 121 / 138, 30 / 59 |
+
+- **S3 total budget:** the Windows S3 total budget is 514 MB commit (0.7 × 734.5; Round 7 Q2). Kit-started PowerShell (~65–72 MB commit each) and its conhosts count. The loop's own tooling does not.
+- **Killed-start orphan (Round 7 Q4):** the S3 orphans are the killed-start proxies. `cleanup.pidRecordLeft` shows `{"pid":5788,"startedMs":null}` (S3/hung) and `{"pid":8532,"startedMs":null}` (S3/short), and the final stop says "start time … is not determinable … refusing to kill".
+- **Calibrated `windows` list** (calibration commit on ticket 02): S1/burst1 → 20, S1/burst4/16/32/bigbody → 19, S1/stalled → 61, S2 → 58, S3/short → 37, S3/hung → 16, S4 → 17, S7 → 34. S5/short is removed and S1/short is unlisted.
+- **S1/burst1 caveat:** it is RED on WS only through PeakWorkingSetSize (sampled WS 234.3, 248.3 in run 3). If it flips between runs, Round 6 Q2 condition 3 applies.
 
 Linux reference check on the ticket 02 branch (Bun 1.4.2, 2026-11-06, `/home/AgentKit/overhaul-tools/t02-memloop/linux-job/`): numbers in line with the ticket 01 run (S3/short kit 849 MB, launcher 78.2, bridge 85.9 MB; S2 cost per generation 1,050 MB, retained 685 MB, CDN +149 MB). S1/burst1 is flaky at its 250 MB HWM budget on the integration tip too: HWM 256.7 MB in the job, reruns 237.7 / 236.7 / 264.6 MB on the branch and 236.6 / 299.2 / 237.5 MB on the tip (3f4e41a).
 

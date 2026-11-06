@@ -1,0 +1,2 @@
+From <FIXTURE>/origin
+   099fc2f..145d8e3  main       -> origin/main

@@ -1,0 +1,10 @@
+
+  ZCODE  /  AGENT KIT
+  v1.2.3  |  Your local AI workspace
+  --------------------------------------------
+  Install to  <FIXTURE>/install
+
+  [1/4] Checking runtime
+  [OK]   Node.js and Bun available
+
+  [2/4] Downloading and verifying release

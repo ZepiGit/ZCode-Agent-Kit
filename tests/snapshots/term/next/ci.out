@@ -1,0 +1,2 @@
+  next: zcode-kit proxy start
+  next: zcode-kit doctor --fix

@@ -1,0 +1,54 @@
+[
+  {
+    "group": "json-extra",
+    "id": "models-json-running",
+    "title": "models --json (running, live list)",
+    "variant": "pipe",
+    "exit": 0,
+    "hasAnsi": false,
+    "maxWidth": 19,
+    "linesOver80": 0,
+    "nonAsciiChars": 0,
+    "glyphs": "",
+    "command": "zcode-kit models --json"
+  },
+  {
+    "group": "json-extra",
+    "id": "doctor-json-down",
+    "title": "doctor --json, proxy down",
+    "variant": "pipe",
+    "exit": 1,
+    "hasAnsi": false,
+    "maxWidth": 118,
+    "linesOver80": 5,
+    "nonAsciiChars": 8,
+    "glyphs": "—",
+    "command": "zcode-kit doctor --json"
+  },
+  {
+    "group": "json-extra",
+    "id": "accounts-doctor-json",
+    "title": "accounts doctor --json",
+    "variant": "pipe",
+    "exit": 0,
+    "hasAnsi": false,
+    "maxWidth": 54,
+    "linesOver80": 0,
+    "nonAsciiChars": 0,
+    "glyphs": "",
+    "command": "zcode-kit accounts doctor --json"
+  },
+  {
+    "group": "json-extra",
+    "id": "accounts-health-json-down",
+    "title": "accounts health --json (proxy down)",
+    "variant": "pipe",
+    "exit": 1,
+    "hasAnsi": false,
+    "maxWidth": 33,
+    "linesOver80": 0,
+    "nonAsciiChars": 0,
+    "glyphs": "",
+    "command": "zcode-kit accounts health --json"
+  }
+]

@@ -2,7 +2,7 @@
 
 **Blocked by:** 01 (Memory loop with budgets, process-count harness, expected-RED ratchet and the ubuntu `memory-budget` job)
 
-**Status:** claimed
+**Status:** ready-for-agent
 
 Model: sol
 
@@ -151,3 +151,218 @@ Branch `ticket/02-windows-sampler`. Code head fbad218, which includes the merge 
 Merged 2026-11-06 as 18351e1b29750156fa2d5e6574aae4f26878afcf; fast suite: kit 366/382 (16 skipped, 0 fail; includes tests/memory/win-sampler.test.mjs; the 5 new skips are the live Windows-only tests in tests/memory/loop.test.mjs), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes. Windows criteria pending CI (windows memory-budget leg, live Windows self-tests, expected-red.json `windows` entries and the METRICS Bun 1.4.2 Windows reference run; orchestrator verifies after push). Logs: .scratch/kit-overhaul/reports/merge-02-{npmci,test,proxy,mcp}.log.
 
 - 2026-11-06 (orchestrator): per Round 6 Q2 this ticket stays open (Status claimed) until the calibrated windows memory-budget run is green.
+
+- 2026-11-06 (orchestrator): REVERTED (revert of merge 18351e1) per run rules and Round 6 Q2: the first windows-latest memory-budget run (https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42221794531) reported every scenario GREEN in ~1 s with a Job Object peak of ~104 MB, i.e. the scenarios never ran (a harness failure presenting as GREEN; the ratchet then failed on 10 "GREEN but listed" entries). The live Windows self-tests in test-kit (windows, 24/26) passed. Fix on branch ticket/02-windows-sampler: make a run that does not reach its scenario a harness failure (exit 2), never GREEN, and get the scenarios to actually run on Windows. Log excerpt: /home/AgentKit/overhaul-tools/win-mem-1.log.
+
+### 2026-11-06 — implementer, round 2 (after the revert of 18351e1 by c252676)
+
+Branch `ticket/02-windows-sampler`. The fix commits sit on top of ba7a8cc: 18d852c, b3393a3, 06ab74d, and this note. Per the orchestrator, the integration tip is NOT merged, because it contains the revert. The merger reverts the revert and merges this branch.
+
+**What happened in CI run 42221794531 (windows-latest)** — evidence: `/home/AgentKit/overhaul-tools/win-mem-1.log` and the downloaded `memory-budget-windows` artefact in `/home/AgentKit/overhaul-tools/t02-ci-artifact-42221794531/`.
+- Every run directory holds only `run.log` and a `samples.csv` with the header line. There is no `summary.json` and no sample.
+- `run.log` holds nothing but the wrapper's `@@JOB applied=1 … peak≈104 MB` and a CLIXML progress record.
+- `job-summary.json`: `exitCode 0`, `rawExit 0`, `metric null`, `samplerOverhead null` for all 13 runs, so the job called them GREEN.
+
+**Root cause.**
+- `run.mjs` reached `startSampler` (the CSV header was written) and then awaited `sampler.ready`.
+- On Windows, `ready` depends only on the poller's units frame. Commit e1fab6c had unref'd the poller child and its pipes, so nothing held the event loop. Node exited with `main()` still pending and with exit code 0.
+- The peak of ~104 MB is the wrapper PowerShell plus a node that did nothing.
+- The live self-tests on the `test-kit` legs passed because the node:test runner keeps its own process alive.
+- The CLIXML lines are PowerShell 5.1 progress output ("Preparing modules for first use") on the redirected stderr. They are noise; they did not break `@@JOB` parsing.
+
+**Fixes**
+1. The poller stays referenced (`lib/win-sampler.mjs`). RED → GREEN test: "the Windows sampler keeps its process alive until the poller answers".
+   - The test runs a separate node process whose only pending work is the sampler, with the fake poller answering after 300 ms.
+   - RED on ba7a8cc: exit 13 (Node's unsettled top-level await) and no `READY` (`reports/t02-r2-red1.log`). GREEN: `t02-r2-green1`.
+2. **A run that did not run its scenario is a harness failure (exit 2), never GREEN** (`lib/completeness.mjs`, used by `job.mjs`). Exit 0 or 1 counts only together with a `summary.json` that meets all of these:
+   - its key and outcome match the exit code;
+   - samples and scenario time are at or above a per-scenario floor (S1 5 samples / 10 s, S2 30 / 60, S3 10 / 15, S4 30 / 60, S5 60 / 120, S6 1 / 1, S7 15 / 30);
+   - every scenario role was seen at least once (S1 and S7: proxy; S2: scenario; S3: proxy, launcher, preflight, mcp-bridge; S4: proxy, manager; S5: mcp-bridge; S6: none);
+   - on Windows, the metric is commit and the units self-test passed (Round 6 Q2 condition 2).
+
+   The floors are about half the shortest real Linux run. S6 needs no role because its 3 s runs often sample no process (2 samples, no role, on Linux).
+   - The job summary now shows samples and roles seen per run.
+   - `run.mjs` exits 2 unless `main()` settles; this is defence in depth, with no test of its own (see Decisions).
+   - `job.mjs --run-script` lets tests replay the symptom with `tests/memory/fixtures/fake-run.mjs`.
+   - RED on the stubbed gate: both job-level tests reported `actual: 'GREEN'` (`t02-r2-red2`).
+3. **PowerShell progress noise.** Every PowerShell we start (poller, Job Object wrapper, suspend) sets `$ProgressPreference = 'SilentlyContinue'` as its first statement and runs with `-OutputFormat Text`. The frame parser finds a frame head even when CLIXML is glued to it without a newline: before the fix, the units frame was lost and the run would have hung until its timeout. RED: `t02-r2-red3`.
+4. Found in review, before the next CI run could show it:
+   - The loop's own tooling (`netstat`/PowerShell/`where` started by the loop root, plus their conhosts) is role `tooling`: visible, but neither kit footprint nor an orphan. Before this, every `portsOf`/`processCommandLine`/suspend call could add a PowerShell (~60–70 MB) to the S3 kit total, and a leftover `netstat` would have made every run RED on orphans.
+   - The kit's own PowerShell (children of kit processes, such as the manager's identity check) stays counted.
+   - RED: `t02-r2-red4` (roles all `other`) and `t02-r2-red5` (survivors included 2800).
+5. The CI `run.log` became a fixture as `ci-42221794531-run-log.txt`. The name `.log` is gitignored (`.gitignore:34`); without the rename CI would have lacked the file.
+
+**Mutation proofs** (scratch copies; each copy restored and diffed identical):
+- A, poller unref'd again → the keep-alive test fails.
+- B, evidence gate bypassed in `job.mjs` → both job tests fail.
+- C, duration floor dropped → the empty-run test fails.
+- D, units check dropped → the evidence test fails.
+- E, `parseJobReport` reads only the first line → the real-CI-log test fails (it is a preservation test, so this is its proof).
+- F, the old frame parser → the CLIXML frame test fails.
+- G, tooling role removed → the tooling and survivors tests fail.
+- H, the survivors filter removed → the survivors test fails.
+
+**Tests (branch head, Linux)**
+- `npm run test`: 392 tests, 376 pass, 0 fail, 16 skipped (the 5 live Windows tests among them). Log: `reports/t02-r2-final-kit.log`.
+- `npm run test:proxy`: 1343 pass, 0 fail.
+- `npm run test:mcp`: 95 / 96, 0 fail, 1 skipped.
+- Full Linux memory job with the gate: `reports/t02-r2-linux-job.log`, 2,183 s, **the ratchet holds**.
+  - All 14 real runs pass the evidence gate. The smallest margins are S1/burst1 (20 s, 19 samples, proxy seen), S3/short (32 s, 118 samples, all four roles) and S6 (3 s, 2 samples).
+  - S1/burst1 was GREEN this time; its flake is Round 6 Q1's.
+  - Ticket 16's S3/hung and the rest: RED as listed.
+  - The job started from the working tree with fixes 1–3. Fix 4 (`tooling`) landed while it ran; on Linux it is a no-op, because no `tooling` role exists there.
+
+**What the next windows CI run must show** (Round 6 Q2) before any `windows` entry changes:
+- each run's `scenarioS` and `samples` well above the floors (expect minutes, not 1 s);
+- `rolesSeen` with the scenario's roles;
+- `metric: "commit"`;
+- `units.ok: true`;
+- `samplerOverhead` present;
+- `samples.csv` rows with `commit_kb` filled in;
+- no harness failures.
+
+If the scenarios still end early, they now show as `HARNESS FAILURE — no evidence the scenario ran: …` with the reason, never as GREEN. A guessed entry may be removed only with those numbers (Q2 condition 2). A run RED only on commit goes to the owner (Q2 condition 1).
+
+**Decisions**
+- The evidence floors are data-derived and per scenario, not per variant. A scenario that gets genuinely faster than half its shortest real Linux run would trip the gate; a tighter fix ticket must then lower its floor with its own numbers.
+- `run.mjs`'s default exit 2 has no test of its own: provoking an empty event loop in `run.mjs` would need a scenario hook in production loop code. The job-level gate covers the same failure and is tested and mutation-proven.
+- The S1/burst1 Linux flake is still open on this branch. Round 6 Q1 puts its median rule on the integration branch before 02 merges.
+
+### 2026-11-06 — implementer, round 3 (pre-merge CI run 42246379763 on staging/02)
+
+The evidence gate worked: the windows runs that did not run their scenario now report harness failures. S2 ran (RED, ticket 58) and S5 ran (GREEN, 713 samples). Two Windows-only defects remained; both are fixed in the commit after a12ab94, still with no merge of the integration tip.
+1. **Config template with CRLF.** Every proxy run (S1, S3, S4, S7) failed in `isolatedConfig` with `missing "claim:\n  enabled: false"`. The Windows checkout converts `proxy/config.example.yaml` to CRLF (core.autocrlf), and the contract strings are LF.
+   - Fix: `isolatedConfig` normalises the template to LF before filling it, and takes an optional `template` (the default is the file).
+   - Why not `.gitattributes`: the shipped template's line endings on Windows checkouts belong to the product, not to the test loop, and this defect is in the loop's parsing. The current `.gitattributes` pins only `*.sh`, `*.ps1` and `*.cmd`.
+   - RED: the test first passed vacuously, because `isolatedConfig` ignored the passed template. After the parameter was added and before the fix, it reproduced the exact CI error (`reports/t02-r3-red1b.log`). GREEN: `t02-r3-green1`.
+2. **`timeout` on Windows.** The fake-run fixture itself calls no utility. `job.mjs --cap none` wrapped every run in GNU `timeout`, and on Windows that resolves to TIMEOUT.EXE ("Invalid syntax"), so the stand-in run exited 1 with no summary.
+   - Fix: `commandFor("none", …)` on win32 runs `node run.mjs …` directly, and the job enforces `timeoutMs` itself. Linux is unchanged (pinned).
+   - The fake run's `green-complete` summary now matches its OS (on Windows: commit and a passed units self-test). Without this, "a run with real evidence keeps its verdict" would still fail on Windows, because the gate rejects a Windows summary without commit.
+   - RED: `t02-r3-red1` (the argv still began with `timeout`).
+
+The REDs are the mutation proofs: removing either fix brings its RED back.
+
+Tests (Linux):
+- `npm run test`: 394 tests, 378 pass, 0 fail, 16 skipped;
+- `npm run test:proxy`: 1343 pass;
+- `npm run test:mcp`: 95 / 96, 1 skipped;
+- a real job smoke `--only S7/short` builds the config from the template: RED (listed, ticket 34), 96 samples, proxy seen, the ratchet holds (`reports/t02-r3-job-smoke.log`).
+
+What CI must show next:
+- test-kit windows: the three `job:` tests pass;
+- memory-budget windows: S1, S3, S4 and S7 run with samples and roles over the floors, and no `config template contract` failure.
+
+Any remaining harness failure arrives with its reason.
+
+### 2026-11-06 — implementer, round 4 (pre-merge CI run 42252896054 on staging/02 fdce519)
+
+Evidence: `/home/AgentKit/overhaul-tools/t02-winmem-3.log` and the `memory-budget-windows` artefact, downloaded to `/home/AgentKit/overhaul-tools/t02-ci-artifact-42252896054/`. Fix commit e35742f; no tip merge.
+
+**(1) S3/hung exit 2 although its verdict was complete.** The exit 2 was not a cleanup step: it was my evidence gate. The job line reads `S3/hung: harness failure: no evidence the scenario ran: role mcp-bridge never seen`. On Windows every S3/hung launch failed (21/21):
+- kill-holder-10: 1/10 failed;
+- hung-10-with-stale-lock: 10/10 failed, "safe start refused … No takeover attempted";
+- hung-10: 10/10 failed, "safe start failed".
+
+So no session ever started a bridge, and failed launches are what the scenario measures.
+- Fix: S3's evidence roles are now proxy, launcher and preflight. The run then keeps its real verdict.
+- RED: `t02-r4-red1`. Mutant (bridge required again): the test fails (`t02-r4-mutJ`).
+
+**The orphan (pid 3796, role proxy) is a real kit orphan, not the loop's suspended process.**
+- 3796 appeared during `kill-holder-10` (0 proxies before, 1 after): it was spawned by the start-lock holder that the adversary SIGKILLed. Every later stop refused it:
+  - hung-10's stop: "alive but nothing answers … ownership not proven: its start time is not determinable or not recorded";
+  - the final stop, after the thaw, with /health answering: `start time of pid 3796 is not determinable — PID reuse cannot be ruled out, refusing to kill` (`verifyOwnProcess` → `start-unknown`).
+- Code: right after spawning, the manager writes `proxy.pid` with `startedMs: null` (`zcode-proxy-manager.mjs:632`) and fills in the start time only after `processStartMs` answers (:639). On Windows that is a PowerShell call of up to 2 × 2.5 s; on Linux it is a `/proc` read.
+- A start killed inside that window leaves a record without a start time, and every later stop then fails closed (`verifyOwnProcess`: recorded null → `start-unknown`). The proxy can never be stopped by the kit, and the run ends with it alive.
+- On Windows the window is wide, and the adversary sees the holder only at the next poll, so the kill lands inside it. On Linux it practically never does.
+- This is a kit lifecycle defect of a killed start on Windows (ticket 16/17 territory: killed lock holder). It is not caused by the loop.
+
+Harness hardening so the orphan check stays honest:
+- the hung rounds freeze and thaw through `lib/freeze.mjs` `whileFrozen`. The thaw always runs. It is skipped only when the process is gone, which happens on Linux when the kit's hung-own recovery killed it (this round 4 change briefly broke Linux S3/hung with `kill ESRCH` until fixed). A thaw that fails is a harness failure, never an orphan;
+- S3 now records `cleanup.pidRecordLeft` (the kit's pid record of any proxy it could not stop), so the next windows run shows directly whether the record lacks `startedMs`.
+
+RED: `t02-r4-red1` and `t02-r4-red3`. Mutant (thaw failure swallowed): the test fails (`t02-r4-mutI`).
+
+**(2) S3/short `exactly-one-proxy-after-round` (1 round): a real outcome, not an artefact.** In round kill-holder-10:
+- `maxSimultaneousProxies 0`, `distinctProxyProcesses 0`, `proxiesAfter 0`, `pidFileMatchesListener false`;
+- 10/10 preflights failed;
+- the stop answered "stale … manager start lock (holder pid 2044 is not alive) — refusing automatic takeover".
+
+There is no second proxy and no double count. The holder was killed before it spawned a proxy, and the stale lock then blocked every launch: the round ended with zero proxies. The other three rounds each show exactly 1 proxy, 1 listener and a matching pid file. Same defect family as Linux S3 (stale lock after a killed holder). On Windows it also shows as "zero proxies", because the kill lands at a different point of the start.
+
+**What counts as kit footprint on Windows** (S3/short samples, by parent):
+- `other` holds PowerShell started by the kit itself: by the launcher, the manager (identity and start-time proofs, one with an Add-Type `csc.exe` compile) and the preflight. Each is ~65–72 MB commit / ~80 MB working set, plus its conhost.
+- These are counted as kit footprint, correctly. They are a Windows finding for the S3 600 MB total.
+- One misattribution was fixed: a conhost under a fixture (the fake harness's `--version` probe, the mock) counted as kit. It now takes its fixture owner's role. Under a kit process a conhost stays `other`, so it is never counted as a second proxy. RED: `t02-r4-red2`.
+
+**For the record (owner proxy calibrates; `expected-red.json` untouched):**
+- S1/short RED only on commit (`procPeak:proxy`, `steady:proxy`);
+- S1/burst1 and S1/stalled RED on both metrics;
+- S5 GREEN with 717 samples and the bridge seen.
+
+**Tests:**
+- `npm run test`: 398 tests, 382 pass, 0 fail, 16 skipped;
+- `npm run test:proxy`: 1343 pass;
+- `npm run test:mcp`: 95 / 96, 1 skipped.
+- Linux job `--only S3/short,S3/hung`: both RED as listed, the ratchet holds (`reports/t02-r4-s3-job2.log`; hung 188 s, 514 samples).
+
+**What CI must show next:**
+- **memory-budget windows:** S3/hung ends RED (exit 1), not HARNESS FAILURE.
+  - If its orphan remains, `notes.cleanup.pidRecordLeft` shows the kit's record. Expected `startedMs: null`, which would confirm the killed-start window.
+  - No `could not thaw` harness failure.
+- **memory-budget windows, other runs:** no harness failure. `other` in the S3 roles no longer includes fixture conhosts.
+- **test-kit:** 4/4 green; **memory-budget ubuntu:** green.
+
+### 2026-11-06 — implementer, round 5 (staging/02 82de0da: only test-kit windows/26 red)
+
+`loop.test.mjs` "whileFrozen thaws after the work, …" used the fake pids 7 and 8 without an `alive` function, so it asked the host's process table. On windows-latest/26 the host answered "gone" for pid 8 and the thaw was skipped (`/home/AgentKit/overhaul-tools/t02-win26-r4.log`). This was a test defect, not a harness defect.
+- **Reproduced on Linux:** with the default liveness forced to "gone" in a scratch copy, the test failed exactly as on Windows (`actual: ['freeze 7','work','freeze 8']`, `reports/t02-r5-red1.log`).
+- **Fix:** the test injects `alive: () => true`. It is now OS-neutral: with the host liveness forced to "gone" it still passes (`t02-r5-hostgone`).
+- **Mutation proof:** `whileFrozen` without a thaw after a failing round → the test fails (`t02-r5-mutK`).
+- **Suites:** `npm run test`: 398 tests, 382 pass, 0 fail, 16 skipped.
+- `expected-red.json` is untouched.
+
+### 2026-11-06 — implementer, round 6 (Owner Proxy Round 7)
+
+Commits 06b507d (Round 7 Q1/Q2) and 6e2f21a (Round 7 Q3 calibration, METRICS reference run); no tip merge.
+
+**Q1 — metric split on Windows** (`lib/verdict.mjs` `osVerdict`, `WS_GATED_ROLES`, `windowsGate`):
+- **Working set** gates the per-process peak and steady budgets of proxy, launcher, mcp-bridge and preflight: the max of sampled WS and PeakWorkingSetSize.
+- **Commit** gates the S3 total, every growth check and every solver/S2 check (`procPeak:solver`, `procPeak:scenario`, cost per generation, extras).
+- Every memory check carries `commitValue`, `wsValue` and `gate`. `run.mjs` prints both on each check line, and the job summary lists every memory check as "commit X / WS Y (budget, gate)" (`memoryChecks` in `job-summary.json`).
+- **Backstop:** in the paced runs (S1/short, S1/stalled, S3, S4, S7), `commit-backstop:proxy` is RED when any proxy sample's commit exceeds 512 MB (ADR-0008 soft limit). Windows only; on Linux no check is added.
+- `samples.csv` gains the additive `ws_peak_kb` column (PeakWorkingSetSize; empty on Linux). `parseSamplesCsv`/`rowsFromSamples` read it, so `reverdict.mjs` reproduces the WS verdict from the artefact.
+- RED → GREEN: `t02-r6-red1` (7 failing: the Round 7 Q1 condition 4 cases plus the budget pin), `t02-r6-red2` (column), `t02-r6-red3` (both values reported).
+- Mutants L–Q all killed (`t02-r6-mut*`):
+  - L: the gate is always commit;
+  - M: solver/scenario judged on WS;
+  - N: no backstop;
+  - O: backstop applied on Linux;
+  - P: `ws_peak_kb` not written;
+  - Q: the total back at 600.
+- Existing tests changed, as Round 7 amends them:
+  - "on Windows samples the verdict judges commit …" (proxy RED on commit) is replaced by "a proxy RED only on commit is GREEN";
+  - the budget pin goes from `windows: 600` to `514`;
+  - the two CSV header pins gain `ws_peak_kb`.
+
+**Q2:** `MEMORY.S3.kitTotalMB.windows` is 514 for every S3 variant. Kit-started PowerShell and its conhosts count; the loop's tooling is excluded, as already pinned.
+
+**Q3 calibration** (`expected-red.json` `windows`):
+- S5/short removed, with its numbers in the commit message;
+- S1/burst1 → 20;
+- S1/stalled → 61;
+- S1/short unlisted;
+- the rest kept.
+
+Issue 61 is checked out unchanged from the integration branch, an identical blob, so that the committed-list test passes on this branch.
+
+Re-judging run 4's artefact under the new rules predicts exactly the calibrated list (METRICS.md table), with one caveat. Run 4's CSVs predate `ws_peak_kb`, so S1/burst1 re-judged from the CSV is GREEN on sampled WS (234.3). The live WS verdicts of runs 3 and 4, which used PeakWorkingSetSize, were RED, and the next run records that peak.
+
+**Q4 condition 5 corroboration:** run 4's `cleanup.pidRecordLeft` is `{"pid":5788,"startedMs":null}` (S3/hung) and `{"pid":8532,"startedMs":null}` (S3/short).
+
+**Tests:**
+- `npm run test`: 405 tests, 389 pass, 0 fail, 16 skipped;
+- `npm run test:proxy`: 1343 pass;
+- `npm run test:mcp`: 95 / 96;
+- Linux job `--only S3/short,S7/short`: unchanged output, no backstop check, the ratchet holds (`reports/t02-r6-job-smoke.log`).
+
+**Left for the orchestrator:** the spec §18 metric sentence and S1/S3 rows, the RUNLOG deviation, and the ticket 16/17/20/37 text from Round 7 are not edited on this branch.

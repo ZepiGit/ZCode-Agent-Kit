@@ -1,0 +1,1 @@
+Usage: zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes] | accounts unlock [--force]

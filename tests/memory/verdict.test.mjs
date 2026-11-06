@@ -66,7 +66,8 @@ test("budgets are the spec §18 numbers", () => {
   assert.equal(MEMORY.growth.risingWindows, 3);
   assert.deepEqual(MEMORY.S1, { steadyMB: 160, peakMB: 250, burstPeakMB: { burst16: 400, burst32: 600 } });
   assert.deepEqual(MEMORY.S2, { solverCapMB: 300, costPerGenerationMB: 300, retainedBeforeRecycleMB: 300, hungReclaimMB: 64, cdnMemoryMB: 64, coldStartMs: 4500 });
-  assert.deepEqual(MEMORY.S3, { kitTotalMB: { linux: 596, windows: 600 }, rolePeakMB: { launcher: 74, "mcp-bridge": 75, preflight: 76, proxy: 62, solver: 20 } });
+  // Round 7 Q2: windows 600 → 514 MB commit (0.7 × the 734.5 MB first clean windows run).
+  assert.deepEqual(MEMORY.S3, { kitTotalMB: { linux: 596, windows: 514 }, rolePeakMB: { launcher: 74, "mcp-bridge": 75, preflight: 76, proxy: 62, solver: 20 } });
   assert.deepEqual(MEMORY.S5, { procPeakMB: 150, rebootCostMB: 20, taskFailures: 0 });
   assert.deepEqual(MEMORY.S6, { linesHeapMB: 16, longLineHeapMB: 16, resizeHeapMB: 8 });
   assert.deepEqual(MEMORY.S7, { proxyLogMB: 6, earlyLogMB: 1, responsesStoreHeapMB: 96 });
@@ -210,15 +211,58 @@ test("ratchet: a listed run that did not run fails", () => {
 // ── Metric per OS (spec §1, ticket 02): commit on Windows, RSS on Linux ─────
 const winProc = (pid, role, { ws, commit, peakCommit = commit, peakWs = ws }) => ({ pid, ppid: 1, key: `${pid}:1`, role, rssKb: ws * 1024, commitKb: commit * 1024, hwmKb: peakCommit * 1024, wsPeakKb: peakWs * 1024, threads: 1, fds: 1, heapMB: null });
 
-test("on Windows samples the verdict judges commit, and a run RED only on commit is flagged for the owner", () => {
-  // Working set 110 MB (peak 120), commit 240 MB with a 310 MB peak: within a 250 MB working-set budget, over it on commit.
+// Round 7 Q1: on Windows the per-process peak and steady budgets of the proxy,
+// launcher, MCP bridge and preflight are judged on working set (max of sampled
+// WS and PeakWorkingSetSize); the S3 total, every growth check and every
+// solver/S2 check stay on commit; paced runs fail when a proxy sample's commit
+// exceeds 512 MB (ADR-0008 soft limit). Every memory check carries both values.
+test("Windows: a proxy RED only on commit is GREEN (its per-process peak is judged on working set)", () => {
+  // WS 110 MB (peak 120), commit 240 MB with a 310 MB peak; 250 MB budget.
   const rows = rowsOf(...Array.from({ length: 5 }, () => [winProc(1, "proxy", { ws: 110, peakWs: 120, commit: 240, peakCommit: 310 })]));
   const v = osVerdict(rows, { procPeaks: { proxy: 250 } });
+  const c = checkNamed(v, "procPeak:proxy");
+  assert.deepEqual({ red: v.red, gate: c.gate, value: c.value, commitValue: c.commitValue, wsValue: c.wsValue }, { red: false, gate: "ws", value: 120, commitValue: 310, wsValue: 120 });
   assert.equal(v.metric, "commit");
-  assert.equal(v.red, true);
-  assert.equal(checkNamed(v, "procPeak:proxy").value, 310);
-  assert.equal(v.workingSet.red, false);
-  assert.equal(v.redOnlyOnCommit, true);
+});
+
+test("Windows: steady and per-process peaks of launcher, bridge and preflight are judged on working set too", () => {
+  const rows = rowsOf(...Array.from({ length: 8 }, () => [winProc(1, "proxy", { ws: 100, commit: 300 }), winProc(2, "launcher", { ws: 30, commit: 90 }), winProc(3, "mcp-bridge", { ws: 40, commit: 95 }), winProc(4, "preflight", { ws: 30, commit: 90 })]));
+  const v = osVerdict(rows, { steady: { role: "proxy", maxMB: 160 }, procPeaks: { launcher: 74, "mcp-bridge": 75, preflight: 76 } });
+  assert.equal(v.red, false, JSON.stringify(v.checks.filter((c) => c.red)));
+  assert.deepEqual(v.checks.map((c) => [c.name, c.gate]), [["procPeak:launcher", "ws"], ["procPeak:mcp-bridge", "ws"], ["procPeak:preflight", "ws"], ["steady:proxy", "ws"]]);
+  assert.deepEqual([checkNamed(v, "steady:proxy").commitValue, checkNamed(v, "steady:proxy").wsValue], [300, 100]);
+});
+
+test("Windows: a solver RED only on commit stays RED", () => {
+  const rows = rowsOf([winProc(1, "solver", { ws: 150, commit: 340 })], [winProc(1, "solver", { ws: 150, commit: 340 })]);
+  const c = checkNamed(osVerdict(rows, { procPeaks: { solver: 300 } }), "procPeak:solver");
+  assert.deepEqual([c.red, c.gate, c.commitValue, c.wsValue], [true, "commit", 340, 150]);
+});
+
+test("Windows: the S2 host and the growth checks stay on commit", () => {
+  const rows = rowsOf(...Array.from({ length: 40 }, (_, i) => [winProc(1, "scenario", { ws: 200, commit: 300 + i * 20 })])).map((r, i) => ({ ...r, progress: i * 100 }));
+  const v = osVerdict(rows, { procPeaks: { scenario: 600 }, growth: { role: "scenario", axis: "progress", maxPctPer1k: 5, risingWindows: 3 } });
+  assert.deepEqual([checkNamed(v, "procPeak:scenario").gate, checkNamed(v, "procPeak:scenario").red], ["commit", true]);
+  assert.deepEqual([checkNamed(v, "growth:scenario").gate, checkNamed(v, "growth:scenario").red], ["commit", true]);
+});
+
+test("Windows: an S3 total RED only on commit stays RED", () => {
+  const rows = rowsOf([winProc(1, "proxy", { ws: 55, commit: 188 }), winProc(2, "mcp-bridge", { ws: 60, commit: 80 }), winProc(3, "launcher", { ws: 30, commit: 300 })]);
+  const c = checkNamed(osVerdict(rows, { peaks: { kit: 514 } }), "peak:kit");
+  assert.deepEqual([c.red, c.gate, c.commitValue, c.wsValue], [true, "commit", 568, 145]);
+});
+
+test("Windows: a paced run whose proxy commit exceeds 512 MB is RED even when its working set is green", () => {
+  const rows = rowsOf([winProc(1, "proxy", { ws: 150, commit: 400 })], [winProc(1, "proxy", { ws: 160, commit: 530 })], [winProc(1, "proxy", { ws: 150, commit: 420 })]);
+  const v = osVerdict(rows, { procPeaks: { proxy: 250 }, commitBackstop: { role: "proxy", maxMB: 512 } });
+  const c = checkNamed(v, "commit-backstop:proxy");
+  assert.deepEqual([v.red, c.red, c.value, c.budget, checkNamed(v, "procPeak:proxy").red], [true, true, 530, 512, false]);
+  assert.equal(checkNamed(osVerdict(rows.slice(0, 1), { commitBackstop: { role: "proxy", maxMB: 512 } }), "commit-backstop:proxy").red, false);
+});
+
+test("the commit backstop never applies to Linux samples (no commit there)", () => {
+  const rows = rowsOf([proc(1, "proxy", 600)]);
+  assert.equal(checkNamed(osVerdict(rows, { commitBackstop: { role: "proxy", maxMB: 512 } }), "commit-backstop:proxy"), undefined);
 });
 
 test("on Windows samples RED on both metrics is not 'RED only on commit'", () => {
