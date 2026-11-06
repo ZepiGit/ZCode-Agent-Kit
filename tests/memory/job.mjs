@@ -4,6 +4,7 @@
 // ratchet (lib/ratchet.mjs) over the outcomes.
 //
 //   node tests/memory/job.mjs [--os linux|windows] [--out DIR] [--cap auto|systemd|prlimit|jobobject|none] [--only KEY,KEY]
+//                             [--run-script PATH]   (tests only: a stand-in for run.mjs)
 //
 // Caps (--cap auto picks the first that works; lib/caps.mjs):
 //   systemd    `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`,
@@ -30,6 +31,7 @@ import { JOB, osLeg, parseRunKey } from "./lib/catalogue.mjs";
 import { checkRatchet, issueIdsIn, readExpectedRed } from "./lib/ratchet.mjs";
 import { assertSafeRun } from "./lib/isolated-kit.mjs";
 import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
+import { runEvidence } from "./lib/completeness.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -45,12 +47,13 @@ const DEFAULT_TIMEOUT_S = 1200;
 const TIMEOUT_FACTOR = { windows: 2 };
 
 function parseArgs(argv) {
-  const out = { os: osLeg(), out: resolve(ROOT, ".memloop", "job"), cap: "auto", only: null };
+  const out = { os: osLeg(), out: resolve(ROOT, ".memloop", "job"), cap: "auto", only: null, runScript: join(HERE, "run.mjs") };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--os") out.os = argv[++i];
     else if (argv[i] === "--out") out.out = resolve(argv[++i]);
     else if (argv[i] === "--cap") out.cap = argv[++i];
     else if (argv[i] === "--only") out.only = argv[++i].split(",").filter(Boolean);
+    else if (argv[i] === "--run-script") out.runScript = resolve(argv[++i]); // tests: a stand-in for run.mjs
     else throw new Error(`unknown argument ${argv[i]}`);
   }
   return out;
@@ -82,10 +85,10 @@ function readSummary(dir) {
 }
 
 function markdown({ os, cap, ratchet, results, partial }) {
-  const lines = [`## memory-budget (${os}, short profile): ${ratchet.ok ? "ratchet holds" : "ratchet FAILED"}`, "", `cap: ${cap} · node ${process.version}${partial ? " · partial run (--only)" : ""}`, "", "| run | outcome | expected-RED | red checks | s |", "|---|---|---|---|---|"];
+  const lines = [`## memory-budget (${os}, short profile): ${ratchet.ok ? "ratchet holds" : "ratchet FAILED"}`, "", `cap: ${cap} · node ${process.version}${partial ? " · partial run (--only)" : ""}`, "", "| run | outcome | expected-RED | red checks | s | samples | roles seen |", "|---|---|---|---|---|---|---|"];
   for (const row of ratchet.rows) {
     const r = results.find((x) => x.key === row.key);
-    lines.push(`| ${row.key} | ${row.outcome}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} |`);
+    lines.push(`| ${row.key} | ${row.outcome}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} | ${r?.samples ?? "—"} | ${Object.entries(r?.rolesSeen ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "—"} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
   const overheads = results.filter((r) => r.samplerOverhead?.polls);
@@ -124,7 +127,7 @@ async function main() {
     const runArgs = [scenario, "--profile", profile, ...(variant ? ["--variant", variant] : []), "--out", dir];
     console.log(`\n── ${key} ──`);
     const size = CAP[key] ?? CAP[scenario] ?? DEFAULT_CAP;
-    const cmd = commandFor(capChoice.cap, size, (TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S) * (TIMEOUT_FACTOR[args.os] ?? 1), runArgs, { runScript: join(HERE, "run.mjs") });
+    const cmd = commandFor(capChoice.cap, size, (TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S) * (TIMEOUT_FACTOR[args.os] ?? 1), runArgs, { runScript: args.runScript });
     const r = await runOne(cmd, join(dir, "run.log"));
     const summary = readSummary(dir);
     // run.mjs exits 0/1/2; anything else (timeout 124, a cap kill 137 / SIGKILL) is a harness failure.
@@ -132,8 +135,11 @@ async function main() {
     let why = exitCode === 2 && !summary?.error ? (r.code === 124 ? "timed out" : r.code === 137 || r.signal === "SIGKILL" || (r.job?.applied && r.job.peakBytes >= 0.95 * bytes(size)) ? `killed (memory cap ${size}?)` : `exit ${r.code}${r.signal ? ` ${r.signal}` : ""}`) : null;
     // A Job Object run counts only if the wrapper proved the cap (never uncapped).
     if (capChoice.cap === "jobobject" && r.code !== 124 && !r.job?.applied) { exitCode = 2; why = `Job Object cap not applied: ${r.job?.error ?? "no @@JOB report"}`; }
+    // A verdict counts only with evidence that the scenario ran (lib/completeness.mjs).
+    const evidence = runEvidence(summary, { key, exitCode });
+    if (!evidence.ok) { exitCode = 2; why = `no evidence the scenario ran: ${evidence.problems.join("; ")}`; }
     if (why) console.log(`${key}: harness failure: ${why}`);
-    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, ...(r.job ? { jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why });
+    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, scenarioS: summary?.durationS ?? null, samples: summary?.samples ?? null, rolesSeen: Object.fromEntries(Object.entries(summary?.summary ?? {}).filter(([role]) => role !== "*" && role !== "kit").map(([role, s]) => [role, s.maxCount])), units: summary?.notes?.sampler?.units ?? null, ...(r.job ? { jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: why ?? summary?.error ?? r.error ?? null });
   }
 
   const ratchet = checkRatchet({ expected, os: args.os, results, issueIds });

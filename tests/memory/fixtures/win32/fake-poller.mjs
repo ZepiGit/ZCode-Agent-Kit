@@ -13,6 +13,8 @@ const opts = JSON.parse(process.argv[2]);
 const read = (name) => readFileSync(join(here, name), "utf8").trimEnd();
 const cim = read(opts.cim ?? "cim-poll.csv");
 const out = (s) => process.stdout.write(s);
+// delayMs: answer late, as PowerShell does while it starts (the caller must stay alive meanwhile).
+if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
 if (opts.units) out(`@@UNITS ${opts.selfPid}\n${read(opts.unitsCim ?? opts.cim ?? "cim-poll.csv")}\n@@GETPROCESS\n${read(opts.getProcess ?? "get-process.csv")}\n@@END\n`);
 let n = 0;
 const poll = () => {
