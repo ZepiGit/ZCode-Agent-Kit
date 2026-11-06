@@ -344,3 +344,11 @@ test("the stub OMP host is the harness: never kit footprint, like the other fixt
   const rows = rowsOf([proc(1, "omp-host", 400), proc(2, "preflight", 70), proc(3, "proxy", 60)]);
   assert.equal(checkNamed(verdict(rows, { peaks: { kit: 200 } }), "peak:kit").value, 130);
 });
+
+test("the S3 OMP leg runs on both legs and is expected RED until single-flight lands (ticket 35)", () => {
+  assert.ok(JOB.linux.includes("S3/omp") && JOB.windows.includes("S3/omp"));
+  const here = dirname(fileURLToPath(import.meta.url));
+  const expected = readExpectedRed(join(here, "expected-red.json"));
+  assert.equal(expected.linux["S3/omp"], "35");
+  assert.equal(expected.windows["S3/omp"], "35");
+});

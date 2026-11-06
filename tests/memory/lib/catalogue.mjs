@@ -7,7 +7,7 @@
 export const CATALOGUE = {
   S1: { module: "./scenarios/s1-proxy-steady.mjs", variants: ["burst1", "burst4", "burst16", "burst32", "bigbody", "stalled"] },
   S2: { module: "./scenarios/s2-captcha.mjs", variants: ["gc"] },
-  S3: { module: "./scenarios/s3-concurrency.mjs", variants: ["hung"] },
+  S3: { module: "./scenarios/s3-concurrency.mjs", variants: ["hung", "omp"] },
   S4: { module: "./scenarios/s4-lifecycle.mjs", variants: [] },
   S5: { module: "./scenarios/s5-mcp.mjs", variants: [] },
   S6: { module: "./scenarios/s6-tui.mjs", variants: [] },
@@ -20,12 +20,12 @@ export const PROFILES = ["short", "long"];
  * The runs of each `memory-budget` leg, in order. S2/gc is a diagnostic
  * variant (phase A only, with forced GC) and stays local. The windows leg
  * (ticket 02, spec §12) runs S1, S2 (offline fixture backend), S3, S4, S5 and
- * S7; S6 stays ubuntu-only.
+ * S7; S6 stays ubuntu-only. S3/omp is the OMP stub-host leg (ticket 03), on both legs.
  */
 const LINUX = [
   "S1/short", "S1/burst1", "S1/burst4", "S1/burst16", "S1/burst32", "S1/bigbody", "S1/stalled",
   "S2/short",
-  "S3/short", "S3/hung",
+  "S3/short", "S3/hung", "S3/omp",
   "S4/short", "S5/short", "S6/short", "S7/short",
 ];
 export const JOB = {
