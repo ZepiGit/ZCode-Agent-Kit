@@ -10,7 +10,7 @@ export default {
   id: "codex",
   label: "Codex CLI",
   protocol: "Responses API (wire_api = \"responses\") via local proxy",
-  primarySource: "https://developers.openai.com/codex/config-advanced/ (checked 2026-09-13; codex 0.153.4 rejects wire_api=\"chat\")",
+  primarySource: "https://developers.openai.com/codex/config-reference (checked 2026-11-04; codex 0.166.0: wire_api=\"responses\" is the only supported value)",
 
   apply(ctx, tx, log) {
     const port = ctx.port();

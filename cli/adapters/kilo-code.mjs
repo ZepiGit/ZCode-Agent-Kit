@@ -11,7 +11,7 @@ export default {
   id: "kilo-code",
   label: "Kilo Code",
   protocol: "Anthropic Messages / OpenAI-compatible custom provider (extension UI)",
-  primarySource: "https://kilo.ai/docs/ai-providers/openai-compatible (checked 2026-09-13)",
+  primarySource: "https://kilo.ai/docs/ai-providers/openai-compatible and https://kilo.ai/docs/code-with-ai/agents/custom-models (checked 2026-11-06)",
 
   apply(ctx, tx, log) {
     ensureDir(ctx, ctx.generated);
@@ -25,13 +25,20 @@ Kilo Code → Settings ⚙ → Providers → Custom provider:
 | Provider ID    | zcode |
 | Display name   | ZCode (local proxy) |
 | Provider API   | Anthropic Messages |
-| Base URL       | http://127.0.0.1:${ctx.port()} |
+| Base URL       | http://127.0.0.1:${ctx.port()}/v1 |
 | API key        | (local proxy key — run \`node cli/zcode-kit.mjs models --show-key\`) |
 | Models         | glm-5.3, glm-5.3-flash |
 
+Models — one row each, with the per-model toggles:
+
+| Model ID       | Name           | Reasoning | Image |
+|----------------|----------------|-----------|-------|
+| glm-5.3        | GLM-5.3        | on        | off   |
+| glm-5.3-flash  | GLM-5.3-Flash  | on        | on    |
+
 Notes:
-- Anthropic Messages uses the proxy root URL (no /v1 suffix), matching the
-  /v1/messages endpoint contract.
+- Anthropic Messages takes the base URL including /v1: Kilo appends
+  /messages to it, matching the proxy's /v1/messages endpoint.
 - Models can also be auto-fetched from the /v1/models endpoint.
 - kilo.jsonc: the upstream docs describe model-level tuning only in the
   "Custom Models" guide; the kit deliberately does not write kilo.jsonc.
