@@ -35,3 +35,5 @@ ADR: 0001, 0005, 0011
 Spec stories: 89, 106, 107, 108, 123
 
 ## Comments
+
+- 2026-11-06 (orchestrator, from tickets 05 and 14): once commands import `lib/term/`, the mini-kit fixtures that copy only `cli/` and `lib/` (cli-kit, cli-audit, setup-regressions, harness-consent, auto-heal, verify-golden-path, ux/capture file list) must also copy `zcode-proxy-src/src/tui/{width-core,tokens}.mjs` (+ `.d.mts`) — justify the fixture change, never fork the core (ADR-0011). With those fixtures in place, ticket 14's checked duplicate `lib/event-line.mjs` can become a re-export of `zcode-proxy-src/src/log/event-line.mjs` the same way; do it here if it stays within this ticket's window, otherwise record it for ticket 15.
