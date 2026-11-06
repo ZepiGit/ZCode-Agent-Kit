@@ -30,7 +30,7 @@ Source: Phase 1B memory loop (`diagnosis/memory` @ 2ccafe2, `tests/memory/`). Co
 |---|---|---|
 | S1 proxy, 30,000 mixed requests (long, 20 min) | plateau median 127 MB, HWM 182 MB, heap ≤ 49 MB, growth 0.07 %/1k, 113 MB after idle | GREEN |
 | S1 proxy, 3,000 requests (short) | growth 5.5 %/1k (warm-up, no trend), HWM 152 MB | GREEN |
-| S1 burst: N × 10.8 MB bodies at once | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight | RED (N ≥ 4) |
+| S1 burst: N concurrent 10.8 MB bodies, 3 × N requests (burst1: 3 sequential requests) | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight | RED (N ≥ 4) |
 | S1 stalled readers, 3,000 | HWM 165 MB, heap 6 MB after idle | GREEN |
 | S2 captcha solver, heavy happy-dom solves (short 420 / long 2,000) | RSS 179 → 958 MB at the 200-solve recycle (+4.1 MB/solve); heap after GC +2.5 MB/solve; per-generation peak 0.9–1.0 GB; HWM 1,068 MB | RED |
 | S2 retained guest heap before recycle | 686 MB (long 619 MB); 687 MB returned on recycle | RED |
@@ -66,6 +66,27 @@ The loop from `diagnosis/memory`, committed with the §18 budgets (`tests/memory
 | S7/short | 148 B/req, 6.37 MB, store heap +63 MB | 148 B/req, 6.37 MB while running, `proxy.early.log` absent, store heap +62 MB | ≤ 6 MB; ≤ 1 MB; ≤ 96 MB | RED → 34 |
 
 No budget is loosened past the Phase 1B baseline. Against the diagnosis loop's own encoding: S3's total is 596 MB (was 600) plus the new per-role targets; S6's long-line budget is 16 MB (was 32); S1 gains the steady ≤ 160 MB check; S2 gains the per-generation, cold-start and solver-count checks. S1/burst16 and burst32 are judged against §18's 400 / 600 MB HWM (ADR-0004) instead of the diagnosis loop's blanket 250 MB; both stay RED. Measurement changes (ticket 01 Comments): S1 short and stalled run 6,000 requests (mixed with a half warm-up), burst and big-body runs are judged by their peak only, S3 samples every 250 ms.
+
+### S1/burst1 distribution and the median rule (ticket 60, Round 6 Q1)
+
+S1/burst1 sends 3 sequential ~10.8 MB requests per run (concurrency 1), not one request. Before the median rule landed we measured 48 fresh S1/burst1 runs, one after another. Each run was its own `node tests/memory/job.mjs --only S1/burst1` in its own systemd scope (MemoryMax 3G, no swap). Setup: integration tip 97c2211 (unchanged code), Linux x64, Node 26.7.0, Bun 1.4.2, port 19600. Runs 1–24 used `/home/AgentKit/overhaul-tools/t60-memloop/dist/` and the `ticket/60` worktree before any harness change. Runs 25–48 used `dist2/` and a clean detached worktree at 97c2211. Logs: `reports/t60-burst1-dist{,2}.log`.
+
+Proxy peak (procPeak:proxy = max(RSS, VmHWM), MB), in run order:
+
+236.5, 205.9, **267.4**, 235.5, 227.5, 239.4, 235.1, **255.6**, 239.9, 191.2, **268.9**, 240.3, 235.0, 234.0, 241.5, 235.0, 241.1, 214.7, 235.4, 239.7, 247.7, 207.3, 232.9, 237.3, 235.6, 203.9, 243.8, 225.3, 234.8, 248.9, 235.7, 240.1, 234.5, 239.4, **256.0**, 227.3, 239.7, 226.9, **262.3**, 237.8, 237.4, 237.8, 235.1, 236.0, 218.0, 235.2, 242.8, 240.4
+
+Summary: min 191.2 MB, median 236.25 MB, max 268.9 MB. 5 of 48 runs are above 250 MB (p = 0.104) and none is above 400 MB. The 11 earlier runs on unchanged code (Round 6 Q1: 219.1 … 299.2 and one CI GREEN) have 3 above 250. Pooled: 8 of 59 (p = 0.136).
+
+False-RED rate of a median of n, P(X ≥ (n+1)/2) with X ~ Binomial(n, p):
+
+| p | n = 3 | n = 5 | n = 7 | n = 9 | smallest n ≤ 5 % |
+|---|---|---|---|---|---|
+| 0.104 (tip, 5/48) | 3.03 % | 0.96 % | 0.32 % | 0.11 % | 3 |
+| 0.136 (pooled, 8/59) | 5.02 % | 2.01 % | 0.84 % | 0.36 % | 5 |
+
+**Chosen n = 5.** This is the smallest odd n that keeps the predicted false-RED rate ≤ 5 % on both estimates. The tip-only estimate gives 3, but n = 3 misses 5 % on the pooled evidence (5.02 %). The cost is 5 × ~20 s per leg. Under the hard per-run ceiling of 400 MB, the measured false-RED rate is 0: the highest observed run, 299.2 MB, sits ~100 MB below it. n lives in `tests/memory/lib/budgets.mjs` (`REPEATED`), and `verdict.test.mjs` pins the computation on these numbers.
+
+The first job run with the rule (`/home/AgentKit/overhaul-tools/t60-memloop/job-burst1/`) gave repetitions 236.4, 244.6, **257.3**, 189.1 and 234.9 MB. The median is 236.4 MB and nothing is over the ceiling, so the variant is GREEN. Judged on one run, repetition 3 alone would have turned the job RED.
 
 ### Windows reference run, Bun 1.4.2 (ticket 02)
 
