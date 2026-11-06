@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +46,37 @@ test("samples.csv keeps its columns and appends commit_kb, empty on Linux", linu
     assert.equal(parsed[0].ppid, process.pid);
     assert.equal(parsed[0].progress, 7);
     assert.ok(rows.some((r) => r.procs.some((p) => p.pid === child.pid)));
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A process sampled between fork and exec still shows its parent's argv; pid
+// and start time survive the exec. Ticket 02 round 7, local S3/hung: the start
+// lock holder (`node cli/heal.mjs`) was killed inside spawn(), its proxy was
+// first sampled before its exec and stayed role "preflight" for all 475
+// samples, so the run had no proxy at all. The role follows the exec.
+test("a marked process is re-attributed after it execs (a proxy first seen before its exec is a proxy)", linuxOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-exec-"));
+  const marker = `ZCODE_MEMLOOP_RUN=exec-test-${process.pid}`;
+  const entry = join(dir, "zcode-proxy-src", "src", "index.ts");
+  mkdirSync(dirname(entry), { recursive: true });
+  writeFileSync(entry, "setTimeout(() => {}, 5000);\n");
+  // `sh pre-exec.sh` first (role other), then the same pid execs into a proxy command line.
+  const preExec = join(dir, "pre-exec.sh");
+  writeFileSync(preExec, `sleep 0.6\nexec "${process.execPath}" "${entry}" serve\n`);
+  const child = spawn("/bin/sh", [preExec], { env: { ...process.env, ZCODE_MEMLOOP_RUN: marker.split("=")[1] }, stdio: "ignore" });
+  try {
+    const sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100 });
+    await sleep(1600);
+    const rows = await sampler.stop();
+    const roles = rows.flatMap((r) => r.procs.filter((p) => p.pid === child.pid).map((p) => p.role));
+    assert.equal(roles[0], "other", `first seen as sh: ${roles}`);
+    assert.equal(roles.at(-1), "proxy", `after its exec: ${roles}`);
+    const csv = parseSamplesCsv(readFileSync(join(dir, "samples.csv"), "utf8")).filter((r) => r.pid === child.pid);
+    assert.equal(csv.at(-1).role, "proxy");
+    assert.match(csv.at(-1).cmd, /index\.ts serve/);
   } finally {
     child.kill("SIGKILL");
     rmSync(dir, { recursive: true, force: true });
