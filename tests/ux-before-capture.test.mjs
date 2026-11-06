@@ -9,7 +9,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -205,4 +205,56 @@ test("capture.mjs builds the fixture env and the Windows git dir through host.mj
   assert.match(src, /const env = fixtureBaseEnv\(process\.env, \{ windows: IS_WIN \}\);/);
   assert.match(src, /windowsGitDir\(process\.env\.PATH \?\? process\.env\.Path, \{ exists: existsSync \}\)/);
   assert.doesNotMatch(src, /for \(const \[k, v\] of Object\.entries\(process\.env\)\)/, "no second, unfiltered env copy");
+});
+
+// --------------------------------------- git diffstat (windows, run 42259233373)
+const DIFFSTAT_LF = [" package.json | 2 +-", " 1 file changed, 1 insertion(+), 1 deletion(-)"];
+const DIFFSTAT_LF_TTY = [" package.json | 2 \x1b[32m+\x1b[m\x1b[31m-\x1b[m", " 1 file changed, 1 insertion(+), 1 deletion(-)"];
+const DIFFSTAT_CRLF = (n) => [` package.json | ${2 * n} ${"+".repeat(30)}${"-".repeat(30)}`, ` 1 file changed, ${n} insertions(+), ${n} deletions(-)`];
+const ffwd = (stat) => ["Updating <SHA>..<SHA>", "Fast-forward", ...stat, "update: refreshing consented integrations", ""].join("\n");
+
+test("git's diffstat of the fixture update normalises whatever the checkout's line endings or package.json length", () => {
+  const want = normaliseVolatile(ffwd(DIFFSTAT_LF));
+  for (const stat of [DIFFSTAT_LF_TTY, DIFFSTAT_CRLF(34), DIFFSTAT_CRLF(35)]) assert.equal(normaliseVolatile(ffwd(stat)), want);
+  assert.equal(want, "Updating <SHA>..<SHA>\nFast-forward\n package.json | <N> <GRAPH>\n <N> file(s) changed, <N> insertion(s)(+), <N> deletion(s)(-)\nupdate: refreshing consented integrations\n");
+  assert.notEqual(normaliseVolatile(ffwd([" cli/zcode-kit.mjs | 2 +-", DIFFSTAT_LF[1]])), want, "the path stays: a different file is a difference");
+});
+
+test("the diffstat rules leave kit lines strict: indentation, trailing text and other wording stay", () => {
+  const kit = [
+    "  [OK]   OMP / Oh My Pi | 2 +",
+    "  package.json | 2 +-",
+    " package.json | 2 +- (refreshed)",
+    " package.json | two +-",
+    " 1 file changed, see install.log",
+    "doctor: 1 file changed, 2 insertions(+)",
+    "",
+  ].join("\n");
+  assert.equal(normaliseVolatile(kit), kit);
+});
+
+test("Linux end to end: a CRLF package.json (as on a windows checkout) changes only git's diffstat", {
+  timeout: 120_000,
+  skip: process.platform === "win32" ? "builds a POSIX fixture kit" : false,
+}, (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ux-capture-crlf-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const kit = join(dir, "kit");
+  for (const sub of ["cli", "lib", "proxy"]) cpSync(join(ROOT, sub), join(kit, sub), { recursive: true });
+  mkdirSync(join(kit, "zcode-proxy-src"), { recursive: true });
+  cpSync(join(ROOT, "zcode-proxy-src", "package.json"), join(kit, "zcode-proxy-src", "package.json"));
+  symlinkSync(join(ROOT, "zcode-proxy-src", "src"), join(kit, "zcode-proxy-src", "src"));
+  symlinkSync(join(ROOT, "zcode-proxy-src", "node_modules"), join(kit, "zcode-proxy-src", "node_modules"));
+  writeFileSync(join(kit, "package.json"), readFileSync(join(ROOT, "package.json"), "utf8").replace(/\r?\n/g, "\r\n"));
+  const out = join(dir, "out");
+  const run = spawnSync(process.execPath, [join(ROOT, "tests", "ux-before", "capture", "capture.mjs"), "--kit", kit, "--out", out,
+    "--only", "^update-checkout$", "--variants", "pipe,ci"], {
+    encoding: "utf8", timeout: 110_000,
+    env: { ...process.env, UX_CAPTURE_PORT: String(Number(process.env.UX_CAPTURE_PORT ?? 18458) + 2) },
+  });
+  assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
+  const lines = readFileSync(join(out, "update", "update-checkout", "pipe.txt"), "utf8").split("\n");
+  const n = readFileSync(join(ROOT, "package.json"), "utf8").split("\n").length - 1;
+  assert.ok(lines.includes(` 1 file changed, ${n} insertions(+), ${n} deletions(-)`), "the CRLF rewrite really changed every line");
+  assert.deepEqual(compareCaptures(join(ROOT, "tests", "ux-before", "linux"), out, { only: /^update\/update-checkout$/, variants: ["pipe", "ci"] }), []);
 });

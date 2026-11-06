@@ -294,4 +294,47 @@ Spec stories: 89, 106, 107, 108, 123
 
 If windows still fails: the `ux-before-now-Windows` artifact holds the fresh capture, and the failure text names the git command with its status and both streams.
 
-- 2026-11-06 (orchestrator): first merge 5155b1d was reverted (f8be074) after CI run 42236936458; fix rounds 2-3 staged on staging/06 for pre-merge CI via draft PR #15.
+### 2026-11-06 — implementer, round 4 (run 42259233373)
+
+**Result reported by the orchestrator** (log `overhaul-tools/uxbefore-win-3.log`)
+- `test-kit` 4/4 and `ux-before` ubuntu were green.
+- windows: the baseline was `193 ok, 0 failed`, then 2 differences: `update/update-checkout/{ci,pipe}.txt` line 4, ` package.json | 68 +++…---` (base) vs `70` (this branch).
+
+**Cause.** `gitFixture()` makes the fixture origin one commit ahead by rewriting `package.json` with `JSON.stringify(pkg, null, 2) + "\n"`; `update` then prints git's fast-forward diffstat.
+- On the windows runner the checkout has CRLF line endings (autocrlf; `package.json` has no eol attribute), so the rewrite changes every line: 34 lines at `3f4e41a` give 68, and 35 on this branch (the added `test:ux-before` script) give 70.
+- The summary line differs too (`34` vs `35 insertions(+)`); the comparator only prints a file's first differing line.
+
+**Why ubuntu passes, and why that is not an accident.** On an LF checkout `package.json` is already exactly `JSON.stringify(…, null, 2)` output at both `3f4e41a` and HEAD (checked), so the fixture commit changes only the version line. The stat is ` package.json | 2 +-` / `1 insertion(+), 1 deletion(-)` whatever the file's length. It would break only if `package.json` stopped being in that canonical form; the new rule removes that dependency as well.
+
+**Fix** (`tests/ux-before/compare.mjs`, explicit `VOLATILE` list, both sides):
+- **"git diffstat":** `^( [^\s|][^\n|]*? \| +)\d+ (?:ESC[…m|[+-])+$` becomes `$1<N> <GRAPH>`, so the path is kept.
+- **"git diffstat summary":** `^ \d+ files? changed(, \d+ insertions?\(\+\))?(, \d+ deletions?\(-\))?$` becomes a fixed marker.
+- In the BEFORE set, only `update/update-checkout` has such lines.
+
+**Tests** (`tests/ux-before-capture.test.mjs`, +4, now 19):
+- the LF, coloured-TTY and CRLF (34/35) forms normalise to one text, and a different path stays a difference;
+- kit lines stay strict: indented lines, trailing text, a non-numeric count, and "files changed" elsewhere in a line are untouched;
+- **Linux end to end:** `update-checkout` captured from a kit with a CRLF `package.json`. It shows `N insertions(+), N deletions(-)` with N = the file's line count, exactly the windows shape, and compares clean against the baseline. Its port is `UX_CAPTURE_PORT + 2`. A manual run gave ` package.json | 70 …`, ` 1 file changed, 35 insertions(+), 35 deletions(-)` and 0 differences (`t06-r4-crlf`).
+
+**Evidence**
+- `t06-r4-green1`: 19/19.
+- Mutation proofs (`t06-mutants4`, restored): 6 killed:
+  - **D1:** no diffstat rule;
+  - **D2:** no summary rule;
+  - **D3:** the diffstat rule accepts any indentation;
+  - **D4:** trailing text accepted after the graph;
+  - **D5:** the summary unanchored;
+  - **D6:** the path masked.
+- Unchanged: the base capture and the git 2.56 `update-checkout` capture still compare clean (0).
+- Full suites at this head (no tip merge):
+  - `npm run test` (`t06-r4-full-kit`): 517 tests, 506 pass, 0 fail, 11 skipped;
+  - `npm run test:proxy`: 1343 pass, 0 fail;
+  - `npm run test:mcp`: 95 pass, 0 fail, 1 skipped;
+  - full `npm run test:ux-before` with git 2.56 on the fixture PATH (`t06-r4-before-git256`): 1/1 (467 s).
+
+**What CI must show**
+1. `ux-before / windows-latest`: baseline `193 ok, 0 failed`, then the equivalence step passes 1/1 with no `differs:`, `unexpected:` or `baseline capture error`. That run's `ux-before-windows-baseline` artifact may then be committed as `tests/ux-before/windows/`.
+2. `ux-before / ubuntu-latest`: green.
+3. `test-kit` 4/4: green with the 19 tests. The two Linux end-to-end tests are skipped on win32; the normalisation, env, git-dir and workflow tests run there too.
+
+- 2026-11-06 (orchestrator): first merge 5155b1d was reverted (f8be074); fix rounds 2-4 staged on staging/06 for pre-merge CI via draft PR #15.
