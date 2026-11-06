@@ -166,3 +166,12 @@ Spec stories: 89, 106, 107, 108, 123
 - JSON baseline committed + superset test in `npm run test`: ✓ (live part on linux/macOS; win32 pending, decision 3).
 - Grep test for new code: ✓ (`term-boundaries`).
 - No-ESC scan over NO_COLOR/pipe/TERM=dumb/CI renders: ✓ (`term-snapshots`).
+
+**Update after a second merge (same day).**
+- The integration tip moved to `922833a` (ticket 02 reverted). It was merged in `8475174`; conflicts in `ci.yml` and `package.json` were resolved by keeping the `ux-before` job and the five new test files on top of the reverted tip.
+- `git diff --stat ec7929c 8475174 -- cli lib proxy zcode-proxy-src mcp install.sh install.ps1` is empty, so the before-equivalence result of `t06-before-final` holds for this head.
+- Re-run:
+  - `npm run test` (`t06-full2-kit`): 498 tests, 487 pass, 0 fail, 11 skipped. The reverted tip has 361; +137.
+  - `npm run test:proxy` (`t06-full2-proxy`): 1343 pass, 0 fail, 90 files.
+  - `npm run test:mcp` (`t06-full2-mcp`): 96 tests, 95 pass, 0 fail, 1 skipped; `dist/` unchanged.
+  - Wiring guard: 0 unwired.
