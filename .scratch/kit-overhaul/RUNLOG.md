@@ -52,3 +52,4 @@
 - 2026-11-06T13:59:26Z Concurrency: t02 fix resumed (slot 1), t03 (slot 2), t06 (slot 3); t60 paused to respect the 3-implementer cap, resumes after the 02 re-merge.
 - 2026-11-06T14:46:28Z Merged t06 (5155b1d green: kit 487/498, proxy 1343, mcp 95/96). t03 done (012abe6) waiting for the 02 re-merge. Spawning t07. Pushing (ux-before windows baseline artifact to commit as tests/ux-before/windows/ once the job runs).
 - 2026-11-06T15:23:59Z Reverted t06 merge as f8be074 (new ux-before job red on ubuntu: git-version-dependent remote progress text in update-checkout; on windows: mangled proxy path + tar failures). t06 implementer resumed to fix; t07 paused (blocked by 06) until the re-merge.
+- 2026-11-06T15:27:49Z Process change: tickets with pending-CI criteria get a pre-merge CI run via a draft PR from the ticket branch into the integration branch (ci.yml triggers on any pull_request); merge only on green. Observation 0017 logged.
