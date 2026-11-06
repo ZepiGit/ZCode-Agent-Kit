@@ -88,6 +88,11 @@ function markdown({ os, cap, ratchet, results, partial }) {
     lines.push(`| ${row.key} | ${row.outcome}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
+  const overheads = results.filter((r) => r.samplerOverhead?.polls);
+  if (overheads.length) {
+    const mb = (kb) => Math.round(kb / 1024);
+    lines.push("", "Sampler overhead (the Windows poller, excluded from every verdict): " + overheads.map((r) => `${r.key} ${mb(r.samplerOverhead.peakCommitKb)} MB commit / ${mb(r.samplerOverhead.peakRssKb)} MB WS, poll ${r.samplerOverhead.pollMsMedian} ms (max ${r.samplerOverhead.pollMsMax})`).join("; "));
+  }
   const onlyCommit = results.filter((r) => r.redOnlyOnCommit);
   if (onlyCommit.length) lines.push("", "RED only on commit (working set within budget) — raised to the owner, never adjusted silently (build-time gate 3):", ...onlyCommit.map((r) => `- ${r.key}: ${r.redChecks.join(", ")} (working set: ${r.workingSetRedChecks.join(", ") || "green"})`));
   return lines.join("\n") + "\n";
@@ -128,7 +133,7 @@ async function main() {
     // A Job Object run counts only if the wrapper proved the cap (never uncapped).
     if (capChoice.cap === "jobobject" && r.code !== 124 && !r.job?.applied) { exitCode = 2; why = `Job Object cap not applied: ${r.job?.error ?? "no @@JOB report"}`; }
     if (why) console.log(`${key}: harness failure: ${why}`);
-    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, ...(r.job ? { jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why });
+    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, ...(r.job ? { jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why });
   }
 
   const ratchet = checkRatchet({ expected, os: args.os, results, issueIds });
