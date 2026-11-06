@@ -18,6 +18,8 @@ All paths above are relative to `/home/AgentKit/wt/overhaul/.scratch/kit-overhau
 - Every test, build, soak or process you start: `/home/AgentKit/overhaul-tools/run-capped.sh <name> <MemoryMax> <timeout_s> -- <cmd>` (systemd scope, no swap, timeout, `ZCODE_OVERHAUL_RUN=1`, isolated HOME; log goes to the integration worktree's `.scratch/kit-overhaul/reports/<name>.log` — prefix `<name>` with `tNN-`). Run it from your worktree with absolute paths (a background `cd X && (A) & B` runs B elsewhere).
 - Isolated ports only: your range is `19000 + NN*10` … `+9`. Never 8457, never another ticket's range. Mock upstream and fixtures only; no real credentials (B2).
 - Never kill a process you did not start. A sentinel kills run-tagged processes when RAM < 15 %.
+- If you set `PATH` inside a capped command, keep `$BUN_DIR` in it (the wrapper's Bun dir is otherwise lost).
+- Criteria that need a GitHub Actions run (CI legs, CI run links): you cannot push. Make the change, prove it locally as far as possible, and mark the criterion "pending CI (orchestrator verifies after merge+push)". The orchestrator pushes the integration branch and checks the draft PR's CI.
 
 ## Hard boundaries (PROMPT.md §5) — never cross
 B1 anti-abuse behaviour unchanged (captcha-*, client-signing, identity, trace-headers, session-context, account rotator/claim scheduler: lifecycle/bounds/errors/observability/UX/tests only). B2 no secrets read/printed/committed. B3 never modify installed kits, running proxies or real harness configs (temp HOME fixtures). B4 never kill foreign processes. B5 never hand-edit `mcp/zcode-harness-mcp/dist/` — rebuild and commit the output. B6 no version bumps, tags or release.
