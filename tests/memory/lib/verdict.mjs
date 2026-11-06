@@ -200,3 +200,32 @@ export function verdict(rows, budgets, { orphans = [], observations = [] } = {})
   for (const extra of budgets.extra ?? []) checks.push(extra);
   return { red: checks.some((c) => c.red), checks, summary };
 }
+
+/**
+ * Rows judged on one metric. "commit" (Windows): commit_kb, with hwm_kb =
+ * PeakPageFileUsage (the peak commit charge). "rss": RSS, with VmHWM on Linux
+ * and the working-set peak (PeakWorkingSetSize) on Windows.
+ */
+export function rowsForMetric(rows, metric) {
+  return rows.map((r) => ({
+    ...r,
+    procs: r.procs.map((p) => (metric === "commit"
+      ? { ...p, rssKb: p.commitKb ?? p.rssKb }
+      : { ...p, hwmKb: p.wsPeakKb ?? p.hwmKb })),
+  }));
+}
+
+/**
+ * The verdict on the OS's metric (spec §1): RSS on Linux, commit on Windows
+ * (any sample carrying commit_kb). On commit the working-set verdict is
+ * computed too, so a run RED only on commit is visible (build-time gate 3:
+ * it goes to the owner, never adjusted silently). Precomputed `extra` checks
+ * are the scenario's own and identical in both.
+ */
+export function osVerdict(rows, budgets, opts = {}) {
+  const commit = rows.some((r) => r.procs.some((p) => p.commitKb !== null && p.commitKb !== undefined));
+  if (!commit) return { ...verdict(rowsForMetric(rows, "rss"), budgets, opts), metric: "rss", workingSet: null, redOnlyOnCommit: false };
+  const v = verdict(rowsForMetric(rows, "commit"), budgets, opts);
+  const ws = verdict(rowsForMetric(rows, "rss"), budgets, opts);
+  return { ...v, metric: "commit", workingSet: { red: ws.red, redChecks: ws.checks.filter((c) => c.red).map((c) => c.name) }, redOnlyOnCommit: v.red && !ws.red };
+}

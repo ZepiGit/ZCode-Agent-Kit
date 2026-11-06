@@ -10,6 +10,7 @@
 // carrying the run id in its command line or executable path (lib/win-sampler.mjs).
 import { readdirSync, readFileSync, readlinkSync, writeFileSync, appendFileSync } from "node:fs";
 import { createKitTracker, pollOnce, powershellPoller, startPoller } from "./win-sampler.mjs";
+import * as winNet from "./win-net.mjs";
 
 const PAGE_KB = 4; // getconf PAGESIZE on every supported Linux target = 4096
 
@@ -122,7 +123,9 @@ export function listeningPorts() {
   return ports;
 }
 
-export function portsOf(pid, ports = listeningPorts()) {
+export function portsOf(pid, ports) {
+  if (process.platform === "win32") return winNet.listenersOf(winNet.netstat(), pid);
+  ports ??= listeningPorts();
   const found = new Set();
   let entries = [];
   try { entries = readdirSync(`/proc/${pid}/fd`); } catch { return []; }
@@ -151,6 +154,7 @@ function hexAddr(hex) {
 
 /** Every TCP socket a pid holds: { local, remote, state } (state hex per /proc/net/tcp). */
 export function connectionsOf(pid) {
+  if (process.platform === "win32") return winNet.connectionsOf(winNet.netstat(), pid);
   const inodes = new Set();
   let entries = [];
   try { entries = readdirSync(`/proc/${pid}/fd`); } catch { return []; }
@@ -175,6 +179,7 @@ export function connectionsOf(pid) {
 
 /** Non-loopback remote endpoints held by a pid (the "no real upstream" proof). */
 export function externalConnections(pid) {
+  if (process.platform === "win32") return winNet.externalOf(winNet.netstat(), pid).map((remote) => ({ remote }));
   return connectionsOf(pid).filter((c) => c.state !== "0A" && !/^(?:127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0):/.test(c.remote));
 }
 

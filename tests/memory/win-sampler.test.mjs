@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createKitTracker, parseCimCsv, parseGetProcessCsv, unitsSelfTest } from "./lib/win-sampler.mjs";
 import { parseSamplesCsv, scan, startSampler } from "./lib/sampler.mjs";
+import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32");
 const fixture = (name) => readFileSync(join(FIXTURES, name), "utf8");
@@ -107,6 +108,15 @@ test("a units self-test failure stops the Windows sampler before it samples anyt
     assert.equal(alive(pollerPid), false);
     assert.equal(readFileSync(join(dir, "samples.csv"), "utf8").split("\n").filter(Boolean).length, 1, "header only");
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("netstat -ano gives each pid's listening ports and its non-loopback peers", () => {
+  const entries = parseNetstat(fixture("netstat-ano.txt"));
+  assert.deepEqual(listenersOf(entries, 2400), [19020, 19021]);
+  assert.deepEqual(listenersOf(entries, 2100), [61001]);
+  assert.deepEqual(externalOf(entries, 2400), ["140.82.112.21:443"], "a TIME_WAIT to a real host still counts");
+  assert.deepEqual(externalOf(entries, 2100), [], "loopback peers are not external");
+  assert.deepEqual(listenersOf(entries, 9999), []);
 });
 
 test("the units self-test refuses to pass on too few comparable processes", () => {
