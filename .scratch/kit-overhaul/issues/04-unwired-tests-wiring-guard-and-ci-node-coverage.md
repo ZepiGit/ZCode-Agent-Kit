@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -69,3 +69,5 @@ Spec stories: 139, 140
 **Left open (not possible from this run)**
 - AC 3 (four green `test-kit` legs in CI) and the CI run link for AC 4: the brief forbids pushing. Whoever pushes adds the first green 4-leg run link to METRICS.md ("pre-existing findings"), which is otherwise already marked resolved. The windows legs are unverified locally.
 - The proxy typecheck joins `test-kit` in ticket 11.
+
+Merged 2026-11-06 as 8f59b2d; fast suite: kit 287/298 (0 fail, 11 skipped), proxy 1288/1288, mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged. Logs: reports/merge-04-{npm-ci,test,proxy,mcp}.log. CI legs (AC 3/4) pending CI after push.
