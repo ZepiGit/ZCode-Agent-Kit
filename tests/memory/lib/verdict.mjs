@@ -125,6 +125,7 @@ export function summarize(rows, roles) {
  *   growth?: { role, maxPctPer1k?, maxMBPerMin?, risingWindows: 3, axis, warmupFraction },
  *   steady?: { role, maxMB, fromT?, untilT?, warmupFraction? },
  *   peaks?: { [role]: MB } (summed per sample), procPeaks?: { [role]: MB } (per process, incl. VmHWM),
+ *   windowPeaks?: [{ name, roles, fromT, untilT, baseMB, maxMB }] (summed roles above a base, in a window),
  *   counts?: { [role]: n }, perParent?: [{ role, max }], observed?: [{ name, label, role, max }],
  *   orphans?: 0, extra?: [precomputed checks] }
  * observations: [{ label, counts: { [role]: n } }] taken by the scenario (ctx.observe).
@@ -164,6 +165,17 @@ export function verdict(rows, budgets, { orphans = [], observations = [] } = {})
     const post = live.slice(Math.floor(live.length * (s.warmupFraction ?? 0.25)));
     const value = Number(median(post.map((x) => x.rssMB)).toFixed(1));
     checks.push({ name: `steady:${s.role}`, red: post.length > 0 && value > s.maxMB, value, budget: s.maxMB, unit: "MB" });
+  }
+  for (const w of budgets.windowPeaks ?? []) {
+    // Summed RSS of several roles inside a time window, above a base level.
+    const roles = new Set(w.roles);
+    let peak = 0;
+    for (const r of rows) {
+      if (r.t < (w.fromT ?? 0) || r.t > (w.untilT ?? Infinity)) continue;
+      peak = Math.max(peak, r.procs.filter((x) => roles.has(x.role)).reduce((a, x) => a + x.rssKb, 0) / MB);
+    }
+    const value = Number(Math.max(0, peak - (w.baseMB ?? 0)).toFixed(1));
+    checks.push({ name: w.name, red: value > w.maxMB, value, budget: w.maxMB, unit: "MB" });
   }
   for (const p of budgets.perParent ?? []) {
     // At every sample: processes of the role sharing one parent (e.g. solvers per proxy).

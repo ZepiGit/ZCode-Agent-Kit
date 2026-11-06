@@ -7,9 +7,10 @@
 // (install.log is truncated per setup run; heal.log is capped at 2 x 64 KB;
 // dump.ts is opt-in and stripped from the managed proxy's environment — all
 // three are bounded by code, see the report.)
-import { appendFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
+import { MEMORY, PROCESSES } from "../lib/budgets.mjs";
 
 export async function run(ctx) {
   const session = await startProxySession(ctx);
@@ -52,15 +53,22 @@ export async function run(ctx) {
   const h1 = (await kit.health())?.details ?? {};
   ctx.note("responsesStore", { entriesSent: nB, inputKB: 64, heapBeforeMB: h0.heapUsedMB, heapAfterMB: h1.heapUsedMB, rssBeforeMB: h0.rssMB, rssAfterMB: h1.rssMB, configuredByteBudgetMB: 64 });
   ctx.log(`proxy.log ${bytesPerRequest.toFixed(0)} B/request, ${(whileRunning / 1048576).toFixed(1)} MB while running (rotated: ${whileRunning < beforeMore}); responses store heap ${h0.heapUsedMB} -> ${h1.heapUsedMB} MB, rss ${h0.rssMB} -> ${h1.rssMB} MB`);
+  // The proxy's early output (ticket 34): ≤ 1 MB plus a bounded overshoot,
+  // taken here as one 64 KB write. Absent today, which is within budget.
+  const earlyLog = join(kit.logDir, "proxy.early.log");
+  const earlyBytes = existsSync(earlyLog) ? statSync(earlyLog).size : 0;
+  ctx.note("earlyLog", { exists: existsSync(earlyLog), bytes: earlyBytes });
   await session.stop();
   const heapGrowth = (h1.heapUsedMB ?? 0) - (h0.heapUsedMB ?? 0);
+  const MiB = 1048576;
   return {
     budgets: {
-      procPeaks: { proxy: 250 },
-      orphans: 0,
+      procPeaks: { proxy: MEMORY.S1.peakMB },
+      orphans: PROCESSES.orphans,
       extra: [
-        { name: "proxy.log:bounded-while-running", red: whileRunning > 5 * 1048576 * 1.2, value: Number((whileRunning / 1048576).toFixed(2)), budget: 6, unit: "MB" },
-        { name: "responses-store:heap-at-cap", red: heapGrowth > 96, value: heapGrowth, budget: 96, unit: "MB" },
+        { name: "proxy.log:bounded-while-running", red: whileRunning > MEMORY.S7.proxyLogMB * MiB, value: Number((whileRunning / MiB).toFixed(2)), budget: MEMORY.S7.proxyLogMB, unit: "MB" },
+        { name: "proxy.early.log:bounded", red: earlyBytes > MEMORY.S7.earlyLogMB * MiB + 64 * 1024, value: Number((earlyBytes / MiB).toFixed(2)), budget: MEMORY.S7.earlyLogMB, unit: "MB (+64 KB overshoot)" },
+        { name: "responses-store:heap-at-cap", red: heapGrowth > MEMORY.S7.responsesStoreHeapMB, value: heapGrowth, budget: MEMORY.S7.responsesStoreHeapMB, unit: "MB" },
       ],
     },
   };

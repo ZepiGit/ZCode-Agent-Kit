@@ -110,6 +110,19 @@ test("solver processes: two under one proxy in any sample is red, one under each
   assert.equal(checkNamed(verdict(split, budgets), "perParent:solver").red, false);
 });
 
+test("solver cost per generation: host plus solver RSS above the host's base, inside the window only", () => {
+  // Thread transport today: the solver lives in the host process. Child transport: its own role.
+  const budgets = { windowPeaks: [{ name: "solver:cost-per-generation", roles: ["scenario", "solver"], fromT: 1000, untilT: 3000, baseMB: 80, maxMB: MEMORY.S2.costPerGenerationMB }] };
+  const thread = rowsOf([proc(1, "scenario", 80)], [proc(1, "scenario", 300)], [proc(1, "scenario", 420)], [proc(1, "scenario", 380)], [proc(1, "scenario", 900)]);
+  const t = checkNamed(verdict(thread, budgets), "solver:cost-per-generation");
+  assert.equal(t.value, 340); // 420 − 80; the 900 MB sample is outside the window
+  assert.equal(t.red, true);
+  const child = rowsOf([proc(1, "scenario", 80)], [proc(1, "scenario", 90), proc(2, "solver", 200, { ppid: 1 })], [proc(1, "scenario", 90), proc(2, "solver", 240, { ppid: 1 })], [proc(1, "scenario", 85)]);
+  const c = checkNamed(verdict(child, budgets), "solver:cost-per-generation");
+  assert.equal(c.value, 250);
+  assert.equal(c.red, false);
+});
+
 test("observed process counts: a solver alive after the proxy was SIGKILLed is red", () => {
   const budgets = { observed: [{ name: "solver-after-proxy-sigkill", label: "after-proxy-sigkill", role: "solver", max: PROCESSES.solversAfterProxyKill }] };
   const seen = (n) => [{ label: "after-proxy-sigkill:hung-solve", counts: { solver: n } }, { label: "after-proxy-sigkill:idle-generation", counts: {} }];

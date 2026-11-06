@@ -5,6 +5,9 @@
  * unless a phase says otherwise. Emits one JSON line per second on stdout:
  *   {"type":"sample","solves":n,"rssMB":..,"mainHeapMB":..,"phase":..,"solver":{..}}
  * and {"type":"phase", ...} marks. Measurement only: solver behaviour is unchanged.
+ * Phases (S2_PHASES, default ABCDE): A heavy solves, B retained heap, C hung
+ * solves, D CDN map, E cold start + idle exit; K (alone, S2_KILL=hung|idle)
+ * waits to be SIGKILLed with a live generation.
  */
 import { join } from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,7 +16,7 @@ import { configureCaptchaSolver, getCaptchaSolverStats, requestCaptchaSolverRecy
 import { CaptchaCdnCache } from "../../../zcode-proxy-src/src/proxy/captcha-cdn-cache.js";
 
 const LONG = process.env.S2_PROFILE === "long";
-const PHASES = process.env.S2_PHASES ?? "ABCD";
+const PHASES = process.env.S2_PHASES ?? "ABCDE";
 const BACKEND = join(import.meta.dir, "..", "fixtures", "s2-backend.ts");
 const MB = 1048576;
 let solves = 0;
@@ -103,6 +106,38 @@ for (let i = 0; i < nD; i++) {
 }
 rmSync(dir, { recursive: true, force: true });
 mark("D-end");
+}
+
+if (PHASES.includes("E")) {
+// E. Cold start of a fresh generation, then the idle exit. The host keeps
+//    running for 3 s after the mark so the loop can count solver processes.
+phase = "E-idle-exit";
+requestCaptchaSolverRecycle("s2-cold-start");
+await sleep(1000);
+configureCaptchaSolver({ idleMs: 2000 });
+const t0 = performance.now();
+const coldStartOk = await solve("token:cold-start");
+const coldStartMs = Math.round(performance.now() - t0);
+await sleep(4000);
+mark("E-idle-exited", { coldStartMs, coldStartOk, idleExited: getCaptchaSolverStats().lastRecycleReason === "idle" });
+await sleep(3000);
+configureCaptchaSolver({ idleMs: 10 * 60_000 });
+}
+if (PHASES.includes("K")) {
+// K. The host is SIGKILLed by the loop (as the watchdog does to a stuck
+//    proxy) with a generation alive: S2_KILL=hung parks the solver in a hung
+//    solve, S2_KILL=idle leaves it idle after a solve. Never returns.
+phase = "K-kill";
+if (process.env.S2_KILL === "hung") {
+  configureCaptchaSolver({ deadlineMs: 120_000 });
+  void solve("fat-hang:1");
+  while (getCaptchaSolverStats().generation < 1) await sleep(50);
+  await sleep(1000);
+} else {
+  await solve("token:before-kill");
+}
+mark("K-ready", { killMode: process.env.S2_KILL ?? "idle" });
+await new Promise(() => {});
 }
 
 shutdownCaptchaSolver();

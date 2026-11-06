@@ -22,7 +22,7 @@ setInterval(() => {
 function mark(name: string, extra: Record<string, unknown> = {}) {
   Bun.gc(true);
   const m = process.memoryUsage();
-  emit({ type: "phase", name, progress, rssMB: Math.round(m.rss / MB), heapMB: Math.round(m.heapUsed / MB), ...extra });
+  emit({ type: "phase", name, progress, ms: Math.round(performance.now()), rssMB: Math.round(m.rss / MB), heapMB: Math.round(m.heapUsed / MB), ...extra });
 }
 
 const pane = new LogPane(2000);

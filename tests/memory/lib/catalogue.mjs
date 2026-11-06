@@ -32,6 +32,11 @@ export const JOB = {
 
 export const OS_LEGS = ["linux", "windows"];
 
+/** The OS leg this process runs on (expected-red.json key). */
+export function osLeg(platform = process.platform) {
+  return platform === "win32" ? "windows" : "linux";
+}
+
 export function runKey(scenario, { profile = "short", variant = null } = {}) {
   return `${scenario}/${variant ?? profile}`;
 }

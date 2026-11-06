@@ -6,10 +6,13 @@
 // and previous_response_id chains.
 //
 // Variants (--variant):
+//   burstN   N concurrent ~10.8 MB bodies at once, 3 x N requests (HWM budget:
+//            400 MB at 16, 600 MB at 32, else the 250 MB peak)
 //   bigbody  only concurrent large/image payloads (peak per in-flight bytes)
 //   stalled  only stop-reading-then-disconnect streaming clients
 import net from "node:net";
 import { startProxySession } from "../lib/proxy-session.mjs";
+import { MEMORY, PROCESSES, growthBudget } from "../lib/budgets.mjs";
 
 function prng(seed) {
   return () => {
@@ -47,7 +50,11 @@ export async function run(ctx) {
   const rand = prng(42);
   const burst = Number((ctx.variant ?? "").match(/^burst(\d+)$/)?.[1] ?? 0);
   const heavy = ctx.variant === "bigbody" || burst > 0;
-  const total = burst ? burst * 3 : ctx.variant === "bigbody" ? (ctx.long ? 1200 : 240) : ctx.variant === "stalled" ? (ctx.long ? 20_000 : 3_000) : (ctx.long ? 30_000 : 3_000);
+  // The mixed short profile is 6,000 requests, and its first half is warm-up:
+  // the allocator and the bounded responses store fill over the first ~3,000
+  // requests (the long run plateaus from there on), so a 3,000-request run is
+  // all warm-up and its slope cannot tell warm-up from a leak.
+  const total = burst ? burst * 3 : ctx.variant === "bigbody" ? (ctx.long ? 1200 : 240) : ctx.variant === "stalled" ? (ctx.long ? 20_000 : 3_000) : (ctx.long ? 30_000 : 6_000);
   const concurrency = burst || (ctx.variant === "bigbody" ? 16 : 8);
   const big = imageB64(heavy ? 8 * 1024 : 1024); // 8 MB / 1 MB images
   const largeText = "lorem ipsum dolor sit amet ".repeat(heavy ? 400_000 : 20_000); // ~10.8 MB / ~540 KB
@@ -140,12 +147,17 @@ export async function run(ctx) {
   const health = await kit.health();
   ctx.note("healthAfterIdle", health?.details ?? null);
   await session.stop();
+  const window = { fromT: loadStart, untilT: loadEnd, warmupFraction: ctx.long ? 0.2 : 0.5 };
+  const mixed = !ctx.variant;
   return {
     budgets: {
-      growth: { role: "proxy", axis: "progress", maxPctPer1k: 5, risingWindows: 3, warmupFraction: 0.2, fromT: loadStart, untilT: loadEnd },
-      procPeaks: { proxy: 250 },
-      counts: { proxy: 1 },
-      orphans: 0,
+      // Bursts and big bodies are spikes, judged by their peak; growth and the
+      // steady level belong to the paced runs (steady: the mixed load only).
+      ...(heavy ? {} : { growth: growthBudget("proxy", window) }),
+      ...(mixed ? { steady: { role: "proxy", maxMB: MEMORY.S1.steadyMB, ...window } } : {}),
+      procPeaks: { proxy: MEMORY.S1.burstPeakMB[ctx.variant] ?? MEMORY.S1.peakMB },
+      counts: { proxy: PROCESSES.proxiesPerInstallation },
+      orphans: PROCESSES.orphans,
     },
   };
 }

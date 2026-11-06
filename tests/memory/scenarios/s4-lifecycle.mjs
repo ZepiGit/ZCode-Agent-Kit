@@ -2,6 +2,10 @@
 // simulated update (stop → start, which is what every update path does around
 // its code swap), all through the real manager CLI. After every cycle: is
 // anything still running or listening, what did the cycle leave in logs/?
+// Every crash cycle counts solver processes right after the proxy's SIGKILL
+// (0 allowed), and every sample allows ≤ 1 solver per proxy. With today's
+// coding-plan proxy no solver spawns; the counts become live with the solver
+// process (ticket 27).
 // Then two adversarial checks:
 //   - Ctrl-C (SIGINT) of a `proxy start` while it holds the start lock;
 //   - a respawn storm: the proxy's own restart hook asked 6 times in a row
@@ -12,6 +16,7 @@ import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan, portsOf } from "../lib/sampler.mjs";
+import { PROCESSES } from "../lib/budgets.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -37,6 +42,7 @@ export async function run(ctx) {
       const pid = kit.pidRecord()?.pid;
       if (pid && proxies().some((p) => p.pid === pid)) process.kill(pid, "SIGKILL");
       await sleep(300);
+      ctx.observe(`after-proxy-sigkill:cycle-${i}`); // no solver may outlive its proxy
       await step(["start"]); // the next harness session after a crash
       await step(["stop"]);
     } else {
@@ -136,16 +142,18 @@ export async function run(ctx) {
   const respawnsDone = storm.filter((s) => s.code === 0).length;
   return {
     budgets: {
-      counts: { proxy: 1 },
-      orphans: 0,
+      counts: { proxy: PROCESSES.proxiesPerInstallation },
+      perParent: [{ role: "solver", max: PROCESSES.solversPerProxy }],
+      observed: [{ name: "solver:after-proxy-sigkill", label: "after-proxy-sigkill", role: "solver", max: PROCESSES.solversAfterProxyKill }],
+      orphans: PROCESSES.orphans,
       extra: [
         { name: "proxy-left-after-stop", red: leftovers > 0, value: leftovers, budget: 0, unit: "cycles" },
         { name: "failed-lifecycle-steps", red: cycles.some((c) => c.failed.length), value: cycles.reduce((a, c) => a + c.failed.length, 0), budget: 0, unit: "steps" },
-        { name: "stale-lock-after-ctrl-c", red: staleAfterSigint > 0, value: staleAfterSigint, budget: 0, unit: `of ${sigint.length}` },
+        { name: "stale-lock-after-ctrl-c", red: staleAfterSigint > PROCESSES.staleLocks, value: staleAfterSigint, budget: PROCESSES.staleLocks, unit: `of ${sigint.length}` },
         { name: "unstoppable-proxy-after-ctrl-c", red: unstoppable > 0, value: unstoppable, budget: 0, unit: `of ${sigint.length}` },
         { name: "respawn-recovers-despite-stale-lock", red: !staleRespawn.healthy, value: staleRespawn.healthy ? 1 : 0, budget: 1, unit: "proxy up" },
-        { name: "respawns-in-window", red: respawnsDone > 3, value: respawnsDone, budget: 3, unit: "restarts/15min" },
-        { name: "log-dir-files", red: (cycles.at(-1)?.logFiles ?? 0) > 8, value: cycles.at(-1)?.logFiles ?? 0, budget: 8, unit: "files" },
+        { name: "respawns-in-window", red: respawnsDone > PROCESSES.respawnsPer15Min, value: respawnsDone, budget: PROCESSES.respawnsPer15Min, unit: "restarts/15min" },
+        { name: "log-dir-files", red: (cycles.at(-1)?.logFiles ?? 0) > PROCESSES.logDirFiles, value: cycles.at(-1)?.logFiles ?? 0, budget: PROCESSES.logDirFiles, unit: "files" },
       ],
     },
   };

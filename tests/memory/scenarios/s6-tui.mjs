@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { bunPath, KIT_ROOT } from "../lib/isolated-kit.mjs";
+import { MEMORY, PROCESSES } from "../lib/budgets.mjs";
 
 export async function run(ctx) {
   const marks = [];
@@ -31,16 +32,20 @@ export async function run(ctx) {
   const resizeHeap = (by["C-start"]?.heapMB ?? 0) - (by["B-start"]?.heapMB ?? 0);
   const longLineHeap = (by["end"]?.heapMB ?? 0) - (by["C-start"]?.heapMB ?? 0);
   ctx.note("marks", marks.map(({ name, rssMB, heapMB, lines }) => ({ name, rssMB, heapMB, ...(lines ? { lines } : {}) })));
-  ctx.note("derived", { linesHeapMB: linesHeap, resizeHeapMB: resizeHeap, longLineHeapMB: longLineHeap });
+  // Frame time is recorded, not gated: the §18 "no frame-time regression from
+  // the width core" compares this number before and after ticket 05.
+  const resizeFrames = (by["C-start"]?.progress ?? 0) - (by["B-start"]?.progress ?? 0);
+  const frameMs = resizeFrames ? Number((((by["C-start"]?.ms ?? 0) - (by["B-start"]?.ms ?? 0)) / resizeFrames).toFixed(3)) : null;
+  ctx.note("derived", { linesHeapMB: linesHeap, resizeHeapMB: resizeHeap, longLineHeapMB: longLineHeap, resizeFrameMs: frameMs });
   ctx.log(`heap delta: 100k lines ${linesHeap} MB, resize storm ${resizeHeap} MB, long lines ${longLineHeap} MB (pane ${by.end?.lines} lines)`);
   return {
     budgets: {
-      orphans: 0,
+      orphans: PROCESSES.orphans,
       extra: [
-        { name: "tui:log-pane-heap", red: linesHeap > 16, value: linesHeap, budget: 16, unit: "MB" },
-        { name: "tui:resize-storm-heap", red: resizeHeap > 8, value: resizeHeap, budget: 8, unit: "MB" },
-        // Proposed: the pane bounds bytes, not only lines (2,000 lines x 64 KB is the current ceiling).
-        { name: "tui:long-line-heap", red: longLineHeap > 32, value: longLineHeap, budget: 32, unit: "MB" },
+        { name: "tui:log-pane-heap", red: linesHeap > MEMORY.S6.linesHeapMB, value: linesHeap, budget: MEMORY.S6.linesHeapMB, unit: "MB" },
+        { name: "tui:resize-storm-heap", red: resizeHeap > MEMORY.S6.resizeHeapMB, value: resizeHeap, budget: MEMORY.S6.resizeHeapMB, unit: "MB" },
+        // §18: the pane bounds bytes, not only lines (2,000 lines x 64 KB is today's ceiling).
+        { name: "tui:long-line-heap", red: longLineHeap > MEMORY.S6.longLineHeapMB, value: longLineHeap, budget: MEMORY.S6.longLineHeapMB, unit: "MB" },
       ],
     },
   };

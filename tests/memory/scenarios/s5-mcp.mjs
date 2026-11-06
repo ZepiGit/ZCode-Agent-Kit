@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan } from "../lib/sampler.mjs";
+import { MEMORY, PROCESSES, growthBudget } from "../lib/budgets.mjs";
 
 function dirBytes(dir) {
   let total = 0, files = 0;
@@ -54,12 +55,12 @@ export async function run(ctx) {
   ctx.log(`bridge rss: empty ${emptyRss} MB, after ${n} tasks ${afterRss} MB, reboot with history ${rebootRss} MB, data ${(disk.total / 1048576).toFixed(1)} MB in ${disk.files} files`);
   return {
     budgets: {
-      growth: { role: "mcp-bridge", axis: "progress", maxPctPer1k: 5, risingWindows: 3, fromT: loadStart, untilT: loadEnd },
-      procPeaks: { "mcp-bridge": 150 },
-      orphans: 0,
+      growth: growthBudget("mcp-bridge", { fromT: loadStart, untilT: loadEnd }),
+      procPeaks: { "mcp-bridge": MEMORY.S5.procPeakMB },
+      orphans: PROCESSES.orphans,
       extra: [
-        { name: "bridge:reboot-cost-of-history", red: rebootRss - emptyRss > 20, value: rebootRss - emptyRss, budget: 20, unit: "MB" },
-        { name: "bridge:task-failures", red: failures > 0, value: failures, budget: 0, unit: "tasks" },
+        { name: "bridge:reboot-cost-of-history", red: rebootRss - emptyRss > MEMORY.S5.rebootCostMB, value: rebootRss - emptyRss, budget: MEMORY.S5.rebootCostMB, unit: "MB" },
+        { name: "bridge:task-failures", red: failures > MEMORY.S5.taskFailures, value: failures, budget: MEMORY.S5.taskFailures, unit: "tasks" },
       ],
     },
   };

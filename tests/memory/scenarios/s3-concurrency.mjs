@@ -6,6 +6,10 @@
 // The guarantee under test is its PURPOSE, not the happy path: every launch
 // ends with a working proxy, there is never more than one proxy, and nothing
 // the race leaves behind (locks, pids, processes) blocks the next session.
+// This is the 10-launch process-count test (spec §18 PROCESSES): exactly 1
+// proxy, 0 failed launches incl. a killed holder, 0 orphans after stop. The
+// footprint verdict has two parts: (a) summed kit RSS at every sample ≤ the
+// total, (b) every kit process's own peak ≤ its role target (budgets.mjs).
 //
 // Rounds (each from a stopped state):
 //   race-5, race-10      mixed launches started at once
@@ -21,8 +25,14 @@ import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan, portsOf } from "../lib/sampler.mjs";
+import { PROCESSES, s3Budgets } from "../lib/budgets.mjs";
+import { osLeg } from "../lib/catalogue.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Preflights live about a second: sample 4 times a second so each one's own
+// peak (VmHWM, read while it is alive) reaches the per-role verdict.
+export const sampleIntervalMs = 250;
 
 export async function run(ctx) {
   const session = await startProxySession(ctx, { startProxy: false });
@@ -164,18 +174,20 @@ export async function run(ctx) {
 
   const worst = (k) => Math.max(0, ...rounds.map((r) => (Array.isArray(r[k]) ? r[k].length : r[k] ?? 0)));
   const failed = rounds.reduce((a, r) => a + r.failedLaunches.length, 0);
+  // Exactly one proxy: every round ends with one proxy, the one proxy.pid names, on the port.
+  const notExactlyOne = rounds.filter((r) => r.proxiesAfter !== PROCESSES.proxiesPerInstallation || !r.pidFileMatchesListener);
   return {
     settleMs: 3000,
     budgets: {
-      counts: { proxy: 1 },
-      peaks: { kit: 600 },
-      orphans: 0,
+      // Part (a) summed kit RSS ≤ the total, part (b) every process within its role target.
+      ...s3Budgets(osLeg()),
       extra: [
-        { name: "simultaneous-proxies", red: worst("maxSimultaneousProxies") > 1, value: worst("maxSimultaneousProxies"), budget: 1, unit: "procs" },
+        { name: "simultaneous-proxies", red: worst("maxSimultaneousProxies") > PROCESSES.proxiesPerInstallation, value: worst("maxSimultaneousProxies"), budget: PROCESSES.proxiesPerInstallation, unit: "procs" },
+        { name: "exactly-one-proxy-after-round", red: notExactlyOne.length > 0, value: notExactlyOne.length, budget: 0, unit: "rounds without exactly 1", detail: notExactlyOne.map((r) => `${r.name}: ${r.proxiesAfter} proxies, pid file ${r.pidFileMatchesListener ? "matches" : "does not match"}`) },
         // A hung-own recovery legitimately replaces the proxy once.
         { name: "proxy-generations/round", red: rounds.some((r) => r.distinctProxyProcesses > (r.name.startsWith("hung") ? 2 : 1)), value: worst("distinctProxyProcesses"), budget: 1, unit: "procs" },
-        { name: "failed-launches", red: failed > 0, value: failed, budget: 0, unit: "launches" },
-        { name: "stale-lock-after-round", red: rounds.some((r) => r.staleLockLeft), value: rounds.filter((r) => r.staleLockLeft).length, budget: 0, unit: "rounds" },
+        { name: "failed-launches", red: failed > PROCESSES.failedLaunches, value: failed, budget: PROCESSES.failedLaunches, unit: "launches" },
+        { name: "stale-lock-after-round", red: rounds.filter((r) => r.staleLockLeft).length > PROCESSES.staleLocks, value: rounds.filter((r) => r.staleLockLeft).length, budget: PROCESSES.staleLocks, unit: "rounds" },
       ],
     },
   };
