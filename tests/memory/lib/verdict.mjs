@@ -20,7 +20,8 @@
 
 const MB = 1024;
 // The kit's own footprint: everything but the test fixtures around it.
-const NOT_KIT = new Set(["mock-upstream", "scenario", "fake-harness"]);
+// "tooling": the loop's own netstat/PowerShell on Windows (lib/win-sampler.mjs).
+const NOT_KIT = new Set(["mock-upstream", "scenario", "fake-harness", "tooling"]);
 const inRole = (p, role) => role === "*" || (role === "kit" ? !NOT_KIT.has(p.role) : p.role === role);
 
 function median(values) {

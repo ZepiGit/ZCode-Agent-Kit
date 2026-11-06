@@ -82,6 +82,8 @@ export function splitCommandLine(line) {
   return out;
 }
 
+const TOOLING = /^(?:powershell|pwsh|netstat|conhost|where)\.exe$/i;
+
 // FILETIME values as decimal strings: compare as BigInt (they exceed 2^53).
 const time = (s) => { try { return BigInt(s || "0"); } catch { return 0n; } };
 
@@ -135,12 +137,22 @@ export function createKitTracker({ rootPid, token }) {
           if (carriesToken(p) || (pc !== null && time(p.created) >= time(pc))) { members.set(p.pid, p); grew = true; }
         }
       }
+      // The loop's own tooling: system tools the loop root starts itself
+      // (netstat for ports, PowerShell for command lines and suspend) and their
+      // descendants (conhost). Visible as role "tooling", never kit footprint.
+      // The kit's own PowerShell (children of kit processes) stays counted.
+      const tooling = new Set();
+      for (const p of members.values()) if (p.ppid === rootPid && TOOLING.test(p.name ?? "")) tooling.add(p.pid);
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const p of members.values()) if (!tooling.has(p.pid) && tooling.has(p.ppid)) { tooling.add(p.pid); grew = true; }
+      }
       const out = [];
       for (const p of members.values()) {
         known.set(p.pid, p.created);
         const argv = p.commandLine ? splitCommandLine(p.commandLine) : [p.executablePath ?? p.name ?? ""];
         out.push({
-          pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: roleOf(argv), comm: p.name,
+          pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: tooling.has(p.pid) ? "tooling" : roleOf(argv), comm: p.name,
           rssKb: p.rssKb, hwmKb: p.hwmKb, commitKb: p.commitKb, wsPeakKb: p.wsPeakKb, threads: p.threads, fds: p.fds,
           cmd: argv.slice(0, 4).map((a) => a.split(/[\\/]/).slice(-2).join("/")).join(" ").slice(0, 120),
         });
@@ -208,8 +220,9 @@ export function pollerScript({ intervalMs = 1000, parentPid = 0, once = false, u
   const props = CIM_PROPS.map((p) => `'${p}'`).join(",");
   const select = CIM_PROPS.map((p) => (p === "CreationDate" ? "@{n='CreationDate';e={ if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 } }}" : `'${p}'`)).join(",");
   return [
-    "$ErrorActionPreference = 'Stop'",
+    // First, before anything loads a module: progress would arrive as CLIXML on a redirected stream.
     "$ProgressPreference = 'SilentlyContinue'",
+    "$ErrorActionPreference = 'Stop'",
     // Throws on some hosts without a console; the frames are ASCII apart from command lines.
     "try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}",
     `$interval = ${Math.max(100, Math.round(intervalMs))}; $parentPid = ${Number(parentPid) | 0}; $once = $${once ? "true" : "false"}; $units = $${units ? "true" : "false"}`,
@@ -242,7 +255,7 @@ export function pollerScript({ intervalMs = 1000, parentPid = 0, once = false, u
 export function powershellPoller(opts) {
   return {
     command: "powershell.exe",
-    args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(pollerScript(opts), "utf16le").toString("base64")],
+    args: ["-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(pollerScript(opts), "utf16le").toString("base64")],
   };
 }
 
@@ -252,11 +265,11 @@ export function createPollParser(onFrame) {
   return (chunk) => {
     buf += chunk;
     for (;;) {
-      if (!buf.startsWith("@@")) {
-        const at = buf.indexOf("\n@@");
-        if (at < 0) { buf = buf.length > 1 << 20 ? "" : buf; return; }
-        buf = buf.slice(at + 1); // noise before a frame (a stray warning line)
-      }
+      // Noise before a frame (a stray warning, a CLIXML progress record with no
+      // newline before the frame): skip to the next frame head wherever it starts.
+      const at = buf.search(/@@(?:UNITS|POLL|ERROR) /);
+      if (at < 0) { buf = buf.length > 1 << 20 ? "" : buf.slice(-64); return; }
+      if (at > 0) buf = buf.slice(at);
       const nl = buf.indexOf("\n");
       if (nl < 0) return;
       const head = buf.slice(0, nl).replace(/\r$/, "").split(" ");
@@ -295,10 +308,10 @@ export function startPoller({ intervalMs = 1000, spawnSpec = powershellPoller, o
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   const reap = () => { try { child.kill(); } catch {} };
   process.once("exit", reap);
-  // Like the Linux sampler's timer: a forgotten poller never keeps the loop alive (exit reaps it).
-  child.unref();
-  child.stdout.unref?.();
-  child.stderr.unref?.();
+  // The poller stays referenced: on Windows it is the only thing the run waits
+  // on until the units self-test answers. An unref'd poller let run.mjs's event
+  // loop empty and exit 0 before any scenario ran (CI run 42221794531). Callers
+  // stop it (run.mjs on every path, tests in `finally`); exit reaps it.
   const ov = { pid: null, polls: 0, pollMs: [], peakCommitKb: 0, peakRssKb: 0 };
   let passed = false, settle;
   const ready = new Promise((resolve, reject) => { settle = { resolve, reject }; });

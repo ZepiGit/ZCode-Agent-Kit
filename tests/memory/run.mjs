@@ -137,4 +137,10 @@ async function main() {
   return v.red ? 1 : 0;
 }
 
-main().then((code) => { process.exitCode = code; }, (err) => { console.error(err); process.exitCode = 2; });
+// Until main() settles the run is a harness failure: if the event loop
+// empties first (nothing left to wait on, CI run 42221794531), Node exits with
+// this code instead of 0.
+process.exitCode = 2;
+let settled = false;
+process.on("beforeExit", () => { if (!settled) console.error("memory loop: the event loop emptied before the scenario finished — harness failure"); });
+main().then((code) => { settled = true; process.exitCode = code; }, (err) => { settled = true; console.error(err); process.exitCode = 2; });

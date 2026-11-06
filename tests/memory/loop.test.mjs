@@ -11,6 +11,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
+import { runEvidence } from "./lib/completeness.mjs";
 
 // The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
 const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
@@ -132,7 +133,7 @@ test("on Windows the job caps every run with a Job Object (job memory + kill-on-
   assert.deepEqual(chooseCap("auto", { platform: "win32" }), { cap: "jobobject" });
   const c = commandFor("jobobject", "3G", 1200, ["S1", "--profile", "short"], { node: "C:\\node\\node.exe", runScript: "D:\\kit\\tests\\memory\\run.mjs" });
   assert.equal(c.argv[0], "powershell.exe");
-  assert.deepEqual(c.argv.slice(1, 5), ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass"]);
+  assert.deepEqual(c.argv.slice(1, 7), ["-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-ExecutionPolicy", "Bypass"]);
   assert.equal(c.timeoutMs, 1230 * 1000, "timeout plus the 30 s kill-after the Linux leg gives `timeout`");
   const script = Buffer.from(c.argv.at(-1), "base64").toString("utf16le");
   assert.match(script, /\b3221225472\b/, "3G in bytes");
@@ -249,4 +250,52 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
   const gone = await waitFor(() => !alive(grandchild), 10_000);
   if (!gone) { try { process.kill(grandchild, "SIGKILL"); } catch {} }
   assert.ok(gone, "the grandchild died with the job");
+});
+
+// ── A run that never ran its scenario is a harness failure, never GREEN ──────
+// CI run 42221794531 (windows): every run exited 0 after writing the CSV
+// header, no summary, no sample, and the job called all 13 runs GREEN.
+const FAKE_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-run.mjs");
+function fakeJob(mode, only = "S1/short") {
+  const home = mkdtempSync(join(tmpdir(), "memloop-fakejob-"));
+  const r = runJob(["--os", "linux", "--only", only, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: mode });
+  let report = null;
+  try { report = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8")); } catch {}
+  rmSync(home, { recursive: true, force: true });
+  return { r, report, row: report?.rows?.[0], result: report?.results?.[0] };
+}
+
+test("job: a run that exits 0 without a summary is a harness failure, not GREEN", () => {
+  const { r, row, result } = fakeJob("exit0-nothing");
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /no summary\.json/);
+  assert.equal(r.status, 1, "the ratchet fails on a harness failure");
+});
+
+test("job: a GREEN summary whose sampler saw no process of the scenario is a harness failure", () => {
+  const { r, row, result } = fakeJob("green-empty");
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /samples/);
+  assert.match(result.error, /role proxy never seen/);
+  assert.match(result.error, /below the S1 floor/);
+  assert.equal(r.status, 1);
+});
+
+test("job: a run with real evidence keeps its verdict", () => {
+  const { r, row } = fakeJob("green-complete");
+  assert.equal(row?.outcome, "GREEN", r.stdout + r.stderr);
+  assert.equal(r.status, 0);
+});
+
+test("run evidence: outcome and exit code must agree, and on Windows commit and a passed units self-test are required", () => {
+  const ok = { key: "S7/short", platform: "linux", outcome: "RED", metric: "rss", durationS: 90, samples: 90, summary: { proxy: { maxCount: 1 } }, notes: { sampler: {} } };
+  assert.deepEqual(runEvidence(ok, { key: "S7/short", exitCode: 1 }), { ok: true, problems: [] });
+  assert.match(runEvidence(ok, { key: "S7/short", exitCode: 0 }).problems.join(), /outcome RED but exit 0/);
+  assert.match(runEvidence(ok, { key: "S1/short", exitCode: 1 }).problems.join(), /summary is for S7\/short/);
+  const win = { ...ok, platform: "win32", metric: "rss" };
+  assert.match(runEvidence(win, { key: "S7/short", exitCode: 1 }).problems.join(), /no commit_kb/);
+  const winCommit = { ...win, metric: "commit", notes: { sampler: { units: { ok: false } } } };
+  assert.match(runEvidence(winCommit, { key: "S7/short", exitCode: 1 }).problems.join(), /units self-test did not pass/);
+  assert.equal(runEvidence({ ...winCommit, notes: { sampler: { units: { ok: true } } } }, { key: "S7/short", exitCode: 1 }).ok, true);
+  assert.equal(runEvidence(ok, { key: "S7/short", exitCode: 2 }).ok, true, "a harness failure needs no evidence: it is already a failure");
 });

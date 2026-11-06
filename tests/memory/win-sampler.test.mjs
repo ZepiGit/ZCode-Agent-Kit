@@ -6,13 +6,17 @@
 // loop.test.mjs (they skip elsewhere).
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createKitTracker, parseCimCsv, parseGetProcessCsv, unitsSelfTest } from "./lib/win-sampler.mjs";
-import { parseSamplesCsv, scan, startSampler } from "./lib/sampler.mjs";
+import { createKitTracker, createPollParser, parseCimCsv, parseGetProcessCsv, powershellPoller, unitsSelfTest } from "./lib/win-sampler.mjs";
+import { commandFor, parseJobReport } from "./lib/caps.mjs";
+import { suspendScript } from "./lib/win-process.mjs";
+import { parseSamplesCsv, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
+import { verdict } from "./lib/verdict.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32");
 const fixture = (name) => readFileSync(join(FIXTURES, name), "utf8");
@@ -53,6 +57,23 @@ test("a process whose parent exited is still found through the parent seen in an
   assert.ok(pids.includes(2600), "the orphaned preflight is found");
   assert.ok(!pids.includes(2700), "a process created before its alleged parent is not the parent's child");
   assert.equal(later.find((p) => p.pid === 2600).role, "preflight");
+});
+
+test("the loop's own tooling (netstat, PowerShell started by the loop root, their conhosts) is visible but never kit footprint; the kit's own PowerShell is", () => {
+  const base = parseCimCsv(fixture("cim-poll.csv"));
+  const like = (pid, ppid, name, commandLine, created) => ({ ...base.find((p) => p.pid === 3000), pid, ppid, name, executablePath: `C:\\Windows\\System32\\${name}`, commandLine, created, commitKb: 60000, rssKb: 70000 });
+  const extra = [
+    like(2800, 2000, "NETSTAT.EXE", "netstat -ano -p TCP", "134070000180000000"),
+    like(2810, 2000, "powershell.exe", "powershell -NoProfile -NonInteractive -Command Get-CimInstance Win32_Process", "134070000180000000"),
+    like(2811, 2810, "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0xffffffff -ForceV1", "134070000180100000"),
+    like(2820, 2300, "powershell.exe", "powershell -NoProfile -NonInteractive -Command Get-CimInstance Win32_Process -Filter ProcessId=2400", "134070000180000000"),
+  ];
+  const kit = createKitTracker(RUN).select([...base, ...extra], { selfPid: 2200 });
+  const role = (pid) => kit.find((p) => p.pid === pid)?.role;
+  assert.deepEqual([role(2800), role(2810), role(2811), role(2820)], ["tooling", "tooling", "tooling", "other"]);
+  // kit (working set, KB) = manager 2300 45056 + proxy 2400 122880 + orphan 2500 20480 + the manager's PowerShell 2820 70000 = 258416 KB.
+  const v = verdict([{ t: 0, progress: 0, procs: kit }], { peaks: { kit: 1000 } });
+  assert.equal(v.checks.find((c) => c.name === "peak:kit").value, 252.4);
 });
 
 test("the units self-test passes when commit_kb matches Get-Process PrivateMemorySize64", () => {
@@ -98,6 +119,41 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
   } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
+// CI run 42221794531: every windows run wrote the CSV header and exited 0 at
+// once — the process waited only on the poller's answer, and an unref'd
+// poller let the event loop empty first. The sampler must hold its process.
+test("the Windows sampler keeps its process alive until the poller answers (nothing else holds the loop)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-alive-"));
+  try {
+    const script = `import { startSampler } from ${JSON.stringify(new URL("./lib/sampler.mjs", import.meta.url).href)};
+const s = startSampler({ marker: "ZCODE_MEMLOOP_RUN=${RUN.token}", csvPath: ${JSON.stringify(join(dir, "samples.csv"))}, intervalMs: 100,
+  windows: { rootPid: ${RUN.rootPid}, alive: () => true, spawn: (o) => ({ command: process.execPath, args: [${JSON.stringify(join(FIXTURES, "fake-poller.mjs"))}, JSON.stringify({ ...o, selfPid: 2200, delayMs: 300 })] }) } });
+const r = await s.ready;
+console.log("READY", r.units.ok);
+await new Promise((ok) => setTimeout(ok, 350));
+await s.stop();
+console.log("ROWS", s.rows.length);`;
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", timeout: 30_000 });
+    assert.match(r.stdout, /READY true/, `exit ${r.status}: ${r.stderr}`);
+    assert.match(r.stdout, /ROWS [1-9]/);
+    assert.equal(r.status, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("after the sampler stops, survivors come from a fresh poll and never include the loop's own tooling", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-surv-"));
+  const marker = `ZCODE_MEMLOOP_RUN=${RUN.token}`;
+  let sampler;
+  try {
+    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ cim: "cim-poll-tooling.csv" }), alive: () => true } });
+    await sampler.ready;
+    await sleep(250);
+    await sampler.stop();
+    const left = survivors(marker);
+    assert.deepEqual(left.map((s) => s.pid).sort((a, b) => a - b), [2100, 2300, 2400, 2500]);
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("a units self-test failure stops the Windows sampler before it samples anything", async () => {
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-"));
   let sampler;
@@ -125,4 +181,38 @@ test("the units self-test refuses to pass on too few comparable processes", () =
   const r = unitsSelfTest(parseCimCsv(fixture("cim-poll.csv")).slice(0, 3), parseGetProcessCsv(fixture("get-process.csv")));
   assert.equal(r.ok, false);
   assert.match(r.reason, /comparable/);
+});
+
+// CI run 42221794531: PowerShell 5.1 under -EncodedCommand with redirected
+// streams prints its progress ("Preparing modules for first use") as CLIXML.
+const CLIXML = '#< CLIXML\r\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04"><Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N="SourceId">1</I64><PR N="Record"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj></Objs>';
+
+test("poller frames glued to a CLIXML progress record are still read, units first", () => {
+  const frames = [];
+  const feed = createPollParser((f) => frames.push(f));
+  const cim = fixture("cim-poll.csv").trimEnd();
+  feed(`${CLIXML}@@UNITS 2200\n${cim}\n@@GETPROCESS\n${fixture("get-process.csv").trimEnd()}\n@@END\n`);
+  feed(`${CLIXML}\r\n@@POLL 2200 210\n${cim}\n@@END\n`);
+  assert.deepEqual(frames.map((f) => f.type), ["units", "poll"]);
+  assert.equal(frames[0].table.length, 12);
+  assert.equal(frames[0].getProcess.length, 12);
+  assert.equal(frames[1].pollMs, 210);
+});
+
+test("every PowerShell we start silences progress before it loads a module, and asks for text output", () => {
+  const scripts = {
+    poller: { argv: powershellPoller({ intervalMs: 1000 }).args },
+    jobObject: { argv: commandFor("jobobject", "1G", 60, ["x"], { node: "node.exe", runScript: "run.mjs" }).argv.slice(1) },
+  };
+  for (const [name, { argv }] of Object.entries(scripts)) {
+    assert.ok(argv.includes("-OutputFormat") && argv[argv.indexOf("-OutputFormat") + 1] === "Text", `${name}: -OutputFormat Text`);
+    const script = Buffer.from(argv.at(-1), "base64").toString("utf16le");
+    const first = script.split("\n").find((l) => l.trim() && !l.trim().startsWith("#"));
+    assert.match(first, /^\$ProgressPreference = 'SilentlyContinue'/, `${name}: first statement`);
+  }
+  assert.match(suspendScript(4242, true).split("\n")[0], /^\$ProgressPreference = 'SilentlyContinue'/, "suspend: first statement");
+});
+
+test("the Job Object report is read from the real CI run log despite the CLIXML around it", () => {
+  assert.deepEqual(parseJobReport(fixture("ci-42221794531-run-log.txt")), { applied: true, limitBytes: 3221225472, peakBytes: 103886848 });
 });

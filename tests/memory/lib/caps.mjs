@@ -96,6 +96,8 @@ public static class MemloopJob {
 /** The Job Object wrapper (Windows PowerShell 5.1). Exit: the run's own code; 2 when the cap could not be applied. */
 export function jobObjectScript({ limitBytes, argv }) {
   return [
+    // First, before Add-Type loads a module: its progress arrived as CLIXML on stderr (CI run 42221794531).
+    "$ProgressPreference = 'SilentlyContinue'",
     "$ErrorActionPreference = 'Stop'",
     "try {",
     `Add-Type -TypeDefinition @'\n${JOB_CS}\n'@`,
@@ -123,7 +125,7 @@ export function commandFor(cap, size, timeoutS, args, { node = process.execPath,
   const run = [node, runScript, ...args];
   if (cap === "jobobject") {
     const script = jobObjectScript({ limitBytes: bytes(size), argv: run });
-    return { argv: ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], timeoutMs: (timeoutS + KILL_AFTER_S) * 1000 };
+    return { argv: ["powershell.exe", "-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], timeoutMs: (timeoutS + KILL_AFTER_S) * 1000 };
   }
   const inner = ["timeout", `--kill-after=${KILL_AFTER_S}`, String(timeoutS), ...run];
   if (cap === "systemd") return { argv: ["systemd-run", "--user", "--scope", "--quiet", "-p", `MemoryMax=${size}`, "-p", "MemorySwapMax=0", "--", ...inner], timeoutMs: null };
