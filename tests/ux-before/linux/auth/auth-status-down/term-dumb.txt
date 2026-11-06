@@ -1,0 +1,4 @@
+{
+  "logged_in": false,
+  "error": "fetch failed"
+}

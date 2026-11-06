@@ -21,7 +21,8 @@
     "memloop:job": "node tests/memory/job.mjs",
     "setup": "node cli/zcode-kit.mjs setup",
     "kit": "node cli/zcode-kit.mjs",
-    "zcode-kit": "node cli/zcode-kit.mjs"
+    "zcode-kit": "node cli/zcode-kit.mjs",
+    "test:ux-before": "node --test tests/ux-before-equivalence.test.mjs"
   },
   "repository": {
     "type": "git",
