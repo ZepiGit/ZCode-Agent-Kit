@@ -18,16 +18,19 @@ export const PROFILES = ["short", "long"];
 
 /**
  * The runs of each `memory-budget` leg, in order. S2/gc is a diagnostic
- * variant (phase A only, with forced GC) and stays local. The windows leg is
- * added with the Windows sampler (ticket 02).
+ * variant (phase A only, with forced GC) and stays local. The windows leg
+ * (ticket 02, spec §12) runs S1, S2 (offline fixture backend), S3, S4, S5 and
+ * S7; S6 stays ubuntu-only.
  */
+const LINUX = [
+  "S1/short", "S1/burst1", "S1/burst4", "S1/burst16", "S1/burst32", "S1/bigbody", "S1/stalled",
+  "S2/short",
+  "S3/short", "S3/hung",
+  "S4/short", "S5/short", "S6/short", "S7/short",
+];
 export const JOB = {
-  linux: [
-    "S1/short", "S1/burst1", "S1/burst4", "S1/burst16", "S1/burst32", "S1/bigbody", "S1/stalled",
-    "S2/short",
-    "S3/short", "S3/hung",
-    "S4/short", "S5/short", "S6/short", "S7/short",
-  ],
+  linux: LINUX,
+  windows: LINUX.filter((key) => !key.startsWith("S6/")),
 };
 
 export const OS_LEGS = ["linux", "windows"];

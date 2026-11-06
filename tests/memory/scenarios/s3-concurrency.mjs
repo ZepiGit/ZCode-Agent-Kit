@@ -21,14 +21,19 @@
 //                        recovery; --variant hung also runs it once with the
 //                        stale lock a killed holder leaves behind
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan, portsOf } from "../lib/sampler.mjs";
 import { PROCESSES, s3Budgets } from "../lib/budgets.mjs";
 import { osLeg } from "../lib/catalogue.mjs";
+import { resumeProcess, suspendProcess } from "../lib/win-process.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// SIGSTOP/SIGCONT; Windows has no stop signal: NtSuspendProcess/NtResumeProcess.
+const freeze = (pid) => (process.platform === "win32" ? suspendProcess(pid) : process.kill(pid, "SIGSTOP"));
+const thaw = (pid) => (process.platform === "win32" ? resumeProcess(pid) : process.kill(pid, "SIGCONT"));
 
 // Preflights live about a second: sample 4 times a second so each one's own
 // peak (VmHWM, read while it is alive) reaches the per-role verdict.
@@ -40,9 +45,18 @@ export async function run(ctx) {
   // Fake harness binary on PATH (opencode needs no generated config).
   const bin = join(kit.dir, "fake-bin");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "opencode"), `#!/bin/sh\nexec "${process.execPath}" "${join(KIT_ROOT, "tests", "memory", "fixtures", "fake-session.mjs")}"\n`);
-  chmodSync(join(bin, "opencode"), 0o755);
-  kit.env.PATH = `${bin}:${kit.env.PATH}`;
+  const fakeSession = join(KIT_ROOT, "tests", "memory", "fixtures", "fake-session.mjs");
+  if (process.platform === "win32") {
+    // An npm-style shim, the only .cmd form the kit runs (lib/process.mjs unwrapShim).
+    writeFileSync(join(bin, "opencode-session.mjs"), `await import(${JSON.stringify(pathToFileURL(fakeSession).href)});\n`);
+    writeFileSync(join(bin, "opencode.cmd"), `"${process.execPath}" "%~dp0\\opencode-session.mjs" %*\r\n`);
+  } else {
+    writeFileSync(join(bin, "opencode"), `#!/bin/sh\nexec "${process.execPath}" "${fakeSession}"\n`);
+    chmodSync(join(bin, "opencode"), 0o755);
+  }
+  // Windows env blocks carry `Path`: prepend to whichever spelling is there.
+  const pathKey = Object.keys(kit.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  kit.env[pathKey] = `${bin}${delimiter}${kit.env[pathKey] ?? ""}`;
   kit.env.S3_HOLD_MS = ctx.long ? "15000" : "8000";
 
   const lockFile = join(kit.logDir, "manager.lock");
@@ -106,27 +120,31 @@ export async function run(ctx) {
     const pid = kit.pidRecord()?.pid;
     if (start.code !== 0 || !pid) return ctx.note(`${name}.skipped`, start.code);
     await sleep(65_000); // past the manager's 60 s startup grace
-    process.kill(pid, "SIGSTOP"); // our own proxy, frozen: /health stops answering
+    freeze(pid); // our own proxy, frozen: /health stops answering
     try { await round(name, 10, { kind: "mixed" }); }
-    finally { try { process.kill(pid, "SIGCONT"); } catch {} }
+    finally { try { thaw(pid); } catch {} }
   };
   const killHolder = async () => {
     await round("kill-holder-10", 10, {
       kind: "preflight",
       adversary: async () => {
+        let notOurs = null;
         for (let i = 0; i < 200; i++) {
           try {
             const holder = JSON.parse(readFileSync(lockFile, "utf8"));
             if (Number.isInteger(holder.pid)) {
               // Only processes of this run carry the marker: never signal anything else.
-              if (!scan(ctx.marker).some((p) => p.pid === holder.pid)) return { killed: null, reason: "holder not ours" };
-              process.kill(holder.pid, "SIGKILL");
-              return { killed: holder.pid };
+              // (Windows sees a new process with the next poll, so keep looking until then.)
+              if (scan(ctx.marker).some((p) => p.pid === holder.pid)) {
+                process.kill(holder.pid, "SIGKILL");
+                return { killed: holder.pid };
+              }
+              notOurs = holder.pid;
             }
           } catch {}
           await sleep(25);
         }
-        return { killed: null, reason: "no holder observed" };
+        return { killed: null, reason: notOurs !== null ? `holder ${notOurs} not ours` : "no holder observed" };
       },
     });
     // What the next session sees after that round (the lock may be stale now).
