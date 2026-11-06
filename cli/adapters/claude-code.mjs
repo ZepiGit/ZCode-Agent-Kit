@@ -11,7 +11,7 @@ export default {
   id: "claude-code",
   label: "Claude Code",
   protocol: "Anthropic-compatible endpoint (CLI --settings env override)",
-  primarySource: "https://code.claude.com/docs/en/llm-gateway (checked 2026-09-13)",
+  primarySource: "https://code.claude.com/docs/en/llm-gateway (checked 2026-11-05)",
 
   apply(ctx, tx, log) {
     const port = ctx.port();
@@ -29,6 +29,10 @@ export default {
         // glm-* models are not in Claude Code's built-in catalog; declare the
         // real context window so auto-compact math and window enforcement match.
         CLAUDE_CODE_MAX_CONTEXT_TOKENS: "1000000",
+        // Effort is deliberately not declared (CLAUDE_CODE_ALWAYS_ENABLE_EFFORT,
+        // ANTHROPIC_DEFAULT_*_MODEL_SUPPORTED_CAPABILITIES): Claude Code would send
+        // its own levels incl. medium/xhigh, which the proxy passes through
+        // unchanged on /v1/messages and which are not verified for glm-5.3.
       },
     };
     // Kit-owned generated artifact: recorded so uninstall can remove it.

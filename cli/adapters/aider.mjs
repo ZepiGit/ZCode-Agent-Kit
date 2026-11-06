@@ -10,7 +10,7 @@ export default {
   id: "aider",
   label: "Aider",
   protocol: "OpenAI-compatible via OPENAI_API_BASE + openai/<model> mapping",
-  primarySource: "https://aider.chat/docs/llms/openai-compat.html (checked 2026-09-13)",
+  primarySource: "https://aider.chat/docs/llms/openai-compat.html (checked 2026-11-05)",
 
   apply(ctx, tx, log) {
     ensureDir(ctx, ctx.generated);
