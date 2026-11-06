@@ -2,7 +2,7 @@
 
 **Blocked by:** 05 (Shared width core and token set (two renderers, one token set))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -175,3 +175,5 @@ Spec stories: 89, 106, 107, 108, 123
   - `npm run test:proxy` (`t06-full2-proxy`): 1343 pass, 0 fail, 90 files.
   - `npm run test:mcp` (`t06-full2-mcp`): 96 tests, 95 pass, 0 fail, 1 skipped; `dist/` unchanged.
   - Wiring guard: 0 unwired.
+
+- Merged 2026-11-06 as 5155b1d; fast suite: kit 487/498 (0 fail, 11 skipped), proxy 1343/1343 (90 files), mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged; no lockfile changes. Logs: reports/merge-06-{npm-ci,test,proxy,mcp}.log. The Windows criteria (Windows pipe/ci BEFORE baseline, win32 JSON superset part) are pending CI by design (decision 3); the orchestrator verifies them after push. The 8-minute `npm run test:ux-before` is not part of the fast suite and was not run here.
