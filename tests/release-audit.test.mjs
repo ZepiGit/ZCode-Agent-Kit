@@ -34,6 +34,9 @@ function packageFixture(t) {
     "bin/zcode-claude.cmd", "bin/zcode-codex.cmd", "bin/zcode-aider.cmd",
     "bin/zcode-claude.sh", "bin/zcode-codex.sh", "bin/zcode-aider.sh",
     "zcode-proxy-src/src/runtime.ts",
+    // ADR-0011 shared output files, required by verify-payload since ticket 05.
+    "zcode-proxy-src/src/tui/width-core.mjs", "zcode-proxy-src/src/tui/width-core.d.mts",
+    "zcode-proxy-src/src/tui/tokens.mjs", "zcode-proxy-src/src/tui/tokens.d.mts",
   ]) put(root, path);
   put(root, "zcode-proxy-src/src/runtime.test.ts", "throw new Error('must not ship');\n");
   put(root, "zcode-proxy-src/src/__fixtures__/credential.json", "fixture\n");
