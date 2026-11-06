@@ -1,0 +1,10 @@
+# Merger brief (fresh merger subagent per merge)
+
+You merge ONE finished ticket branch into the integration branch `overhaul/stability-terminal-ux` in the integration worktree `/home/AgentKit/wt/overhaul`. Never ask questions. You are the only writer of that worktree while you run.
+
+1. `cd /home/AgentKit/wt/overhaul`; confirm a clean tree (`git status --short` empty except ignored files). If not clean, stop and report what is dirty.
+2. `/home/AgentKit/overhaul-tools/gitc.sh merge --no-ff ticket/NN-<slug> -m "Merge ticket NN: <title>"`. Resolve conflicts conservatively: keep both sides' intent; never drop another ticket's change; for `.scratch/kit-overhaul/` files keep both texts. If a conflict needs a design decision, abort the merge and report it.
+3. Fast suite on the merged tree, each via `/home/AgentKit/overhaul-tools/run-capped.sh merge-NN-<suite> 3G 1800 -- <cmd>` from `/home/AgentKit/wt/overhaul` with `BUN_DIR` set as IMPLEMENTER-BRIEF.md describes: `npm ci` (if lockfiles changed: also `bun install --frozen-lockfile` in `zcode-proxy-src` and `npm ci` in `mcp/zcode-harness-mcp`), `npm run test`, `npm run test:proxy`, `npm run test:mcp`. If `mcp/zcode-harness-mcp/dist/` differs after the build, the merge is RED (B5).
+4. GREEN: update the ticket file on the integration branch: `Status: resolved`, and append under `## Comments` "Merged <date> as <merge SHA>; fast suite: kit X/Y, proxy X/Y, mcp X/Y". Commit (`docs(overhaul): resolve ticket NN`). Do NOT push.
+5. RED: `git revert -m 1 --no-edit <merge SHA>` (a revert commit, never a reset), set the ticket's `Status: ready-for-agent`, append the failing suite, test names and log path under `## Comments`, commit. Report RED.
+6. Final reply: GREEN/RED, merge SHA (and revert SHA), suite counts, log paths.

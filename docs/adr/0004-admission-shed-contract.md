@@ -35,3 +35,7 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 - **Shed during a drain (Round 2, Q1, condition 2).** While the proxy drains before a respawn or stop, it keeps its listener open and sheds new requests with this contract, never with connection resets. In-flight requests get the drain window. This settles the open item in the Consequences above for drains ([ADR-0008](0008-proxy-health-supervisor-and-respawn-handoff.md)).
 - **Shed while the solver fails fast (Round 2, Q2, condition 1).** A request that needs a solve is shed with this contract while the solver is in its fail-fast window, with `Retry-After` set to the time until the window reopens, and when a bounded solve queue overflows. It is never shed merely because a solver crash happened ([ADR-0002](0002-captcha-solver-in-capped-child-process.md)).
 - **The stop request bypasses admission (Round 3, Q3, condition 2).** It has no body, is never queued behind the byte cap, and answers `202` before the drain starts ([ADR-0014](0014-graceful-stop-request-over-loopback.md)).
+
+## Amended 2026-11-06 (Round 5, Q4)
+
+- **An idle proxy always admits (Round 5, Q4, change 10; [DECISIONS.md](../../.scratch/kit-overhaul/DECISIONS.md)).** A request is admitted when in-flight bytes + this request ≤ cap, or when in-flight bytes are 0, so a single request at today's maximum body size (32 MB wire, 64 MB inflated) with nothing else in flight is served, never shed.

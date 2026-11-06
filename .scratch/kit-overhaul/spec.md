@@ -610,7 +610,11 @@ On Bun, captcha fetches use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`, and 
   - compact setup by default;
   - the Windows graceful stop;
   - the execve handover's signal exit status and its opt-out `ZCODE_KIT_RESIDENT_LAUNCHER=1`;
-  - the nested proxy workflows deleted.
+  - the nested proxy workflows deleted;
+  - the proxy TUI refuses under TERM=dumb (exit 1) and prints the line-mode commands;
+  - the four new `doctor` checks;
+  - the additive `proxy logs --level/--grep` filters;
+  - harness configs refreshed on the next `setup`/`integrate` (Continue `capabilities`, Kilo Code `/v1`, the confirmed MEDIUM items, the bridge's `--max-semi-space-size=1`).
 
 ### 17. Tracker docs and PR (Round 1 Q20/Q21)
 

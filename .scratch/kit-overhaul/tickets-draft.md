@@ -1,3 +1,5 @@
+Superseded by `issues/` (Round 5); not the tracker.
+
 # Ticket breakdown — DRAFT (not published)
 
 Feature: `kit-overhaul`. Source: `spec.md` (Round 4 corrections applied), `seams.md`, `DECISIONS.md` Rounds 1–4, ADR-0001–0016, `reports/architecture.md`, `reports/drift.md`, `ux/design-language.md`, `ux/ux-audit.md`.
@@ -5,7 +7,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 
 ## How to read this draft
 
-- **Order** = dependency order, following PROMPT §7 Phase 3 as amended (ADR-0016): (1) guardrail incl. the `memory-budget` CI job and `expected-red.json` (Round 4 D2) → (2) prefactors → (3) upgrade batches *before* the memory fixes (Round 2 Q15) → (4) memory/process fixes, each RED on the upgraded runtime → (5) UX batches, then the TUI → (6) observability → (7) docs/translations → (8) remaining CI guardrails. Ticket numbers follow that order; the **Blocked by** edges are the real gates, so the frontier is wider than the numbering (e.g. 01, 04, 50 and 57 can start at once).
+- **Order** = dependency order, following PROMPT §7 Phase 3 as amended (ADR-0016): (1) guardrail incl. the `memory-budget` CI job and `expected-red.json` (Round 4 D2) → (2) prefactors → (3) upgrade batches *before* the memory fixes (Round 2 Q15) → (4) memory/process fixes, each RED on the upgraded runtime → (5) UX batches, then the TUI → (6) observability → (7) docs/translations → (8) remaining CI guardrails. Ticket numbers follow that order; the **Blocked by** edges are the real gates, so the frontier is wider than the numbering (e.g. 01, 04, 50 and 57 can start at once). Ticket 58 was split out of 28 in Round 5; its number breaks the numeric order, and the `Blocked by` edges are authoritative.
 - **Why the guardrail is three tickets (01–03), not one.** "Memory loop + budgets + process-count harness + Windows sampler + memory-budget CI job + expected-RED list" does not fit one fresh context window. 01 lands the loop, the budgets, the ratchet, the process-count harness and the ubuntu job. 02 adds the Windows sampler and the windows job leg, so the Bun 1.4.2 Windows reference run happens on the draft PR's first CI run (Round 3 Q9). 03 adds the S3 OMP stub-host leg. Together they are step 1, and all three are blockers of every upgrade and fix ticket.
 - **Model rule.** `sol` for process lifecycle, concurrency, workers/solver isolation, streaming, the TUI renderer and migrations. `glm` for high-volume, well-scoped, mechanical work.
 - **Expected-RED entries.** `expected-red.json` maps `<os leg> → "<scenario>/<variant>" → ticket number`. Ticket 01 finalises the variant names. The entries below use the loop's existing names (S1 `burst4|burst16|burst32|bigbody`, S2 `short`, S3 `short|hung`, plus the new S3 `omp`, S4–S7 `short`). A memory-fix ticket is closed only when its entries are deleted and the job is green on both legs. If an upgrade alone turns a scenario GREEN, the upgrade ticket deletes the entry and the fix ticket is re-scoped with that evidence (ADR-0016 cond 3).
@@ -23,7 +25,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Acceptance:**
   - [ ] `node tests/memory/run.mjs S1…S7 --profile short` runs on the integration branch; exit codes 1 RED / 0 GREEN / 2 harness failure.
   - [ ] Pinned verdict tests (`verdict.test.mjs`) cover: slope + trend rules, role peak, per-process HWM peak, process counts, orphans, the S3 two-part verdict and role budgets, and the ratchet: a RED scenario not listed fails; a listed scenario that is GREEN fails; an unknown scenario/variant fails; a ticket id with no `issues/<NN>-*.md` file fails (seam 9).
-  - [ ] `expected-red.json` lists, for `linux`: S1/burst4, S1/burst16, S1/burst32, S1/bigbody → 19; S2/short → 28; S3/short → 37; S3/hung → 16; S4/short → 17; S5/short → 30; S6/short → 32; S7/short → 34 (names as finalised here; S3/omp is added by 03; `windows` by 02).
+  - [ ] `expected-red.json` lists, for `linux`: S1/burst4, S1/burst16, S1/burst32, S1/bigbody → 19; S2/short → 58; S3/short → 37; S3/hung → 16; S4/short → 17; S5/short → 30; S6/short → 32; S7/short → 34 (names as finalised here; S3/omp is added by 03; `windows` by 02).
   - [ ] The ubuntu `memory-budget` job is green with that list (all listed scenarios RED, everything else GREEN) and uploads CSV + summary artefacts; `ZCODE_MEMLOOP_ALLOW=1` is set only in this job.
   - [ ] METRICS.md records the committed-loop Linux run on Bun 1.4.2 against the Phase 1B baseline (no budget loosened).
   - [ ] After this ticket merges, the orchestrator opens the draft PR against `main` (never merged; nothing pushed to `main` or `feature/account-rotator`), and its first CI run is the one ticket 02 needs.
@@ -35,18 +37,18 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Delivers:** The loop runs on windows-latest. One long-lived `powershell.exe -NoProfile -NonInteractive` child polls `Win32_Process` every second and is reaped on exit. Kit processes are found by the tree from the loop root plus a run-unique token in the command line or executable path. Mapping: `rss_kb` = WorkingSetSize/1024, `commit_kb` = PrivatePageCount/1024, `hwm_kb` = PeakPageFileUsage, `threads`, `fds` = HandleCount. RED rules use commit on Windows. The windows job leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 under a Job Object cap and a timeout.
 - **Acceptance:**
   - [ ] Self-tests on windows-latest: the units check against `Get-Process` `PrivateMemorySize64` passes; a deliberately orphaned detached process is found; the sampler excludes itself by PID and its measured overhead is recorded.
-  - [ ] `expected-red.json` gains a `windows` key whose entries come from the first windows run (expected: S1 burst variants → 19, S2/short → 28, S3/short → 37, S3/hung → 16, S4/short → 17, S5/short → 30, S7/short → 34). Any scenario RED **only on commit** is raised to the owner, never adjusted silently (build-time gate 3).
+  - [ ] `expected-red.json` gains a `windows` key whose entries come from the first windows run (expected: S1 burst variants → 19, S2/short → 58, S3/short → 37, S3/hung → 16, S4/short → 17, S5/short → 30, S7/short → 34). Any scenario RED **only on commit** is raised to the owner, never adjusted silently (build-time gate 3).
   - [ ] The Bun 1.4.2 Windows reference run (the draft PR's first CI run on this code) is recorded in METRICS.md. If the sampler cannot run on the pre-upgrade code, the reason is in RUNLOG and ticket 11's 1.4.4 run becomes the reference.
   - [ ] The windows job leg is green with its list.
 - **Stories:** 30, 141
 
 ### 03. S3 OMP stub-host leg in the memory loop
-- **Blocked by:** 01
+- **Blocked by:** 01, 02
 - **Model:** sol · **Risk:** medium · **ADR:** 0013
-- **Delivers:** S3 gains an `omp` variant that runs the generated OMP extension in a stub Bun host: 5 simultaneous hosts, and again with the starter host killed. It counts concurrent OMP preflight processes, reports each host's RSS delta (not counted as kit footprint) and asserts that each waiter host printed the starter's `cause=` lines whenever the starter's preflight emitted any (Round 4 Q1 add. 4).
+- **Delivers:** S3 gains an `omp` variant that runs the generated OMP extension in a stub Bun host on both OS legs: 5 simultaneous hosts, and again with the starter host killed. It counts concurrent OMP preflight processes, reports each host's RSS delta (not counted as kit footprint) and asserts that each waiter host printed the starter's `cause=` lines whenever the starter's preflight emitted any (Round 4 Q1 add. 4).
 - **Acceptance:**
   - [ ] Verdict tests pin the new checks: ≤ 1 concurrent OMP preflight process (5 hosts; killed starter), in-host waiter cost ≤ 5 MB per host (reported, gate), cause lines present in every waiter.
-  - [ ] On today's code the variant is RED (5 preflights) and `expected-red.json` gains `S3/omp → 35` for each leg where it runs.
+  - [ ] On today's code the variant is RED (5 preflights) on both legs, and `expected-red.json` gains `S3/omp → 35` under `linux` and `windows`.
 - **Stories:** 31 (measurement), 32 (measurement)
 
 ### 04. Pre-existing findings: unwired tests, the test-wiring guard and CI Node coverage
@@ -64,13 +66,13 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 
 ### 05. Shared width core and token set (two renderers, one token set)
 - **Blocked by:** 01
-- **Model:** glm · **Risk:** medium · **ADR:** 0011, 0001
+- **Model:** sol · **Risk:** medium · **ADR:** 0011, 0001
 - **Delivers:** One plain-ESM width core (+ `.d.mts`) and token set (glyph tiers full/wgl4/ascii, box chrome, 16-colour roles, verdict words) living with the TUI code and used by both the CLI (Node) and the TUI (Bun). The core is grapheme-based (`Intl.Segmenter`, a W/F table generated from UCD 17, VS16/RI pairs = 2, cluster cap 2) with an ASCII/no-combining fast path. The existing width module re-exports the core, so its imports and tests keep working.
 - **Acceptance:**
   - [ ] Width vectors (CJK, emoji, VS16, RI, combining, ASCII fast path) pass identically under `node --test` and `bun test` (seam 6).
-  - [ ] Existing `width`/`frame` tests pass unchanged; S6 frame time and heap within budget (no regression vs 01's run).
+  - [ ] Existing `width`/`frame` tests pass unchanged; S6 heap within budget; a frame-time benchmark (a full 2,000-line pane rendered at 80 and 120 columns, with an ASCII fixture and a mixed CJK/emoji fixture) is recorded on the ticket's base commit and after the change, and the after p95 for the ASCII fixture is ≤ 1.10 × the base p95.
   - [ ] `bun build --compile` succeeds for all five targets; `verify-payload`'s required list includes the shared files and their `.d.mts`.
-  - [ ] No visible output change (TUI frames byte-identical).
+  - [ ] TUI frames and the `ux/before/tui` captures are byte-identical for every fixture whose graphemes keep their width; a vector test lists each grapheme class whose width changes (VS16, RI pairs, new UCD 17 W/F ranges) and the frames that change because of it.
 - **Stories:** 109
 
 ### 06. CLI output module, capability record and the snapshot harness (no visible change)
@@ -80,9 +82,10 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Acceptance:**
   - [ ] Capability-record unit tests cover every precedence branch, including NO_COLOR beating FORCE_COLOR and non-UTF-8 POSIX locale → ascii, wgl4 on win32 without WT_SESSION/TERM_PROGRAM.
   - [ ] A regex test pins `^(PASS|FAIL|SKIP|WARN)  <name>( — <detail>)?$` with whitespace-indented `why:`/`next:` lines for `check()` off a TTY in every glyph tier (seam 5).
-  - [ ] Snapshots of every command captured on the pre-change code (the Phase 1C BEFORE set) are the committed baseline and match byte for byte after the change: "no visible change" is proven (C3 variants, both legs).
+  - [ ] The Phase 1C BEFORE set and its tooling (`.scratch/kit-overhaul/ux/capture/` and `ux/before/`, 640 captures at 0960696) are committed under `tests/` as the step 1–2 baseline. A before-equivalence test re-runs the capture and compares byte for byte: all seven variants on ubuntu (pty via `script`); on windows-latest the pipe and ci variants, whose Windows baseline is captured from this ticket's base commit before the change and committed. This test is the proof of 'no visible change' for 06–08.
   - [ ] The JSON baseline (key names + value types) is committed; a superset test runs in `npm run test`.
   - [ ] No module other than the output module reads `isTTY`, `NO_COLOR`, `TERM`, `CI` or `columns` in code this ticket touches (grep test for new code).
+  - [ ] A scan asserts that no ESC byte appears in any NO_COLOR, pipe, TERM=dumb or CI render of the primitives' fixtures (Story 107).
 - **Stories:** 89, 106, 107, 108, 123
 
 ### 07. CLI command-module split, part 1 (expand: dispatcher + status/doctor/proxy/models/logs)
@@ -95,7 +98,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Stories:** 61 (CLI contracts kept)
 
 ### 08. CLI command-module split, part 2 (migrate remaining commands + contract)
-- **Blocked by:** 07
+- **Blocked by:** 07, 10
 - **Model:** glm · **Risk:** medium · **ADR:** —
 - **Delivers:** `setup`, `integrate`, `update`, `rollback`, `uninstall`, `accounts`, `auth`, `run`, help and the rest move to command modules; the inline command bodies in the CLI entry are deleted (contract).
 - **Acceptance:**
@@ -106,7 +109,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 ## Step 3 — Upgrade batches (before the memory fixes; ADR-0016)
 
 ### 09. Batch 1a — CI toolchain: actions v7, Bun 1.4.4 in CI, nested proxy workflows removed
-- **Blocked by:** 02, 04
+- **Blocked by:** 02, 03, 04
 - **Model:** glm · **Risk:** low · **ADR:** 0006, 0016
 - **Delivers:** `actions/checkout@v7`, `actions/setup-node@v7`, `oven-sh/setup-bun@v2`; Bun 1.4.4 in `ci.yml`, `release.yml` and the `memory-budget` job; the three nested vendored proxy workflows deleted with a MANIFEST vendor-change entry; `release.yml` changes only in versions, runs on Node 26, publish job keeps Node 24 for OIDC.
 - **Acceptance:**
@@ -130,7 +133,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Delivers:** Both installers bootstrap Bun 1.4.4 with the five upstream SHA-256s (linux-x64, linux-aarch64, darwin-x64, darwin-aarch64, windows-x64) from the primary source. The proxy typecheck runs in root CI through a pinned proxy `typescript` devDependency and `@types/bun` 1.4.4 exact; its baseline is recorded first and every failure becomes a ticket. The memory loop's short profile re-runs on 1.4.4 on both legs (the Windows attribution run).
 - **Acceptance:**
   - [ ] Installer tests assert the five hashes and reject a tampered download (seam 8).
-  - [ ] `test-kit` legs include the proxy typecheck, pinned, never `bun x` unpinned.
+  - [ ] `test-kit` legs include the proxy typecheck through the pinned devDependency, never an unpinned `bun x`. Its baseline error list is recorded before any fix. If the list is non-empty, the step compares against a committed expected-error list with the same ratchet as `expected-red.json` (a new error fails; a listed error that disappears fails until it is removed), and each listed error names a filed ticket.
   - [ ] METRICS.md records the Linux and Windows 1.4.4 attribution runs next to the 1.4.2 reference; typecheck-baseline failures (if any) are filed as tickets (build-time gate 7).
 - **Stories:** 126, 140
 
@@ -142,6 +145,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
   - [ ] `captcha-happy`, `captcha-solver`, `captcha-cdn-cache` suites green on the happy-dom commit alone; full `test:proxy` green after the batch.
   - [ ] `bun audit` shows the happy-dom/undici advisories from drift.md resolved.
   - [ ] Both `memory-budget` legs green (entries handled as in 09).
+  - [ ] A test asserts that the happy-dom Window is constructed with `enableCSSFileLoading: true` and `enableIframePageLoading: true`, and fails if either flag is removed (ADR-0007, B1).
 - **Stories:** 127, 128
 
 ### 13. Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24
@@ -157,7 +161,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 ## Step 4 — Memory and process fixes (each RED on the upgraded runtime)
 
 ### 14. Event-line format and redaction for new log events (prefactor)
-- **Blocked by:** 01
+- **Blocked by:** None (can start immediately).
 - **Model:** glm · **Risk:** low · **ADR:** 0010
 - **Delivers:** One small logger for new event lines, `ISO-time LEVEL component message key=value…`, in the proxy (TS) and the manager (mjs), with redaction applied to all lines. Existing lines stay byte-identical. Every later ticket's new events (memory, recycle, shed, supervisor, lock takeover, rotation WARN, respawn ERROR) use it.
 - **Acceptance:**
@@ -185,6 +189,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
   - [ ] v0 lock recovery; unreadable/unknown-version lock untouched with the error block; old-manager interop test against the origin/main manager.
   - [ ] Lock-version migration replayed twice is a no-op the second time.
   - [ ] Loop: S3 killed-holder round → 0 failed launches, 0 stale locks, exactly 1 proxy. **Delete `S3/hung` (linux, windows) from `expected-red.json`.**
+  - [ ] A kill injected during the lock write leaves either no lock file or a complete, parsable record, never a partial one, on both legs (Story 48).
 - **Stories:** 41, 42, 43, 46, 47, 48, 135
 
 ### 17. Start-lock release on signals, orphan adoption, respawn over a proven-stale lock
@@ -195,10 +200,11 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
   - [ ] Seam 2 tests per signal (POSIX) and SIGBREAK/console-close paths (windows-latest); orphan adoption → exactly 1 proxy.
   - [ ] Loop S4: 0 stale locks after Ctrl-C during start (baseline 5/8); respawn with a stale lock → proxy up; 50 cycles → 0 orphans, log-dir files ≤ 8. **Delete `S4/short` (linux, windows).**
   - [ ] A2 (real PowerShell/conhost Ctrl-C) listed as an owner action, marked unverified.
+  - [ ] Adversarial: a holder whose lock was taken over (the on-disk record is no longer its own) leaves the new holder's lock untouched on SIGINT and SIGTERM.
 - **Stories:** 44, 45, 60
 
 ### 18. Per-spawn proxy environment: stop token and log dir set by the manager, token stripped from the respawn hook
-- **Blocked by:** 15
+- **Blocked by:** 15, 21
 - **Model:** sol · **Risk:** medium · **ADR:** 0014 (Round 4 amendment), 0015 (Round 4 amendment)
 - **Delivers:** At every proxy spawn the manager sets `ZCODE_KIT_STOP_TOKEN` (fresh 256-bit token, also written as an additive field in `proxy.pid`) and `ZCODE_KIT_LOG_DIR` (its own logs dir), overwriting inherited values. The proxy removes the token from the respawn hook's environment. `ZCODE_KIT_LOG_DIR` is internal; a proxy without it keeps today's behaviour. The token never appears in logs, status, JSON, doctor, snapshots or error text.
 - **Acceptance:**
@@ -215,11 +221,12 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
   - [ ] Loopback tests (seam 4): byte cap holds; queued bodies unread (server-side read counter); FIFO order; count bound and 15 s bound each shed with the right shape per endpoint; no 429 anywhere; 17+ concurrent streams not limited.
   - [ ] Loop S1 burst: HWM ≤ 400 MB at 16 and ≤ 600 MB at 32 × 10.8 MB bodies (≥ 30 % peak improvement); bigbody within budget. **Delete `S1/burst4`, `S1/burst16`, `S1/burst32`, `S1/bigbody` (linux, windows).**
   - [ ] Config key documented in `config.example.yaml`; invalid value rejected with what/why/next.
+  - [ ] Adversarial (C2): with nothing else in flight, a single request at today's maximum body size (32 MB wire, `handler.ts:859`; 64 MB inflated, `handler.ts:894`) is admitted and served, never shed. The cap rule is 'admit when in-flight bytes + this request ≤ cap, or when in-flight bytes are 0'. The ticket states how a body without `Content-Length` is accounted, and tests that the cap holds for concurrent chunked bodies.
 - **Stories:** 21, 22, 23, 24
 
 ### 20. Fewer redundant request-body copies (bytes upstream unchanged)
 - **Blocked by:** 19
-- **Model:** glm · **Risk:** medium · **ADR:** 0004
+- **Model:** sol · **Risk:** medium · **ADR:** 0004
 - **Delivers:** The redundant body copies identified in research (undici-yaml §5) are removed one by one, each measured; the bytes sent upstream are byte-identical.
 - **Acceptance:**
   - [ ] `protocol-contract`/`handler-resilience` assert byte-identical upstream bodies for each endpoint shape (seam 4).
@@ -234,10 +241,11 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
   - [ ] `health-monitor`/`watchdog` module tests with an injected sampler: soft → WARN only; hard ×3 → respawn request; thresholds from config; no hook → log + keep serving.
   - [ ] Loopback drain test (seam 4): new requests during the drain get 503 + `Retry-After`, the listener stays open, an in-flight request completes, cut streams counted.
   - [ ] Config keys documented; release-notes item "1536/3072 → 512/1024 MB" noted for 54.
+  - [ ] Adversarial: two consecutive samples above hard followed by one below → no respawn request; samples are 15 s apart (injected clock); a soft breach never recycles the solver.
 - **Stories:** 26, 27, 28, 52
 
 ### 22. Graceful stop request `POST /__kit/stop`, shared deadlines and the manager's stop path
-- **Blocked by:** 18, 21
+- **Blocked by:** 18, 21, 40
 - **Model:** sol · **Risk:** high · **ADR:** 0014
 - **Delivers:** The route sits after Host, Origin and bearer checks and requires the stop-token header; both compared in constant time incl. length; no CORS allowance; without a token it answers the unknown-route `404 not_found_error`. No body, bypasses admission, answers 202 before the drain, triggers the single graceful sequence. One shared module holds `STOP_GRACE_MS = 10_000` and `STOP_EXIT_MARGIN_MS`; the manager forces only after both. The manager sends the request on Windows and POSIX after the identity proof; POSIX falls back to SIGTERM on 404/401/403/connection error, Windows to `TerminateProcess`. `recoverHung`, startup timeout, foreign-port paths and golden-path crash injection force directly through an explicit force helper. `proxy stop`/`restart` show progress on a TTY, line-based elsewhere.
 - **Acceptance:**
@@ -254,6 +262,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Acceptance:**
   - [ ] Seam 2/4 tests: ack → drain; exit 4 → keep serving + one ERROR; no ack → keep serving; late ack → "already running, 0", exactly 1 proxy, slot consumed; backwards clock jump → keep serving; watchdog path bounded at 10 s.
   - [ ] Loop: induced memory pressure → ≤ 3 restarts / 15 min and exactly 1 proxy at every sample.
+  - [ ] With the hard condition persisting over two budget windows and every respawn refused, exactly one hook is spawned per window (injected clock, spawn counter) (Story 50).
 - **Stories:** 49, 50, 51, 53
 
 ### 24. Solver transport seam (prefactor): dispatcher state as an object, thread transport adapter
@@ -262,7 +271,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Delivers:** The dispatcher interface (`runCaptchaSolve`, stats, recycle request, shutdown) and message protocol stay; module-level state becomes an object owned by the deep module; the current Worker moves behind a transport seam as the thread transport. No behaviour change.
 - **Acceptance:**
   - [ ] `captcha-solver` suite with fixture backends passes unchanged through the seam (seam 3); `captcha-pool` no longer needs `mock.module` for the solver.
-  - [ ] S2 numbers unchanged within noise (loop).
+  - [ ] S2 per-generation HWM and retained MB within ±10 % of the preceding run on the same leg (loop).
 - **Stories:** 17
 
 ### 25. Bounded-collection module; CDN memory cache and stall counters bounded
@@ -272,12 +281,13 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Acceptance:**
   - [ ] Seam 6: eviction by count, bytes and TTL with a fake clock; responses-store suite unchanged.
   - [ ] Seam 3: CDN memory and stall bounds hold inside one generation.
-  - [ ] Loop S2: CDN memory ≤ 64 MB (baseline +151 MB / 600 URLs). The `S2/short` entry stays until 28 (solver part still RED).
+  - [ ] Loop S2: CDN memory ≤ 64 MB (baseline +151 MB / 600 URLs). The `S2/short` entry stays until 58 (solver part still RED).
+  - [ ] Seam 3 (B1): for a recorded sequence of stalls and solves below 1,024 URLs, the CDN invalidation decisions (which pe URLs are evicted, and when) are identical to the pre-change code.
 - **Stories:** 62, 65
 
 ### 26. Captcha egress routing under Bun
 - **Blocked by:** 12
-- **Model:** glm · **Risk:** low · **ADR:** —
+- **Model:** glm · **Risk:** medium · **ADR:** —
 - **Delivers:** On Bun, captcha fetches (`captchaFetch` and the sync-XHR worker path) use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`; Node keeps the dispatcher. Routing only; what is fetched does not change.
 - **Acceptance:**
   - [ ] Seam 3 test with a local recording proxy: set → all captcha egress goes through it; unset with ambient `HTTP(S)_PROXY` set → no proxy used.
@@ -286,38 +296,52 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 ### 27. Solver as a child process: spawn, environment parity, lazy start, idle exit, one generation
 - **Blocked by:** 24, 18, 26
 - **Model:** sol · **Risk:** high · **ADR:** 0002
-- **Delivers:** The child-process adapter becomes the default. From source it starts from `process.execPath` + the solver entry; compiled builds use a self-exec subcommand (never `-e`). Environment parity: `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA`, CDN cache variables and the egress setting pass; `ZCODE_KIT_RESPAWN_*` and `ZCODE_KIT_STOP_TOKEN` are excluded; the guest error boundary is installed; the child never runs the watchdog or the respawn hook. Child stdout/stderr go through the parent's log writer, lines unchanged. One generation at a time (old exited or killed after a bounded grace before the next spawns). POSIX child exits on IPC EOF. Lazy spawn on the first solve, idle exit after 10 min (not abnormal), prewarm off. Solve inputs, outputs and the 90 s deadline unchanged.
+- **Delivers:** The child-process adapter becomes the default. From source it starts from `process.execPath` + the solver entry; compiled builds use a self-exec subcommand (never `-e`). Environment parity: `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA`, CDN cache variables and the egress setting pass; `ZCODE_KIT_RESPAWN_*` and `ZCODE_KIT_STOP_TOKEN` are excluded; the guest error boundary is installed; the child never runs the watchdog or the respawn hook. Child stdout/stderr are piped to the parent and re-emitted line by line on the parent's stdout/stderr, content unchanged (33 routes those streams through the size-capped writer). One generation at a time (old exited or killed after a bounded grace before the next spawns). POSIX child exits on IPC EOF. Lazy spawn on the first solve, idle exit after 10 min (not abnormal), prewarm off. Solve inputs, outputs and the 90 s deadline unchanged.
 - **Acceptance:**
   - [ ] Seam 3: byte-identical solve I/O on both adapters; spawn from source and compiled (compiled binary test on Linux); env parity and stripping; one-generation ordering.
   - [ ] Seam 1 (loop S2/S4): 0 solver processes after the proxy is SIGKILLed (POSIX), 0 after an idle exit, ≤ 1 per proxy at every sample.
   - [ ] Cold start (spawn + handshake + module load) measured on Linux and Windows, ≤ 4.5 s, recorded in METRICS (build-time gate 4; a miss returns as a finding, the deadline is not moved).
   - [ ] Loop S3: solver idle 0 MB when never used.
+  - [ ] Seam 3: a child line (for example `[pe-cache-evict] …`) appears byte-identical on the parent's stderr; a solve dispatched during the child's cold start fails at 90 s from dispatch, not from child readiness (injected clock); the compiled-binary self-exec spawn test also runs on windows-latest (C7).
 - **Stories:** 1, 7, 8, 9, 17, 18, 19, 20
 
-### 28. Solver cap enforcement per OS, cap handshake, recycle and failure semantics
-- **Blocked by:** 27, 19, 25
+### 28. Solver cap enforcement per OS and the cap handshake
+- **Blocked by:** 27
 - **Model:** sol · **Risk:** high · **ADR:** 0002
-- **Delivers:** Windows: Job Object via `bun:ffi` with `JOB_OBJECT_LIMIT_PROCESS_MEMORY` + `KILL_ON_JOB_CLOSE`, no new dependency. Linux: user-systemd cgroup v2 scope with `MemoryMax=` and `MemorySwapMax=0`, verified by reading `memory.max`, else `sampling`. macOS: `sampling`. Enforcement mode `job-object|cgroup|sampling|none`. The child loads neither happy-dom nor solve code until the handshake confirms the cap. Cap 300 MB default, `config.yaml` key validated against a documented minimum (what/why/next); a cap kill logs the key that raises it; an idle exit releases the container. Recycle: footprint at 80 % (240 MB), count backstop 100 (was 200), failure/idle/request/deadline kept, 768 MB heap trigger removed or re-based. Failure: crash/cap kill/fatal/deadline kill fails only the in-flight solve with `CaptchaSdkError("other", …)`, the queue is pumped onto the next generation; only abnormal exits count toward 5 per 10 min, then fail-fast with 503 + `Retry-After` = time until the window reopens (19's shed helper); planned recycles never count; no solve is resubmitted. The solver queue's caller-side bound (one in-flight solve per pool) is stated with evidence and pinned; a count bound + ADR-0004 shed only if none can be shown.
+- **Delivers:** Windows: Job Object via `bun:ffi` with `JOB_OBJECT_LIMIT_PROCESS_MEMORY` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, no new dependency. Linux: user-systemd cgroup v2 scope with `MemoryMax=` and `MemorySwapMax=0`, verified by reading the scope's `memory.max`, else `sampling`. macOS: `sampling` (footprint sampling and kill). Enforcement mode `job-object|cgroup|sampling|none` (`none` = thread transport or caps off), exposed through the dispatcher stats for 39. The child loads neither happy-dom nor solve code until the handshake confirms the cap. Cap 300 MB by default; the `config.yaml` key is validated at config load against a documented minimum (what/why/next). A cap kill is logged as an event line naming the key that raises the cap. An idle exit releases the cap container (Job Object closed, scope ended).
 - **Acceptance:**
-  - [ ] Seam 3: handshake ordering (no heavy module before ack); each recycle trigger; abnormal-exit counting vs planned recycles; fail-fast shed shape and `Retry-After`; queue bound test.
-  - [ ] Seam 1 windows leg: Job Object reaping after the proxy is SIGKILLed → 0 solver processes (build-time gate 5); enforcement mode reported per OS.
-  - [ ] Config validation test (below minimum rejected); cap-kill log line names the key.
-  - [ ] Loop S2: per-generation cost ≤ 300 MB, retained before recycle ≤ 300 MB, hung-solve reclaim ≤ 64 MB, one generation at a time. **Delete `S2/short` (linux, windows).**
+  - [ ] Seam 3: handshake ordering: no heavy module is loaded before the cap acknowledgement (module-load probe in the child); a child whose acknowledgement never arrives is killed and never solves.
+  - [ ] Seam 1/3 (adversarial, the cap's purpose): a fixture backend that allocates past the cap is killed by the active mode on each leg (`job-object` on windows-latest; `cgroup` on ubuntu where the memory controller is delegated, otherwise `sampling`), and the kill line names the config key.
+  - [ ] Adversarial (never claim a cap that is not there): with the memory controller not delegated (simulated: the scope's `memory.max` missing or not equal to the requested value), the mode is `sampling`, never `cgroup`.
+  - [ ] Seam 1: after an idle exit, the scope no longer exists (Linux) or the Job Object handle is closed (Windows), and 0 solver processes remain. Windows leg: Job Object reaping after the proxy is SIGKILLed → 0 solver processes (build-time gate 5).
+  - [ ] Config validation: a value below the documented minimum is rejected at load with what/why/next; the default is 300 MB.
   - [ ] A1 (live vendor-SDK solve under 300 MB) recorded as an owner action, marked unverified.
-- **Stories:** 2, 3, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15, 16, 60
+- **Stories:** 2, 3, 4, 5, 8, 10, 15, 16, 60
+
+### 58. Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)
+- **Blocked by:** 19, 25, 28
+- **Model:** sol · **Risk:** high · **ADR:** 0002, 0004
+- **Delivers:** Recycle: footprint at 80 % of the configured cap (240 MB at 300), read from the child's own report after each solve; count backstop 100 (was 200); the failure, idle, request and deadline triggers are kept; the in-worker 768 MB heap trigger is removed or re-based below the cap. Failure: a crash, cap kill, fatal error or deadline kill fails only the in-flight solve with `CaptchaSdkError("other", …)`, and the queue is pumped onto the next generation. Only these abnormal exits count toward 5 per 10 min, after which solves fail fast with 503 + `Retry-After` = the time until the window reopens (19's shed helper). Planned recycles (count, footprint, idle, request, shutdown) never count. No solve is resubmitted. The solver queue's caller-side bound (one in-flight solve per pool, the `captcha-pool` clamp) is stated with evidence and pinned; a count bound + ADR-0004 shed is added only if none can be shown. The fail-fast state and its window end are exposed through the dispatcher stats for 39.
+- **Acceptance:**
+  - [ ] Seam 3: each recycle trigger fires at its threshold and not below it (footprint 239 vs 241 MB at cap 300; count 99 vs 100); planned recycles never increment the abnormal-exit count; once the 5-per-10-min budget is used up, the next abnormal exit enters fail-fast, and the shed has the endpoint's error shape and `Retry-After` = seconds until the window reopens; after the window a solve succeeds (injected clock).
+  - [ ] Seam 3 (adversarial, "fail only the solve in flight"): a crash with one solve in flight and one queued fails only the in-flight solve, with the existing error and category; the queued solve completes on the next generation; the backend's call count shows that no solve was resubmitted.
+  - [ ] Seam 3: the queue-bound test.
+  - [ ] Loop S2: per-generation cost ≤ 300 MB, retained before recycle ≤ 300 MB, hung-solve reclaim ≤ 64 MB, one generation at a time. **Delete `S2/short` (linux, windows).**
+- **Stories:** 6, 11, 12, 13, 14
 
 ### 29. CDN disk cache pruning
 - **Blocked by:** 25
-- **Model:** glm · **Risk:** medium · **ADR:** 0009
+- **Model:** sol · **Risk:** medium · **ADR:** 0009
 - **Delivers:** The disk cache stays ≤ 256 MB (oldest first), pruning only entries already expired at max(14 days, configured TTL), at start and after each write, skipping temp files and files being written, tolerating `ENOENT`, safe with several installations sharing the directory.
 - **Acceptance:**
   - [ ] Temp-dir tests (seam 3/6): size bound, expiry-only pruning, temp/in-progress files skipped, concurrent pruners with vanishing files never throw or corrupt.
   - [ ] Retention-pruning migration replayed twice is a no-op.
+  - [ ] An entry 15 days old under a configured TTL of 20 days is kept; an entry 21 days old is pruned (Round 2 Q3 condition 2).
 - **Stories:** 63, 64, 135
 
 ### 30. MCP task retention (500 / 7 days) and the idempotency window
 - **Blocked by:** 13
-- **Model:** glm · **Risk:** medium · **ADR:** 0009
+- **Model:** sol · **Risk:** high · **ADR:** 0009
 - **Delivers:** Terminal tasks are evicted at > 500 or > 7 days, whichever first; running tasks never; `*.result.json` pruned with the task; startup restore loads only retained tasks; the idempotency key is forgotten on eviction; an evicted task gives the existing not-found error. The tool description carries the idempotency sentence.
 - **Acceptance:**
   - [ ] Seam 7 (MCP client + fake harness): eviction by count and age with an injected clock, non-terminal kept, files pruned, restore loads only retained, not-found and new-task-on-reused-key after eviction.
@@ -327,7 +351,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 
 ### 31. Per-task caps and 4 MiB head/tail truncation of task text
 - **Blocked by:** 30
-- **Model:** glm · **Risk:** medium · **ADR:** 0009
+- **Model:** sol · **Risk:** medium · **ADR:** 0009
 - **Delivers:** Per-task warnings 200, errors 200, tool calls 1,000. Response text bounded during ingestion at 4 MiB UTF-8 (head 1 MiB frozen, rolling 3 MiB tail, dropped-byte count) with one `[… N bytes truncated …]` marker cut on code-point boundaries; `completeness: partial` with the note merged after the terminal-state override; additive `truncated: { droppedBytes }`; the transcript fallback gets the same cap; results cached before the change are served as stored. Tool description and `docs/MCP_API.md` describe cap, marker, field and idempotency window; `dist/` regenerated by the build.
 - **Acceptance:**
   - [ ] Seam 7: caps, truncation boundaries (multi-byte at both cuts), marker count = 1, `completeness`/`truncated`, terminal override cannot erase the note, old cached result byte-identical.
@@ -335,22 +359,24 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Stories:** 69, 70, 71, 72
 
 ### 32. TUI log pane capped at 2,000 lines and 8 MB
-- **Blocked by:** 05
+- **Blocked by:** 05, 11
 - **Model:** glm · **Risk:** low · **ADR:** 0009
 - **Delivers:** The log pane enforces a byte cap (8 MB) in addition to its 2,000-line cap.
 - **Acceptance:**
   - [ ] Seam 6: `log-pane` tests for line and byte caps with 64 KB lines.
   - [ ] Loop S6: log pane ≤ 16 MB heap with 64 KB lines, resize storm ≤ 8 MB, frame time unchanged. **Delete `S6/short` (linux).**
+  - [ ] A single line larger than 8 MB never makes the pane exceed 8 MB (the line is truncated or dropped; the ticket states which).
 - **Stories:** 73
 
 ### 33. `proxy.log` single rotator: size-capped writer, manager rotation under the lock, file modes
-- **Blocked by:** 16, 18, 14
+- **Blocked by:** 14, 16, 18, 21
 - **Model:** sol · **Risk:** high · **ADR:** 0009, 0015
-- **Delivers:** While it runs, the proxy opens `proxy.log` (path from `ZCODE_KIT_LOG_DIR`) through a size-capped writer: rotation at 5 MB keeping one `proxy.log.1` (unlink `.1` → rename → reopen), plain fd writes, console/stdout/stderr through it, line content unchanged. A foreign handle blocking the rename → keep appending, retry each check, one WARN event. The manager keeps `[manager <ISO>] …` lines and rotates only under the start lock with no live recorded proxy (today's pre-lock rotation removed). Every creator of a log-dir file uses `0o600` and the logs dir `0o700` (manager, proxy writer on open/reopen, watchdog by-path append). `proxy logs N` reads `.1` + current.
+- **Delivers:** While it runs, the proxy opens `proxy.log` (path from `ZCODE_KIT_LOG_DIR`) through a size-capped writer: rotation at 5 MB keeping one `proxy.log.1` (unlink `.1` → rename → reopen), plain fd writes, console/stdout/stderr through it, line content unchanged. A foreign handle blocking the rename → keep appending, retry each check, one WARN event. The manager keeps `[manager <ISO>] …` lines and rotates only under the start lock with no live recorded proxy (today's pre-lock rotation removed). Every creator of a log-dir file uses `0o600` and the logs dir `0o700` (manager, proxy writer on open/reopen; the watchdog's by-path append is added by 34). `proxy logs N` reads `.1` + current.
 - **Acceptance:**
   - [ ] Seam 4: rotation at 5 MB with kit readers and appenders open; foreign-handle case (windows-latest: rename with an open reader, build-time gate 5); one WARN; no line lost.
   - [ ] Seam 2: manager rotation only under the lock and with no live proxy; file modes on every created file (POSIX); `proxy logs N` across `proxy.log.1` and `proxy.log`.
   - [ ] Loop S7: `proxy.log` ≤ 6 MB while running. The `S7/short` entry stays until 34.
+  - [ ] Seam 4: after the writer opens, a line written to `process.stdout` and one written to `process.stderr` appear unchanged in `proxy.log`.
 - **Stories:** 74, 75, 77, 78, 79
 
 ### 34. Early log (`proxy.early.log`): 1 MB cap and the tail copy into `proxy.log`
@@ -361,6 +387,7 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
   - [ ] Seam 4: cap enforcement with bounded overshoot; marker event.
   - [ ] Seam 2: tail copy before every truncation path; the golden-path classifier finds a crash cause through the tail-copy marker (Round 4 Q1 add. 5).
   - [ ] Loop S7: early log ≤ 1 MB + bounded overshoot. **Delete `S7/short` (linux, windows).**
+  - [ ] Seam 2/4 (POSIX): a watchdog by-path append that creates `proxy.log` creates it with mode `0o600`.
 - **Stories:** 76, 78
 
 ### 35. OMP in-host single-flight preflight with the cause-line result record
@@ -369,8 +396,9 @@ Status: draft for the /to-tickets quiz with the Owner Proxy. On approval each ti
 - **Delivers:** The generated OMP extension takes an O_EXCL autostart token (host pid + start time + per-attempt nonce) in the logs dir before spawning a preflight. Other hosts wait in-host (stat poll + existing `healthy()` fetch, no process), never past `START_TIMEOUT_MS`. Released in `finally`; stale tokens (holder dead, or older than `START_TIMEOUT_MS`) taken over by proof. The starter writes the result record by temp + rename (`0o600`) on every outcome before releasing the token; it holds only the exit code and fixed-vocabulary `cause=` lines (≤ 4 KB / ≤ 16 lines). A waiter accepts it only if its identity matches the observed token and it is not older than its wait start; validates each line before printing; treats a missing/stale/corrupt/oversized record as a starter failure and takes over with its own preflight. One fixed-name file, overwritten per attempt, never deleted by waiters. Old extensions are unaffected. Existing installs get the new extension on the next `setup`/`integrate`.
 - **Acceptance:**
   - [ ] Seam 8 (generated-logic fixtures): write-before-release; identity match; stale record from an earlier start never printed; corrupt and oversized records → takeover; vocabulary validation; file mode.
-  - [ ] Seam 1 (S3 omp leg): ≤ 1 concurrent preflight with 5 hosts and with the starter killed; every waiter printed the starter's cause lines; waiter cost ≤ 5 MB per host; log-dir files ≤ 8 in S4. **Delete `S3/omp` (all legs).**
+  - [ ] Seam 1 (S3 omp leg): ≤ 1 concurrent preflight with 5 hosts and with the starter killed; every waiter printed the starter's cause lines; waiter cost ≤ 5 MB per host; log-dir files ≤ 8 in S4. The S3 omp leg runs on both legs. **Delete `S3/omp` (linux, windows).**
   - [ ] Extension refresh replayed twice through the transaction is a no-op.
+  - [ ] Seam 8 (adversarial): a live starter's token is never taken over; a token whose holder is dead, or that is older than `START_TIMEOUT_MS`, is taken over by proof; a waiter never waits longer than `START_TIMEOUT_MS` (injected clock); the token and the record are created with mode `0o600` (Story 33).
 - **Stories:** 31, 32, 33, 135
 
 ### 36. MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries
@@ -408,11 +436,11 @@ Observability fields (39) land before the TUI because the TUI process strip read
 - **Stories:** 61, 92
 
 ### 39. Observability fields in `/health` details, `proxy status` and `--json`
-- **Blocked by:** 19, 21, 23, 28
+- **Blocked by:** 19, 21, 23, 40, 58
 - **Model:** glm · **Risk:** medium · **ADR:** 0010
 - **Delivers:** Additive objects: `memory[]` per proxy-owned process (`role`, `pid`, `rssMB`, `footprintMB`, `capMB`, `enforcement`; the solver entry adds fail-fast state and window end), `restarts { last15m, budget }`, `admission { inFlightBytes, queued, shedTotal }`, `processes { proxy: 1, solver: n }`. `schemaVersion` stays 1. `/health` stays behind bearer auth, synchronous, O(1), every value from a cached sample.
 - **Acceptance:**
-  - [ ] Seam 4: `/health` details superset vs the 06 JSON baseline (keys + types); sync/O(1) (no await on sampling in the handler); unauthenticated request rejected as today.
+  - [ ] Seam 4: `/health` details superset vs the 06 JSON baseline (keys + types); adversarial: with the sampler stubbed to never complete, `/health` details still answer from the last cached sample (no await on sampling in the handler); unauthenticated request rejected as today.
   - [ ] Seam 5: `proxy status --json` superset test; text rows render per design-language §7.
 - **Stories:** 80, 81, 82, 83, 123
 
@@ -465,13 +493,14 @@ Observability fields (39) land before the TUI because the TUI process strip read
 - **Stories:** 94, 95, 96, 116
 
 ### 45. UX batch (c1): grouped help, per-command `--help`, usage errors, output overrides
-- **Blocked by:** 40
+- **Blocked by:** 37, 40, 42
 - **Model:** glm · **Risk:** low · **ADR:** 0001
-- **Delivers:** Help grouped by task with examples first, environment variables and exit codes, at 80 columns; every command has `--help`; a usage error prints two lines on stderr and exits 2. `--color=auto|always|never`, `--no-color`, `ZCODE_KIT_UNICODE=0|1`, `ZCODE_KIT_PROGRESS`, `ZCODE_KIT_HYPERLINKS` (off by default) wired and documented; NO_COLOR wins over FORCE_COLOR. Help documents `WARN`, `--reask`, the rotator override, `ZCODE_KIT_RESIDENT_LAUNCHER` (if 37 has merged; otherwise 37 adds its line to this structure) and the overrides. Closes A-10.
+- **Delivers:** Help grouped by task with examples first, environment variables and exit codes, at 80 columns; every command has `--help`; a usage error prints two lines on stderr and exits 2. `--color=auto|always|never`, `--no-color`, `ZCODE_KIT_UNICODE=0|1`, `ZCODE_KIT_PROGRESS`, `ZCODE_KIT_HYPERLINKS` (off by default) wired and documented; NO_COLOR wins over FORCE_COLOR. Help documents `WARN`, `--reask`, the rotator override, `ZCODE_KIT_RESIDENT_LAUNCHER` and the overrides. Closes A-10.
 - **Acceptance:**
   - [ ] Snapshots for global and per-command help in every C3 variant; width ≤ 80 asserted.
   - [ ] Usage-error spawn test: exactly two stderr lines, exit 2, nothing on stdout.
   - [ ] Override tests through real spawns.
+  - [ ] A test asserts that the global help names `WARN`, `--reask`, `--account-rotator`, `ZCODE_KIT_ACCOUNT_ROTATOR`, `ZCODE_KIT_RESIDENT_LAUNCHER`, `--color`, `--no-color`, `ZCODE_KIT_UNICODE`, `ZCODE_KIT_PROGRESS` and `ZCODE_KIT_HYPERLINKS`.
 - **Stories:** 95, 103, 104, 110
 
 ### 46. UX batch (c2): `accounts` (+health), `auth status`, `models`
@@ -500,6 +529,7 @@ Observability fields (39) land before the TUI because the TUI process strip read
   - [ ] Seam 6 frame tests per tier and size (80, 100, 120, 60×16, below minimum), NO_COLOR markers, TERM=dumb refusal.
   - [ ] Exit-path tests restore terminal state (signal, error, quit); poll-interval test with an injected clock.
   - [ ] Action-reachability test for provider/plan switching, login, start/stop. S6 within budget.
+  - [ ] The TERM=dumb refusal exits 1, the same code as today's non-TTY refusal (`tui/app.ts:43-48`), and prints `zcode-kit proxy status` and `zcode-kit proxy logs 50`; the non-TTY refusal keeps exit 1.
 - **Stories:** 117, 119, 120, 121, 122
 
 ### 49. Proxy TUI log pane: filter, scroll, follow
@@ -532,42 +562,42 @@ Observability fields (39) land before the TUI because the TUI process strip read
 ## Step 7 — Docs and translations (C8)
 
 ### 52. Docs: README × 5 at content parity
-- **Blocked by:** 10, 19, 21, 28, 30, 31, 33, 34, 37, 42, 43
+- **Blocked by:** 10, 19, 21, 30, 31, 33, 34, 37, 41, 42, 43, 47, 58
 - **Model:** glm · **Risk:** medium · **ADR:** 0003, 0013
 - **Delivers:** README en/de/es/ja/zh-CN updated together: Node 24 floor; new config keys; log rotation and the early log (`proxy.early.log`); MCP task retention and the idempotency window; enforcement modes per OS incl. the Linux delegated-controller section that `doctor` links to; the 503 shed; stderr routing; rotator asked once; the execve handover, its Node ≥ 26.1 requirement and `ZCODE_KIT_RESIDENT_LAUNCHER=1` next to that note; the start-lock "never taken over" line replaced.
 - **Acceptance:**
-  - [ ] A parity check (same section headings and env-var/config-key set in all five files) passes.
-  - [ ] The `doctor` link target anchor exists in every language.
+  - [ ] A parity check passes: all five files have the same heading count per level, the same explicit anchor ids, and the same set of env-var names, config keys and `zcode-kit` commands (extracted by regex).
+  - [ ] The README section that 41's enforcement WARN links to carries an explicit HTML anchor id (`<a id="…"></a>`) that is identical in all five files, and a test asserts that the id 41 prints exists in each file.
 - **Stories:** 136
 
 ### 53. Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST
-- **Blocked by:** 11, 13, 16, 22, 28, 31, 51
+- **Blocked by:** 11, 13, 16, 22, 31, 51, 58
 - **Model:** glm · **Risk:** medium · **ADR:** 0002, 0003, 0007, 0014
 - **Delivers:** SECURITY (+de): solver is a separate OS process with a cap and still not a sandbox; takeover rules replace "never taken over"; happy-dom flags keep the 20.x surface; `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA` unchanged; stop-token protections. `harnesses/README*` and `EFFORT_MAPPING*` where effort/image flags changed. The five MCP bridge READMEs at parity with the Node 24 floor and the stay-back note. `docs/MCP_API.md`: 4 MiB cap (1 MiB head + 3 MiB tail), marker, `truncated`, idempotency window. `SUPPORT_MATRIX.json` (date, Node/Bun versions, tested harness versions reconciled with MANIFEST) and `MANIFEST*`.
 - **Acceptance:**
   - [ ] Parity checks for SECURITY en/de and the five bridge READMEs; `release-audit`/`state-audit` pass with the new matrix.
-  - [ ] No document states the worker-thread solver or "never taken over" (grep test).
+  - [ ] A grep test fails if any sentence that states the worker-thread solver or 'never taken over' is still present. The sentences are captured from the base commit into the test, from SECURITY.md, SECURITY.de.md, README × 5 and the MCP bridge READMEs.
 - **Stories:** 126, 129, 136, 137
 
 ### 54. Release notes vNEXT and owner actions
-- **Blocked by:** 52, 53
+- **Blocked by:** 29, 44, 45, 46, 48, 52, 53
 - **Model:** glm · **Risk:** low · **ADR:** —
-- **Delivers:** `docs/RELEASE_NOTES_vNEXT.md` (English) lists every user-visible change: Node 20/22 dropped (installer refuses first); the stream move; `WARN` with the additive JSON values and `completeness: partial`; `auth status` text on a TTY; rotator asked once + migration; the 503 shed incl. during a recycle drain; the solver as a separate process (visible in task managers), its cap and enforcement modes; thresholds 1536/3072 → 512/1024 MB; recycle count 200 → 100; MCP retention 500/7 days and the idempotency window; MCP task text capped at 4 MiB with a head/tail marker; CDN disk pruning; log rotation while running and `proxy.early.log`; Bun 1.4.4; compact setup by default; Windows graceful stop; execve handover exit status and `ZCODE_KIT_RESIDENT_LAUNCHER=1`; nested proxy workflows deleted. `OWNER-ACTIONS.md` lists A1, A2 (incl. install.ps1 run), macOS terminals/execve/S3 footprint and the optional live smoke with copy-paste commands, each related criterion marked "unverified — owner action".
+- **Delivers:** `docs/RELEASE_NOTES_vNEXT.md` (English) lists every user-visible change: Node 20/22 dropped (installer refuses first); the stream move; `WARN` with the additive JSON values and `completeness: partial`; `auth status` text on a TTY; rotator asked once + migration; the 503 shed incl. during a recycle drain; the solver as a separate process (visible in task managers), its cap and enforcement modes; thresholds 1536/3072 → 512/1024 MB; recycle count 200 → 100; MCP retention 500/7 days and the idempotency window; MCP task text capped at 4 MiB with a head/tail marker; CDN disk pruning; log rotation while running and `proxy.early.log`; Bun 1.4.4; compact setup by default; Windows graceful stop; execve handover exit status and `ZCODE_KIT_RESIDENT_LAUNCHER=1`; nested proxy workflows deleted; the proxy TUI refuses under TERM=dumb (exit 1) and prints the line-mode commands; the four new `doctor` checks; the additive `proxy logs --level/--grep` filters; harness configs refreshed on the next `setup`/`integrate` (Continue `capabilities`, Kilo Code `/v1`, the confirmed MEDIUM items, the bridge's `--max-semi-space-size=1`). `OWNER-ACTIONS.md` lists A1, A2 (incl. install.ps1 run), macOS terminals/execve/S3 footprint and the optional live smoke with copy-paste commands, each related criterion marked "unverified — owner action".
 - **Acceptance:**
-  - [ ] A checklist test/grep confirms every item of spec §16's list appears.
+  - [ ] A checklist test/grep confirms that every item of spec §16's release-notes list (including the four Round 5 additions) appears.
   - [ ] Every "unverified" criterion in tickets 17, 28, 37, 44 points to an OWNER-ACTIONS entry.
 - **Stories:** 138, 144
 
 ## Step 8 — Remaining CI guardrails
 
 ### 55. CI guardrails: snapshot-update refusal and an empty expected-RED list
-- **Blocked by:** 06, 16, 17, 19, 28, 30, 32, 34, 35, 37
+- **Blocked by:** 06, 16, 17, 19, 30, 32, 34, 35, 37, 58, and every typecheck-baseline ticket filed by 11
 - **Model:** glm · **Risk:** low · **ADR:** 0016
 - **Delivers:** CI fails when `UPDATE_SNAPSHOTS` is set; `expected-red.json` is empty on both legs and a guard keeps it empty from here on; the seam 9 guard suite (wiring guard from 04, expected-RED schema, `verify-payload` shared files from 05, snapshot refusal) runs in `npm run test`.
 - **Acceptance:**
   - [ ] A CI-env test with `UPDATE_SNAPSHOTS=1` fails; locally it writes.
   - [ ] Both `memory-budget` legs green with an empty list; the guard rejects a re-added entry.
-  - [ ] The Phase 6 gate commands (spec §18) all run green in one CI run; METRICS "Current" filled from the long-profile loop.
+  - [ ] `npm run test:all` and both `memory-budget` legs are green in the CI run in which the list becomes empty; the proxy typecheck expected-error list from 11 (if any) is empty too.
 - **Stories:** 141, 142
 
 ## Follow-ups (publish as `needs-triage`)
@@ -594,63 +624,64 @@ Observability fields (39) land before the TUI because the TUI process strip read
 |---|---|---|---|---|
 | 01 | Memory loop, budgets, process-count harness, expected-RED ratchet, ubuntu `memory-budget` job | sol | medium | — |
 | 02 | Windows sampler + windows `memory-budget` leg (1.4.2 reference run) | sol | high | 01 |
-| 03 | S3 OMP stub-host leg | sol | medium | 01 |
+| 03 | S3 OMP stub-host leg | sol | medium | 01, 02 |
 | 04 | Pre-existing findings: unwired tests, wiring guard, CI Node 24/26 | glm | low | — |
-| 05 | Shared width core + token set | glm | medium | 01 |
+| 05 | Shared width core + token set | sol | medium | 01 |
 | 06 | CLI output module, capability record, snapshot harness, JSON baseline | glm | medium | 05 |
 | 07 | Command-module split part 1 (expand) | glm | medium | 06 |
-| 08 | Command-module split part 2 (migrate + contract) | glm | medium | 07 |
-| 09 | Batch 1a: CI toolchain, Bun 1.4.4 in CI, nested workflows removed | glm | low | 02, 04 |
+| 08 | Command-module split part 2 (migrate + contract) | glm | medium | 07, 10 |
+| 09 | Batch 1a: CI toolchain, Bun 1.4.4 in CI, nested workflows removed | glm | low | 02, 03, 04 |
 | 10 | Batch 1b: Node 24 floor, refuse before mutation, autostart Node-path check | glm | medium | 09 |
 | 11 | Batch 1c: Bun 1.4.4 installer bootstrap, pinned proxy typecheck, attribution runs | glm | medium | 10 |
 | 12 | Batch 2: happy-dom 21.0.4, undici 8.12.4, yaml 2.9.1 | glm | medium | 11 |
 | 13 | Batch 3: MCP SDK 1.32.2, zod 4.6.6, TS 7, @types/node 24 | glm | medium | 12 |
-| 14 | Event-line format + redaction (prefactor) | glm | low | 01 |
+| 14 | Event-line format + redaction (prefactor) | glm | low | — |
 | 15 | Proxy lifecycle module (intents, outcome records) | sol | high | 08, 13, 14 |
 | 16 | Start lock v1 with proven takeover | sol | high | 15 |
 | 17 | Signal release, orphan adoption, respawn over stale lock | sol | high | 16 |
-| 18 | Per-spawn proxy env (stop token, log dir) | sol | medium | 15 |
+| 18 | Per-spawn proxy env (stop token, log dir) | sol | medium | 15, 21 |
 | 19 | Admission control + 503 shed | sol | high | 13, 14 |
-| 20 | Fewer request-body copies | glm | medium | 19 |
+| 20 | Fewer request-body copies | sol | medium | 19 |
 | 21 | Health supervisor + single graceful sequence | sol | high | 19, 14 |
-| 22 | Graceful stop request `/__kit/stop` + shared deadlines | sol | high | 18, 21 |
+| 22 | Graceful stop request `/__kit/stop` + shared deadlines | sol | high | 18, 21, 40 |
 | 23 | Respawn acknowledgement before drain | sol | high | 17, 18, 21 |
 | 24 | Solver transport seam (prefactor) | sol | medium | 12 |
 | 25 | Bounded-collection module; CDN memory + stall bounds | glm | medium | 12 |
-| 26 | Captcha egress routing under Bun | glm | low | 12 |
+| 26 | Captcha egress routing under Bun | glm | medium | 12 |
 | 27 | Solver child process: spawn, env parity, lazy/idle, one generation | sol | high | 24, 18, 26 |
-| 28 | Solver cap per OS, handshake, recycle + failure semantics | sol | high | 27, 19, 25 |
-| 29 | CDN disk pruning | glm | medium | 25 |
-| 30 | MCP task retention + idempotency window | glm | medium | 13 |
-| 31 | Per-task caps + 4 MiB truncation | glm | medium | 30 |
-| 32 | TUI log pane 2,000 lines / 8 MB | glm | low | 05 |
-| 33 | `proxy.log` single rotator + file modes | sol | high | 16, 18, 14 |
+| 28 | Solver cap per OS + handshake | sol | high | 27 |
+| 58 | Solver recycle + failure semantics | sol | high | 19, 25, 28 |
+| 29 | CDN disk pruning | sol | medium | 25 |
+| 30 | MCP task retention + idempotency window | sol | high | 13 |
+| 31 | Per-task caps + 4 MiB truncation | sol | medium | 30 |
+| 32 | TUI log pane 2,000 lines / 8 MB | glm | low | 05, 11 |
+| 33 | `proxy.log` single rotator + file modes | sol | high | 14, 16, 18, 21 |
 | 34 | Early log cap + tail copy | sol | medium | 33 |
 | 35 | OMP in-host single-flight + cause-line record | sol | high | 03, 15, 33 |
 | 36 | MCP bridge lazy HTTP + semi-space flag | glm | medium | 13 |
 | 37 | execve handover + `ZCODE_KIT_RESIDENT_LAUNCHER=1` | sol | high | 15, 35, 36 |
 | 38 | Manager doctor returns records | glm | medium | 15 |
-| 39 | Observability fields (`/health`, status, JSON) | glm | medium | 19, 21, 23, 28 |
+| 39 | Observability fields (`/health`, status, JSON) | glm | medium | 19, 21, 23, 40, 58 |
 | 40 | UX batch (a): doctor, proxy commands, connection details | glm | medium | 38, 06 |
 | 41 | doctor memory checks | glm | medium | 39, 40 |
 | 42 | Account Rotator asked once + migration | sol | medium | 08 |
 | 43 | UX batch (b1): compact setup, integrate --dry-run | glm | medium | 40, 42 |
 | 44 | UX batch (b2): installers + PowerShell 5.1 gate | glm | medium | 43, 11 |
-| 45 | UX batch (c1): help, usage errors, overrides | glm | low | 40 |
+| 45 | UX batch (c1): help, usage errors, overrides | glm | low | 37, 40, 42 |
 | 46 | UX batch (c2): accounts, auth status, models | glm | low | 40 |
 | 47 | UX batch (c3): run, update, rollback, uninstall | glm | medium | 40, 37 |
 | 48 | Proxy TUI redesign | sol | high | 05, 32, 39 |
 | 49 | TUI log pane filter/scroll/follow | sol | medium | 48 |
 | 50 | Adapters: HIGH fixes | glm | low | — |
 | 51 | Adapters: confirmed MEDIUM fixes | glm | medium | 50 |
-| 52 | Docs: README × 5 | glm | medium | 10, 19, 21, 28, 30, 31, 33, 34, 37, 42, 43 |
-| 53 | Docs: SECURITY, harness, bridge READMEs, MCP_API, SUPPORT_MATRIX, MANIFEST | glm | medium | 11, 13, 16, 22, 28, 31, 51 |
-| 54 | Release notes vNEXT + owner actions | glm | low | 52, 53 |
-| 55 | CI guardrails: snapshot refusal, empty expected-RED list | glm | low | 06, 16, 17, 19, 28, 30, 32, 34, 35, 37 |
+| 52 | Docs: README × 5 | glm | medium | 10, 19, 21, 30, 31, 33, 34, 37, 41, 42, 43, 47, 58 |
+| 53 | Docs: SECURITY, harness, bridge READMEs, MCP_API, SUPPORT_MATRIX, MANIFEST | glm | medium | 11, 13, 16, 22, 31, 51, 58 |
+| 54 | Release notes vNEXT + owner actions | glm | low | 29, 44, 45, 46, 48, 52, 53 |
+| 55 | CI guardrails: snapshot refusal, empty expected-RED list | glm | low | 06, 16, 17, 19, 30, 32, 34, 35, 37, 58, and every typecheck-baseline ticket filed by 11 |
 | 56 | (needs-triage) MCP SDK 2.x migration | sol | high | 13 |
 | 57 | (needs-triage) MCP runtime restart budget (arch #8) | sol | medium | — |
 
-`expected-red.json` ownership: S1 variants → 19; S2/short → 28; S3/hung → 16; S3/omp → 35; S3/short → 37; S4/short → 17; S5/short → 30; S6/short → 32; S7/short → 34.
+`expected-red.json` ownership: S1 variants → 19; S2/short → 58; S3/hung → 16; S3/omp → 35; S3/short → 37; S4/short → 17; S5/short → 30; S6/short → 32; S7/short → 34.
 
 ## Coverage: spec user stories → tickets
 
@@ -661,15 +692,15 @@ Observability fields (39) land before the TUI because the TUI process strip read
 | 3 | 28 |
 | 4 | 28 |
 | 5 | 28 |
-| 6 | 28 |
+| 6 | 58 |
 | 7 | 27 |
 | 8 | 27, 28 |
 | 9 | 27 |
 | 10 | 28 |
-| 11 | 28 |
-| 12 | 28 |
-| 13 | 28 |
-| 14 | 28 |
+| 11 | 58 |
+| 12 | 58 |
+| 13 | 58 |
+| 14 | 58 |
 | 15 | 28 |
 | 16 | 28 |
 | 17 | 24, 27 |
