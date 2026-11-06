@@ -81,6 +81,30 @@ test("run.mjs rejects an unknown scenario or variant with exit 2", () => {
   assert.match(r.stderr, /variants of S1: .*burst16/);
 });
 
+const JOB_ENTRY = join(dirname(fileURLToPath(import.meta.url)), "job.mjs");
+function runJob(args, env) {
+  const clean = { ...process.env };
+  delete clean.ZCODE_OVERHAUL_RUN;
+  delete clean.ZCODE_MEMLOOP_ALLOW;
+  return spawnSync(process.execPath, [JOB_ENTRY, ...args], { env: { ...clean, ...env }, encoding: "utf8", timeout: 30_000 });
+}
+
+test("job.mjs refuses to start outside a capped run, before any scenario runs", () => {
+  const out = mkdtempSync(join(tmpdir(), "memloop-job-"));
+  try {
+    const r = runJob(["--os", "linux", "--out", join(out, "job"), "--cap", "none"], { HOME: out });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /refuses to run outside a capped run/);
+    assert.deepEqual(readdirSync(out), []);
+  } finally { rmSync(out, { recursive: true, force: true }); }
+});
+
+test("job.mjs rejects a run that is not part of the leg's job", () => {
+  const r = runJob(["--os", "linux", "--only", "S2/gc", "--cap", "none"], { ZCODE_OVERHAUL_RUN: "1" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /S2\/gc is not a run of the linux job/);
+});
+
 test("a detached child whose parent exited is still found as a survivor", linuxOnly, async () => {
   const marker = `ZCODE_MEMLOOP_RUN=orphan-test-${process.pid}`;
   // The parent starts a detached grandchild and exits at once; the grandchild
