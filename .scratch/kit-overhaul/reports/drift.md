@@ -242,7 +242,7 @@ The harness-configs note has no Bun/Node-specific adapter drift. One related ris
 | Node.js | engines / CI (above) | floor 20, CI 20 | Active LTS 26 (26.13.0); 24 and 22 in Maintenance; 20 EOL 2026-04-30 (node-lts.md) | floor and CI on an EOL runtime |
 | Node (test evidence) | `SUPPORT_MATRIX.json:4` | 26.7.0 | 26.13.0 (node-lts.md) | minor |
 | Bun (kit CI / installers) | ci.yml:30, release.yml:53, install.sh:131, install.ps1:98 | 1.4.2 (2026-09-05) | 1.4.4 (2026-10-22; bun.md, GitHub API) | 2 patch releases |
-| Bun (proxy CI / shipped binaries) | `zcode-proxy-src/.github/workflows/ci.yml:35`, `release.yml:54,132` | **1.4.0** | 1.4.4 | 4 patch releases; differs from the kit's own 1.4.2 pin |
+| Bun (nested proxy workflows) | `zcode-proxy-src/.github/workflows/ci.yml:35`, `release.yml:54,132` | **1.4.0** | 1.4.4 | 4 patch releases behind and different from the kit's 1.4.2 pin. These workflows never run in this repo (github-actions.md §5). |
 | `@types/bun` | `zcode-proxy-src/bun.lock:18` | 1.3.14 | 1.4.4 | behind the runtime |
 | npm (publish) | `.github/workflows/release.yml:87` | 11.19.1 | 12.2.2 (npm notice in the drift logs, 2026-11-06) | not researched |
 | Claude Code | `MANIFEST.md:28` / de:30 | 2.1.269 | 2.1.318 (2026-11-04) | — |
