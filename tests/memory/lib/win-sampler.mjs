@@ -210,7 +210,8 @@ export function pollerScript({ intervalMs = 1000, parentPid = 0, once = false, u
   return [
     "$ErrorActionPreference = 'Stop'",
     "$ProgressPreference = 'SilentlyContinue'",
-    "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+    // Throws on some hosts without a console; the frames are ASCII apart from command lines.
+    "try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}",
     `$interval = ${Math.max(100, Math.round(intervalMs))}; $parentPid = ${Number(parentPid) | 0}; $once = $${once ? "true" : "false"}; $units = $${units ? "true" : "false"}`,
     `$props = @(${props})`,
     `$sel = @(${select})`,
