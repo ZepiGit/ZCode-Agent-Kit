@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -117,3 +117,5 @@ Branch `ticket/01-memory-loop-budgets`, code head 9fe49bc (merge of the integrat
 - 02: the windows sampler fills `commit_kb` and adds `JOB.windows` and the `windows` key.
 - 03: the `S3/omp` variant and its entries.
 - 27: the solver child's argv must contain `captcha-solver` (role); the S2/S4 counts become live with it.
+
+Merged 2026-11-06 as 0b73e37c61c3c3eda3727f772ac6eb7ab9c04e73; fast suite: kit 334/345 (11 skipped, 0 fail; includes tests/memory/verdict.test.mjs and tests/memory/loop.test.mjs), proxy 1303/1303, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged. Logs: .scratch/kit-overhaul/reports/merge-01-{npmci,test,proxy,mcp}.log.
