@@ -1,0 +1,4 @@
+port:      18458
+pid file:  none
+health:    foreign
+  connection details withheld: port 18458 is answered by a service that is not this kit's proxy

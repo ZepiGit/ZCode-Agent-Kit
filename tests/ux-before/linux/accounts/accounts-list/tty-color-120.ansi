@@ -1,0 +1,5 @@
+Configured accounts:
+  work (Work account)  provider=zai plan=coding-plan  state=ready  credential=redacted
+  personal (Personal)  provider=zai plan=start-plan  state=ready  credential=redacted
+  backup  provider=bigmodel plan=coding-plan  state=paused  credential=redacted
+  store: <HOME>/.zcode-proxy/accounts.json
