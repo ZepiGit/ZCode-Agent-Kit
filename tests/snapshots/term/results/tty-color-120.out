@@ -1,0 +1,5 @@
+  [32m✓ OK[0m    OMP / Oh My Pi            [2mprovider, key resolver, autostart extension[0m
+  [31m✗ FAIL[0m  OpenCode                  [2mprovider.zcode missing from opencode.json[0m
+  [33m! WARN[0m  Codex                     [2mlauncher not on PATH[0m
+  [2m– SKIP[0m  Claude Code               [2mdeclined[0m
+  [36m• INFO[0m  Account Rotator disabled

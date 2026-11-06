@@ -1,0 +1,12 @@
+r001 ANT glm-5.3 200 stream 812ms→6.4s 1830tok 286t/s
+line with its own newline
+{
+  "ok": true,
+  "failed": 0,
+  "checks": [
+    {
+      "name": "bun available",
+      "ok": true
+    }
+  ]
+}

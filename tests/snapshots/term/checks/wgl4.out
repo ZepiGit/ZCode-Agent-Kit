@@ -1,0 +1,18 @@
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m√ PASS[0m  bun available                 [2m/opt/bun/bin/bun (1.4.2)[0m
+  [32m√ PASS[0m  config exists                 [2mproxy/config.yaml[0m
+  [31m× FAIL[0m  mcp bridge deps               [2mmcp/zcode-harness-mcp/node_modules[0m
+                                        [2mmissing[0m
+                                        [2mwhy[0m   the last setup was interrupted
+                                              before the bridge dependencies
+                                              were installed
+                                        [2mnext[0m  [1mzcode-kit setup[0m
+  [33m! WARN[0m  restart budget                [2m2 of 3 restarts used in 15 min[0m
+                                        [2mwhy[0m   the proxy restarted twice for
+                                              memory
+                                        [2mnext[0m  [1mzcode-kit proxy logs 50[0m
+                                          [2mor[0m  [1mzcode-kit doctor[0m
+  [2m– SKIP[0m  pi: integration               [2mnot configured (no consent yet) — answer[0m
+                                        [2my in zcode-kit setup[0m
+  [32m√ PASS[0m  omp: omp extension installed
+doctor: [31m1 failed[0m, [33m1 warning[0m, [32m3 passed[0m, [2m1 skipped[0m → exit 1
