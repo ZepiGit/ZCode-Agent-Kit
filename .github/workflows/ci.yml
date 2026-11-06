@@ -41,6 +41,70 @@ jobs:
       - name: MCP bridge tests
         run: npm run test:mcp
 
+  # Before-equivalence (ticket 06): every captured CLI output is byte-identical
+  # to the BEFORE baseline, the proof of "no visible change" for tickets 06–08
+  # (tests/ux-before-equivalence.test.mjs). ubuntu: all seven variants against
+  # tests/ux-before/linux. windows: the pipe and ci variants; until
+  # tests/ux-before/windows is committed, the baseline is captured on the same
+  # runner from the ticket-06 base commit and uploaded for committing.
+  ux-before:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install proxy dependencies
+        run: cd zcode-proxy-src && bun install --frozen-lockfile
+      - name: Windows baseline from the base commit (until tests/ux-before/windows is committed)
+        if: runner.os == 'Windows' && hashFiles('tests/ux-before/windows/manifest.json') == ''
+        # pwsh, the same shell as the equivalence step: the baseline and the
+        # fresh capture must run in the same environment (a bash step leaks
+        # MSYS state and puts the raw mingw64 git.exe first on PATH).
+        shell: pwsh
+        run: |
+          $base = (Get-Content tests/ux-before/windows-base-commit -Raw).Trim()
+          $kit = Join-Path $env:RUNNER_TEMP "ux-base"
+          $out = Join-Path $env:RUNNER_TEMP "ux-before-windows"
+          git worktree add --detach $kit $base
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location (Join-Path $kit "zcode-proxy-src")
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          node tests/ux-before/capture/capture.mjs --kit $kit --variants pipe,ci --out $out
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UX_BEFORE_BASELINE=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Upload the Windows baseline (to commit as tests/ux-before/windows)
+        if: runner.os == 'Windows' && env.UX_BEFORE_BASELINE != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: ux-before-windows-baseline
+          path: ${{ env.UX_BEFORE_BASELINE }}
+          retention-days: 14
+      - name: Before-equivalence (byte for byte)
+        env:
+          UX_BEFORE_OUT: ${{ runner.temp }}/ux-before-now
+        run: npm run test:ux-before
+      - name: Upload the fresh capture (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ux-before-now-${{ runner.os }}
+          path: ${{ runner.temp }}/ux-before-now
+          if-no-files-found: ignore
+          retention-days: 14
+
   # Memory loop (tests/memory), short profile, with the expected-RED ratchet
   # (tests/memory/expected-red.json, keyed per OS leg): every run listed there
   # must be RED, every other run GREEN. ubuntu runs S1–S7, each run in a
