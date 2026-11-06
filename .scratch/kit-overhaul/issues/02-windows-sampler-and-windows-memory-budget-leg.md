@@ -147,3 +147,77 @@ Branch `ticket/02-windows-sampler`. Code head fbad218, which includes the merge 
 - Orchestrator: verify the windows `memory-budget` leg and the 5 live Windows tests on the draft PR. Then adjust `expected-red.json` `windows` to the first run, raise any RED-only-on-commit run to the owner, and fill the METRICS Windows reference table.
 - S1/burst1's Linux flake at 250 MB is pre-existing and can fail the ubuntu ratchet intermittently. It belongs to ticket 19 or an owner decision; it was not touched here.
 - Ticket 27: on Windows the solver child started from `process.execPath` inherits the run token through the run's bun. Its argv must keep `captcha-solver` (role), as ticket 01 noted.
+
+### 2026-11-06 — implementer, round 2 (after the revert of 18351e1 by c252676)
+
+Branch `ticket/02-windows-sampler`. The fix commits sit on top of ba7a8cc: 18d852c, b3393a3, 06ab74d, and this note. Per the orchestrator, the integration tip is NOT merged, because it contains the revert. The merger reverts the revert and merges this branch.
+
+**What happened in CI run 42221794531 (windows-latest)** — evidence: `/home/AgentKit/overhaul-tools/win-mem-1.log` and the downloaded `memory-budget-windows` artefact in `/home/AgentKit/overhaul-tools/t02-ci-artifact-42221794531/`.
+- Every run directory holds only `run.log` and a `samples.csv` with the header line. There is no `summary.json` and no sample.
+- `run.log` holds nothing but the wrapper's `@@JOB applied=1 … peak≈104 MB` and a CLIXML progress record.
+- `job-summary.json`: `exitCode 0`, `rawExit 0`, `metric null`, `samplerOverhead null` for all 13 runs, so the job called them GREEN.
+
+**Root cause.**
+- `run.mjs` reached `startSampler` (the CSV header was written) and then awaited `sampler.ready`.
+- On Windows, `ready` depends only on the poller's units frame. Commit e1fab6c had unref'd the poller child and its pipes, so nothing held the event loop. Node exited with `main()` still pending and with exit code 0.
+- The peak of ~104 MB is the wrapper PowerShell plus a node that did nothing.
+- The live self-tests on the `test-kit` legs passed because the node:test runner keeps its own process alive.
+- The CLIXML lines are PowerShell 5.1 progress output ("Preparing modules for first use") on the redirected stderr. They are noise; they did not break `@@JOB` parsing.
+
+**Fixes**
+1. The poller stays referenced (`lib/win-sampler.mjs`). RED → GREEN test: "the Windows sampler keeps its process alive until the poller answers".
+   - The test runs a separate node process whose only pending work is the sampler, with the fake poller answering after 300 ms.
+   - RED on ba7a8cc: exit 13 (Node's unsettled top-level await) and no `READY` (`reports/t02-r2-red1.log`). GREEN: `t02-r2-green1`.
+2. **A run that did not run its scenario is a harness failure (exit 2), never GREEN** (`lib/completeness.mjs`, used by `job.mjs`). Exit 0 or 1 counts only together with a `summary.json` that meets all of these:
+   - its key and outcome match the exit code;
+   - samples and scenario time are at or above a per-scenario floor (S1 5 samples / 10 s, S2 30 / 60, S3 10 / 15, S4 30 / 60, S5 60 / 120, S6 1 / 1, S7 15 / 30);
+   - every scenario role was seen at least once (S1 and S7: proxy; S2: scenario; S3: proxy, launcher, preflight, mcp-bridge; S4: proxy, manager; S5: mcp-bridge; S6: none);
+   - on Windows, the metric is commit and the units self-test passed (Round 6 Q2 condition 2).
+
+   The floors are about half the shortest real Linux run. S6 needs no role because its 3 s runs often sample no process (2 samples, no role, on Linux).
+   - The job summary now shows samples and roles seen per run.
+   - `run.mjs` exits 2 unless `main()` settles; this is defence in depth, with no test of its own (see Decisions).
+   - `job.mjs --run-script` lets tests replay the symptom with `tests/memory/fixtures/fake-run.mjs`.
+   - RED on the stubbed gate: both job-level tests reported `actual: 'GREEN'` (`t02-r2-red2`).
+3. **PowerShell progress noise.** Every PowerShell we start (poller, Job Object wrapper, suspend) sets `$ProgressPreference = 'SilentlyContinue'` as its first statement and runs with `-OutputFormat Text`. The frame parser finds a frame head even when CLIXML is glued to it without a newline: before the fix, the units frame was lost and the run would have hung until its timeout. RED: `t02-r2-red3`.
+4. Found in review, before the next CI run could show it:
+   - The loop's own tooling (`netstat`/PowerShell/`where` started by the loop root, plus their conhosts) is role `tooling`: visible, but neither kit footprint nor an orphan. Before this, every `portsOf`/`processCommandLine`/suspend call could add a PowerShell (~60–70 MB) to the S3 kit total, and a leftover `netstat` would have made every run RED on orphans.
+   - The kit's own PowerShell (children of kit processes, such as the manager's identity check) stays counted.
+   - RED: `t02-r2-red4` (roles all `other`) and `t02-r2-red5` (survivors included 2800).
+5. The CI `run.log` became a fixture as `ci-42221794531-run-log.txt`. The name `.log` is gitignored (`.gitignore:34`); without the rename CI would have lacked the file.
+
+**Mutation proofs** (scratch copies; each copy restored and diffed identical):
+- A, poller unref'd again → the keep-alive test fails.
+- B, evidence gate bypassed in `job.mjs` → both job tests fail.
+- C, duration floor dropped → the empty-run test fails.
+- D, units check dropped → the evidence test fails.
+- E, `parseJobReport` reads only the first line → the real-CI-log test fails (it is a preservation test, so this is its proof).
+- F, the old frame parser → the CLIXML frame test fails.
+- G, tooling role removed → the tooling and survivors tests fail.
+- H, the survivors filter removed → the survivors test fails.
+
+**Tests (branch head, Linux)**
+- `npm run test`: 392 tests, 376 pass, 0 fail, 16 skipped (the 5 live Windows tests among them). Log: `reports/t02-r2-final-kit.log`.
+- `npm run test:proxy`: 1343 pass, 0 fail.
+- `npm run test:mcp`: 95 / 96, 0 fail, 1 skipped.
+- Full Linux memory job with the gate: `reports/t02-r2-linux-job.log`, 2,183 s, **the ratchet holds**.
+  - All 14 real runs pass the evidence gate. The smallest margins are S1/burst1 (20 s, 19 samples, proxy seen), S3/short (32 s, 118 samples, all four roles) and S6 (3 s, 2 samples).
+  - S1/burst1 was GREEN this time; its flake is Round 6 Q1's.
+  - Ticket 16's S3/hung and the rest: RED as listed.
+  - The job started from the working tree with fixes 1–3. Fix 4 (`tooling`) landed while it ran; on Linux it is a no-op, because no `tooling` role exists there.
+
+**What the next windows CI run must show** (Round 6 Q2) before any `windows` entry changes:
+- each run's `scenarioS` and `samples` well above the floors (expect minutes, not 1 s);
+- `rolesSeen` with the scenario's roles;
+- `metric: "commit"`;
+- `units.ok: true`;
+- `samplerOverhead` present;
+- `samples.csv` rows with `commit_kb` filled in;
+- no harness failures.
+
+If the scenarios still end early, they now show as `HARNESS FAILURE — no evidence the scenario ran: …` with the reason, never as GREEN. A guessed entry may be removed only with those numbers (Q2 condition 2). A run RED only on commit goes to the owner (Q2 condition 1).
+
+**Decisions**
+- The evidence floors are data-derived and per scenario, not per variant. A scenario that gets genuinely faster than half its shortest real Linux run would trip the gate; a tighter fix ticket must then lower its floor with its own numbers.
+- `run.mjs`'s default exit 2 has no test of its own: provoking an empty event loop in `run.mjs` would need a scenario hook in production loop code. The job-level gate covers the same failure and is tested and mutation-proven.
+- The S1/burst1 Linux flake is still open on this branch. Round 6 Q1 puts its median rule on the integration branch before 02 merges.
