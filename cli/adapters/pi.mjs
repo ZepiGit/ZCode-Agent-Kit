@@ -4,9 +4,11 @@
 // ever updates entries carrying that marker (or byte-identical legacy kit
 // entries from before the marker existed). A hand-written "zcode" entry
 // without either proof is a hard conflict — nothing is written (ZAK-004).
-// Efforts: pi's thinking system is separate from OMP's; the kit advertises
-// reasoning models with verified low/high/max levels via thinkingLevelMap
-// (documented in EFFORT_MAPPING.md); unverified capabilities are not claimed.
+// Efforts: pi's thinking system is separate from OMP's. The kit writes no
+// thinkingLevelMap: on anthropic-messages pi sends the mapped values only with
+// compat.forceAdaptiveThinking, otherwise it sends a thinking budget and clamps
+// xhigh/max to the high budget (pi v1.5.0), so a mapped `max` would be the
+// `high` request under another name. Unverified capabilities are not claimed.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
@@ -49,7 +51,7 @@ export default {
   id: "pi",
   label: "pi",
   protocol: "pi custom provider (models.json, anthropic-messages)",
-  primarySource: "https://github.com/badlogic/pi-mono — packages/coding-agent/docs/models.md (checked 2026-09-13)",
+  primarySource: "https://github.com/earendil-works/pi — packages/coding-agent/docs/models-configuration.md (checked 2026-11-06)",
 
   apply(ctx, tx, log) {
     const agentDir = join(ctx.home, ".pi", "agent");

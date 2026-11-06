@@ -139,6 +139,9 @@ function editConfigYaml(ctx, text, extensionPath) {
   return { text: changed ? String(doc) : text, changed };
 }
 
+// `auth: apiKey`: a custom anthropic-messages provider without `auth` gets
+// OAuth-style (Claude Code) request shaping (omp docs/models.md). `compat`
+// lists only AnthropicCompat keys models.yml honors; others are dropped by omp.
 function ompProviderBlock(ctx, port, indent = "  ") {
   const rootPath = ctx.root.replace(/\\/g, "/");
   const block = `${MARKER_BEGIN}
@@ -149,6 +152,7 @@ function ompProviderBlock(ctx, port, indent = "  ") {
     baseUrl: http://127.0.0.1:${port}
     api: anthropic-messages
     apiKey: ${JSON.stringify(ctx.key())}
+    auth: apiKey
     modelOverrides:
       glm-5.3:
         thinking:
@@ -160,10 +164,8 @@ function ompProviderBlock(ctx, port, indent = "  ") {
           defaultLevel: max
           requiresEffort: true
         compat:
-          supportsOutputEffort: true
           supportsContextManagement: false
           replayUnsignedThinking: true
-          injectClaudeCodeInstruction: false
       glm-5.3-flash:
         thinking:
           mode: anthropic-budget-effort
@@ -174,10 +176,8 @@ function ompProviderBlock(ctx, port, indent = "  ") {
           defaultLevel: max
           requiresEffort: true
         compat:
-          supportsOutputEffort: true
           supportsContextManagement: false
           replayUnsignedThinking: true
-          injectClaudeCodeInstruction: false
     models:
       - id: glm-5.3
         name: GLM-5.3
@@ -212,7 +212,7 @@ export default {
   id: "omp",
   label: "OMP / Oh My Pi",
   protocol: "OMP native provider (anthropic-messages + output_config.effort)",
-  primarySource: "https://omp.sh/docs/custom-models (checked 2026-09-13)",
+  primarySource: "https://github.com/can1357/oh-my-pi/blob/v18.16.0/docs/models.md (checked 2026-11-06)",
 
   apply(ctx, tx, log) {
     const agentDir = join(ctx.home, ".omp", "agent");
