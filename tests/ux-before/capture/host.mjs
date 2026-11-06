@@ -72,6 +72,49 @@ export function swapPath(text, p, token, opts) {
   return pathForms(p, opts).reduce((acc, form) => acc.split(form).join(token), text);
 }
 
+/** Variables the capture never passes to a fixture (terminal, colour, proxy and kit settings of the host). */
+const HOST_ONLY = /^(ZCODE_|CAPTCHA_|NO_COLOR$|FORCE_COLOR$|CLICOLOR|CI$|COLUMNS$|LINES$|TERM$|NODE_OPTIONS$|HTTPS?_PROXY$|ALL_PROXY$)/i;
+/**
+ * Windows only: the variables the fixture sets itself (case-insensitive
+ * names), and the MSYS/Git Bash shell state a `shell: bash` step leaks into
+ * child processes. Under that state git.exe crashed with 0xC0000005 in the
+ * fixture `git clone` (CI, branch staging/06).
+ */
+const WIN_DROP = /^(PATH|TEMP|TMP|MSYSTEM|MSYSTEM_[A-Z0-9_]+|MSYS|MSYS2_[A-Z0-9_]+|MINGW_[A-Z0-9_]+|CHERE_INVOKING|EXEPATH|ORIGINAL_PATH|ORIGINAL_TEMP|ORIGINAL_TMP|SHLVL|PWD|OLDPWD|SHELL|ACLOCAL_PATH|PKG_CONFIG_PATH|MANPATH|INFOPATH|PLINK_PROTOCOL|_)$/i;
+
+/**
+ * The host environment a fixture inherits before the capture adds its own
+ * values. POSIX: the original filter. Windows: also without WIN_DROP.
+ */
+export function fixtureBaseEnv(env, { windows = false } = {}) {
+  const out = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (HOST_ONLY.test(k)) continue;
+    if (windows && WIN_DROP.test(k)) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * The directory of git for a Windows fixture PATH. Git for Windows ships
+ * `cmd\git.exe`, a launcher that sets up its own runtime; a `shell: bash`
+ * step puts the raw `mingw64\bin\git.exe` (or `usr\bin`, `bin`) first. A
+ * git.exe inside a Git for Windows tree maps to that tree's `cmd`; a git.exe
+ * elsewhere is used as found.
+ */
+export function windowsGitDir(pathValue, { exists }) {
+  for (const dir of String(pathValue ?? "").split(";")) {
+    if (!dir || !exists(win32.join(dir, "git.exe"))) continue;
+    const trimmed = dir.replace(/[\\/]+$/, "");
+    const root = trimmed.replace(/[\\/](?:(?:mingw64|mingw32|clangarm64|usr)[\\/]bin|bin|cmd)$/i, "");
+    const launcher = win32.join(root, "cmd");
+    if (root !== trimmed && exists(win32.join(launcher, "git.exe"))) return launcher;
+    return dir;
+  }
+  return null;
+}
+
 /** Describe a failed spawnSync result completely (status, signal, error and both streams). */
 export function describeFailure(label, r) {
   const parts = [`${label}: status ${r.status ?? "null"}`];

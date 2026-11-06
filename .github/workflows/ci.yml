@@ -68,13 +68,23 @@ jobs:
         run: cd zcode-proxy-src && bun install --frozen-lockfile
       - name: Windows baseline from the base commit (until tests/ux-before/windows is committed)
         if: runner.os == 'Windows' && hashFiles('tests/ux-before/windows/manifest.json') == ''
-        shell: bash
+        # pwsh, the same shell as the equivalence step: the baseline and the
+        # fresh capture must run in the same environment (a bash step leaks
+        # MSYS state and puts the raw mingw64 git.exe first on PATH).
+        shell: pwsh
         run: |
-          base="$(tr -d '\r\n' < tests/ux-before/windows-base-commit)"
-          git worktree add --detach "$RUNNER_TEMP/ux-base" "$base"
-          (cd "$RUNNER_TEMP/ux-base/zcode-proxy-src" && bun install --frozen-lockfile)
-          node tests/ux-before/capture/capture.mjs --kit "$RUNNER_TEMP/ux-base" --variants pipe,ci --out "$RUNNER_TEMP/ux-before-windows"
-          echo "UX_BEFORE_BASELINE=$RUNNER_TEMP/ux-before-windows" >> "$GITHUB_ENV"
+          $base = (Get-Content tests/ux-before/windows-base-commit -Raw).Trim()
+          $kit = Join-Path $env:RUNNER_TEMP "ux-base"
+          $out = Join-Path $env:RUNNER_TEMP "ux-before-windows"
+          git worktree add --detach $kit $base
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location (Join-Path $kit "zcode-proxy-src")
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          node tests/ux-before/capture/capture.mjs --kit $kit --variants pipe,ci --out $out
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "UX_BEFORE_BASELINE=$out" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Upload the Windows baseline (to commit as tests/ux-before/windows)
         if: runner.os == 'Windows' && env.UX_BEFORE_BASELINE != ''
         uses: actions/upload-artifact@v7
