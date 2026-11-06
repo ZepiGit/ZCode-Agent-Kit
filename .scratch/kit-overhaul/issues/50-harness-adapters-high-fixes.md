@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -72,3 +72,4 @@ Each fixture is a temp HOME plus an isolated `ZCODE_KIT_STATE_DIR` that already 
 - `kilo-code.apply` still returns `changed: true` on a no-op run (pre-existing). The bytes are idempotent because `commitFile` skips identical content, and C2 keeps the return and log unchanged.
 - Docs: `harnesses/README*` and `EFFORT_MAPPING*` name neither the Continue capability keys nor the Kilo base URL, so no doc change is needed (Q18 cond. 3).
 - Noted but left: the generic setup "Connection details" print the Anthropic base URL as the proxy root plus "(POST /v1/messages)". That is correct for clients that append `/v1/messages` (Claude Code), so it is not the Kilo defect.
+- Merged 2026-11-06 as c2ee3d1; fast suite: kit 290/301 (0 fail, 11 skipped), proxy 1288/1288, mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged. Logs: reports/merge-50-{npmci,test,proxy,mcp}.log.
