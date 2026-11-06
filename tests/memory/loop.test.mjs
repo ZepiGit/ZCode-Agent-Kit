@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
+import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 
 // The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
 const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
@@ -298,4 +299,21 @@ test("run evidence: outcome and exit code must agree, and on Windows commit and 
   assert.match(runEvidence(winCommit, { key: "S7/short", exitCode: 1 }).problems.join(), /units self-test did not pass/);
   assert.equal(runEvidence({ ...winCommit, notes: { sampler: { units: { ok: true } } } }, { key: "S7/short", exitCode: 1 }).ok, true);
   assert.equal(runEvidence(ok, { key: "S7/short", exitCode: 2 }).ok, true, "a harness failure needs no evidence: it is already a failure");
+});
+
+// ── Windows checkouts (CI run 42246379763) ───────────────────────────────────
+test("the isolated config is the same from a CRLF checkout of the template (Windows autocrlf)", () => {
+  const lf = readFileSync(join(KIT_ROOT, "proxy", "config.example.yaml"), "utf8").replace(/\r\n/g, "\n");
+  const opts = { port: 19024, key: "fixture-key", mockUrl: "http://127.0.0.1:19025" };
+  const fromLf = isolatedConfig({ ...opts, template: lf });
+  const fromCrlf = isolatedConfig({ ...opts, template: lf.replace(/\n/g, "\r\n") });
+  assert.equal(fromCrlf, fromLf);
+  assert.match(fromCrlf, /^claim:\n  enabled: false\n  auto: false/m);
+  assert.match(fromCrlf, /^  port: 19024$/m);
+});
+
+test("`--cap none` on Windows runs the run script directly under the job's own timeout (no GNU `timeout`)", () => {
+  const args = ["S1", "--profile", "short"];
+  assert.deepEqual(commandFor("none", "3G", 60, args, { node: "C:\\node.exe", runScript: "D:\\run.mjs", platform: "win32" }), { argv: ["C:\\node.exe", "D:\\run.mjs", ...args], timeoutMs: 90_000 });
+  assert.deepEqual(commandFor("none", "3G", 60, args, { node: "/usr/bin/node", runScript: "/kit/run.mjs", platform: "linux" }), { argv: ["timeout", "--kill-after=30", "60", "/usr/bin/node", "/kit/run.mjs", ...args], timeoutMs: null });
 });
