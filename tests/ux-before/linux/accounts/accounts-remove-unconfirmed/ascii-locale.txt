@@ -1,0 +1,2 @@
+This removes account "personal" from the encrypted account pool.
+Re-run with --yes to confirm. The account's Desktop login is not touched.

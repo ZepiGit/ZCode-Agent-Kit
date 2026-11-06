@@ -1,0 +1,3 @@
+
+--- stderr ---
+zcode-proxy: TUI mode needs an interactive terminal (TTY). For headless/CLI use run: zcode-proxy --cli serve

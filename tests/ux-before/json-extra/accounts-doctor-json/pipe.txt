@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "source": "offline",
+  "asOf": "<TS>",
+  "checks": [
+    {
+      "code": "config_valid",
+      "status": "ok"
+    },
+    {
+      "code": "store_readable",
+      "status": "ok",
+      "detail": "3 account(s)"
+    },
+    {
+      "code": "provider_mismatch",
+      "status": "warning",
+      "detail": "1 account(s)"
+    },
+    {
+      "code": "pool_disabled",
+      "status": "warning",
+      "detail": "legacy single-account mode is active"
+    }
+  ]
+}
