@@ -100,11 +100,11 @@ function markdown({ os, cap, ratchet, results, partial }) {
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
   const repeated = results.filter((r) => r.median);
   if (repeated.length) {
-    lines.push("", "Judged on the median of n fresh repetitions (one verdict per run key; every repetition must also stay within the per-run ceiling):", "", "| run | n | repetitions (MB) | median | budget | ceiling | over ceiling |", "|---|---|---|---|---|---|---|");
+    lines.push("", "Judged on the median of n fresh repetitions (one verdict per run key; every repetition must also stay within the per-run ceiling; Windows: the WS gate, commit reported):", "", "| run | n | gate | repetitions (MB) | median | budget | ceiling | over ceiling | commit per repetition (MB) |", "|---|---|---|---|---|---|---|---|---|");
     for (const r of repeated) {
       const m = r.median;
-      lines.push(`| ${r.key} | ${m.n} | ${m.values.map((v) => v ?? "—").join(", ")} | ${m.medianMB ?? "—"} | ≤ ${m.budgetMB} | ≤ ${m.ceilingMB} | ${m.overCeiling.length ? m.overCeiling.map((i) => `#${i}`).join(", ") : "none"} |`);
-      if (m.workingSet) lines.push(`| ${r.key} (working set) | ${m.n} | ${m.workingSet.values.map((v) => v ?? "—").join(", ")} | ${m.workingSet.medianMB ?? "—"} | ≤ ${m.budgetMB} | ≤ ${m.ceilingMB} | — |`);
+      const gate = m.gate === "ws" ? "WS" : m.gate === "commit" ? "commit" : "RSS";
+      lines.push(`| ${r.key} | ${m.n} | ${gate} | ${m.values.map((v) => v ?? "—").join(", ")} | ${m.medianMB ?? "—"} | ≤ ${m.budgetMB} | ≤ ${m.ceilingMB} | ${m.overCeiling.length ? m.overCeiling.map((i) => `#${i}`).join(", ") : "none"} | ${m.commitValues ? `${m.commitValues.join(", ")} (median ${m.commitMedianMB})` : "—"} |`);
     }
   }
   const overheads = results.filter((r) => r.samplerOverhead?.polls);

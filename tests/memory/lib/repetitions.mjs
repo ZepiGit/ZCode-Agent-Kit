@@ -37,9 +37,12 @@ function median(values) {
 }
 
 /**
- * reps: [{ exitCode, checks: [{ name, red, value }], error? }], one per repetition, in order.
+ * reps: [{ exitCode, checks: [{ name, red, value, gate?, commitValue?, wsValue? }], workingSetRedChecks?, error? }],
+ * one per repetition, in order (Windows checks carry gate/commitValue/wsValue, lib/verdict.mjs osVerdict).
  * Returns { exitCode (0 GREEN, 1 RED, 2 harness failure), red, redChecks,
- * values, medianMB, budgetMB, ceilingMB, overCeiling (1-based repetitions), error? }.
+ * values, medianMB, budgetMB, ceilingMB, overCeiling (1-based repetitions), gate
+ * ("ws"/"commit" on Windows, null on Linux), commitValues, commitMedianMB,
+ * workingSetRedChecks, redOnlyOnCommit, error? }.
  * An incomplete set (a harness failure, fewer than n repetitions, a missing
  * value) is a harness failure: a median of fewer runs is not the rule.
  */
@@ -61,14 +64,21 @@ export function medianVerdict(reps, rule) {
   // Every other check is judged in every repetition.
   for (const r of reps) for (const c of r.checks) if (c.red && c.name !== rule.check && !redChecks.includes(c.name)) redChecks.push(c.name);
   const red = redChecks.length > 0;
-  // Windows: the set is judged on commit; the same rule over the working-set
-  // values shows whether it is RED only on commit (build-time gate 3).
-  let workingSet = null;
-  if (reps.every((r) => Array.isArray(r.workingSet?.checks))) {
-    const ws = medianVerdict(reps.map((r) => ({ exitCode: r.exitCode, checks: r.workingSet.checks })), rule);
-    workingSet = { red: ws.red, redChecks: ws.redChecks, values: ws.values, medianMB: ws.medianMB };
+  // Windows (Round 7 Q1): the value is the check's gated one (working set for
+  // the proxy peak); commit rides along per repetition and is reported, never
+  // judged. The all-WS view (the same rule over wsValue plus each repetition's
+  // WS-RED checks) says whether the set is RED only on commit (build-time gate 3).
+  const ofCheck = (r) => r.checks.find((c) => c.name === rule.check);
+  const gate = ofCheck(reps[0]).gate ?? null;
+  const commitValues = reps.every((r) => typeof ofCheck(r).commitValue === "number") ? reps.map((r) => ofCheck(r).commitValue) : null;
+  let workingSetRedChecks = [];
+  if (gate) {
+    const wsValues = reps.map((r) => ofCheck(r).wsValue);
+    if (median(wsValues) > rule.budgetMB) workingSetRedChecks.push(`median:${rule.check}`);
+    if (wsValues.some((v) => v > rule.ceilingMB)) workingSetRedChecks.push(`ceiling:${rule.check}`);
+    for (const r of reps) for (const name of r.workingSetRedChecks ?? []) if (name !== rule.check && !workingSetRedChecks.includes(name)) workingSetRedChecks.push(name);
   }
-  return { exitCode: red ? 1 : 0, red, redChecks, values, medianMB, overCeiling, ...base, workingSet, redOnlyOnCommit: workingSet ? red && !workingSet.red : false };
+  return { exitCode: red ? 1 : 0, red, redChecks, values, medianMB, overCeiling, ...base, gate, commitValues, commitMedianMB: commitValues ? median(commitValues) : null, workingSetRedChecks, redOnlyOnCommit: gate ? red && workingSetRedChecks.length === 0 : false };
 }
 
 /**

@@ -356,20 +356,39 @@ test("repetitions run one after another, as many as the rule's n, and a harness 
   assert.deepEqual([failing.exitCode, failing.error], [2, "repetition 2: timed out"]);
 });
 
-test("median rule on Windows: judged on commit, with the working-set median beside it, so a set RED only on commit is flagged", () => {
-  // Each repetition as run.mjs writes it on Windows: commit checks plus the working-set verdict's values.
-  const winRep = (commitMB, wsMB) => {
-    const rows = rowsOf([winProc(1, "proxy", { ws: wsMB, commit: commitMB })], [winProc(1, "proxy", { ws: wsMB, commit: commitMB })]);
-    const v = osVerdict(rows, { procPeaks: { proxy: 250 } });
-    return { exitCode: v.red ? 1 : 0, checks: v.checks, workingSet: v.workingSet };
-  };
-  const v = medianVerdict([winRep(260, 120), winRep(255, 118), winRep(240, 117), winRep(270, 121), winRep(230, 119)], rule5);
-  assert.equal(v.medianMB, 255);
-  assert.deepEqual([v.red, v.workingSet.red, v.workingSet.medianMB, v.redOnlyOnCommit], [true, false, 119, true]);
-  const both = medianVerdict([winRep(260, 260), winRep(255, 255), winRep(240, 240), winRep(270, 270), winRep(230, 230)], rule5);
-  assert.deepEqual([both.red, both.workingSet.red, both.redOnlyOnCommit], [true, true, false]);
-  // Linux repetitions carry no working-set verdict.
-  assert.equal(medianVerdict([rep(236), rep(231), rep(240), rep(219), rep(230)], rule5).workingSet, null);
+// Round 7 Q1 / Round 8 Q1: on Windows the S1/burst1 set is judged on the
+// working-set gate, max(sampled WS, PeakWorkingSetSize), and the 400 MB
+// per-run ceiling applies to that same value; commit is reported per repetition.
+// One repetition as job.mjs hands it over on Windows: osVerdict's checks plus the
+// all-WS verdict's RED checks.
+const winRep = ({ commit, ws, wsPeak = ws }) => {
+  const p = winProc(1, "proxy", { ws, commit, peakWs: wsPeak });
+  const v = osVerdict(rowsOf([p], [p]), { procPeaks: { proxy: 250 }, counts: { proxy: 1 }, orphans: 0 });
+  return { exitCode: v.red ? 1 : 0, checks: v.checks, metric: v.metric, workingSetRedChecks: v.workingSet.redChecks };
+};
+
+test("median rule on Windows: judged on the WS gate (max of sampled WS and PeakWorkingSetSize), commit beside it", () => {
+  // CI run 42265988296-like repetitions: ~420 MB commit, WS around the budget.
+  const reps = [winRep({ commit: 422, ws: 234.3, wsPeak: 255 }), winRep({ commit: 365.2, ws: 222 }), winRep({ commit: 424.5, ws: 248.3, wsPeak: 262 }), winRep({ commit: 410, ws: 230, wsPeak: 240 }), winRep({ commit: 400, ws: 236 })];
+  const v = medianVerdict(reps, rule5);
+  // The PeakWorkingSetSize between samples counts: 255 and 262, not 234.3 and 248.3.
+  assert.deepEqual(v.values, [255, 222, 262, 240, 236]);
+  assert.deepEqual([v.gate, v.medianMB, v.red, v.redChecks], ["ws", 240, false, []]);
+  // Commit is reported, never the gate: every repetition is above 250 commit and above 400 in three.
+  assert.deepEqual(v.commitValues, [422, 365.2, 424.5, 410, 400]);
+  assert.equal(v.commitMedianMB, 410);
+  assert.deepEqual(v.overCeiling, []);
+  assert.equal(v.redOnlyOnCommit, false);
+});
+
+test("median rule on Windows: a WS majority above 250 is RED, and the 400 MB ceiling applies to the WS gate value", () => {
+  const high = medianVerdict([winRep({ commit: 430, ws: 240, wsPeak: 256 }), winRep({ commit: 420, ws: 251 }), winRep({ commit: 380, ws: 230 }), winRep({ commit: 425, ws: 248, wsPeak: 270 }), winRep({ commit: 410, ws: 220 })], rule5);
+  assert.deepEqual([high.medianMB, high.red, high.redChecks, high.redOnlyOnCommit], [251, true, ["median:procPeak:proxy"], false]);
+  const spike = medianVerdict([winRep({ commit: 420, ws: 230 }), winRep({ commit: 520, ws: 300, wsPeak: 401 }), winRep({ commit: 400, ws: 231 }), winRep({ commit: 400, ws: 232 }), winRep({ commit: 400, ws: 233 })], rule5);
+  assert.deepEqual([spike.medianMB, spike.red, spike.redChecks, spike.overCeiling], [232, true, ["ceiling:procPeak:proxy"], [2]]);
+  // Linux repetitions carry no commit values.
+  const linux = medianVerdict([rep(236), rep(231), rep(240), rep(219), rep(230)], rule5);
+  assert.deepEqual([linux.gate, linux.commitValues, linux.redOnlyOnCommit], [null, null, false]);
 });
 
 // The S1/burst1 proxy peaks (VmHWM, MB) measured for ticket 60: 48 fresh,
