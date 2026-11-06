@@ -4,40 +4,15 @@
 // manager spawns, reparented to init) keep the marker, so they stay visible —
 // and anything still alive after the scenario stopped is an orphan.
 //
-// Linux reads /proc directly. Windows (ticket 02) cannot read another
-// process's environment: one long-lived PowerShell poller reads Win32_Process
-// and the run's processes are the tree below this process plus every process
-// carrying the run id in its command line or executable path (lib/win-sampler.mjs).
+// Linux reads /proc directly. Other platforms are not supported yet: the
+// Windows equivalent (Get-CimInstance Win32_Process + handle counts) is a
+// missing seam, reported by `supported()`.
 import { readdirSync, readFileSync, readlinkSync, writeFileSync, appendFileSync } from "node:fs";
-import { createKitTracker, pollOnce, powershellPoller, startPoller } from "./win-sampler.mjs";
-import * as winNet from "./win-net.mjs";
 
 const PAGE_KB = 4; // getconf PAGESIZE on every supported Linux target = 4096
 
-export function supported(platform = process.platform) {
-  return platform === "linux" || platform === "win32";
-}
-
-// Windows sampling sessions, per marker: the tracker (tree + token, with every
-// parent seen so far), the latest poll and how to take a fresh one.
-const winSessions = new Map();
-const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
-function winSession(marker, { rootPid = process.pid, spawn = powershellPoller, alive = isAlive } = {}) {
-  let s = winSessions.get(marker);
-  if (!s) {
-    s = { tracker: createKitTracker({ rootPid, token: marker.split("=")[1] }), latest: null, selfPid: null, live: false, spawn, alive };
-    winSessions.set(marker, s);
-  }
-  return s;
-}
-const useWindows = (marker) => winSessions.has(marker) || process.platform === "win32";
-
-function scanWindows(marker) {
-  const s = winSession(marker);
-  if (s.live && s.latest) return s.tracker.select(s.latest, { selfPid: s.selfPid }).filter((p) => s.alive(p.pid));
-  // No live poller (before start, after stop): one fresh poll, same tracker.
-  const f = pollOnce(s.spawn);
-  return s.tracker.select(f.table, { selfPid: f.selfPid });
+export function supported() {
+  return process.platform === "linux";
 }
 
 function readText(path) {
@@ -98,7 +73,6 @@ function snapshot(pid, marker, cache) {
 
 /** All live processes carrying the marker. */
 export function scan(marker, cache = new Map()) {
-  if (useWindows(marker)) return scanWindows(marker);
   const out = [];
   for (const name of readdirSync("/proc")) {
     if (!/^\d+$/.test(name)) continue;
@@ -123,9 +97,7 @@ export function listeningPorts() {
   return ports;
 }
 
-export function portsOf(pid, ports) {
-  if (process.platform === "win32") return winNet.listenersOf(winNet.netstat(), pid);
-  ports ??= listeningPorts();
+export function portsOf(pid, ports = listeningPorts()) {
   const found = new Set();
   let entries = [];
   try { entries = readdirSync(`/proc/${pid}/fd`); } catch { return []; }
@@ -154,7 +126,6 @@ function hexAddr(hex) {
 
 /** Every TCP socket a pid holds: { local, remote, state } (state hex per /proc/net/tcp). */
 export function connectionsOf(pid) {
-  if (process.platform === "win32") return winNet.connectionsOf(winNet.netstat(), pid);
   const inodes = new Set();
   let entries = [];
   try { entries = readdirSync(`/proc/${pid}/fd`); } catch { return []; }
@@ -179,7 +150,6 @@ export function connectionsOf(pid) {
 
 /** Non-loopback remote endpoints held by a pid (the "no real upstream" proof). */
 export function externalConnections(pid) {
-  if (process.platform === "win32") return winNet.externalOf(winNet.netstat(), pid).map((remote) => ({ remote }));
   return connectionsOf(pid).filter((c) => c.state !== "0A" && !/^(?:127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0):/.test(c.remote));
 }
 
@@ -234,13 +204,9 @@ export function countRoles(marker) {
  * Start sampling. `probe(snapshots)` may return { [pid]: heapMB } for
  * processes whose JS heap is reachable (proxy /health, in-process reports).
  * `progress()` returns the scenario's work counter (requests, solves, …).
- * `ready` resolves once sampling runs (at once on Linux; on Windows after the
- * units self-test, and it rejects when that fails). `windows` selects the
- * Windows backend off Windows too (tests: { rootPid, spawn, alive }).
  */
-export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null, progress = () => 0, windows = null }) {
-  const onWindows = windows !== null || process.platform === "win32";
-  if (!onWindows && !supported()) throw new Error(`memory loop sampler supports Linux /proc and Windows only (platform ${process.platform})`);
+export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null, progress = () => 0 }) {
+  if (!supported()) throw new Error(`memory loop sampler supports Linux /proc only (platform ${process.platform})`);
   const cache = new Map();
   const rows = []; // compact in-memory series for the verdict
   const t0 = Date.now();
@@ -248,11 +214,12 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
   let timer = null;
   let running = false;
   let heap = {};
-  const record = async (snaps) => {
+  const tick = async () => {
     if (running) return;
     running = true;
     try {
       const t = Date.now() - t0;
+      const snaps = scan(marker, cache);
       if (probe) {
         try { heap = (await probe(snaps)) ?? heap; } catch {}
       }
@@ -260,55 +227,20 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
       let csv = "";
       for (const s of snaps) {
         const h = heap[s.pid];
-        csv += `${t},${s.pid},${s.ppid},${s.role},${s.rssKb},${s.hwmKb},${s.threads},${s.fds},${h ?? ""},${p},"${s.cmd.replace(/"/g, "'")}",${s.commitKb ?? ""}\n`;
+        csv += `${t},${s.pid},${s.ppid},${s.role},${s.rssKb},${s.hwmKb},${s.threads},${s.fds},${h ?? ""},${p},"${s.cmd.replace(/"/g, "'")}",\n`;
       }
       if (csv) appendFileSync(csvPath, csv);
-      rows.push({ t, progress: p, procs: snaps.map((s) => ({ pid: s.pid, ppid: s.ppid, key: s.key, role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: heap[s.pid] ?? null, commitKb: s.commitKb ?? null, ...(s.wsPeakKb !== undefined ? { wsPeakKb: s.wsPeakKb } : {}) })) });
+      rows.push({ t, progress: p, procs: snaps.map((s) => ({ pid: s.pid, ppid: s.ppid, key: s.key, role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: heap[s.pid] ?? null, commitKb: null })) });
     } finally {
       running = false;
     }
   };
-
-  if (onWindows) {
-    winSessions.delete(marker);
-    const session = winSession(marker, windows ?? {});
-    const poller = startPoller({
-      intervalMs,
-      spawnSpec: session.spawn,
-      onPoll(f) {
-        session.latest = f.table;
-        session.selfPid = f.selfPid;
-        void record(session.tracker.select(f.table, { selfPid: f.selfPid }));
-      },
-    });
-    session.live = true;
-    const ready = poller.ready.then((r) => ({ units: r.units }), (err) => { session.live = false; throw err; });
-    ready.catch(() => {});
-    return {
-      rows,
-      t0,
-      ready,
-      pollerPid: poller.child.pid,
-      overhead: () => poller.overhead(),
-      async stop() {
-        await poller.stop();
-        session.live = false;
-        while (running) await new Promise((r) => setTimeout(r, 20));
-        return rows;
-      },
-    };
-  }
-
-  const tick = () => record(scan(marker, cache));
   timer = setInterval(tick, intervalMs);
   timer.unref?.();
   void tick();
   return {
     rows,
     t0,
-    ready: Promise.resolve({ units: null }),
-    pollerPid: null,
-    overhead: () => null,
     async stop() {
       clearInterval(timer);
       while (running) await new Promise((r) => setTimeout(r, 20));

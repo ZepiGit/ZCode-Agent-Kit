@@ -1,12 +1,11 @@
 // The memory loop's definition of RED, pinned with hand-built series.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { osVerdict, verdict } from "./lib/verdict.mjs";
+import { verdict } from "./lib/verdict.mjs";
 import { MEMORY, PROCESSES, s3Budgets } from "./lib/budgets.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkRatchet, issueIdsIn, readExpectedRed, validateExpectedRed } from "./lib/ratchet.mjs";
-import { JOB } from "./lib/catalogue.mjs";
 
 /** One proxy sample per second; `mb(i)` gives its RSS, progress = 10 units/s. */
 function series(n, mb, role = "proxy") {
@@ -204,38 +203,4 @@ test("ratchet: a listed run that did not run fails", () => {
   const r = judge({ linux: { "S1/burst16": "19", "S3/short": "37" } }, [outcome("S1/short", 0), outcome("S1/burst16", 1)]);
   assert.equal(r.ok, false);
   assert.match(r.failures.join("\n"), /S3\/short.*did not run/);
-});
-
-// ── Metric per OS (spec §1, ticket 02): commit on Windows, RSS on Linux ─────
-const winProc = (pid, role, { ws, commit, peakCommit = commit, peakWs = ws }) => ({ pid, ppid: 1, key: `${pid}:1`, role, rssKb: ws * 1024, commitKb: commit * 1024, hwmKb: peakCommit * 1024, wsPeakKb: peakWs * 1024, threads: 1, fds: 1, heapMB: null });
-
-test("on Windows samples the verdict judges commit, and a run RED only on commit is flagged for the owner", () => {
-  // Working set 110 MB (peak 120), commit 240 MB with a 310 MB peak: within a 250 MB working-set budget, over it on commit.
-  const rows = rowsOf(...Array.from({ length: 5 }, () => [winProc(1, "proxy", { ws: 110, peakWs: 120, commit: 240, peakCommit: 310 })]));
-  const v = osVerdict(rows, { procPeaks: { proxy: 250 } });
-  assert.equal(v.metric, "commit");
-  assert.equal(v.red, true);
-  assert.equal(checkNamed(v, "procPeak:proxy").value, 310);
-  assert.equal(v.workingSet.red, false);
-  assert.equal(v.redOnlyOnCommit, true);
-});
-
-test("on Windows samples RED on both metrics is not 'RED only on commit'", () => {
-  const rows = rowsOf([winProc(1, "proxy", { ws: 300, commit: 320 })], [winProc(1, "proxy", { ws: 300, commit: 320 })]);
-  const v = osVerdict(rows, { procPeaks: { proxy: 250 } });
-  assert.deepEqual([v.red, v.workingSet.red, v.redOnlyOnCommit, v.workingSet.redChecks], [true, true, false, ["procPeak:proxy"]]);
-});
-
-test("Linux samples (no commit_kb) keep the RSS verdict unchanged", () => {
-  const rows = rowsOf([proc(1, "proxy", 100, { hwm: 300 })], [proc(1, "proxy", 120)]);
-  const v = osVerdict(rows, { procPeaks: { proxy: 250 } });
-  assert.equal(v.metric, "rss");
-  assert.deepEqual(v.checks, verdict(rows, { procPeaks: { proxy: 250 } }).checks);
-  assert.equal(v.redOnlyOnCommit, false);
-  assert.equal(v.workingSet, null);
-});
-
-test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6", () => {
-  assert.deepEqual(JOB.windows, JOB.linux.filter((k) => !k.startsWith("S6/")));
-  assert.ok(JOB.windows.includes("S3/hung") && JOB.windows.includes("S2/short"));
 });

@@ -1,8 +1,6 @@
 // Start an isolated kit proxy through the REAL manager (`start`), prove the
 // isolation on the live process, and expose a heap probe via /health.
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { processCommandLine } from "../../../lib/process.mjs";
 import { createIsolatedKit, startMock } from "./isolated-kit.mjs";
 import { externalConnections, portsOf } from "./sampler.mjs";
 
@@ -15,20 +13,8 @@ function environOf(pid) {
   } catch { return {}; }
 }
 
-/**
- * Facts about a live proxy that prove (or disprove) isolation. Never returns secret values.
- * Windows cannot read another process's environment: the env facts are null
- * there, and the proof is the run's own bun as the proxy's executable (it can
- * only come from the isolated ZCODE_KIT_BUN), the isolated port as its only
- * listener (the port comes only from the isolated config) and an answer to
- * /health with the run's own key (startProxySession adds healthWithRunKey).
- */
-export function isolationFacts(kit, pid, platform = process.platform) {
-  const listening = { listeningPorts: portsOf(pid), externalConnections: externalConnections(pid).map((c) => c.remote) };
-  if (platform === "win32") {
-    const exe = processCommandLine(pid)?.executablePath ?? null;
-    return { pid, platform, homeIsolated: null, configIsolated: null, stateDirIsolated: null, credentialsIsolated: null, executableIsRunBun: exe !== null && resolve(exe).toLowerCase() === resolve(kit.bun).toLowerCase(), ...listening };
-  }
+/** Facts about a live proxy that prove (or disprove) isolation. Never returns secret values. */
+export function isolationFacts(kit, pid) {
   const env = environOf(pid);
   return {
     pid,
@@ -36,21 +22,17 @@ export function isolationFacts(kit, pid, platform = process.platform) {
     configIsolated: env.ZCODE_PROXY_CONFIG === kit.config,
     stateDirIsolated: env.ZCODE_KIT_STATE_DIR === kit.stateDir,
     credentialsIsolated: env.ZCODE_PROXY_CREDENTIALS_PATH?.startsWith(kit.stateDir) === true,
-    ...listening,
+    listeningPorts: portsOf(pid),
+    externalConnections: externalConnections(pid).map((c) => c.remote),
   };
 }
 
 export function assertIsolated(facts, port) {
   const bad = [];
-  if (facts.platform === "win32") {
-    if (facts.executableIsRunBun !== true) bad.push("executable is not the run's bun");
-    if (facts.healthWithRunKey !== true) bad.push("/health with the run's key");
-  } else {
-    if (!facts.homeIsolated) bad.push("HOME");
-    if (!facts.configIsolated) bad.push("ZCODE_PROXY_CONFIG");
-    if (!facts.stateDirIsolated) bad.push("ZCODE_KIT_STATE_DIR");
-    if (!facts.credentialsIsolated) bad.push("credentials path");
-  }
+  if (!facts.homeIsolated) bad.push("HOME");
+  if (!facts.configIsolated) bad.push("ZCODE_PROXY_CONFIG");
+  if (!facts.stateDirIsolated) bad.push("ZCODE_KIT_STATE_DIR");
+  if (!facts.credentialsIsolated) bad.push("credentials path");
   if (facts.listeningPorts.length !== 1 || facts.listeningPorts[0] !== port) bad.push(`listening ports ${JSON.stringify(facts.listeningPorts)}`);
   if (facts.externalConnections.length) bad.push(`external connections ${facts.externalConnections.join(",")}`);
   if (bad.length) throw new Error(`isolation not proven for pid ${facts.pid}: ${bad.join("; ")}`);
@@ -74,7 +56,6 @@ export async function startProxySession(ctx, { port = Number(process.env.ZCODE_M
     const rec = kit.pidRecord();
     session.proxyPid = rec?.pid ?? null;
     const facts = isolationFacts(kit, session.proxyPid);
-    if (facts.platform === "win32") facts.healthWithRunKey = (await kit.health(5000)) !== null;
     ctx.note("isolation.facts", facts);
     assertIsolated(facts, port);
   }
