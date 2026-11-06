@@ -2,7 +2,7 @@
 
 **Blocked by:** 05 (Shared width core and token set (two renderers, one token set))
 
-**Status:** resolved
+**Status:** ready-for-agent
 
 Model: glm
 
@@ -176,4 +176,71 @@ Spec stories: 89, 106, 107, 108, 123
   - `npm run test:mcp` (`t06-full2-mcp`): 96 tests, 95 pass, 0 fail, 1 skipped; `dist/` unchanged.
   - Wiring guard: 0 unwired.
 
-- Merged 2026-11-06 as 5155b1d; fast suite: kit 487/498 (0 fail, 11 skipped), proxy 1343/1343 (90 files), mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged; no lockfile changes. Logs: reports/merge-06-{npm-ci,test,proxy,mcp}.log. The Windows criteria (Windows pipe/ci BEFORE baseline, win32 JSON superset part) are pending CI by design (decision 3); the orchestrator verifies them after push. The 8-minute `npm run test:ux-before` is not part of the fast suite and was not run here.
+### 2026-11-06 — implementer, round 2 (after the revert of merge 5155b1d in f8be074)
+
+**Why `ux-before` was red** (CI run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42236936458; logs in `overhaul-tools/uxbefore-{ubuntu,win}-1.log`)
+- **ubuntu (git 2.56.0; this host has 2.43.0).** 10 files differed, all in `update/update-checkout` (the log repeats them, hence 21 lines). The cause is git's own transfer-progress meter: 2.56 writes `ESC[K` before the text and appends `(from 0)` to `pack-reused 0`. Reproduced here with a git 2.56.0 from conda-forge in an isolated prefix (`UX_GIT=…/git256/bin/git`).
+- **windows.** Three causes:
+  1. `fakeProxySource()` pasted the proxy source path raw into the TS literal `"__REAL_PROXY_SRC__"`. In the base worktree `D:\a\_temp\ux-base`, `\u` is an invalid escape, so the fake proxy did not parse and 40 proxy starts failed. In the HEAD checkout `D:\a\ZCode-Agent-Kit\…` the literal parsed, but its escapes had collapsed, giving `Cannot find module 'D:aZCode-Agent-Kit…'`.
+  2. `tar` resolved to Git for Windows' GNU tar in the bash step, which reads `C:\…` as host `C` (6 failures).
+  3. The fixture `git clone -q --bare` failed with an empty stderr (4 failures; the cause is not visible in the log).
+  
+  The comparator then also counted "was undefined" exit codes against the broken baseline.
+- **The artifact `ux-before-windows-baseline` of that run must not be committed:** it holds 50 failed captures.
+
+**Fixes (tooling only; no kit code changed)**
+- `tests/ux-before/compare.mjs`:
+  - a new `VOLATILE` rule, "git transfer progress": a run of lines starting (optionally after `ESC[K`) with `remote: ` or `Receiving|Unpacking|Resolving objects|deltas: ` becomes one `<GIT TRANSFER PROGRESS>` line. It replaces the narrower "git transfer stats" rule. Kit lines are never matched: indented text, mid-line text and other wording are pinned by a test;
+  - a failed **baseline** capture is now a difference (`baseline capture error: …`), and exit codes are compared only where both sides captured;
+  - an `only` filter (by `<group>/<scenario>`).
+- `tests/ux-before/capture/host.mjs` (new): pure, platform-injectable helpers, tested on Linux with Windows paths:
+  - `importBase`: Bun helper scripts (fake proxy, seed-store, render-tui) import from a file URL on every platform. The specifier never appears in a captured output; the BEFORE set has no `<PROXY_SRC>` line;
+  - `fakeProxySource`: inserts that URL as a JSON string literal;
+  - `tarBinary`: `%SystemRoot%\System32\tar.exe` on Windows;
+  - `cloneArgs`: `--no-local` on Windows;
+  - `pathForms` / `swapPath`: the moved Windows path normalisation;
+  - `describeFailure`: status, signal, error and both streams of a failed prep step.
+- `capture.mjs`:
+  - Windows fixture dirs use their long-name realpath (no `RUNNER~1`);
+  - git, tar and Bun prep failures report fully;
+  - new opt-in `UX_GIT` (POSIX) puts a chosen git first on the fixture PATH.
+- `tests/ux-before-equivalence.test.mjs`: `UX_BEFORE_OUT` keeps the fresh capture. The CI job sets it and uploads `ux-before-now-<os>` when the test fails.
+- `tests/ux-before-capture.test.mjs` (new, in `npm run test`, 11 tests):
+  - git progress: the 2.43, 2.56, TERM=dumb and ANSI-stripped forms give one identical text, and kit lines stay untouched;
+  - fake-proxy literal for both CI paths: a `file:///D:/a/…` URL whose `fileURLToPath(…, { windows: true })` round-trips to `D:\…\src\index.ts`;
+  - the raw substitution is invalid, and reproduces CI's `D:aZCode` message;
+  - **Linux end to end:** the capture of `proxy-status-json-running` from a kit path containing `k\ux-base` starts the fixture proxy (`health: ours`). The original tool fails there with "fixture proxy did not start" (`t06-bs-old`). This test uses `UX_CAPTURE_PORT + 1`, because `json-superset` captures in parallel;
+  - tar, clone args, failure description, Windows path forms incl. JSON-escaped and long names, and the comparison rules.
+
+**Evidence**
+- `t06-git256-capture` + compare: with git 2.56, `update-checkout` vs baseline gives 0 differences. Without the new rule there are 10, the same lines CI reported.
+- `t06-before-git256`: the **full** before-equivalence test with git 2.56 on the fixture PATH (`UX_GIT`) is 1/1 GREEN (503 s), so it holds under the ubuntu runner's git.
+- `t06-r2-sub`: 178 captures (update, accounts, doctor-json, setup-proxy-running, tui) with the system git 2.43 vs baseline: 0 differences.
+- Mutation proofs (`t06-mutants2`; every file restored, `cmp` clean):
+  - **R1:** git progress rule removed → killed (2).
+  - **R3:** plain path instead of a file URL → killed (2).
+  - **R4:** GNU tar → killed (1).
+  - **R5:** no `--no-local` → killed (1).
+  - **R6:** no JSON-escaped path form → killed (1).
+  - **R7:** no realpath form → killed (1).
+  - **R8:** stderr dropped from failure text → killed (1).
+  - **R9:** baseline errors ignored → killed (1).
+  - **R2** (JSON-quoting dropped while keeping the URL) survives. It is an equivalent mutant: `pathToFileURL` percent-encodes `\` and `"`, so the URL is safe either way and the JSON quoting is defence in depth.
+  - The original behaviour (raw path, raw substitution; `t06-mutant-orig-literal`) is killed by both the literal test and the Linux end-to-end test.
+- Full suites at `37c1514` (branch not re-merged with the integration tip, as instructed: the tip carries the revert):
+  - `npm run test` (`t06-r2-full-kit`, `t06-r2-full-kit2`): 509 tests, 498 pass, 0 fail, 11 skipped, twice;
+  - `npm run test:proxy` (`t06-r2-full-proxy`): 1343 pass, 0 fail;
+  - `npm run test:mcp` (`t06-r2-full-mcp`): 95 pass, 0 fail, 1 skipped;
+  - wiring guard: 0 unwired.
+
+**What CI must show (run on the integration branch after the revert of f8be074 and the merge of this branch)**
+1. `ux-before / ubuntu-latest`: green. The step "Before-equivalence (byte for byte)" passes 1/1 against `tests/ux-before/linux` (all 7 variants), with no `differs:`, `capture error` or `baseline capture error`.
+2. `ux-before / windows-latest`, in order:
+   - the step "Windows baseline from the base commit" ends with `captures: N ok, 0 failed` (≈ 2 × 115 non-TTY scenarios plus TUI; **0 failed is the check**);
+   - the artifact `ux-before-windows-baseline` is uploaded;
+   - the equivalence step passes 1/1.
+   
+   Only an artifact from such a run may be committed as `tests/ux-before/windows/`. If the leg fails, the `ux-before-now-Windows` artifact holds the fresh capture, and every failed prep step now prints its status, signal and streams (the `git clone` cause in particular).
+3. `test-kit` (ubuntu/windows × Node 24/26): `npm run test` green, including `tests/ux-before-capture.test.mjs`. The Linux end-to-end test is skipped on win32, and `json-superset`'s live part stays skipped on win32 until leg 2 is green.
+
+- 2026-11-06 (orchestrator): first merge 5155b1d was reverted (f8be074) after CI run 42236936458 (ux-before red on both legs); fix round 2 staged on branch staging/06 (revert of the revert + merge) for pre-merge CI.

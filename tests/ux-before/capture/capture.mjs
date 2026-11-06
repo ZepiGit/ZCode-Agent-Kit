@@ -42,6 +42,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { cloneArgs, describeFailure, fakeProxySource as fakeProxySourceFor, importBase, swapPath, tarBinary } from "./host.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -87,7 +88,9 @@ const ONLY_VARIANTS = opt("--variants", null)?.split(",") ?? Object.keys(VARIANT
 
 // --------------------------------------------------------------- fixtures
 const KIT_FILES = ["cli", "lib", "package.json", "proxy/config.example.yaml", "proxy/zcode-proxy-manager.mjs", "proxy/zcode-proxy-autostart.ts", "proxy/resolve-zcode-proxy-key.mjs", "zcode-proxy-src/package.json"];
-const fakeProxySource = () => readFileSync(join(HERE, "fake-proxy.ts"), "utf8").replace("__REAL_PROXY_SRC__", join(KIT, "zcode-proxy-src"));
+const fakeProxySource = () => fakeProxySourceFor(readFileSync(join(HERE, "fake-proxy.ts"), "utf8"), join(KIT, "zcode-proxy-src"), { windows: IS_WIN });
+/** The real proxy source as the Bun helper scripts import it (host.mjs importBase). */
+const PROXY_SRC_REF = importBase(join(KIT, "zcode-proxy-src"), { windows: IS_WIN });
 
 /**
  * Symlink on POSIX. Windows: a junction for a directory (no privilege needed)
@@ -156,6 +159,9 @@ function fixtureBin(bin) {
   if (IS_WIN) return;
   symlinkSync(BUN, join(bin, "bun"));
   symlinkSync(process.execPath, join(bin, "node"));
+  // UX_GIT (tooling): run the fixtures with a chosen git, e.g. the CI runner's
+  // version, to reproduce its transfer-progress output locally.
+  if (process.env.UX_GIT) symlinkSync(process.env.UX_GIT, join(bin, "git"));
 }
 
 /** Directory of the first `name` on the capture host's PATH (Windows tools: git, tar). */
@@ -186,7 +192,8 @@ function fakeOpencode(f) {
  * first setup.
  */
 function makeFixture({ state = "configured", detect = DETECT_ALL, srcLinks = true, version } = {}) {
-  const base = mkdtempSync(join(tmpdir(), "ux-kit-"));
+  // Windows: the long-name path (tmpdir() can be an 8.3 name such as RUNNER~1).
+  const base = IS_WIN ? realpathSync.native(mkdtempSync(join(tmpdir(), "ux-kit-"))) : mkdtempSync(join(tmpdir(), "ux-kit-"));
   const f = { base, root: join(base, "kit"), home: join(base, "home"), bin: join(base, "bin"), tmp: join(base, "tmp") };
   for (const d of [f.root, f.home, f.tmp]) mkdirSync(d, { recursive: true });
   writeKitTree(f.root, { srcLinks, version });
@@ -243,9 +250,9 @@ function prepRun(f, args, { env = {}, input = "" } = {}) {
 }
 function prepBun(f, args, env = {}) {
   const r = spawnSync(BUN, args, { env: f.env(env), cwd: f.root, encoding: "utf8", timeout: 60000 });
-  if (r.status !== 0) throw new Error(`prep bun ${args.join(" ")} failed: ${r.stderr}`);
+  if (r.status !== 0) throw new Error(describeFailure(`prep bun ${args.join(" ")} failed`, r));
 }
-const seed = (f, mode) => prepBun(f, [join(HERE, "seed-store.ts"), join(KIT, "zcode-proxy-src"), mode]);
+const seed = (f, mode) => prepBun(f, [join(HERE, "seed-store.ts"), PROXY_SRC_REF, mode]);
 
 function runCaptured(cmd, cmdArgs, { env, cwd, variant, input, timeoutMs = 120000 }) {
   const v = VARIANTS[variant];
@@ -282,24 +289,7 @@ function runCaptured(cmd, cmdArgs, { env, cwd, variant, input, timeoutMs = 12000
 
 // ------------------------------------------------------------- normalising
 const ANSI_RE = /\x1b(?:\[[0-9;?<=>! ]*[A-Za-z~@`\\]|\][^\x07\x1b]*(?:\x07|\x1b\\)?|[@-Z\\-_=>])/g;
-/**
- * The spellings of a path in output. POSIX: the path itself (the original
- * behaviour). Windows: also its long-name realpath, JSON-escaped and
- * forward-slash forms and a lower-case drive letter, longest first.
- */
-function pathForms(p) {
-  if (!IS_WIN) return [p];
-  const bases = new Set([p]);
-  try { bases.add(realpathSync.native(p)); } catch { /* not on disk */ }
-  const forms = new Set();
-  for (const b of bases) {
-    for (const v of [b, b.replace(/^[A-Z]:/, (d) => d.toLowerCase())]) {
-      forms.add(v); forms.add(v.replace(/\\/g, "\\\\")); forms.add(v.replace(/\\/g, "/"));
-    }
-  }
-  return [...forms].sort((a, b) => b.length - a.length);
-}
-const swap = (s, p, token) => pathForms(p).reduce((acc, form) => acc.split(form).join(token), s);
+const swap = (s, p, token) => swapPath(s, p, token, { windows: IS_WIN, realpath: realpathSync.native });
 
 function normalise(text, f) {
   let s = text.replace(/\r\n/g, "\n").replace(/\r(?!\n)/g, "\n");
@@ -397,8 +387,8 @@ function makeRelease(base, tag, { corrupt = false } = {}) {
   const dir = join(base, `release-${tag}`);
   mkdirSync(dir, { recursive: true });
   const archive = join(dir, `${tag}.tar.gz`);
-  const r = spawnSync("tar", ["-czf", archive, "-C", dirname(stage), "kit"], { encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`tar failed: ${r.stderr}`);
+  const r = spawnSync(tarBinary({ windows: IS_WIN, env: process.env }), ["-czf", archive, "-C", dirname(stage), "kit"], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(describeFailure("tar failed", r));
   const hash = corrupt ? "0".repeat(64) : createHash("sha256").update(readFileSync(archive)).digest("hex");
   writeFileSync(join(dir, "checksums.txt"), `${hash}  ${tag}.tar.gz\n`);
   return dir;
@@ -421,7 +411,12 @@ function gitFixture(f) {
   // A checkout install: kit root is a git clone of a local bare "origin" that
   // is one fast-forward commit ahead. Offline.
   const env = f.env();
-  const git = (cwd, ...a) => { const r = spawnSync("git", a, { cwd, env, encoding: "utf8" }); if (r.status !== 0) throw new Error(`git ${a.join(" ")}: ${r.stderr}`); return r.stdout; };
+  const git = (cwd, ...a) => {
+    const args = a[0] === "clone" ? cloneArgs(a, { windows: IS_WIN }) : a;
+    const r = spawnSync("git", args, { cwd, env, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(describeFailure(`git ${args.join(" ")}`, r));
+    return r.stdout;
+  };
   writeFileSync(join(f.root, ".gitignore"), ".proxykey\nproxy/config.yaml\nlogs/\nbackups/\ngenerated/\nzcode-proxy-src/node_modules\n");
   git(f.root, "init", "-q", "-b", "main");
   git(f.root, "add", "-A");
@@ -627,7 +622,7 @@ async function runScenario(s, variant) {
 // ------------------------------------------------------------------ TUI
 async function captureTui() {
   const env = IS_WIN ? { SystemRoot: process.env.SystemRoot, PATH: winPath(tmpdir()), USERPROFILE: tmpdir(), HOME: tmpdir() } : { PATH: "/usr/bin:/bin", HOME: tmpdir() };
-  const r = spawnSync(BUN, [join(HERE, "render-tui.ts"), join(KIT, "zcode-proxy-src")], { encoding: "utf8", timeout: 60000, env });
+  const r = spawnSync(BUN, [join(HERE, "render-tui.ts"), PROXY_SRC_REF], { encoding: "utf8", timeout: 60000, env });
   if (r.status !== 0) { manifest.push({ group: "tui", id: "frames", variant: "all", error: r.stderr.slice(0, 400) }); return; }
   const frames = JSON.parse(r.stdout);
   for (const [name, fr] of Object.entries(frames)) {

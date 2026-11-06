@@ -10,6 +10,7 @@
 //            against UX_BEFORE_BASELINE: CI captures that baseline from the
 //            ticket-06 base commit (tests/ux-before/windows-base-commit)
 //            until it is committed.
+// UX_BEFORE_OUT=<dir> keeps the fresh capture there for inspection.
 //
 // Slow (about 8 minutes on Linux): wired as `npm run test:ux-before` and run by
 // the `ux-before` CI job, not by `npm run test`.
@@ -33,8 +34,9 @@ test(`every capture matches the BEFORE baseline byte for byte (${VARIANTS.join("
   assert.ok(existsSync(join(BASELINE, "manifest.json")),
     `no BEFORE baseline at ${BASELINE}: on Windows, capture it from the base commit (tests/ux-before/windows-base-commit) with ` +
     "`node tests/ux-before/capture/capture.mjs --kit <base checkout> --variants pipe,ci --out <dir>` and set UX_BEFORE_BASELINE");
-  const out = mkdtempSync(join(tmpdir(), "ux-before-now-"));
-  t.after(() => rmSync(out, { recursive: true, force: true }));
+  // UX_BEFORE_OUT keeps the fresh capture (CI uploads it when this test fails).
+  const out = process.env.UX_BEFORE_OUT || mkdtempSync(join(tmpdir(), "ux-before-now-"));
+  if (!process.env.UX_BEFORE_OUT) t.after(() => rmSync(out, { recursive: true, force: true }));
   const run = spawnSync(process.execPath, [join(ROOT, "tests", "ux-before", "capture", "capture.mjs"), "--kit", ROOT, "--out", out, "--variants", VARIANTS.join(",")], {
     encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 40 * 60_000,
   });
