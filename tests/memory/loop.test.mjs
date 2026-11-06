@@ -553,7 +553,8 @@ test("measurement mode: a missing or zero PeakWorkingSetSize, a failed units sel
 });
 
 test("measurement mode on Linux: the gate is max(sampled RSS, VmHWM), no commit, no Job Object", () => {
-  const { r, measure } = burst1Job(["--measure-burst1", "3"], { peaks: [{ rss: 200, hwm: 236.5 }, { rss: 190, hwm: 267.4 }, { rss: 180, hwm: 235.5 }] });
+  // "3\r": the marker as `$(cat …)` reads it from a CRLF (autocrlf) checkout.
+  const { r, measure } = burst1Job(["--measure-burst1", "3\r"], { peaks: [{ rss: 200, hwm: 236.5 }, { rss: 190, hwm: 267.4 }, { rss: 180, hwm: 235.5 }] });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual(measure.reps.map((x) => [x.gate, x.gateMB, x.sampledMB, x.peakMB, x.commitMB, x.jobApplied, x.gateConsistent, x.valid]), [
     ["rss", 236.5, 200, 236.5, null, null, true, true],
