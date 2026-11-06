@@ -2,7 +2,7 @@
 
 **Blocked by:** 06 (CLI output module, capability record and the snapshot harness (no visible change))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -108,3 +108,6 @@ Both runs are RED. That RED is the existing `S3/short` expected-RED entry, owned
 **Acceptance criteria**
 - Import-without-side-effects test per new module, exit codes asserted on `{ exitCode, records }`: ✓ (`tests/cli-commands.test.mjs`; `t07-green5`, `t07-full-kit`).
 - Existing `cli-kit`, `cli-audit` and `setup-regressions` pass unchanged, all snapshots byte-identical: ✓ on ubuntu (`t07-precommit`, `t07-full-kit`, `t07-before-final`); windows pending CI.
+
+### 2026-11-06 — merger
+- Merged 2026-11-06 as 5777177 (merge of `ticket/07-cli-command-modules-part-1` at cf47ba4, clean, no conflicts), after the pre-merge CI gate: draft PR #16 (`staging/07` at 365dfce), run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42279882243 green on all jobs, both OS legs (covers the windows `test-kit`, `ux-before` and `memory-budget` criteria marked pending CI above). Fast suite: kit 532/543 (11 skipped, 0 fail; includes tests/cli-commands.test.mjs), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes. Logs: .scratch/kit-overhaul/reports/merge-07-{npmci,kit,proxy,mcp}.log.
