@@ -20,7 +20,7 @@ function kitModels(ctx) {
       apiBase: base,
       apiKey: ctx.key(),
       roles: ["chat", "edit", "apply"],
-      capabilities: { toolUse: true },
+      capabilities: ["tool_use"],
     },
     {
       name: "ZCode GLM-5.3-Flash",
@@ -29,7 +29,7 @@ function kitModels(ctx) {
       apiBase: base,
       apiKey: ctx.key(),
       roles: ["chat", "edit", "apply"],
-      capabilities: { toolUse: true, imageInput: true },
+      capabilities: ["tool_use", "image_input"],
     },
   ];
 }
@@ -43,8 +43,9 @@ function yamlBlock(ctx, indent = "  ") {
     lines.push(`    apiBase: ${m.apiBase}`);
     lines.push(`    apiKey: ${JSON.stringify(m.apiKey)}`);
     lines.push(`    roles: [${m.roles.join(", ")}]`);
-    const caps = Object.entries(m.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ");
-    lines.push(`    capabilities: { ${caps} }`);
+    // Continue's schema takes a string array (modelCapabilitySchema.array());
+    // the earlier `{ toolUse: true }` map fails its validation.
+    lines.push(`    capabilities: [${m.capabilities.join(", ")}]`);
   }
   lines.push(BLOCK_END);
   return lines.map((line) => line.startsWith("  ") ? indent + line.slice(2) : line).join("\n");
