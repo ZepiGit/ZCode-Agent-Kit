@@ -109,6 +109,24 @@ export async function run(ctx) {
   }
   ctx.note("sigintDuringStart", sigint);
 
+  // The proxy's own restart path with a stale lock present (what a Ctrl-C'd
+  // start leaves): the memory guard / watchdog launch `respawn <pid>` and then
+  // exit. Emulated exactly: respawn for the recorded pid, then the proxy exits.
+  // The storm above used this run's restart budget; reset that history first.
+  try { unlinkSync(join(kit.logDir, "respawn.json")); } catch {}
+  const staleRespawn = {};
+  await kit.manager(["start"]);
+  const victim = kit.pidRecord()?.pid;
+  writeFileSync(lockFile, JSON.stringify({ pid: 2147483646, startedAt: new Date(0).toISOString(), nonce: "s4-stale" }));
+  const respawning = kit.manager(["respawn", String(victim), "--reason", "memory"], { timeoutMs: 120_000 });
+  await sleep(1000);
+  try { process.kill(victim, "SIGTERM"); } catch {}
+  const rr = await respawning;
+  await sleep(1000);
+  Object.assign(staleRespawn, { respawnCode: rr.code, respawnTail: (rr.out + rr.err).trim().split("\n").slice(-1)[0]?.slice(0, 200), proxiesAfter: proxies().length, healthy: (await kit.health()) !== null });
+  unlinkSync(lockFile);
+  ctx.note("respawnWithStaleLock", staleRespawn);
+
   await kit.manager(["stop"]);
   await session.stop();
 
@@ -125,6 +143,7 @@ export async function run(ctx) {
         { name: "failed-lifecycle-steps", red: cycles.some((c) => c.failed.length), value: cycles.reduce((a, c) => a + c.failed.length, 0), budget: 0, unit: "steps" },
         { name: "stale-lock-after-ctrl-c", red: staleAfterSigint > 0, value: staleAfterSigint, budget: 0, unit: `of ${sigint.length}` },
         { name: "unstoppable-proxy-after-ctrl-c", red: unstoppable > 0, value: unstoppable, budget: 0, unit: `of ${sigint.length}` },
+        { name: "respawn-recovers-despite-stale-lock", red: !staleRespawn.healthy, value: staleRespawn.healthy ? 1 : 0, budget: 1, unit: "proxy up" },
         { name: "respawns-in-window", red: respawnsDone > 3, value: respawnsDone, budget: 3, unit: "restarts/15min" },
         { name: "log-dir-files", red: (cycles.at(-1)?.logFiles ?? 0) > 8, value: cycles.at(-1)?.logFiles ?? 0, budget: 8, unit: "files" },
       ],

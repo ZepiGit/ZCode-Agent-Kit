@@ -12,9 +12,11 @@
 //   race-10-preflight    10 OMP preflights at once
 //   kill-holder-10       10 preflights; the lock holder is SIGKILLed while it
 //                        holds the start lock (a harness closed mid-start)
-//   hung-10 (long only)  the running proxy is SIGSTOPped past its startup grace,
-//                        then 10 launches race the hung-own recovery
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+//   hung-10 (long, and --variant hung) the running proxy is SIGSTOPped past
+//                        its startup grace, then 10 launches race the hung-own
+//                        recovery; --variant hung also runs it once with the
+//                        stale lock a killed holder leaves behind
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
@@ -89,46 +91,63 @@ export async function run(ctx) {
     return result;
   }
 
-  const reps = ctx.long ? 3 : 1;
-  for (let r = 0; r < reps; r++) {
-    await round(`race-5#${r}`, 5);
-    await round(`race-10#${r}`, 10);
-    await round(`race-10-preflight#${r}`, 10, { kind: "preflight" });
-  }
-
-  // Adversary: SIGKILL whichever process holds the start lock, once.
-  await round("kill-holder-10", 10, {
-    kind: "preflight",
-    adversary: async () => {
-      for (let i = 0; i < 200; i++) {
-        try {
-          const holder = JSON.parse(readFileSync(lockFile, "utf8"));
-          if (Number.isInteger(holder.pid)) {
-            // Only processes of this run carry the marker: never signal anything else.
-            if (!scan(ctx.marker).some((p) => p.pid === holder.pid)) return { killed: null, reason: "holder not ours" };
-            process.kill(holder.pid, "SIGKILL");
-            return { killed: holder.pid };
-          }
-        } catch {}
-        await sleep(25);
-      }
-      return { killed: null, reason: "no holder observed" };
-    },
-  });
-  // What the next session sees after that round (the lock may be stale now).
-  const next = await kit.preflight();
-  const nextStop = await kit.manager(["stop"], { timeoutMs: 60_000 });
-  ctx.note("afterKillHolder", { nextPreflight: next.code, nextPreflightTail: (next.out + next.err).trim().split("\n").slice(-1)[0], stopCode: nextStop.code, stopTail: (nextStop.out + nextStop.err).trim().split("\n").slice(-1)[0], proxiesLeft: proxies().length, staleLock: existsSync(lockFile) });
-
-  if (ctx.long) {
+  const hungRound = async (name) => {
     const start = await kit.manager(["start"]);
     const pid = kit.pidRecord()?.pid;
-    if (start.code === 0 && pid) {
-      await sleep(65_000); // past the 60 s startup grace
-      process.kill(pid, "SIGSTOP");
-      await round("hung-10", 10, { kind: "mixed" });
-      try { process.kill(pid, "SIGCONT"); } catch {}
+    if (start.code !== 0 || !pid) return ctx.note(`${name}.skipped`, start.code);
+    await sleep(65_000); // past the manager's 60 s startup grace
+    process.kill(pid, "SIGSTOP"); // our own proxy, frozen: /health stops answering
+    try { await round(name, 10, { kind: "mixed" }); }
+    finally { try { process.kill(pid, "SIGCONT"); } catch {} }
+  };
+  const killHolder = async () => {
+    await round("kill-holder-10", 10, {
+      kind: "preflight",
+      adversary: async () => {
+        for (let i = 0; i < 200; i++) {
+          try {
+            const holder = JSON.parse(readFileSync(lockFile, "utf8"));
+            if (Number.isInteger(holder.pid)) {
+              // Only processes of this run carry the marker: never signal anything else.
+              if (!scan(ctx.marker).some((p) => p.pid === holder.pid)) return { killed: null, reason: "holder not ours" };
+              process.kill(holder.pid, "SIGKILL");
+              return { killed: holder.pid };
+            }
+          } catch {}
+          await sleep(25);
+        }
+        return { killed: null, reason: "no holder observed" };
+      },
+    });
+    // What the next session sees after that round (the lock may be stale now).
+    const next = await kit.preflight();
+    const nextStop = await kit.manager(["stop"], { timeoutMs: 60_000 });
+    ctx.note("afterKillHolder", { nextPreflight: next.code, nextPreflightTail: (next.out + next.err).trim().split("\n").slice(-1)[0], stopCode: nextStop.code, stopTail: (nextStop.out + nextStop.err).trim().split("\n").slice(-1)[0], proxiesLeft: proxies().length, staleLock: existsSync(lockFile) });
+  };
+  const clearStaleLock = async (label) => {
+    if (!existsSync(lockFile)) return;
+    writeFileSync(`${lockFile}.${label}.evidence`, readFileSync(lockFile));
+    unlinkSync(lockFile); // this run's own lock file
+    await stopAll(`${label}-cleanup`);
+  };
+
+  if (ctx.variant === "hung") {
+    // A hung proxy while a stale lock is present (the chain a killed start leaves) …
+    await killHolder();
+    await hungRound("hung-10-with-stale-lock");
+    await clearStaleLock("hung-stale");
+    // … and a clean hung-own recovery raced by 10 launches.
+    await hungRound("hung-10");
+  } else {
+    const reps = ctx.long ? 3 : 1;
+    for (let r = 0; r < reps; r++) {
+      await round(`race-5#${r}`, 5);
+      await round(`race-10#${r}`, 10);
+      await round(`race-10-preflight#${r}`, 10, { kind: "preflight" });
     }
+    await killHolder();
+    await clearStaleLock("kill-holder");
+    if (ctx.long) await hungRound("hung-10");
   }
 
   ctx.note("rounds", rounds);
@@ -136,8 +155,7 @@ export async function run(ctx) {
   // lock file explicitly and stop again, then report what was still running.
   const cleanup = { staleLockRemoved: false };
   if (existsSync(lockFile)) {
-    writeFileSync(lockFile + ".evidence", readFileSync(lockFile));
-    (await import("node:fs")).unlinkSync(lockFile);
+    await clearStaleLock("final");
     cleanup.staleLockRemoved = true;
   }
   cleanup.finalStop = await stopAll("final");
@@ -154,7 +172,8 @@ export async function run(ctx) {
       orphans: 0,
       extra: [
         { name: "simultaneous-proxies", red: worst("maxSimultaneousProxies") > 1, value: worst("maxSimultaneousProxies"), budget: 1, unit: "procs" },
-        { name: "proxy-generations/round", red: rounds.some((r) => !r.name.startsWith("hung") && r.distinctProxyProcesses > 1), value: worst("distinctProxyProcesses"), budget: 1, unit: "procs" },
+        // A hung-own recovery legitimately replaces the proxy once.
+        { name: "proxy-generations/round", red: rounds.some((r) => r.distinctProxyProcesses > (r.name.startsWith("hung") ? 2 : 1)), value: worst("distinctProxyProcesses"), budget: 1, unit: "procs" },
         { name: "failed-launches", red: failed > 0, value: failed, budget: 0, unit: "launches" },
         { name: "stale-lock-after-round", red: rounds.some((r) => r.staleLockLeft), value: rounds.filter((r) => r.staleLockLeft).length, budget: 0, unit: "rounds" },
       ],
