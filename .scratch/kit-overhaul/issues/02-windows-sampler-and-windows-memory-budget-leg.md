@@ -2,7 +2,7 @@
 
 **Blocked by:** 01 (Memory loop with budgets, process-count harness, expected-RED ratchet and the ubuntu `memory-budget` job)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -147,3 +147,5 @@ Branch `ticket/02-windows-sampler`. Code head fbad218, which includes the merge 
 - Orchestrator: verify the windows `memory-budget` leg and the 5 live Windows tests on the draft PR. Then adjust `expected-red.json` `windows` to the first run, raise any RED-only-on-commit run to the owner, and fill the METRICS Windows reference table.
 - S1/burst1's Linux flake at 250 MB is pre-existing and can fail the ubuntu ratchet intermittently. It belongs to ticket 19 or an owner decision; it was not touched here.
 - Ticket 27: on Windows the solver child started from `process.execPath` inherits the run token through the run's bun. Its argv must keep `captcha-solver` (role), as ticket 01 noted.
+
+Merged 2026-11-06 as 18351e1b29750156fa2d5e6574aae4f26878afcf; fast suite: kit 366/382 (16 skipped, 0 fail; includes tests/memory/win-sampler.test.mjs; the 5 new skips are the live Windows-only tests in tests/memory/loop.test.mjs), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes. Windows criteria pending CI (windows memory-budget leg, live Windows self-tests, expected-red.json `windows` entries and the METRICS Bun 1.4.2 Windows reference run; orchestrator verifies after push). Logs: .scratch/kit-overhaul/reports/merge-02-{npmci,test,proxy,mcp}.log.
