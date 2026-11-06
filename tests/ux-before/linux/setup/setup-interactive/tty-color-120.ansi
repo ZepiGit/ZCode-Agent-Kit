@@ -1,0 +1,68 @@
+y
+n
+n
+y
+y
+n
+n
+== bootstrap ==
+  proxy/config.yaml already present — left untouched
+  proxy dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
+  mcp bridge dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
+  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+    cd <KIT>/zcode-proxy-src
+    ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
+detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
+  note: y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
+[1G[0JConfigure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] [82Gy
+n
+n
+y
+y
+n
+n
+== omp: OMP / Oh My Pi (answered y) ==
+  wrote <HOME>/.omp/agent/extensions/zcode-proxy-autostart.ts
+  extension installed/updated: ~/.omp/agent/extensions/zcode-proxy-autostart.ts
+  models.yml updated (zcode provider)
+  config.yml updated (disabledProviders cleaned / extension registered)
+  [OK]   OMP / Oh My Pi
+Configure ZCode as a provider with its supported models in pi? [y/n] n
+  [SKIP] pi — answered n
+  note: y also registers the kit's MCP bridge "zcode-harness" for Claude Code (skip with --no-mcp).
+Configure ZCode as a provider with its supported models in Claude Code? [y/n] n
+  [SKIP] Claude Code — answered n
+Configure ZCode as a provider with its supported models in Codex CLI? [y/n] y
+== codex: Codex CLI (answered y) ==
+  created <KIT>/generated/codex-home
+  wrote <KIT>/generated/codex-home/config.toml (model provider + zcode-harness MCP)
+  use via: bin\zcode-codex.cmd  (e.g. bin\zcode-codex.cmd exec "task")
+  [OK]   Codex CLI
+Configure ZCode as a provider with its supported models in OpenCode? [y/n] y
+== opencode: OpenCode (answered y) ==
+  opencode: provider "zcode" written to <HOME>/.config/opencode/opencode.json (apiKey references ZCODE_PROXY_KEY — set by the kit launcher)
+  use via: zcode-kit run opencode -- <args>  |  openai-compatible chat/completions only
+  [OK]   OpenCode
+Configure ZCode as a provider with its supported models in Continue? [y/n] n
+  [SKIP] Continue — answered n
+== mcp: zcode-harness bridge ==
+  omp: created mcp.json with zcode-harness bridge
+  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.
+
+  Keep authorized logins as separate encrypted accounts.
+  New logins are saved automatically while the feature is enabled.
+Do you want to activate the Account Rotator feature? [y/n] n
+  [OK] Account Rotator disabled. Saved accounts are kept.
+
+transaction <TX> recorded — undo with: zcode-kit rollback <TX>
+
+  Configuration saved.
+  Assistants: 3 configured, 3 skipped, 0 failed.
+  [SKIP] Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+
+  Connection details (local ZCode proxy, from configuration; proxy not verified running)
+    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
+    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
+    API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
+    Model IDs:                     glm-5.3, glm-5.3-flash
+    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start

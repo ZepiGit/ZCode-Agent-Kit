@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "port": 18458,
+  "pid": {
+    "pid": <PID>,
+    "startedAt": "<TS>",
+    "alive": true
+  },
+  "health": "ours",
+  "connection": {
+    "source": "running",
+    "openaiBaseUrl": "http://127.0.0.1:18458/v1",
+    "anthropicBaseUrl": "http://127.0.0.1:18458",
+    "routes": {
+      "openai": [
+        "POST /chat/completions",
+        "POST /responses",
+        "GET /models"
+      ],
+      "anthropic": [
+        "POST /v1/messages"
+      ]
+    },
+    "models": [
+      "glm-5.3",
+      "glm-5.3-flash"
+    ],
+    "modelsSource": "live",
+    "key": {
+      "redacted": true,
+      "export": "zcode-kit models --show-key"
+    },
+    "loopback": true
+  },
+  "quota": [
+    {
+      "name": "GLM Coding Lite",
+      "remaining": 4120,
+      "total": 6000,
+      "unit": "prompts",
+      "expiresAt": "<TS>"
+    },
+    {
+      "name": "Start Plan Bonus",
+      "remaining": 35,
+      "total": 200,
+      "unit": "prompts",
+      "expiresAt": "<TS>"
+    }
+  ]
+}
