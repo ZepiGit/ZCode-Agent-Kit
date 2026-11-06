@@ -1,0 +1,9 @@
+y
+n
+n
+y
+y
+n
+n
+
+  [ERROR] non-empty target is not a zcode-agent-kit install

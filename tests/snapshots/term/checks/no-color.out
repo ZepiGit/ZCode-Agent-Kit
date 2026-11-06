@@ -1,0 +1,18 @@
+Runtime ────────────────────────────────────────────────────────────────────────
+  ✓ PASS  bun available                 /opt/bun/bin/bun (1.4.2)
+  ✓ PASS  config exists                 proxy/config.yaml
+  ✗ FAIL  mcp bridge deps               mcp/zcode-harness-mcp/node_modules
+                                        missing
+                                        why   the last setup was interrupted
+                                              before the bridge dependencies
+                                              were installed
+                                        next  zcode-kit setup
+  ! WARN  restart budget                2 of 3 restarts used in 15 min
+                                        why   the proxy restarted twice for
+                                              memory
+                                        next  zcode-kit proxy logs 50
+                                          or  zcode-kit doctor
+  – SKIP  pi: integration               not configured (no consent yet) — answer
+                                        y in zcode-kit setup
+  ✓ PASS  omp: omp extension installed
+doctor: 1 failed, 1 warning, 3 passed, 1 skipped → exit 1

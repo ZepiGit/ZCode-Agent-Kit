@@ -1,0 +1,24 @@
+[90m╭─ [0m[1mSettings & Login[0m[90m ───────────────────────────────────────────────── [0m[32m● ready[0m[90m ─╮[0m[0m[K
+[90m│[0m [90m  Provider  [0m[90m zai [0m  [90m bigmodel [0m  [33m(stop to switch)[0m                              [90m│[0m[0m[K
+[90m│[0m [90m  Plan      [0m[90m coding-plan [0m  [90m start-plan [0m  [33m(stop to switch)[0m                    [90m│[0m[0m[K
+[90m│[0m [90m  Auth      [0m[32m● [0mlogged in · sk-…a1b2                                           [90m│[0m[0m[K
+[90m│[0m [90m            [0m[90m Logged In [0m  [90m Logout [0m                                            [90m│[0m[0m[K
+[90m╰──────────────────────────────────────────────────────────────────────────────╯[0m[0m[K
+[0m[K
+[90m╭─ [0m[1mProxy Server[0m[90m ───────────────────────────────────────────────────────────────╮[0m[0m[K
+[90m│[0m [90m  Status    [0m[32m● running[0m[36m  http://127.0.0.1:18458[0m                                [90m│[0m[0m[K
+[90m│[0m [90m  Config    [0m[90mzai · start-plan · 2 models · /v1/responses · v4.6.4[0m             [90m│[0m[0m[K
+[90m│[0m [90m            [0m[90m Start [0m    [38;2;255;255;255;48;2;218;54;51m Stop [0m                                                [90m│[0m[0m[K
+[90m╰──────────────────────────────────────────────────────────────────────────────╯[0m[0m[K
+[0m[K
+[90m╭─ [0m[1mLogs[0m[90m (10)[0m[90m ────────────────────────────────────────────────────── [0m[32mfollowing[0m[90m ─╮[0m[0m[K
+[90m│[0m   r002 OAI glm-5.3-flash 200 stream 314ms→2.2s 462tok 152t/s                 [90m│[0m[0m[K
+[90m│[0m   r003 ANT glm-5.3 200 stream 321ms→2.3s 493tok 153t/s                       [90m│[0m[0m[K
+[90m│[0m   r004 OAI glm-5.3-flash 200 stream 328ms→2.4s 524tok 154t/s                 [90m│[0m[0m[K
+[90m│[0m   r005 ANT glm-5.3 200 stream 335ms→2.5s 555tok 155t/s                       [90m│[0m[0m[K
+[90m│[0m   r006 OAI glm-5.3-flash 200 stream 342ms→2.6s 586tok 156t/s                 [90m│[0m[0m[K
+[90m│[0m   r007 ANT glm-5.3 200 stream 349ms→2.7s 617tok 157t/s                       [90m│[0m[0m[K
+[90m│[0m   r008 OAI glm-5.3-flash 200 stream 356ms→2.8s 648tok 158t/s                 [90m│[0m[0m[K
+[90m╰──────────────────────────────────────────────────────────────────────────────╯[0m[0m[K
+ [32m▸ proxy started on http://127.0.0.1:18458[0m[0m[K
+  [90m↑↓ scroll[0m[90m · [0m[90m[s] start/stop[0m[90m · [0m[90m[l] login[0m[90m · [0m[90m[o] logout[0m[90m · [0m[90m[g] follow[0m[90m · [0m[90m[q] quit[0m[0m[K[0m[J

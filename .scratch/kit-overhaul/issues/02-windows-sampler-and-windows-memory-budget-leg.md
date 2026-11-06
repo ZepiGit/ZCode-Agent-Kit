@@ -148,6 +148,12 @@ Branch `ticket/02-windows-sampler`. Code head fbad218, which includes the merge 
 - S1/burst1's Linux flake at 250 MB is pre-existing and can fail the ubuntu ratchet intermittently. It belongs to ticket 19 or an owner decision; it was not touched here.
 - Ticket 27: on Windows the solver child started from `process.execPath` inherits the run token through the run's bun. Its argv must keep `captcha-solver` (role), as ticket 01 noted.
 
+Merged 2026-11-06 as 18351e1b29750156fa2d5e6574aae4f26878afcf; fast suite: kit 366/382 (16 skipped, 0 fail; includes tests/memory/win-sampler.test.mjs; the 5 new skips are the live Windows-only tests in tests/memory/loop.test.mjs), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes. Windows criteria pending CI (windows memory-budget leg, live Windows self-tests, expected-red.json `windows` entries and the METRICS Bun 1.4.2 Windows reference run; orchestrator verifies after push). Logs: .scratch/kit-overhaul/reports/merge-02-{npmci,test,proxy,mcp}.log.
+
+- 2026-11-06 (orchestrator): per Round 6 Q2 this ticket stays open (Status claimed) until the calibrated windows memory-budget run is green.
+
+- 2026-11-06 (orchestrator): REVERTED (revert of merge 18351e1) per run rules and Round 6 Q2: the first windows-latest memory-budget run (https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42221794531) reported every scenario GREEN in ~1 s with a Job Object peak of ~104 MB, i.e. the scenarios never ran (a harness failure presenting as GREEN; the ratchet then failed on 10 "GREEN but listed" entries). The live Windows self-tests in test-kit (windows, 24/26) passed. Fix on branch ticket/02-windows-sampler: make a run that does not reach its scenario a harness failure (exit 2), never GREEN, and get the scenarios to actually run on Windows. Log excerpt: /home/AgentKit/overhaul-tools/win-mem-1.log.
+
 ### 2026-11-06 — implementer, round 2 (after the revert of 18351e1 by c252676)
 
 Branch `ticket/02-windows-sampler`. The fix commits sit on top of ba7a8cc: 18d852c, b3393a3, 06ab74d, and this note. Per the orchestrator, the integration tip is NOT merged, because it contains the revert. The merger reverts the revert and merges this branch.
