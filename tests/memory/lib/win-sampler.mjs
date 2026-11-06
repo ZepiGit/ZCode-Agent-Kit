@@ -82,6 +82,8 @@ export function splitCommandLine(line) {
   return out;
 }
 
+const TOOLING = /^(?:powershell|pwsh|netstat|conhost|where)\.exe$/i;
+
 // FILETIME values as decimal strings: compare as BigInt (they exceed 2^53).
 const time = (s) => { try { return BigInt(s || "0"); } catch { return 0n; } };
 
@@ -135,12 +137,22 @@ export function createKitTracker({ rootPid, token }) {
           if (carriesToken(p) || (pc !== null && time(p.created) >= time(pc))) { members.set(p.pid, p); grew = true; }
         }
       }
+      // The loop's own tooling: system tools the loop root starts itself
+      // (netstat for ports, PowerShell for command lines and suspend) and their
+      // descendants (conhost). Visible as role "tooling", never kit footprint.
+      // The kit's own PowerShell (children of kit processes) stays counted.
+      const tooling = new Set();
+      for (const p of members.values()) if (p.ppid === rootPid && TOOLING.test(p.name ?? "")) tooling.add(p.pid);
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const p of members.values()) if (!tooling.has(p.pid) && tooling.has(p.ppid)) { tooling.add(p.pid); grew = true; }
+      }
       const out = [];
       for (const p of members.values()) {
         known.set(p.pid, p.created);
         const argv = p.commandLine ? splitCommandLine(p.commandLine) : [p.executablePath ?? p.name ?? ""];
         out.push({
-          pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: roleOf(argv), comm: p.name,
+          pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: tooling.has(p.pid) ? "tooling" : roleOf(argv), comm: p.name,
           rssKb: p.rssKb, hwmKb: p.hwmKb, commitKb: p.commitKb, wsPeakKb: p.wsPeakKb, threads: p.threads, fds: p.fds,
           cmd: argv.slice(0, 4).map((a) => a.split(/[\\/]/).slice(-2).join("/")).join(" ").slice(0, 120),
         });

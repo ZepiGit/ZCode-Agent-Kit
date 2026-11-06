@@ -16,6 +16,7 @@ import { commandFor, parseJobReport } from "./lib/caps.mjs";
 import { suspendScript } from "./lib/win-process.mjs";
 import { parseSamplesCsv, scan, startSampler } from "./lib/sampler.mjs";
 import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
+import { verdict } from "./lib/verdict.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32");
 const fixture = (name) => readFileSync(join(FIXTURES, name), "utf8");
@@ -56,6 +57,23 @@ test("a process whose parent exited is still found through the parent seen in an
   assert.ok(pids.includes(2600), "the orphaned preflight is found");
   assert.ok(!pids.includes(2700), "a process created before its alleged parent is not the parent's child");
   assert.equal(later.find((p) => p.pid === 2600).role, "preflight");
+});
+
+test("the loop's own tooling (netstat, PowerShell started by the loop root, their conhosts) is visible but never kit footprint; the kit's own PowerShell is", () => {
+  const base = parseCimCsv(fixture("cim-poll.csv"));
+  const like = (pid, ppid, name, commandLine, created) => ({ ...base.find((p) => p.pid === 3000), pid, ppid, name, executablePath: `C:\\Windows\\System32\\${name}`, commandLine, created, commitKb: 60000, rssKb: 70000 });
+  const extra = [
+    like(2800, 2000, "NETSTAT.EXE", "netstat -ano -p TCP", "134070000180000000"),
+    like(2810, 2000, "powershell.exe", "powershell -NoProfile -NonInteractive -Command Get-CimInstance Win32_Process", "134070000180000000"),
+    like(2811, 2810, "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0xffffffff -ForceV1", "134070000180100000"),
+    like(2820, 2300, "powershell.exe", "powershell -NoProfile -NonInteractive -Command Get-CimInstance Win32_Process -Filter ProcessId=2400", "134070000180000000"),
+  ];
+  const kit = createKitTracker(RUN).select([...base, ...extra], { selfPid: 2200 });
+  const role = (pid) => kit.find((p) => p.pid === pid)?.role;
+  assert.deepEqual([role(2800), role(2810), role(2811), role(2820)], ["tooling", "tooling", "tooling", "other"]);
+  // kit (working set, KB) = manager 2300 45056 + proxy 2400 122880 + orphan 2500 20480 + the manager's PowerShell 2820 70000 = 258416 KB.
+  const v = verdict([{ t: 0, progress: 0, procs: kit }], { peaks: { kit: 1000 } });
+  assert.equal(v.checks.find((c) => c.name === "peak:kit").value, 252.4);
 });
 
 test("the units self-test passes when commit_kb matches Get-Process PrivateMemorySize64", () => {
