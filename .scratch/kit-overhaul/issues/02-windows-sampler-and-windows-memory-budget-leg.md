@@ -247,3 +247,61 @@ What CI must show next:
 - memory-budget windows: S1, S3, S4 and S7 run with samples and roles over the floors, and no `config template contract` failure.
 
 Any remaining harness failure arrives with its reason.
+
+### 2026-11-06 — implementer, round 4 (pre-merge CI run 42252896054 on staging/02 fdce519)
+
+Evidence: `/home/AgentKit/overhaul-tools/t02-winmem-3.log` and the `memory-budget-windows` artefact, downloaded to `/home/AgentKit/overhaul-tools/t02-ci-artifact-42252896054/`. Fix commit e35742f; no tip merge.
+
+**(1) S3/hung exit 2 although its verdict was complete.** The exit 2 was not a cleanup step: it was my evidence gate. The job line reads `S3/hung: harness failure: no evidence the scenario ran: role mcp-bridge never seen`. On Windows every S3/hung launch failed (21/21):
+- kill-holder-10: 1/10 failed;
+- hung-10-with-stale-lock: 10/10 failed, "safe start refused … No takeover attempted";
+- hung-10: 10/10 failed, "safe start failed".
+
+So no session ever started a bridge, and failed launches are what the scenario measures.
+- Fix: S3's evidence roles are now proxy, launcher and preflight. The run then keeps its real verdict.
+- RED: `t02-r4-red1`. Mutant (bridge required again): the test fails (`t02-r4-mutJ`).
+
+**The orphan (pid 3796, role proxy) is a real kit orphan, not the loop's suspended process.**
+- 3796 appeared during `kill-holder-10` (0 proxies before, 1 after): it was spawned by the start-lock holder that the adversary SIGKILLed. Every later stop refused it:
+  - hung-10's stop: "alive but nothing answers … ownership not proven: its start time is not determinable or not recorded";
+  - the final stop, after the thaw, with /health answering: `start time of pid 3796 is not determinable — PID reuse cannot be ruled out, refusing to kill` (`verifyOwnProcess` → `start-unknown`).
+- Code: right after spawning, the manager writes `proxy.pid` with `startedMs: null` (`zcode-proxy-manager.mjs:632`) and fills in the start time only after `processStartMs` answers (:639). On Windows that is a PowerShell call of up to 2 × 2.5 s; on Linux it is a `/proc` read.
+- A start killed inside that window leaves a record without a start time, and every later stop then fails closed (`verifyOwnProcess`: recorded null → `start-unknown`). The proxy can never be stopped by the kit, and the run ends with it alive.
+- On Windows the window is wide, and the adversary sees the holder only at the next poll, so the kill lands inside it. On Linux it practically never does.
+- This is a kit lifecycle defect of a killed start on Windows (ticket 16/17 territory: killed lock holder). It is not caused by the loop.
+
+Harness hardening so the orphan check stays honest:
+- the hung rounds freeze and thaw through `lib/freeze.mjs` `whileFrozen`. The thaw always runs. It is skipped only when the process is gone, which happens on Linux when the kit's hung-own recovery killed it (this round 4 change briefly broke Linux S3/hung with `kill ESRCH` until fixed). A thaw that fails is a harness failure, never an orphan;
+- S3 now records `cleanup.pidRecordLeft` (the kit's pid record of any proxy it could not stop), so the next windows run shows directly whether the record lacks `startedMs`.
+
+RED: `t02-r4-red1` and `t02-r4-red3`. Mutant (thaw failure swallowed): the test fails (`t02-r4-mutI`).
+
+**(2) S3/short `exactly-one-proxy-after-round` (1 round): a real outcome, not an artefact.** In round kill-holder-10:
+- `maxSimultaneousProxies 0`, `distinctProxyProcesses 0`, `proxiesAfter 0`, `pidFileMatchesListener false`;
+- 10/10 preflights failed;
+- the stop answered "stale … manager start lock (holder pid 2044 is not alive) — refusing automatic takeover".
+
+There is no second proxy and no double count. The holder was killed before it spawned a proxy, and the stale lock then blocked every launch: the round ended with zero proxies. The other three rounds each show exactly 1 proxy, 1 listener and a matching pid file. Same defect family as Linux S3 (stale lock after a killed holder). On Windows it also shows as "zero proxies", because the kill lands at a different point of the start.
+
+**What counts as kit footprint on Windows** (S3/short samples, by parent):
+- `other` holds PowerShell started by the kit itself: by the launcher, the manager (identity and start-time proofs, one with an Add-Type `csc.exe` compile) and the preflight. Each is ~65–72 MB commit / ~80 MB working set, plus its conhost.
+- These are counted as kit footprint, correctly. They are a Windows finding for the S3 600 MB total.
+- One misattribution was fixed: a conhost under a fixture (the fake harness's `--version` probe, the mock) counted as kit. It now takes its fixture owner's role. Under a kit process a conhost stays `other`, so it is never counted as a second proxy. RED: `t02-r4-red2`.
+
+**For the record (owner proxy calibrates; `expected-red.json` untouched):**
+- S1/short RED only on commit (`procPeak:proxy`, `steady:proxy`);
+- S1/burst1 and S1/stalled RED on both metrics;
+- S5 GREEN with 717 samples and the bridge seen.
+
+**Tests:**
+- `npm run test`: 398 tests, 382 pass, 0 fail, 16 skipped;
+- `npm run test:proxy`: 1343 pass;
+- `npm run test:mcp`: 95 / 96, 1 skipped.
+- Linux job `--only S3/short,S3/hung`: both RED as listed, the ratchet holds (`reports/t02-r4-s3-job2.log`; hung 188 s, 514 samples).
+
+**What CI must show next:**
+- **memory-budget windows:** S3/hung ends RED (exit 1), not HARNESS FAILURE.
+  - If its orphan remains, `notes.cleanup.pidRecordLeft` shows the kit's record. Expected `startedMs: null`, which would confirm the killed-start window.
+  - No `could not thaw` harness failure.
+- **memory-budget windows, other runs:** no harness failure. `other` in the S3 roles no longer includes fixture conhosts.
+- **test-kit:** 4/4 green; **memory-budget ubuntu:** green.
