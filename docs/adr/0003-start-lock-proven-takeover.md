@@ -26,3 +26,13 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 - The on-disk lock protocol is a one-way door: old and new kits can meet the same lock during an update. Proof of PID reuse needs the holder's process start time in the lock record. A record without it can only be proven stale by a dead PID.
 - This supersedes the "no automatic stale takeover" comments in `proxy/zcode-proxy-manager.mjs` and the README line "A leftover start lock is deliberately never taken over"; both must be updated with the implementation.
 - Exit codes are unchanged.
+
+## Amended 2026-11-06 (Round 2, Q10; Round 3, Q2)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 2, Q10 and Round 3, Q2.
+
+- **The lock carries a protocol version** ([ADR-0012](0012-start-lock-protocol-version-and-stored-state-migrations.md)). Today's version-less record `{pid, startedAt, nonce}` is protocol v0.
+- **This replaces the sentence "A record without it can only be proven stale by a dead PID"** in the Consequences above. A v0 lock is also proven stale when the live process at its PID started later than the lock's `startedAt`. Otherwise stale locks left by old kits would never be recovered after the update.
+- **Never deleted automatically:** an unparsable lock, or a lock of an unknown higher version. Its error gives what/why/next with the exact path.
+- **New locks are written atomically,** so "unreadable" can only mean foreign corruption, never a contender's partial write.
+- **The OMP single-flight token is a separate record** ([ADR-0013](0013-launcher-handover-and-single-flight-preflight.md)). It follows this ADR's lessons (proven takeover, release in `finally`) but does not change the start lock's protocol.

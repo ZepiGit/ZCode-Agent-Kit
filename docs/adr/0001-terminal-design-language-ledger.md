@@ -25,3 +25,13 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 
 - Scripts that grep `^(PASS|FAIL|SKIP)` keep working. The release notes announce `WARN` as the one new word.
 - Snapshot tests and docs pin this language as each command migrates. Before that it is reversible per command; afterwards it is expensive to change.
+
+## Amended 2026-11-06 (Round 2, Q6, Q7 and Q9)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 2, Q6, Q7 and Q9.
+
+- **Rule 2 is narrowed to a header-only box (Q9, condition 3).** In the proxy TUI only the header card is boxed. The log pane gets an unboxed title line with the count/follow badge. This narrows the upper bound of rule 2 and does not contradict it.
+- **Rule 4 is extended (Q9, condition 4).** The TUI process strip shows per-process RSS and, for capped processes, the enforced metric against the cap with the metric named (footprint/commit), the enforcement mode and the restarts in 15 min.
+- **TERM=dumb and non-TTY refuse the TUI (Q9, condition 2)** and print the line-mode commands, instead of rendering a degraded frame.
+- **The manager CLI keeps the legacy grammar (Q7, condition 2).** `node proxy/zcode-proxy-manager.mjs doctor` stays in the off-TTY grammar of rule 1. Only `zcode-kit doctor` stops parsing its text.
+- **Where the code lives** is recorded in [ADR-0011](0011-shared-output-code-two-renderers-one-token-set.md): two renderers over one token set and one width core.

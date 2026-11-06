@@ -27,3 +27,11 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 
 - The default values are a two-way door. The client-visible shed contract (503, `Retry-After`, endpoint error shape) is hard to change once clients rely on it.
 - How a shed surfaces to connected clients beyond this response is still open (DECISIONS.md, Round 1, "Shared understanding" item 3).
+
+## Amended 2026-11-06 (Round 2, Q1 and Q2; Round 3, Q3)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 2, Q1 and Q2; Round 3, Q3.
+
+- **Shed during a drain (Round 2, Q1, condition 2).** While the proxy drains before a respawn or stop, it keeps its listener open and sheds new requests with this contract, never with connection resets. In-flight requests get the drain window. This settles the open item in the Consequences above for drains ([ADR-0008](0008-proxy-health-supervisor-and-respawn-handoff.md)).
+- **Shed while the solver fails fast (Round 2, Q2, condition 1).** A request that needs a solve is shed with this contract while the solver is in its fail-fast window, with `Retry-After` set to the time until the window reopens, and when a bounded solve queue overflows. It is never shed merely because a solver crash happened ([ADR-0002](0002-captcha-solver-in-capped-child-process.md)).
+- **The stop request bypasses admission (Round 3, Q3, condition 2).** It has no body, is never queued behind the byte cap, and answers `202` before the drain starts ([ADR-0014](0014-graceful-stop-request-over-loopback.md)).
