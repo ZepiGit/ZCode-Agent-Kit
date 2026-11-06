@@ -67,12 +67,6 @@ The loop from `diagnosis/memory`, committed with the §18 budgets (`tests/memory
 
 No budget is loosened past the Phase 1B baseline. Against the diagnosis loop's own encoding: S3's total is 596 MB (was 600) plus the new per-role targets; S6's long-line budget is 16 MB (was 32); S1 gains the steady ≤ 160 MB check; S2 gains the per-generation, cold-start and solver-count checks. S1/burst16 and burst32 are judged against §18's 400 / 600 MB HWM (ADR-0004) instead of the diagnosis loop's blanket 250 MB; both stay RED. Measurement changes (ticket 01 Comments): S1 short and stalled run 6,000 requests (mixed with a half warm-up), burst and big-body runs are judged by their peak only, S3 samples every 250 ms.
 
-### Windows reference run, Bun 1.4.2 (ticket 02)
-
-**Pending CI (orchestrator verifies after merge+push).** The reference run is the windows leg of the `memory-budget` job (`node tests/memory/job.mjs` on windows-latest, Node 26, Bun 1.4.2, short profile: S1 all variants, S2, S3 short + hung, S4, S5, S7). Each run is capped by a Job Object (job memory limit + kill-on-close, read back) and timed out. The metric is commit (`PrivatePageCount`; per-process peak = `PeakPageFileUsage`), and each `summary.json` carries the working-set verdict next to it (`workingSet`, `redOnlyOnCommit`) and the sampler's units self-test and overhead (`notes.sampler`). Record per run here: outcome, the key commit numbers against the same budgets as the Linux table, any run RED only on commit (raised to the owner, build-time gate 3), and the poller overhead (peak commit / working set, poll ms). If the sampler cannot run on this pre-upgrade code, the reason goes to RUNLOG and ticket 11's Bun 1.4.4 run becomes the reference.
-
-Linux reference check on the ticket 02 branch (Bun 1.4.2, 2026-11-06, `/home/AgentKit/overhaul-tools/t02-memloop/linux-job/`): numbers in line with the ticket 01 run (S3/short kit 849 MB, launcher 78.2, bridge 85.9 MB; S2 cost per generation 1,050 MB, retained 685 MB, CDN +149 MB). S1/burst1 is flaky at its 250 MB HWM budget on the integration tip too: HWM 256.7 MB in the job, reruns 237.7 / 236.7 / 264.6 MB on the branch and 236.6 / 299.2 / 237.5 MB on the tip (3f4e41a).
-
 ## Current
 
 (pending)

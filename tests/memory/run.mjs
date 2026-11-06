@@ -18,8 +18,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { countRoles, startSampler, survivors, supported } from "./lib/sampler.mjs";
-import { osVerdict } from "./lib/verdict.mjs";
-import { assertSafeRun, KIT_ROOT, prepareRunBun } from "./lib/isolated-kit.mjs";
+import { verdict } from "./lib/verdict.mjs";
+import { assertSafeRun, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { CATALOGUE, PROFILES, runKey } from "./lib/catalogue.mjs";
 
 function parseArgs(argv) {
@@ -42,7 +42,7 @@ async function main() {
   }
   try { assertSafeRun(); } catch (err) { console.error(`memory loop: ${err.message}`); return 2; }
   if (!supported()) {
-    console.error(`memory loop: platform ${process.platform} has no sampler (Linux /proc and Windows only) — skipped`);
+    console.error(`memory loop: platform ${process.platform} has no sampler yet (Linux /proc only) — skipped`);
     return 2;
   }
   const id = `${args.scenario}-${args.profile}${args.variant ? `-${args.variant}` : ""}-${new Date().toISOString().replace(/[:.]/g, "").slice(0, 15)}-${randomBytes(3).toString("hex")}`;
@@ -52,13 +52,6 @@ async function main() {
   // Children inherit the marker; this process itself was exec'd without it,
   // so the runner never counts itself.
   process.env.ZCODE_MEMLOOP_RUN = id;
-  // Windows cannot read another process's environment: every Bun process of
-  // the run (proxy, S2 body) starts from the run's own bun copy, so its
-  // executable path carries the run id (the sampler's run token).
-  let runBun = null;
-  if (process.platform === "win32") {
-    try { runBun = prepareRunBun(outDir); process.env.ZCODE_KIT_BUN = runBun.path; } catch (err) { console.error(`memory loop: cannot prepare the run's bun copy: ${err.message}`); return 2; }
-  }
 
   const key = runKey(args.scenario, args);
   const mod = await import(entry.module);
@@ -97,12 +90,9 @@ async function main() {
   let result;
   const t0 = Date.now();
   try {
-    // Windows: the units self-test against Get-Process runs before any sample.
-    notes.sampler = { ...(await sampler.ready) };
     result = await mod.run(ctx);
   } catch (err) {
     await sampler.stop();
-    notes.sampler = { ...notes.sampler, overhead: sampler.overhead() };
     console.error(`[${args.scenario}] harness failure: ${err?.stack ?? err}`);
     const left = survivors(marker);
     for (const o of left) { try { process.kill(o.pid, "SIGKILL"); } catch {} }
@@ -111,14 +101,11 @@ async function main() {
     return 2;
   }
   const rows = await sampler.stop();
-  // The sampler's own cost (Windows: the poller's commit/working set and poll time); it never counts as kit.
-  notes.sampler = { ...notes.sampler, overhead: sampler.overhead() };
   // Orphans: anything still marked after the scenario's own stop sequence,
   // minus processes the scenario deliberately keeps (none by default).
   await new Promise((r) => setTimeout(r, result.settleMs ?? 2000));
   const orphans = survivors(marker, result.keepPids ?? []);
-  // RSS on Linux, commit on Windows (with the working-set verdict beside it).
-  const v = osVerdict(rows, result.budgets, { orphans, observations });
+  const v = verdict(rows, result.budgets, { orphans, observations });
   // The loop never leaves its own processes behind: orphans are recorded as
   // evidence above, then reaped (only marked processes, i.e. ones this run started).
   for (const o of orphans) { try { process.kill(o.pid, "SIGTERM"); } catch {} }
@@ -126,14 +113,12 @@ async function main() {
     await new Promise((r) => setTimeout(r, 3000));
     for (const o of survivors(marker)) { try { process.kill(o.pid, "SIGKILL"); } catch {} }
   }
-  const summary = { id, key, scenario: args.scenario, profile: args.profile, variant: args.variant, platform: process.platform, node: process.version, outcome: v.red ? "RED" : "GREEN", metric: v.metric, ...(v.workingSet ? { workingSet: v.workingSet, redOnlyOnCommit: v.redOnlyOnCommit } : {}), durationS: Math.round((Date.now() - t0) / 1000), red: v.red, checks: v.checks, summary: v.summary, budgets: result.budgets, orphans: orphans.map((o) => ({ pid: o.pid, role: o.role, cmd: o.cmd })), observations, notes, samples: rows.length, csv: join(outDir, "samples.csv") };
+  const summary = { id, key, scenario: args.scenario, profile: args.profile, variant: args.variant, platform: process.platform, node: process.version, outcome: v.red ? "RED" : "GREEN", durationS: Math.round((Date.now() - t0) / 1000), red: v.red, checks: v.checks, summary: v.summary, budgets: result.budgets, orphans: orphans.map((o) => ({ pid: o.pid, role: o.role, cmd: o.cmd })), observations, notes, samples: rows.length, csv: join(outDir, "samples.csv") };
   writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
   console.log(`\n== memory loop ${key} (${id}): ${v.red ? "RED" : "GREEN"} ==`);
   for (const c of v.checks) console.log(`${c.red ? "RED  " : "ok   "} ${c.name.padEnd(28)} ${String(c.value).padStart(10)} ${c.unit ?? ""} (budget ${c.budget})${c.trend !== undefined ? ` trend=${c.trend}` : ""}`);
   for (const [role, s] of Object.entries(v.summary)) console.log(`  role ${role.padEnd(14)} peak ${String(s.peakMB).padStart(8)} MB  max/proc ${String(s.peakProcMB).padStart(8)} MB  hwm ${String(s.peakHwmMB).padStart(8)} MB  procs ${s.maxCount} (distinct ${s.distinctPids})  fds ${s.maxFds}  threads ${s.maxThreads}${s.peakHeapMB !== null ? `  heap ${s.peakHeapMB} MB` : ""}`);
-  if (v.redOnlyOnCommit) console.log(`  RED only on commit (working set within budget): raised to the owner (build-time gate 3)`);
   console.log(`  summary: ${join(outDir, "summary.json")}`);
-  runBun?.remove();
   return v.red ? 1 : 0;
 }
 

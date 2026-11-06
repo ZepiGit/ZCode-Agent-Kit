@@ -4,7 +4,7 @@
  * with the offline fixture backend, in the production default configuration
  * unless a phase says otherwise. Emits one JSON line per second on stdout:
  *   {"type":"sample","solves":n,"rssMB":..,"mainHeapMB":..,"phase":..,"solver":{..}}
- * and {"type":"phase", ...} marks (with footprintMB, the commit charge on Windows). Measurement only: solver behaviour is unchanged.
+ * and {"type":"phase", ...} marks. Measurement only: solver behaviour is unchanged.
  * Phases (S2_PHASES, default ABCDE): A heavy solves, B retained heap, C hung
  * solves, D CDN map, E cold start + idle exit; K (alone, S2_KILL=hung|idle)
  * waits to be SIGKILLed with a live generation.
@@ -32,8 +32,7 @@ const timer = setInterval(sample, 1000);
 function mark(name: string, extra: Record<string, unknown> = {}) {
   Bun.gc(true);
   const m = process.memoryUsage();
-  // footprintMB: the commit charge on Windows (the metric the Windows leg judges), additive.
-  const rec = { type: "phase", name, phase, solves, rssMB: Math.round(m.rss / MB), footprintMB: Math.round(Bun.unsafe.memoryFootprint() / MB), mainHeapMB: Math.round(m.heapUsed / MB), solver: getCaptchaSolverStats(), ...extra };
+  const rec = { type: "phase", name, phase, solves, rssMB: Math.round(m.rss / MB), mainHeapMB: Math.round(m.heapUsed / MB), solver: getCaptchaSolverStats(), ...extra };
   marks.push(rec);
   emit(rec);
 }
