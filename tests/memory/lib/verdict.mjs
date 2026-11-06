@@ -229,5 +229,6 @@ export function osVerdict(rows, budgets, opts = {}) {
   if (!commit) return { ...verdict(rowsForMetric(rows, "rss"), budgets, opts), metric: "rss", workingSet: null, redOnlyOnCommit: false };
   const v = verdict(rowsForMetric(rows, "commit"), budgets, opts);
   const ws = verdict(rowsForMetric(rows, "rss"), budgets, opts);
-  return { ...v, metric: "commit", workingSet: { red: ws.red, redChecks: ws.checks.filter((c) => c.red).map((c) => c.name) }, redOnlyOnCommit: v.red && !ws.red };
+  // The working-set check values ride along, so a repeated run can take its working-set median too (ticket 60).
+  return { ...v, metric: "commit", workingSet: { red: ws.red, redChecks: ws.checks.filter((c) => c.red).map((c) => c.name), checks: ws.checks.map(({ name, red, value }) => ({ name, red, value })) }, redOnlyOnCommit: v.red && !ws.red };
 }

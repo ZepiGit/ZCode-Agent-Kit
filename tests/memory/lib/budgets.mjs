@@ -31,6 +31,20 @@ export const MEMORY = {
   S7: { proxyLogMB: 6, earlyLogMB: 1, responsesStoreHeapMB: 96 },
 };
 
+/**
+ * Runs judged on the median of n fresh, sequential repetitions instead of one
+ * run (Round 6 Q1, ticket 60; lib/repetitions.mjs). The one place n lives.
+ * S1/burst1 (3 sequential ~10.8 MB requests per repetition): the median proxy
+ * peak against the 250 MB S1 peak, and every repetition ≤ 400 MB, §18's budget
+ * for 16 concurrent bodies (a run with ≤ 1 body in flight above it is a
+ * regression by definition). n = 5: the smallest odd n whose predicted
+ * false-RED rate is ≤ 5 % on the measured distribution (METRICS.md: 5 of 48
+ * runs above 250 MB on the tip → 3; with the 11 earlier runs, 8 of 59 → 5).
+ */
+export const REPEATED = {
+  "S1/burst1": { n: 5, check: "procPeak:proxy", budgetMB: MEMORY.S1.peakMB, ceilingMB: MEMORY.S1.burstPeakMB.burst16 },
+};
+
 export const PROCESSES = {
   proxiesPerInstallation: 1, // at every sample, incl. 10 concurrent launches
   failedLaunches: 0, // incl. a killed lock holder

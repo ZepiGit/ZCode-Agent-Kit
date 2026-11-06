@@ -16,6 +16,12 @@
 // Every run also gets a timeout (`timeout --kill-after=30` on Linux; on
 // Windows the job kills the wrapper, and closing the Job Object kills the tree).
 //
+// Run keys in lib/budgets.mjs REPEATED (S1/burst1) run n times, one fresh
+// isolated run after another, under <out>/<scenario>-<variant>/rep-<i>/, and
+// are judged as one verdict on the median peak plus a per-run ceiling
+// (lib/repetitions.mjs, Round 6 Q1); <out>/<scenario>-<variant>/summary.json
+// records every repetition's value, the median and the ceiling check.
+//
 // Writes <out>/job-summary.json and <out>/job-summary.md (also appended to
 // $GITHUB_STEP_SUMMARY when set); each run's samples.csv and summary.json
 // stay under <out>/<scenario>-<variant>/. Exit 0 when the ratchet holds,
@@ -30,6 +36,7 @@ import { JOB, osLeg, parseRunKey } from "./lib/catalogue.mjs";
 import { checkRatchet, issueIdsIn, readExpectedRed } from "./lib/ratchet.mjs";
 import { assertSafeRun } from "./lib/isolated-kit.mjs";
 import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
+import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -88,6 +95,15 @@ function markdown({ os, cap, ratchet, results, partial }) {
     lines.push(`| ${row.key} | ${row.outcome}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
+  const repeated = results.filter((r) => r.median);
+  if (repeated.length) {
+    lines.push("", "Judged on the median of n fresh repetitions (one verdict per run key; every repetition must also stay within the per-run ceiling):", "", "| run | n | repetitions (MB) | median | budget | ceiling | over ceiling |", "|---|---|---|---|---|---|---|");
+    for (const r of repeated) {
+      const m = r.median;
+      lines.push(`| ${r.key} | ${m.n} | ${m.values.map((v) => v ?? "—").join(", ")} | ${m.medianMB ?? "—"} | ≤ ${m.budgetMB} | ≤ ${m.ceilingMB} | ${m.overCeiling.length ? m.overCeiling.map((i) => `#${i}`).join(", ") : "none"} |`);
+      if (m.workingSet) lines.push(`| ${r.key} (working set) | ${m.n} | ${m.workingSet.values.map((v) => v ?? "—").join(", ")} | ${m.workingSet.medianMB ?? "—"} | ≤ ${m.budgetMB} | ≤ ${m.ceilingMB} | — |`);
+    }
+  }
   const overheads = results.filter((r) => r.samplerOverhead?.polls);
   if (overheads.length) {
     const mb = (kb) => Math.round(kb / 1024);
@@ -116,13 +132,11 @@ async function main() {
   mkdirSync(args.out, { recursive: true });
   console.log(`memory-budget: ${selected.length} runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}`);
 
-  const results = [];
-  for (const key of selected) {
+  // One fresh run of a key into `dir`, capped and timed out: its job result.
+  async function runIn(key, dir) {
     const { scenario, profile, variant } = parseRunKey(key);
-    const dir = join(args.out, key.replace("/", "-"));
     mkdirSync(dir, { recursive: true });
     const runArgs = [scenario, "--profile", profile, ...(variant ? ["--variant", variant] : []), "--out", dir];
-    console.log(`\n── ${key} ──`);
     const size = CAP[key] ?? CAP[scenario] ?? DEFAULT_CAP;
     const cmd = commandFor(capChoice.cap, size, (TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S) * (TIMEOUT_FACTOR[args.os] ?? 1), runArgs, { runScript: join(HERE, "run.mjs") });
     const r = await runOne(cmd, join(dir, "run.log"));
@@ -133,7 +147,31 @@ async function main() {
     // A Job Object run counts only if the wrapper proved the cap (never uncapped).
     if (capChoice.cap === "jobobject" && r.code !== 124 && !r.job?.applied) { exitCode = 2; why = `Job Object cap not applied: ${r.job?.error ?? "no @@JOB report"}`; }
     if (why) console.log(`${key}: harness failure: ${why}`);
-    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, ...(r.job ? { jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why });
+    return { result: { key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, ...(r.job ? { jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why }, summary };
+  }
+
+  const results = [];
+  for (const key of selected) {
+    const dir = join(args.out, key.replace("/", "-"));
+    const rule = repetitionRule(key);
+    if (!rule) {
+      console.log(`\n── ${key} ──`);
+      results.push((await runIn(key, dir)).result);
+      continue;
+    }
+    // Judged on the median of n fresh, sequential repetitions (lib/repetitions.mjs, Round 6 Q1).
+    const set = await runRepetitions(rule, async (i) => {
+      console.log(`\n── ${key} (repetition ${i} of ${rule.n}) ──`);
+      const { result, summary } = await runIn(key, join(dir, `rep-${i}`));
+      return { ...result, checks: summary?.checks ?? [], workingSet: summary?.workingSet ?? null };
+    });
+    const repetitions = set.reps.map((r, i) => ({ rep: i + 1, exitCode: r.exitCode, value: set.values[i], redChecks: r.redChecks, durationS: r.durationS, ...(set.workingSet ? { workingSetValue: set.workingSet.values[i] } : {}), ...(r.error ? { error: r.error } : {}) }));
+    const median = { n: rule.n, check: rule.check, values: set.values, medianMB: set.medianMB, budgetMB: rule.budgetMB, ceilingMB: rule.ceilingMB, overCeiling: set.overCeiling, ...(set.workingSet ? { workingSet: set.workingSet } : {}) };
+    const first = set.reps[0] ?? {};
+    const result = { key, exitCode: set.exitCode, cap: first.cap, durationS: set.reps.reduce((a, r) => a + (r.durationS ?? 0), 0), metric: first.metric ?? null, samplerOverhead: first.samplerOverhead ?? null, redOnlyOnCommit: set.redOnlyOnCommit, workingSetRedChecks: set.workingSet?.redChecks ?? [], redChecks: set.redChecks, error: set.error ?? null, median, repetitions };
+    writeFileSync(join(dir, "summary.json"), JSON.stringify({ key, outcome: { 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" }[set.exitCode], rule: "median of n fresh repetitions (Round 6 Q1)", ...median, redChecks: set.redChecks, redOnlyOnCommit: set.redOnlyOnCommit, ...(set.error ? { error: set.error } : {}), repetitions }, null, 2));
+    console.log(`${key}: median ${set.medianMB ?? "—"} MB of [${set.values.join(", ")}] (budget ${rule.budgetMB}, every run ≤ ${rule.ceilingMB}): ${{ 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" }[set.exitCode]}${set.error ? ` (${set.error})` : ""}`);
+    results.push(result);
   }
 
   const ratchet = checkRatchet({ expected, os: args.os, results, issueIds });
