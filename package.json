@@ -17,6 +17,7 @@
     "test:proxy": "cd zcode-proxy-src && bun test",
     "test:mcp": "cd mcp/zcode-harness-mcp && npm test",
     "test:all": "npm run test && npm run test:proxy && npm run test:mcp",
+    "memloop": "node tests/memory/run.mjs",
     "setup": "node cli/zcode-kit.mjs setup",
     "kit": "node cli/zcode-kit.mjs",
     "zcode-kit": "node cli/zcode-kit.mjs"
