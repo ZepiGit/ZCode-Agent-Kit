@@ -3,7 +3,7 @@
   "serverTime": 1793880000,
   "jwt": {
     "ageHours": 5.2,
-    "issuedAt": 1793910292
+    "issuedAt": 1793914012
   },
   "balances": [
     {

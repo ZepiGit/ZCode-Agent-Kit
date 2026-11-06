@@ -1,0 +1,137 @@
+file:///home/AgentKit/wt/diagnosis-memory/tests/memory/lib/verdict.mjs:125
+  if (budgets.growth) {
+              ^
+
+TypeError: Cannot read properties of undefined (reading 'growth')
+    at verdict (file:///home/AgentKit/wt/diagnosis-memory/tests/memory/lib/verdict.mjs:125:15)
+    at file:///home/AgentKit/wt/diagnosis-memory/tests/memory/reverdict.mjs:20:11
+    at ModuleJob.run (node:internal/modules/esm/module_job:569:25)
+    at async node:internal/modules/esm/loader:650:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v26.7.0
+
+S1-long-2026-11-06T0249-3b28d4: GREEN
+ok    growth:proxy                       0.07 %/1k (budget 5) windows 124.4 126.6 123.7 126 128.1 127.1
+ok    procPeak:proxy                    181.6 MB (budget 250)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+
+S1-short-burst1-2026-11-06T0030-1ad20a: GREEN
+ok    growth:proxy                  undefined %/1k (budget 5)
+ok    procPeak:proxy                    219.1 MB (budget 250)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+
+S1-short-burst4-2026-11-06T0030-ead197: RED
+ok    growth:proxy                  undefined %/1k (budget 5)
+RED   procPeak:proxy                    425.3 MB (budget 250)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+
+S1-short-burst16-2026-11-06T0031-6db2c0: RED
+ok    growth:proxy                    -479.84 %/1k (budget 5) windows 663.9 597.8 899.9 490.3 668.8
+RED   procPeak:proxy                    998.4 MB (budget 250)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+
+S1-short-burst32-2026-11-06T0031-855176: RED
+RED   growth:proxy                    1109.77 %/1k (budget 5) windows 573.6 967.3 505.8 782.1 738 1302.4
+RED   procPeak:proxy                   1618.9 MB (budget 250)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+
+S1-short-bigbody-2026-11-06T0022-616fdb: RED
+ok    growth:proxy                      12.16 %/1k (budget 5) windows 209.3 256.1 199.5 253.7 234.4 191.8
+RED   peak:proxy                        320.1 MB (budget 250)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+
+S1-short-stalled-2026-11-06T0248-9e2a21: GREEN
+ok    growth:proxy                       1.99 %/1k (budget 5) windows 136.3 132.1 139.7 137.6 139.9 142.1
+ok    procPeak:proxy                    165.1 MB (budget 250)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+
+S2-short-2026-11-06T0045-66deee: RED
+RED   growth:scenario                   17.66 %/1k (budget 5) windows 807.1 919.2 358.6 589.6 782.8 909.5
+RED   procPeak:scenario                1068.9 MB (budget 600)
+ok    orphans                               0 procs (budget 0)
+RED   solver:retained-before-recycle        686 MB (budget 300)
+ok    solver:hang-not-reclaimed            -5 MB (budget 64)
+RED   cdn-cache:memory-growth             151 MB (budget 64)
+
+S2-short-gc-2026-11-06T0056-abc101: RED
+ok    growth:scenario                  -17.04 %/1k (budget 5) windows 692.9 808.8 339 540.2 695.3 790.9
+RED   procPeak:scenario                 872.7 MB (budget 600)
+ok    orphans                               0 procs (budget 0)
+ok    solver:retained-before-recycle          0 MB (budget 300)
+ok    solver:hang-not-reclaimed             0 MB (budget 64)
+ok    cdn-cache:memory-growth               0 MB (budget 64)
+
+S2-long-2026-11-06T0314-896e50: RED
+ok    growth:scenario                    2.72 %/1k (budget 5) windows 715.2 781.7 667.7 627.7 749.4 764.4
+RED   procPeak:scenario                1067.5 MB (budget 600)
+ok    orphans                               0 procs (budget 0)
+RED   solver:retained-before-recycle        619 MB (budget 300)
+ok    solver:hang-not-reclaimed            -4 MB (budget 64)
+RED   cdn-cache:memory-growth             502 MB (budget 64)
+
+S3-short-2026-11-06T0138-865d06: RED
+RED   peak:kit                          852.1 MB (budget 600)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+ok    simultaneous-proxies                  1 procs (budget 1)
+ok    proxy-generations/round               1 procs (budget 1)
+RED   failed-launches                       7 launches (budget 0)
+RED   stale-lock-after-round                1 rounds (budget 0)
+
+S3-long-2026-11-06T0246-45f98a: RED
+RED   peak:kit                            852 MB (budget 600)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+ok    simultaneous-proxies                  1 procs (budget 1)
+ok    proxy-generations/round               1 procs (budget 1)
+RED   failed-launches                      17 launches (budget 0)
+RED   stale-lock-after-round                2 rounds (budget 0)
+
+S3-short-hung-2026-11-06T0324-802c13: RED
+RED   peak:kit                          851.2 MB (budget 600)
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+ok    simultaneous-proxies                  1 procs (budget 1)
+ok    proxy-generations/round               2 procs (budget 1)
+RED   failed-launches                      18 launches (budget 0)
+RED   stale-lock-after-round                2 rounds (budget 0)
+
+S4-short-2026-11-06T0319-07cd6f: RED
+ok    count:proxy                           1 procs (budget 1)
+ok    orphans                               0 procs (budget 0)
+ok    proxy-left-after-stop                 0 cycles (budget 0)
+ok    failed-lifecycle-steps                0 steps (budget 0)
+RED   stale-lock-after-ctrl-c               5 of 8 (budget 0)
+ok    unstoppable-proxy-after-ctrl-c          0 of 8 (budget 0)
+RED   respawn-recovers-despite-stale-lock          0 proxy up (budget 1)
+ok    respawns-in-window                    3 restarts/15min (budget 3)
+ok    log-dir-files                         1 files (budget 8)
+
+S5-short-2026-11-06T0209-a4774f: RED
+RED   growth:mcp-bridge                 44.86 %/1k (budget 5) windows 85.8 88.9 93.2 94.1 94.4 96.8
+ok    procPeak:mcp-bridge                99.3 MB (budget 150)
+ok    orphans                               0 procs (budget 0)
+ok    bridge:reboot-cost-of-history          3 MB (budget 20)
+ok    bridge:task-failures                  0 tasks (budget 0)
+
+S6-short-2026-11-06T0232-fd7bb8: RED
+ok    orphans                               0 procs (budget 0)
+ok    tui:log-pane-heap                     2 MB (budget 16)
+ok    tui:resize-storm-heap                 0 MB (budget 8)
+RED   tui:long-line-heap                  125 MB (budget 32)
+
+S7-short-2026-11-06T0239-88681c: RED
+ok    growth:proxy                  undefined %/1k (budget 5)
+ok    procPeak:proxy                    226.9 MB (budget 250)
+ok    orphans                               0 procs (budget 0)
+RED   proxy.log:bounded-while-running       6.37 MB (budget 6)
+ok    responses-store:heap-at-cap          63 MB (budget 96)
+

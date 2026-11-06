@@ -1,0 +1,26 @@
+[1mProxy [0m[2m-------------------------------------------------------------------------[0m
+  State    * running since 1 h 02 min (pid 48211)
+  Port     8457 (loopback only)
+  Version  0.2.42 (proxy 4.6.4)
+
+[1mMemory [0m[2m------------------------------------------------------------------------[0m
+  proxy                182 MB of 1024 MB  ##........  pid 48211
+  captcha worker       311 MB of  768 MB  ####......  pid 48230
+  sync-fetch worker     41 MB of  128 MB  ###.......  pid 48231
+
+[1mQuota [0m[2m-------------------------------------------------------------------------[0m
+  GLM Coding Lite     4120 of 6000 prompts left  #######...  resets 2026-12-31
+  Start Plan Bonus      35 of  200 prompts left  ##........  resets 2026-11-30
+
+[1mAccounts [0m[2m----------------------------------------------------------------------[0m
+  *work usable[2m  -  [0mpersonal exhausted[2m  -  [0mbackup paused   (* active)
+
+[1mCaptcha [0m[2m-----------------------------------------------------------------------[0m
+  ready 2/2, mint success 96 % (10 min), solver gen 3 (2 recycles)
+
+[1mConnection details [0m[2m------------------------------------------------------------[0m
+  OpenAI base URL     http://127.0.0.1:8457/v1
+  Anthropic base URL  http://127.0.0.1:8457
+  API key             k7Qm2_example_fake_key_A1b2C3d4E5f6G7h8I9j0
+  Models              glm-5.3, glm-5.3-flash
+  State               * running, identity verified

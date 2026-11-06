@@ -114,8 +114,11 @@ function fixtureBin(bin) {
   mkdirSync(bin, { recursive: true });
   symlinkSync(BUN, join(bin, "bun"));
   symlinkSync(process.execPath, join(bin, "node"));
-  writeFileSync(join(bin, "opencode"), "#!/bin/sh\necho \"opencode (UX fixture binary) args: $*\"\necho \"ZCODE_PROXY_KEY: ${ZCODE_PROXY_KEY:+set}\"\n");
-  chmodSync(join(bin, "opencode"), 0o755);
+}
+/** A fake `opencode` on PATH (only for `run opencode`: PATH presence also counts as detection). */
+function fakeOpencode(f) {
+  writeFileSync(join(f.bin, "opencode"), "#!/bin/sh\necho \"opencode (UX fixture binary) args: $*\"\necho \"ZCODE_PROXY_KEY: ${ZCODE_PROXY_KEY:+set}\"\n");
+  chmodSync(join(f.bin, "opencode"), 0o755);
 }
 
 /**
@@ -188,8 +191,17 @@ function runCaptured(cmd, cmdArgs, { env, cwd, variant, input, timeoutMs = 12000
   const fullEnv = { ...env, ...v.env };
   const started = Date.now();
   if (!v.tty) {
-    const r = spawnSync(cmd, cmdArgs, { env: fullEnv, cwd, encoding: "utf8", input: typeof input === "string" ? input : "", timeout: timeoutMs, stdio: ["pipe", "pipe", "pipe"] });
-    return Promise.resolve({ code: r.status ?? `signal ${r.signal}`, stdout: r.stdout ?? "", stderr: r.stderr ?? "", ms: Date.now() - started });
+    // Async on purpose: the loopback doubles (vendor, foreign service) live in
+    // this process and must keep answering while the child runs.
+    return new Promise((resolveRun) => {
+      const child = spawn(cmd, cmdArgs, { env: fullEnv, cwd, stdio: ["pipe", "pipe", "pipe"] });
+      let stdout = "", stderr = "";
+      const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+      child.stdout.setEncoding("utf8").on("data", (c) => { stdout += c; });
+      child.stderr.setEncoding("utf8").on("data", (c) => { stderr += c; });
+      child.on("close", (code, signal) => { clearTimeout(timer); resolveRun({ code: code ?? `signal ${signal}`, stdout, stderr, ms: Date.now() - started }); });
+      child.stdin.end(typeof input === "string" ? input : "");
+    });
   }
   return new Promise((resolveRun) => {
     const line = `stty cols ${v.cols} rows ${v.rows} 2>/dev/null; exec ${[cmd, ...cmdArgs].map(shq).join(" ")}`;
@@ -429,15 +441,15 @@ sc("auth", "auth-bad-subcommand", "auth frob", { args: ["auth", "frob"], prep: (
 sc("integrate", "integrate-omp", "integrate omp", { args: ["integrate", "omp"] });
 sc("integrate", "integrate-opencode-dry-run", "integrate opencode --dry-run", { args: ["integrate", "opencode", "--dry-run"] });
 sc("integrate", "integrate-codex-dry-run", "integrate codex --dry-run", { args: ["integrate", "codex", "--dry-run"] });
-sc("run", "run-opencode", "run opencode -- --version (fixture binary, proxy running)", { args: ["run", "opencode", "--", "--version"], prep: (f) => { configured(f, ["opencode"]); running(f); } });
+sc("run", "run-opencode", "run opencode -- --version (fixture binary, proxy running)", { args: ["run", "opencode", "--", "--version"], prep: (f) => { fakeOpencode(f); configured(f, ["opencode"]); running(f); } });
 sc("run", "run-codex-not-integrated", "run codex before integrate", { args: ["run", "codex"] });
 sc("run", "run-omp-no-launcher", "run omp (no launcher)", { args: ["run", "omp"] });
 
 // update / rollback / uninstall
-sc("update", "update-checkout", "update (checkout install, fast-forward from local bare origin)", { args: ["update"], fixture: { detect: ["omp"] }, prep: (f) => { gitFixture(f); prepRun(f, ["setup", "--harness", "omp", "--account-rotator", "n"], { env: { ZCODE_KIT_ALLOW_CHECKOUT: "1" } }); } });
+sc("update", "update-checkout", "update (checkout install, fast-forward from local bare origin); TTY answers n to the re-asked questions", { args: ["update"], input: "n\nn\nn\n", fixture: { detect: ["omp"] }, prep: (f) => { gitFixture(f); prepRun(f, ["setup", "--harness", "omp", "--account-rotator", "n"], { env: { ZCODE_KIT_ALLOW_CHECKOUT: "1" } }); } });
 sc("update", "update-checkout-dirty", "update with a dirty checkout (refused)", { args: ["update"], fixture: { detect: [] }, prep: (f) => { gitFixture(f); appendFileSync(join(f.root, "cli", "zcode-kit.mjs"), "\n// local edit\n"); } });
 sc("update", "update-bad-version", "update --version latest", { args: ["update", "--version", "latest"] });
-sc("update", "update-release", "update (release install, verified tarball via loopback stub)", { args: ["update"], fixture: { detect: ["omp"], srcLinks: false }, release: "v9.9.9", prep: (f) => configured(f, ["omp"]) });
+sc("update", "update-release", "update (release install, verified tarball via loopback stub); TTY answers n to the re-asked questions", { args: ["update"], input: "n\nn\nn\n", fixture: { detect: ["omp"], srcLinks: false }, release: "v9.9.9", prep: (f) => configured(f, ["omp"]) });
 sc("update", "update-release-current", "update when already at the latest release", { args: ["update"], fixture: { detect: [], srcLinks: false, version: "9.9.9" }, release: "v9.9.9" });
 sc("update", "update-release-corrupt", "update with a checksum mismatch", { args: ["update"], fixture: { detect: [], srcLinks: false }, release: "v9.9.9", corrupt: true });
 sc("rollback", "rollback-after-integrate", "rollback after integrate omp", { args: ["rollback"], prep: (f) => prepRun(f, ["integrate", "omp"]) });
@@ -589,6 +601,8 @@ function writeIndex() {
     "- **80 vs 120 columns for the zcode-kit CLI**: captured, but the CLI never reads the terminal width, so both files are byte-identical; the `max width` / `lines >80` columns show where an 80-column terminal soft-wraps.",
     "- **TUI frames under NO_COLOR / TERM=dumb / C locale**: `frame.ts` has no switch for any of them, so those frame files are byte-identical to tty-color-80 by construction; `tui/live/*` confirms it end to end with the real app.",
     "- **Setup live smoke request**: skipped by ZCODE_KIT_SKIP_DEPS=1 (needs the real proxy + upstream; out of scope for fixtures).",
+    "- **Typed-ahead answers** (setup, update, install.sh on TTY variants) are echoed by the pty line discipline before the first prompt, exactly as in a real terminal when a user types ahead; the prompts themselves show the answer they consumed.",
+    "- **Path normalisation** shortens fixture paths to \`<KIT>\`/\`<HOME>\`; inside the TUI frames this makes a few box rows look shorter than 80 cells (the raw frame is exact; the \`.ansi\` file is normalised the same way).",
     "- **auth login** (OAuth browser flow), **accounts unlock / pause / resume / remove --yes**: need a real login or mutate a real pool; not captured.",
     "",
     "## Captures",

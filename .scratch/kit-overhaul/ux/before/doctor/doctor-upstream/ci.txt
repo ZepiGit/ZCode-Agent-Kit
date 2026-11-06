@@ -34,5 +34,6 @@ SKIP  aider: integration — not detected — skipped
 SKIP  continue: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate continue
 SKIP  goose: integration — not detected — skipped
 PASS  harness decisions — 2 stored decision(s) readable
-SKIP  upstream gateway — upstream config unreachable or unreadable (The operation was aborted due to timeout) — skipped
+PASS  upstream gateway (zai, start-plan) — https://zcode.z.ai/api/v1/zcode-plan/anthropic matches the remote provider release rev 23
+SKIP  upstream models (start-plan) — configured but not offered to the ZCode client for this plan: glm-5.3 (offered: glm-5.3-flash, glm-5.2) — may still work; informational
 doctor: 2 check(s) failed

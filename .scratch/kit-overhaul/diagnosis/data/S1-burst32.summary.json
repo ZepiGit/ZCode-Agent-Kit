@@ -1,0 +1,172 @@
+{
+ "id": "S1-short-burst32-2026-11-06T0031-855176",
+ "scenario": "S1",
+ "profile": "short",
+ "variant": "burst32",
+ "durationS": 30,
+ "red": true,
+ "checks": [
+  {
+   "name": "growth:proxy",
+   "red": false,
+   "value": 1109.77,
+   "budget": 5,
+   "unit": "%/1k",
+   "trend": false,
+   "detail": {
+    "samples": 8,
+    "warmupSamples": 1,
+    "meanMB": 881.7,
+    "firstPostMB": 573.6,
+    "lastMB": 1614.5,
+    "slopeMBPer1k": 9784.32,
+    "growthPctPer1k": 1109.77,
+    "slopeMBPerMin": 5658.65,
+    "windowMediansMB": [
+     573.6,
+     967.3,
+     505.8,
+     782.1,
+     738,
+     1302.4
+    ],
+    "risingWindows": 2,
+    "heapSlopeMBPer1k": 376.04,
+    "axis": "progress"
+   }
+  },
+  {
+   "name": "procPeak:proxy",
+   "red": true,
+   "value": 1618.9,
+   "budget": 250,
+   "unit": "MB"
+  },
+  {
+   "name": "count:proxy",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 1820.6,
+   "peakProcMB": 1614.5,
+   "peakHwmMB": 1618.9,
+   "maxCount": 3,
+   "maxFds": 120,
+   "maxThreads": 34,
+   "distinctPids": 3,
+   "peakHeapMB": 898
+  },
+  "mock-upstream": {
+   "peakMB": 296,
+   "peakProcMB": 296,
+   "peakHwmMB": 361.1,
+   "maxCount": 1,
+   "maxFds": 42,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "manager": {
+   "peakMB": 77.2,
+   "peakProcMB": 77.2,
+   "peakHwmMB": 77.2,
+   "maxCount": 1,
+   "maxFds": 16,
+   "maxThreads": 3,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "proxy": {
+   "peakMB": 1614.5,
+   "peakProcMB": 1614.5,
+   "peakHwmMB": 1618.9,
+   "maxCount": 1,
+   "maxFds": 78,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 898
+  }
+ },
+ "budgets": {
+  "growth": {
+   "role": "proxy",
+   "axis": "progress",
+   "maxPctPer1k": 5,
+   "risingWindows": 3,
+   "warmupFraction": 0.2,
+   "fromT": 1099,
+   "untilT": 12496
+  },
+  "procPeaks": {
+   "proxy": 250
+  },
+  "counts": {
+   "proxy": 1
+  },
+  "orphans": 0
+ },
+ "orphans": [],
+ "notes": {
+  "isolation.stateDir": "<diag-data>/S1-short-burst32-2026-11-06T0031-855176/tmp/kit-lHJW6k/state",
+  "isolation.home": "<diag-data>/S1-short-burst32-2026-11-06T0031-855176/tmp/kit-lHJW6k/home",
+  "isolation.port": 18457,
+  "start.code": 0,
+  "isolation.facts": {
+   "pid": 322912,
+   "homeIsolated": true,
+   "configIsolated": true,
+   "stateDirIsolated": true,
+   "credentialsIsolated": true,
+   "listeningPorts": [
+    18457
+   ],
+   "externalConnections": []
+  },
+  "requests": 96,
+  "outcomes": {
+   "large-text:ok": 96
+  },
+  "loadWindowMs": [
+   1099,
+   12496
+  ],
+  "mockStats": {
+   "requests": 96,
+   "bytesIn": 1036823798,
+   "byMode": {
+    "ok": 96
+   },
+   "aborted": 0,
+   "open": 0
+  },
+  "healthAfterIdle": {
+   "pid": 322912,
+   "uptimeSec": 28,
+   "rssMB": 93,
+   "heapUsedMB": 6,
+   "eventLoopLagMs": 0,
+   "eventLoopLagMaxMs": 460,
+   "captcha": null
+  },
+  "isolation.externalConnectionsDuringRun": [],
+  "stop.code": 0,
+  "stop.output": [
+   "stopped (pid 322912)"
+  ]
+ },
+ "samples": 27,
+ "csv": "<diag-data>/S1-short-burst32-2026-11-06T0031-855176/samples.csv"
+}

@@ -21,7 +21,7 @@ SKIP  omp: integration — not configured (no consent yet) — answer y in zcode
 SKIP  pi: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate pi
 SKIP  claude-code: integration — not detected — skipped
 SKIP  codex: integration — not detected — skipped
-SKIP  opencode: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate opencode
+SKIP  opencode: integration — not detected — skipped
 SKIP  cline: integration — not detected — skipped
 SKIP  kilo-code: integration — not detected — skipped
 SKIP  aider: integration — not detected — skipped

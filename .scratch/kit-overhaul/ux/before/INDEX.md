@@ -27,6 +27,8 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 - **80 vs 120 columns for the zcode-kit CLI**: captured, but the CLI never reads the terminal width, so both files are byte-identical; the `max width` / `lines >80` columns show where an 80-column terminal soft-wraps.
 - **TUI frames under NO_COLOR / TERM=dumb / C locale**: `frame.ts` has no switch for any of them, so those frame files are byte-identical to tty-color-80 by construction; `tui/live/*` confirms it end to end with the real app.
 - **Setup live smoke request**: skipped by ZCODE_KIT_SKIP_DEPS=1 (needs the real proxy + upstream; out of scope for fixtures).
+- **Typed-ahead answers** (setup, update, install.sh on TTY variants) are echoed by the pty line discipline before the first prompt, exactly as in a real terminal when a user types ahead; the prompts themselves show the answer they consumed.
+- **Path normalisation** shortens fixture paths to `<KIT>`/`<HOME>`; inside the TUI frames this makes a few box rows look shorter than 80 cells (the raw frame is exact; the `.ansi` file is normalised the same way).
 - **auth login** (OAuth browser flow), **accounts unlock / pause / resume / remove --yes**: need a real login or mutate a real pool; not captured.
 
 ## Captures
@@ -108,8 +110,8 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | setup | setup-none-detected | no-color | 0 | yes | 190 | 8 | `—` | [setup/setup-none-detected/no-color.txt](setup/setup-none-detected/no-color.txt) |
 | setup | setup-none-detected | term-dumb | 0 | no | 190 | 8 | `—` | [setup/setup-none-detected/term-dumb.txt](setup/setup-none-detected/term-dumb.txt) |
 | setup | setup-none-detected | ascii-locale | 0 | yes | 190 | 8 | `—` | [setup/setup-none-detected/ascii-locale.txt](setup/setup-none-detected/ascii-locale.txt) |
-| setup | setup-none-detected | pipe | 0 | no | 190 | 11 | `—` | [setup/setup-none-detected/pipe.txt](setup/setup-none-detected/pipe.txt) |
-| setup | setup-none-detected | ci | 0 | no | 190 | 11 | `—` | [setup/setup-none-detected/ci.txt](setup/setup-none-detected/ci.txt) |
+| setup | setup-none-detected | pipe | 0 | no | 190 | 9 | `—` | [setup/setup-none-detected/pipe.txt](setup/setup-none-detected/pipe.txt) |
+| setup | setup-none-detected | ci | 0 | no | 190 | 9 | `—` | [setup/setup-none-detected/ci.txt](setup/setup-none-detected/ci.txt) |
 | setup | setup-proxy-running | tty-color-80 | 0 | yes | 190 | 8 | `—` | [setup/setup-proxy-running/tty-color-80.txt](setup/setup-proxy-running/tty-color-80.txt) |
 | setup | setup-proxy-running | tty-color-120 | 0 | yes | 190 | 8 | `—` | [setup/setup-proxy-running/tty-color-120.txt](setup/setup-proxy-running/tty-color-120.txt) |
 | setup | setup-proxy-running | no-color | 0 | yes | 190 | 8 | `—` | [setup/setup-proxy-running/no-color.txt](setup/setup-proxy-running/no-color.txt) |
@@ -131,13 +133,13 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | setup | setup-bad-harness | ascii-locale | 2 | no | 152 | 1 |  | [setup/setup-bad-harness/ascii-locale.txt](setup/setup-bad-harness/ascii-locale.txt) |
 | setup | setup-bad-harness | pipe | 2 | no | 152 | 1 |  | [setup/setup-bad-harness/pipe.txt](setup/setup-bad-harness/pipe.txt) |
 | setup | setup-bad-harness | ci | 2 | no | 152 | 1 |  | [setup/setup-bad-harness/ci.txt](setup/setup-bad-harness/ci.txt) |
-| doctor | doctor-fresh | tty-color-80 | 1 | no | 127 | 7 | `—` | [doctor/doctor-fresh/tty-color-80.txt](doctor/doctor-fresh/tty-color-80.txt) |
-| doctor | doctor-fresh | tty-color-120 | 1 | no | 127 | 7 | `—` | [doctor/doctor-fresh/tty-color-120.txt](doctor/doctor-fresh/tty-color-120.txt) |
-| doctor | doctor-fresh | no-color | 1 | no | 127 | 7 | `—` | [doctor/doctor-fresh/no-color.txt](doctor/doctor-fresh/no-color.txt) |
-| doctor | doctor-fresh | term-dumb | 1 | no | 127 | 7 | `—` | [doctor/doctor-fresh/term-dumb.txt](doctor/doctor-fresh/term-dumb.txt) |
-| doctor | doctor-fresh | ascii-locale | 1 | no | 127 | 7 | `—` | [doctor/doctor-fresh/ascii-locale.txt](doctor/doctor-fresh/ascii-locale.txt) |
-| doctor | doctor-fresh | pipe | 1 | no | 127 | 7 | `—` | [doctor/doctor-fresh/pipe.txt](doctor/doctor-fresh/pipe.txt) |
-| doctor | doctor-fresh | ci | 1 | no | 127 | 7 | `—` | [doctor/doctor-fresh/ci.txt](doctor/doctor-fresh/ci.txt) |
+| doctor | doctor-fresh | tty-color-80 | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/tty-color-80.txt](doctor/doctor-fresh/tty-color-80.txt) |
+| doctor | doctor-fresh | tty-color-120 | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/tty-color-120.txt](doctor/doctor-fresh/tty-color-120.txt) |
+| doctor | doctor-fresh | no-color | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/no-color.txt](doctor/doctor-fresh/no-color.txt) |
+| doctor | doctor-fresh | term-dumb | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/term-dumb.txt](doctor/doctor-fresh/term-dumb.txt) |
+| doctor | doctor-fresh | ascii-locale | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/ascii-locale.txt](doctor/doctor-fresh/ascii-locale.txt) |
+| doctor | doctor-fresh | pipe | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/pipe.txt](doctor/doctor-fresh/pipe.txt) |
+| doctor | doctor-fresh | ci | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/ci.txt](doctor/doctor-fresh/ci.txt) |
 | doctor | doctor-proxy-down | tty-color-80 | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/tty-color-80.txt](doctor/doctor-proxy-down/tty-color-80.txt) |
 | doctor | doctor-proxy-down | tty-color-120 | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/tty-color-120.txt](doctor/doctor-proxy-down/tty-color-120.txt) |
 | doctor | doctor-proxy-down | no-color | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/no-color.txt](doctor/doctor-proxy-down/no-color.txt) |
@@ -185,8 +187,8 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | doctor | doctor-upstream | no-color | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/no-color.txt](doctor/doctor-upstream/no-color.txt) |
 | doctor | doctor-upstream | term-dumb | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/term-dumb.txt](doctor/doctor-upstream/term-dumb.txt) |
 | doctor | doctor-upstream | ascii-locale | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/ascii-locale.txt](doctor/doctor-upstream/ascii-locale.txt) |
-| doctor | doctor-upstream | pipe | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream/pipe.txt](doctor/doctor-upstream/pipe.txt) |
-| doctor | doctor-upstream | ci | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream/ci.txt](doctor/doctor-upstream/ci.txt) |
+| doctor | doctor-upstream | pipe | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/pipe.txt](doctor/doctor-upstream/pipe.txt) |
+| doctor | doctor-upstream | ci | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/ci.txt](doctor/doctor-upstream/ci.txt) |
 | doctor | doctor-upstream-unreachable | tty-color-80 | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/tty-color-80.txt](doctor/doctor-upstream-unreachable/tty-color-80.txt) |
 | doctor | doctor-upstream-unreachable | tty-color-120 | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/tty-color-120.txt](doctor/doctor-upstream-unreachable/tty-color-120.txt) |
 | doctor | doctor-upstream-unreachable | no-color | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/no-color.txt](doctor/doctor-upstream-unreachable/no-color.txt) |
@@ -241,8 +243,8 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | proxy | proxy-start-foreign | no-color | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/no-color.txt](proxy/proxy-start-foreign/no-color.txt) |
 | proxy | proxy-start-foreign | term-dumb | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/term-dumb.txt](proxy/proxy-start-foreign/term-dumb.txt) |
 | proxy | proxy-start-foreign | ascii-locale | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/ascii-locale.txt](proxy/proxy-start-foreign/ascii-locale.txt) |
-| proxy | proxy-start-foreign | pipe | 2 | no | 66 | 0 |  | [proxy/proxy-start-foreign/pipe.txt](proxy/proxy-start-foreign/pipe.txt) |
-| proxy | proxy-start-foreign | ci | 2 | no | 66 | 0 |  | [proxy/proxy-start-foreign/ci.txt](proxy/proxy-start-foreign/ci.txt) |
+| proxy | proxy-start-foreign | pipe | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/pipe.txt](proxy/proxy-start-foreign/pipe.txt) |
+| proxy | proxy-start-foreign | ci | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/ci.txt](proxy/proxy-start-foreign/ci.txt) |
 | proxy | proxy-status-running | tty-color-80 | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/tty-color-80.txt](proxy/proxy-status-running/tty-color-80.txt) |
 | proxy | proxy-status-running | tty-color-120 | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/tty-color-120.txt](proxy/proxy-status-running/tty-color-120.txt) |
 | proxy | proxy-status-running | no-color | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/no-color.txt](proxy/proxy-status-running/no-color.txt) |
@@ -262,8 +264,8 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | proxy | proxy-status-foreign | no-color | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/no-color.txt](proxy/proxy-status-foreign/no-color.txt) |
 | proxy | proxy-status-foreign | term-dumb | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/term-dumb.txt](proxy/proxy-status-foreign/term-dumb.txt) |
 | proxy | proxy-status-foreign | ascii-locale | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/ascii-locale.txt](proxy/proxy-status-foreign/ascii-locale.txt) |
-| proxy | proxy-status-foreign | pipe | 1 | no | 143 | 5 | `—` | [proxy/proxy-status-foreign/pipe.txt](proxy/proxy-status-foreign/pipe.txt) |
-| proxy | proxy-status-foreign | ci | 1 | no | 143 | 5 | `—` | [proxy/proxy-status-foreign/ci.txt](proxy/proxy-status-foreign/ci.txt) |
+| proxy | proxy-status-foreign | pipe | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/pipe.txt](proxy/proxy-status-foreign/pipe.txt) |
+| proxy | proxy-status-foreign | ci | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/ci.txt](proxy/proxy-status-foreign/ci.txt) |
 | proxy | proxy-status-fresh | tty-color-80 | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/tty-color-80.txt](proxy/proxy-status-fresh/tty-color-80.txt) |
 | proxy | proxy-status-fresh | tty-color-120 | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/tty-color-120.txt](proxy/proxy-status-fresh/tty-color-120.txt) |
 | proxy | proxy-status-fresh | no-color | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/no-color.txt](proxy/proxy-status-fresh/no-color.txt) |
@@ -537,13 +539,13 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | run | run-omp-no-launcher | ascii-locale | 2 | no | 67 | 0 |  | [run/run-omp-no-launcher/ascii-locale.txt](run/run-omp-no-launcher/ascii-locale.txt) |
 | run | run-omp-no-launcher | pipe | 2 | no | 67 | 0 |  | [run/run-omp-no-launcher/pipe.txt](run/run-omp-no-launcher/pipe.txt) |
 | run | run-omp-no-launcher | ci | 2 | no | 67 | 0 |  | [run/run-omp-no-launcher/ci.txt](run/run-omp-no-launcher/ci.txt) |
-| update | update-checkout | tty-color-80 | signal SIGKILL | yes | 153 | 3 | `—` | [update/update-checkout/tty-color-80.txt](update/update-checkout/tty-color-80.txt) |
-| update | update-checkout | tty-color-120 | signal SIGKILL | yes | 153 | 3 | `—` | [update/update-checkout/tty-color-120.txt](update/update-checkout/tty-color-120.txt) |
-| update | update-checkout | no-color | signal SIGKILL | yes | 153 | 3 | `—` | [update/update-checkout/no-color.txt](update/update-checkout/no-color.txt) |
-| update | update-checkout | term-dumb | signal SIGKILL | no | 153 | 3 | `—` | [update/update-checkout/term-dumb.txt](update/update-checkout/term-dumb.txt) |
-| update | update-checkout | ascii-locale | signal SIGKILL | yes | 153 | 3 | `—` | [update/update-checkout/ascii-locale.txt](update/update-checkout/ascii-locale.txt) |
-| update | update-checkout | pipe | 0 | no | 190 | 16 | `—` | [update/update-checkout/pipe.txt](update/update-checkout/pipe.txt) |
-| update | update-checkout | ci | 0 | no | 190 | 16 | `—` | [update/update-checkout/ci.txt](update/update-checkout/ci.txt) |
+| update | update-checkout | tty-color-80 | 0 | yes | 190 | 11 | `—` | [update/update-checkout/tty-color-80.txt](update/update-checkout/tty-color-80.txt) |
+| update | update-checkout | tty-color-120 | 0 | yes | 190 | 11 | `—` | [update/update-checkout/tty-color-120.txt](update/update-checkout/tty-color-120.txt) |
+| update | update-checkout | no-color | 0 | yes | 190 | 11 | `—` | [update/update-checkout/no-color.txt](update/update-checkout/no-color.txt) |
+| update | update-checkout | term-dumb | 0 | no | 190 | 11 | `—` | [update/update-checkout/term-dumb.txt](update/update-checkout/term-dumb.txt) |
+| update | update-checkout | ascii-locale | 0 | yes | 190 | 11 | `—` | [update/update-checkout/ascii-locale.txt](update/update-checkout/ascii-locale.txt) |
+| update | update-checkout | pipe | 0 | no | 190 | 14 | `—` | [update/update-checkout/pipe.txt](update/update-checkout/pipe.txt) |
+| update | update-checkout | ci | 0 | no | 190 | 14 | `—` | [update/update-checkout/ci.txt](update/update-checkout/ci.txt) |
 | update | update-checkout-dirty | tty-color-80 | 2 | no | 103 | 1 | `—` | [update/update-checkout-dirty/tty-color-80.txt](update/update-checkout-dirty/tty-color-80.txt) |
 | update | update-checkout-dirty | tty-color-120 | 2 | no | 103 | 1 | `—` | [update/update-checkout-dirty/tty-color-120.txt](update/update-checkout-dirty/tty-color-120.txt) |
 | update | update-checkout-dirty | no-color | 2 | no | 103 | 1 | `—` | [update/update-checkout-dirty/no-color.txt](update/update-checkout-dirty/no-color.txt) |
@@ -558,13 +560,13 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | update | update-bad-version | ascii-locale | 2 | no | 68 | 0 |  | [update/update-bad-version/ascii-locale.txt](update/update-bad-version/ascii-locale.txt) |
 | update | update-bad-version | pipe | 2 | no | 68 | 0 |  | [update/update-bad-version/pipe.txt](update/update-bad-version/pipe.txt) |
 | update | update-bad-version | ci | 2 | no | 68 | 0 |  | [update/update-bad-version/ci.txt](update/update-bad-version/ci.txt) |
-| update | update-release | tty-color-80 | signal SIGKILL | yes | 153 | 3 | `—→` | [update/update-release/tty-color-80.txt](update/update-release/tty-color-80.txt) |
-| update | update-release | tty-color-120 | signal SIGKILL | yes | 153 | 3 | `—→` | [update/update-release/tty-color-120.txt](update/update-release/tty-color-120.txt) |
-| update | update-release | no-color | signal SIGKILL | yes | 153 | 3 | `—→` | [update/update-release/no-color.txt](update/update-release/no-color.txt) |
-| update | update-release | term-dumb | signal SIGKILL | no | 153 | 3 | `—→` | [update/update-release/term-dumb.txt](update/update-release/term-dumb.txt) |
-| update | update-release | ascii-locale | signal SIGKILL | yes | 153 | 3 | `—→` | [update/update-release/ascii-locale.txt](update/update-release/ascii-locale.txt) |
-| update | update-release | pipe | 0 | no | 190 | 16 | `—→` | [update/update-release/pipe.txt](update/update-release/pipe.txt) |
-| update | update-release | ci | 0 | no | 190 | 16 | `—→` | [update/update-release/ci.txt](update/update-release/ci.txt) |
+| update | update-release | tty-color-80 | 0 | yes | 190 | 11 | `—→` | [update/update-release/tty-color-80.txt](update/update-release/tty-color-80.txt) |
+| update | update-release | tty-color-120 | 0 | yes | 190 | 11 | `—→` | [update/update-release/tty-color-120.txt](update/update-release/tty-color-120.txt) |
+| update | update-release | no-color | 0 | yes | 190 | 11 | `—→` | [update/update-release/no-color.txt](update/update-release/no-color.txt) |
+| update | update-release | term-dumb | 0 | no | 190 | 11 | `—→` | [update/update-release/term-dumb.txt](update/update-release/term-dumb.txt) |
+| update | update-release | ascii-locale | 0 | yes | 190 | 11 | `—→` | [update/update-release/ascii-locale.txt](update/update-release/ascii-locale.txt) |
+| update | update-release | pipe | 0 | no | 190 | 14 | `—→` | [update/update-release/pipe.txt](update/update-release/pipe.txt) |
+| update | update-release | ci | 0 | no | 190 | 14 | `—→` | [update/update-release/ci.txt](update/update-release/ci.txt) |
 | update | update-release-current | tty-color-80 | 0 | no | 50 | 0 |  | [update/update-release-current/tty-color-80.txt](update/update-release-current/tty-color-80.txt) |
 | update | update-release-current | tty-color-120 | 0 | no | 50 | 0 |  | [update/update-release-current/tty-color-120.txt](update/update-release-current/tty-color-120.txt) |
 | update | update-release-current | no-color | 0 | no | 50 | 0 |  | [update/update-release-current/no-color.txt](update/update-release-current/no-color.txt) |

@@ -1,0 +1,3 @@
+zcode-proxy: the dashboard needs an interactive terminal.
+  next: zcode-kit proxy status    (one-shot, line-based)
+        zcode-kit proxy logs 50  (last log lines)

@@ -1,0 +1,24 @@
+[7m * running :8457 - ok - rss 534 MB - quota 4155 - 1/3 acc - zai/start-plan      [0m
+[2m-[0m [2m12:42:02[0m r194 OAI glm-5.3-flash 200 stream 606ms 982tok
+[2m-[0m [2m12:42:15[0m r195 ANT glm-5.3      200 stream 615ms 985tok
+[2m-[0m [2m12:42:28[0m r196 OAI glm-5.3-flash 200 stream 624ms 988tok
+[2m-[0m [2m12:42:41[0m r197 ANT glm-5.3      200 stream 633ms 991tok
+[2m-[0m [2m12:42:54[0m r198 OAI glm-5.3-flash 200 stream 642ms 994tok
+[2m-[0m [2m12:43:07[0m r199 ANT glm-5.3      200 stream 651ms 997tok
+[2m-[0m [2m12:43:20[0m r200 OAI glm-5.3-flash 200 stream 300ms 1000tok
+[2m-[0m [2m12:43:33[0m r201 ANT glm-5.3      200 stream 309ms 1003tok
+[2m-[0m [2m12:43:46[0m r202 OAI glm-5.3-flash 200 stream 318ms 1006tok
+[2m-[0m [2m12:43:59[0m r203 ANT glm-5.3      200 stream 327ms 1009tok
+[33mW[0m [2m12:44:12[0m r204 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s
+[2m-[0m [2m12:44:25[0m r205 ANT glm-5.3      200 stream 345ms 1015tok
+[2m-[0m [2m12:44:38[0m r206 OAI glm-5.3-flash 200 stream 354ms 1018tok
+[2m-[0m [2m12:44:51[0m r207 ANT glm-5.3      200 stream 363ms 1021tok
+[2m-[0m [2m12:45:04[0m r208 OAI glm-5.3-flash 200 stream 372ms 1024tok
+[2m-[0m [2m12:45:17[0m r209 ANT glm-5.3      200 stream 381ms 1027tok
+[2m-[0m [2m12:45:30[0m r210 OAI glm-5.3-flash 200 stream 390ms 1030tok
+[2m-[0m [2m12:45:43[0m r211 ANT glm-5.3      200 stream 399ms 1033tok
+[2m-[0m [2m12:45:56[0m r212 OAI glm-5.3-flash 200 stream 408ms 1036tok
+[2m-[0m [2m12:46:09[0m r213 ANT glm-5.3      200 stream 417ms 1039tok
+[2m-[0m [2m12:46:22[0m r214 OAI glm-5.3-flash 200 stream 426ms 1042tok
+[2m--------------------------------------------------------------------------------[0m
+q quit  /filter  s start/stop  l login  g follow   214 lines, following

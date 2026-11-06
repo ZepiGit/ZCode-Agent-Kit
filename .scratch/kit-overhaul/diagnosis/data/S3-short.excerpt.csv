@@ -1,0 +1,258 @@
+t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd
+1000,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+1000,358444,358408,preflight,71292,75280,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+1000,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+1000,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+1000,358485,358444,proxy,61728,61728,24,16,4,0,.bin/bun run src/index.ts serve
+1000,358566,358445,fake-harness,50644,50644,7,23,,0,bin/node fixtures/fake-session.mjs
+1000,358567,358443,fake-harness,50844,50844,7,23,,0,bin/node fixtures/fake-session.mjs
+1000,358568,358453,fake-harness,50848,50848,7,23,,0,bin/node fixtures/fake-session.mjs
+1000,358588,358568,mcp-bridge,10960,10960,1,3,,0,bin/node dist/index.js --stdio --data-dir
+2003,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+2003,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+2003,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+2003,358485,971,proxy,61464,61664,24,17,5,0,.bin/bun run src/index.ts serve
+2003,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+2003,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+2003,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+2003,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+2003,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+2003,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+3008,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+3008,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+3008,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+3008,358485,971,proxy,61532,61664,24,17,5,0,.bin/bun run src/index.ts serve
+3008,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+3008,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+3008,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+3008,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+3008,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+3008,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+4016,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+4016,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+4016,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+4016,358485,971,proxy,61568,61664,24,17,5,0,.bin/bun run src/index.ts serve
+4016,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+4016,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+4016,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+4016,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+4016,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+4016,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+5016,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+5016,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+5016,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+5016,358485,971,proxy,61640,61664,24,17,5,0,.bin/bun run src/index.ts serve
+5016,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+5016,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+5016,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+5016,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+5016,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+5016,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+6016,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+6016,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+6016,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+6016,358485,971,proxy,61656,61664,24,17,5,0,.bin/bun run src/index.ts serve
+6016,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+6016,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+6016,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+6016,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+6016,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+6016,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+7017,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+7017,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+7017,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+7017,358485,971,proxy,61640,61664,24,17,5,0,.bin/bun run src/index.ts serve
+7017,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+7017,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+7017,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+7017,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+7017,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+7017,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+8017,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+8017,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+8017,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+8017,358485,971,proxy,61648,61664,24,17,5,0,.bin/bun run src/index.ts serve
+8017,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+8017,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+8017,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+8017,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+8017,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+8017,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+9017,358443,358408,launcher,75552,79244,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+9017,358445,358408,launcher,75560,79604,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+9017,358453,358408,launcher,75480,79128,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+9017,358485,971,proxy,61644,61664,24,17,5,0,.bin/bun run src/index.ts serve
+9017,358566,358445,fake-harness,50964,50964,7,23,,0,bin/node fixtures/fake-session.mjs
+9017,358567,358443,fake-harness,50956,50956,7,23,,0,bin/node fixtures/fake-session.mjs
+9017,358568,358453,fake-harness,50944,50944,7,23,,0,bin/node fixtures/fake-session.mjs
+9017,358588,358568,mcp-bridge,87892,87892,11,21,,0,bin/node dist/index.js --stdio --data-dir
+9017,358589,358566,mcp-bridge,87400,87400,11,21,,0,bin/node dist/index.js --stdio --data-dir
+9017,358590,358567,mcp-bridge,87896,87896,11,21,,0,bin/node dist/index.js --stdio --data-dir
+10017,358485,971,proxy,61632,61664,24,11,5,0,.bin/bun run src/index.ts serve
+11018,358485,971,proxy,61240,61664,22,11,5,0,.bin/bun run src/index.ts serve
+12019,359143,358408,launcher,64848,64848,7,22,,0,bin/node cli/zcode-kit.mjs run opencode
+12019,359144,358408,preflight,63684,63684,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+12019,359145,358408,launcher,64460,64460,7,21,,0,bin/node cli/zcode-kit.mjs run opencode
+12019,359151,358408,preflight,63644,63644,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+12019,359157,358408,launcher,64456,64456,7,21,,0,bin/node cli/zcode-kit.mjs run opencode
+12019,359159,358408,preflight,63640,63640,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+12019,359169,358408,launcher,64480,64480,7,21,,0,bin/node cli/zcode-kit.mjs run opencode
+12019,359175,358408,preflight,63632,63632,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+12019,359176,358408,launcher,64396,64396,7,21,,0,bin/node cli/zcode-kit.mjs run opencode
+12019,359183,358408,preflight,63664,63664,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+12019,359219,359143,proxy,56428,57672,21,10,4,0,.bin/bun run src/index.ts serve
+13019,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+13019,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+13019,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+13019,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+13019,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+13019,359219,359143,proxy,59716,59716,21,21,5,0,.bin/bun run src/index.ts serve
+13019,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+13019,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+13019,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+13019,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+13019,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+13019,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+13019,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+13019,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+13019,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+13019,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+14019,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+14019,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+14019,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+14019,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+14019,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+14019,359219,359143,proxy,59896,59896,21,21,5,0,.bin/bun run src/index.ts serve
+14019,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+14019,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+14019,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+14019,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+14019,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+14019,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+14019,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+14019,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+14019,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+14019,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+15026,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+15026,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+15026,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+15026,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+15026,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+15026,359219,359143,proxy,59920,59920,21,21,5,0,.bin/bun run src/index.ts serve
+15026,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+15026,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+15026,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+15026,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+15026,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+15026,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+15026,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+15026,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+15026,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+15026,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+16027,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+16027,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+16027,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+16027,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+16027,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+16027,359219,359143,proxy,59960,59960,21,21,5,0,.bin/bun run src/index.ts serve
+16027,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+16027,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+16027,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+16027,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+16027,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+16027,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+16027,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+16027,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+16027,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+16027,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+17027,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+17027,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+17027,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+17027,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+17027,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+17027,359219,359143,proxy,60008,60008,21,21,5,0,.bin/bun run src/index.ts serve
+17027,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+17027,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+17027,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+17027,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+17027,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+17027,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+17027,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+17027,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+17027,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+17027,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+18028,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+18028,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+18028,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+18028,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+18028,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+18028,359219,359143,proxy,60020,60020,21,21,5,0,.bin/bun run src/index.ts serve
+18028,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+18028,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+18028,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+18028,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+18028,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+18028,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+18028,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+18028,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+18028,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+18028,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+19029,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+19029,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+19029,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+19029,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+19029,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+19029,359219,359143,proxy,59948,59948,21,21,5,0,.bin/bun run src/index.ts serve
+19029,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+19029,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+19029,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+19029,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+19029,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+19029,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+19029,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+19029,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+19029,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+19029,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+20030,359143,358408,launcher,73656,79564,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+20030,359145,358408,launcher,75752,79404,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+20030,359157,358408,launcher,72796,79388,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+20030,359169,358408,launcher,75124,78840,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+20030,359176,358408,launcher,75584,79312,7,28,,0,bin/node cli/zcode-kit.mjs run opencode
+20030,359219,359143,proxy,59932,59932,21,21,5,0,.bin/bun run src/index.ts serve
+20030,359270,359143,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+20030,359277,359145,fake-harness,50992,50992,7,23,,0,bin/node fixtures/fake-session.mjs
+20030,359278,359270,mcp-bridge,87840,87840,11,21,,0,bin/node dist/index.js --stdio --data-dir
+20030,359290,359169,fake-harness,50912,50912,7,23,,0,bin/node fixtures/fake-session.mjs
+20030,359292,359277,mcp-bridge,87916,87916,11,21,,0,bin/node dist/index.js --stdio --data-dir
+20030,359303,359157,fake-harness,50988,50988,7,23,,0,bin/node fixtures/fake-session.mjs
+20030,359310,359176,fake-harness,50924,50924,7,23,,0,bin/node fixtures/fake-session.mjs
+20030,359312,359290,mcp-bridge,87412,87412,11,21,,0,bin/node dist/index.js --stdio --data-dir
+20030,359326,359310,mcp-bridge,88252,88252,11,21,,0,bin/node dist/index.js --stdio --data-dir
+20030,359327,359303,mcp-bridge,88164,88164,11,21,,0,bin/node dist/index.js --stdio --data-dir
+21032,359219,971,proxy,59936,59936,21,11,5,0,.bin/bun run src/index.ts serve
+22032,359219,971,proxy,59160,59712,20,11,5,0,.bin/bun run src/index.ts serve
+23032,359764,358408,preflight,54784,54784,7,20,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359765,358408,preflight,55712,55712,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359766,358408,preflight,56144,56144,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359772,358408,preflight,52128,52128,7,20,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359778,358408,preflight,55084,55084,7,20,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359779,358408,preflight,49736,49736,7,20,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359790,358408,preflight,29380,29380,6,20,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359796,358408,preflight,52356,52356,7,20,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359803,358408,preflight,33388,33388,6,20,,0,bin/node cli/heal.mjs --diagnostic-code
+23032,359815,358408,preflight,32820,32820,6,20,,0,bin/node cli/heal.mjs --diagnostic-code
+24032,359854,971,proxy,59560,59560,22,10,5,0,.bin/bun run src/index.ts serve
+25033,359854,971,proxy,59868,59868,22,11,5,0,.bin/bun run src/index.ts serve
+26043,359892,358408,preflight,62688,62688,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359893,358408,preflight,62796,62796,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359899,358408,preflight,63900,63900,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359905,358408,preflight,61536,61536,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359911,358408,preflight,62692,62692,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359912,358408,preflight,59048,59048,8,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359923,358408,preflight,58796,58796,8,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359929,358408,preflight,62000,62000,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359936,358408,preflight,62680,62680,7,21,,0,bin/node cli/heal.mjs --diagnostic-code
+26043,359965,359891,proxy,26904,26904,7,7,,0,.bin/bun run src/index.ts serve
+27043,359965,971,proxy,58824,58824,21,10,5,0,.bin/bun run src/index.ts serve
+28043,359965,971,proxy,58864,58864,21,11,5,0,.bin/bun run src/index.ts serve
+29043,360039,358408,manager,34236,34236,6,20,,0,bin/node proxy/zcode-proxy-manager.mjs stop

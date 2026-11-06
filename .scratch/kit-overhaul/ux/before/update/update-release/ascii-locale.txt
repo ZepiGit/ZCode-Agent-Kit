@@ -1,3 +1,6 @@
+n
+n
+n
 update: downloading v9.9.9 ...
 update: verified v9.9.9 (sha256) — updating v0.2.42 → v9.9.9
 not running
@@ -10,10 +13,41 @@ update: refreshing consented integrations (stored answers are respected; new har
   MANUAL STEP REQUIRED (once): log in with your ZCode account:
     cd <KIT>/zcode-proxy-src
     ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
-detected harnesses: omp, opencode — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
+detected harnesses: omp — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
 == omp: OMP / Oh My Pi (previously configured) ==
   extension already current
   models.yml already up to date
   config.yml already up to date
   [OK]   OMP / Oh My Pi
-Configure ZCode as a provider with its supported models in OpenCode? [y/n] 
+== mcp: zcode-harness bridge ==
+  omp: "zcode-harness" already registered
+  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.
+
+  Keep authorized logins as separate encrypted accounts.
+  New logins are saved automatically while the feature is enabled.
+Do you want to activate the Account Rotator feature? [y/n] n
+n
+n
+  [OK] Account Rotator disabled. Saved accounts are kept.
+
+  Configuration saved.
+  Assistants: 1 configured, 0 skipped, 0 failed.
+  [SKIP] Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+
+  Connection details (local ZCode proxy, from configuration; proxy not verified running)
+    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
+    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
+    API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
+    Model IDs:                     glm-5.3, glm-5.3-flash
+    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+update: starting the proxy on the updated code...
+starting zcode-proxy ...
+started (pid <PID>) — healthy on http://127.0.0.1:18458
+
+  Connection details (local ZCode proxy, running and verified)
+    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
+    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
+    API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
+    Model IDs:                     glm-5.3, glm-5.3-flash
+    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required.
+transaction <TX> recorded — undo with: zcode-kit rollback <TX>

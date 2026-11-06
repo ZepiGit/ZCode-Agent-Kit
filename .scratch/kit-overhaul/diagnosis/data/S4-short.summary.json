@@ -1,0 +1,360 @@
+{
+ "id": "S4-short-2026-11-06T0319-07cd6f",
+ "scenario": "S4",
+ "profile": "short",
+ "variant": null,
+ "durationS": 203,
+ "red": true,
+ "checks": [
+  {
+   "name": "count:proxy",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  },
+  {
+   "name": "proxy-left-after-stop",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "cycles"
+  },
+  {
+   "name": "failed-lifecycle-steps",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "steps"
+  },
+  {
+   "name": "stale-lock-after-ctrl-c",
+   "red": true,
+   "value": 5,
+   "budget": 0,
+   "unit": "of 8"
+  },
+  {
+   "name": "unstoppable-proxy-after-ctrl-c",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "of 8"
+  },
+  {
+   "name": "respawn-recovers-despite-stale-lock",
+   "red": true,
+   "value": 0,
+   "budget": 1,
+   "unit": "proxy up"
+  },
+  {
+   "name": "respawns-in-window",
+   "red": false,
+   "value": 3,
+   "budget": 3,
+   "unit": "restarts/15min"
+  },
+  {
+   "name": "log-dir-files",
+   "red": false,
+   "value": 1,
+   "budget": 8,
+   "unit": "files"
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 193.5,
+   "peakProcMB": 75.4,
+   "peakHwmMB": 75.4,
+   "maxCount": 3,
+   "maxFds": 56,
+   "maxThreads": 38,
+   "distinctPids": 181,
+   "peakHeapMB": 5
+  },
+  "kit": {
+   "peakMB": 133.8,
+   "peakProcMB": 75.4,
+   "peakHwmMB": 75.4,
+   "maxCount": 2,
+   "maxFds": 34,
+   "maxThreads": 31,
+   "distinctPids": 180,
+   "peakHeapMB": 5
+  },
+  "mock-upstream": {
+   "peakMB": 59.7,
+   "peakProcMB": 59.7,
+   "peakHwmMB": 60.3,
+   "maxCount": 1,
+   "maxFds": 22,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "manager": {
+   "peakMB": 75.4,
+   "peakProcMB": 75.4,
+   "peakHwmMB": 75.4,
+   "maxCount": 1,
+   "maxFds": 23,
+   "maxThreads": 8,
+   "distinctPids": 107,
+   "peakHeapMB": null
+  },
+  "proxy": {
+   "peakMB": 59.3,
+   "peakProcMB": 59.3,
+   "peakHwmMB": 59.3,
+   "maxCount": 1,
+   "maxFds": 13,
+   "maxThreads": 24,
+   "distinctPids": 73,
+   "peakHeapMB": 5
+  }
+ },
+ "budgets": {
+  "counts": {
+   "proxy": 1
+  },
+  "orphans": 0,
+  "extra": [
+   {
+    "name": "proxy-left-after-stop",
+    "red": false,
+    "value": 0,
+    "budget": 0,
+    "unit": "cycles"
+   },
+   {
+    "name": "failed-lifecycle-steps",
+    "red": false,
+    "value": 0,
+    "budget": 0,
+    "unit": "steps"
+   },
+   {
+    "name": "stale-lock-after-ctrl-c",
+    "red": true,
+    "value": 5,
+    "budget": 0,
+    "unit": "of 8"
+   },
+   {
+    "name": "unstoppable-proxy-after-ctrl-c",
+    "red": false,
+    "value": 0,
+    "budget": 0,
+    "unit": "of 8"
+   },
+   {
+    "name": "respawn-recovers-despite-stale-lock",
+    "red": true,
+    "value": 0,
+    "budget": 1,
+    "unit": "proxy up"
+   },
+   {
+    "name": "respawns-in-window",
+    "red": false,
+    "value": 3,
+    "budget": 3,
+    "unit": "restarts/15min"
+   },
+   {
+    "name": "log-dir-files",
+    "red": false,
+    "value": 1,
+    "budget": 8,
+    "unit": "files"
+   }
+  ]
+ },
+ "orphans": [],
+ "notes": {
+  "isolation.stateDir": "<diag-data>/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/state",
+  "isolation.home": "<diag-data>/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/home",
+  "isolation.port": 18467,
+  "cycles.summary": {
+   "cycles": 50,
+   "withLeftoverProxy": 0,
+   "withListenerAfterStop": 0,
+   "withLockLeft": 0,
+   "failedSteps": [],
+   "logFilesFirst": 1,
+   "logFilesLast": 1,
+   "logDir": [
+    "proxy.log"
+   ],
+   "proxyLogBytesLast": 28600
+  },
+  "respawnStorm": [
+   {
+    "k": 0,
+    "pid": 433609,
+    "code": 0,
+    "newPid": 433609,
+    "proxies": 1,
+    "last": "respawn: start finished with exit code 0"
+   },
+   {
+    "k": 1,
+    "pid": 433609,
+    "code": 0,
+    "newPid": 433609,
+    "proxies": 1,
+    "last": "respawn: start finished with exit code 0"
+   },
+   {
+    "k": 2,
+    "pid": 433609,
+    "code": 0,
+    "newPid": 433609,
+    "proxies": 1,
+    "last": "respawn: start finished with exit code 0"
+   },
+   {
+    "k": 3,
+    "pid": 433609,
+    "code": 4,
+    "newPid": 433609,
+    "proxies": 1,
+    "last": "respawn refused: 3 restarts in 15 min; inspect logs/proxy.log"
+   },
+   {
+    "k": 4,
+    "pid": 433609,
+    "code": 4,
+    "newPid": 433609,
+    "proxies": 1,
+    "last": "respawn refused: 3 restarts in 15 min; inspect logs/proxy.log"
+   },
+   {
+    "k": 5,
+    "pid": 433609,
+    "code": 4,
+    "newPid": 433609,
+    "proxies": 1,
+    "last": "respawn refused: 3 restarts in 15 min; inspect logs/proxy.log"
+   }
+  ],
+  "respawnHistory": 3,
+  "sigintDuringStart": [
+   {
+    "delayMs": 0,
+    "sent": true,
+    "staleLock": true,
+    "childSurvived": false,
+    "pidRecordStartedMs": "no record",
+    "nextStart": 1,
+    "nextStop": 4,
+    "nextStopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/state/log",
+    "proxiesAfter": 0
+   },
+   {
+    "delayMs": 150,
+    "sent": true,
+    "staleLock": true,
+    "childSurvived": true,
+    "pidRecordStartedMs": 1793935324990,
+    "nextStart": 0,
+    "nextStop": 4,
+    "nextStopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/state/log",
+    "proxiesAfter": 1,
+    "stopAfterLockRemoved": 0
+   },
+   {
+    "delayMs": 300,
+    "sent": true,
+    "staleLock": true,
+    "childSurvived": true,
+    "pidRecordStartedMs": 1793935326390,
+    "nextStart": 0,
+    "nextStop": 4,
+    "nextStopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/state/log",
+    "proxiesAfter": 1,
+    "stopAfterLockRemoved": 0
+   },
+   {
+    "delayMs": 450,
+    "sent": true,
+    "staleLock": true,
+    "childSurvived": true,
+    "pidRecordStartedMs": 1793935327940,
+    "nextStart": 0,
+    "nextStop": 4,
+    "nextStopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/state/log",
+    "proxiesAfter": 1,
+    "stopAfterLockRemoved": 0
+   },
+   {
+    "delayMs": 600,
+    "sent": true,
+    "staleLock": true,
+    "childSurvived": true,
+    "pidRecordStartedMs": 1793935329650,
+    "nextStart": 0,
+    "nextStop": 4,
+    "nextStopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/state/log",
+    "proxiesAfter": 1,
+    "stopAfterLockRemoved": 0
+   },
+   {
+    "delayMs": 750,
+    "sent": true,
+    "staleLock": false,
+    "childSurvived": true,
+    "pidRecordStartedMs": 1793935331510,
+    "nextStart": 0,
+    "nextStop": 0,
+    "nextStopTail": "stopped (pid 434291)",
+    "proxiesAfter": 0
+   },
+   {
+    "delayMs": 900,
+    "sent": true,
+    "staleLock": false,
+    "childSurvived": true,
+    "pidRecordStartedMs": 1793935333430,
+    "nextStart": 0,
+    "nextStop": 0,
+    "nextStopTail": "stopped (pid 434338)",
+    "proxiesAfter": 0
+   },
+   {
+    "delayMs": 1050,
+    "sent": true,
+    "staleLock": false,
+    "childSurvived": true,
+    "pidRecordStartedMs": 1793935335500,
+    "nextStart": 0,
+    "nextStop": 0,
+    "nextStopTail": "stopped (pid 434402)",
+    "proxiesAfter": 0
+   }
+  ],
+  "respawnWithStaleLock": {
+   "respawnCode": 1,
+   "respawnTail": "manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S4-short-2026-11-06T0319-07cd6f/tmp/kit-6gasrK/state/logs/manager.lock (holder pid 2147483646 is not al",
+   "proxiesAfter": 0,
+   "healthy": false
+  },
+  "isolation.externalConnectionsDuringRun": [],
+  "stop.code": 0,
+  "stop.output": [
+   "not running"
+  ]
+ },
+ "samples": 203,
+ "csv": "<diag-data>/S4-short-2026-11-06T0319-07cd6f/samples.csv"
+}

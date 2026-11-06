@@ -1,0 +1,23 @@
++- ZCode proxy ----------------------------------------------------- logged in +
+| * running  :8457  -  health ok  -  up 1 h 02 min  -  zai / start-plan        |
+| memory  proxy 182 MB  captcha 311 MB  fetch 41 MB   quota  4120/6000  35/200 |
+| accounts  *work usable  personal exhausted  backup paused                    |
++------------------------------------------------------------------------------+
++- Logs ------------------------------------------------------------ following +
+| filter: 429   12 of 214 lines                                                |
+| 12:03:41 warn  r17 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s   |
+| 12:07:22 warn  r34 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s   |
+| 12:11:03 warn  r51 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s   |
+| 12:14:44 warn  r68 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s   |
+| 12:18:25 warn  r85 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s   |
+| 12:22:06 warn  r102 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s  |
+| 12:25:47 warn  r119 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s  |
+| 12:29:28 warn  r136 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s  |
+| 12:33:09 warn  r153 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s  |
+| 12:36:50 warn  r170 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s  |
+| 12:40:31 warn  r187 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s  |
+| 12:44:12 warn  r204 ANT glm-5.3 429 batch 233ms rate limited, retry in 30 s  |
+|                                                                              |
+|                                                                              |
++------------------------------------------------------------------------------+
+ [q] quit  [s] start/stop  [/] filter  [l] login  [g] follow  [c] clear  ^v s...

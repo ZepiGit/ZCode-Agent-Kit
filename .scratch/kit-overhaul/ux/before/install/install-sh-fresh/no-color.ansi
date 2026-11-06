@@ -64,7 +64,7 @@ Do you want to activate the Account Rotator feature? [y/n] n
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
     Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
-    API key (Bearer / x-api-key):  sTePf7rNAP05s0rVcug3uB_6SGZu-Wdb7rhcly03feY
+    API key (Bearer / x-api-key):  WlNm7Mmaxu5q_yZLbJP1PblVzkQQ8oO6A4DbKeyC8eY
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
 

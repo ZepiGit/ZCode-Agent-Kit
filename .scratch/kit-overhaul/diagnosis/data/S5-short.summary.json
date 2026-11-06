@@ -1,0 +1,154 @@
+{
+ "id": "S5-short-2026-11-06T0209-a4774f",
+ "scenario": "S5",
+ "profile": "short",
+ "variant": null,
+ "durationS": 715,
+ "red": false,
+ "checks": [
+  {
+   "name": "growth:mcp-bridge",
+   "red": false,
+   "value": 44.86,
+   "budget": 5,
+   "unit": "%/1k",
+   "trend": false,
+   "detail": {
+    "samples": 703,
+    "warmupSamples": 175,
+    "meanMB": 92.7,
+    "firstPostMB": 85,
+    "lastMB": 96.8,
+    "slopeMBPer1k": 41.58,
+    "growthPctPer1k": 44.86,
+    "slopeMBPerMin": 1.42,
+    "windowMediansMB": [
+     85.8,
+     88.9,
+     93.2,
+     94.1,
+     94.4,
+     96.8
+    ],
+    "risingWindows": 2,
+    "heapSlopeMBPer1k": null,
+    "axis": "progress"
+   }
+  },
+  {
+   "name": "procPeak:mcp-bridge",
+   "red": false,
+   "value": 99.3,
+   "budget": 150,
+   "unit": "MB"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  },
+  {
+   "name": "bridge:reboot-cost-of-history",
+   "red": false,
+   "value": 3,
+   "budget": 20,
+   "unit": "MB"
+  },
+  {
+   "name": "bridge:task-failures",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "tasks"
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 154.3,
+   "peakProcMB": 99.3,
+   "peakHwmMB": 99.3,
+   "maxCount": 2,
+   "maxFds": 45,
+   "maxThreads": 18,
+   "distinctPids": 3,
+   "peakHeapMB": null
+  },
+  "kit": {
+   "peakMB": 99.3,
+   "peakProcMB": 99.3,
+   "peakHwmMB": 99.3,
+   "maxCount": 1,
+   "maxFds": 24,
+   "maxThreads": 11,
+   "distinctPids": 2,
+   "peakHeapMB": null
+  },
+  "mcp-bridge": {
+   "peakMB": 99.3,
+   "peakProcMB": 99.3,
+   "peakHwmMB": 99.3,
+   "maxCount": 1,
+   "maxFds": 24,
+   "maxThreads": 11,
+   "distinctPids": 2,
+   "peakHeapMB": null
+  },
+  "fake-harness": {
+   "peakMB": 55.8,
+   "peakProcMB": 55.8,
+   "peakHwmMB": 55.8,
+   "maxCount": 1,
+   "maxFds": 21,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  }
+ },
+ "budgets": {
+  "growth": {
+   "role": "mcp-bridge",
+   "axis": "progress",
+   "maxPctPer1k": 5,
+   "risingWindows": 3,
+   "fromT": 3341,
+   "untilT": 706898
+  },
+  "procPeaks": {
+   "mcp-bridge": 150
+  },
+  "orphans": 0,
+  "extra": [
+   {
+    "name": "bridge:reboot-cost-of-history",
+    "red": false,
+    "value": 3,
+    "budget": 20,
+    "unit": "MB"
+   },
+   {
+    "name": "bridge:task-failures",
+    "red": false,
+    "value": 0,
+    "budget": 0,
+    "unit": "tasks"
+   }
+  ]
+ },
+ "orphans": [],
+ "notes": {
+  "bridge": {
+   "tasks": 400,
+   "failures": 0,
+   "emptyRssMB": 86,
+   "afterTasksRssMB": 97,
+   "rebootWithHistoryRssMB": 89,
+   "dataDirMB": 1.9,
+   "dataDirFiles": 1200
+  }
+ },
+ "samples": 714,
+ "csv": "<diag-data>/S5-short-2026-11-06T0209-a4774f/samples.csv"
+}
