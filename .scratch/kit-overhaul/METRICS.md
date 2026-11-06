@@ -19,8 +19,8 @@ Environment: Linux x64, 8 cores, 32 GB RAM, no swap. Node v26.7.0 (local; CI use
 Skipped tests: all 11 kit skips are Windows-only (install.ps1, npm .cmd shims, Windows path equivalence) or the opt-in real-OMP golden path; the mcp skip is a live test. They run on the windows-latest CI leg.
 
 Pre-existing findings (become tickets, not silent fixes):
-- `tests/update.test.mjs` and `tests/upstream-config.test.mjs` exist but are not wired into `npm run test`, so CI never runs them.
-- CI runs Node 20 (EOL) while the local baseline ran Node 26: a Node-version coverage gap.
+- `tests/update.test.mjs` and `tests/upstream-config.test.mjs` exist but are not wired into `npm run test`, so CI never runs them. **Resolved (ticket 04):** both run in `npm run test` (278 → 298 tests: +16 wired, +4 wiring-guard tests in `tests/test-wiring.test.mjs`), locally on Node 24.22.2 and 26.7.0. CI run link: pending (the branch has not been pushed yet; add the first green 4-leg `test-kit` run here).
+- CI runs Node 20 (EOL) while the local baseline ran Node 26: a Node-version coverage gap. **Resolved (ticket 04):** `test-kit` runs {ubuntu-latest, windows-latest} × {Node 24, 26}. CI run link: pending (same run as above).
 
 ## Memory baseline
 
