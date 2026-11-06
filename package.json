@@ -19,7 +19,8 @@
     "test:all": "npm run test && npm run test:proxy && npm run test:mcp",
     "setup": "node cli/zcode-kit.mjs setup",
     "kit": "node cli/zcode-kit.mjs",
-    "zcode-kit": "node cli/zcode-kit.mjs"
+    "zcode-kit": "node cli/zcode-kit.mjs",
+    "prototype:ux": "node cli/ux-prototype/terminal-ux.prototype.mjs"
   },
   "repository": {
     "type": "git",
