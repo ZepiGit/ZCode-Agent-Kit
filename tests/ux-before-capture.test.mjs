@@ -3,7 +3,9 @@
 // proven on Linux with injected Windows paths. Failures fixed here come from
 // CI run 42236936458 (ux-before job): git 2.56's transfer-progress text on
 // ubuntu, and on windows a fixture-proxy path whose backslashes were read as
-// escapes, GNU tar reading `C:` as a remote host, and a silent `git clone`.
+// escapes, GNU tar reading `C:` as a remote host, and a silent `git clone`;
+// then (staging/06) git.exe crashing with 0xC0000005 under a Git Bash step's
+// environment in the baseline step only.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -11,7 +13,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cloneArgs, describeFailure, fakeProxySource, importBase, pathForms, swapPath, tarBinary } from "./ux-before/capture/host.mjs";
+import { cloneArgs, describeFailure, fakeProxySource, fixtureBaseEnv, importBase, pathForms, swapPath, tarBinary, windowsGitDir } from "./ux-before/capture/host.mjs";
 import { VOLATILE, compareCaptures, normaliseVolatile } from "./ux-before/compare.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -151,4 +153,56 @@ test("compare: a failed baseline capture fails loudly; volatile values never hid
   captureSet(join(dir, "changed"), { "g/a/pipe.txt": "FAIL used 1d ago\n", "g/b/pipe.txt": "x\n" }, [m("a", { exit: 1 }), m("b"), m("c", { error: "boom" })]);
   const diffs = compareCaptures(join(dir, "base"), join(dir, "changed"), { only: /^g\/(a|b)$/ });
   assert.deepEqual(diffs, ['differs: g/a/pipe.txt line 1\n  before: "OK used <AGE> ago"\n  now:    "FAIL used <AGE> ago"', "exit code: g/a/pipe was 0, now 1"]);
+});
+
+// ------------------------------------------- git under Git Bash (staging/06)
+const GIT = "C:\\Program Files\\Git";
+const gitTree = new Set([`${GIT}\\cmd\\git.exe`, `${GIT}\\bin\\git.exe`, `${GIT}\\mingw64\\bin\\git.exe`, "D:\\tools\\portable-git\\git.exe"]);
+const exists = (p) => gitTree.has(p);
+
+test("windows git: any git.exe of a Git for Windows tree maps to its cmd launcher", () => {
+  // A `shell: bash` step: mingw64\bin and usr\bin come first.
+  assert.equal(windowsGitDir(`${GIT}\\mingw64\\bin;${GIT}\\usr\\bin;C:\\Windows\\System32`, { exists }), `${GIT}\\cmd`);
+  // pwsh / cmd: Git\bin or Git\cmd, with or without a trailing backslash.
+  assert.equal(windowsGitDir(`C:\\Windows;${GIT}\\bin;${GIT}\\cmd`, { exists }), `${GIT}\\cmd`);
+  assert.equal(windowsGitDir(`${GIT}\\cmd\\`, { exists }), `${GIT}\\cmd`);
+  // A git.exe outside a Git for Windows tree is used as found; no git at all gives null.
+  assert.equal(windowsGitDir("D:\\tools\\portable-git;" + `${GIT}\\cmd`, { exists }), "D:\\tools\\portable-git");
+  assert.equal(windowsGitDir("C:\\Windows\\System32", { exists }), null);
+  assert.equal(windowsGitDir(`${GIT}\\mingw64\\bin`, { exists: (p) => p === `${GIT}\\mingw64\\bin\\git.exe` }), `${GIT}\\mingw64\\bin`, "no launcher: keep the binary");
+});
+
+test("windows fixture env: Git Bash state and the fixture's own variables are dropped, the Windows runtime is kept", () => {
+  const host = {
+    Path: "x", TEMP: "t", tmp: "t2", MSYSTEM: "MINGW64", MSYSTEM_PREFIX: "/mingw64", MINGW_PREFIX: "/mingw64", MSYS: "winsymlinks", EXEPATH: "C:\\Program Files\\Git\\bin",
+    ORIGINAL_PATH: "p", SHLVL: "1", PWD: "/d/a", OLDPWD: "/", SHELL: "/usr/bin/bash", _: "/usr/bin/node", CHERE_INVOKING: "1",
+    SystemRoot: "C:\\Windows", WINDIR: "C:\\Windows", PATHEXT: ".COM;.EXE", ComSpec: "C:\\Windows\\system32\\cmd.exe",
+    HOMEDRIVE: "C:", HOMEPATH: "\\Users\\runneradmin", USERNAME: "runneradmin", NUMBER_OF_PROCESSORS: "4", PROCESSOR_ARCHITECTURE: "AMD64",
+    TERM: "xterm-256color", CI: "true", ZCODE_KIT_HOME: "z", NODE_OPTIONS: "--x",
+  };
+  assert.deepEqual(Object.keys(fixtureBaseEnv(host, { windows: true })).sort(),
+    ["ComSpec", "HOMEDRIVE", "HOMEPATH", "NUMBER_OF_PROCESSORS", "PATHEXT", "PROCESSOR_ARCHITECTURE", "SystemRoot", "USERNAME", "WINDIR"]);
+});
+
+test("POSIX fixture env: exactly the original Phase 1C filter", () => {
+  const host = { PATH: "/usr/bin", HOME: "/h", LANG: "C.UTF-8", MSYSTEM: "x", SHELL: "/bin/sh", TERM: "xterm", COLUMNS: "80", CI: "1", ZCODE_X: "1", https_proxy: "p", NO_COLOR: "1", CLICOLOR_FORCE: "1" };
+  assert.deepEqual(fixtureBaseEnv(host), { PATH: "/usr/bin", HOME: "/h", LANG: "C.UTF-8", MSYSTEM: "x", SHELL: "/bin/sh" });
+});
+
+test("CI: the Windows baseline is captured under the same shell as the equivalence step (pwsh)", () => {
+  const ci = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8").replace(/\r\n/g, "\n");
+  const job = ci.slice(ci.indexOf("\n  ux-before:\n"), ci.indexOf("\n  memory-budget:\n"));
+  const step = (name) => job.slice(job.indexOf(`- name: ${name}`)).split(/\n      - /)[0];
+  const baseline = step("Windows baseline from the base commit");
+  const equivalence = step("Before-equivalence (byte for byte)");
+  assert.match(baseline, /\n {8}shell: pwsh\n/);
+  assert.doesNotMatch(equivalence, /shell:/, "the equivalence step uses the runner default, pwsh on windows");
+  assert.match(baseline, /capture\.mjs --kit \$kit --variants pipe,ci --out \$out/);
+});
+
+test("capture.mjs builds the fixture env and the Windows git dir through host.mjs (wiring of the Windows-only branch)", () => {
+  const src = readFileSync(join(ROOT, "tests", "ux-before", "capture", "capture.mjs"), "utf8");
+  assert.match(src, /const env = fixtureBaseEnv\(process\.env, \{ windows: IS_WIN \}\);/);
+  assert.match(src, /windowsGitDir\(process\.env\.PATH \?\? process\.env\.Path, \{ exists: existsSync \}\)/);
+  assert.doesNotMatch(src, /for \(const \[k, v\] of Object\.entries\(process\.env\)\)/, "no second, unfiltered env copy");
 });

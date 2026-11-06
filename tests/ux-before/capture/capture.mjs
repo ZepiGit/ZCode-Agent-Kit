@@ -42,7 +42,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { cloneArgs, describeFailure, fakeProxySource as fakeProxySourceFor, importBase, swapPath, tarBinary } from "./host.mjs";
+import { cloneArgs, describeFailure, fakeProxySource as fakeProxySourceFor, fixtureBaseEnv, importBase, swapPath, tarBinary, windowsGitDir } from "./host.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -164,20 +164,13 @@ function fixtureBin(bin) {
   if (process.env.UX_GIT) symlinkSync(process.env.UX_GIT, join(bin, "git"));
 }
 
-/** Directory of the first `name` on the capture host's PATH (Windows tools: git, tar). */
-function hostDirOf(name) {
-  for (const dir of (process.env.PATH ?? process.env.Path ?? "").split(delimiter)) {
-    if (dir && existsSync(join(dir, name))) return dir;
-  }
-  return null;
-}
 /**
  * The fixture PATH on Windows: the fixture bin, Bun, Node, git and the
  * system directories, nothing else (no harness on the host may be detected).
  */
 function winPath(bin) {
   const sys = process.env.SystemRoot ?? "C:\\Windows";
-  const dirs = [bin, dirname(BUN), dirname(process.execPath), hostDirOf("git.exe"), join(sys, "System32"), sys];
+  const dirs = [bin, dirname(BUN), dirname(process.execPath), windowsGitDir(process.env.PATH ?? process.env.Path, { exists: existsSync }), join(sys, "System32"), sys];
   return [...new Set(dirs.filter(Boolean))].join(delimiter);
 }
 /** A fake `opencode` on PATH (only for `run opencode`: PATH presence also counts as detection). */
@@ -201,13 +194,8 @@ function makeFixture({ state = "configured", detect = DETECT_ALL, srcLinks = tru
   detectIn(f.home, detect);
   if (state !== "fresh") writeRuntime(f.root);
   f.env = (extra = {}) => {
-    const env = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (/^(ZCODE_|CAPTCHA_|NO_COLOR$|FORCE_COLOR$|CLICOLOR|CI$|COLUMNS$|LINES$|TERM$|NODE_OPTIONS$|HTTPS?_PROXY$|ALL_PROXY$)/i.test(k)) continue;
-      // Windows env names are case-insensitive: drop `Path`/`TEMP`/… so the values below are the only ones.
-      if (IS_WIN && /^(PATH|TEMP|TMP)$/i.test(k)) continue;
-      env[k] = v;
-    }
+    // Host env minus host-only settings (and on Windows minus PATH/TEMP and Git Bash state; host.mjs).
+    const env = fixtureBaseEnv(process.env, { windows: IS_WIN });
     Object.assign(env, {
       HOME: f.home, USERPROFILE: f.home, APPDATA: join(f.home, "AppData", "Roaming"), LOCALAPPDATA: join(f.home, "AppData", "Local"),
       XDG_CONFIG_HOME: join(f.home, ".config"), XDG_DATA_HOME: join(f.home, ".local", "share"), XDG_STATE_HOME: join(f.home, ".local", "state"), XDG_CACHE_HOME: join(f.home, ".cache"),
