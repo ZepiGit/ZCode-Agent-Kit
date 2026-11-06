@@ -563,6 +563,13 @@ test("measurement mode on Linux: the gate is max(sampled RSS, VmHWM), no commit,
   assert.deepEqual([measure.aboveBudget, measure.valid, measure.complete], [1, 3, true]);
 });
 
+test("measurement mode: the median of an even count is the mean of the middle pair, rounded to 0.1 MB", () => {
+  // The ticket 60 Linux measurement's middle pair, 229.6 / 232.2, printed as 230.89999999999998.
+  const { measure, measureMd } = burst1Job(["--measure-burst1", "4"], { peaks: [{ rss: 150, hwm: 229.6 }, { rss: 150, hwm: 260 }, { rss: 150, hwm: 200 }, { rss: 150, hwm: 232.2 }] });
+  assert.equal(measure.medianMB, 230.9);
+  assert.match(measureMd, /min \/ median \/ max: 200 \/ 230\.9 \/ 260 MB/);
+});
+
 test("measurement mode rejects a count that is not a whole number from 1 to 50 before anything runs", () => {
   for (const bad of ["0", "51", "2.5", "x", ""]) {
     const { r, files } = burst1Job(["--measure-burst1", bad], { peaks: [] });

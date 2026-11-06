@@ -69,7 +69,7 @@ export function measureObservation({ rep, result, summary, csvText, rule }) {
 function median(xs) {
   const s = [...xs].sort((a, b) => a - b);
   const m = s.length >> 1;
-  return s.length ? (s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2) : null;
+  return s.length ? (s.length % 2 ? s[m] : Number(((s[m - 1] + s[m]) / 2).toFixed(1))) : null;
 }
 
 /** The distribution over the valid runs: exceedance count and fraction, ceiling breaches, P(median RED) per odd n ≤ 9. */
