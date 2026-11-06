@@ -2,7 +2,7 @@
 
 **Blocked by:** 50 (Harness adapters: HIGH fixes (Continue, Kilo Code))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -87,3 +87,5 @@ Each "before" fixture is the byte-exact file the tip (`3773b47`) wrote, captured
 - OpenCode `modalities.output: [text]` is written next to `input`. Both are optional in the V1 schema, and the V2 migration fills a missing side from defaults, so writing `output` is the explicit form of the same value.
 - Low drift is left as spec §Out of scope says, even where this ticket touches the file: the Kilo sheet's "Models can also be auto-fetched from /v1/models" (false for `@ai-sdk/anthropic`), the Kilo header's "kilo.jsonc … documented only sparsely", the OpenCode header's "%APPDATA%/opencode on Windows", OMP's stale "`!node` not evaluated" comment, Goose `reasoning: true`, `ANTHROPIC_SMALL_FAST_MODEL` (deprecated), and `PI_CODING_AGENT_DIR` / OMP profiles. The owner may want the false Kilo auto-fetch line fixed in a Low follow-up.
 - **For ticket 53 (docs):** image flags changed. OpenCode Flash now declares image input, Goose Flash `supports_vision`, and the Kilo sheet the per-model Image/Reasoning toggles. The Cline sheet documents the CLI path, and OMP now uses `auth: apiKey`. No effort levels changed: OMP thinking is untouched, and Claude Code and pi were left. `harnesses/README*` should mention these, and `EFFORT_MAPPING*` needs no change. The `MANIFEST*` recorded versions (OMP 18.1.18 → 18.16.0, Claude Code 2.1.269 → 2.1.318, Codex 0.153.4 → 0.166.0) and `SUPPORT_MATRIX.json` `primarySource`/`sourceChecked` (pi now `earendil-works/pi`, OMP docs path) are 53's.
+
+- Merged 2026-11-06 as ead458f; fast suite: kit 303/314 (0 fail, 11 skipped), proxy 1303/1303, mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged. Logs: reports/merge-51-{npmci,test,proxy,mcp}.log.
