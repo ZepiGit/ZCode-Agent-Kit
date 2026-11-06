@@ -222,4 +222,30 @@ If the scenarios still end early, they now show as `HARNESS FAILURE — no evide
 - `run.mjs`'s default exit 2 has no test of its own: provoking an empty event loop in `run.mjs` would need a scenario hook in production loop code. The job-level gate covers the same failure and is tested and mutation-proven.
 - The S1/burst1 Linux flake is still open on this branch. Round 6 Q1 puts its median rule on the integration branch before 02 merges.
 
-- 2026-11-06 (orchestrator): first merge 18351e1 was reverted (c252676) after CI run 42221794531 showed the windows scenarios never ran; fix round 2 (above) re-merged through branch staging/02 (revert of the revert + this merge) for a pre-merge CI run.
+### 2026-11-06 — implementer, round 3 (pre-merge CI run 42246379763 on staging/02)
+
+The evidence gate worked: the windows runs that did not run their scenario now report harness failures. S2 ran (RED, ticket 58) and S5 ran (GREEN, 713 samples). Two Windows-only defects remained; both are fixed in the commit after a12ab94, still with no merge of the integration tip.
+1. **Config template with CRLF.** Every proxy run (S1, S3, S4, S7) failed in `isolatedConfig` with `missing "claim:\n  enabled: false"`. The Windows checkout converts `proxy/config.example.yaml` to CRLF (core.autocrlf), and the contract strings are LF.
+   - Fix: `isolatedConfig` normalises the template to LF before filling it, and takes an optional `template` (the default is the file).
+   - Why not `.gitattributes`: the shipped template's line endings on Windows checkouts belong to the product, not to the test loop, and this defect is in the loop's parsing. The current `.gitattributes` pins only `*.sh`, `*.ps1` and `*.cmd`.
+   - RED: the test first passed vacuously, because `isolatedConfig` ignored the passed template. After the parameter was added and before the fix, it reproduced the exact CI error (`reports/t02-r3-red1b.log`). GREEN: `t02-r3-green1`.
+2. **`timeout` on Windows.** The fake-run fixture itself calls no utility. `job.mjs --cap none` wrapped every run in GNU `timeout`, and on Windows that resolves to TIMEOUT.EXE ("Invalid syntax"), so the stand-in run exited 1 with no summary.
+   - Fix: `commandFor("none", …)` on win32 runs `node run.mjs …` directly, and the job enforces `timeoutMs` itself. Linux is unchanged (pinned).
+   - The fake run's `green-complete` summary now matches its OS (on Windows: commit and a passed units self-test). Without this, "a run with real evidence keeps its verdict" would still fail on Windows, because the gate rejects a Windows summary without commit.
+   - RED: `t02-r3-red1` (the argv still began with `timeout`).
+
+The REDs are the mutation proofs: removing either fix brings its RED back.
+
+Tests (Linux):
+- `npm run test`: 394 tests, 378 pass, 0 fail, 16 skipped;
+- `npm run test:proxy`: 1343 pass;
+- `npm run test:mcp`: 95 / 96, 1 skipped;
+- a real job smoke `--only S7/short` builds the config from the template: RED (listed, ticket 34), 96 samples, proxy seen, the ratchet holds (`reports/t02-r3-job-smoke.log`).
+
+What CI must show next:
+- test-kit windows: the three `job:` tests pass;
+- memory-budget windows: S1, S3, S4 and S7 run with samples and roles over the floors, and no `config template contract` failure.
+
+Any remaining harness failure arrives with its reason.
+
+- 2026-11-06 (orchestrator): first merge 18351e1 was reverted (c252676) after CI run 42221794531 showed the windows scenarios never ran; fix rounds 2-3 staged on branch staging/02 (revert of the revert + merge) for pre-merge CI via draft PR #14.
