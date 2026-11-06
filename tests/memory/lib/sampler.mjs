@@ -22,6 +22,10 @@ function readText(path) {
 /** Classify a command line into the roles the budgets talk about. */
 export function roleOf(argv) {
   const cmd = argv.join(" ");
+  // The captcha solver process (ADR-0002; ticket 27): from source it runs the
+  // solver entry module, compiled builds a self-exec subcommand. Either way its
+  // argv names "captcha-solver"; the in-process worker thread has no process.
+  if (/captcha[-_]solver/i.test(cmd)) return "solver";
   if (/src[\\/]index\.ts["']?\s+serve\b/.test(cmd) || /zcode-proxy(?:\.exe)?\s+serve\b/.test(cmd)) return "proxy";
   if (/zcode-proxy-manager\.mjs/.test(cmd)) return "manager";
   if (/cli[\\/]heal\.mjs/.test(cmd)) return "preflight";
@@ -149,7 +153,52 @@ export function externalConnections(pid) {
   return connectionsOf(pid).filter((c) => c.state !== "0A" && !/^(?:127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0):/.test(c.remote));
 }
 
-const HEADER = "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd\n";
+// commit_kb is additive (appended): commit charge on Windows (ticket 02), empty on Linux.
+const HEADER = "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb\n";
+
+/** One CSV line → fields (the cmd column is double-quoted and may hold commas). */
+function splitCsvLine(line) {
+  const out = [];
+  let cur = "", quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ",") { out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+/** samples.csv text → [{ t, pid, ppid, role, rssKb, hwmKb, threads, fds, heapMB, progress, cmd, commitKb }]. Reads files without commit_kb too. */
+export function parseSamplesCsv(text) {
+  const num = (v) => (v === undefined || v === "" ? null : Number(v));
+  return text.split(/\r?\n/).slice(1).filter(Boolean).map((line) => {
+    const [t, pid, ppid, role, rss, hwm, threads, fds, heap, progress, cmd, commit] = splitCsvLine(line);
+    return { t: Number(t), pid: Number(pid), ppid: Number(ppid), role, rssKb: Number(rss), hwmKb: Number(hwm), threads: Number(threads), fds: Number(fds), heapMB: num(heap), progress: Number(progress), cmd, commitKb: num(commit) };
+  });
+}
+
+/** Parsed CSV rows → the verdict's per-sample series. */
+export function rowsFromSamples(samples) {
+  const byT = new Map();
+  for (const s of samples) {
+    if (!byT.has(s.t)) byT.set(s.t, { t: s.t, progress: s.progress, procs: [] });
+    byT.get(s.t).procs.push({ pid: s.pid, ppid: s.ppid, key: String(s.pid), role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: s.heapMB, commitKb: s.commitKb });
+  }
+  return [...byT.values()];
+}
+
+/** Counts per role of the marked processes alive right now (for verdict `observed`). */
+export function countRoles(marker) {
+  const counts = {};
+  for (const s of scan(marker)) counts[s.role] = (counts[s.role] ?? 0) + 1;
+  return counts;
+}
 
 /**
  * Start sampling. `probe(snapshots)` may return { [pid]: heapMB } for
@@ -178,10 +227,10 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
       let csv = "";
       for (const s of snaps) {
         const h = heap[s.pid];
-        csv += `${t},${s.pid},${s.ppid},${s.role},${s.rssKb},${s.hwmKb},${s.threads},${s.fds},${h ?? ""},${p},"${s.cmd.replace(/"/g, "'")}"\n`;
+        csv += `${t},${s.pid},${s.ppid},${s.role},${s.rssKb},${s.hwmKb},${s.threads},${s.fds},${h ?? ""},${p},"${s.cmd.replace(/"/g, "'")}",\n`;
       }
       if (csv) appendFileSync(csvPath, csv);
-      rows.push({ t, progress: p, procs: snaps.map((s) => ({ pid: s.pid, key: s.key, role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: heap[s.pid] ?? null })) });
+      rows.push({ t, progress: p, procs: snaps.map((s) => ({ pid: s.pid, ppid: s.ppid, key: s.key, role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: heap[s.pid] ?? null, commitKb: null })) });
     } finally {
       running = false;
     }

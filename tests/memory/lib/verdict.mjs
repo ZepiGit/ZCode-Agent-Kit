@@ -7,7 +7,15 @@
 //     first post-warm-up window (a slow leak rises less than 1 % per window).
 //     Both must hold, so a GC sawtooth or an allocator plateau is not a leak;
 //   - peak: role peak RSS above budget;
+//   - steady: median RSS of a role after warm-up above budget;
+//   - peak: summed role RSS at any sample above budget (S3 part a: kit total);
+//   - procPeak: one process's own peak (RSS or VmHWM) above its role budget
+//     (S3 part b: per-role targets);
 //   - count: more processes of a role than budgeted at any sample;
+//   - perParent: more processes of a role under one parent at any sample
+//     (≤ 1 solver process per proxy);
+//   - observed: a count the scenario took at a defined moment above budget
+//     (0 solver processes after the proxy is SIGKILLed / after an idle exit);
 //   - orphans: any marked process alive after the scenario stopped it.
 
 const MB = 1024;
@@ -115,9 +123,13 @@ export function summarize(rows, roles) {
 /**
  * budgets: {
  *   growth?: { role, maxPctPer1k?, maxMBPerMin?, risingWindows: 3, axis, warmupFraction },
- *   peaks?: { [role]: MB }, procPeaks?: { [role]: MB }, counts?: { [role]: n }, orphans?: 0 }
+ *   steady?: { role, maxMB, fromT?, untilT?, warmupFraction? },
+ *   peaks?: { [role]: MB } (summed per sample), procPeaks?: { [role]: MB } (per process, incl. VmHWM),
+ *   counts?: { [role]: n }, perParent?: [{ role, max }], observed?: [{ name, label, role, max }],
+ *   orphans?: 0, extra?: [precomputed checks] }
+ * observations: [{ label, counts: { [role]: n } }] taken by the scenario (ctx.observe).
  */
-export function verdict(rows, budgets, { orphans = [] } = {}) {
+export function verdict(rows, budgets, { orphans = [], observations = [] } = {}) {
   const roles = new Set(["*", "kit"]);
   for (const r of rows) for (const p of r.procs) roles.add(p.role);
   const summary = summarize(rows, [...roles]);
@@ -145,6 +157,30 @@ export function verdict(rows, budgets, { orphans = [] } = {}) {
   for (const [role, limit] of Object.entries(budgets.counts ?? {})) {
     const value = summary[role]?.maxCount ?? 0;
     checks.push({ name: `count:${role}`, red: value > limit, value, budget: limit, unit: "procs" });
+  }
+  for (const s of [].concat(budgets.steady ?? [])) {
+    // Steady-state level: median RSS after warm-up inside the load window.
+    const live = roleSeries(rows.filter((r) => r.t >= (s.fromT ?? 0) && r.t <= (s.untilT ?? Infinity)), s.role).filter((x) => x.count > 0);
+    const post = live.slice(Math.floor(live.length * (s.warmupFraction ?? 0.25)));
+    const value = Number(median(post.map((x) => x.rssMB)).toFixed(1));
+    checks.push({ name: `steady:${s.role}`, red: post.length > 0 && value > s.maxMB, value, budget: s.maxMB, unit: "MB" });
+  }
+  for (const p of budgets.perParent ?? []) {
+    // At every sample: processes of the role sharing one parent (e.g. solvers per proxy).
+    let value = 0;
+    for (const r of rows) {
+      const perParent = new Map();
+      for (const x of r.procs) if (x.role === p.role) perParent.set(x.ppid, (perParent.get(x.ppid) ?? 0) + 1);
+      for (const n of perParent.values()) value = Math.max(value, n);
+    }
+    checks.push({ name: `perParent:${p.role}`, red: value > p.max, value, budget: p.max, unit: "procs/parent" });
+  }
+  for (const o of budgets.observed ?? []) {
+    // Counts the scenario took at a defined moment (after a SIGKILL, after an idle exit).
+    // A budget with no matching observation is red: the scenario never checked.
+    const seen = observations.filter((x) => x.label === o.label || x.label.startsWith(`${o.label}:`));
+    const value = seen.length ? Math.max(...seen.map((x) => x.counts[o.role] ?? 0)) : null;
+    checks.push({ name: o.name, red: value === null || value > o.max, value: value ?? "not observed", budget: o.max, unit: "procs", detail: seen.map((x) => `${x.label}=${x.counts[o.role] ?? 0}`) });
   }
   if (budgets.orphans !== undefined) {
     checks.push({ name: "orphans", red: orphans.length > budgets.orphans, value: orphans.length, budget: budgets.orphans, unit: "procs", detail: orphans.map((o) => `${o.pid} ${o.role} ${o.cmd}`) });

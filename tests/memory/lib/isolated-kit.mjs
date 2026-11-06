@@ -42,6 +42,11 @@ export function assertSafeEnvironment(port) {
   if (!Number.isInteger(port) || port < 18457 || port > 65000 || FORBIDDEN_PORTS.has(port)) {
     throw new Error(`memory loop port ${port} refused (allowed: 18457..65000 except ${[...FORBIDDEN_PORTS].join(", ")})`);
   }
+  assertSafeRun();
+}
+
+/** Every scenario, with or without a proxy: only inside a capped run with an isolated HOME. */
+export function assertSafeRun() {
   if (process.env.ZCODE_OVERHAUL_RUN !== "1" && process.env.ZCODE_MEMLOOP_ALLOW !== "1") {
     throw new Error("memory loop refuses to run outside a capped run (set ZCODE_OVERHAUL_RUN=1 via run-capped.sh, or ZCODE_MEMLOOP_ALLOW=1 in CI)");
   }
