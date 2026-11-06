@@ -36,3 +36,5 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
 ## Comments
 
 - 2026-11-06 (orchestrator, from ticket 02 round 4 Windows evidence): a start killed between spawning the proxy and recording its start time leaves `proxy.pid` without a start time (manager writes the record first and fills `startedMs` from a later query: `zcode-proxy-manager.mjs:632/:639`; on Windows that query is PowerShell, up to 2 x 2.5 s). Every later stop then fails closed on `start-unknown` and the proxy can never be stopped by the kit (S3/hung windows: orphan pid 3796, all stops refused). The lock/lifecycle fix must close this window (e.g. record identity atomically before/at spawn, or adopt a healthy proxy that answers with this installation's key) and the windows memory leg must show 0 orphans in S3.
+
+- 2026-11-06 (orchestrator, Round 7 Q4): ticket 16 owns closing the missing-start-time window of a new start, including a start-time probe that times out without any kill; the kit never kills on a pid alone.
