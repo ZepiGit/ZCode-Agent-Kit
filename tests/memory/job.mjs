@@ -28,8 +28,11 @@ import { assertSafeRun } from "./lib/isolated-kit.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
-// Per-scenario cap and timeout. S2's hang phase parks 5 × 256 MB; S5 is the longest.
-const CAP = { S2: "4G" };
+// Per-run (or per-scenario) cap and timeout: the caps protect the runner and
+// sit far above every budget, so a cap kill is a harness failure, never a
+// verdict. Today's worst: S1/burst32 (proxy 1.6 GB + 32 bodies in the
+// client), S2's hang phase (5 × 256 MB parked). S5 is the longest run.
+const CAP = { "S1/burst16": "4G", "S1/burst32": "6G", S2: "4G" };
 const TIMEOUT_S = { S5: 1800 };
 const DEFAULT_CAP = "3G";
 const DEFAULT_TIMEOUT_S = 1200;
@@ -131,11 +134,14 @@ async function main() {
     mkdirSync(dir, { recursive: true });
     const runArgs = [scenario, "--profile", profile, ...(variant ? ["--variant", variant] : []), "--out", dir];
     console.log(`\n── ${key} ──`);
-    const r = await runOne(commandFor(capChoice.cap, CAP[scenario] ?? DEFAULT_CAP, TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S, runArgs), join(dir, "run.log"));
+    const size = CAP[key] ?? CAP[scenario] ?? DEFAULT_CAP;
+    const r = await runOne(commandFor(capChoice.cap, size, TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S, runArgs), join(dir, "run.log"));
     const summary = readSummary(dir);
-    // run.mjs exits 0/1/2; anything else (timeout 124, a cap kill 137) is a harness failure.
+    // run.mjs exits 0/1/2; anything else (timeout 124, a cap kill 137 / SIGKILL) is a harness failure.
     const exitCode = [0, 1, 2].includes(r.code) ? r.code : 2;
-    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, durationS: r.durationS, redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? null });
+    const why = exitCode === 2 && !summary?.error ? (r.code === 124 ? "timed out" : r.code === 137 || r.signal === "SIGKILL" ? `killed (memory cap ${size}?)` : `exit ${r.code}${r.signal ? ` ${r.signal}` : ""}`) : null;
+    if (why) console.log(`${key}: harness failure: ${why}`);
+    results.push({ key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name), error: summary?.error ?? r.error ?? why });
   }
 
   const ratchet = checkRatchet({ expected, os: args.os, results, issueIds });

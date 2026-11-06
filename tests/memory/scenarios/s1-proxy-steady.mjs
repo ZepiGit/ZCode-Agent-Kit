@@ -50,11 +50,12 @@ export async function run(ctx) {
   const rand = prng(42);
   const burst = Number((ctx.variant ?? "").match(/^burst(\d+)$/)?.[1] ?? 0);
   const heavy = ctx.variant === "bigbody" || burst > 0;
-  // The mixed short profile is 6,000 requests, and its first half is warm-up:
-  // the allocator and the bounded responses store fill over the first ~3,000
-  // requests (the long run plateaus from there on), so a 3,000-request run is
-  // all warm-up and its slope cannot tell warm-up from a leak.
-  const total = burst ? burst * 3 : ctx.variant === "bigbody" ? (ctx.long ? 1200 : 240) : ctx.variant === "stalled" ? (ctx.long ? 20_000 : 3_000) : (ctx.long ? 30_000 : 6_000);
+  // The paced short runs are 6,000 requests. Mixed: the first half is warm-up
+  // (the allocator and the bounded responses store fill over the first ~3,000
+  // requests; the long run plateaus from there on), so a 3,000-request run is
+  // all warm-up and its slope cannot tell warm-up from a leak. Stalled: no
+  // warm-up shape, but a ±15 % GC sawtooth, so the slope needs the length.
+  const total = burst ? burst * 3 : ctx.variant === "bigbody" ? (ctx.long ? 1200 : 240) : ctx.variant === "stalled" ? (ctx.long ? 20_000 : 6_000) : (ctx.long ? 30_000 : 6_000);
   const concurrency = burst || (ctx.variant === "bigbody" ? 16 : 8);
   const big = imageB64(heavy ? 8 * 1024 : 1024); // 8 MB / 1 MB images
   const largeText = "lorem ipsum dolor sit amet ".repeat(heavy ? 400_000 : 20_000); // ~10.8 MB / ~540 KB
@@ -147,7 +148,7 @@ export async function run(ctx) {
   const health = await kit.health();
   ctx.note("healthAfterIdle", health?.details ?? null);
   await session.stop();
-  const window = { fromT: loadStart, untilT: loadEnd, warmupFraction: ctx.long ? 0.2 : 0.5 };
+  const window = { fromT: loadStart, untilT: loadEnd, warmupFraction: ctx.long ? 0.2 : ctx.variant === "stalled" ? 0.25 : 0.5 };
   const mixed = !ctx.variant;
   return {
     budgets: {
