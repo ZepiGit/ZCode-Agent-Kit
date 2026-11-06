@@ -1,7 +1,9 @@
 // The memory loop's budgets: spec §18 MEMORY and PROCESSES, in one place.
 // Scenarios build their verdict budgets from these numbers; verdict.test.mjs
 // pins them to the spec, so a budget can only change together with the spec.
-// Metric: RSS (VmRSS / VmHWM) on Linux, commit on Windows (ticket 02).
+// Metric: RSS (VmRSS / VmHWM) on Linux. Windows (Round 7 Q1): working set for
+// the per-process peak/steady budgets of proxy, launcher, MCP bridge and
+// preflight; commit for the S3 total, growth, solver and S2 checks.
 // Budgets are never loosened past the Phase 1B baseline (METRICS.md).
 
 export const MEMORY = {
@@ -22,7 +24,8 @@ export const MEMORY = {
   },
   S3: {
     // (a) maximum over all samples of summed kit RSS (commit on Windows)
-    kitTotalMB: { linux: 596, windows: 600 },
+    // windows: 0.7 × 734.5 MB, the first clean windows run (Round 7 Q2); kit-started PowerShell counts.
+    kitTotalMB: { linux: 596, windows: 514 },
     // (b) every kit process's own peak (VmHWM / PeakPageFileUsage) per role
     rolePeakMB: { launcher: 74, "mcp-bridge": 75, preflight: 76, proxy: 62, solver: 20 },
   },
@@ -30,6 +33,10 @@ export const MEMORY = {
   S6: { linesHeapMB: 16, longLineHeapMB: 16, resizeHeapMB: 8 },
   S7: { proxyLogMB: 6, earlyLogMB: 1, responsesStoreHeapMB: 96 },
 };
+
+// Windows only: in paced runs no proxy sample may exceed ADR-0008's 512 MB
+// soft footprint limit in commit (Round 7 Q1 condition 2).
+export const PROXY_COMMIT_BACKSTOP = { role: "proxy", maxMB: 512 };
 
 export const PROCESSES = {
   proxiesPerInstallation: 1, // at every sample, incl. 10 concurrent launches
@@ -51,6 +58,7 @@ export function s3Budgets(os) {
     counts: { proxy: PROCESSES.proxiesPerInstallation },
     perParent: [{ role: "solver", max: PROCESSES.solversPerProxy }],
     orphans: PROCESSES.orphans,
+    commitBackstop: PROXY_COMMIT_BACKSTOP, // S3 is paced
   };
 }
 

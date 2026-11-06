@@ -16,7 +16,7 @@ const variant = opt("--variant");
 const key = `${scenario}/${variant ?? opt("--profile") ?? "short"}`;
 const dir = join(opt("--out"), `${key.replace("/", "-")}-fake`);
 mkdirSync(dir, { recursive: true });
-writeFileSync(join(dir, "samples.csv"), "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb\n");
+writeFileSync(join(dir, "samples.csv"), "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb\n");
 const mode = process.env.FAKE_RUN_MODE;
 if (mode === "exit0-nothing") process.exit(0);
 const role = (maxCount) => ({ peakMB: 100, peakProcMB: 100, peakHwmMB: 120, maxCount, maxFds: 10, maxThreads: 10, distinctPids: maxCount, peakHeapMB: null });
@@ -25,7 +25,9 @@ const complete = mode === "green-complete";
 const win = process.platform === "win32";
 const summary = {
   id: "fake", key, scenario, profile: "short", variant, platform: process.platform, outcome: "GREEN", metric: win ? "commit" : "rss",
-  durationS: complete ? 300 : 1, red: false, checks: [],
+  durationS: complete ? 300 : 1, red: false,
+  // One memory check as osVerdict reports it on Windows: both values and the gate (Round 7 Q1).
+  checks: complete ? [{ name: "procPeak:proxy", red: false, value: 120, budget: 250, unit: "MB", gate: "ws", commitValue: 310, wsValue: 120 }] : [],
   summary: complete ? { "*": role(2), kit: role(1), proxy: role(1), "mock-upstream": role(1) } : { "*": role(0), kit: role(0) },
   samples: complete ? 300 : 0, notes: { sampler: { units: win ? { ok: true, compared: 40 } : null, overhead: null } }, observations: [], orphans: [],
 };

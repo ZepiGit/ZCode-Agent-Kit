@@ -35,10 +35,12 @@ test("samples.csv keeps its columns and appends commit_kb, empty on Linux", linu
     await sleep(700);
     const rows = await sampler.stop();
     const text = readFileSync(join(dir, "samples.csv"), "utf8");
-    assert.equal(text.split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb");
+    // commit_kb (ticket 02) and ws_peak_kb (Round 7 Q1) are additive and empty on Linux.
+    assert.equal(text.split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb");
     const parsed = parseSamplesCsv(text).filter((r) => r.pid === child.pid);
     assert.ok(parsed.length >= 2, "the marked child is sampled");
     assert.equal(parsed[0].commitKb, null);
+    assert.equal(parsed[0].wsPeakKb, null);
     assert.ok(parsed[0].rssKb > 0 && parsed[0].hwmKb >= parsed[0].rssKb);
     assert.equal(parsed[0].ppid, process.pid);
     assert.equal(parsed[0].progress, 7);
@@ -289,6 +291,12 @@ test("job: a run with real evidence keeps its verdict", () => {
   assert.equal(r.status, 0);
 });
 
+test("job: every memory check is reported with its commit and its working-set value and the gate (Round 7 Q1)", () => {
+  const { r, result } = fakeJob("green-complete");
+  assert.deepEqual(result?.memoryChecks, [{ name: "procPeak:proxy", red: false, gate: "ws", commitMB: 310, wsMB: 120, budget: 250 }], r.stdout + r.stderr);
+  assert.match(r.stdout, /S1\/short procPeak:proxy: commit 310 \/ WS 120 MB \(budget 250, gate WS\) ok/);
+});
+
 test("run evidence: outcome and exit code must agree, and on Windows commit and a passed units self-test are required", () => {
   const ok = { key: "S7/short", platform: "linux", outcome: "RED", metric: "rss", durationS: 90, samples: 90, summary: { proxy: { maxCount: 1 } }, notes: { sampler: {} } };
   assert.deepEqual(runEvidence(ok, { key: "S7/short", exitCode: 1 }), { ok: true, problems: [] });
@@ -335,8 +343,10 @@ test("whileFrozen thaws after the work, after a failing work, and a failed thaw 
   const calls = [];
   const freeze = (pid) => calls.push(`freeze ${pid}`);
   const thaw = (pid) => calls.push(`thaw ${pid}`);
-  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw }), 42);
-  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw }), /round failed/);
+  // Fake pids: liveness is injected, never asked of the host (Windows and Linux answer differently for pid 7/8).
+  const alive = () => true;
+  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw, alive }), 42);
+  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw, alive }), /round failed/);
   assert.deepEqual(calls, ["freeze 7", "work", "thaw 7", "freeze 8", "thaw 8"]);
   await assert.rejects(whileFrozen(9, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); }, alive: () => true }), /could not thaw pid 9 .*0xC000000B/);
 });

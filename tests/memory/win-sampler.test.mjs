@@ -14,9 +14,9 @@ import { fileURLToPath } from "node:url";
 import { createKitTracker, createPollParser, parseCimCsv, parseGetProcessCsv, powershellPoller, unitsSelfTest } from "./lib/win-sampler.mjs";
 import { commandFor, parseJobReport } from "./lib/caps.mjs";
 import { suspendScript } from "./lib/win-process.mjs";
-import { parseSamplesCsv, scan, startSampler, survivors } from "./lib/sampler.mjs";
+import { parseSamplesCsv, rowsFromSamples, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
-import { verdict } from "./lib/verdict.mjs";
+import { rowsForMetric, verdict } from "./lib/verdict.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32");
 const fixture = (name) => readFileSync(join(FIXTURES, name), "utf8");
@@ -121,9 +121,13 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
     const pollerPid = sampler.pollerPid;
     const rows = await sampler.stop();
     const csv = parseSamplesCsv(readFileSync(join(dir, "samples.csv"), "utf8"));
-    assert.equal(readFileSync(join(dir, "samples.csv"), "utf8").split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb");
+    assert.equal(readFileSync(join(dir, "samples.csv"), "utf8").split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb");
     const proxy = csv.find((r) => r.pid === 2400);
-    assert.deepEqual({ role: proxy.role, rssKb: proxy.rssKb, commitKb: proxy.commitKb, hwmKb: proxy.hwmKb, progress: proxy.progress }, { role: "proxy", rssKb: 122880, commitKb: 153600, hwmKb: 190000, progress: 3 });
+    // ws_peak_kb = PeakWorkingSetSize (130000 KB): the WS peak is reproducible from the artefact (Round 7 Q1).
+    assert.deepEqual({ role: proxy.role, rssKb: proxy.rssKb, commitKb: proxy.commitKb, hwmKb: proxy.hwmKb, wsPeakKb: proxy.wsPeakKb, progress: proxy.progress }, { role: "proxy", rssKb: 122880, commitKb: 153600, hwmKb: 190000, wsPeakKb: 130000, progress: 3 });
+    // Read back from the CSV, the working-set verdict sees the same peak as the live run.
+    const back = rowsForMetric(rowsFromSamples(csv), "rss").flatMap((r) => r.procs).find((p) => p.pid === 2400);
+    assert.equal(back.hwmKb, 130000);
     assert.ok(!csv.some((r) => r.pid === 2200 || r.pid === 2210), "the poller and its conhost are never sampled");
     assert.ok(rows.length >= 3 && rows.every((r) => r.procs.length === 4));
     const o = sampler.overhead();

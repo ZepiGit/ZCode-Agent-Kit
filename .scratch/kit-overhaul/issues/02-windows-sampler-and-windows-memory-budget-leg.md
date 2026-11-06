@@ -306,4 +306,57 @@ There is no second proxy and no double count. The holder was killed before it sp
 - **memory-budget windows, other runs:** no harness failure. `other` in the S3 roles no longer includes fixture conhosts.
 - **test-kit:** 4/4 green; **memory-budget ubuntu:** green.
 
-- 2026-11-06 (orchestrator): first merge 18351e1 was reverted (c252676); fix rounds 2-4 staged on staging/02 for pre-merge CI via draft PR #14.
+### 2026-11-06 — implementer, round 5 (staging/02 82de0da: only test-kit windows/26 red)
+
+`loop.test.mjs` "whileFrozen thaws after the work, …" used the fake pids 7 and 8 without an `alive` function, so it asked the host's process table. On windows-latest/26 the host answered "gone" for pid 8 and the thaw was skipped (`/home/AgentKit/overhaul-tools/t02-win26-r4.log`). This was a test defect, not a harness defect.
+- **Reproduced on Linux:** with the default liveness forced to "gone" in a scratch copy, the test failed exactly as on Windows (`actual: ['freeze 7','work','freeze 8']`, `reports/t02-r5-red1.log`).
+- **Fix:** the test injects `alive: () => true`. It is now OS-neutral: with the host liveness forced to "gone" it still passes (`t02-r5-hostgone`).
+- **Mutation proof:** `whileFrozen` without a thaw after a failing round → the test fails (`t02-r5-mutK`).
+- **Suites:** `npm run test`: 398 tests, 382 pass, 0 fail, 16 skipped.
+- `expected-red.json` is untouched.
+
+### 2026-11-06 — implementer, round 6 (Owner Proxy Round 7)
+
+Commits 06b507d (Round 7 Q1/Q2) and 6e2f21a (Round 7 Q3 calibration, METRICS reference run); no tip merge.
+
+**Q1 — metric split on Windows** (`lib/verdict.mjs` `osVerdict`, `WS_GATED_ROLES`, `windowsGate`):
+- **Working set** gates the per-process peak and steady budgets of proxy, launcher, mcp-bridge and preflight: the max of sampled WS and PeakWorkingSetSize.
+- **Commit** gates the S3 total, every growth check and every solver/S2 check (`procPeak:solver`, `procPeak:scenario`, cost per generation, extras).
+- Every memory check carries `commitValue`, `wsValue` and `gate`. `run.mjs` prints both on each check line, and the job summary lists every memory check as "commit X / WS Y (budget, gate)" (`memoryChecks` in `job-summary.json`).
+- **Backstop:** in the paced runs (S1/short, S1/stalled, S3, S4, S7), `commit-backstop:proxy` is RED when any proxy sample's commit exceeds 512 MB (ADR-0008 soft limit). Windows only; on Linux no check is added.
+- `samples.csv` gains the additive `ws_peak_kb` column (PeakWorkingSetSize; empty on Linux). `parseSamplesCsv`/`rowsFromSamples` read it, so `reverdict.mjs` reproduces the WS verdict from the artefact.
+- RED → GREEN: `t02-r6-red1` (7 failing: the Round 7 Q1 condition 4 cases plus the budget pin), `t02-r6-red2` (column), `t02-r6-red3` (both values reported).
+- Mutants L–Q all killed (`t02-r6-mut*`):
+  - L: the gate is always commit;
+  - M: solver/scenario judged on WS;
+  - N: no backstop;
+  - O: backstop applied on Linux;
+  - P: `ws_peak_kb` not written;
+  - Q: the total back at 600.
+- Existing tests changed, as Round 7 amends them:
+  - "on Windows samples the verdict judges commit …" (proxy RED on commit) is replaced by "a proxy RED only on commit is GREEN";
+  - the budget pin goes from `windows: 600` to `514`;
+  - the two CSV header pins gain `ws_peak_kb`.
+
+**Q2:** `MEMORY.S3.kitTotalMB.windows` is 514 for every S3 variant. Kit-started PowerShell and its conhosts count; the loop's tooling is excluded, as already pinned.
+
+**Q3 calibration** (`expected-red.json` `windows`):
+- S5/short removed, with its numbers in the commit message;
+- S1/burst1 → 20;
+- S1/stalled → 61;
+- S1/short unlisted;
+- the rest kept.
+
+Issue 61 is checked out unchanged from the integration branch, an identical blob, so that the committed-list test passes on this branch.
+
+Re-judging run 4's artefact under the new rules predicts exactly the calibrated list (METRICS.md table), with one caveat. Run 4's CSVs predate `ws_peak_kb`, so S1/burst1 re-judged from the CSV is GREEN on sampled WS (234.3). The live WS verdicts of runs 3 and 4, which used PeakWorkingSetSize, were RED, and the next run records that peak.
+
+**Q4 condition 5 corroboration:** run 4's `cleanup.pidRecordLeft` is `{"pid":5788,"startedMs":null}` (S3/hung) and `{"pid":8532,"startedMs":null}` (S3/short).
+
+**Tests:**
+- `npm run test`: 405 tests, 389 pass, 0 fail, 16 skipped;
+- `npm run test:proxy`: 1343 pass;
+- `npm run test:mcp`: 95 / 96;
+- Linux job `--only S3/short,S7/short`: unchanged output, no backstop check, the ratchet holds (`reports/t02-r6-job-smoke.log`).
+
+**Left for the orchestrator:** the spec §18 metric sentence and S1/S3 rows, the RUNLOG deviation, and the ticket 16/17/20/37 text from Round 7 are not edited on this branch.
