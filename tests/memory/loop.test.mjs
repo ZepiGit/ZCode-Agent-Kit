@@ -5,12 +5,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
+import { generateOmpExtension, startOmpHost } from "./lib/omp-host.mjs";
+import { causeLinesOf } from "./lib/omp-leg.mjs";
+import { OMP_LEG } from "./lib/budgets.mjs";
+import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
+import { resolveBun } from "../../lib/process.mjs";
 
 // The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
 const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
@@ -249,4 +254,100 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
   const gone = await waitFor(() => !alive(grandchild), 10_000);
   if (!gone) { try { process.kill(grandchild, "SIGKILL"); } catch {} }
   assert.ok(gone, "the grandchild died with the job");
+});
+
+// ── S3 OMP leg: the stub Bun host runs the generated extension (ticket 03) ──
+const KIT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** The promise's value, or `fallback` after `ms`; the timer never outlives the race. */
+const within = (promise, ms, fallback) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
+const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
+/** A kit root whose preflight is a fixture script; the extension is generated from the real template by the OMP adapter. */
+function ompFixture(healSource) {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-host-"));
+  const root = join(dir, "kit");
+  mkdirSync(join(root, "cli"), { recursive: true });
+  mkdirSync(join(root, "proxy"), { recursive: true });
+  copyFileSync(join(KIT, "proxy", "zcode-proxy-autostart.ts"), join(root, "proxy", "zcode-proxy-autostart.ts"));
+  writeFileSync(join(root, "cli", "heal.mjs"), healSource);
+  const keyFile = join(dir, ".proxykey");
+  writeFileSync(keyFile, "synthetic-omp-host-key\n");
+  const extension = generateOmpExtension({ root, home: join(dir, "home"), keyFile, port: 19031 });
+  return { dir, root, extension };
+}
+
+test("the stub OMP host runs the generated extension once, prints its cause lines, reports its own cost and exits with its loop", async () => {
+  const f = ompFixture(`
+    import { appendFileSync } from "node:fs";
+    appendFileSync("attempts", String(process.ppid) + "\\n");
+    console.error("[zcode-preflight] cause=quota-unavailable");
+    console.error("Bearer SECRET not a cause line");
+  `);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
+  try {
+    const ready = await host.ready;
+    assert.ok(ready && ready.baselineMB > 0, host.stderr());
+    assert.equal(ready.pid, host.pid);
+    host.go();
+    const done = await host.done;
+    assert.ok(done, host.stderr());
+    assert.equal(typeof done.costMB, "number");
+    assert.ok(done.costMB >= 0 && done.peakMB >= done.baselineMB);
+    assert.equal(done.metric, process.platform === "win32" ? "commit" : "rss");
+    assert.deepEqual(causeLinesOf(host.stderr(), PREFLIGHT_WARNINGS), [`[zcode-autostart] quota-unavailable: ${PREFLIGHT_WARNINGS["quota-unavailable"]}`]);
+    assert.doesNotMatch(host.stderr(), /SECRET/);
+    assert.deepEqual(readFileSync(join(f.root, "attempts"), "utf8").trim().split("\n"), [String(host.pid)], "one preflight, spawned by the host itself");
+    host.close();
+    const exit = await within(host.exited, 10_000, "still running");
+    assert.deepEqual(exit, { code: 0, signal: null });
+  } finally {
+    host.killTree();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("killing a starter host takes its running preflight with it (the killed-starter adversary)", async () => {
+  const f = ompFixture(`
+    import { writeFileSync } from "node:fs";
+    writeFileSync("preflight.pid", String(process.pid));
+    setTimeout(() => {}, 30_000);
+  `);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
+  let preflight = null;
+  try {
+    assert.ok(await host.ready, host.stderr());
+    host.go();
+    for (let i = 0; i < 200 && preflight === null; i++) {
+      try { preflight = Number(readFileSync(join(f.root, "preflight.pid"), "utf8")) || null; } catch {}
+      if (preflight === null) await sleep(50);
+    }
+    assert.ok(preflight, "the host spawned its preflight");
+    host.killTree();
+    await within(host.exited, 10_000);
+    const gone = await (async () => { for (let i = 0; i < 100; i++) { if (!isAlive(preflight)) return true; await sleep(100); } return false; })();
+    assert.equal(isAlive(host.pid), false, "the host is gone");
+    assert.equal(gone, true, "its preflight is gone too");
+  } finally {
+    host.killTree();
+    if (preflight && isAlive(preflight)) { try { process.kill(preflight, "SIGKILL"); } catch {} }
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("the stub OMP host charges a hook that does nothing well under the 5 MB waiter gate (its own churn is in the baseline)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-floor-"));
+  const extension = join(dir, "noop-extension.ts");
+  writeFileSync(extension, `export default function (pi) { pi.on("before_provider_request", async () => {}); }\n`);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension, env: { ...process.env } });
+  try {
+    assert.ok(await host.ready, host.stderr());
+    host.go();
+    const done = await host.done;
+    assert.ok(done, host.stderr());
+    // Half the gate: a measurement whose floor reached the gate could not tell a waiter from noise.
+    assert.ok(done.costMB < OMP_LEG.waiterCostMB / 2, `no-op hook charged ${done.costMB} MB`);
+  } finally {
+    host.close();
+    if ((await within(host.exited, 10_000, "running")) === "running") host.killTree();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

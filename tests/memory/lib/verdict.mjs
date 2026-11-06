@@ -20,7 +20,8 @@
 
 const MB = 1024;
 // The kit's own footprint: everything but the test fixtures around it.
-const NOT_KIT = new Set(["mock-upstream", "scenario", "fake-harness"]);
+// The S3 OMP leg's stub host is the harness (ADR-0013 cond 4): reported, never kit.
+const NOT_KIT = new Set(["mock-upstream", "scenario", "fake-harness", "omp-host"]);
 const inRole = (p, role) => role === "*" || (role === "kit" ? !NOT_KIT.has(p.role) : p.role === role);
 
 function median(values) {
