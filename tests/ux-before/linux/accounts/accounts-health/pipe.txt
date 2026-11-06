@@ -1,6 +1,0 @@
-* work      ok      ready      GLM Coding Lite 4,120/6,000 (69%) resets 00:00  used 14h ago
-  personal  empty   exhausted  Start Plan Bonus 0/200 (0%) resets 00:00  used 16h ago
-  backup    paused  paused     —  never used
-
-usable: 1 of 3; totals: GLM Coding Lite 4,120/6,000 (69%) resets 00:00 · Start Plan Bonus 35/200 (18%) resets 00:00
-* = active account

@@ -1,2 +1,0 @@
-zcode-proxy: terminal too small for the TUI.
-   need >= 40x14, got 38x12

@@ -1,3 +1,0 @@
-== integrate opencode: DRY RUN (no changes written) ==
-  detected: yes
-    use via: zcode-kit run opencode -- <args>  |  openai-compatible chat/completions only

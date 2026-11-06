@@ -8,9 +8,3 @@
 /zcode-proxy-src/docs/images/android/** export-ignore
 /zcode-proxy-src/scripts/** export-ignore
 /mcp/zcode-harness-mcp/_probes/** export-ignore
-# Byte snapshots (seam 5) and the BEFORE capture baseline: compared as bytes,
-# ANSI included, so no line-ending conversion on any checkout (ticket 06).
-/tests/snapshots/** -text
-/tests/ux-before/linux/** -text
-/tests/ux-before/windows/** -text
-/tests/ux-before/json-extra/** -text

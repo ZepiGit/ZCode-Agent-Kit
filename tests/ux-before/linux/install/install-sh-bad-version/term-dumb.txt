@@ -1,9 +1,0 @@
-y
-n
-n
-y
-y
-n
-n
-
-  [ERROR] invalid release version; ZCODE_KIT_VERSION must be vX.Y.Z or vX.Y.Z-prerelease

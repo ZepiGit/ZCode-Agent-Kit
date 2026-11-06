@@ -41,50 +41,6 @@ jobs:
       - name: MCP bridge tests
         run: npm run test:mcp
 
-  # Before-equivalence (ticket 06): every captured CLI output is byte-identical
-  # to the BEFORE baseline, the proof of "no visible change" for tickets 06–08
-  # (tests/ux-before-equivalence.test.mjs). ubuntu: all seven variants against
-  # tests/ux-before/linux. windows: the pipe and ci variants; until
-  # tests/ux-before/windows is committed, the baseline is captured on the same
-  # runner from the ticket-06 base commit and uploaded for committing.
-  ux-before:
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 26
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-      - name: Install proxy dependencies
-        run: cd zcode-proxy-src && bun install --frozen-lockfile
-      - name: Windows baseline from the base commit (until tests/ux-before/windows is committed)
-        if: runner.os == 'Windows' && hashFiles('tests/ux-before/windows/manifest.json') == ''
-        shell: bash
-        run: |
-          base="$(tr -d '\r\n' < tests/ux-before/windows-base-commit)"
-          git worktree add --detach "$RUNNER_TEMP/ux-base" "$base"
-          (cd "$RUNNER_TEMP/ux-base/zcode-proxy-src" && bun install --frozen-lockfile)
-          node tests/ux-before/capture/capture.mjs --kit "$RUNNER_TEMP/ux-base" --variants pipe,ci --out "$RUNNER_TEMP/ux-before-windows"
-          echo "UX_BEFORE_BASELINE=$RUNNER_TEMP/ux-before-windows" >> "$GITHUB_ENV"
-      - name: Upload the Windows baseline (to commit as tests/ux-before/windows)
-        if: runner.os == 'Windows' && env.UX_BEFORE_BASELINE != ''
-        uses: actions/upload-artifact@v7
-        with:
-          name: ux-before-windows-baseline
-          path: ${{ env.UX_BEFORE_BASELINE }}
-          retention-days: 14
-      - name: Before-equivalence (byte for byte)
-        run: npm run test:ux-before
-
   # Memory loop (tests/memory), short profile S1–S7, with the expected-RED
   # ratchet (tests/memory/expected-red.json): every run listed there must be
   # RED, every other run GREEN. Each run gets a systemd user scope with

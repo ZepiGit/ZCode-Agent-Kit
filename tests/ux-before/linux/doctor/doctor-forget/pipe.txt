@@ -1,2 +1,0 @@
-Decision for omp removed. Its integration is unchanged; the next zcode-kit setup asks again.
-transaction <TX> recorded — undo with: zcode-kit rollback <TX>

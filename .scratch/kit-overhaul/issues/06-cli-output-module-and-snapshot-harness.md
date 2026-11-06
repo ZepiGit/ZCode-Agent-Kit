@@ -2,7 +2,7 @@
 
 **Blocked by:** 05 (Shared width core and token set (two renderers, one token set))
 
-**Status:** resolved
+**Status:** ready-for-agent
 
 Model: glm
 
@@ -177,3 +177,5 @@ Spec stories: 89, 106, 107, 108, 123
   - Wiring guard: 0 unwired.
 
 - Merged 2026-11-06 as 5155b1d; fast suite: kit 487/498 (0 fail, 11 skipped), proxy 1343/1343 (90 files), mcp 95/96 (0 fail, 1 skipped). `dist/` unchanged; no lockfile changes. Logs: reports/merge-06-{npm-ci,test,proxy,mcp}.log. The Windows criteria (Windows pipe/ci BEFORE baseline, win32 JSON superset part) are pending CI by design (decision 3); the orchestrator verifies them after push. The 8-minute `npm run test:ux-before` is not part of the fast suite and was not run here.
+
+- 2026-11-06 (orchestrator): REVERTED (revert of merge 5155b1d) per run rules: the new `ux-before` job is red on both legs of CI run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42236936458. ubuntu: 21 diffs, all in update/update-checkout captures, from git's own remote progress text varying by git version (e.g. "pack-reused 0" vs "pack-reused 0 (from 0)", position of `\e[K`) — environment text, not kit output. windows: 136 captures differ; the proxy start path is mangled ("Cannot find module 'D:aZCode-Agent-KitZCode-Agent-Kitzcode-proxy-src/src/index.ts'": backslashes lost when the path is passed through), and `tar` fails repeatedly ("Error is not recoverable"). Logs: /home/AgentKit/overhaul-tools/uxbefore-ubuntu-1.log, /home/AgentKit/overhaul-tools/uxbefore-win-1.log. Fix on branch ticket/06-cli-output-module.

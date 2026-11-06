@@ -1,6 +1,0 @@
-Connection details (manual clients) --------------------------------------------
-  OpenAI base URL     http://127.0.0.1:18458/v1
-  Anthropic base URL  http://127.0.0.1:18458
-  API key             (redacted: not an interactive terminal - print it with: zcode-kit models --show-key)
-  Models              glm-5.3, glm-5.3-flash
-  State               * running, identity verified

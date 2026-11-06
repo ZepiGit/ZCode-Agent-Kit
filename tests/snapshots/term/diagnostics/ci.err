@@ -1,9 +1,0 @@
-FAIL  Port 18458 is in use by another service
-  why: it answered /health without this kit's identity (HTTP 401); the kit never stops a service it did not start
-  next: zcode-kit proxy status
-  next: change server.port in proxy/config.yaml, then zcode-kit proxy start
-  exit: 3
-WARN  Account Rotator question skipped
-  why: stdin is not a terminal
-  next: zcode-kit setup --reask
-INFO  Account Rotator disabled
