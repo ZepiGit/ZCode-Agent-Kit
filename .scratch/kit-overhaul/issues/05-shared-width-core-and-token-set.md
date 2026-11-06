@@ -2,7 +2,7 @@
 
 **Blocked by:** 01 (Memory loop with budgets, process-count harness, expected-RED ratchet and the ubuntu `memory-budget` job)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -141,3 +141,5 @@ Spec stories: 109
 - New test files wired: ✓.
 - Pre-existing test changes justified: ✓ (above).
 - No new log events, config keys or env overrides: n/a.
+
+Merged 2026-11-06 as 4352e3272daa3e473ee779e2cb30004a456a6bdc; fast suite: kit 350/361 (11 skipped, 0 fail; includes tests/width-core.test.mjs), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; pack build --tracked-only + verify-payload OK (204 files, all required files present). Logs: .scratch/kit-overhaul/reports/merge-05-{npmci,kit,proxy,mcp,payload}.log.
