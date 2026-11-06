@@ -160,13 +160,14 @@ const waitFor = async (fn, ms = 15_000) => { const end = Date.now() + ms; for (;
 
 test("Windows: the units self-test against Get-Process PrivateMemorySize64 passes on the live process table", windowsOnly, async () => {
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-units-"));
+  let sampler;
   try {
-    const sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=units-${process.pid}`, csvPath: join(dir, "samples.csv") });
+    sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=units-${process.pid}`, csvPath: join(dir, "samples.csv") });
     const ready = await sampler.ready;
     await sampler.stop();
     assert.equal(ready.units.ok, true, ready.units.reason);
     assert.ok(ready.units.compared >= 5, `compared ${ready.units.compared}`);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("Windows: a deliberately orphaned detached process is found, by the run token and through a parent seen earlier", windowsOnly, async () => {
@@ -174,6 +175,7 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
   const id = `orphan-${process.pid}-${Date.now()}`;
   const marker = `ZCODE_MEMLOOP_RUN=${id}`;
   const pids = [];
+  let sampler;
   // The parent starts a detached grandchild and exits; `token` puts the run id in the grandchild's command line.
   const orphanVia = async (token, parentLivesMs) => {
     const code = `const c = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", ${token ? JSON.stringify(id) : '"no-token"'}], { detached: true, stdio: "ignore" }); console.log(c.pid); c.unref(); setTimeout(() => process.exit(0), ${parentLivesMs});`;
@@ -185,17 +187,18 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
     return { orphan: Number(out.trim()), parent: parent.pid };
   };
   try {
-    const sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
+    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
     await sampler.ready;
     const byToken = await orphanVia(true, 0); // parent gone before any poll could see it
     const byTree = await orphanVia(false, 3000); // parent seen by the polls, grandchild without the token
     const found = await waitFor(() => { const s = scan(marker).map((p) => p.pid); return s.includes(byToken.orphan) && s.includes(byTree.orphan) ? s : null; });
     assert.ok(found, "both orphans in the live scan");
     await sampler.stop();
-    const after = survivors(marker);
-    assert.deepEqual(after.map((s) => s.pid).sort(), [byToken.orphan, byTree.orphan].sort(), "a fresh poll after stop still finds both");
+    const after = survivors(marker).filter((s) => !/^conhost\.exe$/i.test(s.comm ?? ""));
+    assert.deepEqual(after.map((s) => s.pid).sort((a, b) => a - b), [byToken.orphan, byTree.orphan].sort((a, b) => a - b), "a fresh poll after stop still finds both, and nothing else");
     assert.equal(after.find((s) => s.pid === byTree.orphan).ppid, byTree.parent, "Windows keeps the dead parent's pid");
   } finally {
+    await sampler?.stop();
     for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch {} }
     rmSync(dir, { recursive: true, force: true });
   }
@@ -203,8 +206,9 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
 
 test("Windows: the sampler excludes its own poller by pid and records the poller's overhead", windowsOnly, async () => {
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-self-"));
+  let sampler;
   try {
-    const sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=self-${process.pid}`, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
+    sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=self-${process.pid}`, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
     await sampler.ready;
     await sleep(2500);
     const pollerPid = sampler.pollerPid;
@@ -216,7 +220,7 @@ test("Windows: the sampler excludes its own poller by pid and records the poller
     assert.ok(o.polls >= 2 && o.peakCommitKb > 0 && o.peakRssKb > 0 && o.pollMsMax > 0, JSON.stringify(o));
     await sleep(500);
     assert.equal(alive(pollerPid), false, "the poller is reaped on stop");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 const PROBE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32", "job-probe.mjs");

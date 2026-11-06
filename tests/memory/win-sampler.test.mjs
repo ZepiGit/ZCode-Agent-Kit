@@ -76,8 +76,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 test("the Windows sampler writes commit_kb, excludes its poller, records its overhead and reaps the poller", async () => {
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-"));
   const marker = `ZCODE_MEMLOOP_RUN=${RUN.token}`;
+  let sampler;
   try {
-    const sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, progress: () => 3, windows: { rootPid: RUN.rootPid, spawn: fakePoller(), alive: () => true } });
+    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, progress: () => 3, windows: { rootPid: RUN.rootPid, spawn: fakePoller(), alive: () => true } });
     const ready = await sampler.ready;
     assert.equal(ready.units.ok, true, ready.units.reason);
     await sleep(450);
@@ -94,20 +95,21 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
     assert.deepEqual({ pid: o.pid, polls: o.polls >= 3, peakCommitKb: o.peakCommitKb, peakRssKb: o.peakRssKb, pollMsMax: o.pollMsMax >= 180 }, { pid: 2200, polls: true, peakCommitKb: 65536, peakRssKb: 81920, pollMsMax: true });
     await sleep(200);
     assert.equal(alive(pollerPid), false, "the poller child is reaped on stop");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("a units self-test failure stops the Windows sampler before it samples anything", async () => {
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-"));
+  let sampler;
   try {
-    const sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=${RUN.token}`, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ unitsCim: "cim-poll-commit-in-kb.csv" }), alive: () => true } });
+    sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=${RUN.token}`, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ unitsCim: "cim-poll-commit-in-kb.csv" }), alive: () => true } });
     await assert.rejects(sampler.ready, /units self-test failed: commit_kb/);
     const pollerPid = sampler.pollerPid;
     await sampler.stop();
     await sleep(200);
     assert.equal(alive(pollerPid), false);
     assert.equal(readFileSync(join(dir, "samples.csv"), "utf8").split("\n").filter(Boolean).length, 1, "header only");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("netstat -ano gives each pid's listening ports and its non-loopback peers", () => {

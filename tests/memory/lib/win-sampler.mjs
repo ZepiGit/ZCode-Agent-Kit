@@ -294,6 +294,10 @@ export function startPoller({ intervalMs = 1000, spawnSpec = powershellPoller, o
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   const reap = () => { try { child.kill(); } catch {} };
   process.once("exit", reap);
+  // Like the Linux sampler's timer: a forgotten poller never keeps the loop alive (exit reaps it).
+  child.unref();
+  child.stdout.unref?.();
+  child.stderr.unref?.();
   const ov = { pid: null, polls: 0, pollMs: [], peakCommitKb: 0, peakRssKb: 0 };
   let passed = false, settle;
   const ready = new Promise((resolve, reject) => { settle = { resolve, reject }; });
