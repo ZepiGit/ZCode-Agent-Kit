@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { createKitTracker, createPollParser, parseCimCsv, parseGetProcessCsv, powershellPoller, unitsSelfTest } from "./lib/win-sampler.mjs";
 import { commandFor, parseJobReport } from "./lib/caps.mjs";
 import { suspendScript } from "./lib/win-process.mjs";
-import { parseSamplesCsv, scan, startSampler } from "./lib/sampler.mjs";
+import { parseSamplesCsv, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
 import { verdict } from "./lib/verdict.mjs";
 
@@ -138,6 +138,20 @@ console.log("ROWS", s.rows.length);`;
     assert.match(r.stdout, /ROWS [1-9]/);
     assert.equal(r.status, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("after the sampler stops, survivors come from a fresh poll and never include the loop's own tooling", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-surv-"));
+  const marker = `ZCODE_MEMLOOP_RUN=${RUN.token}`;
+  let sampler;
+  try {
+    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ cim: "cim-poll-tooling.csv" }), alive: () => true } });
+    await sampler.ready;
+    await sleep(250);
+    await sampler.stop();
+    const left = survivors(marker);
+    assert.deepEqual(left.map((s) => s.pid).sort((a, b) => a - b), [2100, 2300, 2400, 2500]);
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("a units self-test failure stops the Windows sampler before it samples anything", async () => {

@@ -321,7 +321,8 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
 /** Pids still alive with the marker (orphans after stop, excluding `exceptPids`). */
 export function survivors(marker, exceptPids = []) {
   const except = new Set(exceptPids);
-  return scan(marker).filter((s) => !except.has(s.pid));
+  // Windows: the loop's own netstat/PowerShell (role "tooling") is not a kit orphan.
+  return scan(marker).filter((s) => !except.has(s.pid) && s.role !== "tooling");
 }
 
 export { PAGE_KB };
