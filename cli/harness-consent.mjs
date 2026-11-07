@@ -100,13 +100,19 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
   return {
     interactive,
     get aborted() { return aborted; },
-    async ask(question) {
+    /**
+     * `defaultAnswer: false` marks the question `[y/N]` and an empty line
+     * (Enter) answers n; without it the marker is `[y/n]` and Enter asks again.
+     */
+    async ask(question, { defaultAnswer } = {}) {
       if (!interactive) return undefined;
       ensure();
-      const promptText = `${question} [y/n] `;
+      const defaultNo = defaultAnswer === false;
+      const promptText = `${question} ${defaultNo ? "[y/N]" : "[y/n]"} `;
       for (;;) {
         const line = await nextLine(promptText);
         if (line === undefined) return undefined; // Closed input must never count as consent.
+        if (defaultNo && line.trim() === "") return false;
         if (/^[yn]$/i.test(line.trim())) return line.trim().toLowerCase() === "y";
         output.write("Please answer y or n.\n");
       }
@@ -157,10 +163,10 @@ export function parseSelection(answer, count) {
 }
 
 /** Single y/n question on its own terminal session (see createPrompter). */
-export async function askYesNo(question, streams = {}) {
+export async function askYesNo(question, streams = {}, options = {}) {
   const prompter = createPrompter(streams);
   try {
-    return await prompter.ask(question);
+    return await prompter.ask(question, options);
   } finally {
     prompter.close();
   }

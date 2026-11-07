@@ -35,8 +35,8 @@ Configure ZCode as a provider with its supported models in Continue? [y/n] n
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-[1G[0JDo you want to activate the Account Rotator feature? [y/n] [60G  Account Rotator setting unchanged (no interactive answer).
-  Enable later: zcode-kit accounts enable
+  [INFO] Account Rotator disabled (saved choice; not asked again).
+  Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
 transaction <TX> recorded — undo with: zcode-kit rollback <TX>
 

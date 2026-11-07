@@ -7,6 +7,8 @@
 //     env       the process environment;
 //     execPath  the Node executable that runs the manager;
 //     platform  process.platform;
+//     terminal  { stdin, stderr }: the process streams, read for isTTY only
+//               (update decides whether its setup re-run may ask);
 //     spawnSync the child_process boundary;
 //     runCommandSync the PATH-command boundary (lib/process.mjs: git, npm,
 //               claude);

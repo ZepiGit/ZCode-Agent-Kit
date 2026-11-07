@@ -36,7 +36,7 @@ Configure ZCode as a provider with its supported models in Continue? [y/n] n
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
+Do you want to activate the Account Rotator feature? [y/N] n
   [OK] Account Rotator disabled. Saved accounts are kept.
 
   Configuration saved.

@@ -29,6 +29,7 @@ import {
   resolveLatestTag,
   stripV,
 } from "../../lib/self-update.mjs";
+import { isInteractive } from "../harness-consent.mjs";
 import { EXIT_ABORTED, EXIT_HARNESS_FAILED, managerPath } from "./common.mjs";
 
 /** The entry refuses this command below the Node support floor, before the kit context exists. */
@@ -169,6 +170,16 @@ function stopProxyIfRunning(ctx) {
   }
 }
 
+/**
+ * The setup re-run's stdin: the terminal only when stdin and stderr are both
+ * terminals (and not CI). Otherwise setup gets no input, so it asks nothing:
+ * stored decisions apply and undecided questions are skipped. An unattended
+ * update never waits on a question nobody can see or answer (Round 1 Q8 cond 3).
+ */
+export function setupStdin({ terminal, env }) {
+  return isInteractive({ input: terminal?.stdin ?? {}, output: terminal?.stderr ?? {}, env }) ? "inherit" : "ignore";
+}
+
 function finishUpdate(ctx, harnessArgs, txId = null) {
   const { kit, progress, progressError } = ctx;
   progress("update: refreshing consented integrations (stored answers are respected; new harnesses are asked only on a terminal)...");
@@ -177,7 +188,7 @@ function finishUpdate(ctx, harnessArgs, txId = null) {
   // already loaded by this process) apply the integrations.
   const res = ctx.spawnSync(ctx.execPath, [join(kit.root, "cli", "zcode-kit.mjs"), "setup", ...harnessArgs], {
     cwd: kit.root,
-    stdio: "inherit",
+    stdio: [setupStdin(ctx), "inherit", "inherit"],
     env: { ...ctx.env, ZCODE_KIT_ALLOW_CHECKOUT: "1" },
   });
   // Exit 20 = one or more harnesses failed but the kit itself is fine; exit

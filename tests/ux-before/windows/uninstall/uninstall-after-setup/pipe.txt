@@ -1,4 +1,4 @@
 Scope: removes KIT-OWNED integrations and artifacts. Your ZCode Desktop login,
 ~/.zcode-proxy/credentials.json (shared credential store) and harness data are NOT deleted.
-rollback <TX>: 2 restored, 5 removed, 0 conflict(s)
+rollback <TX>: 2 restored, 6 removed, 0 conflict(s)
 Recorded kit files were rolled back. Unrecorded generated data, Codex sessions, proxy key and logs are preserved.
