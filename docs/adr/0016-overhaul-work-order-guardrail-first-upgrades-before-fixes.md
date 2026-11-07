@@ -19,3 +19,11 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Sources: [`.scra
 
 - The expected-RED list can only shrink; it is empty at the Phase 6 gate.
 - The toolchain batch changes the job's Bun pin from 1.4.2 to 1.4.4; the attribution run follows immediately.
+
+## Amended 2026-11-07 (Rounds 10–11)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 10, Q1 and Round 11, Q1.
+
+- **The job's Bun pin stays at 1.4.2 (Rounds 10–11).** This replaces the Consequences line "The toolchain batch changes the job's Bun pin from 1.4.2 to 1.4.4". A paired, interleaved CI measurement on one runner showed Bun 1.4.3 and 1.4.4 raise the Linux S1/burst1 proxy peak against 1.4.2 (5 / 14 / 13 of 24 runs above 250 MB; one-sided Fisher p = 0.0086 and 0.0178). So no newer Bun passes the full suite there, and C5 picks 1.4.2. One pin applies everywhere: CI, the `memory-budget` job, release.yml and the installers. The attribution run is moot, because the runtime does not change.
+- Condition 3 is upheld, not contradicted: every memory fix starts RED on 1.4.2, the runtime the kit ships.
+- Ticket 62 owns moving the pin forward under Round 11 Q1 condition 4's re-entry rule.
