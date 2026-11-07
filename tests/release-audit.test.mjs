@@ -7,6 +7,11 @@ import { join } from "node:path";
 
 const KIT = join(import.meta.dirname, "..");
 
+// Workflow text with LF line endings, read in one place: a Windows checkout
+// (autocrlf) has CRLF, and every assertion here is written against LF.
+const lf = (text) => text.replace(/\r\n/g, "\n");
+const workflowText = (path) => lf(readFileSync(join(KIT, path), "utf8"));
+
 function put(root, path, text = "// fixture\n") {
   mkdirSync(join(root, path, ".."), { recursive: true });
   writeFileSync(join(root, path), text);
@@ -50,7 +55,7 @@ function packageFixture(t) {
 }
 
 test("release workflow keeps automatic main releases while isolating write and OIDC permissions to the publish job", () => {
-  const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const workflow = workflowText(".github/workflows/release.yml");
   const top = workflow.split("jobs:\n")[0];
   const testJob = workflow.split("  test:\n")[1]?.split("  release-and-publish:\n")[0] ?? "";
   const publishJob = workflow.split("  release-and-publish:\n")[1] ?? "";
@@ -70,7 +75,7 @@ test("release workflow keeps automatic main releases while isolating write and O
 });
 
 test("release verification timeout covers the complete registry retry budget", async () => {
-  const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const workflow = workflowText(".github/workflows/release.yml");
   const step = workflow.split("      - name: Verify exact published version is visible on npm\n")[1]?.split("\n      - name:")[0] ?? "";
   const timeoutMinutes = Number(step.match(/timeout-minutes:\s*(\d+)/)?.[1]);
   assert.match(step, /run: node scripts\/registry-version\.mjs verify "\$VERSION"/);
@@ -88,7 +93,7 @@ test("release verification timeout covers the complete registry retry budget", a
 });
 
 test("account-rotator feature releases are isolated prereleases built from the tested SHA", () => {
-  const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const workflow = workflowText(".github/workflows/release.yml");
   const featureJob = workflow.split("  feature-account-rotator-prerelease:\n")[1] ?? "";
   assert.ok(featureJob, "feature prerelease job must exist");
   assert.match(workflow, /branches: \["main", "feature\/account-rotator"\]/);
@@ -239,6 +244,18 @@ test("pin scanner: only a marker-guarded, uncached setup-bun step in memory-budg
   assert.deepEqual(pinViolations(unguarded.rest), ["bun-version: 1.4.4 (want 1.4.2)"]);
 });
 
+test("workflow text reads the same with LF and CRLF line endings: same pins, same measurement arms (Windows checkouts)", () => {
+  for (const file of trackedWorkflows()) {
+    const text = workflowText(file);
+    const crlf = text.replace(/\n/g, "\r\n");
+    assert.ok(crlf.includes("\r\n") && !lf(crlf).includes("\r"), file);
+    const a = splitMeasurementArms(text), b = splitMeasurementArms(lf(crlf));
+    assert.deepEqual(b.arms, a.arms, file);
+    assert.deepEqual(pinViolations(b.rest), pinViolations(a.rest), file);
+    assert.deepEqual(pinViolations(b.rest), [], file);
+  }
+});
+
 test("pin scanner catches stale pins in every spelling (scanner self-check)", () => {
   assert.deepEqual(pinViolations([
     "      - uses: actions/checkout@v7",
@@ -275,7 +292,7 @@ test("CI and release workflows pin checkout@v7, setup-node@v7, setup-bun@v2, Bun
   assert.deepEqual(files.sort(), [".github/workflows/ci.yml", ".github/workflows/release.yml"],
     "only the root workflows exist; the nested vendored proxy workflows are deleted (they never ran and pinned Bun 1.4.0)");
   for (const file of files) {
-    const { rest: text, arms } = splitMeasurementArms(readFileSync(join(KIT, file), "utf8").replace(/\r\n/g, "\n"));
+    const { rest: text, arms } = splitMeasurementArms(workflowText(file));
     assert.deepEqual(arms.flatMap((a) => a.problems), [], `${file}: measurement arm steps`);
     if (file.endsWith("release.yml")) assert.deepEqual(arms, [], "release.yml never installs a measurement arm");
     else assert.deepEqual(arms.map((a) => a.version), ["1.4.3", "1.4.4"], "the paired measurement's candidate arms (Round 10 Q1 condition 1, Round 11 Q1 condition 4)");
@@ -295,7 +312,7 @@ test("CI and release workflows pin checkout@v7, setup-node@v7, setup-bun@v2, Bun
 });
 
 test("release workflow: tests on Node 26, publish keeps Node 24 for OIDC, triggers unchanged", () => {
-  const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const workflow = workflowText(".github/workflows/release.yml");
   const job = (name, next) => workflow.split(`  ${name}:\n`)[1]?.split(next ? `  ${next}:\n` : /\n(?! )/)[0] ?? "";
   const nodeVersions = (text) => [...text.matchAll(/node-version:\s*["']?([^\s"']+)/g)].map((m) => m[1]);
   assert.deepEqual(nodeVersions(job("test", "release-and-publish")), ["26"], "release test job runs on Node 26");

@@ -653,8 +653,14 @@ test("job: S1/burst1 runs n fresh repetitions (n from budgets.mjs REPEATED) and 
   assert.equal(job.results[0].median.n, n);
 });
 
-test("measurement mode is off by default: the ratchet step runs unless the marker file exists, and the marker is not committed", () => {
-  const ci = readFileSync(join(KIT_ROOT, ".github", "workflows", "ci.yml"), "utf8");
+// Workflow text with LF line endings: a Windows checkout (autocrlf) has CRLF,
+// and every assertion below is written against LF (CI run 42360554587).
+const lf = (text) => text.replace(/\r\n/g, "\n");
+const ciWorkflow = () => readFileSync(join(KIT_ROOT, ".github", "workflows", "ci.yml"), "utf8");
+
+/** The memory-budget job's measurement-mode wiring, asserted on ci.yml text as checked out (LF or CRLF). */
+function assertMeasurementWiring(ciText) {
+  const ci = lf(ciText);
   const job = ci.slice(ci.indexOf("\n  memory-budget:"));
   const step = (name) => job.slice(job.indexOf(`- name: ${name}`)).split(/\n      - /)[0];
   assert.match(step("Memory loop (short profile) and expected-RED ratchet"), /if: hashFiles\('tests\/memory\/measure-burst1'\) == ''/);
@@ -677,8 +683,20 @@ test("measurement mode is off by default: the ratchet step runs unless the marke
   const ownBun = job.indexOf("\n          bun-version: 1.4.2\n");
   assert.ok(ownBun > 0 && job.indexOf("- name: Keep Bun 1.4.4 aside") < ownBun && ownBun < job.indexOf("- name: Keep Bun 1.4.2 aside"), "the job's own Bun is installed last, so it stays the one on PATH");
   assert.match(measure, /grep -q 'bun=' tests\/memory\/measure-burst1[\s\S]*for v in \$\(printf '%s' "\$\{SPEC#\*bun=\}" \| tr ',' ' '\); do BUNS="\$\{BUNS:\+\$BUNS,\}\$v=\$ARMS\/\$v\/bun\$EXE"; done[\s\S]*--bun "\$BUNS"/);
+}
+
+test("measurement mode is off by default: the ratchet step runs unless the marker file exists, and the marker is not committed", () => {
+  assertMeasurementWiring(ciWorkflow());
   // A measurement run turns the ratchet off; a committed marker must never reach the integration branch.
   assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-burst1"), false, "tests/memory/measure-burst1 is a one-run switch: delete it before the pre-merge run");
+});
+
+test("the measurement-mode wiring check reads ci.yml the same with LF and CRLF line endings (Windows checkouts)", () => {
+  const text = lf(ciWorkflow());
+  const crlf = text.replace(/\n/g, "\r\n");
+  assert.ok(crlf.includes("bun-version: 1.4.3\r\n          no-cache: true"), "the CRLF copy is a real CRLF checkout");
+  assertMeasurementWiring(text);
+  assertMeasurementWiring(crlf);
 });
 
 test("measurement mode: N fresh sequential S1/burst1 runs on Windows, each with WS gate, sampled WS, ws_peak_kb, commit, proxy count, units and Job Object", () => {
