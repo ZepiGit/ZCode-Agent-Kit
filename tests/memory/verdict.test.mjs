@@ -639,3 +639,37 @@ test("the S3 OMP leg runs on both legs and is expected RED until single-flight l
   assert.equal(expected.linux["S3/omp"], "35");
   assert.equal(expected.windows["S3/omp"], "35");
 });
+
+test("S3/omp → 35 is a plain entry on both legs: RED passes the ratchet, GREEN asks for its deletion, `unstable` is refused", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const expected = readExpectedRed(join(here, "expected-red.json"));
+  const issueIds = issueIdsIn(join(here, "..", "..", ".scratch", "kit-overhaul", "issues"));
+  for (const os of ["linux", "windows"]) {
+    const results = JOB[os].map((key) => {
+      const entry = expected[os][key];
+      if (entry?.state === "unstable") return { key, exitCode: 0, redChecks: [], median: { medianMB: 240, budgetMB: 250, check: "procPeak:proxy" } };
+      return { key, exitCode: entry ? 1 : 0, redChecks: entry ? [key === "S3/omp" ? "omp:concurrent-preflights" : "x"] : [] };
+    });
+    const red = checkRatchet({ expected, os, results, issueIds });
+    assert.deepEqual(red.failures, [], os);
+    const green = checkRatchet({ expected, os, results: results.map((r) => (r.key === "S3/omp" ? { ...r, exitCode: 0, redChecks: [] } : r)), issueIds });
+    assert.deepEqual(green.failures, [`S3/omp: GREEN but listed for ticket 35: delete the entry from expected-red.json (${os})`]);
+    const unstable = { ...expected, [os]: { ...expected[os], "S3/omp": { ticket: "35", state: "unstable" } } };
+    assert.match(validateExpectedRed(unstable, { issueIds }).join("\n"), new RegExp(`${os} S3/omp: \`unstable\` is allowed for windows S1/burst1 only`));
+  }
+});
+
+test("OMP leg on Windows: the waiter cost is gated on commit and reported with its working set", () => {
+  const r = singleFlight();
+  for (const h of r.hosts) Object.assign(h, { metric: "commit", costMB: 3.2, wsCostMB: 1.1 });
+  r.hosts[2].costMB = 5.6;
+  const c = ompCheck([r], "omp:waiter-cost");
+  assert.equal(c.red, true, "a waiter above 5 MB of commit is red, whatever its working set");
+  assert.equal(c.value, 5.6);
+  assert.equal(c.gate, "commit");
+  assert.match(c.detail.join("\n"), /omp-5 host 2 waiter \+5\.6 MB commit \/ \+1\.1 MB WS/);
+  // Linux: RSS only, as before.
+  const linux = ompCheck([singleFlight()], "omp:waiter-cost");
+  assert.equal(linux.gate, undefined);
+  assert.match(linux.detail.join("\n"), /omp-5 host 1 waiter \+1\.2 MB$/m);
+});

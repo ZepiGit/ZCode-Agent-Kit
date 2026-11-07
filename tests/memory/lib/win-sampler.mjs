@@ -83,7 +83,8 @@ export function splitCommandLine(line) {
 }
 
 const TOOLING = /^(?:powershell|pwsh|netstat|conhost|where)\.exe$/i;
-const FIXTURE_ROLES = new Set(["mock-upstream", "scenario", "fake-harness"]);
+// The S3 OMP leg's stub host is the harness (ADR-0013 cond 4), so its console host is too.
+const FIXTURE_ROLES = new Set(["mock-upstream", "scenario", "fake-harness", "omp-host"]);
 
 // FILETIME values as decimal strings: compare as BigInt (they exceed 2^53).
 const time = (s) => { try { return BigInt(s || "0"); } catch { return 0n; } };

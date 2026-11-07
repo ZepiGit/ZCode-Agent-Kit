@@ -12,6 +12,7 @@
 // `roles` must each be seen in at least one sample. S6 measures heap in its
 // own Bun process and its processes are often not sampled at all in its 3–6 s
 // (a Linux smoke run had 2 samples and no role), so it needs no role.
+// A run key may carry its own floor, which then replaces its scenario's.
 
 export const EVIDENCE = {
   S1: { minDurationS: 10, minSamples: 5, roles: ["proxy"] },
@@ -19,6 +20,11 @@ export const EVIDENCE = {
   // No mcp-bridge: a bridge starts only after a launch succeeds, and S3 measures
   // launches that fail (S3/hung on Windows: 21 of 21, CI run 42252896054).
   S3: { minDurationS: 15, minSamples: 10, roles: ["proxy", "launcher", "preflight"] },
+  // The OMP stub-host leg (ticket 03) starts no launcher: its proof is the stub
+  // hosts, the preflights they spawn and the proxy one of them starts. Linux
+  // runs take 10–12 s with 28–37 samples (ticket 03 Comments); the manager a
+  // preflight runs is too short-lived to be required on a Windows poll.
+  "S3/omp": { minDurationS: 5, minSamples: 14, roles: ["proxy", "preflight", "omp-host"] },
   S4: { minDurationS: 60, minSamples: 30, roles: ["proxy", "manager"] },
   S5: { minDurationS: 120, minSamples: 60, roles: ["mcp-bridge"] },
   S6: { minDurationS: 1, minSamples: 1, roles: [] },
@@ -34,6 +40,8 @@ export const EVIDENCE = {
 export const ROUNDS = {
   "S3/short": ["race-5#0", "race-10#0", "race-10-preflight#0", "kill-holder-10"],
   "S3/hung": ["kill-holder-10", "hung-10-with-stale-lock", "hung-10"],
+  // scenarios/s3-concurrency.mjs OMP_ROUNDS; the second is the killed-starter adversary.
+  "S3/omp": ["omp-5", "omp-5-kill-starter"],
 };
 
 const OUTCOME_OF_EXIT = { 0: "GREEN", 1: "RED" };
@@ -49,11 +57,12 @@ export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, round
   if (summary.key !== key) problems.push(`summary is for ${summary.key}, not ${key}`);
   if (summary.outcome !== OUTCOME_OF_EXIT[exitCode]) problems.push(`outcome ${summary.outcome} but exit ${exitCode}`);
   const scenario = String(key).split("/")[0];
-  const floor = evidence[scenario];
+  const floorName = Object.hasOwn(evidence, key) ? key : scenario;
+  const floor = evidence[floorName];
   if (!floor) problems.push(`no evidence floor for ${scenario}`);
   else {
     if (!(summary.samples >= floor.minSamples)) problems.push(`${summary.samples ?? 0} samples (need ≥ ${floor.minSamples})`);
-    if (!(summary.durationS >= floor.minDurationS)) problems.push(`scenario ran ${summary.durationS ?? 0} s, below the ${scenario} floor of ${floor.minDurationS} s`);
+    if (!(summary.durationS >= floor.minDurationS)) problems.push(`scenario ran ${summary.durationS ?? 0} s, below the ${floorName} floor of ${floor.minDurationS} s`);
     for (const role of floor.roles) if (!(summary.summary?.[role]?.maxCount >= 1)) problems.push(`role ${role} never seen`);
   }
   const notes = summary.notes ?? {};

@@ -8,11 +8,13 @@
 //
 // Protocol (stdout, one JSON line each; the extension's own lines go to stderr):
 //   OMP_HOST_READY {pid, baselineMB, metric}  idle, extension loaded, settled
-//   OMP_HOST_DONE  {pid, baselineMB, peakMB, costMB, ms, metric}  the hook returned
+//   OMP_HOST_DONE  {pid, baselineMB, peakMB, costMB, ms, metric[, wsCostMB]}  the hook returned
 // stdin: a line "arm" opens the measurement (sent at spawn), a line "go" fires
 // the hook; end of stdin (the loop went away) exits.
-// Metric: RSS, or on Windows the commit charge (Bun.unsafe.memoryFootprint),
-// matching the loop's per-OS metric (spec §1).
+// Metric: RSS, or on Windows the commit charge (Bun.unsafe.memoryFootprint:
+// PrivateUsage there), matching the loop's per-OS metric (spec §1). On Windows
+// the working-set delta (process.memoryUsage().rss) is measured beside it and
+// reported as wsCostMB (Round 7 Q1 condition 3: every memory check shows both).
 import { pathToFileURL } from "node:url";
 
 const extensionPath = process.argv[2];
@@ -23,6 +25,8 @@ const MB = 1024 * 1024;
 const footprint = (Bun as unknown as { unsafe?: { memoryFootprint?: () => number } }).unsafe?.memoryFootprint;
 const metric = process.platform === "win32" && typeof footprint === "function" ? "commit" : "rss";
 const now = () => (metric === "commit" ? footprint!() : process.memoryUsage().rss) / MB;
+const nowWs = () => process.memoryUsage().rss / MB;
+const dual = metric === "commit";
 const round = (v: number) => Number(v.toFixed(2));
 
 const hooks = new Map<string, Hook>();
@@ -57,8 +61,9 @@ await armed;
 Bun.gc(true);
 await Bun.sleep(300);
 let baselineMB = now();
+let wsBaselineMB = dual ? nowWs() : 0;
 {
-  const idle = setInterval(() => { baselineMB = Math.max(baselineMB, now()); }, 10);
+  const idle = setInterval(() => { baselineMB = Math.max(baselineMB, now()); if (dual) wsBaselineMB = Math.max(wsBaselineMB, nowWs()); }, 10);
   await Bun.sleep(1000);
   clearInterval(idle);
 }
@@ -71,13 +76,16 @@ async function fire() {
   if (fired) return;
   fired = true;
   let peakMB = now();
-  const sample = setInterval(() => { peakMB = Math.max(peakMB, now()); }, 10);
+  let wsPeakMB = dual ? nowWs() : 0;
+  const sample = setInterval(() => { peakMB = Math.max(peakMB, now()); if (dual) wsPeakMB = Math.max(wsPeakMB, nowWs()); }, 10);
   const t0 = Date.now();
   try { await hook!({}, { model: { provider: "zcode" } }); }
   finally {
     clearInterval(sample);
     peakMB = Math.max(peakMB, now());
+    if (dual) wsPeakMB = Math.max(wsPeakMB, nowWs());
   }
-  console.log(`OMP_HOST_DONE ${JSON.stringify({ pid: process.pid, baselineMB: round(baselineMB), peakMB: round(peakMB), costMB: round(Math.max(0, peakMB - baselineMB)), ms: Date.now() - t0, metric })}`);
+  const ws = dual ? { wsCostMB: round(Math.max(0, wsPeakMB - wsBaselineMB)) } : {};
+  console.log(`OMP_HOST_DONE ${JSON.stringify({ pid: process.pid, baselineMB: round(baselineMB), peakMB: round(peakMB), costMB: round(Math.max(0, peakMB - baselineMB)), ms: Date.now() - t0, metric, ...ws })}`);
 }
 

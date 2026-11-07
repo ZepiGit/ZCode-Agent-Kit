@@ -7,6 +7,10 @@
 //   causeLines  the fixed-vocabulary `[zcode-autostart] <cause>: …` lines it printed;
 //   costMB      its own RSS (commit on Windows) above its idle baseline while
 //               the hook ran, or null when it never reported one;
+//   wsCostMB    Windows only: the same delta on working set, reported beside
+//               the commit gate (Round 7 Q1 condition 3). Round 7 Q1 moved only
+//               the kit's per-process budgets to working set; the waiter cost
+//               stays on commit there (ticket 03 Comments);
 //   killed      the round killed it (the starter, with its process tree);
 //   finished    its hook returned.
 // A starter is a surviving host that spawned a preflight; a waiter spawned none.
@@ -32,6 +36,7 @@ export function causeLinesOf(stderr, warnings) {
 
 const roleOf = (h) => (h.killed ? "killed" : h.preflights > 0 ? "starter" : "waiter");
 const mb = (v) => (typeof v === "number" ? `+${Number(v.toFixed(1))} MB` : "unmeasured");
+const costOf = (h) => (h.metric === "commit" ? `${mb(h.costMB)} commit / ${mb(h.wsCostMB)} WS` : mb(h.costMB));
 
 export function ompLegChecks(rounds, budget = OMP_LEG) {
   const worstConcurrent = Math.max(0, ...rounds.map((r) => r.maxConcurrentPreflights ?? 0));
@@ -54,14 +59,15 @@ export function ompLegChecks(rounds, budget = OMP_LEG) {
   const unmeasured = costs.some((c) => typeof c !== "number");
   const worstCost = costs.filter((c) => typeof c === "number").reduce((a, c) => Math.max(a, c), 0);
   const notKilled = rounds.filter((r) => r.killExpected && !r.hosts.some((h) => h.killed));
+  const onCommit = rounds.some((r) => r.hosts.some((h) => h.metric === "commit"));
   return [
     {
       name: "omp:concurrent-preflights", red: worstConcurrent > budget.concurrentPreflights, value: worstConcurrent, budget: budget.concurrentPreflights, unit: "procs",
       detail: rounds.map((r) => `${r.name}: max ${r.maxConcurrentPreflights} at once, ${r.hosts.reduce((a, h) => a + h.preflights, 0)} spawned`),
     },
     {
-      name: "omp:waiter-cost", red: unmeasured || worstCost > budget.waiterCostMB, value: waiters.length ? (unmeasured ? "unmeasured" : Number(worstCost.toFixed(1))) : "no waiter", budget: budget.waiterCostMB, unit: "MB/host",
-      detail: rounds.flatMap((r) => r.hosts.map((h) => `${r.name} host ${h.id} ${roleOf(h)} ${mb(h.costMB)}`)),
+      name: "omp:waiter-cost", red: unmeasured || worstCost > budget.waiterCostMB, value: waiters.length ? (unmeasured ? "unmeasured" : Number(worstCost.toFixed(1))) : "no waiter", budget: budget.waiterCostMB, unit: "MB/host", ...(onCommit ? { gate: "commit" } : {}),
+      detail: rounds.flatMap((r) => r.hosts.map((h) => `${r.name} host ${h.id} ${roleOf(h)} ${costOf(h)}`)),
     },
     { name: "omp:waiter-cause-lines", red: missingCauses.length > 0, value: missingCauses.length, budget: 0, unit: "waiters without", detail: missingCauses },
     { name: "omp:hosts-finished", red: unfinished.length > 0, value: unfinished.length, budget: 0, unit: "hosts still waiting", detail: unfinished },

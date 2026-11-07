@@ -16,7 +16,7 @@ import { causeLinesOf } from "./lib/omp-leg.mjs";
 import { OMP_LEG } from "./lib/budgets.mjs";
 import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
 import { resolveBun } from "../../lib/process.mjs";
-import { runEvidence } from "./lib/completeness.mjs";
+import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { whileFrozen } from "./lib/freeze.mjs";
 import { makeHungRound } from "./scenarios/s3-concurrency.mjs";
@@ -330,6 +330,9 @@ test("the stub OMP host runs the generated extension once, prints its cause line
     assert.equal(typeof done.costMB, "number");
     assert.ok(done.costMB >= 0 && done.peakMB >= done.baselineMB);
     assert.equal(done.metric, process.platform === "win32" ? "commit" : "rss");
+    // Windows reports the working-set delta beside the commit gate; Linux has one metric.
+    if (process.platform === "win32") assert.ok(typeof done.wsCostMB === "number" && done.wsCostMB >= 0, JSON.stringify(done));
+    else assert.equal(done.wsCostMB, undefined);
     assert.deepEqual(causeLinesOf(host.stderr(), PREFLIGHT_WARNINGS), [`[zcode-autostart] quota-unavailable: ${PREFLIGHT_WARNINGS["quota-unavailable"]}`]);
     assert.doesNotMatch(host.stderr(), /SECRET/);
     assert.deepEqual(readFileSync(join(f.root, "attempts"), "utf8").trim().split("\n"), [String(host.pid)], "one preflight, spawned by the host itself");
@@ -497,6 +500,59 @@ test("run evidence: an S3 round that was skipped or never ran fails the run, wha
   // S3/short likewise needs its four short-profile rounds.
   const short = { ...busy({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }] }), key: "S3/short" };
   assert.match(runEvidence(short, { key: "S3/short", exitCode: 1 }).problems.join(), /round kill-holder-10 never ran/);
+});
+
+// ── S3/omp (ticket 03): no launcher ever runs, the run takes 10–12 s on Linux,
+// and its proof is the stub hosts, their preflights and the proxy one of them
+// started. Its own floor, never an exemption from the gate.
+const S3_OMP_ROUNDS = [{ name: "omp-5" }, { name: "omp-5-kill-starter" }];
+const s3omp = ({ roles = ["proxy", "preflight", "omp-host", "manager"], rounds = S3_OMP_ROUNDS, ...rest } = {}) => ({ key: "S3/omp", platform: "linux", outcome: "RED", metric: "rss", durationS: 10, samples: 28, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: r === "omp-host" ? 5 : 1 }])), notes: { sampler: {}, rounds }, ...rest });
+
+test("run evidence: S3/omp is proven by its hosts, their preflights, the proxy and both OMP rounds, not by launchers", () => {
+  assert.deepEqual(runEvidence(s3omp(), { key: "S3/omp", exitCode: 1 }), { ok: true, problems: [] });
+  assert.match(runEvidence(s3omp({ roles: ["proxy", "preflight"] }), { key: "S3/omp", exitCode: 1 }).problems.join(), /role omp-host never seen/);
+  assert.match(runEvidence(s3omp({ roles: ["proxy", "omp-host"] }), { key: "S3/omp", exitCode: 1 }).problems.join(), /role preflight never seen/);
+  assert.match(runEvidence(s3omp({ roles: ["preflight", "omp-host"] }), { key: "S3/omp", exitCode: 0 }).problems.join(), /role proxy never seen/);
+  // The killed-starter round is the adversary: a run without it never ran its scenario.
+  assert.match(runEvidence(s3omp({ rounds: S3_OMP_ROUNDS.slice(0, 1) }), { key: "S3/omp", exitCode: 1 }).problems.join(), /round omp-5-kill-starter never ran/);
+  assert.match(runEvidence(s3omp({ rounds: [] }), { key: "S3/omp", exitCode: 0 }).problems.join(), /round omp-5 never ran/);
+  // Half the shortest Linux run (10 s, 28 samples): a run that never started its hosts is below it.
+  assert.match(runEvidence(s3omp({ durationS: 3, samples: 9 }), { key: "S3/omp", exitCode: 0 }).problems.join(), /9 samples \(need ≥ 14\).*ran 3 s, below the S3\/omp floor of 5 s/);
+  // The other S3 runs keep the S3 floor: a launcher and 15 s.
+  const shortRun = { ...s3omp({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }, { name: "kill-holder-10" }] }), key: "S3/short" };
+  assert.match(runEvidence(shortRun, { key: "S3/short", exitCode: 1 }).problems.join(), /below the S3 floor of 15 s.*role launcher never seen/);
+});
+
+// A real S3/omp run on this branch (Linux, Bun 1.4.2, 2026-11-07): 5 OMP
+// preflights at once in both rounds, every other check green. The integration
+// tip's gate (the S3 floor) called it a harness failure: 12 s, no launcher.
+const S3_OMP_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "local-20261107-s3-omp-linux-summary.json");
+
+test("job: a real S3/omp run passes the evidence gate and is the listed RED; without its killed-starter round it is a harness failure", () => {
+  const { r, row, result } = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: S3_OMP_RUN });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(row, { key: "S3/omp", outcome: "RED", ticket: "35" });
+  assert.deepEqual(result.redChecks, ["omp:concurrent-preflights"]);
+  const dir = mkdtempSync(join(tmpdir(), "memloop-s3omp-"));
+  try {
+    const run = JSON.parse(readFileSync(S3_OMP_RUN, "utf8"));
+    const cut = join(dir, "summary.json");
+    writeFileSync(cut, JSON.stringify({ ...run, notes: { ...run.notes, rounds: run.notes.rounds.slice(0, 1) } }));
+    const skipped = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: cut });
+    assert.equal(skipped.row?.outcome, "HARNESS FAILURE", skipped.r.stdout + skipped.r.stderr);
+    assert.match(skipped.result.error, /round omp-5-kill-starter never ran/);
+    assert.equal(skipped.r.status, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the S3/omp scenario runs exactly the rounds the evidence gate demands", async () => {
+  const { OMP_ROUNDS } = await import("./scenarios/s3-concurrency.mjs");
+  assert.deepEqual(Object.keys(OMP_ROUNDS), ROUNDS["S3/omp"]);
+  assert.deepEqual(ROUNDS["S3/omp"], S3_OMP_ROUNDS.map((r) => r.name));
+  assert.equal(OMP_ROUNDS["omp-5-kill-starter"].killStarter, true);
+  assert.ok(!OMP_ROUNDS["omp-5"].killStarter);
 });
 
 // The loop freezes its own hung proxy (S3); whatever happens in between, it

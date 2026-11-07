@@ -53,6 +53,13 @@ const thaw = (pid) => (process.platform === "win32" ? resumeProcess(pid) : proce
 // peak (VmHWM, read while it is alive) reaches the per-role verdict.
 export const sampleIntervalMs = 250;
 
+// The S3 OMP leg's rounds, in order; the evidence gate requires each by name
+// (lib/completeness.mjs ROUNDS["S3/omp"]).
+export const OMP_ROUNDS = {
+  "omp-5": {},
+  "omp-5-kill-starter": { killStarter: true },
+};
+
 // A hung round: our running proxy is frozen past the manager's startup grace,
 // then 10 mixed launches race the kit's hung-own recovery.
 //
@@ -257,6 +264,8 @@ export async function run(ctx) {
             baselineMB: done[id]?.baselineMB ?? ready[id]?.baselineMB ?? null,
             peakMB: done[id]?.peakMB ?? null,
             metric: ready[id]?.metric ?? null,
+            // Windows: the host's working-set delta, reported beside the commit gate (Round 7 Q1 condition 3).
+            wsCostMB: done[id]?.wsCostMB ?? null,
             hookMs: done[id]?.ms ?? null,
             finished: done[id] !== null,
             lastLine: h.stderr().trim().split("\n").slice(-1)[0]?.slice(0, 200) ?? "",
@@ -275,14 +284,14 @@ export async function run(ctx) {
   async function ompLeg() {
     const extension = generateOmpExtension({ root: KIT_ROOT, home: kit.home, keyFile: join(kit.stateDir, ".proxykey"), port: kit.port, key: kit.key });
     const omp = [];
-    for (const [name, opts] of [["omp-5", {}], ["omp-5-kill-starter", { killStarter: true }]]) {
+    for (const [name, opts] of Object.entries(OMP_ROUNDS)) {
       const r = await ompRound(name, extension, opts);
       omp.push(r);
       // A killed starter's preflight may have held the start lock: this run's own lock, cleared as in kill-holder.
       await clearStaleLock(name);
       r.stop = await stopAll(name);
     }
-    ctx.note("ompRounds", omp);
+    ctx.note("rounds", omp);
     await session.stop();
     const worstProxies = Math.max(0, ...omp.map((r) => r.maxSimultaneousProxies));
     return {
