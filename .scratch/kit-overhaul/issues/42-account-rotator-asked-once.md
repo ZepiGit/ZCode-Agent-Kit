@@ -2,7 +2,7 @@
 
 **Blocked by:** 08 (CLI command-module split, part 2 (migrate remaining commands + contract))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -240,3 +240,5 @@ Both are RED on the existing `S3/short` expected-RED entry (tickets 16/37); the 
 **Pending CI:** windows `test-kit` (Node 24, 26), the CRLF tests and the pre-rotator test on the CRLF checkout. Round 1–2's list otherwise stands.
 
 **Not covered here:** `bootstrap` creates `config.yaml` from the example, keeping the checkout's line endings, and other writers of `config.yaml` outside this ticket (harness adapters, upstream-config) were not audited. This round covered only the Account Rotator paths.
+
+- Merged 2026-11-07 as 928565e28a52788fda5c37ef49e2c9f004c20ec8 (ticket/42-account-rotator-asked-once at 99310eb into f2c0e74; first merge, no revert-of-revert step); fast suite: kit 780/799 (19 skipped, 0 fail), proxy 1354/1354, mcp 95/96 (1 skipped, 0 fail); also `npm run test:ux-before` 1/1 and `npm run test:proxy-typecheck` exit 0; mcp dist unchanged; no lockfile changes; clean merge (no conflicts, none in non-.scratch files after tickets 65 and 32 landed). Sanity: `git diff staging/42 HEAD` over the 143 non-.scratch files ticket 42 changed (from merge-base f7d73d3) is empty (every file matches the staging/42 4eff3c6 tree CI judged). Pre-merge CI (draft PR #24, staging/42 4eff3c6), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42415962768 (earlier rounds: 42401136452 readline cursor control in CI, fixed in round 2; 42408170742 CRLF fixture + configureAccountRotator bug, fixed in round 3 04dfbaa). Logs: .scratch/kit-overhaul/reports/merge-42-{npm-ci,test,proxy,mcp,ux-before,proxy-typecheck}.log.
