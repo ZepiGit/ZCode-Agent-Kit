@@ -105,14 +105,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # Memory loop (tests/memory), short profile S1–S7, with the expected-RED
-  # ratchet (tests/memory/expected-red.json): every run listed there must be
-  # RED, every other run GREEN. Each run gets a systemd user scope with
-  # MemoryMax (verified) or prlimit, and a timeout (tests/memory/job.mjs).
-  # The windows leg joins with the Windows sampler (ticket 02).
+  # Memory loop (tests/memory), short profile, with the expected-RED ratchet
+  # (tests/memory/expected-red.json, keyed per OS leg): every run listed there
+  # must be RED, every other run GREEN. ubuntu runs S1–S7, each run in a
+  # systemd user scope with MemoryMax (verified) or prlimit, plus a timeout;
+  # windows runs S1, S2 (offline fixture), S3, S4, S5 and S7 with the Windows
+  # sampler (commit charge), each run in a Job Object with a job memory limit
+  # and kill-on-close (read back before the run), plus a timeout
+  # (tests/memory/job.mjs, lib/caps.mjs).
   memory-budget:
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 150 || 75 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     env:
       # Disposable runner: the only place the loop may run without run-capped.sh.
       ZCODE_MEMLOOP_ALLOW: "1"
@@ -129,12 +136,12 @@ jobs:
           cd zcode-proxy-src && bun install --frozen-lockfile
           cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile
       - name: Memory loop (short profile) and expected-RED ratchet
-        run: node tests/memory/job.mjs --out "$RUNNER_TEMP/memloop"
+        run: node tests/memory/job.mjs --out "${{ runner.temp }}/memloop"
       - name: Upload memory loop artefacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: memory-budget-linux
+          name: memory-budget-${{ matrix.os == 'windows-latest' && 'windows' || 'linux' }}
           path: |
             ${{ runner.temp }}/memloop/job-summary.json
             ${{ runner.temp }}/memloop/job-summary.md

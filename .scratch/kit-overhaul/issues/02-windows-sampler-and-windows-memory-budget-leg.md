@@ -2,7 +2,7 @@
 
 **Blocked by:** 01 (Memory loop with budgets, process-count harness, expected-RED ratchet and the ubuntu `memory-budget` job)
 
-**Status:** ready-for-agent
+**Status:** claimed
 
 Model: sol
 

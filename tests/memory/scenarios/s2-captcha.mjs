@@ -87,14 +87,16 @@ export async function run(ctx) {
   const heap = existsSync(heapLog) ? readFileSync(heapLog, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
   const byName = Object.fromEntries(marks.map((m) => [m.name, m]));
   const maxWorkerHeap = (kind) => Math.max(0, ...heap.filter((h) => h.kind === kind).map((h) => h.heapMB));
-  ctx.note("marks", marks.map(({ name, rssMB, mainHeapMB, tMs, solver, entries, coldStartMs, idleExited }) => ({ name, tMs, rssMB, mainHeapMB, generation: solver.generation, recycles: solver.recycles, lastRecycleReason: solver.lastRecycleReason, deadlineKills: solver.deadlineKills, ...(entries ? { entries } : {}), ...(coldStartMs !== undefined ? { coldStartMs, idleExited } : {}) })));
+  ctx.note("marks", marks.map(({ name, rssMB, footprintMB, mainHeapMB, tMs, solver, entries, coldStartMs, idleExited }) => ({ name, tMs, rssMB, footprintMB, mainHeapMB, generation: solver.generation, recycles: solver.recycles, lastRecycleReason: solver.lastRecycleReason, deadlineKills: solver.deadlineKills, ...(entries ? { entries } : {}), ...(coldStartMs !== undefined ? { coldStartMs, idleExited } : {}) })));
   ctx.note("workerHeap", {
     heavyDomMaxMB: maxWorkerHeap("heavy-dom"),
     heavyDomFirst10: heap.filter((h) => h.kind === "heavy-dom").slice(0, 10).map((h) => h.heapMB),
     heavyDomLast10: heap.filter((h) => h.kind === "heavy-dom").slice(-10).map((h) => h.heapMB),
     retainMaxMB: maxWorkerHeap("retain"),
   });
-  const rss = (name) => byName[name]?.rssMB ?? null;
+  // The OS's metric (spec §1): RSS on Linux, commit (Bun's memory footprint) on Windows.
+  const metricKey = process.platform === "win32" ? "footprintMB" : "rssMB";
+  const rss = (name) => byName[name]?.[metricKey] ?? null;
   const hangLeakMB = rss("C-end") - rss("C-start");
   const retainedBeforeRecycle = rss("B-before-recycle") - rss("B-start");
   const returnedOnRecycle = rss("B-before-recycle") - rss("B-after-recycle-5s");
