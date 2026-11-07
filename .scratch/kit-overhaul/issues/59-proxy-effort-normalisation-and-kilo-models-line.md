@@ -50,3 +50,40 @@ Spec stories: none (outside spec.md; recorded during ticket 51).
 ---
 
 - Part (a) (effort normalisation) moved to ticket 63 (needs-info). This ticket now covers part (b) only.
+
+### 2026-11-07 — implementer (claude-opus-5-5, logged substitute for glm), part (b) only
+
+**Branch:** `ticket/59-kilo-models-line`. Fix commit `5bad9ca` on integration tip `74899d2` (the merge of the current tip was a no-op, "Already up to date"). This evidence commit sits on top. Effort handling (ticket 63) is not touched.
+
+**Primary source, re-verified where the value is consumed (criterion 1).** Kilo's Custom provider dialog decides whether to list models with `canFetch = (npm, url) => npm !== "@ai-sdk/anthropic" && /^https?:\/\//.test(url.trim())`. The debounced auto-fetch returns early when it is false (`:253`), and the "Fetch models" button is `disabled={fetching() || !canFetch(form.npm, form.baseURL)}` (`:708`). The Anthropic Messages entry is `@ai-sdk/anthropic` (`:45`). So for the provider API the sheet prescribes, Kilo does not request `/v1/models` and the user types in the models. Sources: https://github.com/Kilo-Org/kilocode/blob/v7.8.27/packages/kilo-vscode/webview-ui/src/components/settings/CustomProviderDialog.tsx#L232-L233 (tag `v7.8.27` = `03a6f07d053cd7e6aa88fa1e258e93510335259f`, the version `research/harness-configs.md` records). The same two lines are unchanged on `main` (`45484c9`, fetched 2026-11-07). The button label "Fetch models" is from `packages/kilo-vscode/webview-ui/src/i18n/en.ts:451` (`v7.8.27`).
+
+**Change (`cli/adapters/kilo-code.mjs:42`).** The one false note is replaced, and nothing else in the sheet changes:
+```
+- Kilo does not fetch the model list for Anthropic Messages ("Fetch
+  models" stays disabled): enter both models above by hand.
+```
+Sheet diff for an existing user (the snapshot diff for criterion 5; no snapshot suite holds this sheet, grep `tests/snapshots`): `-- Models can also be auto-fetched from the /v1/models endpoint.` becomes the two lines above. A user with a pre-50 or pre-51 sheet also gets the ticket 50/51 changes in the same refresh, as before.
+
+**Tests (seam 8, `tests/adapter-audit.test.mjs`, already wired; +2 tests).**
+1. `integrate replaces the false Kilo /v1/models auto-fetch note in every earlier sheet, idempotently and reversibly`. It runs three on-disk generations: the legacy `kiloSheetBeforeFix()` (line 180, used unedited as input), the post-50 sheet and a new post-51 fixture. Each goes through `refreshCycle`: integrate, second integrate (byte-idempotent), `rollback <tx>` (byte-exact restore), replay. Each asserts that no `auto-fetch` or `/v1/models` text is left, and that the result equals the post-51 sheet with only the note replaced (literal `KILO_TRUE_NOTE`).
+2. `the next plain setup replaces the false Kilo auto-fetch note for a user with a stored decision, idempotently and reversibly`. It uses a temp HOME with a detected `kilocode.kilo-code-7.8.27` extension dir and a stored `configured` decision. Plain `setup` records a transaction, a second `setup` is byte-identical, and `rollback` restores the post-51 sheet byte for byte.
+- The new fixture `kiloSheetAfterMediumFix()` is byte-equal to what the tip wrote. I captured it with a scratch `zcode-kit integrate kilo-code` on `74899d2` (temp HOME/state with `.owner.json`, port 19500 in the config, nothing listening). Comparison: `BYTE-EQUAL`.
+
+**RED → GREEN.** RED on the tip's adapter: 2 tests, 0 pass, 2 fail (`reports/t59-red.log`; after the setup fixture gained the extension dir, again `t59-red2.log` with the tip adapter swapped in and restored, `git diff --stat` showing only this ticket's two files). The failures were `no auto-fetch claim left (before ticket 50)` and `the refresh is recorded as a transaction` (on the tip, setup writes the same bytes, so nothing is refreshed). GREEN: 2/2 (`t59-green.log`).
+
+**Full suite** (Bun 1.4.2): `npm run test` 687 tests, 670 pass, 0 fail, 17 skipped (`t59-full-kit.log`). `npm run test:proxy` 1343 pass, 0 fail, 90 files (`t59-full-proxy.log`). `npm run test:mcp` 96 tests, 95 pass, 0 fail, 1 skipped (`t59-full-mcp.log`). `git status` was clean after the build, so `dist/` is unchanged.
+
+**Criteria**
+1. ✓ The false line is replaced by a true one, with the source re-verified above.
+2. ✓ The test pins the absence, RED then GREEN.
+3. ✓ Integrate and plain setup both refresh through the existing transaction. The second run is byte-idempotent, and rollback restores the old sheet (both tests).
+4. ✓ `tests/adapter-audit.test.mjs:180` (`kiloSheetBeforeFix`) is not edited; it is used as input. No pre-existing test changed. The ticket 50/51 Kilo tests assert only Base URL, rows and the key, so they pass unchanged.
+5. ✓ The sheet diff is recorded above, and no snapshot holds the sheet. Grep: `harnesses/README*` and `docs/` have no auto-fetch claim. Their only `/v1/models` hits are the proxy endpoint table ("`GET /v1/models` | model list | discovery"), which is true for the proxy. So C8 needs no doc change beyond the release notes.
+
+**Decisions taken**
+- The scope is the one line (the Round 12 exception to spec line 812). The header comment's stale "kilo.jsonc … documented only sparsely" and the sheet's kilo.jsonc note are other Low drift, so I left them.
+- The new note names the disabled "Fetch models" button, so a user who sees the button greyed out knows this is expected.
+
+**For other tickets**
+- 54 (release notes): the Kilo values sheet is refreshed on the next setup/integrate. Its auto-fetch note becomes "enter both models above by hand".
+- Orchestrator: the ticket's H1 and the INDEX row still carry the pre-split title. Round 12 says to retitle it "Kilo Code values sheet: correct the `/v1/models` auto-fetch line". I left INDEX.md and the H1 alone, because the merger owns the tracker rows.
