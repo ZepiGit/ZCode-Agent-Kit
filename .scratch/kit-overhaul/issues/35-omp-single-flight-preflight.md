@@ -33,3 +33,5 @@ ADR: 0013 (Round 4 amendment)
 Spec stories: 31, 32, 33, 135
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 03's pre-merge CI run 42335478907): ubuntu S3/omp is RED on two more checks besides `omp:concurrent-preflights`, both just over budget: `procPeak:preflight` 77.4 MB (budget 76) and `procPeak:proxy` 62.9 MB (budget 62). Windows S3/omp was RED on `omp:concurrent-preflights` only (`peak:kit` 350 MB commit / 400 MB WS, budget 514). Single-flight may not by itself turn ubuntu S3/omp GREEN; if these two stay RED after the fix, ticket 35 cannot delete `S3/omp (linux)` and comes back with the numbers (budgets are never loosened). Artefact: /home/AgentKit/overhaul-tools/ci-art/t03-premerge-a2v0.
