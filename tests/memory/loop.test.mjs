@@ -88,6 +88,76 @@ test("a marked process is re-attributed after it execs (a proxy first seen befor
   }
 });
 
+// A fake /proc for the exec window (ticket 64): one directory per pid, the
+// files the sampler reads. `stat` carries the pid's start time (field 22),
+// which survives the exec, and its flags (field 9; PF_KTHREAD = 0x200000).
+function fakeProc() {
+  const root = mkdtempSync(join(tmpdir(), "memloop-fakeproc-"));
+  return {
+    root,
+    set(pid, { cmdline, environ, starttime = 4711, flags = 0x400000, state = "S" }) {
+      const d = join(root, String(pid));
+      mkdirSync(join(d, "fd"), { recursive: true });
+      const fields = [state, 1, pid, pid, 0, -1, flags, 0, 0, 0, 0, 0, 0, 0, 0, 20, 0, 1, 0, starttime, 1000, 100];
+      writeFileSync(join(d, "stat"), `${pid} (sh) ${fields.join(" ")}\n`);
+      writeFileSync(join(d, "cmdline"), cmdline.length ? `${cmdline.join("\0")}\0` : "");
+      writeFileSync(join(d, "environ"), environ.length ? `${environ.join("\0")}\0` : "");
+      writeFileSync(join(d, "status"), "VmHWM:\t2048 kB\nVmRSS:\t1024 kB\nThreads:\t1\n");
+    },
+    cleanup() { rmSync(root, { recursive: true, force: true }); },
+  };
+}
+
+// Ticket 64 (CI run 42391052837: "after its exec: other,other,other,other,other,other").
+// Between installing the new address space and setting its arguments, an exec
+// shows /proc/<pid>/cmdline and /proc/<pid>/environ as 0 bytes (fs/proc/base.c
+// returns 0 while mm->env_end is unset). A sample taken in that window found no
+// marker and cached the pid as not ours for good: the exec'd proxy vanished from
+// the run, which is ticket 02 round 7's "role proxy never seen" again.
+test("a marked process sampled inside its exec is read again after it, not dropped as not ours", linuxOnly, () => {
+  const proc = fakeProc();
+  const marker = "ZCODE_MEMLOOP_RUN=exec-window";
+  const env = ["PATH=/usr/bin", marker];
+  const proxyArgv = ["/usr/bin/node", "/kit/zcode-proxy-src/src/index.ts", "serve"];
+  try {
+    const cache = new Map();
+    const rolesOf = (pid) => scan(marker, cache, { procRoot: proc.root }).filter((p) => p.pid === pid).map((p) => p.role);
+    proc.set(4242, { cmdline: ["/bin/sh", "/tmp/pre-exec.sh"], environ: env });
+    assert.deepEqual(rolesOf(4242), ["other"], "before the exec: sh");
+    proc.set(4242, { cmdline: [], environ: [] });
+    assert.deepEqual(rolesOf(4242), [], "inside the exec: no sample (nothing to attribute yet)");
+    assert.deepEqual(rolesOf(4242), [], "still inside the exec on the next tick");
+    proc.set(4242, { cmdline: proxyArgv, environ: env });
+    assert.deepEqual(rolesOf(4242), ["proxy"], "after the exec: the same pid is a proxy");
+
+    // First seen inside its exec (spawned between two ticks): picked up after it.
+    proc.set(4343, { cmdline: [], environ: [], starttime: 5000 });
+    assert.deepEqual(rolesOf(4343), []);
+    proc.set(4343, { cmdline: proxyArgv, environ: env, starttime: 5000 });
+    assert.deepEqual(rolesOf(4343), ["proxy"], "a pid first seen inside its exec is ours once the exec is done");
+  } finally { proc.cleanup(); }
+});
+
+test("the exec window never makes a process ours: an exec without the marker, a kernel thread and a stranger stay out", linuxOnly, () => {
+  const proc = fakeProc();
+  const marker = "ZCODE_MEMLOOP_RUN=exec-window-out";
+  const proxyArgv = ["/usr/bin/node", "/kit/zcode-proxy-src/src/index.ts", "serve"];
+  try {
+    const cache = new Map();
+    const pids = () => scan(marker, cache, { procRoot: proc.root }).map((p) => p.pid).sort((a, b) => a - b);
+    proc.set(10, { cmdline: ["/bin/sh", "x.sh"], environ: [marker] });          // ours, later execs into a clean environment
+    proc.set(11, { cmdline: [], environ: [], flags: 0x00208040 });               // a kernel thread (PF_KTHREAD)
+    proc.set(12, { cmdline: ["/usr/bin/other"], environ: ["PATH=/usr/bin"] }); // a stranger
+    assert.deepEqual(pids(), [10]);
+    proc.set(10, { cmdline: [], environ: [] });
+    proc.set(12, { cmdline: [], environ: [] });
+    assert.deepEqual(pids(), []);
+    proc.set(10, { cmdline: proxyArgv, environ: ["PATH=/usr/bin"] });
+    proc.set(12, { cmdline: proxyArgv, environ: [marker] }); // cached as not ours: a fork inherits its parent's environment
+    assert.deepEqual(pids(), [], "an exec that drops the marker is not ours; a stranger stays a stranger");
+  } finally { proc.cleanup(); }
+});
+
 // The entry point refuses to run any scenario outside a capped, isolated run.
 const RUN = join(dirname(fileURLToPath(import.meta.url)), "run.mjs");
 function runLoop(args, env) {
