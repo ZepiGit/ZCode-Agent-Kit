@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: wait for t02 fix round 7 (ubuntu S3/hung harness failure). Then per Owner Proxy round 8 (DECISIONS.md): resume t60 on top of ticket/02, add a windows-latest S1/burst1 >= 20-repetition measurement (C2), pick n per C3, stage 02 then 60 into staging/02, one pre-merge CI run (confirms only, C4), merge 02 and 60 back to back via MERGER-BRIEF.md only if green on both legs. R8 C1 already checked OK (RUNLOG 21:40). Then resume t03. Frontier is only 02; 57 and 59 are needs-triage.
+- Next action: wait for t60 round 3 (Owner Proxy round 9 conditions 1-3, 6, 8: unstable state for windows S1/burst1 only). Then on staging/02: git rm the marker tests/memory/measure-burst1 (db5f353), merge ticket/60 again, push, one pre-merge run (must be green on both legs; disagreement per R9 C7 -> question, no rerun-until-green). Green -> merge 02 then 60 via MERGER-BRIEF.md (staging/02 tree; revert the revert c252676 first). Then resume t03; frontier opens to 09, 61 (needs-triage).
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul
