@@ -2,7 +2,7 @@
 
 **Blocked by:** 01 (Memory loop with budgets, process-count harness, expected-RED ratchet and the ubuntu `memory-budget` job), 02 (Windows sampler and the windows leg of the `memory-budget` job (Bun 1.4.2 reference run))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -216,3 +216,5 @@ Branch `ticket/03-s3-omp-stub-host`. Merge 18d6271 (tip 5631511: tickets 02 + 60
   - the round 1 notes still hold (≈ 1 MB margin; the takeover race);
   - the per-host data is now in `notes.rounds`;
   - on Windows the waiter gate is commit with WS reported beside it (decision 8).
+
+Merged 2026-11-07 as efab6f19b9bef603d876830468bd69f5a72340e0; fast suite: kit 627/643 (16 skipped, 0 fail; includes the stub OMP host tests in tests/memory/loop.test.mjs and the OMP leg verdict tests), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes; clean merge (no conflicts). Pre-merge CI (draft PR #17, staging/03), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42335478907. From that run: windows `S3/omp` RED → 35 on `omp:concurrent-preflights` only (5 at once in both rounds); `peak:kit` 350 MB commit / 400 MB WS (budget 514, ok); the 5 stub-host tests ran and passed on windows Node 24 and 26. Ubuntu `S3/omp` RED → 35 on `omp:concurrent-preflights` plus `procPeak:preflight` 77.4/76 MB and `procPeak:proxy` 62.9/62 MB. Logs: .scratch/kit-overhaul/reports/merge-03-{npm-ci,test,test-proxy,test-mcp}.log.
