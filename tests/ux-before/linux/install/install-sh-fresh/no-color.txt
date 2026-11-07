@@ -28,32 +28,19 @@ n
 
   Assistant integrations
   note: y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
-Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] y
-n
-n
-y
-y
-n
-n
-  [OK]   OMP / Oh My Pi
-Configure ZCode as a provider with its supported models in pi? [y/n] n
-  [SKIP] pi — answered n
+Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n]   [OK]   OMP / Oh My Pi
+Configure ZCode as a provider with its supported models in pi? [y/n]   [SKIP] pi — answered n
   note: y also registers the kit's MCP bridge "zcode-harness" for Claude Code (skip with --no-mcp).
-Configure ZCode as a provider with its supported models in Claude Code? [y/n] n
-  [SKIP] Claude Code — answered n
-Configure ZCode as a provider with its supported models in Codex CLI? [y/n] y
-  [OK]   Codex CLI
-Configure ZCode as a provider with its supported models in OpenCode? [y/n] y
-  [OK]   OpenCode
-Configure ZCode as a provider with its supported models in Continue? [y/n] n
-  [SKIP] Continue — answered n
+Configure ZCode as a provider with its supported models in Claude Code? [y/n]   [SKIP] Claude Code — answered n
+Configure ZCode as a provider with its supported models in Codex CLI? [y/n]   [OK]   Codex CLI
+Configure ZCode as a provider with its supported models in OpenCode? [y/n]   [OK]   OpenCode
+Configure ZCode as a provider with its supported models in Continue? [y/n]   [SKIP] Continue — answered n
 
   Account Rotator
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
-  [OK] Account Rotator disabled. Saved accounts are kept.
+Do you want to activate the Account Rotator feature? [y/N]   [OK] Account Rotator disabled. Saved accounts are kept.
 
   Configuration saved.
   Assistants: 3 configured, 3 skipped, 0 failed.
@@ -64,7 +51,7 @@ Do you want to activate the Account Rotator feature? [y/n] n
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
     Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
-    API key (Bearer / x-api-key):  WlNm7Mmaxu5q_yZLbJP1PblVzkQQ8oO6A4DbKeyC8eY
+    API key (Bearer / x-api-key):  fJJ28RGoK32Byh1diX45jJhM74xH7eh4gNfhBjz82Rs
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
 

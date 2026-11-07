@@ -28,7 +28,7 @@ n
 
   [1;36mAssistant integrations[0m
   note: y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
-[1G[0JConfigure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] [2Gy
+Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] y
 n
 n
 y
@@ -52,7 +52,7 @@ Configure ZCode as a provider with its supported models in Continue? [y/n] n
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
+Do you want to activate the Account Rotator feature? [y/N] n
   [OK] Account Rotator disabled. Saved accounts are kept.
 
   Configuration saved.
@@ -64,7 +64,7 @@ Do you want to activate the Account Rotator feature? [y/n] n
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
     Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
-    API key (Bearer / x-api-key):  dYDnwsaoXf2H8lRBPdFOaNIFmi8tN-RgCfYHy1KHvM4
+    API key (Bearer / x-api-key):  8anymhHsujPOG96jby9YapkAwZ2b_p8ZSvaVVOKRF4w
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
 

@@ -29,7 +29,7 @@ n
 
   [1;36mAssistant integrations[0m
   note: y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
-[1G[0JConfigure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] [82Gy
+Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] y
 n
 n
 y
@@ -53,7 +53,7 @@ Configure ZCode as a provider with its supported models in Continue? [y/n] n
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
+Do you want to activate the Account Rotator feature? [y/N] n
   [OK] Account Rotator disabled. Saved accounts are kept.
 
   Configuration saved.

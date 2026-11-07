@@ -17,7 +17,7 @@ detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters
     5) OpenCode
     6) Continue
   note: selecting OMP / Oh My Pi or Claude Code also registers the kit's MCP bridge "zcode-harness" there (skip with --no-mcp).
-[1G[0J  Configure ZCode as a provider with its supported models in which assistants? (numbers, all, none) [101G1,4
+  Configure ZCode as a provider with its supported models in which assistants? (numbers, all, none) 1,4
 n
 == omp: OMP / Oh My Pi (answered y) ==
   wrote <HOME>/.omp/agent/extensions/zcode-proxy-autostart.ts
@@ -40,7 +40,7 @@ n
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
+Do you want to activate the Account Rotator feature? [y/N] n
   [OK] Account Rotator disabled. Saved accounts are kept.
 
 transaction <TX> recorded — undo with: zcode-kit rollback <TX>

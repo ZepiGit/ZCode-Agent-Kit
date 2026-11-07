@@ -1,0 +1,408 @@
+{
+  "id": "S3-short-hung-2026-11-07T1737-9f5a94",
+  "key": "S3/hung",
+  "scenario": "S3",
+  "profile": "short",
+  "variant": "hung",
+  "platform": "linux",
+  "node": "v26.13.0",
+  "outcome": "RED",
+  "metric": "rss",
+  "durationS": 117,
+  "red": true,
+  "checks": [
+    {
+      "name": "peak:kit",
+      "red": true,
+      "value": 889.8,
+      "budget": 596,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:launcher",
+      "red": true,
+      "value": 82.5,
+      "budget": 74,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:mcp-bridge",
+      "red": true,
+      "value": 87.7,
+      "budget": 75,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:preflight",
+      "red": false,
+      "value": 69.4,
+      "budget": 76,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:proxy",
+      "red": true,
+      "value": 64.6,
+      "budget": 62,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:solver",
+      "red": false,
+      "value": 0,
+      "budget": 20,
+      "unit": "MB"
+    },
+    {
+      "name": "count:proxy",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "perParent:solver",
+      "red": false,
+      "value": 0,
+      "budget": 1,
+      "unit": "procs/parent"
+    },
+    {
+      "name": "orphans",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "procs",
+      "detail": []
+    },
+    {
+      "name": "simultaneous-proxies",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "exactly-one-proxy-after-round",
+      "red": true,
+      "value": 1,
+      "budget": 0,
+      "unit": "rounds without exactly 1",
+      "detail": [
+        "kill-holder-10: 0 proxies, pid file does not match"
+      ]
+    },
+    {
+      "name": "proxy-generations/round",
+      "red": false,
+      "value": 2,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "failed-launches",
+      "red": true,
+      "value": 10,
+      "budget": 0,
+      "unit": "launches"
+    },
+    {
+      "name": "stale-lock-after-round",
+      "red": true,
+      "value": 1,
+      "budget": 0,
+      "unit": "rounds"
+    }
+  ],
+  "summary": {
+    "*": {
+      "peakMB": 1206.7,
+      "peakProcMB": 87.7,
+      "peakHwmMB": 87.7,
+      "maxCount": 18,
+      "maxFds": 460,
+      "maxThreads": 148,
+      "distinctPids": 36,
+      "peakHeapMB": 6
+    },
+    "kit": {
+      "peakMB": 889.8,
+      "peakProcMB": 87.7,
+      "peakHwmMB": 87.7,
+      "maxCount": 11,
+      "maxFds": 289,
+      "maxThreads": 106,
+      "distinctPids": 29,
+      "peakHeapMB": 6
+    },
+    "mock-upstream": {
+      "peakMB": 61.4,
+      "peakProcMB": 61.4,
+      "peakHwmMB": 61.4,
+      "maxCount": 1,
+      "maxFds": 24,
+      "maxThreads": 7,
+      "distinctPids": 1,
+      "peakHeapMB": null
+    },
+    "preflight": {
+      "peakMB": 526.3,
+      "peakProcMB": 69.4,
+      "peakHwmMB": 69.4,
+      "maxCount": 9,
+      "maxFds": 206,
+      "maxThreads": 67,
+      "distinctPids": 14,
+      "peakHeapMB": null
+    },
+    "manager": {
+      "peakMB": 67.9,
+      "peakProcMB": 67.9,
+      "peakHwmMB": 67.9,
+      "maxCount": 1,
+      "maxFds": 24,
+      "maxThreads": 7,
+      "distinctPids": 3,
+      "peakHeapMB": null
+    },
+    "proxy": {
+      "peakMB": 64.6,
+      "peakProcMB": 64.6,
+      "peakHwmMB": 64.6,
+      "maxCount": 1,
+      "maxFds": 23,
+      "maxThreads": 16,
+      "distinctPids": 2,
+      "peakHeapMB": 6
+    },
+    "launcher": {
+      "peakMB": 388.7,
+      "peakProcMB": 78.6,
+      "peakHwmMB": 82.5,
+      "maxCount": 5,
+      "maxFds": 150,
+      "maxThreads": 35,
+      "distinctPids": 5,
+      "peakHeapMB": null
+    },
+    "fake-harness": {
+      "peakMB": 278.5,
+      "peakProcMB": 51.1,
+      "peakHwmMB": 51.1,
+      "maxCount": 6,
+      "maxFds": 147,
+      "maxThreads": 41,
+      "distinctPids": 6,
+      "peakHeapMB": null
+    },
+    "mcp-bridge": {
+      "peakMB": 437.7,
+      "peakProcMB": 87.7,
+      "peakHwmMB": 87.7,
+      "maxCount": 5,
+      "maxFds": 116,
+      "maxThreads": 55,
+      "distinctPids": 5,
+      "peakHeapMB": null
+    }
+  },
+  "budgets": {
+    "peaks": {
+      "kit": 596
+    },
+    "procPeaks": {
+      "launcher": 74,
+      "mcp-bridge": 75,
+      "preflight": 76,
+      "proxy": 62,
+      "solver": 20
+    },
+    "counts": {
+      "proxy": 1
+    },
+    "perParent": [
+      {
+        "role": "solver",
+        "max": 1
+      }
+    ],
+    "orphans": 0,
+    "commitBackstop": {
+      "role": "proxy",
+      "maxMB": 512
+    },
+    "extra": [
+      {
+        "name": "simultaneous-proxies",
+        "red": false,
+        "value": 1,
+        "budget": 1,
+        "unit": "procs"
+      },
+      {
+        "name": "exactly-one-proxy-after-round",
+        "red": true,
+        "value": 1,
+        "budget": 0,
+        "unit": "rounds without exactly 1",
+        "detail": [
+          "kill-holder-10: 0 proxies, pid file does not match"
+        ]
+      },
+      {
+        "name": "proxy-generations/round",
+        "red": false,
+        "value": 2,
+        "budget": 1,
+        "unit": "procs"
+      },
+      {
+        "name": "failed-launches",
+        "red": true,
+        "value": 10,
+        "budget": 0,
+        "unit": "launches"
+      },
+      {
+        "name": "stale-lock-after-round",
+        "red": true,
+        "value": 1,
+        "budget": 0,
+        "unit": "rounds"
+      }
+    ]
+  },
+  "orphans": [],
+  "observations": [],
+  "notes": {
+    "sampler": {
+      "units": null,
+      "overhead": null
+    },
+    "isolation.stateDir": "/home/runner/work/_temp/memloop/S3-hung/S3-short-hung-2026-11-07T1737-9f5a94/tmp/kit-l19Gox/state",
+    "isolation.home": "/home/runner/work/_temp/memloop/S3-hung/S3-short-hung-2026-11-07T1737-9f5a94/tmp/kit-l19Gox/home",
+    "isolation.port": 18457,
+    "afterKillHolder": {
+      "nextPreflight": 4,
+      "nextPreflightTail": "[zcode-preflight] cause=startup",
+      "stopCode": 4,
+      "stopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/runner/work/_temp/memloop/S3-hung/S3-short-hung-2026-11-07T1737-9f5a94/tmp/kit-l19Gox/state/logs/manager.lock (holder pid 4089 is not alive, started 2026-11-07T17:37:21.369Z) — refusing automatic takeover. If no start is actually running, remove /home/runner/work/_temp/memloop/S3-hung/S3-short-hung-2026-11-07T1737-9f5a94/tmp/kit-l19Gox/state/logs/manager.lock manually and retry.",
+      "proxiesLeft": 0,
+      "staleLock": true
+    },
+    "hung-10-with-stale-lock.skipped": {
+      "startCode": 1,
+      "reason": "manager start exited 1"
+    },
+    "hung-10.target": {
+      "pid": 4215,
+      "via": "pid-record",
+      "recordedPid": 4215
+    },
+    "rounds": [
+      {
+        "name": "kill-holder-10",
+        "n": 10,
+        "kind": "preflight",
+        "tFrom": 72,
+        "tTo": 1886,
+        "proxiesBefore": 0,
+        "maxSimultaneousProxies": 0,
+        "maxSimultaneousListeners": 0,
+        "distinctProxyProcesses": 0,
+        "proxiesAfter": 0,
+        "pidFileMatchesListener": false,
+        "failedLaunches": [
+          "preflight#0 code=4 [zcode-preflight] cause=startup",
+          "preflight#1 code=null starting zcode-proxy ...",
+          "preflight#2 code=4 [zcode-preflight] cause=startup",
+          "preflight#3 code=4 [zcode-preflight] cause=startup",
+          "preflight#4 code=4 [zcode-preflight] cause=startup",
+          "preflight#5 code=4 [zcode-preflight] cause=startup",
+          "preflight#6 code=4 [zcode-preflight] cause=startup",
+          "preflight#7 code=4 [zcode-preflight] cause=startup",
+          "preflight#8 code=4 [zcode-preflight] cause=startup",
+          "preflight#9 code=4 [zcode-preflight] cause=startup"
+        ],
+        "launchMs": [
+          150,
+          244,
+          246,
+          255,
+          257,
+          257,
+          259,
+          260,
+          262,
+          264
+        ],
+        "staleLockLeft": "{\"pid\":4089,\"startedAt\":\"2026-11-07T17:37:21.369Z\",\"nonce\":\"7186d291f0ce7936\"}",
+        "adversary": {
+          "killed": 4089
+        },
+        "stop": {
+          "label": "kill-holder-10",
+          "code": 4,
+          "tail": [
+            "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/runner/work/_temp/memloop/S3-hung/S3-short-hung-2026-11-07T1737-9f5a94/tmp/kit-l19Gox/state/logs/manager.lock (holder pid 4089 is not alive, started 2026-11-07T17:37:21.369Z) — refusing automatic takeover. If no start is actually running, remove /home/runner/work/_temp/memloop/S3-hung/S3-short-hung-2026-11-07T1737-9f5a94/tmp/kit-l19Gox/state/logs/manager.lock manually and retry."
+          ],
+          "proxiesLeft": 0
+        }
+      },
+      {
+        "name": "hung-10",
+        "n": 10,
+        "kind": "mixed",
+        "tFrom": 67850,
+        "tTo": 113882,
+        "proxiesBefore": 1,
+        "maxSimultaneousProxies": 1,
+        "maxSimultaneousListeners": 1,
+        "distinctProxyProcesses": 2,
+        "proxiesAfter": 1,
+        "pidFileMatchesListener": true,
+        "failedLaunches": [],
+        "launchMs": [
+          35946,
+          35946,
+          35960,
+          36020,
+          36021,
+          44328,
+          44360,
+          44371,
+          44386,
+          44519
+        ],
+        "staleLockLeft": null,
+        "adversary": null,
+        "stop": {
+          "label": "hung-10",
+          "code": 0,
+          "tail": [
+            "stopped (pid 4409)"
+          ],
+          "proxiesLeft": 0
+        }
+      }
+    ],
+    "cleanup": {
+      "staleLockRemoved": false,
+      "finalStop": {
+        "label": "final",
+        "code": 0,
+        "tail": [
+          "not running"
+        ],
+        "proxiesLeft": 0
+      }
+    },
+    "isolation.externalConnectionsDuringRun": [],
+    "stop.code": 0,
+    "stop.output": [
+      "not running"
+    ]
+  },
+  "samples": 341,
+  "csv": "/home/runner/work/_temp/memloop/S3-hung/S3-short-hung-2026-11-07T1737-9f5a94/samples.csv"
+}

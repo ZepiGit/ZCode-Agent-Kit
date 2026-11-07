@@ -13,8 +13,9 @@ detected harnesses: none — adapters run only after consent (y answer, stored d
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-[1G[0JDo you want to activate the Account Rotator feature? [y/n] [60Gn
-  [OK] Account Rotator disabled. Saved accounts are kept.
+Do you want to activate the Account Rotator feature? [y/N]   [OK] Account Rotator disabled. Saved accounts are kept.
+
+transaction <TX> recorded — undo with: zcode-kit rollback <TX>
 
   Configuration saved.
   Assistants: 0 configured, 0 skipped, 0 failed.

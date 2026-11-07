@@ -3,8 +3,13 @@
  * capacity (app.ts: new LogPane(2000)). Phases:
  *   A 100k (long: 1M) ordinary log lines, rendering a frame every 100 lines
  *   B resize storm: 5k (long: 50k) frames at random sizes
- *   C 2,000 long lines (64 KB each — a body or stack dumped into one record);
- *     the pane caps lines, not bytes
+ *   C 4,000 long lines (64 KB each — a body or stack dumped into one record);
+ *     the pane's 8 MB byte cap holds (ticket 32; before it, 2,000 x 64 KB)
+ *   D adversarial records against the byte cap, while scrolled to the top
+ *     (ticket 32): 64 KB ASCII lines with one emoji (held two bytes per
+ *     UTF-16 unit), one 20 MB line (above the cap), 64 KB CJK lines, and
+ *     multi-line records whose rows are substrings of a 20 MB parent (Bun
+ *     keeps a substring's parent alive). Marked after each part.
  * One JSON line per second on stdout, phase marks with forced-GC heap.
  */
 import { LogPane } from "../../../zcode-proxy-src/src/tui/log-pane.js";
@@ -65,6 +70,41 @@ for (let i = 0; i < 4000; i++) {
   progress += 1;
   if ((i + 1) % 500 === 0) { mark(`C-after-${i + 1}`, { lines: pane.count }); await Bun.sleep(0); }
 }
+mark("C-end", { lines: pane.count });
+
+phase = "D-adversarial";
+pane.scrollUp(pane.count); // a flood while the user reads the oldest rows
+mark("D-start", { lines: pane.count });
+const mixed = "x".repeat(64 * 1024 - 2) + "😀";
+for (let i = 0; i < 1000; i++) {
+  pane.push(`[mixed ${i}] ${mixed}`, "warn");
+  if (i % 50 === 0) buildFrame(state(120, 40));
+  progress += 1;
+}
+mark("D-mixed", { lines: pane.count });
+pane.push(`[huge] ${"z".repeat(20 * MB)}`, "error");
+const hugeT0 = performance.now();
+for (let i = 0; i < 20; i++) buildFrame(state(120, 40));
+const hugeFrameMs = Number(((performance.now() - hugeT0) / 20).toFixed(3));
+progress += 1;
+mark("D-huge", { lines: pane.count, hugeFrameMs });
+const cjk = "上游服务暂时不可用".repeat(2427); // 21,843 chars, 65,529 UTF-8 bytes
+for (let i = 0; i < 1000; i++) {
+  pane.push(`[cjk ${i}] ${cjk}`, "info");
+  if (i % 50 === 0) buildFrame(state(120, 40));
+  progress += 1;
+}
+mark("D-cjk", { lines: pane.count });
+for (let k = 0; k < 4; k++) {
+  const rows: string[] = [`[record ${k}] ${"y".repeat(20 * MB)}`];
+  for (let j = 0; j < 2000; j++) rows.push(`[record ${k}] at frame ${j} (/srv/app/handlers/messages.ts:${j}:17) ${"·".repeat(40)}`);
+  pane.push(rows.join("\n"), "error");
+  buildFrame(state(120, 40));
+  progress += 1;
+  await Bun.sleep(0);
+}
+mark("D-records", { lines: pane.count });
+pane.scrollDown(pane.count);
 mark("end", { lines: pane.count });
 emit({ type: "done" });
 process.exit(0);

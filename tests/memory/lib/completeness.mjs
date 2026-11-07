@@ -44,13 +44,43 @@ export const ROUNDS = {
   "S3/omp": ["omp-5", "omp-5-kill-starter"],
 };
 
+// The rounds where a refused `manager start` is the measured outcome, not a
+// round that did not run (ticket 65; CI runs 42395651721, 42398295810,
+// 42398299724). The killed holder's stale lock is what the round tests, and
+// while the kit refuses that lock (ticket 16) the start fails there. Such a
+// round counts as run only with its evidence: a non-zero exit code, the
+// stderr, a lock whose holder was not alive, its launches, and the scenario's
+// start-over-stale-lock check RED. In any other round a refused start is no
+// evidence at all.
+export const STALE_LOCK_ROUNDS = {
+  "S3/hung": ["hung-10-with-stale-lock"],
+};
+
+function refusedStartProblems(key, rounds, checks, staleLockRounds) {
+  const problems = [];
+  for (const r of rounds) {
+    if (!r?.startRefused) continue;
+    const name = r.name;
+    if (!(staleLockRounds[key] ?? []).includes(name)) { problems.push(`round ${name}: a refused start counts only in a stale-lock round`); continue; }
+    const s = r.startRefused;
+    if (!(Number.isInteger(s.startCode) && s.startCode !== 0 && typeof s.stderr === "string" && s.stderr.trim() !== "" && Number.isInteger(s.lock?.holderPid) && s.lock?.holderAlive === false)) {
+      problems.push(`round ${name}: refused start without its evidence (exit code, stderr, a lock whose holder is not alive)`);
+      continue;
+    }
+    const launches = Array.isArray(r.launchMs) ? r.launchMs.length : 0;
+    if (!(r.n > 0 && launches === r.n)) problems.push(`round ${name}: refused start but ${launches} of ${r.n ?? 0} launches ran`);
+    if (!checks.some((c) => c?.name === "start-over-stale-lock" && c.red === true)) problems.push(`round ${name}: refused start but the start-over-stale-lock check is not RED`);
+  }
+  return problems;
+}
+
 const OUTCOME_OF_EXIT = { 0: "GREEN", 1: "RED" };
 
 /**
  * summary: the run's parsed summary.json, or null when there is none.
  * Returns { ok, problems }. An exit 2 is already a harness failure and needs no evidence.
  */
-export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, rounds = ROUNDS }) {
+export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, rounds = ROUNDS, staleLockRounds = STALE_LOCK_ROUNDS }) {
   if (exitCode !== 0 && exitCode !== 1) return { ok: true, problems: [] };
   if (!summary) return { ok: false, problems: [`exit ${exitCode} but no summary.json: the run never finished its scenario`] };
   const problems = [];
@@ -71,8 +101,10 @@ export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, round
     const why = v && typeof v === "object" ? v.reason ?? JSON.stringify(v) : `manager start exited ${v}`;
     problems.push(`round ${k.slice(0, -".skipped".length)} skipped: ${why}`);
   }
-  const ran = new Set((Array.isArray(notes.rounds) ? notes.rounds : []).map((r) => r?.name));
+  const roundList = Array.isArray(notes.rounds) ? notes.rounds : [];
+  const ran = new Set(roundList.map((r) => r?.name));
   for (const name of rounds[key] ?? []) if (!ran.has(name)) problems.push(`round ${name} never ran`);
+  problems.push(...refusedStartProblems(key, roundList, Array.isArray(summary.checks) ? summary.checks : [], staleLockRounds));
   if (summary.platform === "win32" && summary.metric !== "commit") problems.push(`windows run with metric ${summary.metric ?? "none"}: no commit_kb was sampled`);
   if (summary.metric === "commit" && summary.notes?.sampler?.units?.ok !== true) problems.push("the units self-test did not pass");
   return { ok: problems.length === 0, problems };

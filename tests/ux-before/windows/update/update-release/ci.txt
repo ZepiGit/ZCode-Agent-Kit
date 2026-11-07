@@ -23,8 +23,8 @@ detected harnesses: omp — adapters run only after consent (y answer, stored de
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-  Account Rotator setting unchanged (no interactive answer).
-  Enable later: zcode-kit accounts enable
+  [INFO] Account Rotator disabled (saved choice; not asked again).
+  Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
   Configuration saved.
   Assistants: 1 configured, 0 skipped, 0 failed.

@@ -11,3 +11,6 @@ You merge ONE finished ticket branch into the integration branch `overhaul/stabi
 
 ## Pre-merge CI gate (added 2026-11-06 after the 02 and 06 reverts)
 If the ticket has any criterion marked "pending CI", the orchestrator first pushes the ticket branch and opens a draft PR from it into `overhaul/stability-terminal-ux`, so ci.yml runs on both OS legs. You are dispatched only after that CI run is green (its run URL is in your prompt); record the URL in the merge comment. Re-merging a reverted ticket: first `gitc.sh revert --no-edit <revert SHA>` (revert the revert), then merge the ticket branch. Exception (added 2026-11-07 after the 02/60 merge): if the branch you merge already carries its own revert of that revert (it merged the integration tip and undid the revert there), skip the first step; check with `git log --oneline <branch> --grep 'Revert' ` and `git merge-base --is-ancestor <revert SHA> <branch>`, and say which path you took.
+
+## Memory-loop runs by the merger (added 2026-11-07)
+When the orchestrator asks for a local memory-loop run, pass `--out /home/AgentKit/overhaul-tools/merge-NN-memloop` (outside the worktree) so the job's summary files never sit untracked in the integration tree.

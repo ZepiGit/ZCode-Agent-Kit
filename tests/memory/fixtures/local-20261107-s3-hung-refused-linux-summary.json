@@ -1,0 +1,500 @@
+{
+  "id": "S3-short-hung-2026-11-07T1852-c74fae",
+  "key": "S3/hung",
+  "scenario": "S3",
+  "profile": "short",
+  "variant": "hung",
+  "platform": "linux",
+  "node": "v26.7.0",
+  "outcome": "RED",
+  "metric": "rss",
+  "durationS": 197,
+  "red": true,
+  "checks": [
+    {
+      "name": "peak:kit",
+      "red": true,
+      "value": 869.3,
+      "budget": 596,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:launcher",
+      "red": true,
+      "value": 80.2,
+      "budget": 74,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:mcp-bridge",
+      "red": true,
+      "value": 86.5,
+      "budget": 75,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:preflight",
+      "red": false,
+      "value": 69.2,
+      "budget": 76,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:proxy",
+      "red": true,
+      "value": 62.8,
+      "budget": 62,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:solver",
+      "red": false,
+      "value": 0,
+      "budget": 20,
+      "unit": "MB"
+    },
+    {
+      "name": "count:proxy",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "perParent:solver",
+      "red": false,
+      "value": 0,
+      "budget": 1,
+      "unit": "procs/parent"
+    },
+    {
+      "name": "orphans",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "procs",
+      "detail": []
+    },
+    {
+      "name": "simultaneous-proxies",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "exactly-one-proxy-after-round",
+      "red": true,
+      "value": 2,
+      "budget": 0,
+      "unit": "rounds without exactly 1",
+      "detail": [
+        "kill-holder-10: 0 proxies, pid file does not match",
+        "hung-10-with-stale-lock: 0 proxies, pid file does not match"
+      ]
+    },
+    {
+      "name": "proxy-generations/round",
+      "red": false,
+      "value": 2,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "failed-launches",
+      "red": true,
+      "value": 20,
+      "budget": 0,
+      "unit": "launches"
+    },
+    {
+      "name": "start-over-stale-lock",
+      "red": true,
+      "value": 1,
+      "budget": 0,
+      "unit": "refused starts",
+      "detail": [
+        "hung-10-with-stale-lock: manager start exited 1: manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+      ]
+    },
+    {
+      "name": "stale-lock-after-round",
+      "red": true,
+      "value": 2,
+      "budget": 0,
+      "unit": "rounds"
+    }
+  ],
+  "summary": {
+    "*": {
+      "peakMB": 1177.7,
+      "peakProcMB": 86.5,
+      "peakHwmMB": 86.5,
+      "maxCount": 18,
+      "maxFds": 420,
+      "maxThreads": 154,
+      "distinctPids": 47,
+      "peakHeapMB": 6
+    },
+    "kit": {
+      "peakMB": 869.3,
+      "peakProcMB": 86.5,
+      "peakHwmMB": 86.5,
+      "maxCount": 12,
+      "maxFds": 283,
+      "maxThreads": 112,
+      "distinctPids": 41,
+      "peakHeapMB": 6
+    },
+    "mock-upstream": {
+      "peakMB": 59.6,
+      "peakProcMB": 59.6,
+      "peakHwmMB": 60.2,
+      "maxCount": 1,
+      "maxFds": 22,
+      "maxThreads": 7,
+      "distinctPids": 1,
+      "peakHeapMB": null
+    },
+    "preflight": {
+      "peakMB": 506,
+      "peakProcMB": 69.2,
+      "peakHwmMB": 69.2,
+      "maxCount": 9,
+      "maxFds": 185,
+      "maxThreads": 64,
+      "distinctPids": 20,
+      "peakHeapMB": null
+    },
+    "launcher": {
+      "peakMB": 378.7,
+      "peakProcMB": 76.5,
+      "peakHwmMB": 80.2,
+      "maxCount": 5,
+      "maxFds": 140,
+      "maxThreads": 35,
+      "distinctPids": 10,
+      "peakHeapMB": null
+    },
+    "manager": {
+      "peakMB": 64.5,
+      "peakProcMB": 64.5,
+      "peakHwmMB": 64.5,
+      "maxCount": 1,
+      "maxFds": 22,
+      "maxThreads": 8,
+      "distinctPids": 4,
+      "peakHeapMB": null
+    },
+    "proxy": {
+      "peakMB": 62.8,
+      "peakProcMB": 62.8,
+      "peakHwmMB": 62.8,
+      "maxCount": 1,
+      "maxFds": 23,
+      "maxThreads": 24,
+      "distinctPids": 2,
+      "peakHeapMB": 6
+    },
+    "fake-harness": {
+      "peakMB": 248.8,
+      "peakProcMB": 49.8,
+      "peakHwmMB": 49.8,
+      "maxCount": 5,
+      "maxFds": 115,
+      "maxThreads": 35,
+      "distinctPids": 5,
+      "peakHeapMB": null
+    },
+    "mcp-bridge": {
+      "peakMB": 430.5,
+      "peakProcMB": 86.5,
+      "peakHwmMB": 86.5,
+      "maxCount": 5,
+      "maxFds": 105,
+      "maxThreads": 55,
+      "distinctPids": 5,
+      "peakHeapMB": null
+    }
+  },
+  "budgets": {
+    "peaks": {
+      "kit": 596
+    },
+    "procPeaks": {
+      "launcher": 74,
+      "mcp-bridge": 75,
+      "preflight": 76,
+      "proxy": 62,
+      "solver": 20
+    },
+    "counts": {
+      "proxy": 1
+    },
+    "perParent": [
+      {
+        "role": "solver",
+        "max": 1
+      }
+    ],
+    "orphans": 0,
+    "commitBackstop": {
+      "role": "proxy",
+      "maxMB": 512
+    },
+    "extra": [
+      {
+        "name": "simultaneous-proxies",
+        "red": false,
+        "value": 1,
+        "budget": 1,
+        "unit": "procs"
+      },
+      {
+        "name": "exactly-one-proxy-after-round",
+        "red": true,
+        "value": 2,
+        "budget": 0,
+        "unit": "rounds without exactly 1",
+        "detail": [
+          "kill-holder-10: 0 proxies, pid file does not match",
+          "hung-10-with-stale-lock: 0 proxies, pid file does not match"
+        ]
+      },
+      {
+        "name": "proxy-generations/round",
+        "red": false,
+        "value": 2,
+        "budget": 1,
+        "unit": "procs"
+      },
+      {
+        "name": "failed-launches",
+        "red": true,
+        "value": 20,
+        "budget": 0,
+        "unit": "launches"
+      },
+      {
+        "name": "start-over-stale-lock",
+        "red": true,
+        "value": 1,
+        "budget": 0,
+        "unit": "refused starts",
+        "detail": [
+          "hung-10-with-stale-lock: manager start exited 1: manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+        ]
+      },
+      {
+        "name": "stale-lock-after-round",
+        "red": true,
+        "value": 2,
+        "budget": 0,
+        "unit": "rounds"
+      }
+    ]
+  },
+  "orphans": [],
+  "observations": [],
+  "notes": {
+    "sampler": {
+      "units": null,
+      "overhead": null
+    },
+    "isolation.stateDir": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state",
+    "isolation.home": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/home",
+    "isolation.port": 19654,
+    "afterKillHolder": {
+      "nextPreflight": 4,
+      "nextPreflightTail": "[zcode-preflight] cause=startup",
+      "stopCode": 4,
+      "stopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
+      "proxiesLeft": 0,
+      "staleLock": true
+    },
+    "hung-10-with-stale-lock.startRefused": {
+      "startCode": 1,
+      "stderr": "manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
+      "lock": {
+        "path": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock",
+        "holderPid": 2138131,
+        "holderAlive": false
+      },
+      "proxiesOfRun": 0,
+      "serving": 0
+    },
+    "hung-10.target": {
+      "pid": 2139868,
+      "via": "pid-record",
+      "recordedPid": 2139868
+    },
+    "rounds": [
+      {
+        "name": "kill-holder-10",
+        "n": 10,
+        "kind": "preflight",
+        "tFrom": 189,
+        "tTo": 72515,
+        "proxiesBefore": 0,
+        "maxSimultaneousProxies": 0,
+        "maxSimultaneousListeners": 0,
+        "distinctProxyProcesses": 0,
+        "proxiesAfter": 0,
+        "pidFileMatchesListener": false,
+        "failedLaunches": [
+          "preflight#0 code=null ",
+          "preflight#1 code=4 [zcode-preflight] cause=startup",
+          "preflight#2 code=4 [zcode-preflight] cause=startup",
+          "preflight#3 code=4 [zcode-preflight] cause=startup",
+          "preflight#4 code=4 [zcode-preflight] cause=startup",
+          "preflight#5 code=4 [zcode-preflight] cause=startup",
+          "preflight#6 code=4 [zcode-preflight] cause=startup",
+          "preflight#7 code=4 [zcode-preflight] cause=startup",
+          "preflight#8 code=4 [zcode-preflight] cause=startup",
+          "preflight#9 code=4 [zcode-preflight] cause=startup"
+        ],
+        "launchMs": [
+          547,
+          725,
+          736,
+          801,
+          863,
+          914,
+          940,
+          70723,
+          70728,
+          70748
+        ],
+        "staleLockLeft": "{\"pid\":2138131,\"startedAt\":\"2026-11-07T18:52:21.588Z\",\"nonce\":\"8054b8636ea2792e\"}",
+        "adversary": {
+          "killed": 2138131,
+          "afterMs": 65,
+          "proxiesAtKill": 0,
+          "pidRecordAfterKill": null
+        },
+        "startRefused": null,
+        "stop": {
+          "label": "kill-holder-10",
+          "code": 4,
+          "tail": [
+            "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+          ],
+          "proxiesLeft": 0
+        }
+      },
+      {
+        "name": "hung-10-with-stale-lock",
+        "n": 10,
+        "kind": "mixed",
+        "tFrom": 72909,
+        "tTo": 74798,
+        "proxiesBefore": 0,
+        "maxSimultaneousProxies": 0,
+        "maxSimultaneousListeners": 0,
+        "distinctProxyProcesses": 0,
+        "proxiesAfter": 0,
+        "pidFileMatchesListener": false,
+        "failedLaunches": [
+          "run#0 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+          "preflight#1 code=4 [zcode-preflight] cause=startup",
+          "run#2 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+          "preflight#3 code=4 [zcode-preflight] cause=startup",
+          "run#4 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+          "preflight#5 code=4 [zcode-preflight] cause=startup",
+          "run#6 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+          "preflight#7 code=4 [zcode-preflight] cause=startup",
+          "run#8 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+          "preflight#9 code=4 [zcode-preflight] cause=startup"
+        ],
+        "launchMs": [
+          196,
+          203,
+          203,
+          208,
+          238,
+          242,
+          242,
+          248,
+          258,
+          262
+        ],
+        "staleLockLeft": "{\"pid\":2138131,\"startedAt\":\"2026-11-07T18:52:21.588Z\",\"nonce\":\"8054b8636ea2792e\"}",
+        "adversary": null,
+        "startRefused": {
+          "startCode": 1,
+          "stderr": "manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
+          "lock": {
+            "path": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock",
+            "holderPid": 2138131,
+            "holderAlive": false
+          },
+          "proxiesOfRun": 0,
+          "serving": 0
+        },
+        "stop": {
+          "label": "hung-10-with-stale-lock",
+          "code": 4,
+          "tail": [
+            "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+          ],
+          "proxiesLeft": 0
+        }
+      },
+      {
+        "name": "hung-10",
+        "n": 10,
+        "kind": "mixed",
+        "tFrom": 143819,
+        "tTo": 193088,
+        "proxiesBefore": 1,
+        "maxSimultaneousProxies": 1,
+        "maxSimultaneousListeners": 1,
+        "distinctProxyProcesses": 2,
+        "proxiesAfter": 1,
+        "pidFileMatchesListener": true,
+        "failedLaunches": [],
+        "launchMs": [
+          38963,
+          39008,
+          39012,
+          39024,
+          39297,
+          47598,
+          47610,
+          47618,
+          47629,
+          47644
+        ],
+        "staleLockLeft": null,
+        "adversary": null,
+        "startRefused": null,
+        "stop": {
+          "label": "hung-10",
+          "code": 0,
+          "tail": [
+            "stopped (pid 2141382)"
+          ],
+          "proxiesLeft": 0
+        }
+      }
+    ],
+    "cleanup": {
+      "staleLockRemoved": false,
+      "finalStop": {
+        "label": "final",
+        "code": 0,
+        "tail": [
+          "not running"
+        ],
+        "proxiesLeft": 0
+      }
+    },
+    "isolation.externalConnectionsDuringRun": [],
+    "stop.code": 0,
+    "stop.output": [
+      "not running"
+    ]
+  },
+  "samples": 628,
+  "csv": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/samples.csv"
+}
