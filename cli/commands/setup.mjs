@@ -22,7 +22,7 @@ import { detectHarnesses } from "../../lib/detect.mjs";
 import { ensureState } from "../../lib/state.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 import { bootstrap } from "../context.mjs";
-import { ACCOUNT_ROTATOR_QUESTION, configureAccountRotator, restartForAccountChange, rotatorChoice } from "../account-setup.mjs";
+import { decideAccountRotator, restartForAccountChange, rotatorChoice } from "../account-setup.mjs";
 import { setupOutput } from "../setup-output.mjs";
 import {
   ABORTED, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, createPrompter, decideHarness,
@@ -219,26 +219,22 @@ export async function run({ flags }, cmd) {
     // a refresh, an `integrate` decision or a y given without the note.
     await integrateMcp(cmd, flags, tx, detected, mcpIds, (...args) => ui.detail(...args));
     ui.step("Account Rotator");
-    cmd.progress("\n  Keep authorized logins as separate encrypted accounts.");
-    cmd.progress("  New logins are saved automatically while the feature is enabled.");
-    let choice = explicitChoice;
-    if (choice === undefined && !abortedByUser) {
-      try {
-        choice = await prompter.ask(ACCOUNT_ROTATOR_QUESTION);
-      } catch (err) {
-        if (err?.code !== ABORTED) throw err;
-        abortedByUser = true;
-      }
-    }
-    if (choice === undefined) {
-      cmd.progress(abortedByUser ? "  Account Rotator question skipped (aborted); setting unchanged." : "  Account Rotator setting unchanged (no interactive answer).");
-      cmd.progress("  Enable later: zcode-kit accounts enable");
-    } else {
-      const result = configureAccountRotator(ctx, tx, choice, (cliArgs, opts) => proxyCli(cmd, cliArgs, opts));
-      accountChange = result.changed;
-      cmd.progress(choice ? `  [OK] Account Rotator enabled (${result.accountCount} saved accounts).` : "  [OK] Account Rotator disabled. Saved accounts are kept.");
-      if (choice && result.accountCount === 0) cmd.progress("  Add your first account: zcode-kit auth login zai");
-    }
+    // Asked once (ticket 42): a stored decision stands unless --reask; the
+    // overrides still win. See decideAccountRotator for the order.
+    const rotator = await decideAccountRotator({
+      ctx,
+      tx,
+      explicit: explicitChoice,
+      explicitSource: flags["account-rotator"] !== undefined ? "flag" : "env",
+      reask: flags.reask === true,
+      prompter,
+      aborted: abortedByUser,
+      progress: cmd.progress,
+      warn: (line) => ui.warn(line),
+      runProxyCli: (cliArgs, opts) => proxyCli(cmd, cliArgs, opts),
+    });
+    accountChange = rotator.changed;
+    abortedByUser = rotator.aborted;
   } finally {
     prompter.close();
     let finishErr = null;

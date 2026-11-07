@@ -89,6 +89,8 @@ function commandCtx(kit) {
     env: process.env,
     execPath: process.execPath,
     platform: process.platform,
+    // Lazy: touching process.stdin creates its handle; only update reads it.
+    terminal: { get stdin() { return process.stdin; }, get stderr() { return process.stderr; } },
     spawnSync,
     runCommandSync,
     fetch: (...args) => fetch(...args),
