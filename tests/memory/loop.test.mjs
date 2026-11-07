@@ -67,14 +67,25 @@ test("a marked process is re-attributed after it execs (a proxy first seen befor
   const marker = `ZCODE_MEMLOOP_RUN=exec-test-${process.pid}`;
   const entry = join(dir, "zcode-proxy-src", "src", "index.ts");
   mkdirSync(dirname(entry), { recursive: true });
-  writeFileSync(entry, "setTimeout(() => {}, 5000);\n");
-  // `sh pre-exec.sh` first (role other), then the same pid execs into a proxy command line.
+  writeFileSync(entry, "setTimeout(() => {}, 30000);\n");
+  // `sh pre-exec.sh` first (role other), then the same pid execs into a proxy
+  // command line. Ticket 64: every step waits on the event it needs (sampled as
+  // sh, the exec seen in /proc, two ticks after it), never on a time window.
   const preExec = join(dir, "pre-exec.sh");
-  writeFileSync(preExec, `sleep 0.6\nexec "${process.execPath}" "${entry}" serve\n`);
-  const child = spawn("/bin/sh", [preExec], { env: { ...process.env, ZCODE_MEMLOOP_RUN: marker.split("=")[1] }, stdio: "ignore" });
+  writeFileSync(preExec, `read go\nexec "${process.execPath}" "${entry}" serve\n`);
+  const child = spawn("/bin/sh", [preExec], { env: { ...process.env, ZCODE_MEMLOOP_RUN: marker.split("=")[1] }, stdio: ["pipe", "ignore", "ignore"] });
+  const until = async (what, ok, ms = 20_000) => {
+    for (const end = Date.now() + ms; !ok(); await sleep(20)) if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+  };
+  const execd = () => { try { return /index\.ts\0serve\0/.test(readFileSync(`/proc/${child.pid}/cmdline`, "utf8")); } catch { return false; } };
   try {
     const sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100 });
-    await sleep(1600);
+    const rolesNow = () => sampler.rows.flatMap((r) => r.procs.filter((p) => p.pid === child.pid).map((p) => p.role));
+    await until("a sample of the child as sh", () => rolesNow().length > 0);
+    child.stdin.end("go\n");
+    await until("the exec", execd);
+    const seenAtExec = sampler.rows.length;
+    await until("two samples after the exec", () => sampler.rows.length >= seenAtExec + 2);
     const rows = await sampler.stop();
     const roles = rows.flatMap((r) => r.procs.filter((p) => p.pid === child.pid).map((p) => p.role));
     assert.equal(roles[0], "other", `first seen as sh: ${roles}`);

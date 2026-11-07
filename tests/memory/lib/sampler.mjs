@@ -13,6 +13,7 @@ import { createKitTracker, pollOnce, powershellPoller, startPoller } from "./win
 import * as winNet from "./win-net.mjs";
 
 const PAGE_KB = 4; // getconf PAGESIZE on every supported Linux target = 4096
+const PF_KTHREAD = 0x00200000; // /proc/<pid>/stat flags (field 9): a kernel thread
 
 export function supported(platform = process.platform) {
   return platform === "linux" || platform === "win32";
@@ -84,6 +85,12 @@ function snapshot(pid, marker, cache, root) {
   const cmdline = readText(`${root}/${pid}/cmdline`) ?? "";
   if (meta === undefined || meta.cmdline !== cmdline) {
     const environ = readText(`${root}/${pid}/environ`);
+    // Inside an exec the new address space is installed before its arguments
+    // and environment: both read 0 bytes (fs/proc/base.c, mm->env_end unset).
+    // That is no evidence the process is not ours (ticket 64: an exec'd proxy
+    // vanished from the run): no sample now, read it again next tick. A kernel
+    // thread (PF_KTHREAD) reads the same and is never ours.
+    if (cmdline === "" && environ === "" && !(Number(fields[6]) & PF_KTHREAD)) return null;
     if (environ === null || !environ.split("\0").includes(marker)) {
       cache.set(key, null);
       return null;
