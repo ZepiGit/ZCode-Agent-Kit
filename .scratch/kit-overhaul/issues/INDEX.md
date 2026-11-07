@@ -69,6 +69,8 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 63 | [Proxy-side effort normalisation for native `/v1/messages` (Claude Code effort for `glm-*`)](63-claude-code-effort-normalisation-live-probe.md) | sol | medium | — | needs-info |
 | 64 | [Sampler re-attribution after exec fails under CI load (test or sampler defect)](64-sampler-exec-reattribution-flake.md) | sol | medium | — | ready-for-agent |
 | 65 | [S3/hung's stale-lock round is skipped when `manager start` exits 1](65-s3-hung-stale-lock-round-start-refused.md) | sol | high | — | ready-for-agent |
+| 66 | [Windows S5/short re-listed under ticket 30 with a bounded unstable growth band](66-windows-s5-short-unstable-growth-band.md) | glm | low | — | ready-for-agent |
+| 67 | [A plain expected-RED listing of a single-run key accepts any RED](67-plain-listing-hides-other-reds.md) | sol | medium | — | needs-triage |
 
 ## Initial frontier
 
