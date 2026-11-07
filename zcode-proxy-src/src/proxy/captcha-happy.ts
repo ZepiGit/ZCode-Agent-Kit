@@ -1804,6 +1804,11 @@ async function createDom(region: string, prefix: string, resources?: DomResource
     settings: {
       enableJavaScriptEvaluation: true,
       enableImageFileLoading: true,
+      // happy-dom 21 turned these off by default (GHSA-c8p4-j97h-3vg8). Kept on
+      // so a solve loads what it loaded on 20.x: the surface is unchanged, not
+      // stricter (ADR-0007, B1). Dropping either needs a live vendor solve.
+      enableCSSFileLoading: true,
+      enableIframePageLoading: true,
       suppressInsecureJavaScriptEnvironmentWarning: true,
       navigator: { userAgent: fp.userAgent },
       viewport: { width: fp.screen.w, height: fp.screen.h, devicePixelRatio: 1 },
