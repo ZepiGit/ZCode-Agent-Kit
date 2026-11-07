@@ -13,6 +13,7 @@ import { createKitTracker, pollOnce, powershellPoller, startPoller } from "./win
 import * as winNet from "./win-net.mjs";
 
 const PAGE_KB = 4; // getconf PAGESIZE on every supported Linux target = 4096
+const PF_KTHREAD = 0x00200000; // /proc/<pid>/stat flags (field 9): a kernel thread
 
 export function supported(platform = process.platform) {
   return platform === "linux" || platform === "win32";
@@ -66,8 +67,8 @@ export function roleOf(argv) {
 }
 
 /** One /proc snapshot of a pid, or null when it vanished or is not ours. */
-function snapshot(pid, marker, cache) {
-  const stat = readText(`/proc/${pid}/stat`);
+function snapshot(pid, marker, cache, root) {
+  const stat = readText(`${root}/${pid}/stat`);
   if (!stat) return null;
   const close = stat.lastIndexOf(")");
   const fields = stat.slice(close + 2).split(" ");
@@ -81,9 +82,15 @@ function snapshot(pid, marker, cache) {
   // first seen between fork and exec shows its parent's argv (a proxy spawned
   // by a start lock holder killed inside spawn() was role "preflight" for a
   // whole S3/hung run). A marked process is re-read whenever its command line changed.
-  const cmdline = readText(`/proc/${pid}/cmdline`) ?? "";
+  const cmdline = readText(`${root}/${pid}/cmdline`) ?? "";
   if (meta === undefined || meta.cmdline !== cmdline) {
-    const environ = readText(`/proc/${pid}/environ`);
+    const environ = readText(`${root}/${pid}/environ`);
+    // Inside an exec the new address space is installed before its arguments
+    // and environment: both read 0 bytes (fs/proc/base.c, mm->env_end unset).
+    // That is no evidence the process is not ours (ticket 64: an exec'd proxy
+    // vanished from the run): no sample now, read it again next tick. A kernel
+    // thread (PF_KTHREAD) reads the same and is never ours.
+    if (cmdline === "" && environ === "" && !(Number(fields[6]) & PF_KTHREAD)) return null;
     if (environ === null || !environ.split("\0").includes(marker)) {
       cache.set(key, null);
       return null;
@@ -92,10 +99,10 @@ function snapshot(pid, marker, cache) {
     meta = { cmdline, argv, role: roleOf(argv), comm: stat.slice(stat.indexOf("(") + 1, close) };
     cache.set(key, meta);
   }
-  const status = readText(`/proc/${pid}/status`) ?? "";
+  const status = readText(`${root}/${pid}/status`) ?? "";
   const kb = (name) => Number((status.match(new RegExp(`^${name}:\\s+(\\d+)`, "m")) ?? [])[1] ?? 0);
   let fds = 0;
-  try { fds = readdirSync(`/proc/${pid}/fd`).length; } catch {}
+  try { fds = readdirSync(`${root}/${pid}/fd`).length; } catch {}
   return {
     pid, ppid, state, key, role: meta.role, comm: meta.comm,
     rssKb: kb("VmRSS"), hwmKb: kb("VmHWM"), threads: kb("Threads"), fds,
@@ -103,13 +110,13 @@ function snapshot(pid, marker, cache) {
   };
 }
 
-/** All live processes carrying the marker. */
-export function scan(marker, cache = new Map()) {
+/** All live processes carrying the marker. `procRoot` (Linux; tests: a fake /proc) defaults to /proc. */
+export function scan(marker, cache = new Map(), { procRoot = "/proc" } = {}) {
   if (useWindows(marker)) return scanWindows(marker);
   const out = [];
-  for (const name of readdirSync("/proc")) {
+  for (const name of readdirSync(procRoot)) {
     if (!/^\d+$/.test(name)) continue;
-    const snap = snapshot(Number(name), marker, cache);
+    const snap = snapshot(Number(name), marker, cache, procRoot);
     if (snap && snap.state !== "Z") out.push(snap);
   }
   return out;

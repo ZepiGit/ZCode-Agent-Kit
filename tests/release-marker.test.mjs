@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -111,6 +111,24 @@ test("payload verification rejects a payload without the shared width core, toke
   const { root, build } = packageFixture(t);
   const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
   for (const file of SHARED_OUTPUT_FILES) {
+    build();
+    const good = verify();
+    assert.equal(good.status, 0, good.stderr);
+    rmSync(join(root, "pack/dist", file));
+    const bad = verify();
+    assert.equal(bad.status, 1, `a package missing ${file} must fail closed`);
+    assert.match(bad.stderr, new RegExp(`required file missing: ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  }
+});
+
+test("payload verification rejects a payload without any one of the CLI command modules (ticket 08)", (t) => {
+  const { root, build } = packageFixture(t);
+  const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
+  // The checkout's own cli/commands/ is the source of truth: the entry
+  // dispatches every command through these files.
+  const modules = readdirSync(join(KIT, "cli", "commands")).filter((f) => f.endsWith(".mjs")).map((f) => `cli/commands/${f}`);
+  assert.ok(modules.includes("cli/commands/index.mjs") && modules.length >= 15, `${modules}`);
+  for (const file of modules) {
     build();
     const good = verify();
     assert.equal(good.status, 0, good.stderr);

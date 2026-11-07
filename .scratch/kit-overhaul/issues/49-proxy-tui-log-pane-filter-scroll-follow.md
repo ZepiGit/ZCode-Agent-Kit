@@ -31,3 +31,5 @@ ADR: 0001
 Spec stories: 118
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 32): with an 8 MB line on screen a frame takes 5.9 ms (recorded, not gated); a short pane scrolled by fewer rows than the viewport shows a '▼ 0 more' badge.
