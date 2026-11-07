@@ -11,7 +11,7 @@ All paths above are relative to `/home/AgentKit/wt/overhaul/.scratch/kit-overhau
 ## Worktree and branch
 - Create: `git -C /home/AgentKit/wt/overhaul worktree add -b ticket/NN-<slug> /home/AgentKit/wt/tNN overhaul/stability-terminal-ux`.
 - Before starting, confirm `git -C /home/AgentKit/wt/tNN merge-base --is-ancestor overhaul/stability-terminal-ux HEAD`; if not, reset onto the integration branch.
-- Install deps in the worktree as `METRICS.md` (Baseline) describes. Bun is not on PATH: use `/home/AgentKit/overhaul-tools/bun-1.4.4/node_modules/.bin/bun` once ticket 11 has merged (check `git log overhaul/stability-terminal-ux --oneline | grep -i 'bun 1.4.4'`), otherwise `/home/AgentKit/overhaul-tools/bun-1.4.2/...`. Pass `BUN_DIR=<that .bin dir>` to the runner below.
+- Install deps in the worktree as `METRICS.md` (Baseline) describes. Bun is not on PATH: use `/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin/bun`. Bun is pinned to 1.4.2 everywhere (Owner Proxy round 11; ticket 62 owns any move to a newer Bun), so 1.4.3/1.4.4 under overhaul-tools are for the paired measurement only. Pass `BUN_DIR=<that .bin dir>` to the runner below.
 - Commit with `/home/AgentKit/overhaul-tools/gitc.sh commit ...` only. Conventional Commits, English, matching the repo's style (`feat(proxy): …`, `fix(cli): …`, `test(memory): …`). Never push. Never touch `/home/AgentKit/ZCode-Agent-Kit` (owner checkout) or `/home/AgentKit/wt/overhaul` (integration worktree; the merger owns it).
 
 ## Running things
