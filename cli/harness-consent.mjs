@@ -45,40 +45,70 @@ function abortError() {
  * CI, or input closed before an answer (EOF must never count as consent).
  * Ctrl-C rejects with an error whose `code` is ABORTED so the caller can stop
  * asking instead of treating it as "no answer".
+ *
+ * How a question is drawn is the capability record's decision
+ * (lib/term/out.mjs promptStyle, from `output`, `env` and `platform`), never
+ * the process's own TERM (Node's readline redraws a prompt unless
+ * process.env.TERM is "dumb"). The kit always writes the question text itself.
+ *   redraw: readline owns the line (raw mode): it echoes, edits and redraws the
+ *           question on resize with cursor control. Only where motion and
+ *           colour are allowed.
+ *   plain:  readline only reads lines (terminal: false). The terminal's own
+ *           line discipline echoes and edits, nothing the kit writes carries
+ *           an escape sequence, and Ctrl-C arrives as SIGINT. TERM=dumb,
+ *           NO_COLOR, colour off.
+ * `redraw` forces the decision (true/false); by default it is taken on the
+ * first question, loading the capability record lazily: the proxy manager
+ * imports this module and never loads presentation code.
  */
-export function createPrompter({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
+export function createPrompter({ input = process.stdin, output = process.stdout, env = process.env, platform = process.platform, redraw } = {}) {
   const interactive = isInteractive({ input, output, env });
   const queue = [];
   const waiters = [];
   let rl = null;
   let closed = false;
   let aborted = false;
+  let style = redraw === undefined ? null : { redraw: redraw === true };
+  let onSignal = null;
   function settleWaiters() {
     while (waiters.length) {
       const waiter = waiters.shift();
       if (aborted) waiter.reject(abortError()); else waiter.resolve(undefined);
     }
   }
-  function ensure() {
+  function detachSignal() {
+    if (onSignal) process.removeListener("SIGINT", onSignal);
+    onSignal = null;
+  }
+  function abort() {
+    aborted = true;
+    queue.length = 0;
+    output.write("\n");
+    const current = rl;
+    rl = null;
+    closed = true;
+    detachSignal();
+    current?.close();
+    settleWaiters();
+  }
+  async function ensure() {
     if (rl || closed) return;
-    rl = createInterface({ input, output, terminal: true });
+    if (!style) {
+      const { loadPromptStyle } = await import("../lib/term/load.mjs");
+      style = await loadPromptStyle(output, { env, platform });
+    }
+    if (rl || closed) return;
+    rl = createInterface({ input, output, terminal: style.redraw });
     rl.on("line", (line) => {
       const waiter = waiters.shift();
       if (waiter) waiter.resolve(line); else queue.push(line);
     });
-    rl.on("SIGINT", () => {
-      aborted = true;
-      queue.length = 0;
-      output.write("\n");
-      const current = rl;
-      rl = null;
-      closed = true;
-      current.close();
-      settleWaiters();
-    });
+    if (style.redraw) rl.on("SIGINT", abort);
+    else { onSignal = abort; process.on("SIGINT", onSignal); }
     rl.on("close", () => {
       closed = true;
       rl = null;
+      detachSignal();
       settleWaiters();
     });
   }
@@ -93,8 +123,12 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
     if (closed) return Promise.resolve(undefined);
     return new Promise((resolve, reject) => {
       waiters.push({ resolve, reject });
-      rl.setPrompt(promptText);
-      rl.prompt();
+      // Not rl.prompt(): its bytes depend on process.env.TERM. The question is
+      // written as text; in redraw mode readline also keeps it as the line to
+      // redraw on resize or editing.
+      if (style.redraw) rl.setPrompt(promptText);
+      if (rl.paused) rl.resume();
+      output.write(promptText);
     });
   }
   return {
@@ -106,7 +140,7 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
      */
     async ask(question, { defaultAnswer } = {}) {
       if (!interactive) return undefined;
-      ensure();
+      await ensure();
       const defaultNo = defaultAnswer === false;
       const promptText = `${question} ${defaultNo ? "[y/N]" : "[y/n]"} `;
       for (;;) {
@@ -124,7 +158,7 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
      */
     async askLine(promptText, parse, retryHint) {
       if (!interactive) return undefined;
-      ensure();
+      await ensure();
       for (;;) {
         const line = await nextLine(promptText);
         if (line === undefined) return undefined;
@@ -135,6 +169,7 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
     },
     close() {
       closed = true;
+      detachSignal();
       if (rl) { const current = rl; rl = null; current.close(); }
       settleWaiters();
     },

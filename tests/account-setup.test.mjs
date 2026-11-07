@@ -35,6 +35,8 @@ test("terminal redraw keeps the y/n question visible before and during input", a
     const pending = askAccountRotator({ input, output, env: {} });
     try {
       const question = `${ACCOUNT_ROTATOR_QUESTION} [y/N] `;
+      // Round 2: the question is drawn once the capability record has loaded (one async step).
+      for (let i = 0; i < 200 && !transcript.includes(question); i++) await new Promise((r) => setTimeout(r, 5));
       assert.ok(transcript.includes(question));
       transcript = "";
       output.emit("resize");
@@ -451,35 +453,79 @@ test("update spawns its setup with stdin attached only when stdin and stderr are
   }
 });
 
-// Prompt snapshots (seam 5 style, TTY variants): the rotator step as the user
-// sees it on a terminal, undecided, answered n. Setup's text output is not on
-// the output module yet (ticket 43), so every TTY variant renders the same
-// bytes; the files pin that, and a later batch updates them per variant.
-for (const variant of Object.keys(C3_VARIANTS).filter((v) => C3_VARIANTS[v].tty)) {
-  test(`snapshot: the Account Rotator question in ${variant}`, async (t) => {
-    const { decideAccountRotator } = await loadAccountSetup();
-    const { createPrompter } = await import(pathToFileURL(join(KIT, "cli", "harness-consent.mjs")).href);
-    const root = mkdtempSync(join(tmpdir(), "kit-rotator-snap-"));
-    t.after(() => rmSync(root, { recursive: true, force: true }));
-    const config = join(root, "config.yaml");
-    writeFileSync(config, "auth:\n  accounts:\n    enabled: false\n");
-    const ctx = { config, generated: join(root, "generated"), proxySrc: join(KIT, "zcode-proxy-src") };
-    const input = new PassThrough(), output = new PassThrough();
-    input.isTTY = output.isTTY = true;
-    output.columns = C3_VARIANTS[variant].columns;
-    let transcript = "";
-    output.on("data", (chunk) => { transcript += chunk; });
-    const prompter = createPrompter({ input, output, env: C3_VARIANTS[variant].env });
-    const tx = { touch() {} };
-    const pending = decideAccountRotator({
-      ctx, tx, explicit: undefined, explicitSource: null, reask: false, prompter, aborted: false,
+// Prompt snapshots (seam 5 style, TTY variants): the rotator step and one
+// harness question as the kit writes them on a terminal, undecided, answered
+// n. In the plain variants (no-color, term-dumb) the typed answer is echoed by
+// the terminal, not by the kit, so it is not in the kit's bytes.
+// Their bytes are decided by the capability record of the variant (forced
+// streams and env), never by the test process's own TERM: Node's readline
+// redraws a prompt unless process.env.TERM is "dumb" (round 2: the snapshots
+// taken under TERM=dumb failed on CI, where TERM is not dumb). Each render is
+// repeated under three process TERM values and must be byte-identical.
+const PROCESS_TERMS = [undefined, "dumb", "xterm-256color"];
+async function withProcessTerm(term, fn) {
+  const saved = process.env.TERM;
+  if (term === undefined) delete process.env.TERM; else process.env.TERM = term;
+  try { return await fn(); } finally { if (saved === undefined) delete process.env.TERM; else process.env.TERM = saved; }
+}
+async function renderQuestion(t, variant, kind, { after } = {}) {
+  const { decideAccountRotator } = await loadAccountSetup();
+  const { createPrompter, harnessQuestion } = await import(pathToFileURL(join(KIT, "cli", "harness-consent.mjs")).href);
+  const root = mkdtempSync(join(tmpdir(), "kit-rotator-snap-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const config = join(root, "config.yaml");
+  writeFileSync(config, "auth:\n  accounts:\n    enabled: false\n");
+  const ctx = { config, generated: join(root, "generated"), proxySrc: join(KIT, "zcode-proxy-src") };
+  const v = C3_VARIANTS[variant];
+  const input = new PassThrough(), output = new PassThrough();
+  input.isTTY = output.isTTY = true;
+  output.columns = v.columns;
+  let transcript = "";
+  output.on("data", (chunk) => { transcript += chunk; });
+  const prompter = createPrompter({ input, output, env: v.env, platform: v.platform });
+  const pending = kind === "rotator"
+    ? decideAccountRotator({
+      ctx, tx: { touch() {} }, explicit: undefined, explicitSource: null, reask: false, prompter, aborted: false,
       progress: (line) => output.write(line + "\n"), warn: (line) => output.write(`  WARN: ${line}\n`),
       runProxyCli: () => assert.fail("a no never imports"),
+    })
+    : prompter.ask(harnessQuestion("Codex CLI"));
+  // Type only once the question is on screen (a line typed ahead takes another path).
+  for (let i = 0; i < 200 && !/\[y\/[nN]\] $/.test(transcript); i++) await new Promise((r) => setTimeout(r, 5));
+  assert.match(transcript, /\[y\/[nN]\] $/, "the question is written before input is read");
+  if (after) after({ input, output });
+  input.write("n\n");
+  const result = await pending;
+  prompter.close();
+  return { transcript, result };
+}
+const TTY_VARIANTS = Object.keys(C3_VARIANTS).filter((v) => C3_VARIANTS[v].tty);
+for (const variant of TTY_VARIANTS) {
+  for (const [kind, file] of [["rotator", "rotator-prompt"], ["harness", "harness-prompt"]]) {
+    test(`snapshot: the ${kind === "rotator" ? "Account Rotator" : "per-harness"} question in ${variant}, whatever the process TERM`, async (t) => {
+      const renders = [];
+      for (const term of PROCESS_TERMS) renders.push(await withProcessTerm(term, () => renderQuestion(t, variant, kind)));
+      assert.deepEqual(renders[0].result, kind === "rotator" ? { changed: false, aborted: false } : false);
+      for (const r of renders.slice(1)) assert.equal(r.transcript, renders[0].transcript, "the process TERM must not change the bytes");
+      matchSnapshot(`setup/${file}/${variant}.txt`, renders[0].transcript);
     });
-    await new Promise((r) => setImmediate(r));
-    input.write("n\n");
-    assert.deepEqual(await pending, { changed: false, aborted: false });
-    prompter.close();
-    matchSnapshot(`setup/rotator-prompt/${variant}.txt`, transcript);
-  });
+  }
+}
+
+// design-language §3.3/§4.10 (R6, R15): no cursor control and no escape
+// sequence where the capability record turns colour or motion off, even when
+// the terminal is resized or a key is erased during the question.
+for (const variant of TTY_VARIANTS.filter((v) => ["no-color", "term-dumb"].includes(v))) {
+  for (const kind of ["rotator", "harness"]) {
+    test(`no escape sequence in the ${kind} question under ${variant}, with a resize and a backspace, whatever the process TERM`, async (t) => {
+      for (const term of PROCESS_TERMS) {
+        const { transcript } = await withProcessTerm(term, () => renderQuestion(t, variant, kind, {
+          // In plain mode the terminal's line discipline edits; here the erased
+          // key arrives as an invalid line, so the question is asked once more.
+          after: ({ input, output }) => { input.write("x\x7f\n"); output.emit("resize"); },
+        }));
+        assert.equal(transcript.indexOf("\x1b"), -1, `ESC under ${variant} (process TERM ${term}): ${JSON.stringify(transcript)}`);
+      }
+    });
+  }
 }
