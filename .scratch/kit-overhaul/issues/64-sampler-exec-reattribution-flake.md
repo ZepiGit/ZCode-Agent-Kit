@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: medium
@@ -64,3 +64,5 @@ Branch `ticket/64-sampler-exec-reattribution`, code head a30b300 (c499de5 RED te
 - The window yields no sample rather than a sample with the previous role. Its contents are unknown at that moment, and an exec may drop the marker (mutant Y's case).
 - No expected-red entry belongs to this ticket.
 - CI confirmation of the flake's absence on ubuntu Node 24: pending CI (orchestrator verifies after merge+push).
+
+Merged 2026-11-07 as e0f5349 (ticket/64-sampler-exec-reattribution at 1f4ee0c; first merge, no revert-of-revert step); fast suite: kit 727/746 (19 skipped, 0 fail), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged. No lockfile changes, so only the root `npm ci` ran. Clean merge (no conflicts). No pre-merge CI run: the change is test infrastructure only (tests/memory/lib/sampler.mjs and its tests). Its one pending-CI item (the ubuntu Node 24 leg no longer flakes) is confirmed by the next staging runs, which the orchestrator starts right after this merge. Memory loop on the merged tree: `node tests/memory/job.mjs --only S3/hung` (port 19640, cap systemd, node v26.7.0) has the ratchet holding. S3/hung is RED only against ticket 16's expected-RED entry, and every harness role is seen (fake-harness 7, mcp-bridge 5, launcher 5); 189 s, 449 samples. Logs: .scratch/kit-overhaul/reports/merge-64-{npm-ci,test,proxy,mcp,memloop-S3-hung}.log.
