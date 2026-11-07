@@ -6,6 +6,7 @@ import { parseDocument } from "yaml";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import type { ProviderId } from "../provider/types.js";
 import { EXAMPLE_CONFIG_YAML } from "./template.js";
+import { withLineEndingsOf } from "./line-endings.mjs";
 
 /**
  * Targeted YAML update of top-level `provider` and `plan` keys.
@@ -19,10 +20,12 @@ export function updateConfigYaml(
   path: string,
   fields: { provider: ProviderId; plan: "coding-plan" | "start-plan" },
 ): void {
-  const doc = parseDocument(readFileSync(path, "utf-8"));
+  const source = readFileSync(path, "utf-8");
+  const doc = parseDocument(source);
   doc.set("provider", fields.provider);
   doc.set("plan", fields.plan);
-  writeFileSync(path, String(doc), "utf-8");
+  // The yaml library renders LF: keep a CRLF config CRLF (line-endings.mjs).
+  writeFileSync(path, withLineEndingsOf(source, String(doc)), "utf-8");
 }
 
 /** Update account policy fields without round-tripping unrelated YAML. */
@@ -30,13 +33,14 @@ export function updateAccountPolicyYaml(
   path: string,
   fields: { pausedIds?: string[]; allowedIds?: string[]; allowPaid?: boolean },
 ): void {
-  const doc = parseDocument(readFileSync(path, "utf-8"));
+  const source = readFileSync(path, "utf-8");
+  const doc = parseDocument(source);
   const current = doc.getIn(["auth", "accounts"]);
   if (!current || typeof current !== "object") doc.setIn(["auth", "accounts"], {});
   for (const [key, value] of Object.entries(fields)) {
     if (value !== undefined) doc.setIn(["auth", "accounts", key], value);
   }
-  writeFileSync(path, String(doc), "utf-8");
+  writeFileSync(path, withLineEndingsOf(source, String(doc)), "utf-8");
 }
 
 /**

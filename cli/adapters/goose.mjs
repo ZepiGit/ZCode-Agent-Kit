@@ -5,6 +5,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";
+import { withLineEndingsOf } from "../../lib/line-endings.mjs";
 
 /** Platform-correct custom_providers directory (exported for tests). */
 export function providerDir(home) {
@@ -48,7 +49,8 @@ export default {
         timeout_seconds: 10,
       },
     };
-    const current = existsSync(file) ? readJsonSafe(file) : null;
+    const existing = existsSync(file) ? readFileSync(file, "utf8") : "";
+    const current = existing ? readJsonSafe(file) : null;
     if (current && JSON.stringify(current) === JSON.stringify(provider)) {
       log("  goose: zcode provider already current");
       return { changed: false };
@@ -58,7 +60,8 @@ export default {
     }
     const merged = { ...(current ?? {}), ...provider, auth: { ...(current?.auth ?? {}), ...provider.auth } };
     if (current && JSON.stringify(current) === JSON.stringify(merged)) return { changed: false };
-    commitFile(ctx, tx, file, JSON.stringify(merged, null, 2) + "\n");
+    // Written with the file's own line endings (lib/line-endings.mjs).
+    commitFile(ctx, tx, file, withLineEndingsOf(existing, JSON.stringify(merged, null, 2) + "\n"));
     log(`  goose: wrote ${file}`);
     log("  use via: goose session --provider zcode  (credential fetched through the kit's auth helper)");
     return { changed: true };

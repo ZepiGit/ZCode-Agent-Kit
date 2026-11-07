@@ -231,7 +231,9 @@ function assertRepairAllowed(ctx) {
 }
 async function alignOfflineKey(ctx, tx) {
   const text = readFileSync(ctx.config, 'utf8');
-  const keys = [...text.matchAll(/^  proxyApiKey: "([A-Za-z0-9_-]+)"\r?$/gm)];
+  // The match ends before the line break, so the replacement below keeps the
+  // file's own line ending (a CRLF config stays CRLF).
+  const keys = [...text.matchAll(/^  proxyApiKey: "([A-Za-z0-9_-]+)"(?=\r?$)/gm)];
   const ports = [...text.matchAll(/^  port: (\d+)\r?$/gm)];
   const key = ctx.key();
   if (keys.length !== 1 || ports.length !== 1 || !/^[A-Za-z0-9_-]+$/.test(key) || Number(ports[0][1]) < 1 || Number(ports[0][1]) > 65535) {

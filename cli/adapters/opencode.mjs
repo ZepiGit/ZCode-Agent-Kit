@@ -5,7 +5,7 @@
 // ZCODE_PROXY_KEY; users can alternatively run /connect inside OpenCode.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
+import { parseJsonc, setTopLevelKey, withFinalNewline } from "../../lib/jsonc.mjs";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 /** Platform-correct global config location (exported for tests). */
@@ -90,7 +90,7 @@ export default {
     text = setTopLevelKey(text, "provider", { ...(doc.provider ?? {}), zcode: wanted });
     // Validate the merged document still parses before writing.
     parseJsonc(text);
-    const { wrote } = commitFile(ctx, tx, target, text.endsWith("\n") ? text : text + "\n");
+    const { wrote } = commitFile(ctx, tx, target, withFinalNewline(text));
     if (wrote) log(`  opencode: provider "zcode" written to ${target} (apiKey references ZCODE_PROXY_KEY — set by the kit launcher)`);
     log("  use via: zcode-kit run opencode -- <args>  |  openai-compatible chat/completions only");
     return { changed: wrote };

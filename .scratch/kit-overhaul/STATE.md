@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: staging/12 run 42420564808 -> merge; stage 68 (CRLF writers); t13 running. Then frontier after 13. Triage round for 67 and 69 pending. After Phase 4: Phases 5-8.
+- Next action: ticket 13 pre-merge CI 42425069025 (PR #28; watch windows S5 band, bound 30) -> merge -> opens 19, 24-26, 30, 36. t67 and t69 running. After Phase 4: Phases 5-8.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -15,6 +15,7 @@
 - Ticket 32 (TUI log pane caps) merged 2026-11-07 as 0c75be5 (resolved f2c0e74; pre-merge CI 42415961268).
 - Ticket 42 (Account Rotator asked once) merged 2026-11-07 as 928565e (resolved cc3e77e; pre-merge CI 42415962768).
 - Ticket 12 (proxy dependencies) merged 2026-11-07 as 3b409b1 (resolved 6b76a1e; pre-merge CI 42420564808).
+- Ticket 68 (CRLF writers) merged 2026-11-07 as aff5c05 (resolved 58ad4c6; pre-merge CI 42421432504).
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul
