@@ -311,6 +311,25 @@ test("CI and release workflows pin checkout@v7, setup-node@v7, setup-bun@v2, Bun
   assert.match(manifest, /zcode-proxy-src\/\.github\/workflows\//, "MANIFEST.md records the nested-workflow vendor change");
 });
 
+// One Bun everywhere (story 126; Round 11 Q1 conditions 1 and 6): the installers'
+// bootstrap URLs and messages, README in all five languages and SUPPORT_MATRIX
+// name the CI pin and no other Bun. Moving the pin (ticket 62) moves all of them.
+test("Bun 1.4.2 is the one pin: both installers, README x5 and SUPPORT_MATRIX name no other Bun", () => {
+  const versions = (text, pattern) => [...new Set([...text.matchAll(pattern)].map((m) => m[1]))];
+  for (const file of ["install.sh", "install.ps1"]) {
+    const text = lf(readFileSync(join(KIT, file), "utf8"));
+    const urls = [...text.matchAll(/https:\/\/github\.com\/oven-sh\/bun\/releases\/download\/bun-v([^/\s"]+)\//g)].map((m) => m[1]);
+    assert.ok(urls.length >= 1, `${file} bootstraps Bun from the oven-sh/bun release assets`);
+    assert.deepEqual([...new Set(urls)], [BUN_PIN], `${file}: Bun download URLs`);
+    assert.deepEqual(versions(text, /\bbun-v(\d+\.\d+\.\d+(?:-[\w.]+)?)/g), [BUN_PIN], `${file}: every bun-vX reference`);
+    assert.deepEqual(versions(text, /\bBun v(\d+\.\d+\.\d+(?:-[\w.]+)?)/g), [BUN_PIN], `${file}: the version the installer prints`);
+  }
+  for (const readme of ["README.md", "README.de.md", "README.es.md", "README.ja.md", "README.zh-CN.md"]) {
+    assert.deepEqual(versions(readFileSync(join(KIT, readme), "utf8"), /\bBun (\d+\.\d+\.\d+)/g), [BUN_PIN], `${readme} names the tested Bun`);
+  }
+  assert.deepEqual(versions(readFileSync(join(KIT, "SUPPORT_MATRIX.json"), "utf8"), /\bBun (\d+\.\d+\.\d+)/g), [BUN_PIN], "SUPPORT_MATRIX.json");
+});
+
 // The proxy typecheck in root CI (ticket 11; ADR-0016 condition 2, spec §12,
 // story 140). Every test-kit leg runs it through the proxy's pinned
 // devDependencies: typescript 7.0.2 (research/typescript.md) and @types/bun at
