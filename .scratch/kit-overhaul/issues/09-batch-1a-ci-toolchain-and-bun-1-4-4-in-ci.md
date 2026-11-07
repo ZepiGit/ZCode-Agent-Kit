@@ -105,3 +105,70 @@ Spec stories: 126, 140
     - (g) The "RED only on commit" list in the job summary.
     - Any listed windows entry that turns GREEN fails the ratchet. That becomes an Owner Proxy question with the numbers, and `expected-red.json` is not edited.
   - release.yml cannot run on a staging push (see triggers). Its first real run is the next `main` push or `v*` tag, which is a release (B6, owner). Until then only the audit test checks it. setup-node v7 dropped the dummy `NODE_AUTH_TOKEN`. Its docs say npm Trusted Publishing (OIDC) is not affected, but the first real publish is the first live proof.
+
+- **2026-11-07, round 2 (Round 10 Q1 conditions 1–2): the paired Bun measurement.**
+  - **Why.** The staged pre-merge run 42344393581 on `staging/09` failed on ubuntu `memory-budget` only: `S1/burst1: RED but not listed (linux)`, median 252.3 of [252.3, 280.6, 246, 221.2, 302.2]. The 24-run measurement 42347506810 then gave Linux CI 12/24 runs above 250 MB on Bun 1.4.4, against 1/24 on 1.4.2. The Owner Proxy (Round 10) ordered a paired, interleaved measurement before any pin decision. No pin and no list entry changed in this round; Bun stays 1.4.4 on the branch (conditions 2c/3 decide after the run).
+  - **Commit 44b2ddb, plus the merge of the integration tip f497b95** (docs only) as 70b6259.
+  - **How to switch it on.** Commit `tests/memory/measure-burst1` with one line: `24 bun=1.4.2,1.4.3,1.4.4` (LF or CRLF). Grammar: `N` (the old single-arm mode, unchanged) or `N bun=<x.y.z>,<x.y.z>[,…]` (N runs per arm, 1–50, two or more distinct exact versions; `parseMeasureSpec`). It is the same one-run marker as ticket 60: while it exists, both `memory-budget` legs run the measurement instead of the ratchet, and every `test-kit` leg fails exactly the guard test "measurement mode is off by default …". Checked locally: with this content present, the guard test fails with "tests/memory/measure-burst1 is a one-run switch". Delete it, commit and push, then make the pre-merge run.
+  - **CI changes (`ci.yml` `memory-budget`, both legs):**
+    - Only with the marker: `setup-bun@v2` steps for 1.4.2 and 1.4.3 (`no-cache: true`), each followed by `tests/memory/lib/keep-bun-arm.mjs`. That script copies the binary to `$RUNNER_TEMP/bun-arms/<v>/bun[.exe]` and keeps it only if `--revision` reports `<v>+…`; otherwise it removes the copy and fails the step.
+    - Then the job's own `setup-bun` 1.4.4 runs, so it stays the Bun on PATH, and is kept aside the same way.
+    - The measurement step passes `--bun 1.4.2=…,1.4.3=…,1.4.4=…` only when the marker contains `bun=`.
+    - **Endpoint:** setup-bun with an exact version skips the tags API and downloads `https://github.com/oven-sh/bun/releases/download/bun-v<v>/bun-<os>-<arch>[-baseline].zip`. That is the official release asset endpoint the job's own 1.4.4 step already uses, so no new endpoint is added (C6).
+    - **Integrity:** setup-bun itself verifies no checksum. The guards are the `--revision` match at keep time and the per-run runtime check below. That is the same trust as the job's own Bun.
+    - **Why `no-cache`:** setup-bun always installs to `~/.bun/bin/bun`. Its post step caches whatever binary sits there at job end (1.4.4) under each step's key, so a cached 1.4.2 key would hold the 1.4.4 binary.
+  - **Measurement code (`tests/memory`):**
+    - `job.mjs`: `--bun <v>=<path>,…` is accepted only with `--measure-burst1`. Its arms must equal the marker's arms exactly, each file must exist, and every refusal exits 2 before anything runs. The runs follow the rotation 1.4.2, 1.4.3, 1.4.4, 1.4.2, … (not blocks), `rep-<i>-bun-<v>`, each with `ZCODE_KIT_BUN` set to its arm's binary. On Windows, run.mjs's per-run Bun copy is made from it.
+    - `run.mjs` plus the new `lib/runtime-probe.mjs`: on only when job.mjs sets `ZCODE_MEMLOOP_MEASURE_PROBES=1`, i.e. in measurement mode, so a ratchet run is untouched.
+      - Before the sampler starts, inside the run's cap scope, the arm's Bun records `Bun.version`/`revision`, `process.constrainedMemory()`, `process.availableMemory()`, `navigator.hardwareConcurrency`, `os.availableParallelism()`, the CPU model and the CPU count.
+      - The node side adds `nproc`, `/proc/cpuinfo`'s model name, the cgroup filesystem type from the statfs magic (`v2-only`, `hybrid` or `v1-only`), the scope's `memory.max` read through `/proc/self/cgroup` (on hybrid hosts also the v1 `memory.limit_in_bytes`), and the cap the job requested. On Windows it records the Job Object limit instead.
+      - **The proxy's runtime Bun:** for every proxy pid the sampler sees, the executable is read from the OS while the process lives (Linux `/proc/<pid>/exe`; Windows the CIM `ExecutablePath`, now passed through the Windows snapshot, not into samples.csv). That binary is then asked for `--revision`. The flag value is never trusted.
+      - Probe processes run without the run marker, so the sampler never counts them.
+    - `lib/measure.mjs`: a paired run is invalid when no runtime Bun was recorded for its proxy, or when the proxy ran another version than its arm.
+      - The report gives, per arm: valid of requested, the count above 250, the stable-unlisted check, over-400 runs, min/median/max, the proxy's runtime Bun, and the environment (one row, plus how many variants occurred; free memory and the per-run scope path are excluded).
+      - It also gives the one-sided Fisher p of each arm against 1.4.2.
+      - On Linux it prints condition 2's mechanical reading: (a) invalid, (b) no Bun effect, or (c) with the version the rule gives, plus a caution when the count is not 24 per arm.
+      - On Windows it prints the condition 5 flags (median > 300, runs > 400) for information only.
+      - Everything goes to `measure-S1-burst1.{json,md}` and the step summary, so the result reads straight off the job summary. The job pins nothing.
+  - **The decision rule as coded:**
+    - "Stable unlisted" is `medianFalseRedRate(above/valid, 5) ≤ 0.05`, which at 24 runs is ≤ 4 of 24. The tests pin 4/24 as pass and 5/24 as fail.
+    - The Fisher test is the hypergeometric upper tail. The test checks it against an independent BigInt computation; 12/24 against 1/24 gives p < 0.001.
+    - The order is (a) → (b) → (c), with (c) V = 1.4.3 only if 1.4.3 is stable and its p > 0.05, otherwise 1.4.2.
+    - Note: at 24 per arm, a stable 1.4.3 (≤ 4) can never be significantly above a stable 1.4.2. The closest case, 4 against 0, gives p = C(24,4)/C(48,4) ≈ 0.0546. So in (c) the 1.4.3 test reduces to "1.4.3 stable"; it is still computed and printed.
+  - **Expected duration per leg** (from the 42347506810 artefacts: Linux 456 s for 24 runs, median 19 s/run; Windows 535 s for 24, median 22 s/run; locally the probes added no measurable time, 19.7 s/run against 19.6):
+    - ubuntu: 72 runs × ~19 s ≈ **23 min** plus about 1–2 min for the two extra setup-bun downloads. Timeout 75.
+    - windows: 72 × ~22 s ≈ **27 min**, about 30 min with setup. Timeout 150.
+  - **RED → GREEN:**
+    - 7 new tests failed on bf6fa98 (round 1's head) with only the new tests added (`reports/t09-r2-red.log`): marker spec, Fisher, condition 2 reading, paired rotation, runtime mismatch, cgroup info, and the CI guard with the new arm steps.
+    - The `--bun` refusal test passed before the implementation only because `--bun` was an unknown argument (exit 2). Mutation M6 below shows it now guards the real check.
+    - After the implementation: `loop.test.mjs` plus `release-audit.test.mjs` 62 pass, 0 fail, 5 skipped (`reports/t09-r2-green4.log`). The new tests: marker spec; Fisher; condition 2 reading; paired rotation (Linux); paired condition 5 (Windows shape); runtime mismatch / none recorded; `--bun` refusals; keep-bun-arm (Linux only, fake bun scripts); cgroup info; the extended CI guard; and the release-audit arm-step scanner self-check.
+  - **Pre-existing test changes, justified:**
+    - The release-audit pin test (round 1, this ticket) now exempts exactly the measurement-arm steps: a setup-bun step that carries the marker `if:`, has `no-cache: true` and sits in `memory-budget`. release.yml must have none, and ci.yml must have exactly 1.4.2 and 1.4.3. Everything else still has to be 1.4.4. Round 10 condition 1 requires those installs, and the scanner self-check shows that an unguarded `bun-version: 1.4.2` is still flagged.
+    - The ticket-60 guard test gains assertions for the new steps. Its marker-not-committed assertion is unchanged.
+  - **Mutations** (scratch edits on 44b2ddb, restored with `git checkout -- .`, `git status` clean):
+    - M1, blocks instead of rotation: 3 tests fail.
+    - M2, no runtime-revision check: the mismatch test fails.
+    - M3, the job's own Bun installed before the arms: the CI guard fails.
+    - M4, an arm step without `no-cache`: the release audit and the CI guard fail.
+    - M5, stable rule on a median of 3 instead of 5: the condition 2 test fails.
+    - M6, `--bun` accepted outside measurement mode: the refusal test fails.
+  - **Local proof (Linux, real Bun 1.4.2/1.4.3/1.4.4 from `/home/AgentKit/overhaul-tools/bun-1.4.{2,3,4}`).** Bun 1.4.3 was installed for this round the same way as the others: `npm install --save-exact bun@1.4.3` under `/home/AgentKit/overhaul-tools/bun-1.4.3`, `reports/t09-install-bun143.log`; the binary is an ELF reporting `1.4.3+c6da4a4d3`.
+    - **(1) `job.mjs --measure-burst1 '3 bun=1.4.2,1.4.3,1.4.4' --bun …`**, cap systemd, port 19093, 9 runs (`reports/t09-r2-paired-local2.log`, `/home/AgentKit/overhaul-tools/t09-memloop/r2-paired3b/`):
+      - Every run is valid, and every proxy ran its arm's Bun (read from the live pid). Example: `pid … 1.4.3+c6da4a4d3 (…/bun-1.4.3/node_modules/bun/bin/bun.exe)`.
+      - Per arm, above 250 / min / median / max (MB):
+        - 1.4.2: 0 of 3, 236.2 / 238.3 / 242.2.
+        - 1.4.3: 1 of 3, 211.7 / 213.3 / 275.5.
+        - 1.4.4: 0 of 3, 207.8 / 221.8 / 230.4.
+      - Reading: (b), with the "not 24 per arm" caution.
+      - An earlier run of the same command (`r2-paired3`) gave the same shape: 1.4.2 235–244, 1.4.3 202–274, 1.4.4 205–209.
+    - **(2) The CI path simulated** (`reports/t09-r2-ci-sim.log`): `keep-bun-arm.mjs` on the three binaries, then the measurement step's exact `run:` text extracted from ci.yml, with the marker `1 bun=1.4.2,1.4.3,1.4.4` present. It kept the three arms, ran the rotation and wrote the reading. The marker was removed afterwards.
+    - **Environment once per arm on this machine** (Round 10 condition 1's "local machine" record):
+      - Bun side, identical for all three versions: `constrainedMemory` 3221225472 (the 3G scope), `hardwareConcurrency` 8, `availableParallelism` 8.
+      - Host: `nproc` 8, AMD EPYC 7B12, cgroup **v2-only**, scope `memory.max` 3221225472, one variant per arm.
+      - On this v2-only host every Bun version already honours the scope limit. That fits the hypothesis that 1.4.4's change (cgroup v2 limits on hybrid hosts) can only show on a host of another cgroup type. The CI rows will show which type the runners have.
+  - **Suites after merging f497b95** (Bun 1.4.4, Linux): `npm run test` 640 pass, 0 fail, 16 skipped (Node 26.7.0, and before the docs-only merge also on Node 24.22.2); `npm run test:proxy` 1343 pass, 0 fail; `npm run test:mcp` 95 pass, 0 fail, 1 skipped (`reports/t09-r2m-suite-*.log`, `t09-r2-suite-test-node24.log`).
+  - **Left for the orchestrator:**
+    - Commit the marker on `staging/09`, push, and read both `measure-S1-burst1.md` files.
+    - Ubuntu decides by condition 2; windows is information by condition 5.
+    - After V is chosen, condition 3 is a follow-up round on this branch: the `bun-version` pins, the release-audit `BUN_PIN`, and the arm list if V ≠ 1.4.4.
+    - Delete the marker before the pre-merge run.

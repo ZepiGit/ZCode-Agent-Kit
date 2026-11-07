@@ -15,6 +15,10 @@
 //                                 linux shape, { ws, wsPeak, commit, units, job } in
 //                                 the win32 shape (FAKE_RUN_SHAPE, default linux;
 //                                 units/job false = a failed self-test / no Job Object).
+//                                 In measurement mode (ZCODE_MEMLOOP_MEASURE_PROBES=1)
+//                                 it reports the proxy's runtime Bun as run.mjs does:
+//                                 FAKE_RUN_BUN_REVISIONS maps ZCODE_KIT_BUN → revision
+//                                 ("" = none recorded), plus a fixed runtime environment.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { osVerdict } from "../lib/verdict.mjs";
@@ -55,6 +59,11 @@ if (mode === "burst1") {
     checks: v.checks, summary: v.summary, workingSet: v.workingSet, redOnlyOnCommit: v.redOnlyOnCommit, samples: 6,
     notes: { sampler: { units: shape === "win32" ? { ok: p.units !== false, compared: 12 } : null, overhead: null } }, observations: [], orphans: [],
   };
+  if (process.env.ZCODE_MEMLOOP_MEASURE_PROBES === "1") {
+    const revision = JSON.parse(process.env.FAKE_RUN_BUN_REVISIONS ?? "{}")[process.env.ZCODE_KIT_BUN ?? ""] ?? null;
+    summary.notes.bunRuntime = { proxies: [{ pid: 4242, exe: process.env.ZCODE_KIT_BUN ?? null, revision: revision || null }] };
+    summary.notes.runtimeEnv = { capRequested: process.env.ZCODE_MEMLOOP_CAP ?? null, bun: { revision: revision || null, constrainedMemory: 3221225472, availableMemory: 3000000000 + rep, hardwareConcurrency: 4, availableParallelism: 4, cpuModel: "Fake CPU" }, nproc: 4, cgroup: { type: "v2-only", v2Path: `/app.slice/run-r${rep}.scope`, memoryMax: "3221225472" } };
+  }
   writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
   if (shape === "win32") process.stderr.write(p.job === false ? "@@JOB applied=0 error=fake\n" : `@@JOB applied=1 limit=${3 * 1024 ** 3} peak=${kb(p.commit) * 1024}\n`);
   process.exit(v.red ? 1 : 0);

@@ -19,7 +19,8 @@ import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
 import { countRoles, startSampler, survivors, supported } from "./lib/sampler.mjs";
 import { osVerdict } from "./lib/verdict.mjs";
-import { assertSafeRun, KIT_ROOT, prepareRunBun } from "./lib/isolated-kit.mjs";
+import { assertSafeRun, bunPath, KIT_ROOT, prepareRunBun } from "./lib/isolated-kit.mjs";
+import { proxyBunTracker, runtimeEnv } from "./lib/runtime-probe.mjs";
 import { CATALOGUE, PROFILES, runKey } from "./lib/catalogue.mjs";
 
 function parseArgs(argv) {
@@ -79,6 +80,20 @@ async function main() {
     observe(label) { const counts = countRoles(marker); observations.push({ label, tMs: ctx.elapsed(), counts }); return counts; },
     log(line) { console.log(`[${args.scenario}] ${line}`); },
   };
+  // Measurement mode only (job.mjs --measure-burst1 sets it; Round 10 Q1
+  // condition 1): the runtime environment inside this cap scope, before the
+  // sampler starts, and the Bun every proxy of the run actually executes.
+  let bunTracker = null;
+  if (process.env.ZCODE_MEMLOOP_MEASURE_PROBES === "1") {
+    notes.runtimeEnv = runtimeEnv({ bun: bunPath() });
+    bunTracker = proxyBunTracker();
+    probes.push((snaps) => bunTracker.probe(snaps));
+  }
+  const recordBun = () => {
+    if (!bunTracker) return;
+    notes.bunRuntime = bunTracker.resolve();
+    console.log(`[${args.scenario}] runtime Bun of the proxy: ${notes.bunRuntime.proxies.map((p) => `pid ${p.pid} ${p.revision ?? "unknown"} (${p.exe ?? "no executable"})`).join("; ") || "no proxy seen"}`);
+  };
   const sampler = startSampler({
     marker,
     csvPath: join(outDir, "samples.csv"),
@@ -103,6 +118,7 @@ async function main() {
   } catch (err) {
     await sampler.stop();
     notes.sampler = { ...notes.sampler, overhead: sampler.overhead() };
+    recordBun();
     console.error(`[${args.scenario}] harness failure: ${err?.stack ?? err}`);
     const left = survivors(marker);
     for (const o of left) { try { process.kill(o.pid, "SIGKILL"); } catch {} }
@@ -113,6 +129,7 @@ async function main() {
   const rows = await sampler.stop();
   // The sampler's own cost (Windows: the poller's commit/working set and poll time); it never counts as kit.
   notes.sampler = { ...notes.sampler, overhead: sampler.overhead() };
+  recordBun();
   // Orphans: anything still marked after the scenario's own stop sequence,
   // minus processes the scenario deliberately keeps (none by default).
   await new Promise((r) => setTimeout(r, result.settleMs ?? 2000));
