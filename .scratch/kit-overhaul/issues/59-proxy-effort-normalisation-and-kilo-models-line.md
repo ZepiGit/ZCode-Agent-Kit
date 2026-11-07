@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 Risk: low
@@ -87,3 +87,5 @@ Sheet diff for an existing user (the snapshot diff for criterion 5; no snapshot 
 **For other tickets**
 - 54 (release notes): the Kilo values sheet is refreshed on the next setup/integrate. Its auto-fetch note becomes "enter both models above by hand".
 - Orchestrator: the ticket's H1 and the INDEX row still carry the pre-split title. Round 12 says to retitle it "Kilo Code values sheet: correct the `/v1/models` auto-fetch line". I left INDEX.md and the H1 alone, because the merger owns the tracker rows.
+
+Merged 2026-11-07 as 113075d6734e9bf7afee5a0e4a1a08e895546849 (ticket/59-kilo-models-line at 51baf79; first merge, no revert-of-revert step); fast suite: kit 670/687 (17 skipped, 0 fail; includes the 2 new tests in tests/adapter-audit.test.mjs), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes, so only the root `npm ci` ran; clean merge (no conflicts; the integration H1 from 7fd04c8 and both Comments texts kept). No CI-only criteria; CI runs on the next integration push. Logs: .scratch/kit-overhaul/reports/merge-59-{npm-ci,test,proxy,mcp}.log.
