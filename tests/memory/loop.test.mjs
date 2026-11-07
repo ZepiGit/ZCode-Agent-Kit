@@ -579,3 +579,21 @@ test("measurement mode rejects a count that is not a whole number from 1 to 50 b
     assert.deepEqual(files, [], bad);
   }
 });
+
+test("job: windows S1/burst1 against the committed unstable entry prints its line for a median of 251–300 and of ≤ 250, and fails above 300", () => {
+  const ws = (...xs) => xs.map((w) => ({ ws: w, wsPeak: w, commit: 410 }));
+  for (const [peaks, medianMB] of [[ws(255, 251, 240, 262, 230), 251], [ws(230, 220, 240, 235, 225), 230]]) {
+    const { r, job, stepSummary } = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const line = `S1/burst1: unstable (median ${medianMB} MB, budget 250), owned by ticket 20`;
+    assert.equal(job.rows[0].note, line);
+    for (const text of [r.stdout, stepSummary]) {
+      assert.ok(text.includes(`- ${line}`), `${medianMB}: ${text}`);
+      assert.match(text, /\| S1\/burst1 \| (GREEN|RED) \(unstable\) \| ticket 20 \|/);
+    }
+  }
+  const high = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(301, 305, 290, 310, 280) });
+  assert.equal(high.r.status, 1, high.r.stdout + high.r.stderr);
+  assert.match(high.stepSummary, /S1\/burst1: unstable median 301 MB is above the 300 MB bound/);
+  assert.doesNotMatch(high.stepSummary, /owned by ticket 20/);
+});

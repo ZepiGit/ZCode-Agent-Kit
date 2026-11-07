@@ -106,7 +106,30 @@ Min 180.6, median 230.9, max 251.8 MB. 2 of 20 runs are above 250 (p = 0.10), an
 
 n stays 5, the Linux-derived value. These numbers do not change it. The 8/59 estimate is still the least favourable Linux one and needs n ≥ 5. Round 8 Q1 condition 3 picks the final n from both legs.
 
-**Windows, ≥ 20 runs: pending CI.** This host has no Windows. The orchestrator gets the distribution from one CI run with the marker committed on `staging/02` (ticket 60 Comments give the exact switch). The result goes here, with p_win computed twice: from the runs alone, and pooled with runs 3, 4 and 5 counted as RED, RED, GREEN.
+**CI measurement run.** Run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42316982634, on `staging/02` db5f353: `ticket/02` 3dd5d2c merged first, then `ticket/60` 7e8520a, plus the marker `tests/memory/measure-burst1` = 24. Node v26.13.0, Bun 1.4.2. Artefacts are in `/home/AgentKit/overhaul-tools/ci-art/r8-measure-nGEr/memory-budget-{windows,linux}/measure-S1-burst1.{json,md}`.
+
+**Windows, 24 runs.** Each run is in a Job Object, 557 s in total. All 24 are valid: `ws_peak_kb` is non-zero in every run, the units self-test passed, the Job Object was applied, `count:proxy` is 1, and the gate equals max(sampled WS, ws_peak_kb) from `samples.csv` (Round 8 Q1 condition 1). WS gate in MB, in run order:
+
+**291.1**, **274.0**, **261.6**, **253.4**, 249.4, 239.2, **272.6**, **290.2**, **290.4**, 242.0, **270.1**, 249.7, 206.9, **260.5**, **274.6**, **253.3**, 240.2, **272.2**, **250.6**, 243.8, 238.6, 241.4, 231.1, 240.8
+
+- Sampled WS: 238.8, 229.6, 199.7, 155.9, 135.0, 93.9, 167.6, 264.8, 176.2, 193.3, 251.8, 217.6, 145.4, 250.1, 257.9, 149.6, 178.4, 226.9, 166.5, 222.5, 215.4, 241.2, 157.3, 155.3. In every run the gate is the PeakWorkingSetSize.
+- Commit (reported, not judged): 441, 430, 412.4, 409.5, 399.8, 391.5, 417.9, 446.3, 445.6, 391.4, 418.4, 403.6, 360.7, 411.5, 433.9, 403.8, 392.9, 421.8, 400.2, 388.8, 393.4, 393.7, 375.8, 388.8. Median 403.7, max 446.3.
+
+Min 206.9, median 251.9, max 291.1 MB. 13 of 24 runs are above 250 (p_win = 0.542). Pooled with runs 3, 4 and 5 counted as RED, RED, GREEN: 15 of 27 (p_win = 0.556), the less favourable estimate. None is above 400 and none above 300.
+
+At these p values, P(median of n above 250) is 0.56, 0.58, 0.59 and 0.60 for n = 3, 5, 7 and 9. That is Round 8 Q1 condition 3's middle band: no n ≤ 9 agrees with either list state at ≥ 95 %.
+
+**Linux, 24 CI runs** (systemd scopes, 453 s). All 24 are valid. RSS gate in MB:
+
+233.5, 212.9, 212.5, 230.7, 234.5, 246.3, **262.1**, 235.7, 214.6, 235.0, 233.7, 236.3, 241.9, 234.9, 236.5, 220.9, 236.9, 234.4, 238.4, 222.3, 240.3, 218.6, 212.7, 217.6
+
+Min 212.5, median 234.4, max 262.1 MB. 1 of 24 runs is above 250 (p = 0.042), and none is above 400. All Linux runs together: 11 of 103 (p = 0.107), where n = 5 gives a false-RED rate of ≈ 1.2 %. At the less favourable p = 0.127 it is ≈ 1.7 %. Both are within Round 6 Q1 condition 2's 5 %, so Linux stays unlisted.
+
+**Decision (Round 9 Q1).** n stays 5, and the 250 MB budget, the 400 MB ceiling and the metric are unchanged. The windows `S1/burst1 → 20` entry stays listed and is marked `unstable`: a median up to 300 MB passes, and each passing run prints "S1/burst1: unstable (median <x> MB, budget 250), owned by ticket 20".
+
+The 300 MB bound rests on two numbers. 0 of 27 windows values are above 300. At the 95 % upper bound for a single run above 300 (p ≈ 0.105), a median of 5 exceeds 300 with probability ≈ 1.0 %.
+
+A listed repeated key also no longer masks its ceiling or any other RED check (condition 1). The entry's only exit is ticket 20's ≥ 20-run measurement with every windows run ≤ 250 MB.
 
 ### Windows reference run, Bun 1.4.2 (ticket 02)
 
