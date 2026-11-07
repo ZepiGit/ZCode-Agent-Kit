@@ -14,7 +14,7 @@ n
     ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
 detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
   note: y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
-[1G[0JConfigure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] [2Gy
+Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] y
 n
 n
 y
@@ -51,7 +51,7 @@ Configure ZCode as a provider with its supported models in Continue? [y/n] n
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
+Do you want to activate the Account Rotator feature? [y/N] n
   [OK] Account Rotator disabled. Saved accounts are kept.
 
 transaction <TX> recorded — undo with: zcode-kit rollback <TX>

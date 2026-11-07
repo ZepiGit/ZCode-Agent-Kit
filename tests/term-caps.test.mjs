@@ -139,3 +139,19 @@ test("the record is a frozen snapshot: later env changes do not alter it", () =>
   assert.ok(Object.isFrozen(record));
   assert.deepEqual(Object.keys(record).sort(), ["animate", "color", "fixed", "glyphs", "plain", "tty", "width"]);
 });
+
+// Ticket 42 round 2: how a question is drawn comes from the record, not from
+// the process's own TERM (readline's rl.prompt() checks process.env.TERM).
+test("promptStyle: a question may be redrawn with cursor control only on a colour TTY with motion (not NO_COLOR, TERM=dumb, CI or a pipe)", async () => {
+  const { promptStyle } = await import("../lib/term/caps.mjs");
+  const redraw = (stream, env, opts) => promptStyle(caps(stream, env, opts)).redraw;
+  assert.equal(redraw(TTY, UTF8), true);
+  assert.equal(redraw(TTY, {}), true, "an unset TERM is not dumb");
+  assert.equal(redraw(TTY, {}, { platform: "win32" }), true, "conhost");
+  assert.equal(redraw(TTY, { ...UTF8, NO_COLOR: "1" }), false);
+  assert.equal(redraw(TTY, { ...UTF8, TERM: "dumb" }), false);
+  assert.equal(redraw(TTY, { ...UTF8, CI: "true" }), false);
+  assert.equal(redraw(TTY, UTF8, { flags: { color: "never" } }), false);
+  assert.equal(redraw(PIPE, UTF8), false);
+  assert.equal(redraw(PIPE, { ...UTF8, FORCE_COLOR: "1" }), false, "forced colour is no terminal");
+});

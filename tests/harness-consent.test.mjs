@@ -678,7 +678,7 @@ test("interactive setup asks per harness and applies the answers", { skip: !scri
   const r = await runPty(f, ["setup"], "y\nn\nn\n");
   assert.equal(r.code, 0, `${r.out}\n${r.stderr}`);
   assert.ok(r.out.indexOf("in OMP / Oh My Pi? [y/n]") < r.out.indexOf("in pi? [y/n]"), "questions in detection order");
-  assert.ok(r.out.indexOf("in pi? [y/n]") < r.out.indexOf(`${ACCOUNT_ROTATOR_QUESTION} [y/n]`), "rotator question comes after the harness questions");
+  assert.ok(r.out.indexOf("in pi? [y/n]") < r.out.indexOf(`${ACCOUNT_ROTATOR_QUESTION} [y/N]`), "rotator question comes after the harness questions");
   assert.match(r.out, /note: y also registers the kit's MCP bridge "zcode-harness" for OMP \/ Oh My Pi/);
   assert.match(r.out, /\[OK\]\s+OMP \/ Oh My Pi/);
   assert.match(r.out, /\[SKIP\] pi — answered n/);
@@ -710,7 +710,7 @@ test("setup --select: one numbered list, invalid answers repeat, chosen = config
   const r = await runPty(f, ["setup", "--select"], [
     { after: "(numbers, all, none)", send: "7\n" },
     { after: "Please enter numbers from the list", send: "2\n" },
-    { after: "[y/n]", send: "n\n" },
+    { after: "[y/N]", send: "n\n" },
   ]);
   assert.equal(r.code, 0, `${r.out}\n${r.stderr}`);
   assert.match(r.out, /1\) OMP \/ Oh My Pi\s*\n\s*2\) pi/);
@@ -720,7 +720,7 @@ test("setup --select: one numbered list, invalid answers repeat, chosen = config
   assert.match(r.out, /\[OK\]\s+pi/);
   assert.deepEqual(choicesOf(f), { omp: "skipped/interactive", pi: "configured/interactive" });
   assert.equal(existsSync(f.mcp), false, "the bridge only for a chosen harness");
-  const all = await runPty(f, ["setup", "--select"], [{ after: "(numbers, all, none)", send: "all\n" }, { after: "[y/n]", send: "n\n" }]);
+  const all = await runPty(f, ["setup", "--select"], [{ after: "(numbers, all, none)", send: "all\n" }, { after: "[y/N]", send: "n\n" }]);
   assert.equal(all.code, 0, `${all.out}\n${all.stderr}`);
   assert.match(all.out, /1\) OMP \/ Oh My Pi \(currently skipped\)/, "stored decisions are shown");
   assert.deepEqual(choicesOf(f), { omp: "configured/interactive", pi: "configured/interactive" });
