@@ -2,7 +2,7 @@
 
 **Blocked by:** 05 (Shared width core and token set (two renderers, one token set)), 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -85,3 +85,7 @@ Spec stories: 73
 - `test-kit` legs (ubuntu/windows × Node 24/26): `tests/memory/verdict.test.mjs` and `loop.test.mjs` pass with the trimmed `expected-red.json`.
 
 **Left for other tickets:** 49 owns viewport pinning while new lines arrive when scrolled, and the `▼ 0 more` badge shown when a short pane is scrolled by fewer rows than the viewport. 48 owns level words and timestamps in rows. When ticket 01's owner next edits `METRICS.md`, the S6/short row "RED → 32" becomes GREEN.
+
+### 2026-11-07 — merger
+
+- Merged 2026-11-07 as 0c75be53ccf550bdc30b239a7c35db9d047b3982 (ticket/32-tui-log-pane-caps at fcc10bf into a858ade; first merge, no revert-of-revert step); fast suite: kit 747/766 (19 skipped, 0 fail), proxy 1354/1354, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes; clean merge (no conflicts). Sanity: `git diff --stat staging/32 HEAD -- zcode-proxy-src/src/tui tests/memory/expected-red.json tests/memory/scenarios/s6-tui-run.ts tests/memory/scenarios/s6-tui.mjs` is empty (every file ticket 32 changed matches the staging/32 e296f35 tree CI judged). Pre-merge CI (draft PR #23, staging/32 on the tip with ticket 66), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42415961268; linux S6/short GREEN without its expected-RED entry (long-line heap 7 MB vs 125 MB at the tip, budget 16). METRICS.md S6/short row moved from "RED → 32" to GREEN in this resolve commit. Logs: .scratch/kit-overhaul/reports/merge-32-{npmci,test,proxy,mcp}.log.
