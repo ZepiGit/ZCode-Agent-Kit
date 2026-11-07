@@ -95,3 +95,27 @@ Die native Providerroute kann von der Proxyroute abweichen.
   MCP-Tools funktioniert unabhängig (so wie im Auftrag gefordert).
 - Getestete MCP-Clients: offizieller SDK-Client (Node 26), eigener HTTP-Client (`fetch`), MCP Inspector
   nicht ausgeführt (nicht installiert); bei Bedarf separat verifizieren.
+
+## 6. Protokollrevision 2025-11-25 und SDK 1.x (bewusster Stay-back)
+
+- **Stand:** Die Bridge nutzt `@modelcontextprotocol/sdk` 1.x (`^1.32.2`) mit dem Low-Level-`Server`
+  und handelt höchstens die Protokollrevision `2025-11-25` aus (`LATEST_PROTOCOL_VERSION` des SDK;
+  ältere unterstützte Revisionen wie `2025-06-18` werden gespiegelt). Die aktuelle Revision
+  `2026-07-28` und die SDK-2.x-Linie (`@modelcontextprotocol/server`) werden **bewusst nicht**
+  übernommen.
+- **Grund:** `2026-07-28` ist ein Architekturschritt, kein Versionssprung: keine Protokoll-Sessions
+  und kein `initialize` mehr, Pflicht-Methode `server/discover`, Pflichtfeld `resultType`,
+  `ttlMs`/`cacheScope` auf List-/Read-Ergebnissen, neue Fehlercodes (unbekannte Resource `-32602`
+  statt des heutigen `-32002`), `logging` abgekündigt. SDK 1.x wird diese Revision nie unterstützen;
+  ein reiner Tausch auf 2.x brächte der Bridge ohne diesen Umbau funktional nichts.
+- **Was gilt bis dahin:** Die HTTP-Seite ist schon heute zustandslos, nur POST, ohne Session-ID und
+  mit 405 auf GET/DELETE, also so, wie `2026-07-28` Legacy-Verkehr erwartet. Clients der neuen Ära
+  müssen ihren Legacy-Pfad (`initialize`) nutzen; ein Client ganz ohne Legacy-Pfad kann die Bridge
+  nicht verwenden.
+- **Frist:** SDK 1.x erhält laut seinem README Bug- und Sicherheitsfixes mindestens sechs Monate nach
+  dem v2-Release (2026-07-27), also mindestens bis **2027-01-27**. Die Migration auf 2.x und
+  `2026-07-28` ist als eigenes Ticket erfasst (Overhaul-Ticket 56, `needs-triage`) und muss vor
+  diesem Datum entschieden werden.
+- Quellen: SDK-Support-Politik
+  <https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.x/README.md>, Änderungen in
+  `2026-07-28` <https://modelcontextprotocol.io/specification/2026-07-28/changelog>.
