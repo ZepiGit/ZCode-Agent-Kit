@@ -39,6 +39,18 @@ fi
 for tool in curl tar node mktemp; do
   command -v "$tool" >/dev/null 2>&1 || { die "required tool missing: $tool" 2; }
 done
+# Node.js support floor (ADR-0006): checked before any download, temp
+# directory or file write, so an old Node leaves an existing installation
+# exactly as it was.
+NODE_FLOOR=24
+NODE_FOUND=$(node --version 2>/dev/null || :)
+NODE_MAJOR=$(printf '%s\n' "$NODE_FOUND" | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p' | head -n1)
+if [ -z "$NODE_MAJOR" ] || [ "$NODE_MAJOR" -lt "$NODE_FLOOR" ]; then
+  printf '\n  [ERROR] Node.js %s or newer is required (found %s)\n' "$NODE_FLOOR" "${NODE_FOUND:-no readable version}" >&2
+  printf '    why:  the kit supports Node.js %s and newer; nothing was downloaded, installed or changed\n' "$NODE_FLOOR" >&2
+  printf '    next: install Node.js %s LTS or newer from https://nodejs.org/en/download (with nvm: nvm install %s), then re-run this installer\n' "$NODE_FLOOR" "$NODE_FLOOR" >&2
+  exit 2
+fi
 command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || { die "sha256sum or shasum required" 2; }
 umask 077
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/zcode-kit-install.XXXXXX")
@@ -111,10 +123,6 @@ case "$(uname -s)" in
   Darwin) : ;;
   *) die "unsupported platform: $(uname -s)" 2 ;;
 esac
-
-command -v node >/dev/null 2>&1 || die "node >= 20 required (https://nodejs.org)" 2
-NODE_MAJOR=$(node --version | sed 's/^v\([0-9]*\)\..*/\1/')
-[ "$NODE_MAJOR" -ge 20 ] || die "node >= 20 required, found $(node --version)" 2
 
 # Shared by Bun bootstrap and release verification, including existing Bun installs.
 # Probe explicitly: `sha256sum | awk || shasum` cannot reliably fall back.
