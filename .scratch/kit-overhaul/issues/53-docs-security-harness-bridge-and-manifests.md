@@ -1,6 +1,6 @@
 # 53: Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST
 
-**Blocked by:** 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs), 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 16 (Start lock protocol v1 with proven takeover (no judge-then-rename race)), 22 (Graceful stop request `POST /__kit/stop`, shared deadlines and the manager's stop path), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 51 (Harness adapters: confirmed MEDIUM fixes and record refresh), 58 (Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed))
+**Blocked by:** 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs), 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 16 (Start lock protocol v1 with proven takeover (no judge-then-rename race)), 22 (Graceful stop request `POST /__kit/stop`, shared deadlines and the manager's stop path), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 51 (Harness adapters: confirmed MEDIUM fixes and record refresh), 58 (Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)), 57 (MCP runtime restart budget)
 
 **Status:** ready-for-agent
 

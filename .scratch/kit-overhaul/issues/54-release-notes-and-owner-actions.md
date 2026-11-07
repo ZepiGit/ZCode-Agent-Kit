@@ -1,6 +1,6 @@
 # 54: Release notes vNEXT and owner actions
 
-**Blocked by:** 29 (CDN disk cache pruning), 44 (UX batch (b2): installer stages, `install.sh`/`install.ps1` text and the PowerShell 5.1 stderr gate), 45 (UX batch (c1): grouped help, per-command `--help`, usage errors, output overrides), 46 (UX batch (c2): `accounts` (+health), `auth status`, `models`), 48 (Proxy TUI redesign on the shared tokens), 52 (Docs: README × 5 at content parity), 53 (Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST)
+**Blocked by:** 29 (CDN disk cache pruning), 44 (UX batch (b2): installer stages, `install.sh`/`install.ps1` text and the PowerShell 5.1 stderr gate), 45 (UX batch (c1): grouped help, per-command `--help`, usage errors, output overrides), 46 (UX batch (c2): `accounts` (+health), `auth status`, `models`), 48 (Proxy TUI redesign on the shared tokens), 52 (Docs: README × 5 at content parity), 53 (Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST), 59 (Kilo `/v1/models` sheet line)
 
 **Status:** ready-for-agent
 
