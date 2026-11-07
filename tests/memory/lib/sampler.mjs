@@ -56,6 +56,8 @@ export function roleOf(argv) {
   if (/cli[\\/]heal\.mjs/.test(cmd)) return "preflight";
   if (/cli[\\/](?:launch|zcode-kit)\.mjs/.test(cmd)) return "launcher";
   if (/zcode-harness-mcp[\\/]dist[\\/]index\.js/.test(cmd)) return "mcp-bridge";
+  // S3 OMP leg: the stub Bun host running the generated extension (the harness, not kit).
+  if (/tests[\\/]memory[\\/]fixtures[\\/]omp-host\.ts/.test(cmd)) return "omp-host";
   if (/fake-harness\.mjs/.test(cmd)) return "fake-harness";
   if (/tests[\\/]memory[\\/]lib[\\/]soak-mock\.mjs/.test(cmd)) return "mock-upstream";
   if (/tests[\\/]memory[\\/]scenarios[\\/]/.test(cmd)) return "scenario";

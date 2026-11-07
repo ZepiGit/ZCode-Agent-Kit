@@ -2,7 +2,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { osVerdict, verdict } from "./lib/verdict.mjs";
-import { MEMORY, PROCESSES, s3Budgets } from "./lib/budgets.mjs";
+import { MEMORY, OMP_LEG, PROCESSES, s3Budgets } from "./lib/budgets.mjs";
+import { ompLegChecks } from "./lib/omp-leg.mjs";
+import { roleOf } from "./lib/sampler.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkRatchet, issueIdsIn, readExpectedRed, validateExpectedRed } from "./lib/ratchet.mjs";
@@ -525,4 +527,149 @@ test("S1/burst1 is the only run judged on a median: n from the measured distribu
 test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6", () => {
   assert.deepEqual(JOB.windows, JOB.linux.filter((k) => !k.startsWith("S6/")));
   assert.ok(JOB.windows.includes("S3/hung") && JOB.windows.includes("S2/short"));
+});
+
+// ── S3 OMP stub-host leg (ticket 03, ADR-0013 cond 4, Round 4 Q1 add. 4) ────
+// A host is a stub Bun host running the generated OMP extension. A starter
+// spawned a preflight process; a waiter spawned none. Its cost is its own RSS
+// delta (commit on Windows) above its idle baseline while the hook ran.
+const QUOTA = "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled.";
+const HUNG = "[zcode-autostart] hung: Recovered an unresponsive ZCode proxy (restarted automatically).";
+const host = (id, { preflights = 0, causeLines = [], costMB = 1.2, killed = false, finished = !killed } = {}) => ({ id, pid: 100 + id, preflights, causeLines, costMB, killed, finished });
+const ompRound = (name, hosts, maxConcurrentPreflights, extra = {}) => ({ name, hosts, maxConcurrentPreflights, ...extra });
+const ompCheck = (rounds, name) => ompLegChecks(rounds).find((c) => c.name === name);
+// The shape single-flight should produce: one starter, four waiters that printed its cause line.
+const singleFlight = (name = "omp-5") => ompRound(name, [host(0, { preflights: 1, causeLines: [QUOTA] }), ...[1, 2, 3, 4].map((i) => host(i, { causeLines: [QUOTA] }))], 1);
+
+test("OMP leg budgets are the spec §18 numbers: 5 hosts, ≤ 1 concurrent preflight, ≤ 5 MB waiter cost", () => {
+  assert.deepEqual(OMP_LEG, { hosts: 5, concurrentPreflights: 1, waiterCostMB: 5 });
+});
+
+test("OMP leg: five hosts that each spawn their own preflight at once are red (today's extension)", () => {
+  const today = ompRound("omp-5", [0, 1, 2, 3, 4].map((i) => host(i, { preflights: 1, causeLines: [QUOTA] })), 5);
+  const c = ompCheck([today], "omp:concurrent-preflights");
+  assert.equal(c.red, true);
+  assert.equal(c.value, 5);
+  assert.equal(c.budget, 1);
+});
+
+test("OMP leg: one starter and four waiters that printed its cause lines are green in every check", () => {
+  const killed = ompRound("omp-5-kill-starter", [host(0, { preflights: 1, killed: true }), host(1, { preflights: 1, causeLines: [QUOTA] }), ...[2, 3, 4].map((i) => host(i, { causeLines: [QUOTA] }))], 1, { killExpected: true });
+  const checks = ompLegChecks([singleFlight(), killed]);
+  assert.deepEqual(checks.filter((c) => c.red).map((c) => c.name), []);
+  assert.deepEqual(checks.map((c) => c.name), ["omp:concurrent-preflights", "omp:waiter-cost", "omp:waiter-cause-lines", "omp:hosts-finished", "omp:starter-killed"]);
+});
+
+test("OMP leg: a killed starter followed by two overlapping preflights is red", () => {
+  const r = ompRound("omp-5-kill-starter", [host(0, { preflights: 1, killed: true }), host(1, { preflights: 1, causeLines: [QUOTA] }), host(2, { preflights: 1, causeLines: [QUOTA] }), host(3), host(4)], 2, { killExpected: true });
+  assert.equal(ompCheck([singleFlight(), r], "omp:concurrent-preflights").red, true);
+});
+
+test("OMP leg: a killed-starter round in which no starter was killed proved nothing and is red", () => {
+  const r = { ...singleFlight("omp-5-kill-starter"), killExpected: true };
+  const c = ompCheck([r], "omp:starter-killed");
+  assert.equal(c.red, true);
+  assert.equal(ompCheck([singleFlight()], "omp:starter-killed").red, false, "the 5-host round kills nobody");
+});
+
+test("OMP leg: a waiter above 5 MB is red; the starter's cost is reported but not gated", () => {
+  const heavyWaiter = singleFlight();
+  heavyWaiter.hosts[3].costMB = 5.4;
+  const c = ompCheck([heavyWaiter], "omp:waiter-cost");
+  assert.equal(c.red, true);
+  assert.equal(c.value, 5.4);
+  const heavyStarter = singleFlight();
+  heavyStarter.hosts[0].costMB = 9;
+  assert.equal(ompCheck([heavyStarter], "omp:waiter-cost").red, false);
+  assert.match(ompCheck([heavyStarter], "omp:waiter-cost").detail.join("\n"), /host 0 starter \+9 MB/);
+});
+
+test("OMP leg: a waiter whose cost was never measured is red, not assumed cheap", () => {
+  const r = singleFlight();
+  r.hosts[2].costMB = null;
+  assert.equal(ompCheck([r], "omp:waiter-cost").red, true);
+});
+
+test("OMP leg: a waiter that did not print the starter's cause lines is red", () => {
+  const r = singleFlight();
+  r.hosts[0].causeLines = [HUNG, QUOTA];
+  r.hosts[4].causeLines = [QUOTA]; // the hung recovery was dropped
+  const c = ompCheck([r], "omp:waiter-cause-lines");
+  assert.equal(c.red, true);
+  assert.equal(c.value, 4, "every waiter lacks the hung line");
+  for (const w of r.hosts.slice(1)) w.causeLines = [HUNG, QUOTA];
+  assert.equal(ompCheck([r], "omp:waiter-cause-lines").red, false);
+});
+
+test("OMP leg: when the starter's preflight emitted no cause line, silent waiters are green", () => {
+  const r = singleFlight();
+  for (const h of r.hosts) h.causeLines = [];
+  assert.equal(ompCheck([r], "omp:waiter-cause-lines").red, false);
+});
+
+test("OMP leg: after a killed starter the waiters must print the surviving starter's lines, not nothing", () => {
+  const r = ompRound("omp-5-kill-starter", [host(0, { preflights: 1, killed: true }), host(1, { preflights: 1, causeLines: [QUOTA] }), host(2, { causeLines: [QUOTA] }), host(3, { causeLines: [] }), host(4, { causeLines: [QUOTA] })], 1, { killExpected: true });
+  const c = ompCheck([r], "omp:waiter-cause-lines");
+  assert.equal(c.red, true);
+  assert.equal(c.value, 1);
+  assert.match(c.detail.join("\n"), /omp-5-kill-starter host 3/);
+});
+
+test("OMP leg: waiters with no surviving starter got no diagnostics at all and are red", () => {
+  const r = ompRound("omp-5-kill-starter", [host(0, { preflights: 1, killed: true }), ...[1, 2, 3, 4].map((i) => host(i))], 1, { killExpected: true });
+  assert.equal(ompCheck([r], "omp:waiter-cause-lines").red, true);
+});
+
+test("OMP leg: a surviving host whose hook never returned is red", () => {
+  const r = singleFlight();
+  r.hosts[2].finished = false;
+  assert.equal(ompCheck([r], "omp:hosts-finished").red, true);
+});
+
+test("the stub OMP host is the harness: never kit footprint, like the other fixtures", () => {
+  assert.equal(roleOf(["/usr/bin/bun", "/kit/tests/memory/fixtures/omp-host.ts", "/h/.omp/agent/extensions/zcode-proxy-autostart.ts"]), "omp-host");
+  const rows = rowsOf([proc(1, "omp-host", 400), proc(2, "preflight", 70), proc(3, "proxy", 60)]);
+  assert.equal(checkNamed(verdict(rows, { peaks: { kit: 200 } }), "peak:kit").value, 130);
+});
+
+test("the S3 OMP leg runs on both legs and is expected RED until single-flight lands (ticket 35)", () => {
+  assert.ok(JOB.linux.includes("S3/omp") && JOB.windows.includes("S3/omp"));
+  const here = dirname(fileURLToPath(import.meta.url));
+  const expected = readExpectedRed(join(here, "expected-red.json"));
+  assert.equal(expected.linux["S3/omp"], "35");
+  assert.equal(expected.windows["S3/omp"], "35");
+});
+
+test("S3/omp → 35 is a plain entry on both legs: RED passes the ratchet, GREEN asks for its deletion, `unstable` is refused", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const expected = readExpectedRed(join(here, "expected-red.json"));
+  const issueIds = issueIdsIn(join(here, "..", "..", ".scratch", "kit-overhaul", "issues"));
+  for (const os of ["linux", "windows"]) {
+    const results = JOB[os].map((key) => {
+      const entry = expected[os][key];
+      if (entry?.state === "unstable") return { key, exitCode: 0, redChecks: [], median: { medianMB: 240, budgetMB: 250, check: "procPeak:proxy" } };
+      return { key, exitCode: entry ? 1 : 0, redChecks: entry ? [key === "S3/omp" ? "omp:concurrent-preflights" : "x"] : [] };
+    });
+    const red = checkRatchet({ expected, os, results, issueIds });
+    assert.deepEqual(red.failures, [], os);
+    const green = checkRatchet({ expected, os, results: results.map((r) => (r.key === "S3/omp" ? { ...r, exitCode: 0, redChecks: [] } : r)), issueIds });
+    assert.deepEqual(green.failures, [`S3/omp: GREEN but listed for ticket 35: delete the entry from expected-red.json (${os})`]);
+    const unstable = { ...expected, [os]: { ...expected[os], "S3/omp": { ticket: "35", state: "unstable" } } };
+    assert.match(validateExpectedRed(unstable, { issueIds }).join("\n"), new RegExp(`${os} S3/omp: \`unstable\` is allowed for windows S1/burst1 only`));
+  }
+});
+
+test("OMP leg on Windows: the waiter cost is gated on commit and reported with its working set", () => {
+  const r = singleFlight();
+  for (const h of r.hosts) Object.assign(h, { metric: "commit", costMB: 3.2, wsCostMB: 1.1 });
+  r.hosts[2].costMB = 5.6;
+  const c = ompCheck([r], "omp:waiter-cost");
+  assert.equal(c.red, true, "a waiter above 5 MB of commit is red, whatever its working set");
+  assert.equal(c.value, 5.6);
+  assert.equal(c.gate, "commit");
+  assert.match(c.detail.join("\n"), /omp-5 host 2 waiter \+5\.6 MB commit \/ \+1\.1 MB WS/);
+  // Linux: RSS only, as before.
+  const linux = ompCheck([singleFlight()], "omp:waiter-cost");
+  assert.equal(linux.gate, undefined);
+  assert.match(linux.detail.join("\n"), /omp-5 host 1 waiter \+1\.2 MB$/m);
 });
