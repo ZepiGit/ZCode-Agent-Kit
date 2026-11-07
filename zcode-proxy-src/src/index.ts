@@ -14,6 +14,7 @@ import type { Credential } from "./auth/types.js";
 import type { ProviderId } from "./provider/types.js";
 import type { ProxyConfig } from "./config/types.js";
 import { updateConfigYaml, updateAccountPolicyYaml, ensureConfigFile } from "./config/edit.js";
+import { withLineEndingsOf } from "./config/line-endings.mjs";
 import { openBrowser } from "./runtime/open-browser.js";
 import { pasteLoginInstructions, readPastedLine, boldIfTTY } from "./runtime/paste-login.js";
 import { buildServerOptions } from "./server/server-options.js";
@@ -1073,7 +1074,9 @@ export function ensureDeviceMidInConfig(path: string): string {
     const block = `identity:\n  deviceMid: "${mid}"\n`;
     updated = raw.endsWith("\n") || raw.length === 0 ? raw + block : raw + "\n" + block;
   }
-  writeFileSync(path, updated, "utf-8");
+  // Only the line-break bytes follow the file (a CRLF config stays CRLF,
+  // config/line-endings.mjs); the value and when it is generated are unchanged.
+  writeFileSync(path, withLineEndingsOf(raw, updated), "utf-8");
   console.log(`Device identity generated: ${mid.slice(0, 8)}… (stored in ${path})`);
   return mid;
 }

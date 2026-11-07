@@ -8,6 +8,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";
+import { lineEndingOf, withLineEndingsOf } from "../../lib/line-endings.mjs";
 import { resolveCommand, resolveBun } from "../../lib/process.mjs";
 import { PREFLIGHT_DETAILS, PREFLIGHT_WARNINGS } from "../heal.mjs";
 
@@ -136,7 +137,8 @@ function editConfigYaml(ctx, text, extensionPath) {
     changed = true;
   }
 
-  return { text: changed ? String(doc) : text, changed };
+  // The yaml library renders LF: write the document with the file's own line endings.
+  return { text: changed ? withLineEndingsOf(text, String(doc)) : text, changed };
 }
 
 // `auth: apiKey`: a custom anthropic-messages provider without `auth` gets
@@ -247,9 +249,12 @@ export default {
       );
     }
     const { indent, insertAt } = providerLayout(newModels, providersPair);
-    const block = ompProviderBlock(ctx, port, indent);
-    const separator = insertAt > 0 && newModels[insertAt - 1] !== "\n" ? "\n" : "";
-    newModels = newModels.slice(0, insertAt) + separator + block + "\n" + newModels.slice(insertAt);
+    // The block takes the file's own line endings; the user's bytes around it
+    // stay as they are (lib/line-endings.mjs).
+    const newline = lineEndingOf(models);
+    const block = withLineEndingsOf(models, ompProviderBlock(ctx, port, indent));
+    const separator = insertAt > 0 && newModels[insertAt - 1] !== "\n" ? newline : "";
+    newModels = newModels.slice(0, insertAt) + separator + block + newline + newModels.slice(insertAt);
     parseYamlDocument(ctx, newModels, "models.yml (staged)");
 
     let newConfig = existsSync(configYml) ? readFileSync(configYml, "utf8") : null;
