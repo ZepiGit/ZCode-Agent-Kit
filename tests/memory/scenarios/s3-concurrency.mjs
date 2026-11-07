@@ -20,18 +20,31 @@
 //                        its startup grace, then 10 launches race the hung-own
 //                        recovery; --variant hung also runs it once with the
 //                        stale lock a killed holder leaves behind
+//   --variant omp (the S3 OMP stub-host leg, ADR-0013 cond 4; lib/omp-leg.mjs)
+//     omp-5              5 stub Bun hosts load the generated OMP extension and
+//                        fire its hook at once: OMP preflight processes alive
+//                        at once (≤ 1), each host's own cost (≤ 5 MB per waiter,
+//                        reported, not kit footprint), and every waiter printed
+//                        the starter's cause lines
+//     omp-5-kill-starter the same, and the first host seen spawning a preflight
+//                        is killed with its process tree as soon as it does
 import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan, portsOf } from "../lib/sampler.mjs";
-import { PROCESSES, s3Budgets } from "../lib/budgets.mjs";
+import { OMP_LEG, PROCESSES, s3Budgets } from "../lib/budgets.mjs";
+import { generateOmpExtension, startOmpHost } from "../lib/omp-host.mjs";
+import { causeLinesOf, ompLegChecks } from "../lib/omp-leg.mjs";
+import { PREFLIGHT_WARNINGS } from "../../../cli/heal.mjs";
 import { osLeg } from "../lib/catalogue.mjs";
 import { resumeProcess, suspendProcess } from "../lib/win-process.mjs";
 import { whileFrozen } from "../lib/freeze.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** The promise's value, or `fallback` after `ms` (the timer never outlives the race). */
+const within = (promise, ms, fallback = null) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
 // SIGSTOP/SIGCONT; Windows has no stop signal: NtSuspendProcess/NtResumeProcess.
 const freeze = (pid) => (process.platform === "win32" ? suspendProcess(pid) : process.kill(pid, "SIGSTOP"));
 const thaw = (pid) => (process.platform === "win32" ? resumeProcess(pid) : process.kill(pid, "SIGCONT"));
@@ -39,6 +52,13 @@ const thaw = (pid) => (process.platform === "win32" ? resumeProcess(pid) : proce
 // Preflights live about a second: sample 4 times a second so each one's own
 // peak (VmHWM, read while it is alive) reaches the per-role verdict.
 export const sampleIntervalMs = 250;
+
+// The S3 OMP leg's rounds, in order; the evidence gate requires each by name
+// (lib/completeness.mjs ROUNDS["S3/omp"]).
+export const OMP_ROUNDS = {
+  "omp-5": {},
+  "omp-5-kill-starter": { killStarter: true },
+};
 
 // A hung round: our running proxy is frozen past the manager's startup grace,
 // then 10 mixed launches race the kit's hung-own recovery.
@@ -189,6 +209,102 @@ export async function run(ctx) {
     unlinkSync(lockFile); // this run's own lock file
     await stopAll(`${label}-cleanup`);
   };
+
+  if (ctx.variant === "omp") return ompLeg();
+
+  // ── S3 OMP stub-host leg ──────────────────────────────────────────────────
+  async function ompRound(name, extension, { killStarter = false } = {}) {
+    const hosts = Array.from({ length: OMP_LEG.hosts }, () => startOmpHost({ bun: kit.bun, extension, env: kit.env, cwd: kit.dir }));
+    const byPid = new Map(hosts.map((h, id) => [h.pid, { id, host: h, preflights: new Set() }]));
+    const tFrom = ctx.elapsed();
+    let maxConcurrent = 0, maxProxies = 0, killed = null;
+    const preflights = new Set();
+    let polling = true;
+    try {
+      const ready = await Promise.all(hosts.map((h) => within(h.ready, 60_000)));
+      const notReady = ready.map((r, i) => (r ? null : `host ${i}: ${hosts[i].stderr().trim().split("\n").slice(-1)[0] ?? ""}`)).filter(Boolean);
+      if (notReady.length) throw new Error(`${name}: stub OMP host did not start: ${notReady.join("; ")}`);
+      // Short-lived preflights: a 50 ms poll sees every overlap.
+      const cache = new Map();
+      const poll = (async () => {
+        while (polling) {
+          const procs = scan(ctx.marker, cache);
+          const live = procs.filter((p) => p.role === "preflight");
+          maxConcurrent = Math.max(maxConcurrent, live.length);
+          maxProxies = Math.max(maxProxies, procs.filter((p) => p.role === "proxy").length);
+          for (const p of live) {
+            preflights.add(p.key);
+            const owner = byPid.get(p.ppid);
+            if (!owner) continue;
+            owner.preflights.add(p.key);
+            // The starter: the first host seen with a preflight child, killed with its tree at once.
+            if (killStarter && killed === null) { killed = owner; owner.host.killTree(); }
+          }
+          await sleep(50);
+        }
+      })();
+      for (const h of hosts) h.go();
+      // Past the extension's START_TIMEOUT_MS (120 s): a waiter that never returns is a finding.
+      const done = await Promise.all(hosts.map((h) => within(Promise.race([h.done, h.exited.then(() => null)]), 150_000)));
+      await sleep(1500);
+      polling = false;
+      await poll;
+      const result = {
+        name, tFrom, tTo: ctx.elapsed(), killExpected: killStarter,
+        maxConcurrentPreflights: maxConcurrent,
+        distinctPreflights: preflights.size,
+        maxSimultaneousProxies: maxProxies,
+        hosts: hosts.map((h, id) => {
+          const own = byPid.get(h.pid);
+          return {
+            id, pid: h.pid, killed: killed === own,
+            preflights: own.preflights.size,
+            causeLines: causeLinesOf(h.stderr(), PREFLIGHT_WARNINGS),
+            costMB: done[id]?.costMB ?? null,
+            baselineMB: done[id]?.baselineMB ?? ready[id]?.baselineMB ?? null,
+            peakMB: done[id]?.peakMB ?? null,
+            metric: ready[id]?.metric ?? null,
+            // Windows: the host's working-set delta, reported beside the commit gate (Round 7 Q1 condition 3).
+            wsCostMB: done[id]?.wsCostMB ?? null,
+            hookMs: done[id]?.ms ?? null,
+            finished: done[id] !== null,
+            lastLine: h.stderr().trim().split("\n").slice(-1)[0]?.slice(0, 200) ?? "",
+          };
+        }),
+      };
+      ctx.log(`${name}: max ${maxConcurrent} OMP preflights at once (${preflights.size} spawned), killed ${killed ? `host ${killed.id}` : "none"}, waiter cost ${result.hosts.filter((x) => !x.killed && x.preflights === 0).map((x) => x.costMB).join("/") || "no waiter"} MB`);
+      return result;
+    } finally {
+      polling = false;
+      for (const h of hosts) h.close();
+      await Promise.all(hosts.map(async (h) => { if ((await within(h.exited, 10_000, "running")) === "running") h.killTree(); }));
+    }
+  }
+
+  async function ompLeg() {
+    const extension = generateOmpExtension({ root: KIT_ROOT, home: kit.home, keyFile: join(kit.stateDir, ".proxykey"), port: kit.port, key: kit.key });
+    const omp = [];
+    for (const [name, opts] of Object.entries(OMP_ROUNDS)) {
+      const r = await ompRound(name, extension, opts);
+      omp.push(r);
+      // A killed starter's preflight may have held the start lock: this run's own lock, cleared as in kill-holder.
+      await clearStaleLock(name);
+      r.stop = await stopAll(name);
+    }
+    ctx.note("rounds", omp);
+    await session.stop();
+    const worstProxies = Math.max(0, ...omp.map((r) => r.maxSimultaneousProxies));
+    return {
+      settleMs: 3000,
+      budgets: {
+        ...s3Budgets(osLeg()),
+        extra: [
+          ...ompLegChecks(omp),
+          { name: "simultaneous-proxies", red: worstProxies > PROCESSES.proxiesPerInstallation, value: worstProxies, budget: PROCESSES.proxiesPerInstallation, unit: "procs" },
+        ],
+      },
+    };
+  }
 
   if (ctx.variant === "hung") {
     // A hung proxy while a stale lock is present (the chain a killed start leaves) …

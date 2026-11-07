@@ -5,13 +5,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
-import { runEvidence } from "./lib/completeness.mjs";
+import { generateOmpExtension, startOmpHost } from "./lib/omp-host.mjs";
+import { causeLinesOf } from "./lib/omp-leg.mjs";
+import { OMP_LEG } from "./lib/budgets.mjs";
+import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
+import { resolveBun } from "../../lib/process.mjs";
+import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { whileFrozen } from "./lib/freeze.mjs";
 import { makeHungRound } from "./scenarios/s3-concurrency.mjs";
@@ -288,6 +293,105 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
   assert.ok(gone, "the grandchild died with the job");
 });
 
+// ── S3 OMP leg: the stub Bun host runs the generated extension (ticket 03) ──
+const KIT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** The promise's value, or `fallback` after `ms`; the timer never outlives the race. */
+const within = (promise, ms, fallback) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
+const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
+/** A kit root whose preflight is a fixture script; the extension is generated from the real template by the OMP adapter. */
+function ompFixture(healSource) {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-host-"));
+  const root = join(dir, "kit");
+  mkdirSync(join(root, "cli"), { recursive: true });
+  mkdirSync(join(root, "proxy"), { recursive: true });
+  copyFileSync(join(KIT, "proxy", "zcode-proxy-autostart.ts"), join(root, "proxy", "zcode-proxy-autostart.ts"));
+  writeFileSync(join(root, "cli", "heal.mjs"), healSource);
+  const keyFile = join(dir, ".proxykey");
+  writeFileSync(keyFile, "synthetic-omp-host-key\n");
+  const extension = generateOmpExtension({ root, home: join(dir, "home"), keyFile, port: 19031 });
+  return { dir, root, extension };
+}
+
+test("the stub OMP host runs the generated extension once, prints its cause lines, reports its own cost and exits with its loop", async () => {
+  const f = ompFixture(`
+    import { appendFileSync } from "node:fs";
+    appendFileSync("attempts", String(process.ppid) + "\\n");
+    console.error("[zcode-preflight] cause=quota-unavailable");
+    console.error("Bearer SECRET not a cause line");
+  `);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
+  try {
+    const ready = await host.ready;
+    assert.ok(ready && ready.baselineMB > 0, host.stderr());
+    assert.equal(ready.pid, host.pid);
+    host.go();
+    const done = await host.done;
+    assert.ok(done, host.stderr());
+    assert.equal(typeof done.costMB, "number");
+    assert.ok(done.costMB >= 0 && done.peakMB >= done.baselineMB);
+    assert.equal(done.metric, process.platform === "win32" ? "commit" : "rss");
+    // Windows reports the working-set delta beside the commit gate; Linux has one metric.
+    if (process.platform === "win32") assert.ok(typeof done.wsCostMB === "number" && done.wsCostMB >= 0, JSON.stringify(done));
+    else assert.equal(done.wsCostMB, undefined);
+    assert.deepEqual(causeLinesOf(host.stderr(), PREFLIGHT_WARNINGS), [`[zcode-autostart] quota-unavailable: ${PREFLIGHT_WARNINGS["quota-unavailable"]}`]);
+    assert.doesNotMatch(host.stderr(), /SECRET/);
+    assert.deepEqual(readFileSync(join(f.root, "attempts"), "utf8").trim().split("\n"), [String(host.pid)], "one preflight, spawned by the host itself");
+    host.close();
+    const exit = await within(host.exited, 10_000, "still running");
+    assert.deepEqual(exit, { code: 0, signal: null });
+  } finally {
+    host.killTree();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("killing a starter host takes its running preflight with it (the killed-starter adversary)", async () => {
+  const f = ompFixture(`
+    import { writeFileSync } from "node:fs";
+    writeFileSync("preflight.pid", String(process.pid));
+    setTimeout(() => {}, 30_000);
+  `);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
+  let preflight = null;
+  try {
+    assert.ok(await host.ready, host.stderr());
+    host.go();
+    for (let i = 0; i < 200 && preflight === null; i++) {
+      try { preflight = Number(readFileSync(join(f.root, "preflight.pid"), "utf8")) || null; } catch {}
+      if (preflight === null) await sleep(50);
+    }
+    assert.ok(preflight, "the host spawned its preflight");
+    host.killTree();
+    await within(host.exited, 10_000);
+    const gone = await (async () => { for (let i = 0; i < 100; i++) { if (!isAlive(preflight)) return true; await sleep(100); } return false; })();
+    assert.equal(isAlive(host.pid), false, "the host is gone");
+    assert.equal(gone, true, "its preflight is gone too");
+  } finally {
+    host.killTree();
+    if (preflight && isAlive(preflight)) { try { process.kill(preflight, "SIGKILL"); } catch {} }
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("the stub OMP host charges a hook that does nothing well under the 5 MB waiter gate (its own churn is in the baseline)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-floor-"));
+  const extension = join(dir, "noop-extension.ts");
+  writeFileSync(extension, `export default function (pi) { pi.on("before_provider_request", async () => {}); }\n`);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension, env: { ...process.env } });
+  try {
+    assert.ok(await host.ready, host.stderr());
+    host.go();
+    const done = await host.done;
+    assert.ok(done, host.stderr());
+    // Half the gate: a measurement whose floor reached the gate could not tell a waiter from noise.
+    assert.ok(done.costMB < OMP_LEG.waiterCostMB / 2, `no-op hook charged ${done.costMB} MB`);
+  } finally {
+    host.close();
+    if ((await within(host.exited, 10_000, "running")) === "running") host.killTree();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── A run that never ran its scenario is a harness failure, never GREEN ──────
 // CI run 42221794531 (windows): every run exited 0 after writing the CSV
 // header, no summary, no sample, and the job called all 13 runs GREEN.
@@ -396,6 +500,59 @@ test("run evidence: an S3 round that was skipped or never ran fails the run, wha
   // S3/short likewise needs its four short-profile rounds.
   const short = { ...busy({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }] }), key: "S3/short" };
   assert.match(runEvidence(short, { key: "S3/short", exitCode: 1 }).problems.join(), /round kill-holder-10 never ran/);
+});
+
+// ── S3/omp (ticket 03): no launcher ever runs, the run takes 10–12 s on Linux,
+// and its proof is the stub hosts, their preflights and the proxy one of them
+// started. Its own floor, never an exemption from the gate.
+const S3_OMP_ROUNDS = [{ name: "omp-5" }, { name: "omp-5-kill-starter" }];
+const s3omp = ({ roles = ["proxy", "preflight", "omp-host", "manager"], rounds = S3_OMP_ROUNDS, ...rest } = {}) => ({ key: "S3/omp", platform: "linux", outcome: "RED", metric: "rss", durationS: 10, samples: 28, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: r === "omp-host" ? 5 : 1 }])), notes: { sampler: {}, rounds }, ...rest });
+
+test("run evidence: S3/omp is proven by its hosts, their preflights, the proxy and both OMP rounds, not by launchers", () => {
+  assert.deepEqual(runEvidence(s3omp(), { key: "S3/omp", exitCode: 1 }), { ok: true, problems: [] });
+  assert.match(runEvidence(s3omp({ roles: ["proxy", "preflight"] }), { key: "S3/omp", exitCode: 1 }).problems.join(), /role omp-host never seen/);
+  assert.match(runEvidence(s3omp({ roles: ["proxy", "omp-host"] }), { key: "S3/omp", exitCode: 1 }).problems.join(), /role preflight never seen/);
+  assert.match(runEvidence(s3omp({ roles: ["preflight", "omp-host"] }), { key: "S3/omp", exitCode: 0 }).problems.join(), /role proxy never seen/);
+  // The killed-starter round is the adversary: a run without it never ran its scenario.
+  assert.match(runEvidence(s3omp({ rounds: S3_OMP_ROUNDS.slice(0, 1) }), { key: "S3/omp", exitCode: 1 }).problems.join(), /round omp-5-kill-starter never ran/);
+  assert.match(runEvidence(s3omp({ rounds: [] }), { key: "S3/omp", exitCode: 0 }).problems.join(), /round omp-5 never ran/);
+  // Half the shortest Linux run (10 s, 28 samples): a run that never started its hosts is below it.
+  assert.match(runEvidence(s3omp({ durationS: 3, samples: 9 }), { key: "S3/omp", exitCode: 0 }).problems.join(), /9 samples \(need ≥ 14\).*ran 3 s, below the S3\/omp floor of 5 s/);
+  // The other S3 runs keep the S3 floor: a launcher and 15 s.
+  const shortRun = { ...s3omp({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }, { name: "kill-holder-10" }] }), key: "S3/short" };
+  assert.match(runEvidence(shortRun, { key: "S3/short", exitCode: 1 }).problems.join(), /below the S3 floor of 15 s.*role launcher never seen/);
+});
+
+// A real S3/omp run on this branch (Linux, Bun 1.4.2, 2026-11-07): 5 OMP
+// preflights at once in both rounds, every other check green. The integration
+// tip's gate (the S3 floor) called it a harness failure: 12 s, no launcher.
+const S3_OMP_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "local-20261107-s3-omp-linux-summary.json");
+
+test("job: a real S3/omp run passes the evidence gate and is the listed RED; without its killed-starter round it is a harness failure", () => {
+  const { r, row, result } = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: S3_OMP_RUN });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(row, { key: "S3/omp", outcome: "RED", ticket: "35" });
+  assert.deepEqual(result.redChecks, ["omp:concurrent-preflights"]);
+  const dir = mkdtempSync(join(tmpdir(), "memloop-s3omp-"));
+  try {
+    const run = JSON.parse(readFileSync(S3_OMP_RUN, "utf8"));
+    const cut = join(dir, "summary.json");
+    writeFileSync(cut, JSON.stringify({ ...run, notes: { ...run.notes, rounds: run.notes.rounds.slice(0, 1) } }));
+    const skipped = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: cut });
+    assert.equal(skipped.row?.outcome, "HARNESS FAILURE", skipped.r.stdout + skipped.r.stderr);
+    assert.match(skipped.result.error, /round omp-5-kill-starter never ran/);
+    assert.equal(skipped.r.status, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the S3/omp scenario runs exactly the rounds the evidence gate demands", async () => {
+  const { OMP_ROUNDS } = await import("./scenarios/s3-concurrency.mjs");
+  assert.deepEqual(Object.keys(OMP_ROUNDS), ROUNDS["S3/omp"]);
+  assert.deepEqual(ROUNDS["S3/omp"], S3_OMP_ROUNDS.map((r) => r.name));
+  assert.equal(OMP_ROUNDS["omp-5-kill-starter"].killStarter, true);
+  assert.ok(!OMP_ROUNDS["omp-5"].killStarter);
 });
 
 // The loop freezes its own hung proxy (S3); whatever happens in between, it

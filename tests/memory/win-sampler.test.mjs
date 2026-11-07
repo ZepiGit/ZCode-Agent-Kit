@@ -16,7 +16,7 @@ import { commandFor, parseJobReport } from "./lib/caps.mjs";
 import { suspendScript } from "./lib/win-process.mjs";
 import { parseSamplesCsv, rowsFromSamples, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
-import { rowsForMetric, verdict } from "./lib/verdict.mjs";
+import { osVerdict, rowsForMetric, verdict } from "./lib/verdict.mjs";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32");
 const fixture = (name) => readFileSync(join(FIXTURES, name), "utf8");
@@ -88,6 +88,27 @@ test("a console host belongs to a fixture owner (never kit footprint) but stays 
   const kit = createKitTracker(RUN).select([...base, ...extra], { selfPid: 2200 });
   const role = (pid) => kit.find((p) => p.pid === pid)?.role;
   assert.deepEqual([role(2900), role(2901), role(2902), role(2903)], ["fake-harness", "fake-harness", "mock-upstream", "other"]);
+});
+
+test("S3/omp: the stub OMP host and its console host are the harness; the preflight it spawns, with its PowerShell and console host, is kit", () => {
+  const base = parseCimCsv(fixture("cim-poll.csv"));
+  const like = (pid, ppid, name, commandLine) => ({ ...base.find((p) => p.pid === 3000), pid, ppid, name, executablePath: `C:\\x\\${name}`, commandLine, created: "134070000190000000", rssKb: 40000, commitKb: 100000 });
+  const extra = [
+    like(2950, 2000, "bun.exe", `"D:\\a\\_temp\\memloop\\S3-omp\\${RUN.token}\\bun\\bun.exe" D:\\a\\kit\\kit\\tests\\memory\\fixtures\\omp-host.ts C:\\h\\.omp\\agent\\extensions\\zcode-proxy-autostart.ts`),
+    like(2951, 2950, "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"),
+    like(2952, 2950, "node.exe", '"C:\\node.exe" D:\\a\\kit\\kit\\cli\\heal.mjs --diagnostic-code'),
+    like(2953, 2952, "powershell.exe", "powershell -NoProfile -NonInteractive -Command Get-CimInstance Win32_Process -Filter ProcessId=2400"),
+    like(2954, 2952, "conhost.exe", "\\??\\C:\\Windows\\system32\\conhost.exe 0x4"),
+  ];
+  const kit = createKitTracker(RUN).select([...base, ...extra], { selfPid: 2200 });
+  const role = (pid) => kit.find((p) => p.pid === pid)?.role;
+  assert.deepEqual([2950, 2951, 2952, 2953, 2954].map(role), ["omp-host", "omp-host", "preflight", "other", "other"]);
+  // Kit commit counts the preflight, its PowerShell and its console host (Round 7 Q2 condition 3), never the host's.
+  const only = (pids) => kit.filter((p) => pids.includes(p.pid));
+  const v = osVerdict([{ t: 0, progress: 0, procs: only([2950, 2951, 2952, 2953, 2954]) }], { peaks: { kit: 1000 } });
+  const total = v.checks.find((c) => c.name === "peak:kit");
+  assert.equal(total.gate, "commit");
+  assert.equal(total.value, Number((3 * 100000 / 1024).toFixed(1)));
 });
 
 test("the units self-test passes when commit_kb matches Get-Process PrivateMemorySize64", () => {

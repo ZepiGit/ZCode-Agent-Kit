@@ -68,6 +68,16 @@ export const PROCESSES = {
   respawnsPer15Min: 3,
 };
 
+// S3 OMP leg (ADR-0013 cond 4, spec §18 "S3 OMP leg"): the generated OMP
+// extension in stub Bun hosts started together, also with the starter killed.
+// The hosts are the harness: their RSS delta is reported and gated here, never
+// counted as kit footprint.
+export const OMP_LEG = {
+  hosts: 5, // simultaneous hosts of one installation
+  concurrentPreflights: 1, // OMP preflight processes alive at once
+  waiterCostMB: 5, // in-host waiter cost per host (build-time gate)
+};
+
 /** S3's two-part verdict for one OS leg: (a) as `peaks.kit`, (b) as `procPeaks` per role. */
 export function s3Budgets(os) {
   return {
