@@ -1,0 +1,4 @@
+OK config_valid
+OK store_readable: 3 account(s)
+WARNING provider_mismatch: 1 account(s)
+WARNING pool_disabled: legacy single-account mode is active

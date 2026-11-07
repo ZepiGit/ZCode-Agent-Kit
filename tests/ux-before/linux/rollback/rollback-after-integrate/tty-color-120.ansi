@@ -1,0 +1,4 @@
+restored: <HOME>/.omp/agent/models.yml
+restored: <HOME>/.omp/agent/config.yml
+removed (kit-created): <HOME>/.omp/agent/extensions/zcode-proxy-autostart.ts
+removed (kit-created): <KIT>/generated/harness-choices/omp.json

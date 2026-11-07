@@ -1,7 +1,9 @@
 // The memory loop's budgets: spec §18 MEMORY and PROCESSES, in one place.
 // Scenarios build their verdict budgets from these numbers; verdict.test.mjs
 // pins them to the spec, so a budget can only change together with the spec.
-// Metric: RSS (VmRSS / VmHWM) on Linux, commit on Windows (ticket 02).
+// Metric: RSS (VmRSS / VmHWM) on Linux. Windows (Round 7 Q1): working set for
+// the per-process peak/steady budgets of proxy, launcher, MCP bridge and
+// preflight; commit for the S3 total, growth, solver and S2 checks.
 // Budgets are never loosened past the Phase 1B baseline (METRICS.md).
 
 export const MEMORY = {
@@ -22,7 +24,8 @@ export const MEMORY = {
   },
   S3: {
     // (a) maximum over all samples of summed kit RSS (commit on Windows)
-    kitTotalMB: { linux: 596, windows: 600 },
+    // windows: 0.7 × 734.5 MB, the first clean windows run (Round 7 Q2); kit-started PowerShell counts.
+    kitTotalMB: { linux: 596, windows: 514 },
     // (b) every kit process's own peak (VmHWM / PeakPageFileUsage) per role
     rolePeakMB: { launcher: 74, "mcp-bridge": 75, preflight: 76, proxy: 62, solver: 20 },
   },
@@ -30,6 +33,28 @@ export const MEMORY = {
   S6: { linesHeapMB: 16, longLineHeapMB: 16, resizeHeapMB: 8 },
   S7: { proxyLogMB: 6, earlyLogMB: 1, responsesStoreHeapMB: 96 },
 };
+
+/**
+ * Runs judged on the median of n fresh, sequential repetitions instead of one
+ * run (Round 6 Q1, ticket 60; lib/repetitions.mjs). The one place n lives.
+ * S1/burst1 (3 sequential ~10.8 MB requests per repetition): the median proxy
+ * peak against the 250 MB S1 peak, and every repetition ≤ 400 MB, §18's budget
+ * for 16 concurrent bodies (a run with ≤ 1 body in flight above it is a
+ * regression by definition). The value judged is the check's own: RSS/VmHWM
+ * on Linux, the working-set gate max(sampled WS, PeakWorkingSetSize) on
+ * Windows (Round 7 Q1); the ceiling applies to that same value. n = 5: the
+ * smallest odd n whose predicted false-RED rate is ≤ 5 % on the measured Linux
+ * distribution (METRICS.md: 5 of 48 runs above 250 MB on the tip → 3; with the
+ * 11 earlier runs, 8 of 59 → 5). Round 8 Q1 condition 3 may raise it (≤ 9)
+ * once the windows distribution is measured (job.mjs --measure-burst1).
+ */
+export const REPEATED = {
+  "S1/burst1": { n: 5, check: "procPeak:proxy", budgetMB: MEMORY.S1.peakMB, ceilingMB: MEMORY.S1.burstPeakMB.burst16 },
+};
+
+// Windows only: in paced runs no proxy sample may exceed ADR-0008's 512 MB
+// soft footprint limit in commit (Round 7 Q1 condition 2).
+export const PROXY_COMMIT_BACKSTOP = { role: "proxy", maxMB: 512 };
 
 export const PROCESSES = {
   proxiesPerInstallation: 1, // at every sample, incl. 10 concurrent launches
@@ -61,6 +86,7 @@ export function s3Budgets(os) {
     counts: { proxy: PROCESSES.proxiesPerInstallation },
     perParent: [{ role: "solver", max: PROCESSES.solversPerProxy }],
     orphans: PROCESSES.orphans,
+    commitBackstop: PROXY_COMMIT_BACKSTOP, // S3 is paced
   };
 }
 

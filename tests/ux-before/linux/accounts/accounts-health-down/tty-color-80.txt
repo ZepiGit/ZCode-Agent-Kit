@@ -1,0 +1,7 @@
+live data unavailable — start the proxy with: zcode-kit proxy start
+
+  work      unknown  ready   —  never used
+  personal  unknown  ready   —  never used
+  backup    unknown  paused  —  never used
+
+usable: 0 of 3; totals: n/a

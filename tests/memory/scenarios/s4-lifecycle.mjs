@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan, portsOf } from "../lib/sampler.mjs";
-import { PROCESSES } from "../lib/budgets.mjs";
+import { PROCESSES, PROXY_COMMIT_BACKSTOP } from "../lib/budgets.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -143,6 +143,7 @@ export async function run(ctx) {
   return {
     budgets: {
       counts: { proxy: PROCESSES.proxiesPerInstallation },
+      commitBackstop: PROXY_COMMIT_BACKSTOP, // paced (Round 7 Q1)
       perParent: [{ role: "solver", max: PROCESSES.solversPerProxy }],
       observed: [{ name: "solver:after-proxy-sigkill", label: "after-proxy-sigkill", role: "solver", max: PROCESSES.solversAfterProxyKill }],
       orphans: PROCESSES.orphans,

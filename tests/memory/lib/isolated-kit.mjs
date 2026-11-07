@@ -73,9 +73,12 @@ export function assertSafeRun() {
 }
 
 /** Fill the shipped template; every network-facing feature points at loopback or is off. */
-export function isolatedConfig({ port, key, mockUrl }) {
-  const template = readFileSync(join(KIT_ROOT, "proxy", "config.example.yaml"), "utf8");
+export function isolatedConfig({ port, key, mockUrl, template = readFileSync(join(KIT_ROOT, "proxy", "config.example.yaml"), "utf8") }) {
+  // Line-ending agnostic: a Windows checkout (core.autocrlf) has the template
+  // with CRLF, and the contract below matches LF (CI run 42246379763). The
+  // config is written with LF, which the proxy's YAML reader takes on every OS.
   let text = template
+    .replace(/\r\n/g, "\n")
     .replace(/^  port: 8457$/m, `  port: ${port}`)
     .replace('proxyApiKey: "GENERATE_ME"', `proxyApiKey: "${key}"`)
     .replace(/^plan: start-plan$/m, "plan: coding-plan")

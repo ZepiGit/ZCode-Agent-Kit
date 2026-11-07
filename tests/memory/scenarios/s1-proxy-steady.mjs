@@ -12,7 +12,7 @@
 //   stalled  only stop-reading-then-disconnect streaming clients
 import net from "node:net";
 import { startProxySession } from "../lib/proxy-session.mjs";
-import { MEMORY, PROCESSES, growthBudget } from "../lib/budgets.mjs";
+import { MEMORY, PROCESSES, PROXY_COMMIT_BACKSTOP, growthBudget } from "../lib/budgets.mjs";
 
 function prng(seed) {
   return () => {
@@ -156,6 +156,8 @@ export async function run(ctx) {
       // steady level belong to the paced runs (steady: the mixed load only).
       ...(heavy ? {} : { growth: growthBudget("proxy", window) }),
       ...(mixed ? { steady: { role: "proxy", maxMB: MEMORY.S1.steadyMB, ...window } } : {}),
+      // Paced runs only (short, stalled): Windows proxy commit ≤ 512 MB per sample (Round 7 Q1).
+      ...(heavy ? {} : { commitBackstop: PROXY_COMMIT_BACKSTOP }),
       procPeaks: { proxy: MEMORY.S1.burstPeakMB[ctx.variant] ?? MEMORY.S1.peakMB },
       counts: { proxy: PROCESSES.proxiesPerInstallation },
       orphans: PROCESSES.orphans,

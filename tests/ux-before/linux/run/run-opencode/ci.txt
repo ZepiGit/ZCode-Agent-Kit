@@ -1,0 +1,3 @@
+already running (pid <PID>)
+opencode (UX fixture binary) args: --version
+ZCODE_PROXY_KEY: set

@@ -1236,3 +1236,412 @@ The typecheck ratchet applies the Round 2 Q14 expected-RED pattern to Round 1 Q1
 ## Shared understanding
 
 CONFIRMED. No design branch is open. The Q1–Q4 changes are exact text and edge edits to `tickets-draft.md`, plus one amendment line in ADR-0004 and four release-notes items in spec.md §16. Apply them and publish; no further round is needed for them. The design detail of how bodies without `Content-Length` are accounted is delegated to ticket 19, bounded by its acceptance tests (Q4 change 10). The Round 3 build-time gates stay as listed in spec §18, and they return as questions with numbers only if a gate fails.
+
+## Round 6 (2026-11-06) — S1/burst1 flake and the first Windows run
+
+Questions: rounds/round-06.md. Answers below are copied verbatim from rounds/round-06-answers.md.
+
+# Round 6: Owner Proxy answers
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–5 decisions in DECISIONS.md bind these answers. Where a recommendation contradicts one of them, the answer says so and the earlier decision wins.
+
+I checked the evidence myself:
+- ticket 01 (`issues/01-*.md`, Comments and merge note) and ticket 20;
+- ticket 02 on `ticket/02-windows-sampler` (worktree `/home/AgentKit/wt/t02`, head ba7a8cc, read-only);
+- `reports/t02-linux-job.log`, `reports/t01-final-job.log`, `reports/t01-baseline-job.log`, `reports/memloop-S1-burst1.log` (1B), `reports/t02-burst1-t02-{1,2,3}.log` and `reports/t02-burst1-t02-tip-{1,2,3}.log`;
+- CI run 42203592466 (`gh run view`): `memory-budget` (ubuntu) and all four `test-kit` legs green. The windows memory leg did not exist yet;
+- `tests/memory/expected-red.json`, `tests/memory/lib/budgets.mjs`, `tests/memory/scenarios/s1-proxy-steady.mjs:51-59,159` on the t02 branch;
+- spec §18, PROMPT §7 Phase 4 and §9.
+
+Where the evidence differs from the round's wording, the answer says so. Where an answer is ACCEPTED with conditions, the conditions bind the tickets and the loop.
+
+---
+
+## Q1 — S1/burst1 flakes around its 250 MB peak budget
+
+**DECISION:** REJECTED in part. Accepted: the 250 MB budget stays. The fix changes the measurement only. S1/burst1 runs as several independent repetitions in the job and is judged on the MEDIAN peak. Ticket 20 owns the variant. No expected-RED entry is added. Rejected: the claim that three repetitions fix the flake, and the deferral of the outlier bound to ticket 20. Binding corrections:
+1. **Factual corrections.** S1/burst1 is not "one 10.8 MB request". It is 3 requests of ~10.8 MB at concurrency 1 (`s1-proxy-steady.mjs:58-59`; every log says "3 requests in 1 s"). The 250 MB number is the §18 "S1 proxy main ≤ 250 MB peak" budget, which ticket 01 decision 3 applies to the burst variants other than 16/32. It is not a §18 burst-row budget. Neither point changes the decision.
+2. **The repetition count comes from the measured distribution.** The known samples on unchanged code are 219.1, 231.8, 234, 236.6, 236.7, 237.5, 237.7, 256.7, 264.6 and 299.2 MB, plus one CI GREEN. Three runs out of about 11 exceed 250 (p ≈ 0.27). A median of 3 fails whenever 2 of 3 runs land in the tail: 3p² − 2p³ ≈ 18 %. So roughly one job run in six would still go RED per leg, and under the Phase 4 revert rule a good merge could be reverted. Rule: before the median rule lands, run S1/burst1 at least 20 times, sequentially, on the integration tip (Linux), and record the distribution in METRICS.md. Then n is the smallest odd number in {3, 5, 7, 9} whose predicted false-RED rate (binomial, p = the measured exceedance fraction) is ≤ 5 % per leg run. At p ≈ 0.25 that is n = 9 (≈ 4.9 %), which costs about 3 minutes per leg. If no n ≤ 9 reaches 5 %, the rule is not adopted, and the question comes back with the distribution.
+3. **The outlier ceiling applies now, not only after ticket 20.** Every repetition must be ≤ 400 MB, which is §18's budget for 16 concurrent bodies. A run with ≤ 1 body in flight that exceeds the 16-body budget is a regression by definition. The ceiling sits ~100 MB above the highest measured value (299.2), so it does not cause flakes of its own. Without it, a median rule would let one repetition spike to any size unnoticed until ticket 20 lands.
+4. **Ticket 20's criterion is stricter than proposed.** Replace "S1/burst1 median peak ≤ 250 MB with every repetition ≤ 300 MB" with: "In a ≥ 20-repetition measurement of S1/burst1 on each leg (RSS on Linux, commit on Windows), every repetition is ≤ 250 MB. The tail is gone, so the peak budget holds as a peak. The job keeps the median rule." A 300 MB bound would sit 0.8 MB above an observed value on unchanged code, so it is neither a goal nor a stable gate. If ticket 20 cannot reach every repetition ≤ 250, it comes back with numbers. The budget is never loosened.
+5. **Mechanics.**
+   - Each repetition is a fresh, isolated proxy run. Repetitions run one after another, never concurrently (§6 resource safety).
+   - `summary.json` and the job summary record every repetition's value, the median and the ceiling check.
+   - The rule applies identically on the windows leg, using commit. If burst1 is RED there only on commit, Q2 condition 1 applies.
+   - `verdict.test.mjs` pins the rule RED → GREEN with at least these cases: one high run passes; a high majority fails; one repetition above 400 MB fails even when the median is GREEN.
+6. **Scope and order.**
+   - The rule covers S1/burst1 only. Any other scenario needs its own decision with its own distribution. In particular, S1/burst4 and S1/bigbody may hover near 250 MB once ticket 19 lands, and that comes back with numbers.
+   - The change lands on the integration branch with its tests, through the normal ticket/merge path, **before** ticket 02 merges. That way a pre-existing flake cannot trigger a revert of 02.
+   - It is recorded as a measurement-rule amendment in spec §18 (S1 row) and in ticket 01's Comments, and the deviation goes in RUNLOG.
+
+**Rationale:** The variance is real kernel VmHWM. The sampled proxy peaks are ~100–104 MB, and the high values come from transient overlap of body copies. It is not sampler noise. That makes it a property of today's code, and ticket 20 (body copies) is the right owner. Judging a peak on the median of several fresh runs does not loosen the 250 MB number. That number already tightens §9, whose literal ceiling is steady-state RSS ≤ 250 MB, and the 1B baseline (219 MB) stays below it. A single-sample verdict on a distribution whose typical value sits ~13 MB under the budget is a coin flip, not evidence (C9). The recommendation's own premise is not backed, though: at the measured tail rate, a median of 3 stays flaky about one run in six. It also leaves the variant without any outlier guard until ticket 20 lands. The conditions take n from the data, keep a hard ceiling now, and give ticket 20 a target that restores the budget's meaning as a peak.
+
+**Charter:** C1 (bounded memory proven, not sampled by luck), C9 (stronger measured evidence; simpler than a flaky-entry mechanism), §9 (budget not loosened; tightened at ticket 20), C7 (same rule on the windows leg), PROMPT §7 Phase 4 (no spurious reverts).
+
+**REVERSIBILITY:** Two-way door (a measurement rule in test code and spec text). No ADR.
+
+---
+
+## Q2 — First windows-latest memory run
+
+**DECISION:** ACCEPTED with conditions. The first windows-latest `memory-budget` run calibrates the guessed `windows` list. It is not a regression of an existing leg. If it differs from the guess only in which scenarios are RED, the orchestrator does not revert ticket 02. Instead it updates the `windows` key in `expected-red.json` from the measured run in one follow-up commit, and records that run in METRICS.md as the Windows Bun 1.4.2 reference (Round 3 Q9 condition 1). Every harness, cap or Job Object failure is a real RED: the merge is reverted per Phase 4 and ticket 02 reopens with the failure attached. Binding conditions:
+1. **A run RED only on commit is never listed silently.** This follows Round 2 Q13 condition 3, Round 3 Q9, build-time gate 3 and ticket 02 acceptance item 2. A run RED on commit but GREEN on working set, or RED on Windows but GREEN on Linux because of the metric, goes to the owner as a question in the next round, with the commit value, the working-set value and the Linux value. To keep CI usable until that answer, it may be listed under a newly filed `needs-triage` ticket that states the question. It is never listed under a fix ticket that does not own it, and no budget changes.
+2. **A guessed entry is removed only with numbers.** If a scenario the ticket expected RED is GREEN on Windows, the removal commit cites the run's check values. Those values must show that the check observed real processes: role present, process count ≥ 1, units self-test passed. This matters most where the Linux defect does not depend on the platform (S2 retained memory, S5 growth). A GREEN that comes from a missing observation is a harness failure, not a calibration.
+3. **One calibration only.** The follow-up commit's CI run must hold the ratchet on both legs. If a later windows run disagrees with the calibrated list, nobody edits the list a second time. The scenario is flaky on Windows and comes back as a question with its numbers. The Q1 median rule is not extended to it automatically.
+4. **What counts as a real RED (revert):**
+   - a harness failure (exit 2);
+   - a failed units self-test;
+   - a Job Object not applied (`applied=0` or no `@@JOB` report);
+   - a cap kill or a timeout (exit 124);
+   - a poller left alive after the loop;
+   - any failing live Windows self-test on the `test-kit` legs (units, orphan, self-exclusion, Job Object applied and killing the tree);
+   - any RED on the ubuntu `memory-budget` leg or any `test-kit` leg, under the normal Phase 4 rule.
+5. **The reference record is complete.** METRICS.md records:
+   - the run URL, runner image, Bun version (it must be 1.4.2; otherwise Round 3 Q9's fallback note goes in RUNLOG) and Node version;
+   - per run: commit, working set, `redOnlyOnCommit` and poller overhead.
+   Where a Windows baseline peak exceeds its budget, the ≥ 30 % rule applies to that leg (Round 3 Q1 condition 3). In particular, if Windows S3 commit exceeds 600 MB, the windows S3 total in `budgets.mjs` becomes 0.7 × that baseline in the same follow-up commit. That is a tightening, and `verdict.test.mjs` pins it. Nothing else in `budgets.mjs` and nothing under the `linux` key changes in that commit.
+6. **Ticket 02 stays open** until the calibrated run is green on both legs and its evidence (run URL, final `windows` list, METRICS reference table, live self-test results) is in the ticket file. The exception to "a merge that turns anything red is reverted" is limited to this first run of the new leg, and it is recorded in RUNLOG. The 1.4.4 attribution run remains ticket 11's (Round 3 Q9 condition 2).
+
+**Rationale:** The windows leg is new, and the ticket can only guess its list, because this host has no Windows (ticket 02 Comments). Under the ratchet, a first run that disagrees with a guess is expected by design. Reverting the sampler for it would make the Windows reference baseline impossible, and with it build-time gate 3 and C7's primary-platform evidence. The recommendation correctly keeps harness, cap and Job Object failures as real REDs. It does not cover three cases that earlier rounds bound: a RED only on commit, which must go to the owner and never be absorbed silently; a GREEN that is really a measurement gap; and repeated list edits that would turn the ratchet into a rubber stamp. It also omits the ≥ 30 % rule for a Windows baseline above its budget. The conditions close those gaps.
+
+**Charter:** C7 (Windows primary; reference baseline must exist), C1 (caps and reaping proven on Windows), C9 (measured evidence decides the list), §9 (no loosening; ≥ 30 % rule), Round 2 Q13, Round 3 Q1/Q8/Q9, PROMPT §7 Phase 4 (revert rule; exception recorded).
+
+**REVERSIBILITY:** Two-way door (list entries and METRICS text). No ADR.
+
+---
+
+## Shared understanding
+
+CONFIRMED. No design branch is open. Q1 and Q2 are measurement and calibration rules with exact conditions. These come back as questions with numbers only if their gates fail:
+- no n ≤ 9 reaches ≤ 5 % false-RED for S1/burst1;
+- ticket 20 cannot get every repetition ≤ 250 MB;
+- a Windows run is RED only on commit;
+- the calibrated Windows list does not hold on the next run.
+
+## Round 7 (2026-11-06) — calibrating the Windows memory leg
+
+Questions: rounds/round-07.md. Answers below are copied verbatim from rounds/round-07-answers.md.
+
+# Round 7: Owner Proxy answers
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–6 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it says so by name.
+
+I checked the evidence myself:
+- `/home/AgentKit/overhaul-tools/t02-winmem-4.log`: run 42265988296 on the `pull/14` merge of 82de0da, windows-2025 image, Bun 1.4.2, Node 26.13.0, `@@JOB applied=1` on all 13 runs, no harness failure.
+- `t02-winmem-3.log` and its artefact `t02-ci-artifact-42252896054/` (every `summary.json` and `samples.csv`). I recomputed per-process working set against commit from the CSVs, because **the run-4 log does not carry working-set values**. Its check lines print commit only. Working set shows up only as a verdict ("S1/short … working set: green"), and the run-4 artefact is not on this host. The working-set numbers below are therefore *sampled* WS from run 3. The WS verdict itself uses `PeakWorkingSetSize`, which `samples.csv` does not store (`win-sampler.mjs:11`, `verdict.mjs:215-217`).
+- Ticket 02 on `ticket/02-windows-sampler` (worktree `/home/AgentKit/wt/t02`, head dd34ff8), Comments rounds 2–5, and `tests/memory/{expected-red.json, lib/budgets.mjs, lib/verdict.mjs, lib/win-sampler.mjs, scenarios/s1-proxy-steady.mjs}`. Also `proxy/zcode-proxy-manager.mjs:629-639` and `:274-284`.
+- Issues 16, 17, 19, 20, 30, 33, 34, 37 and 60 in `/home/AgentKit/wt/overhaul/.scratch/kit-overhaul/issues/`, spec §18 and PROMPT §9.
+
+Where an answer is ACCEPTED with conditions, the conditions bind the loop, the tickets and spec §18.
+
+---
+
+## Q1 — Which Windows metric gates the per-process budgets
+
+**DECISION:** ACCEPTED with conditions. On Windows, the per-process peak and steady budgets are judged on the working set, which is Windows' RSS. Peaks use `max(sampled WS, PeakWorkingSetSize)`. This applies to the proxy, launcher, MCP bridge and preflight in S1, S3, S5 and S7, and to the S1/burst1 median rule. Commit is reported for every process. **This explicitly amends** Round 1 Q7 condition 3, Round 2 Q13 ("RED rules use commit charge on Windows"), Round 3 Q1 condition 2(b) (Windows per-process peak = `PeakPageFileUsage`), Round 6 Q1 conditions 4–5 ("commit on Windows"), the spec §18 sentence "commit on Windows unless stated", and ticket 02's "RED rules use commit on Windows". The amendment covers the per-process budgets named above and nothing else. Round 2 Q13 condition 3 and Round 6 Q2 condition 1 reserved exactly this question for the owner, so answering it here is the intended path, not a silent adjustment. Binding conditions:
+1. **These stay on commit, because commit is what the OS enforces or what exhausts the system (C1):**
+   - the S3 kit total (Round 3 Q1; see Q2);
+   - every growth check;
+   - every solver and S2 check: `procPeak:solver` anywhere, cost per generation, retained before recycle, hung-solve reclaim, and `procPeak:scenario` while S2 hosts the solver in-thread. The Job Object cap is a commit limit (Round 1 Q3 condition 5, ADR-0002), and a solver judged on WS could pass the test while the product's cap kills it.
+2. **A commit backstop for the proxy.** In the paced runs (S1/short, S1/stalled, S3, S4, S7), no proxy sample's commit may exceed the ADR-0008 soft limit of 512 MB footprint. Above that limit the product's own `doctor` WARNs (Round 3 Q7), so a run there is not a pass. Today's values are all below it (S1/short 347.7, S1/stalled 452.3, S7 401.5, S3 188 MB), so the calibration does not change. Burst and bigbody runs are judged by their peaks only (ticket 01 decision 3).
+3. **The WS peak must be reproducible from the artefact.** `samples.csv` gains an additive `ws_peak_kb` column (Round 2 Q13 condition 2 precedent). The job summary and `summary.json` print the commit value and the WS value for every memory check, not just a WS verdict. METRICS.md records both numbers per run, as Round 6 Q2 condition 5 already requires ("commit, working set").
+4. `verdict.test.mjs` pins the split RED → GREEN with at least these cases:
+   - a Windows proxy RED only on commit is GREEN;
+   - a solver RED only on commit stays RED;
+   - an S3 total RED only on commit stays RED;
+   - a paced proxy above 512 MB commit is RED even when its WS is green.
+5. Linux, every budget number and the product's own metrics (ADR-0002 cap, ADR-0008 footprint thresholds, `memory[]` fields) are unchanged. The amendment goes into spec §18 (metric sentence and the S1/S3 rows), ticket 02, ticket 20 (see Q3), and RUNLOG as a recorded deviation.
+
+**Rationale:** §9 states the per-process budgets in RSS, and all of their numbers (250/160, 62/74/75/76, 150) were derived from Linux RSS. The measurements show that Windows working set is the like-for-like counterpart and commit is not:
+- An idle proxy is 52–57 MB WS against 166–188 MB commit (run 3, S3/S4). Linux RSS is ~60 MB.
+- A proxy's first sample is already 27 MB WS / 113 MB commit (S4 pids 2676 and 1644), so the ~120–130 MB offset exists before the kit does any work.
+- S1/short peaks at 150 MB sampled WS against 331 MB commit. Linux: steady 122, HWM 173.
+
+Judged on commit, these budgets cannot be reached by any kit fix:
+- The S3 proxy target is 62 MB against an idle commit of ~188.
+- S7's proxy peak (401.5 commit, 190.7 sampled WS) would keep ticket 34 from ever deleting its entry.
+- burst1's per-run 400 MB ceiling (Round 6 Q1 condition 3) would fail on commit alone (422/424.5).
+
+The result would be a permanent expected-RED list, which defeats §9 CI ("green on windows, empty list"). That is not a gate (C9: stronger measured evidence). Round 1 Q7 chose commit for a valid C1 reason: it is the resource that exhausts Windows, and the OS may trim the working set. Conditions 1–2 keep that guarantee where it matters: the cap, the total, leak detection, and a product-meaningful ceiling. The combination is not the strictest metric for every check. The S3 WS sum is higher than the commit sum: in S3/hung run 3, commit was 460 and GREEN while WS was RED. I keep commit for the total because Round 3 Q1 bound it, because private commit adds up across processes while a WS sum counts shared image pages once per process, and because Q2's ≥ 30 % rule tightens it anyway.
+
+**Charter:** §9 (budgets stated in RSS; numbers unchanged), C1 (the enforced cap metric, leak detection and the total stay on commit; backstop), C7 (meaningful gates on the primary platform), C9 (stronger measured evidence), Round 2 Q13 condition 3, Round 6 Q2 condition 1.
+
+**REVERSIBILITY:** Two-way door (a measurement rule in test code and spec text). No ADR. The amendment is recorded in spec §18 and RUNLOG.
+
+---
+
+## Q2 — The Windows S3 total
+
+**DECISION:** ACCEPTED with conditions. The Windows S3 total is **≤ 514 MB of commit** (734.5 × 0.7 = 514.15, rounded down, which is a tightening). PowerShell processes the kit itself starts count as kit footprint. This is consistent with Round 3 Q1 condition 3 and Round 6 Q2 condition 5; it contradicts nothing. Binding conditions:
+1. **The baseline is this run.** Run 42265988296 is the first clean windows run, on Bun 1.4.2 (Round 3 Q9 condition 1). It goes into METRICS.md as the Windows reference with the Round 6 Q2 condition 5 fields, plus the WS sum for information (Q1 condition 3). Run 3 (738.4 MB) is cited as corroboration and does not raise the number.
+2. **One Windows S3 total applies to every S3 variant**: `kitTotalMB.windows` 600 → 514 in `budgets.mjs`, pinned by `verdict.test.mjs`. S3/hung (456.8) stays GREEN on this check. Nothing under `linux` changes.
+3. **What counts.** Every process the kit starts counts (Round 1 Q6), and so does its conhost:
+   - the launcher's, manager's and preflight's PowerShell for identity and start-time proofs (~65–72 MB commit each; one includes an `Add-Type` `csc.exe` compile).
+
+   The loop's own `netstat`/PowerShell stays in the `tooling` role and is excluded. Ticket 02 already pins that attribution (`t02-r2-red4/5`, `t02-r4-red2`), and it stays pinned.
+4. **Ticket 37's Windows criterion** changes from "≤ 600 MB commit (≥ 30 % rule …)" to "≤ 514 MB commit".
+5. **Known risk, recorded rather than adjusted.** On today's per-process commit, the proxy (187.9) plus five bridges (role peak 388.1) already make 576 MB, before launchers (161.9) and preflight. With mechanisms (a)–(c), 514 is therefore unlikely on Windows without further levers. When ticket 37 misses, build-time gate 2 applies (Round 3 Q2 condition 8): the orchestrator returns with numbers for the measured levers. Those are the lean resident launcher and the Bun bridge, and now also replacing the per-call PowerShell proofs. No lever is adopted now, and the 514 is never loosened (§9).
+
+**Rationale:** The ≥ 30 % rule applies to every baseline above its budget on each leg (Round 3 Q1 condition 3), and Round 6 Q2 condition 5 already ordered this exact tightening. "Total kit footprint" means every process the kit starts. A PowerShell child of the launcher or manager is such a process, and leaving it out would understate Windows' real cost by ~65–72 MB per call. Writing down that 514 is probably out of reach of the planned mechanisms keeps the gate honest instead of leaving it to surprise ticket 37.
+
+**Charter:** §9 (≥ 30 % rule; no loosening), C1 (the kit's processes are bounded in total), C7, C9, Round 1 Q6, Round 3 Q1/Q2.
+
+**REVERSIBILITY:** Two-way door (a budget value; only further tightening is allowed). No ADR.
+
+---
+
+## Q3 — Calibration commit for the windows list (Round 6 Q2)
+
+**DECISION:** REJECTED in part. Accepted:
+- remove `S5/short`;
+- keep `S3/short → 37`, `S3/hung → 16`, `S4/short → 17`, `S7/short → 34`, `S2/short → 58` and `S1/burst4|burst16|burst32|bigbody → 19`;
+- add `S1/burst1 → 20` under the ticket-60 median rule;
+- `S1/short` gets no entry, because Q1 answers its owner question and it is GREEN on the WS gate.
+
+**Rejected: `S1/stalled → 19`.** Ticket 19 does not own that defect, so the entry would break Round 6 Q2 condition 1 ("never listed under a fix ticket that does not own it"). The facts:
+- S1/stalled sends only ~200-byte request bodies, each asking for a ~4 MB streamed answer that is never read before disconnect (`s1-proxy-steady.mjs:68-80, 122`). The in-flight bytes are response bytes.
+- Ticket 19 caps request-body bytes, and its own Delivers says "Open response streams are not limited" (Round 1 Q5).
+- On Linux the variant is GREEN (HWM 167 MB). On Windows it is RED on both metrics: commit 444/452.3, sampled WS 283.8 MB in run 3, and WS RED in both runs.
+
+So on Q1's gate it still needs an entry, and no existing ticket owns it. My decision:
+1. **File a new ticket** (next free number, 61 at the time of writing): "S1/stalled on Windows: proxy peak above 250 MB with stalled streaming readers (Linux HWM 167 MB)", with `Status: needs-triage`, Model sol (streaming), Risk high. It carries both runs' numbers (commit, WS, Linux), and it asks where the buffering toward paused sockets on Windows comes from. List `S1/stalled` under `windows` → that ticket. Any fix that would limit open response streams contradicts Round 1 Q5, and it comes back to the owner before it is built.
+2. **The S5/short removal** cites its numbers in the commit message, which meets Round 6 Q2 condition 2:
+   - GREEN in runs 3 and 4 with 717/714 samples, the bridge seen, units self-test `ok: true`;
+   - procPeak 89–89.8 MB (≤ 150), 0 task failures, reboot cost 4 MB.
+
+   The commit also records that the growth slope is 26.24 / 22.01 %/1k with no trend (run 3: net 7.3 %, 0 rising windows). It is therefore GREEN under spec §18's slope-plus-trend rule only. Ticket 30 records the Windows S5 numbers after its fix. If a later windows run turns S5 RED, Round 6 Q2 condition 3 applies: the scenario comes back as a question, and nobody edits the list again.
+3. **S1/burst1 → 20.** The rule is ticket 60's median of n with a per-repetition ceiling of 400 MB, judged on WS on Windows (Q1). Ticket 20 gains these criteria:
+   - "In a ≥ 20-repetition measurement on each leg (RSS on Linux, **working set** on Windows), every repetition is ≤ 250 MB" (the Round 6 Q1 condition 4 text, amended by Q1);
+   - "**Delete `S1/burst1` (windows).**"
+
+   The sampled WS peak (248.3 MB in run 3) sits just under the budget, and only `PeakWorkingSetSize` puts it over. If the variant then flips GREEN/RED between windows runs, Round 6 Q2 condition 3 applies. The median rule is not stretched to cover it.
+4. **The other kept entries stay RED on their owners' checks under Q1.** S7's only remaining RED is `proxy.log` (34), and its proxy peak is GREEN on WS. S3/hung keeps orphans, failed launches and stale locks (16). S3/short keeps the total, the lock and the orphan checks; for those, Q4 adds the edge that lets 37 delete it.
+5. **The edits happen in one calibration commit,** with its CI run holding the ratchet on both legs (Round 6 Q2 condition 3). Ticket 02 stays open until that run is green (Round 6 Q2 condition 6).
+
+**Rationale:** The ratchet's value lies in each entry naming the ticket whose fix turns it GREEN. Under 19, the S1/stalled entry would outlive ticket 19's merge, and the "delete your entry" acceptance could never be met. It would also push 19 toward limiting response streams, which Round 1 Q5 rejected. A Windows-only defect that is RED on both metrics and has no owner is exactly the `needs-triage` case. Everything else in the recommendation is backed by the two runs and matches Round 6 Q1/Q2.
+
+**Charter:** C9 (an entry is owned by the ticket that fixes it), C1, C7, Round 1 Q5, Round 6 Q1/Q2.
+
+**REVERSIBILITY:** Two-way door (list entries and ticket text). No ADR.
+
+---
+
+## Q4 — The Windows killed-start orphan
+
+**DECISION:** ACCEPTED with conditions. The defect is confirmed in the code. `start()` writes `proxy.pid` with `startedMs: null` right after the spawn (`zcode-proxy-manager.mjs:632`), and fills it in only if `processStartMs` answers within a 5 s probe of up to 2 × 2.5 s PowerShell calls (`:633-639`). `verifyOwnProcess` then returns `start-unknown` (`:279-284`), and every stop refuses: "start time of pid 3796 is not determinable … refusing to kill" (run 3 S3/hung `cleanup.finalStop`). Windows S3 entries stay listed until the fix lands. "Owned by 16 and 17" leaves the work without a single owner, so these conditions bind:
+1. **Ticket 16 owns closing the window.** No live proxy may end up with a pid record that lacks a start time. The ticket chooses the mechanism, for example recording identity before or at spawn, or a proof that needs no external query. **The window is wider than a killed start:** a probe that simply times out (two slow PowerShell calls, no kill at all) leaves the same record behind for good. Both cases are covered. Acceptance moves out of the Comments into Acceptance:
+   - on windows-latest, a kill injected at each point between spawn and the complete record, and a forced probe timeout, each end with the proxy stoppable or adopted;
+   - S3/hung windows shows 0 orphans before 16 deletes `S3/hung (linux, windows)`.
+2. **Ticket 17 owns records that already exist.** Records with no start time, written by old kits on users' machines, are adopted or stopped (C2: old state keeps working). Ticket 17's S4 criterion covers `unstoppable-proxy-after-ctrl-c` on Windows (2 of 8 today).
+3. **Never kill on a pid alone (C1, C6, AUD-001).** Without a recorded start time, a stop or adoption needs a proof of equal strength: an authenticated identity answer from the recorded pid, with the listener's owning pid equal to the record, or the per-spawn stop capability once ticket 22 exists. Relaxing `start-unknown` into "kill anyway" is not a fix. A test shows that a reused pid with no record match is never killed.
+4. **New edge: ticket 37 is blocked by 17.** Windows S3/short is RED on the orphan, failed-launch and stale-lock checks as well as on the total (run 4: orphans 1, failed launches 1, stale lock 1). It has a single owner, 37, which cannot fix the lock checks. With 17 landed first, 37's "GREEN → delete `S3/short (windows)`" is reachable. The graph stays acyclic (17 ← 16 ← 15; 37 ← 15, 35, 36). PROMPT §0 says wall-clock time does not matter.
+5. `cleanup.pidRecordLeft` stays in S3's summary. The calibration commit cites it from run 4's artefact as the direct record of `startedMs: null`. It is only corroboration: the code and the stop text already establish the defect.
+
+**Rationale:** The finding is a C1 failure on the primary platform. The kit starts a proxy it can never stop, and a crash, Ctrl-C or slow PowerShell reaches the same state for real users, not only the adversarial loop. The recommendation is right that the entries stay until the fix lands. But it splits ownership without saying who does what, and it misses the no-kill timeout path. It also leaves ticket 37 holding an entry it can never clear. The conditions give each part one owner and keep the identity-proof safety that Round 1 Q4 kept.
+
+**Charter:** C1 (every child reaped; exactly one proxy, never an unstoppable one), C2 (legacy records), C6 (no kill without proof), C7, C9, Round 1 Q4, Round 5 Q2 (edges where a criterion needs another ticket's output).
+
+**REVERSIBILITY:** Two-way door (ticket text and one edge). The pid-record contract change inside ticket 16 falls under the existing ADR-0003/Round 2 Q10 lock-and-record ADR, as an amendment line, not a new ADR.
+
+---
+
+## Shared understanding
+
+CONFIRMED. No design branch is open. Q1–Q4 are measurement, calibration and ownership rules with exact conditions. These come back as questions with numbers when they occur:
+- the Windows S3 total misses 514 MB of commit after ticket 37: build-time gate 2, now with the PowerShell-proof lever named;
+- ticket 61 (S1/stalled on Windows) needs a response-side bound, which touches Round 1 Q5;
+- a Bun solver child cannot fit its work under the 300 MB commit cap on Windows. The Bun commit floor is ~113 MB at the first sample and ~180 MB at an idle proxy. Ticket 28's windows proof and A1 will show it;
+- S5/short or S1/burst1 disagree with the calibrated windows list on a later run (Round 6 Q2 condition 3).
+
+
+---
+
+# Round 8 (2026-11-06) — windows S1/burst1 disagrees with the calibrated list
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–7 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it says so by name.
+
+I checked the evidence myself:
+- CI run 42281731448 (`gh run view`, `--log-failed`) on the `staging/02` head 0f324a7:
+  - the windows `memory-budget` leg fails on exactly one ratchet line: `S1/burst1: GREEN but listed for ticket 20`;
+  - S1/burst1 (windows) is `procPeak:proxy 222 MB (budget 250) [commit 365.2 / WS 222, gate WS]`, `count:proxy 1`, `orphans 0`, `@@JOB applied=1`, 3 requests;
+  - the ubuntu leg's S1/burst1 is a single-run GREEN at 235.5 MB, and that leg fails on S3/hung;
+  - all four `test-kit` legs and both `ux-before` legs are green.
+- `expected-red.json` on `origin/staging/02`: `windows` lists `S1/burst1 → 20`, and `linux` does not list it.
+- `staging/02` METRICS.md, Windows reference block:
+  - run 4 S1/burst1: proxy peak 422 commit / 234.3 sampled WS, RED on live WS (`PeakWorkingSetSize`);
+  - run 3: sampled WS 248.3, also RED through `PeakWorkingSetSize`;
+  - the block's own caveat: "If it flips between runs, Round 6 Q2 condition 3 applies."
+- Ticket 60 on `ticket/60-s1-burst1-median-rule` (`/home/AgentKit/wt/t60`, head 4a54f63, read-only):
+  - 48 fresh Linux repetitions: 5 of 48 above 250 (p = 0.104); pooled with Round 6's samples, 8 of 59 (p = 0.136);
+  - chosen n = 5, read from `budgets.mjs` (`REPEATED`);
+  - the windows distribution was **not** measured.
+- Ticket 60 in the integration tree says "Blocked by: 01, 02". Ticket 20 is unchanged in the integration tree, and its burst1 criterion text lives on the t60 branch.
+- `tests/memory/lib/{win-sampler.mjs, verdict.mjs}` on `staging/02`: the WS gate uses `max(sampled WS, wsPeakKb)`. `wsPeakKb` is `PeakWorkingSetSize`, and it **defaults to 0** when the field is missing (`win-sampler.mjs:64`).
+- RUNLOG 2026-11-06T13:11:25Z (the Round 6 Q1 order deviation) and 21:05Z (this round opened).
+
+The windows S1/burst1 evidence so far is three single runs with WS gate verdicts **RED, RED, GREEN**. Its exceedance rate is unknown, and on these three runs it looks far above Linux's 0.10–0.14.
+
+---
+
+## Q1 — S1/burst1 (windows) went GREEN on the calibration run
+
+**DECISION:** REJECTED in part.
+
+Accepted:
+- No list edit now.
+- No budget change.
+- Ticket 02's ubuntu S3/hung RED goes back to the 02 implementer first, outside this question.
+- Then ticket 60 is finished on top of `ticket/02`. Both are merged into `staging/02` (02 first, then 60), and one pre-merge CI run judges them.
+- 02 and 60 merge to the integration branch back to back, and only if that run is green on both legs.
+- Ticket 20 keeps its ≥ 20-repetition criterion on both legs (RSS on Linux, WS on Windows).
+
+Rejected: letting **one** pre-merge job run under the median rule decide whether the windows entry is deleted. That is a second list edit decided on a single sample. Round 6 Q2 condition 3 forbids it, and Round 7 Q3 condition 3 says the median rule "is not stretched to cover" a windows flip. Round 6 Q1 condition 2 requires that n comes from a measured distribution, with false-RED ≤ 5 % **per leg**. No windows distribution exists. At the windows evidence so far (2 of 3 RED, p ≈ 0.67), a median of 5 is GREEN about 21 % of the time. So the recommendation would leave the windows ratchet flaky one run in five if the entry is kept. If the entry is deleted on one GREEN median, about 79 % of later runs would fail as "RED but unlisted".
+
+This answer is the "comes back as a question" step of Round 6 Q2 condition 3, and it authorises at most **one** further windows list change, decided by the rule below. Binding conditions:
+
+1. **Rule out a measurement gap first (Round 6 Q2 condition 2).** From the run 42281731448 artefact, the proxy's `ws_peak_kb` in S1/burst1 `samples.csv` must be present and non-zero, and the 222 MB gate value must equal `max(sampled WS, ws_peak_kb)`.
+   - If `ws_peak_kb` is missing or 0, the GREEN came from a missing observation (`wsPeakKb` defaults to 0). That is a harness failure and a real RED for ticket 02 (Round 6 Q2 condition 4). The windows entry stays, and the RED, RED history stands.
+   - The check goes in ticket 02's Comments.
+2. **Measure the windows distribution before the list question is settled.** On windows-latest, with the staged 02+60 code, run S1/burst1 as **at least 20** fresh, isolated repetitions, one after another.
+   - Each repetition runs in its own Job Object with `@@JOB applied=1`.
+   - The mechanism is the implementer's choice, for example the windows memory job restricted to S1/burst1 on the staging branch. It must use no new endpoints (C6).
+   - Record per repetition: the WS gate value, sampled WS, `ws_peak_kb` (non-zero), commit peak, `count:proxy` and the units self-test.
+   - Every repetition must also stay ≤ 400 MB WS (Round 6 Q1 condition 3 as amended by Round 7 Q1).
+   - Write it to METRICS.md and ticket 60's Comments the way the Linux block was written.
+   - Compute p_win twice: from these repetitions alone, and pooled with runs 3, 4 and 5 counted as RED, RED, GREEN. The decision uses the less favourable estimate, as ticket 60 did on Linux.
+3. **One n, from both legs, read from one place.** n is the smallest odd n ≤ 9 at which, on **each** leg, the median verdict matches that leg's list state with probability ≥ 95 %: P(median RED) ≤ 5 % where the variant is unlisted, and P(median GREEN) ≤ 5 % where it is listed. Linux needs n ≥ 5 at p = 0.136. If windows needs more, n rises for both legs (≤ 9), and `verdict.test.mjs` pins the computation on both distributions. For n ≤ 9 the bands are:
+   - **Windows entry deleted** if p_win ≤ 0.251 at n = 9 (≤ 0.189 at n = 5). Ticket 60's commit makes the deletion and cites the distribution and the condition 1 observation checks (Round 6 Q2 condition 2). Ticket 20's "Delete `S1/burst1` (windows)" criterion is struck with a note. Its "every repetition ≤ 250 MB on each leg" criterion stays, because the tail still exists.
+   - **Windows entry kept under 20** if p_win ≥ 0.749 at n = 9 (≥ 0.811 at n = 5). That is a stable RED that ticket 20 owns.
+   - **Neither:** p_win is in the middle band, where no median of n ≤ 9 gives a stable verdict either way. Then the list does not change, no budget changes, and no "flaky entry" mechanism is added (Round 6 Q1 rationale). 02 and 60 do not merge. The question comes back with the windows distribution, the same as Round 6 Q1's "no n ≤ 9" exit.
+4. **The pre-merge run confirms. It does not decide.** If the one pre-merge CI run on `staging/02` (02 + 60, with the list from condition 3) disagrees with the list on either leg's S1/burst1, there is no rerun-until-green. The run's numbers come back as a question, and 02 and 60 do not merge. Any other RED follows Round 6 Q2 condition 4 and the Phase 4 rule as usual.
+5. **Order and records.**
+   - Staging 02 and 60 together, with 02 merged first, meets ticket 60's "Blocked by: 02" edge and restores Round 6 Q1's intent that a pre-existing burst1 flake cannot trigger a revert of 02.
+   - RUNLOG records this as the closure of the 13:11:25Z deviation.
+   - Ticket 02 stays open until the pre-merge run is green on both legs (Round 6 Q2 condition 6).
+6. **Nothing else changes:**
+   - the 250 MB budget;
+   - the 400 MB per-repetition ceiling;
+   - the `linux` list;
+   - every other `windows` entry;
+   - `budgets.mjs`, except `REPEATED` if condition 3 raises n;
+   - Round 7 Q1's metric split.
+
+**Rationale:** The windows S1/burst1 peak sits right at its budget. The live WS is just over 250 in runs 3 and 4 and 222 in run 5, so a single run is a coin flip, not evidence (C9, Round 6 Q1). The recommendation is right on order: staging 02 and 60 together fixes the Round 6 Q1 deviation without a second calibration edit, and its merge gates are right. But it then lets one median-of-5 job run settle a list entry, using an n computed only from Linux. Round 6 Q1 requires n per leg from a measured distribution. Round 6 Q2 condition 3 and Round 7 Q3 condition 3 send a windows flip back as a question rather than letting a single run or a stretched median resolve it. The binomial bands show why that matters. Unless Windows' exceedance rate is outside roughly 0.25–0.75, no permitted n gives a stable windows verdict, and either list state would make the ratchet flaky, which leads to spurious reverts under Phase 4. Measuring 20+ windows repetitions first costs about 10 minutes of CI. It turns the entry into a decision backed by numbers, and it keeps the ratchet's meaning: an entry is RED until its owner's fix and GREEN otherwise. Condition 1 guards the one way this GREEN could be fake: a missing `PeakWorkingSetSize` silently defaults to 0.
+
+**Charter:** C9 (stronger measured evidence; then the smaller blast radius: no merge on a coin flip), C1 (bounded memory proven by a distribution, not a lucky sample), C7 (Windows is primary, so its leg needs its own evidence), §9 (no budget loosened), Round 6 Q1 conditions 2, 3 and 5, Round 6 Q2 conditions 2, 3, 4 and 6, Round 7 Q1, Round 7 Q3 condition 3, PROMPT §7 Phase 4 (no spurious reverts).
+
+**REVERSIBILITY:** Two-way door (a list entry, the repetition count and ticket text). No ADR.
+
+---
+
+## Shared understanding
+
+CONFIRMED. No design branch is open. These come back as questions with numbers when they occur:
+- the run 42281731448 GREEN turns out to be a missing `PeakWorkingSetSize` observation (a harness RED for 02);
+- the windows S1/burst1 exceedance rate falls in the middle band, where no median of n ≤ 9 is stable;
+- the pre-merge `staging/02` run disagrees with the distribution-backed list.
+
+
+---
+
+# Round 9 (2026-11-07) — the Windows S1/burst1 distribution lands in the middle band
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–8 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it says so by name.
+
+I checked the evidence myself:
+- `/home/AgentKit/overhaul-tools/ci-art/r8-measure-nGEr/memory-budget-windows/measure-S1-burst1.{md,json}`:
+  - 24 of 24 runs valid: `ws_peak_kb` non-zero in every run, units self-test `ok`, Job Object `applied`, `count:proxy 1`;
+  - in every run the WS gate equals `ws_peak_kb` / 1024 (for example 298060 KB = 291.1 MB), so the gate is `max(sampled WS, PeakWorkingSetSize)` as Round 7 Q1 fixed it;
+  - 13 of 24 above 250 MB (p = 0.542); min / median / max 206.9 / 251.9 / 291.1 MB; none above 400 MB; commit median 403.7, max 446.3 MB;
+  - the first 12 runs have 8 above 250 and the last 12 have 5. That is no evidence of drift at this sample size.
+- `…/memory-budget-linux/measure-S1-burst1.{md,json}`: 24 of 24 valid, 1 of 24 above 250 (p = 0.042), max 262.1, none above 400. RUNLOG 2026-11-07T00:15Z has the local 20 runs (2 of 20; pooled 10 of 79 = 0.127). Adding the CI runs gives 11 of 103 (p = 0.107), so the round's figures match.
+- RUNLOG 2026-11-06T21:40Z: the Round 8 condition 1 check on run 42281731448 (`ws_peak_kb` non-zero in 19 of 19 rows, gate 222 = max). RUNLOG 2026-11-07T00:15Z and 00:34Z: staging/02 is 0f7b9e4 + 5380767, plus the marker db5f353. The measurement ran in run 42316982634.
+- `issues/INDEX.md`: 20 ← 19 ← 13 (and 14) ← 12 ← 11 ← 10 ← 09 ← 02, 03, 04; and 03 ← 02. RUNLOG 21:20Z says "Frontier now only 02". 01, 04, 14 and 50 are `resolved`; 57 and 59 are `needs-triage`. The deadlock fact is correct.
+- `issues/55-*.md`: it is blocked by 06, 16, 17, 19, 30, 32, 34, 35, 37 and 58, **not by 20 and not by 61**. Both of those own windows entries today.
+- `issues/20-*.md`: the integration tree has no burst1 criteria. On `ticket/60` 7e8520a it carries the Round 6/7/8 burst1 criteria (every one of ≥ 20 repetitions ≤ 250 MB per leg; delete the windows entry).
+- `ticket/60` 7e8520a: `tests/memory/lib/ratchet.mjs`, `lib/repetitions.mjs`, `lib/budgets.mjs` (`REPEATED` S1/burst1 n = 5, ceiling `burstPeakMB.burst16` = 400), `job.mjs` and `expected-red.json` (windows `S1/burst1 → 20`; linux unlisted).
+
+**A gap in today's ratchet that matters here.** `medianVerdict` puts `median:procPeak:proxy`, `ceiling:procPeak:proxy` and every other RED check of every repetition into one `redChecks` list, and returns one exit code. `checkRatchet` only sees GREEN or RED per run key, and it accepts any RED for a listed key. So while `S1/burst1 → 20` is listed on windows, a repetition above the 400 MB ceiling, an orphan or a second proxy would all pass as "expected RED". Round 6 Q1 condition 3 ("every repetition must be ≤ 400 MB … applies now") is not enforced for a listed repeated key today. The round's point 2 assumes that it is.
+
+---
+
+## Q1 — What happens to windows S1/burst1 at p ≈ 0.54
+
+**DECISION:** ACCEPTED with conditions. **This explicitly contradicts three earlier decisions:**
+- Round 8 Q1 condition 3 says the middle band gets "no 'flaky entry' mechanism", and Round 8 authorised "at most one further windows list change, decided by the rule below". This answer adds such a mechanism, and the change is not decided by that rule.
+- Round 6 Q1's rationale ("simpler than a flaky-entry mechanism").
+- Round 7 Q3 condition 3 ("the median rule is not stretched to cover it"). The median rule itself is unchanged, but the ratchet is stretched for this one entry.
+
+Round 8 sent the middle band back to the owner for exactly this case, and the distribution is now measured. So this is the intended return path. It is not a silent adjustment.
+
+Merge 02 and then 60, with the windows `S1/burst1 → 20` entry kept and marked `unstable`. Binding conditions:
+
+1. **A listed repeated key tolerates only its median check (this closes the gap above and applies to every listed repeated key, `unstable` or not).** The ratchet must see which checks were RED:
+   - For a listed run key in `REPEATED`, the only RED check it accepts is `median:<check>`.
+   - Each of these is a ratchet failure, listed or not: `ceiling:<check>`; any other RED check in any repetition (`count:proxy`, orphans, Job Object, units); a harness failure.
+   - This enforces Round 6 Q1 condition 3 as written, so it does not contradict it.
+2. **What `unstable` means.** It applies to windows `S1/burst1` only:
+   - a median ≤ 250 MB passes;
+   - a median > 250 MB and ≤ 300 MB passes;
+   - each passing run prints `S1/burst1: unstable (median <x> MB, budget 250), owned by ticket 20` in the job summary and in the report rows;
+   - a median > 300 MB is a ratchet failure;
+   - condition 1 holds on top of this.
+
+   The 300 MB bound is an evidence-backed tightening of the recommendation, not a budget:
+   - 0 of 27 windows values exceed 300 MB (max 291.1). The 95 % upper bound on a single run above 300 is p ≈ 0.105, and at that p a median of 5 exceeds 300 with probability ≈ 1.0 % (binomial). The bound does not make the entry flaky.
+   - Without it, a Windows-only regression of up to ~109 MB per run would pass silently until ticket 20. Ticket 20 sits eight tickets down the chain, behind Bun 1.4.4 (11) and the undici/happy-dom bumps (12).
+   - This is not the per-run "≤ 300 MB" target that Round 6 Q1 condition 4 rejected for ticket 20. Ticket 20's target stays "every repetition ≤ 250 MB", and the 250 MB budget is unchanged.
+   - The bound disappears with the entry.
+3. **One entry, enforced in code.** `unstable` is a value kind in `expected-red.json`, for example `{ "ticket": "20", "state": "unstable" }`, in one place. The exact shape is the implementer's choice. The schema check accepts it for `windows` `S1/burst1` only, through an allow-list of one key in code. Any other key that carries it is a schema error. `verdict.test.mjs` / the ratchet tests pin these cases RED → GREEN:
+   - an `unstable` median of 251 passes, and so does 230;
+   - a median of 301 fails;
+   - one repetition at 401 fails while the median is 240;
+   - an orphan or `count:proxy 2` in one repetition fails;
+   - `unstable` on any other key, or on `linux` `S1/burst1`, is rejected;
+   - a normal listed repeated entry that is RED only on its ceiling fails (condition 1).
+
+   Any other scenario that lands in a middle band comes back as its own question with its own distribution (Round 6 Q1 condition 6). `unstable` is not extended to it.
+4. **One owner, one exit.** The entry leaves the list only through ticket 20's existing criterion: a ≥ 20-repetition measurement where every windows repetition is ≤ 250 MB on the WS gate (run through the off-by-default measurement mode), and the commit that deletes the entry cites it. If ticket 20 cannot reach that, it comes back with numbers (Round 6 Q1 condition 4), and the budget is never loosened. No single job run, and no median of n, ever edits this entry (Round 6 Q2 condition 3 and Round 8 condition 4 stand).
+5. **Ticket 55 gets the edge it is missing.** Add `20` to ticket 55's "Blocked by". Without that edge, 55's "empty list on both legs" criterion can come due while the 20-owned entry still exists. 55 also gains the recommended criterion: the guard rejects any `unstable` entry and any re-added entry, and the schema allow-list from condition 3 is removed. Ticket 20 keeps its "Delete `S1/burst1` (windows)" criterion, which Round 8 condition 3 did **not** strike, because the windows result was in the middle band.
+6. **Nothing else changes:**
+   - the 250 MB budget, the 400 MB per-run ceiling, n = 5 (`REPEATED`) and Round 7 Q1's metric split;
+   - windows commit is still reported and still not judged for burst runs (Round 7 Q1 condition 2); the commit max of 446.3 is below the 512 MB paced backstop anyway;
+   - Linux keeps S1/burst1 unlisted at n = 5 (false-RED ≈ 1.7 % at the less favourable p = 0.127, within Round 6 Q1 condition 2's 5 %);
+   - every other `linux` and `windows` entry;
+   - sampled WS does not become the gate. That would loosen Round 7 Q1 and miss the true peak.
+7. **Merge path (Round 8 conditions 4 and 5, otherwise unchanged).**
+   - Remove the marker commit db5f353.
+   - Land conditions 1–5 on ticket 60, restage 02 first and 60 second, and run one pre-merge CI run on staging/02. It must be green on both legs.
+   - That run confirms; it does not decide. For S1/burst1, "disagree" now means any of: a Linux median > 250; a windows median > 300; a ceiling breach; any RED check other than the median on either leg.
+   - On any disagreement, the numbers come back as a question, with no rerun-until-green. Any other RED follows Round 6 Q2 condition 4 and Phase 4.
+   - 02 and 60 merge back to back. Ticket 02 stays open until that run is green (Round 6 Q2 condition 6).
+8. **Records.**
+   - Spec §18 (S1 row) records the `unstable` state, the 300 MB median bound and condition 1 as a measurement-rule amendment.
+   - RUNLOG records them as a deviation from Round 8 Q1 condition 3, naming this round.
+   - METRICS.md and ticket 60's Comments get the windows and Linux distributions from run 42316982634, written the way the Linux block was written (Round 8 condition 2).
+   - Ticket 20's Comments name the entry's state and its only exit.
+
+**Rationale:** The decision rests on the 27 windows values: the median sits 1.9 MB above the budget and p ≈ 0.54–0.56. With those numbers, every option that keeps a binary ratchet fails:
+- Listed as plain RED, the median of 5 is GREEN in ≈ 40–42 % of runs. At n = 9 it is still ≈ 36–40 %. That is a ratchet failure in roughly every second or third windows run, and under Phase 4 that means revert churn on good merges.
+- Deleting the entry fails the other way, ≈ 58–60 % of the time.
+- Gating on sampled WS would make the leg pass by loosening the metric Round 7 Q1 bound.
+- Holding 02 until 20 is a deadlock: 02 is the only frontier ticket, and 20 is downstream of it.
+
+Round 8 refused a flaky-entry mechanism because a "GREEN or RED" entry hides regressions. The evidence above shows that today's plain listing already hides more: it accepts a ceiling breach and any non-median RED for the listed key. So the accepted design is stricter than the status quo for this entry. It tolerates exactly one check, inside a 250–300 MB band with a measured ≈ 1 % false-RED rate. It cannot spread past one allow-listed key, and its only exit is ticket 20's ≥ 20-repetition criterion, backed by a new edge that stops ticket 55 from closing around it. The recommendation is right on the core point and is not loosening the 250 MB budget. It needed the band bound, the per-check tolerance and the 55 ← 20 edge to be safe.
+
+**Charter:** C1 (bounded memory still proven: hard ceiling, single-proxy and orphan checks are now enforced where they were masked, plus a regression bound), C7 (Windows primary: a gate that holds without lying), C9 (stronger measured evidence: 27 valid runs; smaller blast radius than a deadlock or a metric change; one entry, one owner, one exit), §9 (250 MB budget, 400 MB ceiling and n unchanged; the 300 MB bound only tightens), Round 6 Q1 conditions 2–4 and 6, Round 6 Q2 conditions 3, 4 and 6, Round 7 Q1, Round 8 Q1 conditions 4 and 5, PROMPT §7 Phase 4 (no spurious reverts).
+
+**REVERSIBILITY:** Two-way door (test code, one list entry, ticket text and one edge). The state is removed by ticket 20 and guarded out for good by ticket 55. No ADR.
+
+---
+
+## Shared understanding
+
+Open branches I still see (none blocks this round's merge path):
+- **Ticket 55 is also not blocked by 61**, but `S1/stalled → 61` is a windows entry. Ticket 61 is `needs-triage`, so 55's empty-list criterion can come due while that entry still exists. The orchestrator should add the edge 55 ← 61, or bring the question back if 61 is never accepted. This answer does not decide it.
+- These come back as questions with numbers when they occur:
+  - ticket 20 cannot get every windows (or Linux) repetition ≤ 250 MB (Round 6 Q1 condition 4);
+  - a windows S1/burst1 median > 300 MB or a ceiling breach after a later merge, most likely at ticket 11 (Bun 1.4.4) or 12;
+  - the pre-merge staging/02 run disagrees as defined in condition 7.

@@ -96,6 +96,8 @@ public static class MemloopJob {
 /** The Job Object wrapper (Windows PowerShell 5.1). Exit: the run's own code; 2 when the cap could not be applied. */
 export function jobObjectScript({ limitBytes, argv }) {
   return [
+    // First, before Add-Type loads a module: its progress arrived as CLIXML on stderr (CI run 42221794531).
+    "$ProgressPreference = 'SilentlyContinue'",
     "$ErrorActionPreference = 'Stop'",
     "try {",
     `Add-Type -TypeDefinition @'\n${JOB_CS}\n'@`,
@@ -119,11 +121,14 @@ export function jobObjectScript({ limitBytes, argv }) {
 }
 
 /** argv for one capped run, plus the timeout the caller enforces itself (Windows) or null (`timeout` does it). */
-export function commandFor(cap, size, timeoutS, args, { node = process.execPath, runScript }) {
+export function commandFor(cap, size, timeoutS, args, { node = process.execPath, runScript, platform = process.platform }) {
   const run = [node, runScript, ...args];
+  // Windows has no GNU `timeout` (TIMEOUT.EXE is a pause command): with no cap
+  // the job enforces the timeout itself (CI run 42246379763).
+  if (cap === "none" && platform === "win32") return { argv: run, timeoutMs: (timeoutS + KILL_AFTER_S) * 1000 };
   if (cap === "jobobject") {
     const script = jobObjectScript({ limitBytes: bytes(size), argv: run });
-    return { argv: ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], timeoutMs: (timeoutS + KILL_AFTER_S) * 1000 };
+    return { argv: ["powershell.exe", "-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], timeoutMs: (timeoutS + KILL_AFTER_S) * 1000 };
   }
   const inner = ["timeout", `--kill-after=${KILL_AFTER_S}`, String(timeoutS), ...run];
   if (cap === "systemd") return { argv: ["systemd-run", "--user", "--scope", "--quiet", "-p", `MemoryMax=${size}`, "-p", "MemorySwapMax=0", "--", ...inner], timeoutMs: null };
