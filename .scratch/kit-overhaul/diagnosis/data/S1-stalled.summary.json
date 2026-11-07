@@ -1,0 +1,173 @@
+{
+ "id": "S1-short-stalled-2026-11-06T0248-9e2a21",
+ "scenario": "S1",
+ "profile": "short",
+ "variant": "stalled",
+ "durationS": 170,
+ "red": false,
+ "checks": [
+  {
+   "name": "growth:proxy",
+   "red": false,
+   "value": 1.99,
+   "budget": 5,
+   "unit": "%/1k",
+   "trend": true,
+   "detail": {
+    "samples": 151,
+    "warmupSamples": 30,
+    "meanMB": 137.9,
+    "firstPostMB": 133,
+    "lastMB": 135.4,
+    "slopeMBPer1k": 2.74,
+    "growthPctPer1k": 1.99,
+    "slopeMBPerMin": 3.27,
+    "windowMediansMB": [
+     136.3,
+     132.1,
+     139.7,
+     137.6,
+     139.9,
+     142.1
+    ],
+    "risingWindows": 3,
+    "netRisePct": 4.3,
+    "heapSlopeMBPer1k": -0.18,
+    "axis": "progress"
+   }
+  },
+  {
+   "name": "procPeak:proxy",
+   "red": false,
+   "value": 165.1,
+   "budget": 250,
+   "unit": "MB"
+  },
+  {
+   "name": "count:proxy",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 295.6,
+   "peakProcMB": 157.3,
+   "peakHwmMB": 165.1,
+   "maxCount": 2,
+   "maxFds": 55,
+   "maxThreads": 32,
+   "distinctPids": 2,
+   "peakHeapMB": 22
+  },
+  "kit": {
+   "peakMB": 157.3,
+   "peakProcMB": 157.3,
+   "peakHwmMB": 165.1,
+   "maxCount": 1,
+   "maxFds": 27,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 22
+  },
+  "mock-upstream": {
+   "peakMB": 142.6,
+   "peakProcMB": 142.6,
+   "peakHwmMB": 142.6,
+   "maxCount": 1,
+   "maxFds": 29,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "proxy": {
+   "peakMB": 157.3,
+   "peakProcMB": 157.3,
+   "peakHwmMB": 165.1,
+   "maxCount": 1,
+   "maxFds": 27,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 22
+  }
+ },
+ "budgets": {
+  "growth": {
+   "role": "proxy",
+   "axis": "progress",
+   "maxPctPer1k": 5,
+   "risingWindows": 3,
+   "warmupFraction": 0.2,
+   "fromT": 883,
+   "untilT": 151840
+  },
+  "procPeaks": {
+   "proxy": 250
+  },
+  "counts": {
+   "proxy": 1
+  },
+  "orphans": 0
+ },
+ "orphans": [],
+ "notes": {
+  "isolation.stateDir": "<diag-data>/S1-short-stalled-2026-11-06T0248-9e2a21/tmp/kit-XaEyEm/state",
+  "isolation.home": "<diag-data>/S1-short-stalled-2026-11-06T0248-9e2a21/tmp/kit-XaEyEm/home",
+  "isolation.port": 18467,
+  "start.code": 0,
+  "isolation.facts": {
+   "pid": 421196,
+   "homeIsolated": true,
+   "configIsolated": true,
+   "stateDirIsolated": true,
+   "credentialsIsolated": true,
+   "listeningPorts": [
+    18467
+   ],
+   "externalConnections": []
+  },
+  "requests": 3000,
+  "outcomes": {
+   "stalled-reader:ok": 3000
+  },
+  "loadWindowMs": [
+   883,
+   151840
+  ],
+  "mockStats": {
+   "requests": 3000,
+   "bytesIn": 802890,
+   "byMode": {
+    "big": 3000
+   },
+   "aborted": 0,
+   "open": 0
+  },
+  "healthAfterIdle": {
+   "pid": 421196,
+   "uptimeSec": 167,
+   "rssMB": 97,
+   "heapUsedMB": 6,
+   "eventLoopLagMs": 0,
+   "eventLoopLagMaxMs": 81,
+   "captcha": null
+  },
+  "isolation.externalConnectionsDuringRun": [],
+  "stop.code": 0,
+  "stop.output": [
+   "stopped (pid 421196)"
+  ]
+ },
+ "samples": 169,
+ "csv": "<diag-data>/S1-short-stalled-2026-11-06T0248-9e2a21/samples.csv"
+}

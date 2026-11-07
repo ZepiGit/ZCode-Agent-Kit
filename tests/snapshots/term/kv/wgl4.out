@@ -1,0 +1,8 @@
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [2mState  [0m  running since 1 h 02 min (pid 4242)
+  [2mPort   [0m  18458 (loopback only)
+  [2mVersion[0m  0.2.42 (proxy 4.6.4)
+  [2mNote   [0m  a long value that has to wrap on an interactive terminal at eighty
+           columns, under its own column and never in the middle of
+           /a/very/long/path/token/that/stays/whole
+  [2mEmpty[0m

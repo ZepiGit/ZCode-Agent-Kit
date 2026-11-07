@@ -1,0 +1,562 @@
+{
+ "id": "S2-short-2026-11-06T0045-66deee",
+ "scenario": "S2",
+ "profile": "short",
+ "variant": null,
+ "durationS": 168,
+ "red": true,
+ "checks": [
+  {
+   "name": "growth:scenario",
+   "red": true,
+   "value": 17.66,
+   "budget": 5,
+   "unit": "%/1k",
+   "trend": true,
+   "detail": {
+    "samples": 126,
+    "warmupSamples": 31,
+    "meanMB": 710.5,
+    "firstPostMB": 675.1,
+    "lastMB": 223.5,
+    "slopeMBPer1k": 125.47,
+    "growthPctPer1k": 17.66,
+    "slopeMBPerMin": 28.83,
+    "windowMediansMB": [
+     807.1,
+     919.2,
+     358.6,
+     589.6,
+     782.8,
+     909.5
+    ],
+    "risingWindows": 4,
+    "heapSlopeMBPer1k": 0,
+    "axis": "progress"
+   }
+  },
+  {
+   "name": "procPeak:scenario",
+   "red": true,
+   "value": 1068.9,
+   "budget": 600,
+   "unit": "MB"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  },
+  {
+   "name": "solver:retained-before-recycle",
+   "red": true,
+   "value": 686,
+   "budget": 300,
+   "unit": "MB"
+  },
+  {
+   "name": "solver:hang-not-reclaimed",
+   "red": false,
+   "value": -5,
+   "budget": 64,
+   "unit": "MB"
+  },
+  {
+   "name": "cdn-cache:memory-growth",
+   "red": true,
+   "value": 151,
+   "budget": 64,
+   "unit": "MB"
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 1059.3,
+   "peakProcMB": 1059.3,
+   "peakHwmMB": 1068.9,
+   "maxCount": 1,
+   "maxFds": 12,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 152
+  },
+  "scenario": {
+   "peakMB": 1059.3,
+   "peakProcMB": 1059.3,
+   "peakHwmMB": 1068.9,
+   "maxCount": 1,
+   "maxFds": 12,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 152
+  }
+ },
+ "budgets": {
+  "growth": {
+   "role": "scenario",
+   "axis": "progress",
+   "maxPctPer1k": 5,
+   "risingWindows": 3,
+   "fromT": 1039,
+   "untilT": 127159
+  },
+  "procPeaks": {
+   "scenario": 600
+  },
+  "orphans": 0,
+  "extra": [
+   {
+    "name": "solver:retained-before-recycle",
+    "red": true,
+    "value": 686,
+    "budget": 300,
+    "unit": "MB"
+   },
+   {
+    "name": "solver:hang-not-reclaimed",
+    "red": false,
+    "value": -5,
+    "budget": 64,
+    "unit": "MB"
+   },
+   {
+    "name": "cdn-cache:memory-growth",
+    "red": true,
+    "value": 151,
+    "budget": 64,
+    "unit": "MB"
+   }
+  ]
+ },
+ "orphans": [],
+ "notes": {
+  "marks": [
+   {
+    "name": "A-start",
+    "tMs": 47,
+    "rssMB": 24,
+    "mainHeapMB": 1,
+    "generation": 0,
+    "recycles": 0,
+    "lastRecycleReason": null,
+    "deadlineKills": 0
+   },
+   {
+    "name": "A-after-10",
+    "tMs": 1843,
+    "rssMB": 179,
+    "mainHeapMB": 1,
+    "generation": 1,
+    "recycles": 0,
+    "lastRecycleReason": null,
+    "deadlineKills": 0
+   },
+   {
+    "name": "A-after-100",
+    "tMs": 23508,
+    "rssMB": 550,
+    "mainHeapMB": 1,
+    "generation": 1,
+    "recycles": 0,
+    "lastRecycleReason": null,
+    "deadlineKills": 0
+   },
+   {
+    "name": "A-after-200",
+    "tMs": 62322,
+    "rssMB": 958,
+    "mainHeapMB": 1,
+    "generation": 1,
+    "recycles": 1,
+    "lastRecycleReason": "solves",
+    "deadlineKills": 0
+   },
+   {
+    "name": "A-after-300",
+    "tMs": 85631,
+    "rssMB": 568,
+    "mainHeapMB": 1,
+    "generation": 2,
+    "recycles": 1,
+    "lastRecycleReason": "solves",
+    "deadlineKills": 0
+   },
+   {
+    "name": "A-after-400",
+    "tMs": 124426,
+    "rssMB": 1059,
+    "mainHeapMB": 1,
+    "generation": 2,
+    "recycles": 2,
+    "lastRecycleReason": "solves",
+    "deadlineKills": 0
+   },
+   {
+    "name": "A-end",
+    "tMs": 127993,
+    "rssMB": 276,
+    "mainHeapMB": 1,
+    "generation": 3,
+    "recycles": 2,
+    "lastRecycleReason": "solves",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-start",
+    "tMs": 128495,
+    "rssMB": 76,
+    "mainHeapMB": 1,
+    "generation": 3,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-2",
+    "tMs": 128665,
+    "rssMB": 155,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-4",
+    "tMs": 128712,
+    "rssMB": 215,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-6",
+    "tMs": 128766,
+    "rssMB": 276,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-8",
+    "tMs": 128815,
+    "rssMB": 337,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-10",
+    "tMs": 128865,
+    "rssMB": 398,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-12",
+    "tMs": 128908,
+    "rssMB": 459,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-14",
+    "tMs": 128953,
+    "rssMB": 517,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-16",
+    "tMs": 128996,
+    "rssMB": 579,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-18",
+    "tMs": 129042,
+    "rssMB": 640,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-20",
+    "tMs": 129092,
+    "rssMB": 701,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-22",
+    "tMs": 129134,
+    "rssMB": 762,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-before-recycle",
+    "tMs": 129136,
+    "rssMB": 762,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 3,
+    "lastRecycleReason": "s2-phase",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-after-recycle-5s",
+    "tMs": 134144,
+    "rssMB": 75,
+    "mainHeapMB": 1,
+    "generation": 4,
+    "recycles": 4,
+    "lastRecycleReason": "s2-measure",
+    "deadlineKills": 0
+   },
+   {
+    "name": "B-fresh-generation",
+    "tMs": 134258,
+    "rssMB": 93,
+    "mainHeapMB": 1,
+    "generation": 5,
+    "recycles": 4,
+    "lastRecycleReason": "s2-measure",
+    "deadlineKills": 0
+   },
+   {
+    "name": "C-start",
+    "tMs": 134261,
+    "rssMB": 93,
+    "mainHeapMB": 1,
+    "generation": 5,
+    "recycles": 4,
+    "lastRecycleReason": "s2-measure",
+    "deadlineKills": 0
+   },
+   {
+    "name": "C-after-hang-1",
+    "tMs": 138764,
+    "rssMB": 75,
+    "mainHeapMB": 1,
+    "generation": 5,
+    "recycles": 5,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 1
+   },
+   {
+    "name": "C-after-hang-2",
+    "tMs": 143268,
+    "rssMB": 76,
+    "mainHeapMB": 1,
+    "generation": 6,
+    "recycles": 6,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 2
+   },
+   {
+    "name": "C-after-hang-3",
+    "tMs": 147771,
+    "rssMB": 76,
+    "mainHeapMB": 1,
+    "generation": 7,
+    "recycles": 7,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 3
+   },
+   {
+    "name": "C-after-hang-4",
+    "tMs": 152274,
+    "rssMB": 74,
+    "mainHeapMB": 1,
+    "generation": 8,
+    "recycles": 8,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 4
+   },
+   {
+    "name": "C-after-hang-5",
+    "tMs": 156778,
+    "rssMB": 74,
+    "mainHeapMB": 1,
+    "generation": 9,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5
+   },
+   {
+    "name": "C-end",
+    "tMs": 161906,
+    "rssMB": 88,
+    "mainHeapMB": 1,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5
+   },
+   {
+    "name": "D-start",
+    "tMs": 161908,
+    "rssMB": 88,
+    "mainHeapMB": 1,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5
+   },
+   {
+    "name": "D-after-100",
+    "tMs": 162271,
+    "rssMB": 114,
+    "mainHeapMB": 26,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5,
+    "entries": 100
+   },
+   {
+    "name": "D-after-200",
+    "tMs": 162603,
+    "rssMB": 139,
+    "mainHeapMB": 51,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5,
+    "entries": 200
+   },
+   {
+    "name": "D-after-300",
+    "tMs": 162941,
+    "rssMB": 164,
+    "mainHeapMB": 76,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5,
+    "entries": 300
+   },
+   {
+    "name": "D-after-400",
+    "tMs": 163276,
+    "rssMB": 189,
+    "mainHeapMB": 101,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5,
+    "entries": 400
+   },
+   {
+    "name": "D-after-500",
+    "tMs": 163714,
+    "rssMB": 214,
+    "mainHeapMB": 127,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5,
+    "entries": 500
+   },
+   {
+    "name": "D-after-600",
+    "tMs": 164202,
+    "rssMB": 239,
+    "mainHeapMB": 152,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5,
+    "entries": 600
+   },
+   {
+    "name": "D-end",
+    "tMs": 164273,
+    "rssMB": 239,
+    "mainHeapMB": 152,
+    "generation": 10,
+    "recycles": 9,
+    "lastRecycleReason": "deadline",
+    "deadlineKills": 5
+   },
+   {
+    "name": "end",
+    "tMs": 166281,
+    "rssMB": 225,
+    "mainHeapMB": 1,
+    "generation": 10,
+    "recycles": 10,
+    "lastRecycleReason": "shutdown",
+    "deadlineKills": 5
+   }
+  ],
+  "workerHeap": {
+   "heavyDomMaxMB": 667,
+   "heavyDomFirst10": [
+    25,
+    29,
+    34,
+    35,
+    57,
+    39,
+    41,
+    41,
+    51,
+    59
+   ],
+   "heavyDomLast10": [
+    59,
+    59,
+    59,
+    54,
+    54,
+    69,
+    69,
+    99,
+    99,
+    78
+   ],
+   "retainMaxMB": 571
+  },
+  "derived": {
+   "retainedBeforeRecycleMB": 686,
+   "returnedOnRecycleMB": 687,
+   "hangLeakMB": -5,
+   "cdnGrowthMB": 151,
+   "cdnEntries": 600
+  }
+ },
+ "samples": 168,
+ "csv": "<diag-data>/S2-short-2026-11-06T0045-66deee/samples.csv"
+}

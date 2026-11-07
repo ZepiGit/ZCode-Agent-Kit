@@ -1,0 +1,24 @@
+╭─ Settings & Login ───────────────────────────────────────────────── ● ready ─╮
+│   Provider   zai    bigmodel   (stop to switch)                              │
+│   Plan       coding-plan    start-plan   (stop to switch)                    │
+│   Auth      ● logged in · sk-…a1b2                                           │
+│              Logged In    Logout                                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ Proxy Server ───────────────────────────────────────────────────────────────╮
+│   Status    ● running  http://127.0.0.1:18458                                │
+│   Config    zai · start-plan · 2 models · /v1/responses · v4.6.4             │
+│              Start      Stop                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭─ Logs (62) ─────────────────────────────────────────── ▼ 25 more · g follow ─╮
+│   r028 OAI glm-5.3-flash 200 stream 496ms→4.8s 1268tok 178t/s                │
+│   r029 ANT glm-5.3 200 stream 503ms→4.9s 1299tok 179t/s                      │
+│   r030 OAI glm-5.3-flash 200 stream 510ms→5.0s 1330tok 180t/s                │
+│   r031 ANT glm-5.3 200 stream 517ms→5.1s 1361tok 181t/s                      │
+│   r032 OAI glm-5.3-flash 200 stream 524ms→5.2s 1392tok 182t/s                │
+│   r033 ANT glm-5.3 200 stream 531ms→5.3s 1423tok 183t/s                      │
+│   r034 OAI glm-5.3-flash 200 stream 538ms→5.4s 1454tok 184t/s                │
+│   r035 ANT glm-5.3 200 stream 545ms→5.5s 1485tok 185t/s                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  ↑↓ scroll · [s] start/stop · [l] login · [o] logout · [g] follow · [q] quit

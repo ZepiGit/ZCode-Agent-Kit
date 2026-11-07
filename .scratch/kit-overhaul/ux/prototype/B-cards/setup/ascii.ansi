@@ -1,0 +1,23 @@
+[2m+-[0m[1m Setup complete [0m[2m-------------------------------------------------------------[0m[2m+[0m
+[2m|[0m [32m+ 3 assistants configured[0m   3 skipped   0 failed                             [2m|[0m
+[2m|[0m   [32m+[0m OMP / Oh My Pi[2m  + MCP bridge[0m                                             [2m|[0m
+[2m|[0m   [32m+[0m Codex                                                                    [2m|[0m
+[2m|[0m   [32m+[0m OpenCode                                                                 [2m|[0m
+[2m|[0m   - pi[2m  answered n[0m                                                           [2m|[0m
+[2m|[0m   - Claude Code[2m  answered n[0m                                                  [2m|[0m
+[2m|[0m   - Continue[2m  answered n[0m                                                     [2m|[0m
+[2m|[0m                                                                              [2m|[0m
+[2m|[0m [2mAccount Rotator[0m  disabled (enable later: zcode-kit accounts enable)          [2m|[0m
+[2m|[0m [2mLive check     [0m  skipped (no account yet)                                    [2m|[0m
+[2m|[0m [2mUndo           [0m  zcode-kit rollback 2026-11-05T12-00-00-000-001-a1b2c3       [2m|[0m
+[2m+------------------------------------------------------------------------------+[0m
+[2m+-[0m[1m Connect any client [0m[2m---------------------------------------------[0m [32m* verified[0m [2m+[0m
+[2m|[0m [2mOpenAI    [0m  http://127.0.0.1:8457/v1                                         [2m|[0m
+[2m|[0m [2mAnthropic [0m  http://127.0.0.1:8457                                            [2m|[0m
+[2m|[0m [2mAPI key   [0m  k7Qm2_example_fake_key_A1b2C3d4E5f6G7h8I9j0                      [2m|[0m
+[2m|[0m [2mModels    [0m  glm-5.3  glm-5.3-flash                                           [2m|[0m
+[2m+------------------------------------------------------------------------------+[0m
+[2m+-[0m[1m Next [0m[2m-----------------------------------------------------------------------[0m[2m+[0m
+[2m|[0m 1  [1mzcode-kit auth login zai[0m   sign in                                        [2m|[0m
+[2m|[0m 2  [1mzcode-kit doctor[0m          verify everything                               [2m|[0m
+[2m+------------------------------------------------------------------------------+[0m

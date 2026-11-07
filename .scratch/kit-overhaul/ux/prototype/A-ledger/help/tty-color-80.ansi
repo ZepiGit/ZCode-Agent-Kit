@@ -1,0 +1,47 @@
+[1mzcode-kit[0m — local ZCode provider for your own agent harnesses
+
+[1mUsage[0m  zcode-kit <command> [options]
+
+[1mGet started[0m
+  [1msetup                         [0m  Detect assistants, ask once per assistant,
+                                  configure the local provider
+  [1mintegrate <harness>           [0m  Configure one assistant explicitly (--dry-run
+                                  shows the changes)
+  [1mrun <harness> -- <args>       [0m  Start an assistant wired to the local proxy
+
+[1mCheck and fix[0m
+  [1mdoctor                        [0m  Check runtime, proxy, account and integrations
+                                  (--fix repairs, --json)
+  [1mstatus                        [0m  Proxy health, memory, quota and connection
+                                  details (--json)
+  [1mmodels                        [0m  Model ids served by the proxy (--show-key
+                                  prints the local key)
+
+[1mProxy service[0m
+  [1mproxy start|stop|restart      [0m  Manage the local proxy (never touches a
+                                  service it did not start)
+  [1mproxy status|logs [n]         [0m  Show state or the last n log lines
+
+[1mAccounts[0m
+  [1mauth status|login|logout      [0m  ZCode login used by the proxy
+  [1maccounts [health|quota|doctor][0m  Account Rotator pool
+                                  (enable|disable|pause|resume|remove)
+
+[1mMaintenance[0m
+  [1mupdate [--version vX.Y.Z]     [0m  Update the kit, keep your configuration
+  [1mrollback [tx-id]              [0m  Undo the last (or a given) change set
+  [1muninstall                     [0m  Remove kit-owned integrations; logins are kept
+
+[1mExamples[0m
+  zcode-kit setup                       # first run, answers y/n per assistant
+  zcode-kit setup --harness omp,codex   # unattended, no questions
+  zcode-kit proxy status                # base URLs, key and models for a manual
+[2m                                          client[0m
+  zcode-kit doctor --fix                # repair kit-owned config and restart a
+[2m                                          dead proxy[0m
+
+[1mExit codes[0m
+  0 ok · 1 checks failed · 2 runtime error · 3 port conflict · 4 safe-start
+  refused · 5 auth failure · 20 a harness failed · 130 aborted
+
+Details for one command: zcode-kit <command> --help

@@ -7,7 +7,7 @@
 # the account's 2FA policy): the runner exchanges a GitHub OIDC token with the
 # registry. Prerequisite configured once on npmjs.com: package Settings →
 # Trusted Publisher → ZepiGit/ZCode-Agent-Kit + workflow `release.yml`.
-# Requires npm >= 11.5 (installed in the publish job; Node 20 ships npm 10).
+# Requires npm >= 11.5 (installed in the publish job; Node 24 ships npm 11.3).
 #
 # Why a tag push instead of the `release` event: GitHub delivered the
 # ReleaseEvent for v0.2.0/v0.2.1 but never started the release-triggered
@@ -41,12 +41,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 26
       # The proxy + MCP bridge suites need bun (their vendored toolchain).
-      # Pinned to the version the test evidence was produced with (1.4.2);
+      # Pinned to the CI Bun (1.4.2, Rounds 10–11);
       # older bun (e.g. 1.2.20) rejects the mcp bridge's lockfileVersion 2.
       - uses: oven-sh/setup-bun@v2
         with:
@@ -72,11 +72,11 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The publish job alone runs on Node 24: Trusted Publishing (OIDC)
-      # needs npm >= 11.5, which is installed below. The test matrix above
-      # intentionally stays on Node 20 (the documented engines floor).
-      - uses: actions/setup-node@v4
+      # needs npm >= 11.5, which is installed below. The test job above runs
+      # on Node 26 (ADR-0006); Node 24 here keeps the npm 11 upgrade path.
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org/
@@ -224,13 +224,13 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 26
       - name: Prepare exact prerelease metadata
         run: |
           set -euo pipefail

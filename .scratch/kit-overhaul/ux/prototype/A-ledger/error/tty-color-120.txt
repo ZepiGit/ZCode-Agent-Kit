@@ -1,0 +1,5 @@
+✗ error  Port 8457 is in use by another service
+   why   it answered /health without this kit's identity (HTTP 401); the kit never stops a service it did not start
+   next  zcode-kit proxy status
+     or  change server.port in proxy/config.yaml, then zcode-kit proxy start
+   exit 3

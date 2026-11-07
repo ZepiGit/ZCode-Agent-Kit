@@ -1,0 +1,18 @@
+╭─ Settings & Login ─────────────────────────────────────────────────────────────────────────────────── ● logging in… ─╮
+│   Provider   zai    bigmodel                                                                                         │
+│   Plan       coding-plan    start-plan                                                                               │
+│   Auth      ○ not logged in                                                                                          │
+│              Logging in…                                                                                             │
+│   Login      ▸ waiting for browser authorization… press L to paste a code instead                                    │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭─ Proxy Server ───────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│   Status    ○ stopped                                                                                                │
+│   Config    zai · start-plan · 2 models · /v1/responses · v4.6.4                                                     │
+│              Start      Stop                                                                                         │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭─ Logs (0) ─────────────────────────────────────────────────────────────────────────────────────────────── following ─╮
+│   (no logs yet — start the server and send requests)                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ↑↓ scroll · [s] start/stop · [l] login · [o] logout · [g] follow · [q] quit · [p] provider · [t] plan · [c] clear

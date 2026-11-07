@@ -1,0 +1,627 @@
+{
+ "id": "S3-long-2026-11-06T0246-45f98a",
+ "scenario": "S3",
+ "profile": "long",
+ "variant": null,
+ "durationS": 195,
+ "red": true,
+ "checks": [
+  {
+   "name": "peak:kit",
+   "red": true,
+   "value": 852,
+   "budget": 600,
+   "unit": "MB"
+  },
+  {
+   "name": "count:proxy",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  },
+  {
+   "name": "simultaneous-proxies",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "proxy-generations/round",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "failed-launches",
+   "red": true,
+   "value": 17,
+   "budget": 0,
+   "unit": "launches"
+  },
+  {
+   "name": "stale-lock-after-round",
+   "red": true,
+   "value": 2,
+   "budget": 0,
+   "unit": "rounds"
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 1177,
+   "peakProcMB": 86.6,
+   "peakHwmMB": 86.6,
+   "maxCount": 18,
+   "maxFds": 426,
+   "maxThreads": 154,
+   "distinctPids": 148,
+   "peakHeapMB": 5
+  },
+  "kit": {
+   "peakMB": 852,
+   "peakProcMB": 86.6,
+   "peakHwmMB": 86.6,
+   "maxCount": 11,
+   "maxFds": 269,
+   "maxThreads": 112,
+   "distinctPids": 122,
+   "peakHeapMB": 5
+  },
+  "mock-upstream": {
+   "peakMB": 59.8,
+   "peakProcMB": 59.8,
+   "peakHwmMB": 60.4,
+   "maxCount": 1,
+   "maxFds": 22,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "launcher": {
+   "peakMB": 363.7,
+   "peakProcMB": 73.7,
+   "peakHwmMB": 77.5,
+   "maxCount": 5,
+   "maxFds": 140,
+   "maxThreads": 35,
+   "distinctPids": 29,
+   "peakHeapMB": null
+  },
+  "proxy": {
+   "peakMB": 59.9,
+   "peakProcMB": 59.9,
+   "peakHwmMB": 59.9,
+   "maxCount": 1,
+   "maxFds": 21,
+   "maxThreads": 24,
+   "distinctPids": 10,
+   "peakHeapMB": 5
+  },
+  "fake-harness": {
+   "peakMB": 276.7,
+   "peakProcMB": 49.8,
+   "peakHwmMB": 49.8,
+   "maxCount": 6,
+   "maxFds": 135,
+   "maxThreads": 41,
+   "distinctPids": 25,
+   "peakHeapMB": null
+  },
+  "mcp-bridge": {
+   "peakMB": 429.6,
+   "peakProcMB": 86.6,
+   "peakHwmMB": 86.6,
+   "maxCount": 5,
+   "maxFds": 109,
+   "maxThreads": 55,
+   "distinctPids": 24,
+   "peakHeapMB": null
+  },
+  "manager": {
+   "peakMB": 64.7,
+   "peakProcMB": 64.7,
+   "peakHwmMB": 64.7,
+   "maxCount": 1,
+   "maxFds": 21,
+   "maxThreads": 7,
+   "distinctPids": 5,
+   "peakHeapMB": null
+  },
+  "preflight": {
+   "peakMB": 623,
+   "peakProcMB": 73,
+   "peakHwmMB": 73,
+   "maxCount": 10,
+   "maxFds": 211,
+   "maxThreads": 70,
+   "distinctPids": 54,
+   "peakHeapMB": null
+  }
+ },
+ "budgets": {
+  "counts": {
+   "proxy": 1
+  },
+  "peaks": {
+   "kit": 600
+  },
+  "orphans": 0,
+  "extra": [
+   {
+    "name": "simultaneous-proxies",
+    "red": false,
+    "value": 1,
+    "budget": 1,
+    "unit": "procs"
+   },
+   {
+    "name": "proxy-generations/round",
+    "red": false,
+    "value": 1,
+    "budget": 1,
+    "unit": "procs"
+   },
+   {
+    "name": "failed-launches",
+    "red": true,
+    "value": 17,
+    "budget": 0,
+    "unit": "launches"
+   },
+   {
+    "name": "stale-lock-after-round",
+    "red": true,
+    "value": 2,
+    "budget": 0,
+    "unit": "rounds"
+   }
+  ]
+ },
+ "orphans": [],
+ "notes": {
+  "isolation.stateDir": "<diag-data>/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/state",
+  "isolation.home": "<diag-data>/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/home",
+  "isolation.port": 18457,
+  "afterKillHolder": {
+   "nextPreflight": 0,
+   "nextPreflightTail": "[zcode-preflight] cause=quota-unavailable",
+   "stopCode": 4,
+   "stopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/state/logs/manager.lock (holder pid 421378 is not alive, started 2026-11-06T02:48:14.016Z) \u2014 refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/diag-data/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/state/logs/manager.lock manually and retry.",
+   "proxiesLeft": 1,
+   "staleLock": true
+  },
+  "rounds": [
+   {
+    "name": "race-5#0",
+    "n": 5,
+    "kind": "mixed",
+    "tFrom": 137,
+    "tTo": 17905,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     832,
+     835,
+     16200,
+     16223,
+     16231
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-5#0",
+     "code": 0,
+     "tail": [
+      "stopped (pid 419374)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-10#0",
+    "n": 10,
+    "kind": "mixed",
+    "tFrom": 18331,
+    "tTo": 36267,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     822,
+     848,
+     875,
+     876,
+     921,
+     16305,
+     16375,
+     16387,
+     16394,
+     16399
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-10#0",
+     "code": 0,
+     "tail": [
+      "stopped (pid 419638)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-10-preflight#0",
+    "n": 10,
+    "kind": "preflight",
+    "tFrom": 36697,
+    "tTo": 39163,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     836,
+     839,
+     842,
+     858,
+     863,
+     864,
+     885,
+     886,
+     899,
+     921
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-10-preflight#0",
+     "code": 0,
+     "tail": [
+      "stopped (pid 419954)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-5#1",
+    "n": 5,
+    "kind": "mixed",
+    "tFrom": 39591,
+    "tTo": 57369,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     795,
+     798,
+     16184,
+     16190,
+     16210
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-5#1",
+     "code": 0,
+     "tail": [
+      "stopped (pid 420026)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-10#1",
+    "n": 10,
+    "kind": "mixed",
+    "tFrom": 57800,
+    "tTo": 75850,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     872,
+     876,
+     888,
+     891,
+     925,
+     16347,
+     16360,
+     16389,
+     16400,
+     16420
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-10#1",
+     "code": 0,
+     "tail": [
+      "stopped (pid 420279)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-10-preflight#1",
+    "n": 10,
+    "kind": "preflight",
+    "tFrom": 76277,
+    "tTo": 78742,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     816,
+     819,
+     859,
+     865,
+     867,
+     873,
+     875,
+     882,
+     894,
+     907
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-10-preflight#1",
+     "code": 0,
+     "tail": [
+      "stopped (pid 420567)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-5#2",
+    "n": 5,
+    "kind": "mixed",
+    "tFrom": 79164,
+    "tTo": 96994,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     801,
+     806,
+     16202,
+     16206,
+     16209
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-5#2",
+     "code": 0,
+     "tail": [
+      "stopped (pid 420660)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-10#2",
+    "n": 10,
+    "kind": "mixed",
+    "tFrom": 97424,
+    "tTo": 115375,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     864,
+     887,
+     953,
+     964,
+     973,
+     16304,
+     16362,
+     16395,
+     16400,
+     16409
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-10#2",
+     "code": 0,
+     "tail": [
+      "stopped (pid 420954)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "race-10-preflight#2",
+    "n": 10,
+    "kind": "preflight",
+    "tFrom": 115815,
+    "tTo": 118336,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [],
+    "launchMs": [
+     861,
+     889,
+     915,
+     921,
+     922,
+     946,
+     949,
+     953,
+     957,
+     962
+    ],
+    "staleLockLeft": null,
+    "adversary": null,
+    "stop": {
+     "label": "race-10-preflight#2",
+     "code": 0,
+     "tail": [
+      "stopped (pid 421329)"
+     ],
+     "proxiesLeft": 0
+    }
+   },
+   {
+    "name": "kill-holder-10",
+    "n": 10,
+    "kind": "preflight",
+    "tFrom": 118764,
+    "tTo": 121282,
+    "proxiesBefore": 0,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [
+     "preflight#0 code=4 [zcode-preflight] cause=startup",
+     "preflight#1 code=4 [zcode-preflight] cause=startup",
+     "preflight#2 code=null starting zcode-proxy ...",
+     "preflight#3 code=4 [zcode-preflight] cause=startup",
+     "preflight#4 code=4 [zcode-preflight] cause=startup",
+     "preflight#6 code=4 [zcode-preflight] cause=startup",
+     "preflight#7 code=4 [zcode-preflight] cause=startup"
+    ],
+    "launchMs": [
+     231,
+     257,
+     260,
+     264,
+     267,
+     270,
+     278,
+     848,
+     850,
+     854
+    ],
+    "staleLockLeft": "{\"pid\":421378,\"startedAt\":\"2026-11-06T02:48:14.016Z\",\"nonce\":\"831a53e95142d343\"}",
+    "adversary": {
+     "killed": 421378
+    },
+    "stop": {
+     "label": "kill-holder-10",
+     "code": 4,
+     "tail": [
+      "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/state/logs/manager.lock (holder pid 421378 is not alive, started 2026-11-06T02:48:14.016Z) \u2014 refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/diag-data/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/state/logs/manager.lock manually and retry."
+     ],
+     "proxiesLeft": 1
+    }
+   },
+   {
+    "name": "hung-10",
+    "n": 10,
+    "kind": "mixed",
+    "tFrom": 186797,
+    "tTo": 191120,
+    "proxiesBefore": 1,
+    "maxSimultaneousProxies": 1,
+    "maxSimultaneousListeners": 1,
+    "distinctProxyProcesses": 1,
+    "proxiesAfter": 1,
+    "pidFileMatchesListener": true,
+    "failedLaunches": [
+     "run#0 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+     "preflight#1 code=4 [zcode-preflight] cause=startup",
+     "run#2 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+     "preflight#3 code=4 [zcode-preflight] cause=startup",
+     "run#4 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+     "preflight#5 code=4 [zcode-preflight] cause=startup",
+     "run#6 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+     "preflight#7 code=4 [zcode-preflight] cause=startup",
+     "run#8 code=4 ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.",
+     "preflight#9 code=4 [zcode-preflight] cause=startup"
+    ],
+    "launchMs": [
+     2590,
+     2616,
+     2619,
+     2636,
+     2636,
+     2659,
+     2667,
+     2667,
+     2667,
+     2677
+    ],
+    "staleLockLeft": "{\"pid\":421378,\"startedAt\":\"2026-11-06T02:48:14.016Z\",\"nonce\":\"831a53e95142d343\"}",
+    "adversary": null,
+    "stop": {
+     "label": "hung-10",
+     "code": 4,
+     "tail": [
+      "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/diag-data/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/state/logs/manager.lock (holder pid 421378 is not alive, started 2026-11-06T02:48:14.016Z) \u2014 refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/diag-data/S3-long-2026-11-06T0246-45f98a/tmp/kit-kzyZqA/state/logs/manager.lock manually and retry."
+     ],
+     "proxiesLeft": 1
+    }
+   }
+  ],
+  "cleanup": {
+   "staleLockRemoved": true,
+   "finalStop": {
+    "label": "final",
+    "code": 0,
+    "tail": [
+     "stopped (pid 421452)"
+    ],
+    "proxiesLeft": 0
+   }
+  },
+  "isolation.externalConnectionsDuringRun": [],
+  "stop.code": 0,
+  "stop.output": [
+   "not running"
+  ]
+ },
+ "samples": 191,
+ "csv": "<diag-data>/S3-long-2026-11-06T0246-45f98a/samples.csv"
+}

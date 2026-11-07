@@ -1,0 +1,20 @@
+✗ doctor: 2 problems, 1 warning (9 ok, 3 skipped)
+
+✗ FAIL  runtime · MCP bridge dependencies: mcp/zcode-harness-mcp/node_modules missing
+  ├─ why   the last setup was interrupted before the bridge dependencies were installed
+  └─ next  zcode-kit setup
+
+! warn  proxy · Memory: proxy 912 MB of 1024 MB budget
+  ├─ why   RSS is close to the hard cap; the captcha worker is recycled at the cap
+  └─ next  zcode-kit proxy restart
+
+✗ FAIL  integrations · OpenCode: provider.zcode missing from opencode.json
+  ├─ why   the file was rewritten after setup (no kit signature found)
+  └─ next  zcode-kit integrate opencode
+
+runtime      ✓ Bun runtime, Proxy config, Local proxy key, Proxy dependencies
+proxy        ✓ Proxy reachable (own instance)
+account      ✓ Credential store, Account auth
+integrations ✓ OMP / Oh My Pi, Codex – 3 skipped
+
+zcode-kit doctor --verbose lists every check · --json for scripts

@@ -1,0 +1,3 @@
+This removes the kit proxy's effective credential store: <HOME>\.zcode-proxy\credentials.json
+Your ZCode Desktop login and its data are NOT touched.
+Re-run with --yes to confirm.

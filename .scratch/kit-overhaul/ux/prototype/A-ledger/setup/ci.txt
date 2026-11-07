@@ -1,0 +1,21 @@
+Setup summary -----------------------------------------------------------------
+  + ok    OMP / Oh My Pi  + MCP bridge
+  + ok    Codex
+  + ok    OpenCode
+  - skip  pi  answered n
+  - skip  Claude Code  answered n
+  - skip  Continue  answered n
+
+  Assistants       3 configured, 3 skipped, 0 failed
+  Account Rotator  disabled (enable later: zcode-kit accounts enable)
+  Live check       skipped (no account yet)
+  Undo             zcode-kit rollback 2026-11-05T12-00-00-000-001-a1b2c3
+
+Connection details (manual clients) -------------------------------------------
+  OpenAI base URL     http://127.0.0.1:8457/v1
+  Anthropic base URL  http://127.0.0.1:8457
+  API key             (hidden off a terminal - zcode-kit models --show-key)
+  Models              glm-5.3, glm-5.3-flash
+  State               * running, identity verified
+
+Next: zcode-kit auth login zai  then  zcode-kit doctor

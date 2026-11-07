@@ -1,0 +1,5 @@
+r002 OAI glm-5.3-flash 200 stream 390ms→2.1s 402tok 191t/s
+r003 ANT glm-5.3 429 batch 233ms
+[captcha] solver recycled (rss-budget) generation=3
+r004 OAI glm-5.3-flash 200 batch 412ms 18tok 44t/s
+[manager <TS>] started (pid <PID>) — healthy on http://127.0.0.1:18458

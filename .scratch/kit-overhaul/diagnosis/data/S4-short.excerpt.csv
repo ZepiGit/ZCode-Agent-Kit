@@ -1,0 +1,363 @@
+t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd
+1000,430402,430351,manager,66040,66040,7,21,,0,bin/node proxy/zcode-proxy-manager.mjs stop
+2000,430411,430351,manager,64060,64060,7,22,,1,bin/node proxy/zcode-proxy-manager.mjs start
+2000,430419,430411,proxy,57008,58424,22,10,4,1,.bin/bun run src/index.ts serve
+3001,430449,430351,manager,64172,64172,7,22,,2,bin/node proxy/zcode-proxy-manager.mjs start
+3001,430457,430449,proxy,56896,58280,23,10,4,2,.bin/bun run src/index.ts serve
+4001,430505,430351,manager,64260,64260,7,22,,3,bin/node proxy/zcode-proxy-manager.mjs start
+4001,430513,430505,proxy,58140,58500,22,10,4,3,.bin/bun run src/index.ts serve
+5001,430544,430351,manager,64144,64144,7,22,,4,bin/node proxy/zcode-proxy-manager.mjs start
+5001,430552,430544,proxy,20332,20332,10,7,,4,.bin/bun run src/index.ts serve
+6002,430575,430351,manager,65964,65964,7,21,,4,bin/node proxy/zcode-proxy-manager.mjs restart
+7002,430605,430351,manager,66256,66256,7,21,,4,bin/node proxy/zcode-proxy-manager.mjs stop
+8002,430621,971,proxy,59272,59272,23,10,4,5,.bin/bun run src/index.ts serve
+8002,430644,430351,manager,63064,63064,7,21,,5,bin/node proxy/zcode-proxy-manager.mjs restart
+9002,430669,971,proxy,59104,59104,23,10,4,5,.bin/bun run src/index.ts serve
+9002,430692,430351,manager,31080,31080,6,20,,5,bin/node proxy/zcode-proxy-manager.mjs stop
+10003,430700,430351,manager,64196,64196,7,22,,6,bin/node proxy/zcode-proxy-manager.mjs start
+10003,430708,430700,proxy,57076,58444,22,10,4,6,.bin/bun run src/index.ts serve
+11004,430730,430351,manager,66660,66660,7,22,,6,bin/node proxy/zcode-proxy-manager.mjs restart
+11004,430738,430730,proxy,57016,58688,22,10,4,6,.bin/bun run src/index.ts serve
+12005,430768,430351,manager,64096,64096,7,22,,7,bin/node proxy/zcode-proxy-manager.mjs start
+12005,430776,430768,proxy,57020,58568,24,10,4,7,.bin/bun run src/index.ts serve
+13005,430800,430351,manager,66748,66748,7,22,,7,bin/node proxy/zcode-proxy-manager.mjs restart
+13005,430808,430800,proxy,58052,58052,23,10,4,7,.bin/bun run src/index.ts serve
+14005,430856,430351,manager,64104,64104,7,22,,8,bin/node proxy/zcode-proxy-manager.mjs start
+14005,430864,430856,proxy,29180,29180,11,7,,8,.bin/bun run src/index.ts serve
+15005,430886,430351,manager,54912,54912,7,20,,8,bin/node proxy/zcode-proxy-manager.mjs start
+16006,430917,430351,manager,66060,66060,7,21,,8,bin/node proxy/zcode-proxy-manager.mjs stop
+17007,430933,971,proxy,59092,59092,23,11,4,9,.bin/bun run src/index.ts serve
+17007,430956,430351,manager,64880,64880,7,22,,9,bin/node proxy/zcode-proxy-manager.mjs stop
+18008,430964,430351,manager,64048,64048,7,22,,9,bin/node proxy/zcode-proxy-manager.mjs start
+18008,430972,430964,proxy,56816,57924,23,10,4,9,.bin/bun run src/index.ts serve
+19007,431020,430351,manager,64128,64128,7,22,,10,bin/node proxy/zcode-proxy-manager.mjs start
+19007,431028,431020,proxy,57036,58524,22,10,4,10,.bin/bun run src/index.ts serve
+20008,431058,430351,manager,64204,64204,7,22,,11,bin/node proxy/zcode-proxy-manager.mjs start
+20008,431066,431058,proxy,57332,58128,23,10,4,11,.bin/bun run src/index.ts serve
+21010,431097,430351,manager,64108,64108,7,22,,12,bin/node proxy/zcode-proxy-manager.mjs start
+21010,431105,431097,proxy,19172,19172,10,7,,12,.bin/bun run src/index.ts serve
+22010,431128,430351,manager,66316,66316,7,21,,12,bin/node proxy/zcode-proxy-manager.mjs stop
+23011,431168,430351,manager,66020,66020,7,21,,13,bin/node proxy/zcode-proxy-manager.mjs stop
+24012,431176,430351,manager,65856,65856,7,23,,14,bin/node proxy/zcode-proxy-manager.mjs start
+24012,431194,431176,proxy,57028,58024,22,11,4,14,.bin/bun run src/index.ts serve
+25012,431223,430351,manager,66540,66540,7,22,,14,bin/node proxy/zcode-proxy-manager.mjs restart
+25012,431231,431223,proxy,57300,58792,24,10,4,14,.bin/bun run src/index.ts serve
+26013,431263,430351,manager,64080,64080,7,22,,15,bin/node proxy/zcode-proxy-manager.mjs start
+26013,431271,431263,proxy,57080,58648,23,10,4,15,.bin/bun run src/index.ts serve
+27013,431294,430351,manager,66860,66860,7,22,,15,bin/node proxy/zcode-proxy-manager.mjs restart
+27013,431302,431294,proxy,58472,58708,24,10,4,15,.bin/bun run src/index.ts serve
+28014,431334,430351,manager,64180,64180,7,22,,16,bin/node proxy/zcode-proxy-manager.mjs start
+28014,431342,431334,proxy,17396,17396,9,7,,16,.bin/bun run src/index.ts serve
+29015,431382,430351,manager,66028,66028,7,21,,16,bin/node proxy/zcode-proxy-manager.mjs restart
+30016,431413,430351,manager,66752,66752,7,21,,16,bin/node proxy/zcode-proxy-manager.mjs stop
+31016,431429,971,proxy,59092,59092,23,10,4,17,.bin/bun run src/index.ts serve
+31016,431452,430351,manager,59484,59484,8,21,,17,bin/node proxy/zcode-proxy-manager.mjs restart
+32016,431460,971,proxy,58992,58992,21,10,4,17,.bin/bun run src/index.ts serve
+33016,431492,430351,manager,64140,64140,7,22,,18,bin/node proxy/zcode-proxy-manager.mjs start
+33016,431500,431492,proxy,57288,58492,24,10,4,18,.bin/bun run src/index.ts serve
+34017,431526,430351,manager,64236,64236,7,22,,18,bin/node proxy/zcode-proxy-manager.mjs start
+34017,431549,431526,proxy,57004,57956,24,10,4,18,.bin/bun run src/index.ts serve
+35018,431581,430351,manager,64012,64012,7,22,,19,bin/node proxy/zcode-proxy-manager.mjs start
+35018,431589,431581,proxy,56840,58508,23,10,4,19,.bin/bun run src/index.ts serve
+36018,431620,430351,manager,64012,64012,7,22,,19,bin/node proxy/zcode-proxy-manager.mjs start
+36018,431628,431620,proxy,40204,40204,11,7,,19,.bin/bun run src/index.ts serve
+37018,431651,430351,manager,66208,66208,7,21,,19,bin/node proxy/zcode-proxy-manager.mjs stop
+38018,431689,430351,manager,65876,65876,7,21,,20,bin/node proxy/zcode-proxy-manager.mjs stop
+39018,431705,971,proxy,58924,58924,23,10,4,21,.bin/bun run src/index.ts serve
+39018,431745,430351,manager,32816,32816,6,20,,21,bin/node proxy/zcode-proxy-manager.mjs stop
+40019,431753,430351,manager,64280,64280,7,22,,22,bin/node proxy/zcode-proxy-manager.mjs start
+40019,431761,431753,proxy,57144,58384,23,10,4,22,.bin/bun run src/index.ts serve
+41020,431792,430351,manager,64140,64140,7,22,,23,bin/node proxy/zcode-proxy-manager.mjs start
+41020,431800,431792,proxy,57000,58416,23,10,4,23,.bin/bun run src/index.ts serve
+42021,431831,430351,manager,64112,64112,7,22,,24,bin/node proxy/zcode-proxy-manager.mjs start
+42021,431839,431831,proxy,58596,58596,22,10,4,24,.bin/bun run src/index.ts serve
+43021,431861,430351,manager,66644,66644,7,22,,24,bin/node proxy/zcode-proxy-manager.mjs restart
+43021,431869,431861,proxy,41560,41560,13,7,,24,.bin/bun run src/index.ts serve
+44022,431892,430351,manager,65964,65964,7,21,,24,bin/node proxy/zcode-proxy-manager.mjs stop
+45022,431948,430351,manager,66188,66188,7,21,,25,bin/node proxy/zcode-proxy-manager.mjs restart
+46022,431979,430351,manager,66188,66188,7,21,,25,bin/node proxy/zcode-proxy-manager.mjs stop
+47023,431987,430351,manager,65684,65684,7,23,,26,bin/node proxy/zcode-proxy-manager.mjs start
+47023,431995,431987,proxy,56892,58152,22,11,4,26,.bin/bun run src/index.ts serve
+48024,432017,430351,manager,66648,66648,7,22,,26,bin/node proxy/zcode-proxy-manager.mjs restart
+48024,432025,432017,proxy,56872,58260,23,10,4,26,.bin/bun run src/index.ts serve
+49024,432056,430351,manager,64220,64220,7,22,,27,bin/node proxy/zcode-proxy-manager.mjs start
+49024,432064,432056,proxy,56924,58148,23,10,4,27,.bin/bun run src/index.ts serve
+50024,432104,430351,manager,66688,66688,7,22,,27,bin/node proxy/zcode-proxy-manager.mjs restart
+50024,432112,432104,proxy,57072,58836,23,10,4,27,.bin/bun run src/index.ts serve
+51024,432143,430351,manager,64276,64276,7,22,,28,bin/node proxy/zcode-proxy-manager.mjs start
+51024,432151,432143,proxy,29044,29044,11,7,,28,.bin/bun run src/index.ts serve
+52024,432174,430351,manager,50200,50200,7,20,,28,bin/node proxy/zcode-proxy-manager.mjs start
+53024,432204,430351,manager,65988,65988,7,21,,28,bin/node proxy/zcode-proxy-manager.mjs stop
+54024,432220,971,proxy,58804,58804,22,10,4,29,.bin/bun run src/index.ts serve
+54024,432259,430351,manager,60864,60864,8,21,,29,bin/node proxy/zcode-proxy-manager.mjs stop
+55024,432267,430351,manager,64220,64220,7,22,,29,bin/node proxy/zcode-proxy-manager.mjs start
+55024,432275,432267,proxy,57016,58236,23,10,4,29,.bin/bun run src/index.ts serve
+56025,432308,430351,manager,64236,64236,7,22,,30,bin/node proxy/zcode-proxy-manager.mjs start
+56025,432316,432308,proxy,56884,58412,22,10,4,30,.bin/bun run src/index.ts serve
+57026,432346,430351,manager,64088,64088,7,22,,31,bin/node proxy/zcode-proxy-manager.mjs start
+57026,432354,432346,proxy,57988,58184,22,10,4,31,.bin/bun run src/index.ts serve
+58026,432384,430351,manager,63972,63972,7,22,,32,bin/node proxy/zcode-proxy-manager.mjs start
+58026,432392,432384,proxy,7296,7296,1,6,,32,.bin/bun run src/index.ts serve
+59026,432415,430351,manager,65780,65780,7,21,,32,bin/node proxy/zcode-proxy-manager.mjs stop
+60027,432470,430351,manager,65992,65992,7,21,,33,bin/node proxy/zcode-proxy-manager.mjs stop
+61027,432478,430351,manager,75720,75720,3,16,,34,bin/node proxy/zcode-proxy-manager.mjs start
+61027,432486,432478,proxy,59256,59256,22,12,4,34,.bin/bun run src/index.ts serve
+62028,432508,430351,manager,66808,66808,7,22,,34,bin/node proxy/zcode-proxy-manager.mjs restart
+62028,432516,432508,proxy,56972,58404,23,10,4,34,.bin/bun run src/index.ts serve
+63029,432547,430351,manager,64204,64204,7,22,,35,bin/node proxy/zcode-proxy-manager.mjs start
+63029,432555,432547,proxy,57012,58204,24,10,4,35,.bin/bun run src/index.ts serve
+64029,432579,430351,manager,66728,66728,7,22,,35,bin/node proxy/zcode-proxy-manager.mjs restart
+64029,432587,432579,proxy,56760,58256,23,10,4,35,.bin/bun run src/index.ts serve
+65030,432635,430351,manager,64240,64240,7,22,,36,bin/node proxy/zcode-proxy-manager.mjs start
+65030,432643,432635,proxy,59148,59148,22,10,4,36,.bin/bun run src/index.ts serve
+66030,432665,430351,manager,66904,66904,7,22,,36,bin/node proxy/zcode-proxy-manager.mjs restart
+66030,432673,432665,proxy,42520,42520,11,7,,36,.bin/bun run src/index.ts serve
+67051,432704,430351,manager,11132,11132,1,3,,37,bin/node proxy/zcode-proxy-manager.mjs start
+68051,432736,430351,manager,65924,65924,7,21,,37,bin/node proxy/zcode-proxy-manager.mjs restart
+69052,432779,430351,manager,66236,66236,7,21,,37,bin/node proxy/zcode-proxy-manager.mjs stop
+70053,432805,430351,manager,75920,75920,3,16,,38,bin/node proxy/zcode-proxy-manager.mjs start
+70053,432813,432805,proxy,59016,59016,22,12,4,38,.bin/bun run src/index.ts serve
+71053,432835,430351,manager,64068,64068,7,22,,38,bin/node proxy/zcode-proxy-manager.mjs start
+71053,432843,432835,proxy,57184,58692,22,10,4,38,.bin/bun run src/index.ts serve
+72054,432873,430351,manager,64036,64036,7,22,,39,bin/node proxy/zcode-proxy-manager.mjs start
+72054,432881,432873,proxy,57300,58368,22,10,4,39,.bin/bun run src/index.ts serve
+73054,432911,430351,manager,63956,63956,7,22,,39,bin/node proxy/zcode-proxy-manager.mjs start
+73054,432919,432911,proxy,58336,58608,23,10,4,39,.bin/bun run src/index.ts serve
+74054,432950,430351,manager,62452,62452,7,21,,40,bin/node proxy/zcode-proxy-manager.mjs start
+75054,432999,430351,manager,66152,66152,7,21,,40,bin/node proxy/zcode-proxy-manager.mjs stop
+76055,433015,971,proxy,59288,59288,24,11,4,41,.bin/bun run src/index.ts serve
+76055,433039,430351,manager,65428,65432,7,22,,41,bin/node proxy/zcode-proxy-manager.mjs stop
+77056,433047,430351,manager,64208,64208,7,22,,42,bin/node proxy/zcode-proxy-manager.mjs start
+77056,433055,433047,proxy,56960,57836,22,10,4,42,.bin/bun run src/index.ts serve
+78057,433085,430351,manager,64232,64232,7,22,,43,bin/node proxy/zcode-proxy-manager.mjs start
+78057,433093,433085,proxy,57004,58300,23,10,4,43,.bin/bun run src/index.ts serve
+79058,433124,430351,manager,64112,64112,7,22,,44,bin/node proxy/zcode-proxy-manager.mjs start
+79058,433132,433124,proxy,58144,58388,23,10,4,44,.bin/bun run src/index.ts serve
+80059,433172,430351,manager,66656,66656,7,22,,44,bin/node proxy/zcode-proxy-manager.mjs restart
+80059,433180,433172,proxy,56348,56348,22,10,4,44,.bin/bun run src/index.ts serve
+81059,433211,430351,manager,47316,47316,7,20,,45,bin/node proxy/zcode-proxy-manager.mjs start
+82060,433242,430351,manager,66176,66176,7,21,,45,bin/node proxy/zcode-proxy-manager.mjs restart
+83060,433273,430351,manager,65824,65824,7,21,,45,bin/node proxy/zcode-proxy-manager.mjs stop
+84060,433289,433281,proxy,59060,59060,22,12,4,46,.bin/bun run src/index.ts serve
+85061,433311,430351,manager,67436,67436,7,22,,46,bin/node proxy/zcode-proxy-manager.mjs restart
+85061,433336,433311,proxy,57076,58424,23,10,4,46,.bin/bun run src/index.ts serve
+86062,433367,430351,manager,64164,64164,7,22,,47,bin/node proxy/zcode-proxy-manager.mjs start
+86062,433375,433367,proxy,57056,58500,23,10,4,47,.bin/bun run src/index.ts serve
+87062,433398,430351,manager,66576,66576,7,22,,47,bin/node proxy/zcode-proxy-manager.mjs restart
+87062,433406,433398,proxy,57148,58808,23,10,4,47,.bin/bun run src/index.ts serve
+88062,433437,430351,manager,64072,64072,7,22,,48,bin/node proxy/zcode-proxy-manager.mjs start
+88062,433445,433437,proxy,58620,58620,22,10,4,48,.bin/bun run src/index.ts serve
+89062,433467,430351,manager,64160,64160,7,22,,48,bin/node proxy/zcode-proxy-manager.mjs start
+89062,433475,433467,proxy,49156,49156,13,7,,48,.bin/bun run src/index.ts serve
+90086,433523,430351,manager,12536,12536,1,3,,49,bin/node proxy/zcode-proxy-manager.mjs start
+91087,433554,430351,manager,66672,66672,7,21,,49,bin/node proxy/zcode-proxy-manager.mjs stop
+92087,433570,971,proxy,59680,59680,23,10,4,49,.bin/bun run src/index.ts serve
+92087,433593,430351,manager,62056,62056,7,21,,49,bin/node proxy/zcode-proxy-manager.mjs stop
+93088,433601,430351,manager,64036,64036,7,22,,50,bin/node proxy/zcode-proxy-manager.mjs start
+93088,433609,433601,proxy,56996,58496,22,10,4,50,.bin/bun run src/index.ts serve
+94089,433609,971,proxy,59112,59112,22,11,5,50,.bin/bun run src/index.ts serve
+94089,433631,430351,manager,56340,56340,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+95090,433609,971,proxy,59268,59268,22,11,5,50,.bin/bun run src/index.ts serve
+95090,433631,430351,manager,56352,56352,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+96091,433609,971,proxy,59276,59276,22,11,5,50,.bin/bun run src/index.ts serve
+96091,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+97092,433609,971,proxy,59292,59292,22,11,5,50,.bin/bun run src/index.ts serve
+97092,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+98093,433609,971,proxy,59632,59632,22,11,5,50,.bin/bun run src/index.ts serve
+98093,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+99092,433609,971,proxy,59624,59624,22,11,5,50,.bin/bun run src/index.ts serve
+99092,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+100093,433609,971,proxy,59660,59660,22,11,5,50,.bin/bun run src/index.ts serve
+100093,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+101093,433609,971,proxy,59800,59800,22,11,5,50,.bin/bun run src/index.ts serve
+101093,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+102094,433609,971,proxy,59844,59844,22,11,5,50,.bin/bun run src/index.ts serve
+102094,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+103095,433609,971,proxy,59308,59796,21,11,5,50,.bin/bun run src/index.ts serve
+103095,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+104096,433609,971,proxy,59292,59796,21,11,5,50,.bin/bun run src/index.ts serve
+104096,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+105096,433609,971,proxy,59296,59796,21,11,5,50,.bin/bun run src/index.ts serve
+105096,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+106097,433609,971,proxy,59316,59796,21,11,5,50,.bin/bun run src/index.ts serve
+106097,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+107098,433609,971,proxy,59260,59796,21,11,5,50,.bin/bun run src/index.ts serve
+107098,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+108099,433609,971,proxy,59376,59796,21,11,5,50,.bin/bun run src/index.ts serve
+108099,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+109100,433609,971,proxy,59368,59796,21,11,5,50,.bin/bun run src/index.ts serve
+109100,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+110101,433609,971,proxy,59392,59796,21,11,5,50,.bin/bun run src/index.ts serve
+110101,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+111102,433609,971,proxy,59620,59796,21,11,5,50,.bin/bun run src/index.ts serve
+111102,433631,430351,manager,56376,56376,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+112103,433609,971,proxy,59692,59796,21,11,5,50,.bin/bun run src/index.ts serve
+112103,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+113104,433609,971,proxy,59700,59796,21,11,5,50,.bin/bun run src/index.ts serve
+113104,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+114105,433609,971,proxy,59740,59796,21,11,5,50,.bin/bun run src/index.ts serve
+114105,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+115106,433609,971,proxy,59748,59796,21,11,5,50,.bin/bun run src/index.ts serve
+115106,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+116107,433609,971,proxy,59772,59796,21,11,5,50,.bin/bun run src/index.ts serve
+116107,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+117108,433609,971,proxy,59772,59796,21,11,5,50,.bin/bun run src/index.ts serve
+117108,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+118109,433609,971,proxy,59804,59804,21,11,5,50,.bin/bun run src/index.ts serve
+118109,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+119110,433609,971,proxy,59816,59816,21,11,5,50,.bin/bun run src/index.ts serve
+119110,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+120110,433609,971,proxy,59864,59864,20,11,5,50,.bin/bun run src/index.ts serve
+120110,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+121111,433609,971,proxy,59884,59884,21,11,5,50,.bin/bun run src/index.ts serve
+121111,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+122112,433609,971,proxy,59908,59908,21,11,5,50,.bin/bun run src/index.ts serve
+122112,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+123112,433609,971,proxy,59896,59896,21,11,5,50,.bin/bun run src/index.ts serve
+123112,433631,430351,manager,56380,56380,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+124112,433609,971,proxy,60300,60300,21,11,5,50,.bin/bun run src/index.ts serve
+124112,433746,430351,manager,56300,56300,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+125112,433609,971,proxy,60516,60516,21,11,5,50,.bin/bun run src/index.ts serve
+125112,433746,430351,manager,56304,56304,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+126113,433609,971,proxy,60508,60508,21,11,5,50,.bin/bun run src/index.ts serve
+126113,433746,430351,manager,56324,56324,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+127114,433609,971,proxy,60504,60504,21,11,5,50,.bin/bun run src/index.ts serve
+127114,433746,430351,manager,56328,56328,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+128115,433609,971,proxy,60744,60744,21,11,5,50,.bin/bun run src/index.ts serve
+128115,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+129116,433609,971,proxy,60744,60744,21,11,5,50,.bin/bun run src/index.ts serve
+129116,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+130116,433609,971,proxy,60760,60760,21,11,5,50,.bin/bun run src/index.ts serve
+130116,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+131117,433609,971,proxy,60748,60748,21,11,5,50,.bin/bun run src/index.ts serve
+131117,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+132118,433609,971,proxy,60768,60768,21,11,5,50,.bin/bun run src/index.ts serve
+132118,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+133118,433609,971,proxy,60756,60756,21,11,5,50,.bin/bun run src/index.ts serve
+133118,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+134118,433609,971,proxy,60692,60692,20,11,5,50,.bin/bun run src/index.ts serve
+134118,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+135118,433609,971,proxy,60568,60568,20,11,5,50,.bin/bun run src/index.ts serve
+135118,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+136119,433609,971,proxy,60552,60552,20,11,5,50,.bin/bun run src/index.ts serve
+136119,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+137119,433609,971,proxy,60220,60220,19,11,5,50,.bin/bun run src/index.ts serve
+137119,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+138119,433609,971,proxy,60376,60376,19,11,5,50,.bin/bun run src/index.ts serve
+138119,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+139119,433609,971,proxy,60368,60368,19,11,5,50,.bin/bun run src/index.ts serve
+139119,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+140120,433609,971,proxy,60408,60408,20,11,5,50,.bin/bun run src/index.ts serve
+140120,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+141121,433609,971,proxy,60396,60396,20,11,5,50,.bin/bun run src/index.ts serve
+141121,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+142121,433609,971,proxy,60408,60408,20,11,5,50,.bin/bun run src/index.ts serve
+142121,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+143121,433609,971,proxy,60400,60400,20,11,5,50,.bin/bun run src/index.ts serve
+143121,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+144121,433609,971,proxy,60320,60320,20,11,5,50,.bin/bun run src/index.ts serve
+144121,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+145122,433609,971,proxy,60304,60304,20,11,5,50,.bin/bun run src/index.ts serve
+145122,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+146123,433609,971,proxy,60288,60288,20,11,5,50,.bin/bun run src/index.ts serve
+146123,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+147122,433609,971,proxy,60300,60300,20,11,5,50,.bin/bun run src/index.ts serve
+147122,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+148123,433609,971,proxy,60452,60452,20,11,5,50,.bin/bun run src/index.ts serve
+148123,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+149123,433609,971,proxy,60464,60464,20,11,5,50,.bin/bun run src/index.ts serve
+149123,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+150124,433609,971,proxy,60432,60432,19,11,5,50,.bin/bun run src/index.ts serve
+150124,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+151124,433609,971,proxy,60432,60432,19,11,5,50,.bin/bun run src/index.ts serve
+151124,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+152124,433609,971,proxy,60432,60432,19,11,5,50,.bin/bun run src/index.ts serve
+152124,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+153125,433609,971,proxy,60440,60440,19,11,5,50,.bin/bun run src/index.ts serve
+153125,433746,430351,manager,56332,56332,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+154125,433609,971,proxy,59944,60196,18,11,5,50,.bin/bun run src/index.ts serve
+154125,433860,430351,manager,56388,56388,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+155126,433609,971,proxy,60000,60196,19,11,5,50,.bin/bun run src/index.ts serve
+155126,433860,430351,manager,56388,56388,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+156126,433609,971,proxy,60028,60196,19,11,5,50,.bin/bun run src/index.ts serve
+156126,433860,430351,manager,56416,56416,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+157127,433609,971,proxy,60036,60196,19,11,5,50,.bin/bun run src/index.ts serve
+157127,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+158127,433609,971,proxy,60208,60208,19,11,5,50,.bin/bun run src/index.ts serve
+158127,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+159127,433609,971,proxy,60216,60216,19,11,5,50,.bin/bun run src/index.ts serve
+159127,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+160128,433609,971,proxy,60212,60212,19,11,5,50,.bin/bun run src/index.ts serve
+160128,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+161127,433609,971,proxy,60212,60212,19,11,5,50,.bin/bun run src/index.ts serve
+161127,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+162128,433609,971,proxy,60212,60212,19,11,5,50,.bin/bun run src/index.ts serve
+162128,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+163129,433609,971,proxy,60220,60220,19,11,5,50,.bin/bun run src/index.ts serve
+163129,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+164130,433609,971,proxy,60216,60216,19,11,5,50,.bin/bun run src/index.ts serve
+164130,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+165130,433609,971,proxy,60224,60224,19,11,5,50,.bin/bun run src/index.ts serve
+165130,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+166131,433609,971,proxy,60060,60196,18,11,5,50,.bin/bun run src/index.ts serve
+166131,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+167132,433609,971,proxy,60068,60196,18,11,5,50,.bin/bun run src/index.ts serve
+167132,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+168133,433609,971,proxy,59156,60196,19,11,4,50,.bin/bun run src/index.ts serve
+168133,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+169133,433609,971,proxy,59172,60196,19,11,4,50,.bin/bun run src/index.ts serve
+169133,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+170133,433609,971,proxy,58796,60196,19,11,4,50,.bin/bun run src/index.ts serve
+170133,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+171134,433609,971,proxy,59048,60196,20,11,4,50,.bin/bun run src/index.ts serve
+171134,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+172134,433609,971,proxy,59160,60196,20,11,4,50,.bin/bun run src/index.ts serve
+172134,433860,430351,manager,56432,56432,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+173135,433609,971,proxy,59228,60196,20,11,4,50,.bin/bun run src/index.ts serve
+173135,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+174136,433609,971,proxy,59228,60196,20,11,4,50,.bin/bun run src/index.ts serve
+174136,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+175137,433609,971,proxy,59232,60196,20,11,4,50,.bin/bun run src/index.ts serve
+175137,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+176137,433609,971,proxy,59388,60196,21,11,4,50,.bin/bun run src/index.ts serve
+176137,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+177138,433609,971,proxy,59388,60196,21,11,4,50,.bin/bun run src/index.ts serve
+177138,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+178138,433609,971,proxy,59400,60196,21,11,4,50,.bin/bun run src/index.ts serve
+178138,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+179139,433609,971,proxy,59404,60196,21,11,4,50,.bin/bun run src/index.ts serve
+179139,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+180139,433609,971,proxy,59528,60196,21,11,4,50,.bin/bun run src/index.ts serve
+180139,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+181140,433609,971,proxy,59528,60196,21,11,4,50,.bin/bun run src/index.ts serve
+181140,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+182140,433609,971,proxy,59528,60196,21,11,4,50,.bin/bun run src/index.ts serve
+182140,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+183141,433609,971,proxy,59532,60196,21,11,4,50,.bin/bun run src/index.ts serve
+183141,433860,430351,manager,56436,56436,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 433609
+184141,434003,430351,manager,65948,65948,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs stop
+185142,434027,430351,manager,56024,56024,7,20,,50,bin/node proxy/zcode-proxy-manager.mjs stop
+186154,434042,971,proxy,58960,58960,23,10,4,50,.bin/bun run src/index.ts serve
+186154,434097,430351,manager,15400,15400,1,3,,50,bin/node proxy/zcode-proxy-manager.mjs stop
+187154,434113,971,proxy,57084,58400,23,10,4,50,.bin/bun run src/index.ts serve
+188154,434159,430351,manager,51884,51884,7,20,,50,bin/node proxy/zcode-proxy-manager.mjs start
+189155,434167,971,proxy,56880,58464,23,10,4,50,.bin/bun run src/index.ts serve
+190155,434213,430351,manager,64084,64084,7,22,,50,bin/node proxy/zcode-proxy-manager.mjs start
+190155,434221,434213,proxy,56896,58396,22,10,4,50,.bin/bun run src/index.ts serve
+191156,434221,971,proxy,59100,59100,22,13,5,50,.bin/bun run src/index.ts serve
+191156,434260,430351,manager,77164,77164,3,16,,50,bin/node proxy/zcode-proxy-manager.mjs start
+192156,434283,430351,manager,64140,64140,7,22,,50,bin/node proxy/zcode-proxy-manager.mjs start
+192156,434291,434283,proxy,57296,58652,23,10,4,50,.bin/bun run src/index.ts serve
+193155,434291,971,proxy,59924,59924,23,13,5,50,.bin/bun run src/index.ts serve
+193155,434314,430351,manager,77076,77076,3,16,,50,bin/node proxy/zcode-proxy-manager.mjs start
+194156,434330,430351,manager,64068,64068,7,22,,50,bin/node proxy/zcode-proxy-manager.mjs start
+194156,434338,434330,proxy,56720,58032,22,10,4,50,.bin/bun run src/index.ts serve
+195157,434338,971,proxy,59164,59164,22,11,5,50,.bin/bun run src/index.ts serve
+195157,434360,430351,manager,56540,56540,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs start
+196157,434377,430351,manager,64184,64184,7,22,,50,bin/node proxy/zcode-proxy-manager.mjs start
+196157,434402,434377,proxy,56912,58396,23,10,4,50,.bin/bun run src/index.ts serve
+197159,434402,971,proxy,59292,59292,23,11,5,50,.bin/bun run src/index.ts serve
+198160,434441,430351,manager,64144,64144,7,22,,50,bin/node proxy/zcode-proxy-manager.mjs start
+198160,434449,434441,proxy,58648,58648,23,10,4,50,.bin/bun run src/index.ts serve
+199161,434449,971,proxy,58984,59992,23,11,5,50,.bin/bun run src/index.ts serve
+199161,434472,430351,manager,56364,56364,7,21,,50,bin/node proxy/zcode-proxy-manager.mjs respawn 434449

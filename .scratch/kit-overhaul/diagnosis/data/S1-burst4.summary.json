@@ -1,0 +1,144 @@
+{
+ "id": "S1-short-burst4-2026-11-06T0030-ead197",
+ "scenario": "S1",
+ "profile": "short",
+ "variant": "burst4",
+ "durationS": 20,
+ "red": true,
+ "checks": [
+  {
+   "name": "growth:proxy",
+   "red": false,
+   "budget": 5,
+   "unit": "%/1k",
+   "trend": false,
+   "detail": {
+    "samples": 2,
+    "insufficient": true
+   }
+  },
+  {
+   "name": "procPeak:proxy",
+   "red": true,
+   "value": 425.3,
+   "budget": 250,
+   "unit": "MB"
+  },
+  {
+   "name": "count:proxy",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 470,
+   "peakProcMB": 330.3,
+   "peakHwmMB": 425.3,
+   "maxCount": 2,
+   "maxFds": 45,
+   "maxThreads": 32,
+   "distinctPids": 2,
+   "peakHeapMB": 114
+  },
+  "mock-upstream": {
+   "peakMB": 147,
+   "peakProcMB": 147,
+   "peakHwmMB": 180.7,
+   "maxCount": 1,
+   "maxFds": 25,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "proxy": {
+   "peakMB": 330.3,
+   "peakProcMB": 330.3,
+   "peakHwmMB": 425.3,
+   "maxCount": 1,
+   "maxFds": 20,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 114
+  }
+ },
+ "budgets": {
+  "growth": {
+   "role": "proxy",
+   "axis": "progress",
+   "maxPctPer1k": 5,
+   "risingWindows": 3,
+   "warmupFraction": 0.2,
+   "fromT": 944,
+   "untilT": 2416
+  },
+  "procPeaks": {
+   "proxy": 250
+  },
+  "counts": {
+   "proxy": 1
+  },
+  "orphans": 0
+ },
+ "orphans": [],
+ "notes": {
+  "isolation.stateDir": "<diag-data>/S1-short-burst4-2026-11-06T0030-ead197/tmp/kit-GfJEn8/state",
+  "isolation.home": "<diag-data>/S1-short-burst4-2026-11-06T0030-ead197/tmp/kit-GfJEn8/home",
+  "isolation.port": 18457,
+  "start.code": 0,
+  "isolation.facts": {
+   "pid": 322425,
+   "homeIsolated": true,
+   "configIsolated": true,
+   "stateDirIsolated": true,
+   "credentialsIsolated": true,
+   "listeningPorts": [
+    18457
+   ],
+   "externalConnections": []
+  },
+  "requests": 12,
+  "outcomes": {
+   "large-text:ok": 12
+  },
+  "loadWindowMs": [
+   944,
+   2416
+  ],
+  "mockStats": {
+   "requests": 12,
+   "bytesIn": 129602966,
+   "byMode": {
+    "ok": 12
+   },
+   "aborted": 0,
+   "open": 0
+  },
+  "healthAfterIdle": {
+   "pid": 322425,
+   "uptimeSec": 17,
+   "rssMB": 81,
+   "heapUsedMB": 6,
+   "eventLoopLagMs": 2,
+   "eventLoopLagMaxMs": 71,
+   "captcha": null
+  },
+  "isolation.externalConnectionsDuringRun": [],
+  "stop.code": 0,
+  "stop.output": [
+   "stopped (pid 322425)"
+  ]
+ },
+ "samples": 19,
+ "csv": "<diag-data>/S1-short-burst4-2026-11-06T0030-ead197/samples.csv"
+}

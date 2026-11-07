@@ -38,6 +38,7 @@ import { processCommandLine, resolveBun } from "../lib/process.mjs";
 import { proxyEnv } from "../lib/proxy-env.mjs";
 import { configuredModelIds, configuredServer, connectionDetailsLines, connectionDetailsObject, shouldRevealKey } from "../cli/connection-details.mjs";
 import { readHarnessChoices } from "../cli/harness-consent.mjs";
+import { createEventLogger, redactLine } from "../lib/event-line.mjs";
 
 // ------------------------------------------------------------------ factory
 const MANAGER_PATH = fileURLToPath(import.meta.url);
@@ -86,12 +87,41 @@ export function createManager({
     return readFileSync(KEY_FILE, "utf8").trim();
   }
 
+  // Redaction applies to every line the manager writes or shows (ADR-0010
+  // rule 4): exact known secrets plus token shapes; secret-free text is unchanged.
+  function knownSecrets() {
+    try { return [readKey()]; } catch { return []; }
+  }
+  const redact = (text) => redactLine(text, knownSecrets());
+
+  function appendLog(line) {
+    mkdirSync(LOG_DIR, { recursive: true });
+    appendFileSync(LOG_FILE, line + "\n");
+  }
+
+  // Existing lines: `[manager <ISO>] …`, text unchanged (the golden-path
+  // script and users grep them).
   function logLine(msg) {
-    console.log(msg);
+    const text = redact(msg);
+    console.log(text);
     try {
-      mkdirSync(LOG_DIR, { recursive: true });
-      appendFileSync(LOG_FILE, `[manager ${new Date().toISOString()}] ${msg}\n`);
+      appendLog(`[manager ${new Date().toISOString()}] ${text}`);
     } catch {}
+  }
+
+  // New events: `ISO-time LEVEL manager message key=value…`.
+  const events = createEventLogger({
+    component: "manager",
+    secrets: knownSecrets,
+    write: (line) => {
+      console.log(line);
+      try { appendLog(line); } catch {}
+    },
+  });
+  function logEvent(level, message, fields) {
+    const method = { DEBUG: events.debug, INFO: events.info, WARN: events.warn, ERROR: events.error }[level];
+    if (!method) throw new TypeError(`logEvent: unknown level ${level}`);
+    return method(message, fields);
   }
 
   function rotateLogIfNeeded() {
@@ -1193,7 +1223,8 @@ try {
       const buf = Buffer.alloc(tailBytes);
       readSync(fh, buf, 0, tailBytes, size - tailBytes);
       const lines = buf.toString("utf8").split("\n").filter(Boolean);
-      console.log(lines.slice(-n).join("\n"));
+      // The proxy's own lines are shown redacted too (ADR-0010 rule 4).
+      console.log(redact(lines.slice(-n).join("\n")));
     } finally {
       closeSync(fh);
     }
@@ -1201,7 +1232,7 @@ try {
   }
 
   return {
-    start, stop, restart, respawn, status, doctor, logs, healthIdentify, readPidFile, verifyOwnProcess, proveHungOwn,
+    start, stop, restart, respawn, status, doctor, logs, logEvent, healthIdentify, readPidFile, verifyOwnProcess, proveHungOwn,
     pidAlive, processStartMs, killOwned, lastRecovery: () => lastRecovery, connectionDetails, printConnectionDetails,
     LOG_FILE, PID_FILE, CONFIG, KEY_FILE, LOG_DIR, RESPAWN_FILE,
   };

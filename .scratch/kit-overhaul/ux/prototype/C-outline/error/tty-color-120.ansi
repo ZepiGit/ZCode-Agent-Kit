@@ -1,0 +1,5 @@
+[31m✗ Port 8457 is in use by another service[0m
+  ├─ why   it answered /health without this kit's identity (HTTP 401); the kit never stops a service it did not start
+  ├─ next  [1mzcode-kit proxy status[0m
+  └─ or    [1mchange server.port in proxy/config.yaml, then zcode-kit proxy start[0m
+[2m  exit 3[0m

@@ -1,0 +1,42 @@
+# 16: Start lock protocol v1 with proven takeover (no judge-then-rename race)
+
+**Blocked by:** 15 (Proxy lifecycle module: intents return outcome records, every caller uses them (prefactor for the lifecycle tickets))
+
+**Status:** ready-for-agent
+
+Model: sol
+
+Risk: high
+
+ADR: 0003, 0012
+
+**What to build:** New locks add a protocol version and the holder's process start time, written atomically. Takeover only on proof (holder dead, or PID reused: live start time differs; v0: later than `startedAt`). The race is closed (moved record checked against the judged one, or an exclusive side-lock with pid + start-time proof). A live holder's lock is never touched; unparsable or unknown-higher-version locks are never deleted and are reported with what/why/next and the exact path. Old kits read only `pid`/`startedAt`. AUD-001 comments updated with the implementation. The takeover logs one event line.
+
+**Acceptance criteria:**
+
+- [ ] Takeover race test: N contenders with a kill injected at every protocol step → never two holders, never a deleted live lock (seam 2, real time).
+- [ ] v0 lock recovery; unreadable/unknown-version lock untouched with the error block; old-manager interop test against the origin/main manager.
+- [ ] Lock-version migration replayed twice is a no-op the second time.
+- [ ] Loop: S3 killed-holder round → 0 failed launches, 0 stale locks, exactly 1 proxy. **Delete `S3/hung` (linux, windows) from `expected-red.json`.**
+- [ ] A kill injected during the lock write leaves either no lock file or a complete, parsable record, never a partial one, on both legs (Story 48).
+
+**Common acceptance (every ticket):**
+
+- [ ] tests start RED and turn GREEN at the named seam
+- [ ] the fast suite and the `memory-budget` job stay green on ubuntu and windows
+- [ ] new test files are wired into a script (wiring guard, ticket 04)
+- [ ] no pre-existing test changes without a justification in the ticket
+- [ ] evidence (test summary, metrics delta, snapshot diff) is recorded in the ticket file before closing
+- [ ] every new log event uses the event-line format (ticket 14)
+- [ ] every new config key is optional and documented in `proxy/config.example.yaml`
+- [ ] any new env override for a `ZCODE_PROXY_*` key goes through the `proxyEnv` exception list with a test
+
+Spec stories: 41, 42, 43, 46, 47, 48, 135
+
+## Comments
+
+- 2026-11-06 (orchestrator, from ticket 02 round 4 Windows evidence): a start killed between spawning the proxy and recording its start time leaves `proxy.pid` without a start time (manager writes the record first and fills `startedMs` from a later query: `zcode-proxy-manager.mjs:632/:639`; on Windows that query is PowerShell, up to 2 x 2.5 s). Every later stop then fails closed on `start-unknown` and the proxy can never be stopped by the kit (S3/hung windows: orphan pid 3796, all stops refused). The lock/lifecycle fix must close this window (e.g. record identity atomically before/at spawn, or adopt a healthy proxy that answers with this installation's key) and the windows memory leg must show 0 orphans in S3.
+
+- 2026-11-06 (orchestrator, Round 7 Q4): ticket 16 owns closing the missing-start-time window of a new start, including a start-time probe that times out without any kill; the kit never kills on a pid alone.
+
+- 2026-11-06 (orchestrator, from ticket 02 round 7 Linux evidence): the same window exists on Linux, earlier. A start lock holder killed after it spawned the proxy but before it wrote `proxy.pid` leaves a healthy proxy with no record at all. Every later stop refuses it ("proxy healthy but no pid file"), it ends as an orphan, and while it is frozen the kit starts a second proxy (2 at once, 10/10 launches failed in the reproduction). CI run 42281731448 hit it naturally (ubuntu S3/hung). Closing the window covers spawn → record write, not only record write → start time. Reproduction: ticket 02 Comments, round 7 (5 s sleep widened between spawn and `proxy.pid`, scratch copy only).

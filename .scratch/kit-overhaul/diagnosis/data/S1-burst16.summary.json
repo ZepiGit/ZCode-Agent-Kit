@@ -1,0 +1,161 @@
+{
+ "id": "S1-short-burst16-2026-11-06T0031-6db2c0",
+ "scenario": "S1",
+ "profile": "short",
+ "variant": "burst16",
+ "durationS": 25,
+ "red": true,
+ "checks": [
+  {
+   "name": "growth:proxy",
+   "red": false,
+   "value": -479.84,
+   "budget": 5,
+   "unit": "%/1k",
+   "trend": false,
+   "detail": {
+    "samples": 6,
+    "warmupSamples": 1,
+    "meanMB": 664.1,
+    "firstPostMB": 663.9,
+    "lastMB": 668.8,
+    "slopeMBPer1k": -3186.81,
+    "growthPctPer1k": -479.84,
+    "slopeMBPerMin": -598.58,
+    "windowMediansMB": [
+     663.9,
+     597.8,
+     899.9,
+     490.3,
+     668.8
+    ],
+    "risingWindows": 2,
+    "heapSlopeMBPer1k": null,
+    "axis": "progress"
+   }
+  },
+  {
+   "name": "procPeak:proxy",
+   "red": true,
+   "value": 998.4,
+   "budget": 250,
+   "unit": "MB"
+  },
+  {
+   "name": "count:proxy",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 1071.1,
+   "peakProcMB": 899.9,
+   "peakHwmMB": 998.4,
+   "maxCount": 2,
+   "maxFds": 80,
+   "maxThreads": 32,
+   "distinctPids": 2,
+   "peakHeapMB": 680
+  },
+  "mock-upstream": {
+   "peakMB": 265.4,
+   "peakProcMB": 265.4,
+   "peakHwmMB": 302.4,
+   "maxCount": 1,
+   "maxFds": 33,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "proxy": {
+   "peakMB": 899.9,
+   "peakProcMB": 899.9,
+   "peakHwmMB": 998.4,
+   "maxCount": 1,
+   "maxFds": 47,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 680
+  }
+ },
+ "budgets": {
+  "growth": {
+   "role": "proxy",
+   "axis": "progress",
+   "maxPctPer1k": 5,
+   "risingWindows": 3,
+   "warmupFraction": 0.2,
+   "fromT": 970,
+   "untilT": 7156
+  },
+  "procPeaks": {
+   "proxy": 250
+  },
+  "counts": {
+   "proxy": 1
+  },
+  "orphans": 0
+ },
+ "orphans": [],
+ "notes": {
+  "isolation.stateDir": "<diag-data>/S1-short-burst16-2026-11-06T0031-6db2c0/tmp/kit-72L9P6/state",
+  "isolation.home": "<diag-data>/S1-short-burst16-2026-11-06T0031-6db2c0/tmp/kit-72L9P6/home",
+  "isolation.port": 18457,
+  "start.code": 0,
+  "isolation.facts": {
+   "pid": 322665,
+   "homeIsolated": true,
+   "configIsolated": true,
+   "stateDirIsolated": true,
+   "credentialsIsolated": true,
+   "listeningPorts": [
+    18457
+   ],
+   "externalConnections": []
+  },
+  "requests": 48,
+  "outcomes": {
+   "large-text:ok": 48
+  },
+  "loadWindowMs": [
+   970,
+   7156
+  ],
+  "mockStats": {
+   "requests": 48,
+   "bytesIn": 518411894,
+   "byMode": {
+    "ok": 48
+   },
+   "aborted": 0,
+   "open": 0
+  },
+  "healthAfterIdle": {
+   "pid": 322665,
+   "uptimeSec": 22,
+   "rssMB": 85,
+   "heapUsedMB": 7,
+   "eventLoopLagMs": 0,
+   "eventLoopLagMaxMs": 499,
+   "captcha": null
+  },
+  "isolation.externalConnectionsDuringRun": [],
+  "stop.code": 0,
+  "stop.output": [
+   "stopped (pid 322665)"
+  ]
+ },
+ "samples": 24,
+ "csv": "<diag-data>/S1-short-burst16-2026-11-06T0031-6db2c0/samples.csv"
+}

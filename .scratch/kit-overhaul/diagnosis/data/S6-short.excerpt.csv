@@ -1,0 +1,5 @@
+t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd
+1000,393639,393631,scenario,56272,57720,17,8,,0,.bin/bun scenarios/s6-tui-run.ts
+2000,393639,393631,scenario,125708,125708,17,8,2,104000,.bin/bun scenarios/s6-tui-run.ts
+3000,393639,393631,scenario,223912,223912,17,8,95,106500,.bin/bun scenarios/s6-tui-run.ts
+4000,393639,393631,scenario,220864,223736,17,8,127,108000,.bin/bun scenarios/s6-tui-run.ts

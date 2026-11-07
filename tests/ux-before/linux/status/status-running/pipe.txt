@@ -1,0 +1,15 @@
+port:      18458
+pid file:  <PID> (started <TS>)
+health:    ours
+process:   pid 4242, up 3725s, rss 182 MB, heap 64 MB, event-loop lag 2 ms
+captcha:   ready 2/2, active solves 0, storm no, mint success 96% (10 min)
+solver:    generation 3, recycles 2 (last: rss-budget at <TS>), solves 118, failures 3, idle
+  quota: GLM Coding Lite 4120/6000 prompts (expires <TS>)
+  quota: Start Plan Bonus 35/200 prompts (expires <TS>)
+
+  Connection details (local ZCode proxy, running and verified)
+    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
+    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
+    API key (Bearer / x-api-key):  (redacted: not an interactive terminal — print it with: zcode-kit models --show-key)
+    Model IDs:                     glm-5.3, glm-5.3-flash
+    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required.

@@ -28,6 +28,7 @@ zcode-proxy-src/zcode-proxy-linux-*
 zcode-proxy-src/zcode-proxy-darwin-*
 tests/fakehome/
 coverage/
+.memloop/
 test-results/
 playwright-report/
 *.log

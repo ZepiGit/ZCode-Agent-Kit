@@ -1,0 +1,144 @@
+{
+ "id": "S1-short-burst1-2026-11-06T0030-1ad20a",
+ "scenario": "S1",
+ "profile": "short",
+ "variant": "burst1",
+ "durationS": 19,
+ "red": false,
+ "checks": [
+  {
+   "name": "growth:proxy",
+   "red": false,
+   "budget": 5,
+   "unit": "%/1k",
+   "trend": false,
+   "detail": {
+    "samples": 1,
+    "insufficient": true
+   }
+  },
+  {
+   "name": "procPeak:proxy",
+   "red": false,
+   "value": 219.1,
+   "budget": 250,
+   "unit": "MB"
+  },
+  {
+   "name": "count:proxy",
+   "red": false,
+   "value": 1,
+   "budget": 1,
+   "unit": "procs"
+  },
+  {
+   "name": "orphans",
+   "red": false,
+   "value": 0,
+   "budget": 0,
+   "unit": "procs",
+   "detail": []
+  }
+ ],
+ "summary": {
+  "*": {
+   "peakMB": 258.1,
+   "peakProcMB": 148.6,
+   "peakHwmMB": 219.1,
+   "maxCount": 2,
+   "maxFds": 39,
+   "maxThreads": 32,
+   "distinctPids": 2,
+   "peakHeapMB": 98
+  },
+  "mock-upstream": {
+   "peakMB": 109.5,
+   "peakProcMB": 109.5,
+   "peakHwmMB": 135.6,
+   "maxCount": 1,
+   "maxFds": 24,
+   "maxThreads": 7,
+   "distinctPids": 1,
+   "peakHeapMB": null
+  },
+  "proxy": {
+   "peakMB": 148.6,
+   "peakProcMB": 148.6,
+   "peakHwmMB": 219.1,
+   "maxCount": 1,
+   "maxFds": 15,
+   "maxThreads": 25,
+   "distinctPids": 1,
+   "peakHeapMB": 98
+  }
+ },
+ "budgets": {
+  "growth": {
+   "role": "proxy",
+   "axis": "progress",
+   "maxPctPer1k": 5,
+   "risingWindows": 3,
+   "warmupFraction": 0.2,
+   "fromT": 907,
+   "untilT": 1592
+  },
+  "procPeaks": {
+   "proxy": 250
+  },
+  "counts": {
+   "proxy": 1
+  },
+  "orphans": 0
+ },
+ "orphans": [],
+ "notes": {
+  "isolation.stateDir": "<diag-data>/S1-short-burst1-2026-11-06T0030-1ad20a/tmp/kit-649Zzy/state",
+  "isolation.home": "<diag-data>/S1-short-burst1-2026-11-06T0030-1ad20a/tmp/kit-649Zzy/home",
+  "isolation.port": 18457,
+  "start.code": 0,
+  "isolation.facts": {
+   "pid": 322075,
+   "homeIsolated": true,
+   "configIsolated": true,
+   "stateDirIsolated": true,
+   "credentialsIsolated": true,
+   "listeningPorts": [
+    18457
+   ],
+   "externalConnections": []
+  },
+  "requests": 3,
+  "outcomes": {
+   "large-text:ok": 3
+  },
+  "loadWindowMs": [
+   907,
+   1592
+  ],
+  "mockStats": {
+   "requests": 3,
+   "bytesIn": 32400741,
+   "byMode": {
+    "ok": 3
+   },
+   "aborted": 0,
+   "open": 0
+  },
+  "healthAfterIdle": {
+   "pid": 322075,
+   "uptimeSec": 17,
+   "rssMB": 75,
+   "heapUsedMB": 6,
+   "eventLoopLagMs": 0,
+   "eventLoopLagMaxMs": 27,
+   "captcha": null
+  },
+  "isolation.externalConnectionsDuringRun": [],
+  "stop.code": 0,
+  "stop.output": [
+   "stopped (pid 322075)"
+  ]
+ },
+ "samples": 19,
+ "csv": "<diag-data>/S1-short-burst1-2026-11-06T0030-1ad20a/samples.csv"
+}

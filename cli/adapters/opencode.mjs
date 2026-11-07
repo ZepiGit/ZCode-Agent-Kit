@@ -28,6 +28,9 @@ function zcodeProvider(ctx) {
       "glm-5.3": { name: "GLM-5.3", limit: { context: 1000000, output: 128000 } },
       "glm-5.3-flash": {
         name: "GLM-5.3-Flash", limit: { context: 1000000, output: 128000 },
+        // Without modalities the model gets OpenCode's text-only defaults and
+        // images are never sent (V1 shape, migrated to V2 capabilities.input).
+        modalities: { input: ["text", "image"], output: ["text"] },
         options: { reasoningEffort: "low" },
         variants: {
           low: { reasoningEffort: "low" },
@@ -53,7 +56,7 @@ export default {
   id: "opencode",
   label: "OpenCode",
   protocol: "OpenAI-compatible (ai-sdk openai-compatible → /v1/chat/completions)",
-  primarySource: "https://opencode.ai/docs/providers/ (checked 2026-09-13)",
+  primarySource: "https://opencode.ai/v2/docs/providers (checked 2026-11-05; the V1 provider shape is still accepted and migrated)",
 
   apply(ctx, tx, log) {
     const target = configPath(ctx.home);

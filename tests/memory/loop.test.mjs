@@ -1,0 +1,1016 @@
+// The memory loop at process level (seam 1): the sampler finds every process
+// carrying the run marker — including a detached child its parent left
+// behind — and writes the CSV schema the verdict and reverdict read; the
+// entry point refuses to run outside a capped, isolated run.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawn, spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir, userInfo } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sampler.mjs";
+import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
+import { generateOmpExtension, startOmpHost } from "./lib/omp-host.mjs";
+import { causeLinesOf } from "./lib/omp-leg.mjs";
+import { OMP_LEG } from "./lib/budgets.mjs";
+import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
+import { resolveBun } from "../../lib/process.mjs";
+import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
+import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
+import { whileFrozen } from "./lib/freeze.mjs";
+import { makeHungRound } from "./scenarios/s3-concurrency.mjs";
+
+// The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
+const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
+const windowsOnly = { skip: process.platform === "win32" ? false : "live Windows sampler self-test (windows-latest legs)" };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+test("a solver process is its own role, whatever runtime starts it", () => {
+  assert.equal(roleOf(["/usr/bin/bun", "/kit/zcode-proxy-src/src/proxy/captcha-solver-child.ts"]), "solver");
+  assert.equal(roleOf(["/kit/zcode-proxy", "captcha-solver"]), "solver");
+  assert.equal(roleOf(["/usr/bin/bun", "/kit/zcode-proxy-src/src/index.ts", "serve"]), "proxy");
+});
+
+test("samples.csv keeps its columns and appends commit_kb, empty on Linux", linuxOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-sampler-"));
+  const marker = `ZCODE_MEMLOOP_RUN=sampler-test-${process.pid}`;
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 3000)"], { env: { ...process.env, ZCODE_MEMLOOP_RUN: marker.split("=")[1] }, stdio: "ignore" });
+  try {
+    const sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 200, progress: () => 7 });
+    await sleep(700);
+    const rows = await sampler.stop();
+    const text = readFileSync(join(dir, "samples.csv"), "utf8");
+    // commit_kb (ticket 02) and ws_peak_kb (Round 7 Q1) are additive and empty on Linux.
+    assert.equal(text.split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb");
+    const parsed = parseSamplesCsv(text).filter((r) => r.pid === child.pid);
+    assert.ok(parsed.length >= 2, "the marked child is sampled");
+    assert.equal(parsed[0].commitKb, null);
+    assert.equal(parsed[0].wsPeakKb, null);
+    assert.ok(parsed[0].rssKb > 0 && parsed[0].hwmKb >= parsed[0].rssKb);
+    assert.equal(parsed[0].ppid, process.pid);
+    assert.equal(parsed[0].progress, 7);
+    assert.ok(rows.some((r) => r.procs.some((p) => p.pid === child.pid)));
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A process sampled between fork and exec still shows its parent's argv; pid
+// and start time survive the exec. Ticket 02 round 7, local S3/hung: the start
+// lock holder (`node cli/heal.mjs`) was killed inside spawn(), its proxy was
+// first sampled before its exec and stayed role "preflight" for all 475
+// samples, so the run had no proxy at all. The role follows the exec.
+test("a marked process is re-attributed after it execs (a proxy first seen before its exec is a proxy)", linuxOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-exec-"));
+  const marker = `ZCODE_MEMLOOP_RUN=exec-test-${process.pid}`;
+  const entry = join(dir, "zcode-proxy-src", "src", "index.ts");
+  mkdirSync(dirname(entry), { recursive: true });
+  writeFileSync(entry, "setTimeout(() => {}, 5000);\n");
+  // `sh pre-exec.sh` first (role other), then the same pid execs into a proxy command line.
+  const preExec = join(dir, "pre-exec.sh");
+  writeFileSync(preExec, `sleep 0.6\nexec "${process.execPath}" "${entry}" serve\n`);
+  const child = spawn("/bin/sh", [preExec], { env: { ...process.env, ZCODE_MEMLOOP_RUN: marker.split("=")[1] }, stdio: "ignore" });
+  try {
+    const sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100 });
+    await sleep(1600);
+    const rows = await sampler.stop();
+    const roles = rows.flatMap((r) => r.procs.filter((p) => p.pid === child.pid).map((p) => p.role));
+    assert.equal(roles[0], "other", `first seen as sh: ${roles}`);
+    assert.equal(roles.at(-1), "proxy", `after its exec: ${roles}`);
+    const csv = parseSamplesCsv(readFileSync(join(dir, "samples.csv"), "utf8")).filter((r) => r.pid === child.pid);
+    assert.equal(csv.at(-1).role, "proxy");
+    assert.match(csv.at(-1).cmd, /index\.ts serve/);
+  } finally {
+    child.kill("SIGKILL");
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The entry point refuses to run any scenario outside a capped, isolated run.
+const RUN = join(dirname(fileURLToPath(import.meta.url)), "run.mjs");
+function runLoop(args, env) {
+  const clean = { ...process.env };
+  delete clean.ZCODE_OVERHAUL_RUN;
+  delete clean.ZCODE_MEMLOOP_ALLOW;
+  return spawnSync(process.execPath, [RUN, ...args], { env: { ...clean, ...env }, encoding: "utf8", timeout: 30_000 });
+}
+
+test("run.mjs refuses every scenario without ZCODE_OVERHAUL_RUN=1 or ZCODE_MEMLOOP_ALLOW=1 (exit 2, nothing started)", () => {
+  const out = mkdtempSync(join(tmpdir(), "memloop-guard-"));
+  try {
+    for (const scenario of ["S2", "S5", "S6"]) {
+      const r = runLoop([scenario, "--out", out], { HOME: out });
+      assert.equal(r.status, 2, `${scenario}: ${r.stderr}`);
+      assert.match(r.stderr, /refuses to run outside a capped run/);
+    }
+    assert.deepEqual(readdirSync(out), []);
+  } finally { rmSync(out, { recursive: true, force: true }); }
+});
+
+test("run.mjs refuses the real home directory as HOME inside a capped run", () => {
+  const out = mkdtempSync(join(tmpdir(), "memloop-guard-"));
+  try {
+    const r = runLoop(["S6", "--out", out], { ZCODE_OVERHAUL_RUN: "1", HOME: userInfo().homedir });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /isolated HOME/);
+    assert.deepEqual(readdirSync(out), []);
+  } finally { rmSync(out, { recursive: true, force: true }); }
+});
+
+test("run.mjs rejects an unknown scenario or variant with exit 2", () => {
+  assert.equal(runLoop(["S9"], { ZCODE_OVERHAUL_RUN: "1" }).status, 2);
+  const r = runLoop(["S1", "--variant", "burst99"], { ZCODE_OVERHAUL_RUN: "1" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /variants of S1: .*burst16/);
+});
+
+const JOB_ENTRY = join(dirname(fileURLToPath(import.meta.url)), "job.mjs");
+function runJob(args, env) {
+  const clean = { ...process.env };
+  delete clean.ZCODE_OVERHAUL_RUN;
+  delete clean.ZCODE_MEMLOOP_ALLOW;
+  return spawnSync(process.execPath, [JOB_ENTRY, ...args], { env: { ...clean, ...env }, encoding: "utf8", timeout: 30_000 });
+}
+
+test("job.mjs refuses to start outside a capped run, before any scenario runs", () => {
+  const out = mkdtempSync(join(tmpdir(), "memloop-job-"));
+  try {
+    const r = runJob(["--os", "linux", "--out", join(out, "job"), "--cap", "none"], { HOME: out });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /refuses to run outside a capped run/);
+    assert.deepEqual(readdirSync(out), []);
+  } finally { rmSync(out, { recursive: true, force: true }); }
+});
+
+test("job.mjs rejects a run that is not part of the leg's job", () => {
+  const r = runJob(["--os", "linux", "--only", "S2/gc", "--cap", "none"], { ZCODE_OVERHAUL_RUN: "1" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /S2\/gc is not a run of the linux job/);
+});
+
+test("a detached child whose parent exited is still found as a survivor", linuxOnly, async () => {
+  const marker = `ZCODE_MEMLOOP_RUN=orphan-test-${process.pid}`;
+  // The parent starts a detached grandchild and exits at once; the grandchild
+  // is reparented and keeps the marker in its environment.
+  const parent = spawn(process.execPath, ["-e", `const c = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 20000)"], { detached: true, stdio: "ignore" }); console.log(c.pid); c.unref();`], { env: { ...process.env, ZCODE_MEMLOOP_RUN: marker.split("=")[1] }, stdio: ["ignore", "pipe", "inherit"] });
+  let out = "";
+  parent.stdout.on("data", (b) => { out += b; });
+  await new Promise((r) => parent.on("close", r));
+  const orphanPid = Number(out.trim());
+  try {
+    await sleep(100);
+    const found = survivors(marker);
+    assert.deepEqual(found.map((s) => s.pid), [orphanPid]);
+    assert.notEqual(found[0].ppid, parent.pid);
+  } finally {
+    try { process.kill(orphanPid, "SIGKILL"); } catch {}
+  }
+});
+
+// ── The windows leg's cap (ticket 02): a Job Object per run ─────────────────
+test("on Windows the job caps every run with a Job Object (job memory + kill-on-close) and its own timeout", () => {
+  assert.deepEqual(chooseCap("auto", { platform: "win32" }), { cap: "jobobject" });
+  const c = commandFor("jobobject", "3G", 1200, ["S1", "--profile", "short"], { node: "C:\\node\\node.exe", runScript: "D:\\kit\\tests\\memory\\run.mjs" });
+  assert.equal(c.argv[0], "powershell.exe");
+  assert.deepEqual(c.argv.slice(1, 7), ["-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-ExecutionPolicy", "Bypass"]);
+  assert.equal(c.timeoutMs, 1230 * 1000, "timeout plus the 30 s kill-after the Linux leg gives `timeout`");
+  const script = Buffer.from(c.argv.at(-1), "base64").toString("utf16le");
+  assert.match(script, /\b3221225472\b/, "3G in bytes");
+  assert.match(script, /'C:\\node\\node\.exe'/);
+  assert.match(script, /'D:\\kit\\tests\\memory\\run\.mjs', 'S1', '--profile', 'short'/);
+});
+
+test("the Linux caps are unchanged: systemd scope or prlimit around timeout --kill-after=30", () => {
+  const args = ["S1", "--profile", "short"];
+  const s = commandFor("systemd", "3G", 1200, args, { node: "/usr/bin/node", runScript: "/kit/run.mjs" });
+  assert.deepEqual(s, { argv: ["systemd-run", "--user", "--scope", "--quiet", "-p", "MemoryMax=3G", "-p", "MemorySwapMax=0", "--", "timeout", "--kill-after=30", "1200", "/usr/bin/node", "/kit/run.mjs", ...args], timeoutMs: null });
+  const p = commandFor("prlimit", "3G", 1200, args, { node: "/usr/bin/node", runScript: "/kit/run.mjs" });
+  assert.deepEqual(p.argv.slice(0, 3), ["prlimit", `--as=${6 * 1024 ** 3}`, "--"]);
+});
+
+test("the Job Object wrapper's report says whether the cap was applied and how close the run came to it", () => {
+  assert.deepEqual(parseJobReport("noise\n@@JOB applied=1 limit=3221225472 peak=1610612736\n"), { applied: true, limitBytes: 3221225472, peakBytes: 1610612736 });
+  assert.deepEqual(parseJobReport("@@JOB applied=0 error=AssignProcessToJobObject failed (5)\n"), { applied: false, error: "AssignProcessToJobObject failed (5)" });
+  assert.equal(parseJobReport("no report"), null);
+});
+
+// ── Live Windows self-tests (spec §1; run on the windows-latest legs) ───────
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const waitFor = async (fn, ms = 15_000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await sleep(250); } };
+
+test("Windows: the units self-test against Get-Process PrivateMemorySize64 passes on the live process table", windowsOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-units-"));
+  let sampler;
+  try {
+    sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=units-${process.pid}`, csvPath: join(dir, "samples.csv") });
+    const ready = await sampler.ready;
+    await sampler.stop();
+    assert.equal(ready.units.ok, true, ready.units.reason);
+    assert.ok(ready.units.compared >= 5, `compared ${ready.units.compared}`);
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Windows: a deliberately orphaned detached process is found, by the run token and through a parent seen earlier", windowsOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-orphan-"));
+  const id = `orphan-${process.pid}-${Date.now()}`;
+  const marker = `ZCODE_MEMLOOP_RUN=${id}`;
+  const pids = [];
+  let sampler;
+  // The parent starts a detached grandchild and exits; `token` puts the run id in the grandchild's command line.
+  const orphanVia = async (token, parentLivesMs) => {
+    const code = `const c = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)", ${token ? JSON.stringify(id) : '"no-token"'}], { detached: true, stdio: "ignore" }); console.log(c.pid); c.unref(); setTimeout(() => process.exit(0), ${parentLivesMs});`;
+    const parent = spawn(process.execPath, ["-e", code], { stdio: ["ignore", "pipe", "inherit"] });
+    let out = "";
+    parent.stdout.on("data", (b) => { out += b; });
+    await new Promise((r) => parent.on("close", r));
+    pids.push(Number(out.trim()));
+    return { orphan: Number(out.trim()), parent: parent.pid };
+  };
+  try {
+    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
+    await sampler.ready;
+    const byToken = await orphanVia(true, 0); // parent gone before any poll could see it
+    const byTree = await orphanVia(false, 3000); // parent seen by the polls, grandchild without the token
+    const found = await waitFor(() => { const s = scan(marker).map((p) => p.pid); return s.includes(byToken.orphan) && s.includes(byTree.orphan) ? s : null; });
+    assert.ok(found, "both orphans in the live scan");
+    await sampler.stop();
+    const after = survivors(marker).filter((s) => !/^conhost\.exe$/i.test(s.comm ?? ""));
+    assert.deepEqual(after.map((s) => s.pid).sort((a, b) => a - b), [byToken.orphan, byTree.orphan].sort((a, b) => a - b), "a fresh poll after stop still finds both, and nothing else");
+    assert.equal(after.find((s) => s.pid === byTree.orphan).ppid, byTree.parent, "Windows keeps the dead parent's pid");
+  } finally {
+    await sampler?.stop();
+    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Windows: the sampler excludes its own poller by pid and records the poller's overhead", windowsOnly, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-win-self-"));
+  let sampler;
+  try {
+    sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=self-${process.pid}`, csvPath: join(dir, "samples.csv"), intervalMs: 500 });
+    await sampler.ready;
+    await sleep(2500);
+    const pollerPid = sampler.pollerPid;
+    const seen = scan(`ZCODE_MEMLOOP_RUN=self-${process.pid}`).map((p) => p.pid);
+    const rows = await sampler.stop();
+    const o = sampler.overhead();
+    assert.ok(!seen.includes(pollerPid) && rows.every((r) => r.procs.every((p) => p.pid !== pollerPid)), "the poller is never sampled");
+    assert.equal(o.pid, pollerPid);
+    assert.ok(o.polls >= 2 && o.peakCommitKb > 0 && o.peakRssKb > 0 && o.pollMsMax > 0, JSON.stringify(o));
+    await sleep(500);
+    assert.equal(alive(pollerPid), false, "the poller is reaped on stop");
+  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+const PROBE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "win32", "job-probe.mjs");
+const runCapped = (size, args, timeoutS = 60) => {
+  const { argv } = commandFor("jobobject", size, timeoutS, args, { runScript: PROBE });
+  return spawnSync(argv[0], argv.slice(1), { encoding: "utf8", timeout: 120_000 });
+};
+
+test("Windows: the Job Object cap is applied and read back, and an allocation past it fails", windowsOnly, () => {
+  const ok = runCapped("1G", ["alloc", "256"]);
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  const rep = parseJobReport(ok.stderr);
+  assert.equal(rep.applied, true, ok.stderr);
+  assert.equal(rep.limitBytes, 1024 ** 3);
+  assert.ok(rep.peakBytes >= 256 * 1048576, `peak ${rep.peakBytes}`);
+  const over = runCapped("1G", ["alloc", "2048"]);
+  assert.notEqual(over.status, 0, "2 GB inside a 1 GB job cannot succeed");
+  assert.doesNotMatch(over.stdout, /ALLOC_OK/);
+});
+
+test("Windows: closing the Job Object kills a detached grandchild (nothing escapes the cap)", windowsOnly, async () => {
+  const r = runCapped("1G", ["detach"]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const grandchild = Number((r.stdout.match(/GRANDCHILD (\d+)/) ?? [])[1]);
+  assert.ok(grandchild > 0, r.stdout);
+  const gone = await waitFor(() => !alive(grandchild), 10_000);
+  if (!gone) { try { process.kill(grandchild, "SIGKILL"); } catch {} }
+  assert.ok(gone, "the grandchild died with the job");
+});
+
+// ── S3 OMP leg: the stub Bun host runs the generated extension (ticket 03) ──
+const KIT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+/** The promise's value, or `fallback` after `ms`; the timer never outlives the race. */
+const within = (promise, ms, fallback) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
+const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
+/** A kit root whose preflight is a fixture script; the extension is generated from the real template by the OMP adapter. */
+function ompFixture(healSource) {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-host-"));
+  const root = join(dir, "kit");
+  mkdirSync(join(root, "cli"), { recursive: true });
+  mkdirSync(join(root, "proxy"), { recursive: true });
+  copyFileSync(join(KIT, "proxy", "zcode-proxy-autostart.ts"), join(root, "proxy", "zcode-proxy-autostart.ts"));
+  writeFileSync(join(root, "cli", "heal.mjs"), healSource);
+  const keyFile = join(dir, ".proxykey");
+  writeFileSync(keyFile, "synthetic-omp-host-key\n");
+  const extension = generateOmpExtension({ root, home: join(dir, "home"), keyFile, port: 19031 });
+  return { dir, root, extension };
+}
+
+test("the stub OMP host runs the generated extension once, prints its cause lines, reports its own cost and exits with its loop", async () => {
+  const f = ompFixture(`
+    import { appendFileSync } from "node:fs";
+    appendFileSync("attempts", String(process.ppid) + "\\n");
+    console.error("[zcode-preflight] cause=quota-unavailable");
+    console.error("Bearer SECRET not a cause line");
+  `);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
+  try {
+    const ready = await host.ready;
+    assert.ok(ready && ready.baselineMB > 0, host.stderr());
+    assert.equal(ready.pid, host.pid);
+    host.go();
+    const done = await host.done;
+    assert.ok(done, host.stderr());
+    assert.equal(typeof done.costMB, "number");
+    assert.ok(done.costMB >= 0 && done.peakMB >= done.baselineMB);
+    assert.equal(done.metric, process.platform === "win32" ? "commit" : "rss");
+    // Windows reports the working-set delta beside the commit gate; Linux has one metric.
+    if (process.platform === "win32") assert.ok(typeof done.wsCostMB === "number" && done.wsCostMB >= 0, JSON.stringify(done));
+    else assert.equal(done.wsCostMB, undefined);
+    assert.deepEqual(causeLinesOf(host.stderr(), PREFLIGHT_WARNINGS), [`[zcode-autostart] quota-unavailable: ${PREFLIGHT_WARNINGS["quota-unavailable"]}`]);
+    assert.doesNotMatch(host.stderr(), /SECRET/);
+    assert.deepEqual(readFileSync(join(f.root, "attempts"), "utf8").trim().split("\n"), [String(host.pid)], "one preflight, spawned by the host itself");
+    host.close();
+    const exit = await within(host.exited, 10_000, "still running");
+    assert.deepEqual(exit, { code: 0, signal: null });
+  } finally {
+    host.killTree();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("killing a starter host takes its running preflight with it (the killed-starter adversary)", async () => {
+  const f = ompFixture(`
+    import { writeFileSync } from "node:fs";
+    writeFileSync("preflight.pid", String(process.pid));
+    setTimeout(() => {}, 30_000);
+  `);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
+  let preflight = null;
+  try {
+    assert.ok(await host.ready, host.stderr());
+    host.go();
+    for (let i = 0; i < 200 && preflight === null; i++) {
+      try { preflight = Number(readFileSync(join(f.root, "preflight.pid"), "utf8")) || null; } catch {}
+      if (preflight === null) await sleep(50);
+    }
+    assert.ok(preflight, "the host spawned its preflight");
+    host.killTree();
+    await within(host.exited, 10_000);
+    const gone = await (async () => { for (let i = 0; i < 100; i++) { if (!isAlive(preflight)) return true; await sleep(100); } return false; })();
+    assert.equal(isAlive(host.pid), false, "the host is gone");
+    assert.equal(gone, true, "its preflight is gone too");
+  } finally {
+    host.killTree();
+    if (preflight && isAlive(preflight)) { try { process.kill(preflight, "SIGKILL"); } catch {} }
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("the stub OMP host charges a hook that does nothing well under the 5 MB waiter gate (its own churn is in the baseline)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-floor-"));
+  const extension = join(dir, "noop-extension.ts");
+  writeFileSync(extension, `export default function (pi) { pi.on("before_provider_request", async () => {}); }\n`);
+  const host = startOmpHost({ bun: resolveBun(KIT), extension, env: { ...process.env } });
+  try {
+    assert.ok(await host.ready, host.stderr());
+    host.go();
+    const done = await host.done;
+    assert.ok(done, host.stderr());
+    // Half the gate: a measurement whose floor reached the gate could not tell a waiter from noise.
+    assert.ok(done.costMB < OMP_LEG.waiterCostMB / 2, `no-op hook charged ${done.costMB} MB`);
+  } finally {
+    host.close();
+    if ((await within(host.exited, 10_000, "running")) === "running") host.killTree();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── A run that never ran its scenario is a harness failure, never GREEN ──────
+// CI run 42221794531 (windows): every run exited 0 after writing the CSV
+// header, no summary, no sample, and the job called all 13 runs GREEN.
+const FAKE_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-run.mjs");
+function fakeJob(mode, only = "S1/short", env = {}) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-fakejob-"));
+  const r = runJob(["--os", "linux", "--only", only, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: mode, ...env });
+  let report = null;
+  try { report = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8")); } catch {}
+  rmSync(home, { recursive: true, force: true });
+  return { r, report, row: report?.rows?.[0], result: report?.results?.[0] };
+}
+
+test("job: a run that exits 0 without a summary is a harness failure, not GREEN", () => {
+  const { r, row, result } = fakeJob("exit0-nothing");
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /no summary\.json/);
+  assert.equal(r.status, 1, "the ratchet fails on a harness failure");
+});
+
+test("job: a GREEN summary whose sampler saw no process of the scenario is a harness failure", () => {
+  const { r, row, result } = fakeJob("green-empty");
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /samples/);
+  assert.match(result.error, /role proxy never seen/);
+  assert.match(result.error, /below the S1 floor/);
+  assert.equal(r.status, 1);
+});
+
+test("job: a run with real evidence keeps its verdict", () => {
+  const { r, row } = fakeJob("green-complete");
+  assert.equal(row?.outcome, "GREEN", r.stdout + r.stderr);
+  assert.equal(r.status, 0);
+});
+
+test("job: every memory check is reported with its commit and its working-set value and the gate (Round 7 Q1)", () => {
+  const { r, result } = fakeJob("green-complete");
+  assert.deepEqual(result?.memoryChecks, [{ name: "procPeak:proxy", red: false, gate: "ws", commitMB: 310, wsMB: 120, budget: 250 }], r.stdout + r.stderr);
+  assert.match(r.stdout, /S1\/short procPeak:proxy: commit 310 \/ WS 120 MB \(budget 250, gate WS\) ok/);
+});
+
+test("run evidence: outcome and exit code must agree, and on Windows commit and a passed units self-test are required", () => {
+  const ok = { key: "S7/short", platform: "linux", outcome: "RED", metric: "rss", durationS: 90, samples: 90, summary: { proxy: { maxCount: 1 } }, notes: { sampler: {} } };
+  assert.deepEqual(runEvidence(ok, { key: "S7/short", exitCode: 1 }), { ok: true, problems: [] });
+  assert.match(runEvidence(ok, { key: "S7/short", exitCode: 0 }).problems.join(), /outcome RED but exit 0/);
+  assert.match(runEvidence(ok, { key: "S1/short", exitCode: 1 }).problems.join(), /summary is for S7\/short/);
+  const win = { ...ok, platform: "win32", metric: "rss" };
+  assert.match(runEvidence(win, { key: "S7/short", exitCode: 1 }).problems.join(), /no commit_kb/);
+  const winCommit = { ...win, metric: "commit", notes: { sampler: { units: { ok: false } } } };
+  assert.match(runEvidence(winCommit, { key: "S7/short", exitCode: 1 }).problems.join(), /units self-test did not pass/);
+  assert.equal(runEvidence({ ...winCommit, notes: { sampler: { units: { ok: true } } } }, { key: "S7/short", exitCode: 1 }).ok, true);
+  assert.equal(runEvidence(ok, { key: "S7/short", exitCode: 2 }).ok, true, "a harness failure needs no evidence: it is already a failure");
+});
+
+// ── Windows checkouts (CI run 42246379763) ───────────────────────────────────
+test("the isolated config is the same from a CRLF checkout of the template (Windows autocrlf)", () => {
+  const lf = readFileSync(join(KIT_ROOT, "proxy", "config.example.yaml"), "utf8").replace(/\r\n/g, "\n");
+  const opts = { port: 19024, key: "fixture-key", mockUrl: "http://127.0.0.1:19025" };
+  const fromLf = isolatedConfig({ ...opts, template: lf });
+  const fromCrlf = isolatedConfig({ ...opts, template: lf.replace(/\n/g, "\r\n") });
+  assert.equal(fromCrlf, fromLf);
+  assert.match(fromCrlf, /^claim:\n  enabled: false\n  auto: false/m);
+  assert.match(fromCrlf, /^  port: 19024$/m);
+});
+
+test("`--cap none` on Windows runs the run script directly under the job's own timeout (no GNU `timeout`)", () => {
+  const args = ["S1", "--profile", "short"];
+  assert.deepEqual(commandFor("none", "3G", 60, args, { node: "C:\\node.exe", runScript: "D:\\run.mjs", platform: "win32" }), { argv: ["C:\\node.exe", "D:\\run.mjs", ...args], timeoutMs: 90_000 });
+  assert.deepEqual(commandFor("none", "3G", 60, args, { node: "/usr/bin/node", runScript: "/kit/run.mjs", platform: "linux" }), { argv: ["timeout", "--kill-after=30", "60", "/usr/bin/node", "/kit/run.mjs", ...args], timeoutMs: null });
+});
+
+// ── CI run 42252896054 (windows): S3/hung printed a complete RED verdict and
+// was turned into a harness failure because no MCP bridge was seen — every
+// launch failed on Windows, so no session ever started a bridge.
+const S3_HUNG_ROUNDS = [{ name: "kill-holder-10" }, { name: "hung-10-with-stale-lock" }, { name: "hung-10" }];
+test("run evidence: S3 is proven by its proxy, launchers and preflights; a bridge exists only after a launch succeeds", () => {
+  const s3 = (roles) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 150, samples: 500, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: 1 }])), notes: { sampler: {}, rounds: S3_HUNG_ROUNDS } });
+  assert.deepEqual(runEvidence(s3(["proxy", "launcher", "preflight"]), { key: "S3/hung", exitCode: 1 }), { ok: true, problems: [] });
+  assert.match(runEvidence(s3(["proxy", "preflight"]), { key: "S3/hung", exitCode: 1 }).problems.join(), /role launcher never seen/);
+});
+
+// ── CI run 42281731448 (ubuntu): S3/hung skipped both hung rounds, ran 9 s and
+// printed a RED verdict. A run that did not run its rounds stays a harness
+// failure — through the job, and however long and busy the rest of it was.
+const CI_S3_HUNG = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ci-42281731448-s3-hung-summary.json");
+
+test("job: the S3/hung run of CI 42281731448 (hung rounds skipped, RED verdict) is a harness failure", () => {
+  const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: CI_S3_HUNG });
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /round hung-10-with-stale-lock skipped/);
+  assert.match(result.error, /round hung-10 never ran/);
+  assert.equal(r.status, 1, "the ratchet fails on a harness failure");
+});
+
+test("run evidence: an S3 round that was skipped or never ran fails the run, whatever its time and roles", () => {
+  const busy = (notes) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 300, samples: 900, summary: { proxy: { maxCount: 1 }, launcher: { maxCount: 5 }, preflight: { maxCount: 9 } }, notes: { sampler: {}, ...notes } });
+  assert.equal(runEvidence(busy({ rounds: S3_HUNG_ROUNDS }), { key: "S3/hung", exitCode: 1 }).ok, true);
+  const skipped = runEvidence(busy({ rounds: S3_HUNG_ROUNDS.slice(0, 2), "hung-10.skipped": { startCode: 0, reason: "no pid record, 0 proxies of this run serve port 18457" } }), { key: "S3/hung", exitCode: 1 });
+  assert.equal(skipped.ok, false);
+  assert.match(skipped.problems.join(), /round hung-10 skipped: no pid record, 0 proxies/);
+  // The pre-fix note was the bare start code (0): still a skip.
+  assert.match(runEvidence(busy({ rounds: S3_HUNG_ROUNDS, "hung-10.skipped": 0 }), { key: "S3/hung", exitCode: 1 }).problems.join(), /round hung-10 skipped: manager start exited 0/);
+  // No note at all, the round is simply missing.
+  assert.match(runEvidence(busy({ rounds: S3_HUNG_ROUNDS.slice(0, 1) }), { key: "S3/hung", exitCode: 1 }).problems.join(), /round hung-10-with-stale-lock never ran.*round hung-10 never ran/);
+  assert.match(runEvidence(busy({}), { key: "S3/hung", exitCode: 0 }).problems.join(), /round kill-holder-10 never ran/);
+  // S3/short likewise needs its four short-profile rounds.
+  const short = { ...busy({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }] }), key: "S3/short" };
+  assert.match(runEvidence(short, { key: "S3/short", exitCode: 1 }).problems.join(), /round kill-holder-10 never ran/);
+});
+
+// ── S3/omp (ticket 03): no launcher ever runs, the run takes 10–12 s on Linux,
+// and its proof is the stub hosts, their preflights and the proxy one of them
+// started. Its own floor, never an exemption from the gate.
+const S3_OMP_ROUNDS = [{ name: "omp-5" }, { name: "omp-5-kill-starter" }];
+const s3omp = ({ roles = ["proxy", "preflight", "omp-host", "manager"], rounds = S3_OMP_ROUNDS, ...rest } = {}) => ({ key: "S3/omp", platform: "linux", outcome: "RED", metric: "rss", durationS: 10, samples: 28, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: r === "omp-host" ? 5 : 1 }])), notes: { sampler: {}, rounds }, ...rest });
+
+test("run evidence: S3/omp is proven by its hosts, their preflights, the proxy and both OMP rounds, not by launchers", () => {
+  assert.deepEqual(runEvidence(s3omp(), { key: "S3/omp", exitCode: 1 }), { ok: true, problems: [] });
+  assert.match(runEvidence(s3omp({ roles: ["proxy", "preflight"] }), { key: "S3/omp", exitCode: 1 }).problems.join(), /role omp-host never seen/);
+  assert.match(runEvidence(s3omp({ roles: ["proxy", "omp-host"] }), { key: "S3/omp", exitCode: 1 }).problems.join(), /role preflight never seen/);
+  assert.match(runEvidence(s3omp({ roles: ["preflight", "omp-host"] }), { key: "S3/omp", exitCode: 0 }).problems.join(), /role proxy never seen/);
+  // The killed-starter round is the adversary: a run without it never ran its scenario.
+  assert.match(runEvidence(s3omp({ rounds: S3_OMP_ROUNDS.slice(0, 1) }), { key: "S3/omp", exitCode: 1 }).problems.join(), /round omp-5-kill-starter never ran/);
+  assert.match(runEvidence(s3omp({ rounds: [] }), { key: "S3/omp", exitCode: 0 }).problems.join(), /round omp-5 never ran/);
+  // Half the shortest Linux run (10 s, 28 samples): a run that never started its hosts is below it.
+  assert.match(runEvidence(s3omp({ durationS: 3, samples: 9 }), { key: "S3/omp", exitCode: 0 }).problems.join(), /9 samples \(need ≥ 14\).*ran 3 s, below the S3\/omp floor of 5 s/);
+  // The other S3 runs keep the S3 floor: a launcher and 15 s.
+  const shortRun = { ...s3omp({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }, { name: "kill-holder-10" }] }), key: "S3/short" };
+  assert.match(runEvidence(shortRun, { key: "S3/short", exitCode: 1 }).problems.join(), /below the S3 floor of 15 s.*role launcher never seen/);
+});
+
+// A real S3/omp run on this branch (Linux, Bun 1.4.2, 2026-11-07): 5 OMP
+// preflights at once in both rounds, every other check green. The integration
+// tip's gate (the S3 floor) called it a harness failure: 12 s, no launcher.
+const S3_OMP_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "local-20261107-s3-omp-linux-summary.json");
+
+test("job: a real S3/omp run passes the evidence gate and is the listed RED; without its killed-starter round it is a harness failure", () => {
+  const { r, row, result } = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: S3_OMP_RUN });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(row, { key: "S3/omp", outcome: "RED", ticket: "35" });
+  assert.deepEqual(result.redChecks, ["omp:concurrent-preflights"]);
+  const dir = mkdtempSync(join(tmpdir(), "memloop-s3omp-"));
+  try {
+    const run = JSON.parse(readFileSync(S3_OMP_RUN, "utf8"));
+    const cut = join(dir, "summary.json");
+    writeFileSync(cut, JSON.stringify({ ...run, notes: { ...run.notes, rounds: run.notes.rounds.slice(0, 1) } }));
+    const skipped = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: cut });
+    assert.equal(skipped.row?.outcome, "HARNESS FAILURE", skipped.r.stdout + skipped.r.stderr);
+    assert.match(skipped.result.error, /round omp-5-kill-starter never ran/);
+    assert.equal(skipped.r.status, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the S3/omp scenario runs exactly the rounds the evidence gate demands", async () => {
+  const { OMP_ROUNDS } = await import("./scenarios/s3-concurrency.mjs");
+  assert.deepEqual(Object.keys(OMP_ROUNDS), ROUNDS["S3/omp"]);
+  assert.deepEqual(ROUNDS["S3/omp"], S3_OMP_ROUNDS.map((r) => r.name));
+  assert.equal(OMP_ROUNDS["omp-5-kill-starter"].killStarter, true);
+  assert.ok(!OMP_ROUNDS["omp-5"].killStarter);
+});
+
+// The loop freezes its own hung proxy (S3); whatever happens in between, it
+// is thawed, and a thaw that fails makes the run a harness failure — a
+// process the loop left frozen is never reported as a kit orphan.
+test("whileFrozen thaws after the work, after a failing work, and a failed thaw fails the run", async () => {
+  const calls = [];
+  const freeze = (pid) => calls.push(`freeze ${pid}`);
+  const thaw = (pid) => calls.push(`thaw ${pid}`);
+  // Fake pids: liveness is injected, never asked of the host (Windows and Linux answer differently for pid 7/8).
+  const alive = () => true;
+  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw, alive }), 42);
+  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw, alive }), /round failed/);
+  assert.deepEqual(calls, ["freeze 7", "work", "thaw 7", "freeze 8", "thaw 8"]);
+  await assert.rejects(whileFrozen(9, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); }, alive: () => true }), /could not thaw pid 9 .*0xC000000B/);
+});
+
+// ── CI run 42281731448 (ubuntu, staging/02): S3/hung ran 9 s. The killed start
+// lock holder had spawned the proxy but not yet written proxy.pid, so
+// `manager start` answered 0 (healthy) with no pid record, both hung rounds
+// were skipped, and only kill-holder-10 ran (8 of 9 earlier ubuntu runs: 188 s).
+// The hung round freezes the run's own proxy that serves the isolated port;
+// it never freezes a process that is not this run's, and it never guesses.
+function fakeHungRound({ record = null, ours = [], listening = {}, startCode = 0 } = {}) {
+  const calls = [], notes = {};
+  const kit = { port: 19026, manager: async () => ({ code: startCode, out: "", err: "" }), pidRecord: () => record };
+  const hungRound = makeHungRound({
+    kit, proxies: () => ours.map((pid) => ({ pid, role: "proxy", key: `${pid}` })), portsOf: (pid) => listening[pid] ?? [],
+    round: async (name) => { calls.push(`round ${name}`); }, note: (k, v) => { notes[k] = v; },
+    freeze: (pid) => calls.push(`freeze ${pid}`), thaw: (pid) => calls.push(`thaw ${pid}`), alive: () => true, graceMs: 0,
+  });
+  return { hungRound, calls, notes };
+}
+
+test("S3 hung round: a proxy the killed start left without a pid record is frozen and the round runs (CI run 42281731448)", async () => {
+  const { hungRound, calls, notes } = fakeHungRound({ record: null, ours: [3723], listening: { 3723: [19026] } });
+  await hungRound("hung-10-with-stale-lock");
+  assert.deepEqual(calls, ["freeze 3723", "round hung-10-with-stale-lock", "thaw 3723"]);
+  assert.deepEqual(notes, { "hung-10-with-stale-lock.target": { pid: 3723, via: "listener", recordedPid: null } });
+});
+
+test("S3 hung round: the recorded proxy is frozen as before", async () => {
+  const { hungRound, calls, notes } = fakeHungRound({ record: { pid: 41, startedMs: 1 }, ours: [41], listening: { 41: [19026] } });
+  await hungRound("hung-10");
+  assert.deepEqual(calls, ["freeze 41", "round hung-10", "thaw 41"]);
+  assert.deepEqual(notes, { "hung-10.target": { pid: 41, via: "pid-record", recordedPid: 41 } });
+});
+
+test("S3 hung round: nothing of this run to freeze is a skipped round, never a guess", async () => {
+  const cases = {
+    "no proxy at all": { ours: [] },
+    "our proxy is not on the isolated port": { ours: [50], listening: { 50: [9999] } },
+    "two of our proxies serve the port": { ours: [51, 52], listening: { 51: [19026], 52: [19026] } },
+    "the recorded pid is not a process of this run": { record: { pid: 1, startedMs: 1 }, ours: [] },
+    "start failed": { startCode: 4, ours: [53], listening: { 53: [19026] } },
+  };
+  for (const [label, c] of Object.entries(cases)) {
+    const { hungRound, calls, notes } = fakeHungRound(c);
+    await hungRound("hung-10");
+    assert.deepEqual(calls, [], label);
+    assert.ok(notes["hung-10.skipped"], `${label}: the skip is noted`);
+  }
+});
+
+test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery) needs no thaw", async () => {
+  const thawed = [];
+  const r = await whileFrozen(10, async () => "round", { freeze: () => {}, thaw: (pid) => { thawed.push(pid); throw new Error("kill ESRCH"); }, alive: () => false });
+  assert.equal(r, "round");
+  assert.deepEqual(thawed, []);
+});
+
+// ── S1/burst1 at the job seam: the median rule and the measurement mode (ticket 60) ──
+// The fake run's burst1 mode writes proxy samples and judges them with the real
+// osVerdict, in the Linux or the Windows shape (fixtures/fake-run.mjs).
+function burst1Job(args, { shape = "linux", peaks, env = {} } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-burst1-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const os = shape === "win32" ? "windows" : "linux";
+  const r = runJob(["--os", os, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN, ...args], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "burst1", FAKE_RUN_SHAPE: shape, FAKE_RUN_PEAKS: JSON.stringify(peaks), GITHUB_STEP_SUMMARY: stepSummary, ...env });
+  const read = (p) => { try { return readFileSync(join(home, "job", p), "utf8"); } catch { return null; } };
+  const json = (p) => { const t = read(p); return t === null ? null : JSON.parse(t); };
+  const files = (() => { try { return readdirSync(join(home, "job")); } catch { return []; } })();
+  const out = { r, files, job: json("job-summary.json"), measure: json("measure-S1-burst1.json"), measureMd: read("measure-S1-burst1.md"), stepSummary: readFileSync(stepSummary, "utf8"), repDirs: (() => { try { return readdirSync(join(home, "job", "S1-burst1")); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return out;
+}
+
+test("job: S1/burst1 runs n fresh repetitions (n from budgets.mjs REPEATED) and the ratchet sees one verdict", async () => {
+  const { REPEATED } = await import("./lib/budgets.mjs");
+  const n = REPEATED["S1/burst1"].n;
+  const peaks = Array.from({ length: n }, (_, i) => ({ rss: i === 1 ? 270 : 230 + i }));
+  const { r, job, repDirs } = burst1Job(["--only", "S1/burst1"], { peaks });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(repDirs.filter((d) => d.startsWith("rep-")).sort(), Array.from({ length: n }, (_, i) => `rep-${i + 1}`).sort());
+  assert.deepEqual(job.rows.map((x) => [x.key, x.outcome]), [["S1/burst1", "GREEN"]]);
+  assert.equal(job.results[0].repetitions.length, n);
+  assert.equal(job.results[0].median.n, n);
+});
+
+// Workflow text with LF line endings: a Windows checkout (autocrlf) has CRLF,
+// and every assertion below is written against LF (CI run 42360554587).
+const lf = (text) => text.replace(/\r\n/g, "\n");
+const ciWorkflow = () => readFileSync(join(KIT_ROOT, ".github", "workflows", "ci.yml"), "utf8");
+
+/** The memory-budget job's measurement-mode wiring, asserted on ci.yml text as checked out (LF or CRLF). */
+function assertMeasurementWiring(ciText) {
+  const ci = lf(ciText);
+  const job = ci.slice(ci.indexOf("\n  memory-budget:"));
+  const step = (name) => job.slice(job.indexOf(`- name: ${name}`)).split(/\n      - /)[0];
+  assert.match(step("Memory loop (short profile) and expected-RED ratchet"), /if: hashFiles\('tests\/memory\/measure-burst1'\) == ''/);
+  const measure = step("S1/burst1 measurement");
+  assert.match(measure, /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/);
+  assert.match(measure, /--measure-burst1 "\$\(cat tests\/memory\/measure-burst1\)"/);
+  assert.match(step("Upload memory loop artefacts"), /measure-S1-burst1\.json[\s\S]*measure-S1-burst1\.md/);
+  // Round 10 Q1 condition 1 / Round 11 Q1 condition 4: the candidate Bun arms
+  // are installed only with the marker, uncached (setup-bun's post step would
+  // cache the binary then on ~/.bun/bin under the wrong version); the job's
+  // own Bun, the pinned 1.4.2 and the reference arm, comes last so it stays
+  // on PATH; --bun is built from the marker's own arm list.
+  for (const v of ["1.4.3", "1.4.4"]) {
+    const arm = step(`Bun ${v} for the paired measurement`);
+    assert.match(arm, /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/, v);
+    assert.match(arm, new RegExp(`bun-version: ${v.replace(/\./g, "\\.")}\\n\\s+no-cache: true`), v);
+    assert.match(step(`Keep Bun ${v} aside`), /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/, v);
+  }
+  assert.match(step("Keep Bun 1.4.2 aside"), /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/);
+  const ownBun = job.indexOf("\n          bun-version: 1.4.2\n");
+  assert.ok(ownBun > 0 && job.indexOf("- name: Keep Bun 1.4.4 aside") < ownBun && ownBun < job.indexOf("- name: Keep Bun 1.4.2 aside"), "the job's own Bun is installed last, so it stays the one on PATH");
+  assert.match(measure, /grep -q 'bun=' tests\/memory\/measure-burst1[\s\S]*for v in \$\(printf '%s' "\$\{SPEC#\*bun=\}" \| tr ',' ' '\); do BUNS="\$\{BUNS:\+\$BUNS,\}\$v=\$ARMS\/\$v\/bun\$EXE"; done[\s\S]*--bun "\$BUNS"/);
+}
+
+test("measurement mode is off by default: the ratchet step runs unless the marker file exists, and the marker is not committed", () => {
+  assertMeasurementWiring(ciWorkflow());
+  // A measurement run turns the ratchet off; a committed marker must never reach the integration branch.
+  assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-burst1"), false, "tests/memory/measure-burst1 is a one-run switch: delete it before the pre-merge run");
+});
+
+test("the measurement-mode wiring check reads ci.yml the same with LF and CRLF line endings (Windows checkouts)", () => {
+  const text = lf(ciWorkflow());
+  const crlf = text.replace(/\n/g, "\r\n");
+  assert.ok(crlf.includes("bun-version: 1.4.3\r\n          no-cache: true"), "the CRLF copy is a real CRLF checkout");
+  assertMeasurementWiring(text);
+  assertMeasurementWiring(crlf);
+});
+
+test("measurement mode: N fresh sequential S1/burst1 runs on Windows, each with WS gate, sampled WS, ws_peak_kb, commit, proxy count, units and Job Object", () => {
+  const peaks = [{ ws: 234.3, wsPeak: 255, commit: 422 }, { ws: 222, wsPeak: 222, commit: 365.2 }, { ws: 240, wsPeak: 246, commit: 410 }, { ws: 248.3, wsPeak: 262, commit: 424.5 }];
+  const { r, files, job, measure, measureMd, stepSummary, repDirs } = burst1Job(["--measure-burst1", "4"], { shape: "win32", peaks });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(job, null, "a measurement run is not a ratchet run");
+  assert.ok(files.includes("measure-S1-burst1.md"));
+  assert.deepEqual(repDirs, [], "the job's own S1/burst1 set does not run");
+  assert.equal(measure.key, "S1/burst1");
+  assert.equal(measure.os, "windows");
+  assert.equal(measure.requested, 4);
+  assert.equal(measure.reps.length, 4);
+  assert.deepEqual(measure.reps.map((x) => x.rep), [1, 2, 3, 4]);
+  const first = measure.reps[0];
+  assert.deepEqual(
+    { gate: first.gate, gateMB: first.gateMB, sampledMB: first.sampledMB, wsPeakKb: first.wsPeakKb, commitMB: first.commitMB, proxyCount: first.proxyCount, unitsOk: first.unitsOk, jobApplied: first.jobApplied, gateConsistent: first.gateConsistent, valid: first.valid, outcome: first.outcome },
+    { gate: "ws", gateMB: 255, sampledMB: 234.3, wsPeakKb: 261120, commitMB: 422, proxyCount: 1, unitsOk: true, jobApplied: true, gateConsistent: true, valid: true, outcome: "RED" },
+  );
+  assert.deepEqual(measure.reps.map((x) => x.gateMB), [255, 222, 246, 262]);
+  assert.deepEqual([measure.valid, measure.aboveBudget, measure.p, measure.overCeiling, measure.maxMB, measure.medianMB], [4, 2, 0.5, [], 262, 250.5]);
+  assert.equal(measure.budgetMB, 250);
+  assert.equal(measure.ceilingMB, 400);
+  // P(median RED) for each odd n ≤ 9 at the measured p (informational: Round 8 Q1 condition 3 decides).
+  assert.deepEqual(Object.keys(measure.medianRedProbability), ["3", "5", "7", "9"]);
+  assert.equal(measure.medianRedProbability["3"], 0.5);
+  for (const text of [measureMd, stepSummary]) {
+    assert.match(text, /S1\/burst1 measurement \(windows, 4 fresh runs\)/);
+    assert.match(text, /\| 1 \| RED \| 255 \| 234\.3 \| 261120 \| 422 \| 1 \| ok \| applied \|/);
+    assert.match(text, /above 250 MB: 2 of 4 \(p = 0\.5\)/);
+  }
+});
+
+test("measurement mode: a missing or zero PeakWorkingSetSize, a failed units self-test or no Job Object makes a run invalid, and the measurement exits 2", () => {
+  const peaks = [{ ws: 230, wsPeak: 240, commit: 400 }, { ws: 222, wsPeak: 0, commit: 365.2 }, { ws: 231, wsPeak: 241, commit: 401, job: false }, { ws: 232, wsPeak: 242, commit: 402, units: false }];
+  const { r, measure } = burst1Job(["--measure-burst1", "4"], { shape: "win32", peaks });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.deepEqual(measure.reps.map((x) => x.valid), [true, false, false, false]);
+  assert.match(measure.reps[1].problems.join(), /ws_peak_kb missing or 0/);
+  assert.match(measure.reps[2].problems.join(), /Job Object not applied/);
+  assert.match(measure.reps[3].problems.join(), /units self-test/);
+  assert.equal(measure.valid, 1);
+  assert.equal(measure.complete, false);
+});
+
+test("measurement mode on Linux: the gate is max(sampled RSS, VmHWM), no commit, no Job Object", () => {
+  // "3\r": the marker as `$(cat …)` reads it from a CRLF (autocrlf) checkout.
+  const { r, measure } = burst1Job(["--measure-burst1", "3\r"], { peaks: [{ rss: 200, hwm: 236.5 }, { rss: 190, hwm: 267.4 }, { rss: 180, hwm: 235.5 }] });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(measure.reps.map((x) => [x.gate, x.gateMB, x.sampledMB, x.peakMB, x.commitMB, x.jobApplied, x.gateConsistent, x.valid]), [
+    ["rss", 236.5, 200, 236.5, null, null, true, true],
+    ["rss", 267.4, 190, 267.4, null, null, true, true],
+    ["rss", 235.5, 180, 235.5, null, null, true, true],
+  ]);
+  assert.deepEqual([measure.aboveBudget, measure.valid, measure.complete], [1, 3, true]);
+});
+
+test("measurement mode: the median of an even count is the mean of the middle pair, rounded to 0.1 MB", () => {
+  // The ticket 60 Linux measurement's middle pair, 229.6 / 232.2, printed as 230.89999999999998.
+  const { measure, measureMd } = burst1Job(["--measure-burst1", "4"], { peaks: [{ rss: 150, hwm: 229.6 }, { rss: 150, hwm: 260 }, { rss: 150, hwm: 200 }, { rss: 150, hwm: 232.2 }] });
+  assert.equal(measure.medianMB, 230.9);
+  assert.match(measureMd, /min \/ median \/ max: 200 \/ 230\.9 \/ 260 MB/);
+});
+
+test("measurement mode rejects a count that is not a whole number from 1 to 50 before anything runs", () => {
+  for (const bad of ["0", "51", "2.5", "x", ""]) {
+    const { r, files } = burst1Job(["--measure-burst1", bad], { peaks: [] });
+    assert.equal(r.status, 2, `${bad}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /--measure-burst1/);
+    assert.deepEqual(files, [], bad);
+  }
+});
+
+// ── Paired Bun measurement (Round 10 Q1 conditions 1–2, ticket 09) ──
+// The marker names the arms ("N bun=1.4.2,1.4.3,1.4.4"); --bun gives their
+// binaries; the arms run interleaved in rotation, N valid runs each, and the
+// output carries the re-entry reading (Round 11 Q1 condition 4) at the job's
+// n, with the first arm as the reference. The fake run reports the
+// proxy's runtime Bun from FAKE_RUN_BUN_REVISIONS (path → revision).
+function bunArms(home, versions) {
+  const paths = {};
+  for (const v of versions) {
+    mkdirSync(join(home, "arms", v), { recursive: true });
+    paths[v] = join(home, "arms", v, process.platform === "win32" ? "bun.exe" : "bun");
+    writeFileSync(paths[v], "fake bun\n");
+  }
+  return paths;
+}
+
+function pairedJob({ spec, arms = ["1.4.2", "1.4.3", "1.4.4"], peaks, shape = "linux", revisions = (v) => `${v}+fake${v.replace(/\./g, "")}`, bunArg, extraArgs = [], jobBunEnv = null }) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-paired-"));
+  const paths = bunArms(home, arms);
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const map = Object.fromEntries(Object.entries(paths).map(([v, p]) => [p, revisions(v)]));
+  const bun = bunArg === undefined ? Object.entries(paths).map(([v, p]) => `${v}=${p}`).join(",") : bunArg;
+  const args = ["--os", shape === "win32" ? "windows" : "linux", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN, ...(spec === null ? [] : ["--measure-burst1", spec]), ...(bun === null ? [] : ["--bun", bun]), ...extraArgs];
+  const r = runJob(args, { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "burst1", FAKE_RUN_SHAPE: shape, FAKE_RUN_PEAKS: JSON.stringify(peaks), FAKE_RUN_BUN_REVISIONS: JSON.stringify(map), GITHUB_STEP_SUMMARY: stepSummary, ZCODE_KIT_BUN: jobBunEnv ?? join(home, "no-job-bun") });
+  const read = (p) => { try { return readFileSync(join(home, "job", p), "utf8"); } catch { return null; } };
+  const files = (() => { try { return readdirSync(join(home, "job")); } catch { return []; } })();
+  const measureText = read("measure-S1-burst1.json");
+  const out = { r, files, paths, measure: measureText ? JSON.parse(measureText) : null, measureMd: read("measure-S1-burst1.md"), stepSummary: readFileSync(stepSummary, "utf8") };
+  rmSync(home, { recursive: true, force: true });
+  return out;
+}
+
+test("paired marker spec: N, or N bun=<v>,<v>[,…] with distinct x.y.z versions; anything else is refused", async () => {
+  const { parseMeasureSpec } = await import("./lib/measure.mjs");
+  assert.deepEqual(parseMeasureSpec("24"), { count: 24, arms: null });
+  assert.deepEqual(parseMeasureSpec("24\r\n"), { count: 24, arms: null });
+  assert.deepEqual(parseMeasureSpec("24 bun=1.4.2,1.4.3,1.4.4\r\n"), { count: 24, arms: ["1.4.2", "1.4.3", "1.4.4"] });
+  for (const bad of ["", "0", "51", "24 bun=", "24 bun=1.4.2", "24 bun=1.4.2,1.4.2", "24 bun=latest,1.4.4", "24 bun=1.4,1.4.4", "24 foo=1.4.2,1.4.4", "24 bun=1.4.2,1.4.4 x", "0 bun=1.4.2,1.4.4"]) {
+    assert.throws(() => parseMeasureSpec(bad), /--measure-burst1/, JSON.stringify(bad));
+  }
+});
+
+test("one-sided Fisher exact test on counts above the budget (arm more often above than the reference)", async () => {
+  const { fisherOneSided } = await import("./lib/measure.mjs");
+  // Independent check: the hypergeometric upper tail with exact BigInt binomials.
+  const C = (n, k) => { let r = 1n; for (let i = 0n; i < BigInt(k); i++) r = (r * (BigInt(n) - i)) / (i + 1n); return r; };
+  const tail = (a, n1, c, n2) => {
+    const K = a + c, N = n1 + n2;
+    let num = 0n;
+    for (let x = a; x <= Math.min(K, n1); x++) num += C(n1, x) * C(n2, K - x);
+    return Number((num * 10n ** 12n) / C(N, K)) / 1e12;
+  };
+  for (const [a, n1, c, n2] of [[12, 24, 1, 24], [3, 24, 1, 24], [5, 24, 2, 24], [0, 24, 0, 24], [24, 24, 0, 24], [1, 3, 0, 3], [14, 24, 13, 24]]) {
+    assert.ok(Math.abs(fisherOneSided(a, n1, c, n2) - tail(a, n1, c, n2)) < 1e-9, `${[a, n1, c, n2]}`);
+  }
+  // The Round 10 CI numbers: 1.4.4 12/24 against 1.4.2 1/24 is p ≈ 0.0003 (well under 0.05).
+  assert.ok(fisherOneSided(12, 24, 1, 24) < 0.001);
+  assert.equal(fisherOneSided(0, 24, 0, 24), 1);
+  assert.ok(fisherOneSided(3, 24, 1, 24) > 0.05, "3/24 vs 1/24 is no shown effect");
+});
+
+test("stable unlisted follows the job's n: at most 3 / 4 / 5 / 6 of 24 for n = 3 / 5 / 7 / 9 (Round 11)", async () => {
+  const { stableMaxCount, stableUnlisted } = await import("./lib/measure.mjs");
+  assert.deepEqual([3, 5, 7, 9].map((n) => stableMaxCount(24, n)), [3, 4, 5, 6]);
+  const arm = (above) => ({ valid: 24, aboveBudget: above });
+  assert.deepEqual([stableUnlisted(arm(5), 5), stableUnlisted(arm(5), 7), stableUnlisted(arm(6), 7)], [false, true, false]);
+  assert.throws(() => stableUnlisted(arm(1)), /the job's n/, "no default n: the caller passes the job's");
+});
+
+test("re-entry reading (Round 11 Q1 condition 4): (i) valid and within the ceiling, (ii) stable at the job's n, (iii) Fisher p > 0.05 on Linux; (iv) median ≤ 300 on Windows", async () => {
+  const { reentryReading } = await import("./lib/measure.mjs");
+  const arm = (bun, above, { valid = 24, requested = 24, overCeiling = [], medianMB = 240 } = {}) => ({ bun, valid, requested, aboveBudget: above, overCeiling, medianMB });
+  const linux = (ref, ...cands) => reentryReading([ref, ...cands], { os: "linux", n: 7, jobBun: "1.4.2+744846f84" });
+  const verdict = (r) => r.candidates.map((c) => [c.bun, c.pass, ...["i", "ii", "iii"].map((k) => c.checks[k].pass)]);
+  // The paired CI run 42352122623 (Linux): 1.4.2 5/24, 1.4.3 14/24, 1.4.4 13/24.
+  const ci = linux(arm("1.4.2", 5), arm("1.4.3", 14), arm("1.4.4", 13));
+  assert.equal(ci.reference, "1.4.2");
+  assert.deepEqual(verdict(ci), [["1.4.3", false, true, false, false], ["1.4.4", false, true, false, false]]);
+  assert.ok(Math.abs(ci.candidates[0].fisherP - 0.0086) < 5e-4 && Math.abs(ci.candidates[1].fisherP - 0.0178) < 5e-4);
+  assert.deepEqual(ci.notes, []);
+  // A candidate that passes all three on this leg.
+  assert.deepEqual(verdict(linux(arm("1.4.2", 1), arm("1.4.5", 3))), [["1.4.5", true, true, true, true]]);
+  // Stable at n = 7 (5 of 24) but significantly above a clean reference (5 vs 0: p = C(24,5)/C(48,5) ≈ 0.0248).
+  const sig = linux(arm("1.4.2", 0), arm("1.4.5", 5));
+  assert.deepEqual(verdict(sig), [["1.4.5", false, true, true, false]]);
+  assert.ok(Math.abs(sig.candidates[0].fisherP - 42504 / 1712304) < 1e-9);
+  // Not stable at n = 7 (6 of 24), although no worse than the reference.
+  assert.deepEqual(verdict(linux(arm("1.4.2", 5), arm("1.4.5", 6))), [["1.4.5", false, true, false, true]]);
+  // (i): one invalid run in the reference, or one run above the ceiling in the candidate.
+  assert.deepEqual(verdict(linux(arm("1.4.2", 1, { valid: 23 }), arm("1.4.5", 1))), [["1.4.5", false, false, true, true]]);
+  assert.deepEqual(verdict(linux(arm("1.4.2", 1), arm("1.4.5", 1, { overCeiling: [7] }))), [["1.4.5", false, false, true, true]]);
+  // n is the job's: the same 5 of 24 is not stable at n = 5.
+  assert.equal(reentryReading([arm("1.4.2", 1), arm("1.4.5", 5)], { os: "linux", n: 5, jobBun: "1.4.2+x" }).candidates[0].checks.ii.pass, false);
+  // Windows: (i) and (iv) only.
+  const win = reentryReading([arm("1.4.2", 12), arm("1.4.3", 17, { medianMB: 300 }), arm("1.4.4", 19, { medianMB: 300.1 })], { os: "windows", n: 7, jobBun: "1.4.2+x" });
+  assert.deepEqual(win.candidates.map((c) => [c.bun, Object.keys(c.checks).sort().join(), c.pass]), [["1.4.3", "i,iv", true], ["1.4.4", "i,iv", false]]);
+  // Cautions: not 24 per arm; the reference arm is not the job's own Bun.
+  const notes = reentryReading([arm("1.4.4", 0, { valid: 3, requested: 3 }), arm("1.4.2", 0, { valid: 3, requested: 3 })], { os: "linux", n: 7, jobBun: "1.4.2+744846f84" }).notes.join("\n");
+  assert.match(notes, /24 valid runs per arm/);
+  assert.match(notes, /reference arm 1\.4\.4 is not the job's own Bun \(1\.4\.2\+744846f84\)/);
+  assert.match(reentryReading([arm("1.4.2", 0), arm("1.4.5", 0)], { os: "linux", n: 7, jobBun: null }).notes.join(), /not the job's own Bun \(unknown\)/);
+});
+
+test("paired measurement: arms interleaved in rotation, each run on its arm's Bun, per-arm counts and the re-entry reading at the job's n in the summary", () => {
+  // Rotation 1.4.2, 1.4.3, 1.4.4 ×4: 1.4.2 never above 250, 1.4.3 once, 1.4.4 three times.
+  const hwm = [230, 240, 260, 231, 255, 270, 229, 241, 280, 232, 242, 245];
+  const { r, measure, measureMd, stepSummary, paths } = pairedJob({ spec: "4 bun=1.4.2,1.4.3,1.4.4", peaks: hwm.map((h) => ({ rss: 200, hwm: h })) });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(measure.mode, "paired");
+  assert.deepEqual(measure.reps.map((x) => x.bun), ["1.4.2", "1.4.3", "1.4.4", "1.4.2", "1.4.3", "1.4.4", "1.4.2", "1.4.3", "1.4.4", "1.4.2", "1.4.3", "1.4.4"]);
+  assert.deepEqual(measure.reps.map((x) => x.rep), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  assert.deepEqual(measure.reps.map((x) => x.bunRuntime), measure.reps.map((x) => `${x.bun}+fake${x.bun.replace(/\./g, "")}`), "the Bun the proxy ran, not the flag");
+  assert.deepEqual(measure.reps.map((x) => x.bunPath), measure.reps.map((x) => paths[x.bun]));
+  assert.ok(measure.reps.every((x) => x.valid));
+  assert.deepEqual(measure.arms.map((a) => [a.bun, a.requested, a.valid, a.aboveBudget, a.complete]), [["1.4.2", 4, 4, 0, true], ["1.4.3", 4, 4, 1, true], ["1.4.4", 4, 4, 3, true]]);
+  assert.deepEqual(measure.arms.map((a) => [a.env?.bun?.hardwareConcurrency, a.env?.nproc, a.env?.cgroup?.type, a.env?.cgroup?.memoryMax, a.env?.capRequested, a.envVariants]), Array(3).fill([4, 4, "v2-only", "3221225472", "3G", 1]), "the runtime environment once per arm; free memory alone does not make a variant");
+  // The reading uses the job's own n (budgets.mjs REPEATED) and the first arm as the reference.
+  assert.deepEqual([measure.n, measure.reading.reference, measure.reading.n, measure.reading.candidates.map((c) => c.bun)], [7, "1.4.2", 7, ["1.4.3", "1.4.4"]]);
+  assert.match(measure.reading.notes.join("\n"), /24 valid runs per arm/);
+  for (const text of [measureMd, stepSummary]) {
+    assert.match(text, /S1\/burst1 paired Bun measurement \(linux, 4 runs per arm, rotation 1\.4\.2 → 1\.4\.3 → 1\.4\.4\)/);
+    // 1 of 4 is p = 0.25, above the 0.225 that n = 7 still allows.
+    assert.match(text, /stable unlisted \(P\(median of 7 RED\) ≤ 0\.05; ≤ 0 of 4\)/);
+    assert.match(text, /\| 1\.4\.4 \| 4 of 4 \| 3 \| FAIL \|/);
+    assert.match(text, /Fisher one-sided p, 1\.4\.4 vs 1\.4\.2: \d/);
+    assert.match(text, /Fisher one-sided p, 1\.4\.3 vs 1\.4\.2: \d/);
+    assert.match(text, /Re-entry reading \(Round 11 Q1 condition 4, linux leg, mechanical; reference 1\.4\.2, n = 7\)/);
+    assert.match(text, /\| 1\.4\.4 \| pass: [^|]* \| FAIL: 3 of 4 above the budget[^|]* \| [^|]* \| \*\*fails\*\* \|/);
+    assert.match(text, /\| 3 \| 1\.4\.4 \| 1\.4\.4\+fake144 \| RED \| 260 \|/);
+  }
+});
+
+test("paired measurement: the job's own Bun is the reference check; a marker that lists another Bun first is flagged", linuxOnly, () => {
+  const home = mkdtempSync(join(tmpdir(), "memloop-jobbun-"));
+  try {
+    const own = join(home, "bun");
+    writeFileSync(own, "#!/bin/sh\nprintf '1.4.2+744846f84\\n'\n", { mode: 0o755 });
+    const peaks = Array.from({ length: 2 }, () => ({ rss: 200, hwm: 230 }));
+    const ok = pairedJob({ spec: "1 bun=1.4.2,1.4.4", arms: ["1.4.2", "1.4.4"], peaks, jobBunEnv: own });
+    assert.equal(ok.measure.jobBun, "1.4.2+744846f84");
+    assert.equal(ok.measure.reading.notes.some((n) => /not the job's own Bun/.test(n)), false);
+    const flipped = pairedJob({ spec: "1 bun=1.4.4,1.4.2", arms: ["1.4.2", "1.4.4"], peaks, jobBunEnv: own });
+    assert.match(flipped.measure.reading.notes.join(), /reference arm 1\.4\.4 is not the job's own Bun \(1\.4\.2\+744846f84\): list the pinned Bun first/);
+    assert.match(flipped.measureMd, /Caution: the reference arm 1\.4\.4 is not the job's own Bun/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("paired measurement on Windows: the re-entry reading checks (i) and (iv) only", () => {
+  // Rotation ×2: 1.4.4's median 305 is above 300; 1.4.3 has one run above 400.
+  const ws = [250, 260, 300, 252, 410, 310].map((w) => ({ ws: w, wsPeak: w, commit: 420 }));
+  const { r, measure, measureMd } = pairedJob({ spec: "2 bun=1.4.2,1.4.3,1.4.4", peaks: ws, shape: "win32" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(measure.reading.candidates.map((c) => [c.bun, c.checks.i.pass, c.checks.iv.pass, "ii" in c.checks, c.pass]), [["1.4.3", false, false, false, false], ["1.4.4", true, false, false, false]]);
+  assert.match(measureMd, /Re-entry reading \(Round 11 Q1 condition 4, windows leg/);
+  assert.match(measureMd, /\| 1\.4\.3 \| FAIL: 1\.4\.3: 0 invalid, over the ceiling #5 \| FAIL: median 335 MB \(≤ 300\) \| \*\*fails\*\* \|/);
+  assert.match(measureMd, /\| 1\.4\.2 \| 2 of 2 \| 1 \| FAIL \| none \| 250 \/ 251 \/ 252 \| 420 \/ 420 \|/);
+});
+
+test("paired measurement: a run whose proxy ran another Bun than its arm, or reported none, is invalid and the measurement exits 2", () => {
+  const peaks = Array.from({ length: 6 }, () => ({ rss: 200, hwm: 230 }));
+  const wrong = pairedJob({ spec: "2 bun=1.4.2,1.4.3,1.4.4", peaks, revisions: (v) => (v === "1.4.3" ? "1.4.4+38afee6c8" : `${v}+x`) });
+  assert.equal(wrong.r.status, 2, wrong.r.stdout + wrong.r.stderr);
+  assert.deepEqual(wrong.measure.reps.map((x) => x.valid), [true, false, true, true, false, true]);
+  assert.match(wrong.measure.reps[1].problems.join(), /proxy ran Bun 1\.4\.4\+38afee6c8, not the 1\.4\.3 arm/);
+  assert.deepEqual(wrong.measure.reading.candidates.map((c) => [c.bun, c.checks.i.pass]), [["1.4.3", false], ["1.4.4", true]], "re-entry check (i): an invalid run fails its arm");
+  const none = pairedJob({ spec: "1 bun=1.4.2,1.4.4", arms: ["1.4.2", "1.4.4"], peaks, revisions: () => "" });
+  assert.equal(none.r.status, 2);
+  assert.ok(none.measure.reps.every((x) => !x.valid && /no runtime Bun version recorded for the proxy/.test(x.problems.join())));
+});
+
+test("--bun exists only in measurement mode and must match the marker's arms exactly, refused before anything runs", () => {
+  const peaks = [{ rss: 200, hwm: 230 }];
+  const cases = {
+    "no measurement mode": { spec: null },
+    "plain-N marker": { spec: "3" },
+    "marker arms without --bun": { spec: "3 bun=1.4.2,1.4.3,1.4.4", bunArg: null },
+    "an arm without a path": { spec: "3 bun=1.4.2,1.4.3,1.4.4", arms: ["1.4.2", "1.4.4"] },
+    "a path for no arm": { spec: "3 bun=1.4.2,1.4.4", arms: ["1.4.2", "1.4.3", "1.4.4"] },
+    "a missing binary": { spec: "3 bun=1.4.2,1.4.4", arms: ["1.4.2", "1.4.4"], bunArg: "1.4.2=/nonexistent/bun,1.4.4=/nonexistent/bun2" },
+    "a malformed list": { spec: "3 bun=1.4.2,1.4.4", bunArg: "1.4.2" },
+  };
+  for (const [label, c] of Object.entries(cases)) {
+    const { r, files } = pairedJob({ peaks, ...c });
+    assert.equal(r.status, 2, `${label}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, /--bun|--measure-burst1/, label);
+    assert.deepEqual(files, [], `${label}: nothing ran`);
+  }
+});
+
+test("keep-bun-arm: an arm's binary is kept only if its --revision is that version; a mislabelled one is removed and the step fails", linuxOnly, () => {
+  const home = mkdtempSync(join(tmpdir(), "memloop-keeparm-"));
+  try {
+    const fake = (name, revision) => { const p = join(home, name, "bun"); mkdirSync(join(home, name)); writeFileSync(p, `#!/bin/sh\nprintf '%s\\n' '${revision}'\n`, { mode: 0o755 }); return p; };
+    const script = join(KIT_ROOT, "tests", "memory", "lib", "keep-bun-arm.mjs");
+    const arms = join(home, "arms");
+    const ok = spawnSync(process.execPath, [script, fake("a", "1.4.3+c6da4a4d3"), "1.4.3", arms], { encoding: "utf8" });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(spawnSync(join(arms, "1.4.3", "bun"), ["--revision"], { encoding: "utf8" }).stdout.trim(), "1.4.3+c6da4a4d3");
+    // setup-bun's ~/.bun/bin already overwritten by the next version: refused.
+    const bad = spawnSync(process.execPath, [script, fake("b", "1.4.4+38afee6c8"), "1.4.2", arms], { encoding: "utf8" });
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /reports "1\.4\.4\+38afee6c8", not Bun 1\.4\.2/);
+    assert.equal(readdirSync(arms).includes("1.4.2"), false, "nothing is left for the job to pick up");
+    // "1.4.30+…" is not 1.4.3.
+    assert.equal(spawnSync(process.execPath, [script, fake("c", "1.4.30+x"), "1.4.3", join(home, "arms2")], { encoding: "utf8" }).status, 1);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("runtime environment: cgroup type from the filesystem magic, the scope's MemoryMax from /proc/self/cgroup", async () => {
+  const { cgroupInfo } = await import("./lib/runtime-probe.mjs");
+  const files = {
+    "/sys/fs/cgroup/user.slice/run-r1.scope/memory.max": "3221225472\n",
+    "/sys/fs/cgroup/unified/user.slice/run-r2.scope/memory.max": "max\n",
+    "/sys/fs/cgroup/memory/user.slice/memory.limit_in_bytes": "9223372036854771712\n",
+  };
+  const fsLike = (types) => ({ statfsType: (p) => types[p] ?? null, read: (p) => files[p] ?? null, exists: (p) => p in types });
+  const v2 = cgroupInfo({ procSelfCgroup: "0::/user.slice/run-r1.scope\n", ...fsLike({ "/sys/fs/cgroup": 0x63677270 }) });
+  assert.deepEqual([v2.type, v2.memoryMax], ["v2-only", "3221225472"]);
+  const hybrid = cgroupInfo({ procSelfCgroup: "12:memory:/user.slice\n0::/user.slice/run-r2.scope\n", ...fsLike({ "/sys/fs/cgroup": 0x01021994, "/sys/fs/cgroup/unified": 0x63677270 }) });
+  assert.deepEqual([hybrid.type, hybrid.memoryMax, hybrid.v1MemoryLimit], ["hybrid", "max", "9223372036854771712"]);
+  const v1 = cgroupInfo({ procSelfCgroup: "12:memory:/user.slice\n", ...fsLike({ "/sys/fs/cgroup": 0x01021994 }) });
+  assert.deepEqual([v1.type, v1.memoryMax], ["v1-only", null]);
+});
+
+test("job: windows S1/burst1 against the committed unstable entry prints its line for a median of 251–300 and of ≤ 250, and fails above 300", () => {
+  const ws = (...xs) => xs.map((w) => ({ ws: w, wsPeak: w, commit: 410 }));
+  // Seven repetitions: the job's n since Round 11 Q1 condition 2 (budgets.mjs REPEATED).
+  for (const [peaks, medianMB] of [[ws(255, 251, 240, 262, 230, 280, 245), 251], [ws(230, 220, 240, 235, 225, 260, 228), 230]]) {
+    const { r, job, stepSummary } = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(job.results[0].repetitions.length, 7);
+    const line = `S1/burst1: unstable (median ${medianMB} MB, budget 250), owned by ticket 20`;
+    assert.equal(job.rows[0].note, line);
+    for (const text of [r.stdout, stepSummary]) {
+      assert.ok(text.includes(`- ${line}`), `${medianMB}: ${text}`);
+      assert.match(text, /\| S1\/burst1 \| (GREEN|RED) \(unstable\) \| ticket 20 \|/);
+    }
+  }
+  const high = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(301, 305, 290, 310, 280, 320, 295) });
+  assert.equal(high.r.status, 1, high.r.stdout + high.r.stderr);
+  assert.match(high.stepSummary, /S1\/burst1: unstable median 301 MB is above the 300 MB bound/);
+  assert.doesNotMatch(high.stepSummary, /owned by ticket 20/);
+});

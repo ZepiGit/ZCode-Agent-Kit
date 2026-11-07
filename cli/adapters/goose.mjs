@@ -19,7 +19,7 @@ export default {
   id: "goose",
   label: "Goose",
   protocol: "OpenAI-compatible custom provider (engine: openai, full endpoint URL)",
-  primarySource: "https://goose-docs.ai/docs/getting-started/providers/ (checked 2026-09-13)",
+  primarySource: "https://goose-docs.ai/docs/getting-started/providers/ (checked 2026-11-06)",
 
   apply(ctx, tx, log) {
     const dir = providerDir(ctx.home);
@@ -35,7 +35,9 @@ export default {
       base_url: `http://127.0.0.1:${ctx.port()}/v1/chat/completions`,
       models: [
         { name: "glm-5.3", context_limit: 1000000 },
-        { name: "glm-5.3-flash", context_limit: 1000000 },
+        // Honored since goose v1.55.0; unset falls back to the catalog, then
+        // false, and images are stripped.
+        { name: "glm-5.3-flash", context_limit: 1000000, supports_vision: true },
       ],
       supports_streaming: true,
       requires_auth: true,
