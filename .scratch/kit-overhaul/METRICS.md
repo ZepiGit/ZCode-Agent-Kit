@@ -88,6 +88,26 @@ False-RED rate of a median of n, P(X ≥ (n+1)/2) with X ~ Binomial(n, p):
 
 The first job run with the rule (`/home/AgentKit/overhaul-tools/t60-memloop/job-burst1/`) gave repetitions 236.4, 244.6, **257.3**, 189.1 and 234.9 MB. The median is 236.4 MB and nothing is over the ceiling, so the variant is GREEN. Judged on one run, repetition 3 alone would have turned the job RED.
 
+### S1/burst1 measurement on the staged 02+60 code (ticket 60, Round 8 Q1 condition 2)
+
+Measurement mode: `node tests/memory/job.mjs --measure-burst1 N` runs N fresh, isolated S1/burst1 runs one after another. Each run gets the job's cap, timeout and evidence gate. The mode writes `measure-S1-burst1.{json,md}` and appends the table to the job summary. It is no verdict and no ratchet. CI runs it only while the one-run marker `tests/memory/measure-burst1` (holding N) is committed. On Windows a run counts only with a non-zero `ws_peak_kb`, a passed units self-test, `@@JOB applied=1` and a gate equal to max(sampled WS, ws_peak_kb) from its `samples.csv` (Round 8 Q1 condition 1).
+
+**Linux, 20 runs** (2026-11-06, `ticket/60` at dac4f4b = `ticket/02` 6d8e8e0 + ticket 60, Linux x64, Node 26.7.0, Bun 1.4.2, port 19600, each run in its own systemd scope with MemoryMax 3G inside `run-capped.sh` 4G; `/home/AgentKit/overhaul-tools/t60-memloop/measure-linux20/`, log `reports/t60-measure-linux20.log`, 397 s). All 20 runs are valid, with 1 proxy each. RSS gate = max(sampled RSS, VmHWM), MB, in run order:
+
+215.2, 242.7, 222.8, 217.0, 248.0, **251.8**, 237.5, 246.2, **250.7**, 205.0, 232.2, 212.5, 229.6, 233.9, 208.4, 240.6, 225.8, 211.3, 180.6, 237.1
+
+Min 180.6, median 230.9, max 251.8 MB. 2 of 20 runs are above 250 (p = 0.10), and none is above 400. Pooled with the 59 earlier Linux runs (8 above 250): 10 of 79 (p = 0.127).
+
+| p (Linux) | n = 3 | n = 5 | n = 7 | n = 9 |
+|---|---|---|---|---|
+| 0.100 (these 20) | 2.80 % | 0.86 % | 0.27 % | 0.09 % |
+| 0.127 (pooled, 10/79) | 4.40 % | 1.66 % | 0.65 % | 0.26 % |
+| 0.136 (ticket 60's earlier pooled, 8/59) | 5.02 % | 2.01 % | 0.84 % | 0.36 % |
+
+n stays 5, the Linux-derived value. These numbers do not change it. The 8/59 estimate is still the least favourable Linux one and needs n ≥ 5. Round 8 Q1 condition 3 picks the final n from both legs.
+
+**Windows, ≥ 20 runs: pending CI.** This host has no Windows. The orchestrator gets the distribution from one CI run with the marker committed on `staging/02` (ticket 60 Comments give the exact switch). The result goes here, with p_win computed twice: from the runs alone, and pooled with runs 3, 4 and 5 counted as RED, RED, GREEN.
+
 ### Windows reference run, Bun 1.4.2 (ticket 02)
 
 Run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42265988296 (`pull/14` merge of staging/02 82de0da, 2026-11-06). This is the first clean windows run (Round 7 Q2 condition 1). Run 3 (42252896054) corroborates it.
