@@ -31,3 +31,5 @@ ADR: 0001, 0005
 Spec stories: 95, 97, 111, 115
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 42): the harness-prompt part of audit finding A-22 and moving prompts to stderr remain here (ticket 42 kept prompts on stdout).

@@ -33,3 +33,5 @@ ADR: 0001
 Spec stories: 95, 103, 104, 110
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 42): the help text names the saved Account Rotator choice (generated/account-rotator.json) and `setup --reask`.
