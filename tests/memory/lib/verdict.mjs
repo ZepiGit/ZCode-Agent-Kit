@@ -20,7 +20,8 @@
 
 const MB = 1024;
 // The kit's own footprint: everything but the test fixtures around it.
-const NOT_KIT = new Set(["mock-upstream", "scenario", "fake-harness"]);
+// "tooling": the loop's own netstat/PowerShell on Windows (lib/win-sampler.mjs).
+const NOT_KIT = new Set(["mock-upstream", "scenario", "fake-harness", "tooling"]);
 const inRole = (p, role) => role === "*" || (role === "kit" ? !NOT_KIT.has(p.role) : p.role === role);
 
 function median(values) {
@@ -217,17 +218,46 @@ export function rowsForMetric(rows, metric) {
   }));
 }
 
+// Round 7 Q1: the roles whose per-process peak and steady budgets are judged
+// on working set on Windows (their §9 numbers are RSS numbers). Everything else
+// (the S3 total, growth, solver and S2 checks) stays on commit there.
+export const WS_GATED_ROLES = new Set(["proxy", "launcher", "mcp-bridge", "preflight"]);
+
+/** "ws" or "commit": which Windows metric gates a check. */
+export function windowsGate(name) {
+  const m = /^(procPeak|steady):(.+)$/.exec(name);
+  return m && WS_GATED_ROLES.has(m[2]) ? "ws" : "commit";
+}
+
 /**
- * The verdict on the OS's metric (spec §1): RSS on Linux, commit on Windows
- * (any sample carrying commit_kb). On commit the working-set verdict is
- * computed too, so a run RED only on commit is visible (build-time gate 3:
- * it goes to the owner, never adjusted silently). Precomputed `extra` checks
- * are the scenario's own and identical in both.
+ * The verdict on the OS's metrics (spec §1, amended by Round 7 Q1). Linux
+ * (no commit_kb): RSS, unchanged. Windows: the per-process peak and steady
+ * budgets of WS_GATED_ROLES on working set (max of sampled WS and
+ * PeakWorkingSetSize), every other memory check on commit, each memory check
+ * carrying `commitValue`, `wsValue` and `gate`. `budgets.commitBackstop`
+ * ({ role, maxMB }, paced runs) adds a commit ceiling per sample (ADR-0008's
+ * 512 MB soft limit) on Windows only. `workingSet` is the all-WS verdict and
+ * `redOnlyOnCommit` flags a run RED that would be GREEN on working set alone.
  */
 export function osVerdict(rows, budgets, opts = {}) {
   const commit = rows.some((r) => r.procs.some((p) => p.commitKb !== null && p.commitKb !== undefined));
   if (!commit) return { ...verdict(rowsForMetric(rows, "rss"), budgets, opts), metric: "rss", workingSet: null, redOnlyOnCommit: false };
-  const v = verdict(rowsForMetric(rows, "commit"), budgets, opts);
-  const ws = verdict(rowsForMetric(rows, "rss"), budgets, opts);
-  return { ...v, metric: "commit", workingSet: { red: ws.red, redChecks: ws.checks.filter((c) => c.red).map((c) => c.name) }, redOnlyOnCommit: v.red && !ws.red };
+  const vc = verdict(rowsForMetric(rows, "commit"), budgets, opts);
+  const vw = verdict(rowsForMetric(rows, "rss"), budgets, opts);
+  const rowMemoryNames = new Set((budgets.windowPeaks ?? []).map((w) => w.name));
+  const checks = vc.checks.map((c, i) => {
+    const w = vw.checks[i];
+    if (!(/^(growth|peak|procPeak|steady):/.test(c.name) || rowMemoryNames.has(c.name))) return c; // counts, orphans, observed, extra: metric-free
+    const gate = windowsGate(c.name);
+    return { ...(gate === "ws" ? w : c), gate, commitValue: c.value, wsValue: w.value };
+  });
+  if (budgets.commitBackstop) {
+    const { role, maxMB } = budgets.commitBackstop;
+    let peak = 0;
+    for (const r of rows) for (const p of r.procs) if (p.role === role && typeof p.commitKb === "number") peak = Math.max(peak, p.commitKb / 1024);
+    const value = Number(peak.toFixed(1));
+    checks.push({ name: `commit-backstop:${role}`, red: value > maxMB, value, budget: maxMB, unit: "MB commit (per sample, ADR-0008 soft limit)", gate: "commit" });
+  }
+  const red = checks.some((c) => c.red);
+  return { ...vc, checks, red, metric: "commit", workingSet: { red: vw.red, redChecks: vw.checks.filter((c) => c.red).map((c) => c.name) }, redOnlyOnCommit: red && !vw.red };
 }

@@ -129,7 +129,7 @@ async function main() {
   const summary = { id, key, scenario: args.scenario, profile: args.profile, variant: args.variant, platform: process.platform, node: process.version, outcome: v.red ? "RED" : "GREEN", metric: v.metric, ...(v.workingSet ? { workingSet: v.workingSet, redOnlyOnCommit: v.redOnlyOnCommit } : {}), durationS: Math.round((Date.now() - t0) / 1000), red: v.red, checks: v.checks, summary: v.summary, budgets: result.budgets, orphans: orphans.map((o) => ({ pid: o.pid, role: o.role, cmd: o.cmd })), observations, notes, samples: rows.length, csv: join(outDir, "samples.csv") };
   writeFileSync(join(outDir, "summary.json"), JSON.stringify(summary, null, 2));
   console.log(`\n== memory loop ${key} (${id}): ${v.red ? "RED" : "GREEN"} ==`);
-  for (const c of v.checks) console.log(`${c.red ? "RED  " : "ok   "} ${c.name.padEnd(28)} ${String(c.value).padStart(10)} ${c.unit ?? ""} (budget ${c.budget})${c.trend !== undefined ? ` trend=${c.trend}` : ""}`);
+  for (const c of v.checks) console.log(`${c.red ? "RED  " : "ok   "} ${c.name.padEnd(28)} ${String(c.value).padStart(10)} ${c.unit ?? ""} (budget ${c.budget})${c.trend !== undefined ? ` trend=${c.trend}` : ""}${c.commitValue !== undefined ? `  [commit ${c.commitValue} / WS ${c.wsValue}, gate ${c.gate === "ws" ? "WS" : "commit"}]` : ""}`);
   for (const [role, s] of Object.entries(v.summary)) console.log(`  role ${role.padEnd(14)} peak ${String(s.peakMB).padStart(8)} MB  max/proc ${String(s.peakProcMB).padStart(8)} MB  hwm ${String(s.peakHwmMB).padStart(8)} MB  procs ${s.maxCount} (distinct ${s.distinctPids})  fds ${s.maxFds}  threads ${s.maxThreads}${s.peakHeapMB !== null ? `  heap ${s.peakHeapMB} MB` : ""}`);
   if (v.redOnlyOnCommit) console.log(`  RED only on commit (working set within budget): raised to the owner (build-time gate 3)`);
   console.log(`  summary: ${join(outDir, "summary.json")}`);
@@ -137,4 +137,10 @@ async function main() {
   return v.red ? 1 : 0;
 }
 
-main().then((code) => { process.exitCode = code; }, (err) => { console.error(err); process.exitCode = 2; });
+// Until main() settles the run is a harness failure: if the event loop
+// empties first (nothing left to wait on, CI run 42221794531), Node exits with
+// this code instead of 0.
+process.exitCode = 2;
+let settled = false;
+process.on("beforeExit", () => { if (!settled) console.error("memory loop: the event loop emptied before the scenario finished — harness failure"); });
+main().then((code) => { settled = true; process.exitCode = code; }, (err) => { settled = true; console.error(err); process.exitCode = 2; });

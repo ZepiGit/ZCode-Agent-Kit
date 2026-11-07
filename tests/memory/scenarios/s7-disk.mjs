@@ -10,7 +10,7 @@
 import { appendFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
-import { MEMORY, PROCESSES } from "../lib/budgets.mjs";
+import { MEMORY, PROCESSES, PROXY_COMMIT_BACKSTOP } from "../lib/budgets.mjs";
 
 export async function run(ctx) {
   const session = await startProxySession(ctx);
@@ -64,6 +64,7 @@ export async function run(ctx) {
   return {
     budgets: {
       procPeaks: { proxy: MEMORY.S1.peakMB },
+      commitBackstop: PROXY_COMMIT_BACKSTOP, // paced (Round 7 Q1)
       orphans: PROCESSES.orphans,
       extra: [
         { name: "proxy.log:bounded-while-running", red: whileRunning > MEMORY.S7.proxyLogMB * MiB, value: Number((whileRunning / MiB).toFixed(2)), budget: MEMORY.S7.proxyLogMB, unit: "MB" },

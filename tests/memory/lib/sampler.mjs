@@ -74,17 +74,22 @@ function snapshot(pid, marker, cache) {
   const starttime = fields[19];
   const key = `${pid}:${starttime}`;
   let meta = cache.get(key);
-  if (meta === undefined) {
+  if (meta === null) return null;
+  // pid and start time survive an exec, the command line does not: a child
+  // first seen between fork and exec shows its parent's argv (a proxy spawned
+  // by a start lock holder killed inside spawn() was role "preflight" for a
+  // whole S3/hung run). A marked process is re-read whenever its command line changed.
+  const cmdline = readText(`/proc/${pid}/cmdline`) ?? "";
+  if (meta === undefined || meta.cmdline !== cmdline) {
     const environ = readText(`/proc/${pid}/environ`);
     if (environ === null || !environ.split("\0").includes(marker)) {
       cache.set(key, null);
       return null;
     }
-    const argv = (readText(`/proc/${pid}/cmdline`) ?? "").split("\0").filter(Boolean);
-    meta = { argv, role: roleOf(argv), comm: stat.slice(stat.indexOf("(") + 1, close) };
+    const argv = cmdline.split("\0").filter(Boolean);
+    meta = { cmdline, argv, role: roleOf(argv), comm: stat.slice(stat.indexOf("(") + 1, close) };
     cache.set(key, meta);
   }
-  if (meta === null) return null;
   const status = readText(`/proc/${pid}/status`) ?? "";
   const kb = (name) => Number((status.match(new RegExp(`^${name}:\\s+(\\d+)`, "m")) ?? [])[1] ?? 0);
   let fds = 0;
@@ -183,8 +188,9 @@ export function externalConnections(pid) {
   return connectionsOf(pid).filter((c) => c.state !== "0A" && !/^(?:127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0):/.test(c.remote));
 }
 
-// commit_kb is additive (appended): commit charge on Windows (ticket 02), empty on Linux.
-const HEADER = "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb\n";
+// commit_kb (ticket 02) and ws_peak_kb (Round 7 Q1) are additive (appended):
+// commit charge and PeakWorkingSetSize on Windows, empty on Linux.
+const HEADER = "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb\n";
 
 /** One CSV line → fields (the cmd column is double-quoted and may hold commas). */
 function splitCsvLine(line) {
@@ -204,12 +210,12 @@ function splitCsvLine(line) {
   return out;
 }
 
-/** samples.csv text → [{ t, pid, ppid, role, rssKb, hwmKb, threads, fds, heapMB, progress, cmd, commitKb }]. Reads files without commit_kb too. */
+/** samples.csv text → [{ t, pid, ppid, role, rssKb, hwmKb, threads, fds, heapMB, progress, cmd, commitKb, wsPeakKb }]. Reads files without commit_kb / ws_peak_kb too. */
 export function parseSamplesCsv(text) {
   const num = (v) => (v === undefined || v === "" ? null : Number(v));
   return text.split(/\r?\n/).slice(1).filter(Boolean).map((line) => {
-    const [t, pid, ppid, role, rss, hwm, threads, fds, heap, progress, cmd, commit] = splitCsvLine(line);
-    return { t: Number(t), pid: Number(pid), ppid: Number(ppid), role, rssKb: Number(rss), hwmKb: Number(hwm), threads: Number(threads), fds: Number(fds), heapMB: num(heap), progress: Number(progress), cmd, commitKb: num(commit) };
+    const [t, pid, ppid, role, rss, hwm, threads, fds, heap, progress, cmd, commit, wsPeak] = splitCsvLine(line);
+    return { t: Number(t), pid: Number(pid), ppid: Number(ppid), role, rssKb: Number(rss), hwmKb: Number(hwm), threads: Number(threads), fds: Number(fds), heapMB: num(heap), progress: Number(progress), cmd, commitKb: num(commit), wsPeakKb: num(wsPeak) };
   });
 }
 
@@ -218,7 +224,7 @@ export function rowsFromSamples(samples) {
   const byT = new Map();
   for (const s of samples) {
     if (!byT.has(s.t)) byT.set(s.t, { t: s.t, progress: s.progress, procs: [] });
-    byT.get(s.t).procs.push({ pid: s.pid, ppid: s.ppid, key: String(s.pid), role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: s.heapMB, commitKb: s.commitKb });
+    byT.get(s.t).procs.push({ pid: s.pid, ppid: s.ppid, key: String(s.pid), role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: s.heapMB, commitKb: s.commitKb, ...(s.wsPeakKb !== null ? { wsPeakKb: s.wsPeakKb } : {}) });
   }
   return [...byT.values()];
 }
@@ -260,7 +266,7 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
       let csv = "";
       for (const s of snaps) {
         const h = heap[s.pid];
-        csv += `${t},${s.pid},${s.ppid},${s.role},${s.rssKb},${s.hwmKb},${s.threads},${s.fds},${h ?? ""},${p},"${s.cmd.replace(/"/g, "'")}",${s.commitKb ?? ""}\n`;
+        csv += `${t},${s.pid},${s.ppid},${s.role},${s.rssKb},${s.hwmKb},${s.threads},${s.fds},${h ?? ""},${p},"${s.cmd.replace(/"/g, "'")}",${s.commitKb ?? ""},${s.wsPeakKb ?? ""}\n`;
       }
       if (csv) appendFileSync(csvPath, csv);
       rows.push({ t, progress: p, procs: snaps.map((s) => ({ pid: s.pid, ppid: s.ppid, key: s.key, role: s.role, rssKb: s.rssKb, hwmKb: s.hwmKb, threads: s.threads, fds: s.fds, heapMB: heap[s.pid] ?? null, commitKb: s.commitKb ?? null, ...(s.wsPeakKb !== undefined ? { wsPeakKb: s.wsPeakKb } : {}) })) });
@@ -321,7 +327,8 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
 /** Pids still alive with the marker (orphans after stop, excluding `exceptPids`). */
 export function survivors(marker, exceptPids = []) {
   const except = new Set(exceptPids);
-  return scan(marker).filter((s) => !except.has(s.pid));
+  // Windows: the loop's own netstat/PowerShell (role "tooling") is not a kit orphan.
+  return scan(marker).filter((s) => !except.has(s.pid) && s.role !== "tooling");
 }
 
 export { PAGE_KB };

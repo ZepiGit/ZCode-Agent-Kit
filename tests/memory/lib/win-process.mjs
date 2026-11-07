@@ -23,11 +23,11 @@ public static class MemloopSuspend {
 /** The PowerShell 5.1 script that suspends or resumes one pid; prints the NTSTATUS. */
 export function suspendScript(pid, suspend) {
   if (!Number.isInteger(pid) || pid <= 0) throw new Error(`not a pid: ${pid}`);
-  return `$ErrorActionPreference = 'Stop'\nAdd-Type -TypeDefinition @'\n${CS}\n'@\n[Console]::Out.Write([MemloopSuspend]::Run(${pid}, $${suspend ? "true" : "false"}))`;
+  return `$ProgressPreference = 'SilentlyContinue'\n$ErrorActionPreference = 'Stop'\nAdd-Type -TypeDefinition @'\n${CS}\n'@\n[Console]::Out.Write([MemloopSuspend]::Run(${pid}, $${suspend ? "true" : "false"}))`;
 }
 
 function run(pid, suspend) {
-  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(suspendScript(pid, suspend), "utf16le").toString("base64")], { encoding: "utf8", timeout: 60_000, windowsHide: true });
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(suspendScript(pid, suspend), "utf16le").toString("base64")], { encoding: "utf8", timeout: 60_000, windowsHide: true });
   const status = (r.stdout ?? "").trim();
   if (r.status !== 0 || status !== "0") throw new Error(`${suspend ? "suspend" : "resume"} ${pid} failed: status ${status || r.status} ${(r.stderr ?? "").trim().slice(0, 200)}`);
 }
