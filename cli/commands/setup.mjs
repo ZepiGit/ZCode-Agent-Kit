@@ -21,6 +21,7 @@ import { acquireLock, beginTransaction, releaseLock } from "../../lib/transactio
 import { detectHarnesses } from "../../lib/detect.mjs";
 import { ensureState } from "../../lib/state.mjs";
 import { commitFile } from "../../lib/edit.mjs";
+import { withLineEndingsOf } from "../../lib/line-endings.mjs";
 import { bootstrap } from "../context.mjs";
 import { decideAccountRotator, restartForAccountChange, rotatorChoice } from "../account-setup.mjs";
 import { setupOutput } from "../setup-output.mjs";
@@ -323,7 +324,8 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
     const entry = { type: "stdio", command: "node", args: [serverJs, "--stdio"] };
     if (existsSync(ompMcp)) {
       try {
-        const j = JSON.parse(readFileSync(ompMcp, "utf8"));
+        const text = readFileSync(ompMcp, "utf8");
+        const j = JSON.parse(text);
         const current = j.mcpServers?.["zcode-harness"];
         // F-09: an entry pointing at ANOTHER kit copy is not "ours" — replace
         // only when it is absent or already points at this installation.
@@ -331,7 +333,7 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
         if (!current || (ours && JSON.stringify(current) !== JSON.stringify(entry))) {
           j.mcpServers = j.mcpServers ?? {};
           j.mcpServers["zcode-harness"] = entry;
-          commitFile(ctx, tx, ompMcp, JSON.stringify(j, null, 2) + "\n");
+          commitFile(ctx, tx, ompMcp, withLineEndingsOf(text, JSON.stringify(j, null, 2) + "\n"));
           log("  omp: mcp.json updated (zcode-harness → stdio bridge)");
         } else if (!ours) {
           log(`  WARN: omp mcp.json "zcode-harness" points at another kit copy (${current.args?.[0] ?? "?"}) — left untouched`);

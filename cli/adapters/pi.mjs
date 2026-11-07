@@ -11,7 +11,7 @@
 // `high` request under another name. Unverified capabilities are not claimed.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
+import { parseJsonc, setTopLevelKey, withFinalNewline } from "../../lib/jsonc.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 
 const MANAGED_NOTE = "// zcode provider block managed by zcode-kit — GLM via local proxy";
@@ -100,7 +100,7 @@ export default {
     const rendered = existed
       ? setManagedProvider(readFileSync(modelsJson, "utf8"), doc)
       : `${MANAGED_NOTE}\n${JSON.stringify(doc, null, 2)}\n`;
-    const { wrote } = commitFile(ctx, tx, modelsJson, rendered.endsWith("\n") ? rendered : rendered + "\n");
+    const { wrote } = commitFile(ctx, tx, modelsJson, withFinalNewline(rendered));
     if (wrote) log("  pi: models.json updated (zcode provider, anthropic-messages via local proxy)");
     return { changed: wrote };
   },
