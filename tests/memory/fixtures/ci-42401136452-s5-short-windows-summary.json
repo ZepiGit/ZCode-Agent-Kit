@@ -1,0 +1,192 @@
+{
+  "id": "S5-short-2026-11-07T1853-b822d0",
+  "key": "S5/short",
+  "scenario": "S5",
+  "profile": "short",
+  "variant": null,
+  "platform": "win32",
+  "node": "v26.13.0",
+  "outcome": "GREEN",
+  "metric": "commit",
+  "workingSet": {
+    "red": false,
+    "redChecks": []
+  },
+  "redOnlyOnCommit": false,
+  "durationS": 721,
+  "red": false,
+  "checks": [
+    {
+      "name": "growth:mcp-bridge",
+      "red": false,
+      "value": 15.55,
+      "budget": 5,
+      "unit": "%/1k",
+      "trend": false,
+      "detail": {
+        "samples": 703,
+        "warmupSamples": 175,
+        "meanMB": 80.3,
+        "firstPostMB": 74,
+        "lastMB": 76.9,
+        "slopeMBPer1k": 12.5,
+        "growthPctPer1k": 15.55,
+        "slopeMBPerMin": 0.42,
+        "windowMediansMB": [
+          77.3,
+          79.1,
+          80.6,
+          80.5,
+          82.6,
+          77.4
+        ],
+        "risingWindows": 0,
+        "netRisePct": 0.1,
+        "heapSlopeMBPer1k": null,
+        "axis": "progress"
+      },
+      "gate": "commit",
+      "commitValue": 15.55,
+      "wsValue": 26.39
+    },
+    {
+      "name": "procPeak:mcp-bridge",
+      "red": false,
+      "value": 74.5,
+      "budget": 150,
+      "unit": "MB",
+      "gate": "ws",
+      "commitValue": 90.5,
+      "wsValue": 74.5
+    },
+    {
+      "name": "orphans",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "procs",
+      "detail": []
+    },
+    {
+      "name": "bridge:reboot-cost-of-history",
+      "red": false,
+      "value": 3,
+      "budget": 20,
+      "unit": "MB"
+    },
+    {
+      "name": "bridge:task-failures",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "tasks"
+    }
+  ],
+  "summary": {
+    "*": {
+      "peakMB": 110.3,
+      "peakProcMB": 86.3,
+      "peakHwmMB": 90.5,
+      "maxCount": 3,
+      "maxFds": 497,
+      "maxThreads": 34,
+      "distinctPids": 4,
+      "peakHeapMB": null
+    },
+    "kit": {
+      "peakMB": 86.3,
+      "peakProcMB": 86.3,
+      "peakHwmMB": 90.5,
+      "maxCount": 1,
+      "maxFds": 217,
+      "maxThreads": 18,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    },
+    "mcp-bridge": {
+      "peakMB": 86.3,
+      "peakProcMB": 86.3,
+      "peakHwmMB": 90.5,
+      "maxCount": 1,
+      "maxFds": 217,
+      "maxThreads": 18,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    },
+    "fake-harness": {
+      "peakMB": 25.2,
+      "peakProcMB": 23.9,
+      "peakHwmMB": 23.9,
+      "maxCount": 2,
+      "maxFds": 280,
+      "maxThreads": 16,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    }
+  },
+  "budgets": {
+    "growth": {
+      "role": "mcp-bridge",
+      "axis": "progress",
+      "maxPctPer1k": 5,
+      "risingWindows": 3,
+      "netRisePct": 10,
+      "warmupFraction": 0.25,
+      "fromT": 3651,
+      "untilT": 712159
+    },
+    "procPeaks": {
+      "mcp-bridge": 150
+    },
+    "orphans": 0,
+    "extra": [
+      {
+        "name": "bridge:reboot-cost-of-history",
+        "red": false,
+        "value": 3,
+        "budget": 20,
+        "unit": "MB"
+      },
+      {
+        "name": "bridge:task-failures",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "tasks"
+      }
+    ]
+  },
+  "orphans": [],
+  "observations": [],
+  "notes": {
+    "sampler": {
+      "units": {
+        "compared": 133,
+        "commitRatio": 1,
+        "rssRatio": 1,
+        "hwmToCommit": 1.154,
+        "ok": true,
+        "reason": null
+      },
+      "overhead": {
+        "pid": 5284,
+        "polls": 713,
+        "pollMsMedian": 29,
+        "pollMsMax": 61,
+        "peakCommitKb": 124440,
+        "peakRssKb": 141804
+      }
+    },
+    "bridge": {
+      "tasks": 400,
+      "failures": 0,
+      "emptyRssMB": 78,
+      "afterTasksRssMB": 77,
+      "rebootWithHistoryRssMB": 81,
+      "dataDirMB": 1.9,
+      "dataDirFiles": 1200
+    }
+  },
+  "samples": 713,
+  "csv": "D:\\a\\_temp\\memloop\\S5-short\\S5-short-2026-11-07T1853-b822d0\\samples.csv"
+}

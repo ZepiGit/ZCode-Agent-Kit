@@ -21,25 +21,62 @@
 // So the list can only shrink, and a stale or mistyped entry cannot hide a
 // RED run.
 //
-// One entry may instead be `{ "ticket": "20", "state": "unstable" }` (Round 9
-// Q1): windows S1/burst1, whose WS-gated median sits on its 250 MB budget
-// (p ≈ 0.54, 24 fresh runs). UNSTABLE below is the allow-list of exactly that
-// key; any other key carrying the state is a schema error. An unstable run
-// passes with its median ≤ 250 (GREEN) or ≤ maxMedianMB (RED on the median
-// only) and prints "<key>: unstable (median <x> MB, budget <b>), owned by
-// ticket <t>"; a median above maxMedianMB fails, and the listed-repeated rule
-// above holds on top. The entry leaves only through ticket 20's ≥ 20-run
-// criterion; ticket 55 removes this allow-list.
+// An entry may instead be `{ "ticket": "<NN>", "state": "unstable" }`, only for
+// a key in UNSTABLE below (any other key carrying the state is a schema
+// error). Each key there has its own bound kind, and the kind must fit the key:
+//   - { maxMedianMB } (a repeated key; Round 9 Q1): windows S1/burst1, whose
+//     WS-gated median sits on its 250 MB budget (p ≈ 0.54, 24 fresh runs). It
+//     passes with its median ≤ 250 (GREEN) or ≤ maxMedianMB (RED on the median
+//     only) and prints "<key>: unstable (median <x> MB, budget <b>), owned by
+//     ticket <t>"; a median above maxMedianMB fails, and the listed-repeated
+//     rule above holds on top. It leaves only through ticket 20's ≥ 20-run
+//     criterion.
+//   - { growthBand: { check, budget, max } } (a single run; Round 13 Q1):
+//     windows S5/short, whose growth:mcp-bridge is over its 5 %/1k budget in
+//     28 of 28 runs and RED only when the trend flag fires (1 of 28). It is
+//     judged on the check's commit value, not on RED/GREEN: budget < value ≤
+//     max passes with either trend flag and prints "<key>: unstable (<check>
+//     <x> %/1k commit, budget <b>, bound <max>, trend <t>), owned by ticket
+//     <t>"; above max fails (a step change); ≤ budget fails as "at budget but
+//     listed" (an entry is RED until its owner's fix); any other RED check
+//     fails; no commit value (insufficient samples, no check) is a measurement
+//     gap and fails. It leaves only through ticket 30's ≥ 10-run criterion.
+// Ticket 55 removes this allow-list.
 
 import { readdirSync, readFileSync } from "node:fs";
 import { CATALOGUE, JOB, OS_LEGS, parseRunKey } from "./catalogue.mjs";
-import { REPEATED } from "./budgets.mjs";
+import { MEMORY, REPEATED } from "./budgets.mjs";
 import { repetitionRule } from "./repetitions.mjs";
 
 const OUTCOME = { 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" };
 
-/** The one place the `unstable` state is allowed (Round 9 Q1 condition 3), with its median bound (condition 2). */
-export const UNSTABLE = { windows: { "S1/burst1": { maxMedianMB: 300 } } };
+/**
+ * The one place the `unstable` state is allowed (Round 9 Q1 condition 3, Round
+ * 13 Q1 condition 3), each key with its own bound: S1/burst1 a median bound
+ * (Round 9 Q1 condition 2), S5/short a growth-value band on commit whose floor
+ * is the growth budget and whose 30 %/1k ceiling is a regression bound, not a
+ * budget (Round 13 Q1 condition 2).
+ */
+export const UNSTABLE = {
+  windows: {
+    "S1/burst1": { maxMedianMB: 300 },
+    "S5/short": { growthBand: { check: "growth:mcp-bridge", budget: MEMORY.growth.maxPctPer1k, max: 30 } },
+  },
+};
+
+const isNum = (x) => typeof x === "number" && Number.isFinite(x);
+
+/** Why an allow-list bound does not fit its key (Round 13 Q1 condition 3), or null. */
+function boundKindError(key, bound, repeated) {
+  const kinds = bound && typeof bound === "object" ? Object.keys(bound).sort().join() : "";
+  const isRepeated = !!repetitionRule(key, repeated);
+  const band = bound?.growthBand;
+  const okMedian = isRepeated && kinds === "maxMedianMB" && isNum(bound.maxMedianMB);
+  const okBand = !isRepeated && kinds === "growthBand" && band && typeof band === "object" && Object.keys(band).sort().join() === "budget,check,max"
+    && typeof band.check === "string" && band.check.startsWith("growth:") && isNum(band.budget) && isNum(band.max) && band.max > band.budget;
+  if (okMedian || okBand) return null;
+  return `the \`unstable\` allow-list gives it ${JSON.stringify(bound)}${isRepeated ? " (a repeated key)" : " (a single run)"}; a repeated key takes { maxMedianMB }, a single run { growthBand: { check, budget, max } } (Round 13 Q1 condition 3)`;
+}
 
 /** An entry value → { ticket, state } ("red" for a plain ticket id), or { error }. */
 function entryOf(value) {
@@ -61,7 +98,13 @@ export function validateExpectedRed(expected, { job = JOB, issueIds, catalogue =
       else if (!(job[os] ?? []).includes(key)) errors.push(`${os} ${key}: not run by the ${os} job, so its state can never be checked`);
       const entry = entryOf(value);
       if (entry.error) { errors.push(`${os} ${key}: ${entry.error}`); continue; }
-      if (entry.state === "unstable" && !(Object.hasOwn(unstable[os] ?? {}, key) && repetitionRule(key, repeated))) errors.push(`${os} ${key}: \`unstable\` is allowed for ${Object.entries(unstable).flatMap(([o, keys]) => Object.keys(keys).map((k) => `${o} ${k}`)).join(", ")} only (Round 9 Q1 condition 3)`);
+      if (entry.state === "unstable") {
+        if (!Object.hasOwn(unstable[os] ?? {}, key)) errors.push(`${os} ${key}: \`unstable\` is allowed for ${Object.entries(unstable).flatMap(([o, keys]) => Object.keys(keys).map((k) => `${o} ${k}`)).join(", ")} only (Round 9 Q1 condition 3, Round 13 Q1 condition 3)`);
+        else {
+          const kindError = boundKindError(key, unstable[os][key], repeated);
+          if (kindError) errors.push(`${os} ${key}: ${kindError}`);
+        }
+      }
       const ticket = entry.ticket;
       if (typeof ticket !== "string" || !/^\d{2}$/.test(ticket)) errors.push(`${os} ${key}: ticket id must be a two-digit string, got ${JSON.stringify(ticket)}`);
       else if (!issueIds.has(ticket)) errors.push(`${os} ${key}: ticket ${ticket} has no issue file (.scratch/kit-overhaul/issues/${ticket}-*.md)`);
@@ -73,7 +116,8 @@ export function validateExpectedRed(expected, { job = JOB, issueIds, catalogue =
 /**
  * expected: the parsed expected-red.json; os: "linux" | "windows";
  * results: [{ key, exitCode, redChecks? }] for the runs of this job (0 GREEN, 1 RED, 2 harness failure;
- *   a repeated key's set also carries median: { medianMB, budgetMB, check });
+ *   a repeated key's set also carries median: { medianMB, budgetMB, check }; a single run carries
+ *   growthChecks: [{ name, commitValue, gate, trend, insufficient, samples, … }]);
  * job: { [os]: [run key, …] } the runs each leg performs;
  * issueIds: Set of ticket ids that have an issue file.
  * Returns { ok, failures: string[], rows: [{ key, outcome, ticket }] }.
@@ -104,6 +148,23 @@ export function checkRatchet({ expected, os, results, job = JOB, issueIds, catal
       const median = `median:${rule.check}`;
       const other = (result.redChecks ?? []).filter((c) => c !== median);
       if (other.length || !(result.redChecks ?? []).includes(median)) { failures.push(`${key}: RED on ${other.join(", ") || "no median check"}: a listed repeated run accepts only ${median} (${os}, Round 9 Q1 condition 1)`); continue; }
+    }
+    // A bound that does not fit its key is already a schema error: it judges nothing.
+    if (isUnstable && boundKindError(key, unstable[os][key], repeated)) continue;
+    const band = isUnstable ? unstable[os][key].growthBand : undefined;
+    if (band && (outcome === "RED" || outcome === "GREEN")) {
+      // Round 13 Q1 condition 1: judged on the check's commit value, either trend flag.
+      const red = result.redChecks ?? [];
+      const other = red.filter((c) => c !== band.check);
+      const g = (result.growthChecks ?? []).find((c) => c.name === band.check);
+      const value = g?.commitValue;
+      const gap = !g ? `no ${band.check} check` : g.insufficient ? `insufficient: ${g.samples ?? 0} samples` : g.gate !== "commit" ? `gate ${g.gate ?? "none"}, not commit` : !isNum(value) ? "no value" : null;
+      if (other.length || (outcome === "RED" && !red.includes(band.check))) failures.push(`${key}: RED on ${other.join(", ") || "no red check"}: the unstable entry accepts only ${band.check} within its band (${os}, Round 13 Q1 condition 1)`);
+      else if (gap) failures.push(`${key}: unstable entry without a commit value of ${band.check} (${gap}): a measurement gap (${os}, Round 13 Q1 condition 1, Round 6 Q2 condition 2)`);
+      else if (value > band.max) failures.push(`${key}: unstable ${band.check} ${value} %/1k (commit) is above the ${band.max} %/1k bound (${os}, Round 13 Q1 condition 1)`);
+      else if (value <= band.budget) failures.push(`${key}: ${band.check} ${value} %/1k (commit) is at budget (≤ ${band.budget}) but listed for ticket ${ticket}: the ownership comes back as a question (${os}, Round 13 Q1 condition 1)`);
+      else row.note = `${key}: unstable (${band.check} ${value} %/1k commit, budget ${band.budget}, bound ${band.max}, trend ${g.trend === true}), owned by ticket ${ticket}`;
+      continue;
     }
     if (isUnstable && (outcome === "RED" || outcome === "GREEN")) {
       // Round 9 Q1 condition 2: GREEN or RED on the median alone, within the bound.
