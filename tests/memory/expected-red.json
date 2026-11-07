@@ -13,7 +13,7 @@
     "S7/short": "34"
   },
   "windows": {
-    "S1/burst1": "20",
+    "S1/burst1": { "ticket": "20", "state": "unstable" },
     "S1/burst4": "19",
     "S1/burst16": "19",
     "S1/burst32": "19",

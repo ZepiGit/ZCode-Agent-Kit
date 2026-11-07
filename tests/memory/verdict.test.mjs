@@ -435,6 +435,71 @@ test("ratchet: a repeated key's harness failure or ceiling breach fails listed o
   }
 });
 
+// ── The `unstable` entry: windows S1/burst1 only (Round 9 Q1 conditions 2–3) ──
+// A median ≤ 300 MB passes (≤ 250 GREEN or 250–300 RED) with the line
+// "S1/burst1: unstable (median <x> MB, budget 250), owned by ticket 20"; above
+// 300 fails; condition 1 holds on top. Any other key carrying it is a schema error.
+const UNSTABLE_ENTRY = { ticket: "20", state: "unstable" };
+const unstableDoc = { windows: { "S1/burst1": UNSTABLE_ENTRY } };
+const wsFive = (...ws) => ws.map((x) => winRep({ commit: 410, ws: x }));
+
+test("unstable: a median of 251 and a median of 230 both pass, each with its unstable line", () => {
+  for (const [peaks, medianMB] of [[[255, 251, 240, 262, 230], 251], [[230, 220, 240, 235, 225], 230]]) {
+    const r = judgeBurst(unstableDoc, setResult("S1/burst1", wsFive(...peaks)));
+    assert.deepEqual(r.failures, [], String(medianMB));
+    const row = r.rows.find((x) => x.key === "S1/burst1");
+    assert.equal(row.state, "unstable");
+    assert.equal(row.note, `S1/burst1: unstable (median ${medianMB} MB, budget 250), owned by ticket 20`);
+  }
+});
+
+test("unstable: a median above 300 MB fails", () => {
+  const r = judgeBurst(unstableDoc, setResult("S1/burst1", wsFive(301, 305, 290, 310, 280)));
+  assert.equal(r.ok, false);
+  assert.match(r.failures.join("\n"), /S1\/burst1: unstable median 301 MB is above the 300 MB bound/);
+  assert.equal(judgeBurst(unstableDoc, setResult("S1/burst1", wsFive(300, 305, 290, 310, 280))).ok, true, "300 itself is within the bound");
+});
+
+test("unstable: one repetition at 401 with a median of 240, an orphan, or count:proxy 2 fails (condition 1 holds on top)", () => {
+  const cases = {
+    "ceiling:procPeak:proxy": setResult("S1/burst1", [winRep({ commit: 520, ws: 300, wsPeak: 401 }), ...wsFive(240, 231, 245, 236)]),
+    orphans: setResult("S1/burst1", fiveOf(255, withOrphan(255), 262, 251, 230)),
+    "count:proxy": setResult("S1/burst1", fiveOf(240, twoProxies(240), 231, 245, 236)),
+  };
+  for (const [check, result] of Object.entries(cases)) {
+    const r = judgeBurst(unstableDoc, result);
+    assert.equal(r.ok, false, check);
+    assert.match(r.failures.join("\n"), new RegExp(`S1/burst1: RED on .*${check}`), check);
+    assert.equal(r.rows.find((x) => x.key === "S1/burst1").note, undefined, `${check}: no unstable pass line`);
+  }
+});
+
+test("unstable is rejected on any other key and on linux S1/burst1; a plain listed GREEN still fails", () => {
+  const ok = { ...unstableDoc };
+  assert.deepEqual(validateExpectedRed(ok, { job: burstJob, issueIds: burstIds }), []);
+  for (const [doc, pattern] of [
+    [{ linux: { "S1/burst1": UNSTABLE_ENTRY } }, /linux S1\/burst1: `unstable` is allowed for windows S1\/burst1 only/],
+    [{ windows: { "S1/short": UNSTABLE_ENTRY } }, /windows S1\/short: `unstable` is allowed for windows S1\/burst1 only/],
+    [{ windows: { "S1/burst1": { ticket: "20", state: "flaky" } } }, /windows S1\/burst1: an entry is a ticket id or \{ "ticket", "state": "unstable" \}/],
+    [{ windows: { "S1/burst1": { ticket: "20", state: "unstable", maxMedianMB: 400 } } }, /windows S1\/burst1: an entry is a ticket id or/],
+    [{ windows: { "S1/burst1": { ticket: "99", state: "unstable" } } }, /windows S1\/burst1: ticket 99 has no issue file/],
+  ]) {
+    assert.match(validateExpectedRed(doc, { job: burstJob, issueIds: burstIds }).join("\n"), pattern, JSON.stringify(doc));
+    assert.equal(judgeBurst(doc, setResult("S1/burst1", wsFive(255, 251, 240, 262, 230)), Object.keys(doc)[0]).ok, false, JSON.stringify(doc));
+  }
+  // The plain entry keeps its meaning: GREEN while listed is a failure.
+  assert.match(judgeBurst({ windows: { "S1/burst1": "20" } }, setResult("S1/burst1", wsFive(230, 220, 240, 235, 225))).failures.join("\n"), /GREEN but listed for ticket 20/);
+});
+
+test("the committed list marks windows S1/burst1 unstable for ticket 20, its only non-plain entry; linux does not list it", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const expected = readExpectedRed(join(here, "expected-red.json"));
+  assert.deepEqual(expected.windows["S1/burst1"], { ticket: "20", state: "unstable" });
+  assert.equal(Object.hasOwn(expected.linux, "S1/burst1"), false);
+  const objects = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => typeof v !== "string").map(([k]) => `${os} ${k}`));
+  assert.deepEqual(objects, ["windows S1/burst1"]);
+});
+
 // The S1/burst1 proxy peaks (VmHWM, MB) measured for ticket 60: 48 fresh,
 // sequential runs on the integration tip 97c2211 (Linux, Bun 1.4.2; METRICS.md).
 const BURST1_TIP = [

@@ -116,9 +116,12 @@ function markdown({ os, cap, ratchet, results, partial }) {
   const lines = [`## memory-budget (${os}, short profile): ${ratchet.ok ? "ratchet holds" : "ratchet FAILED"}`, "", `cap: ${cap} · node ${process.version}${partial ? " · partial run (--only)" : ""}`, "", "| run | outcome | expected-RED | red checks | s | samples | roles seen |", "|---|---|---|---|---|---|---|"];
   for (const row of ratchet.rows) {
     const r = results.find((x) => x.key === row.key);
-    lines.push(`| ${row.key} | ${row.outcome}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} | ${r?.samples ?? "—"} | ${Object.entries(r?.rolesSeen ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "—"} |`);
+    lines.push(`| ${row.key} | ${row.outcome}${row.state === "unstable" ? " (unstable)" : ""}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} | ${r?.samples ?? "—"} | ${Object.entries(r?.rolesSeen ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "—"} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
+  // Round 9 Q1 condition 2: every passing run of the unstable entry says so.
+  const notes = ratchet.rows.filter((row) => row.note);
+  if (notes.length) lines.push("", "Unstable entries (Round 9 Q1; the only exit is the owner's ≥ 20-run measurement):", ...notes.map((row) => `- ${row.note}`));
   const repeated = results.filter((r) => r.median);
   if (repeated.length) {
     lines.push("", "Judged on the median of n fresh repetitions (one verdict per run key; every repetition must also stay within the per-run ceiling; Windows: the WS gate, commit reported):", "", "| run | n | gate | repetitions (MB) | median | budget | ceiling | over ceiling | commit per repetition (MB) |", "|---|---|---|---|---|---|---|---|---|");
