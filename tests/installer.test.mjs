@@ -35,7 +35,7 @@ esac`);
       // and the installer control flow execute for real, entirely under tmp.
       script("tar", `mkdir -p "$4/kit/cli"
 printf 'fixture cli\\n' > "$4/kit/cli/zcode-kit.mjs"`);
-      script("node", `if [ "$1" = "--version" ]; then printf 'v20.19.0\\n'; else
+      script("node", `if [ "$1" = "--version" ]; then printf 'v24.0.0\\n'; else
   [ "$1" = "cli/zcode-kit.mjs" ] && [ "$2" = "setup" ] && [ "$3" = "--harness" ] && [ "$4" = "auto" ]
   printf 'setup completed\\n' > setup-ran
 fi`);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync,
+  chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,7 +64,7 @@ for (const targetKind of ["foreign", "checkout"]) {
         writeFileSync(join(install, "package.json"), JSON.stringify({ name: "zcode-agent-kit" }));
       }
       executable(join(bin, "curl"), `printf 'called\\n' >> "$AUDIT_LOG"; exit 90`);
-      executable(join(bin, "node"), `if [ "\${1}" = --version ]; then printf 'v20.19.0\\n'; else exit 0; fi`);
+      executable(join(bin, "node"), `if [ "\${1}" = --version ]; then printf 'v24.0.0\\n'; else exit 0; fi`);
       executable(join(bin, "uname"), `if [ "\${1:-}" = -m ]; then printf 'arm64\\n'; else printf 'Darwin\\n'; fi`);
       executable(join(bin, "bun"), "exit 0");
 
@@ -90,7 +90,7 @@ test("install.sh validates an explicit version before downloading", () => {
   try {
     for (const dir of [bin, home, temp]) mkdirSync(dir, { recursive: true });
     executable(join(bin, "curl"), `printf 'called\\n' >> "$AUDIT_LOG"; exit 90`);
-    executable(join(bin, "node"), `printf 'v20.19.0\\n'`);
+    executable(join(bin, "node"), `printf 'v24.0.0\\n'`);
     executable(join(bin, "uname"), `printf 'Darwin\\n'`);
     executable(join(bin, "bun"), "exit 0");
     const result = runSh({ bin, home, install, temp, log, version: "1.2.3" });
@@ -101,6 +101,80 @@ test("install.sh validates an explicit version before downloading", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * Every entry under `dir` with its type, mode, mtime and (files) content hash:
+ * two equal snapshots mean nothing was created, removed, rewritten or touched.
+ */
+function snapshotTree(dir) {
+  const self = lstatSync(dir);
+  const out = [`. dir ${self.mode.toString(8)} ${self.mtimeMs}`];
+  const walk = (abs, rel) => {
+    for (const name of readdirSync(abs).sort()) {
+      const path = join(abs, name);
+      const relPath = rel ? `${rel}/${name}` : name;
+      const st = lstatSync(path);
+      const kind = st.isDirectory() ? "dir" : st.isSymbolicLink() ? "link" : "file";
+      const content = kind === "file" ? createHash("sha256").update(readFileSync(path)).digest("hex") : "";
+      out.push(`${relPath} ${kind} ${st.mode.toString(8)} ${st.mtimeMs} ${content}`);
+      if (kind === "dir") walk(path, relPath);
+    }
+  };
+  walk(dir, "");
+  return out;
+}
+
+// An existing installation as install.sh leaves it: kit files, the state the
+// mirror protects, and the user-scope shim in HOME.
+const EXISTING_INSTALL = {
+  "package.json": '{"name":"zcode-agent-kit","version":"1.2.2"}\n',
+  "cli/zcode-kit.mjs": "// release v1\n",
+  ".bun-path": "/opt/bun/bin/bun\n",
+  ".proxykey": "local-secret-key\n",
+  "proxy/config.yaml": "user: settings\n",
+  "logs/proxy.log": "history\n",
+  "backups/tx-1.json": "{}\n",
+  "generated/harness-choices/omp.json": '{"schema":1}\n',
+};
+
+// ADR-0006: the floor is Node 24. A Node below it is refused before any
+// download, temp directory or file change; the existing installation, its
+// state and HOME stay byte-identical (seam 8, C2).
+for (const found of ["v20.19.0", "v22.23.4", "v23.11.1", "garbage", ""]) {
+  test(`install.sh refuses Node ${JSON.stringify(found)} before any file changes and leaves the existing installation as it was`, () => {
+    const root = mkdtempSync(join(tmpdir(), "zcode-installer-floor-"));
+    const bin = join(root, "bin");
+    const home = join(root, "home");
+    const install = join(root, "target");
+    const temp = join(root, "tmp");
+    const log = join(root, "calls.log");
+    try {
+      for (const dir of [bin, home, temp]) mkdirSync(dir, { recursive: true });
+      for (const [rel, body] of Object.entries(EXISTING_INSTALL)) { mkdirSync(join(install, rel, ".."), { recursive: true }); writeFileSync(join(install, rel), body); }
+      mkdirSync(join(home, ".local", "bin"), { recursive: true });
+      writeFileSync(join(home, ".local", "bin", "zcode-kit"), `#!/usr/bin/env sh\nexec node "${install}/cli/zcode-kit.mjs" "$@"\n`, { mode: 0o755 });
+      for (const tool of ["curl", "unzip", "rsync", "sha256sum", "bun"]) executable(join(bin, tool), `printf '${tool} called\\n' >> "$AUDIT_LOG"; exit 90`);
+      executable(join(bin, "node"), `if [ "\${1:-}" = --version ]; then printf '%s\\n' ${JSON.stringify(found)}; exit 0; fi
+printf 'node %s\\n' "$*" >> "$AUDIT_LOG"; exit 91`);
+      executable(join(bin, "uname"), `if [ "\${1:-}" = -m ]; then printf 'x86_64\\n'; else printf 'Linux\\n'; fi`);
+      const before = { install: snapshotTree(install), home: snapshotTree(home), temp: snapshotTree(temp) };
+
+      const result = runSh({ bin, home, install, temp, log });
+      const text = `${result.stdout}\n${result.stderr}`;
+      assert.equal(result.status, 2, text);
+      assert.equal(existsSync(log), false, `no download, setup or other tool may run:\n${existsSync(log) ? readFileSync(log, "utf8") : ""}`);
+      assert.deepEqual({ install: snapshotTree(install), home: snapshotTree(home), temp: snapshotTree(temp) }, before,
+        "the installation, HOME and TMPDIR are byte-identical (nothing created, removed or touched)");
+      // what / why / next, on stderr, naming the floor and the exact upgrade step.
+      assert.match(result.stderr, /\[ERROR\] Node\.js 24 or newer is required \(found /);
+      if (found.startsWith("v")) assert.ok(result.stderr.includes(`(found ${found})`), result.stderr);
+      assert.match(result.stderr, /why: .*nothing was downloaded, installed or changed/);
+      assert.match(result.stderr, /next: install Node\.js 24 LTS or newer from https:\/\/nodejs\.org\/en\/download \(with nvm: nvm install 24\), then re-run this installer/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test("install.sh bootstraps Bun in its private temp, persists .bun-path, and accepts setup warnings with exit 0", () => {
   const root = mkdtempSync(join(tmpdir(), "zcode-installer-bun-"));
@@ -115,7 +189,7 @@ test("install.sh bootstraps Bun in its private temp, persists .bun-path, and acc
     for (const dir of [bin, home, temp]) mkdirSync(dir, { recursive: true });
     executable(join(bin, "uname"), `if [ "\${1:-}" = -m ]; then printf 'arm64\\n'; else printf 'Darwin\\n'; fi`);
     executable(join(bin, "node"), `if [ "\${1:-}" = --version ]; then
-  printf 'v20.19.0\\n'
+  printf 'v24.0.0\\n'
 else
   [ "\${1:-}" = cli/zcode-kit.mjs ] || exit 81
   [ "\${2:-}" = setup ] || exit 82
@@ -205,7 +279,7 @@ case "$url" in
   */checksums.txt) cp "$RELEASE_DIR/checksums.txt" "$out" ;;
   *) exit 83 ;;
 esac`);
-      executable(join(bin, "node"), `if [ "\${1:-}" = --version ]; then printf 'v20.19.0\\n'; exit 0; fi
+      executable(join(bin, "node"), `if [ "\${1:-}" = --version ]; then printf 'v26.13.0\\n'; exit 0; fi
 [ "\${1:-}" = cli/zcode-kit.mjs ] && [ "\${2:-}" = setup ] || exit 81
 printf 'setup ran\\n'`);
       executable(join(bin, "bun"), "printf '1.4.2\\n'");
@@ -246,15 +320,20 @@ printf 'setup ran\\n'`);
 /**
  * install.ps1 against mocked downloads/tar/node/bun (real robocopy). `release`
  * are the files the mocked tar extracts; `setupExit` is what the mocked setup
- * returns. Returns the spawn result plus the install dir.
+ * returns; `nodeVersion` is what the mocked `node --version` prints. Every
+ * download and non-version node call is appended to `calls.log`. `mode` "iex"
+ * runs the script as `irm ... | iex` does (Invoke-Expression in the caller's
+ * session, which then prints SESSION_ALIVE); `env` adds variables. Returns the
+ * spawn result plus the install dir.
  */
-function runPs1Fixture(root, { release, setupExit = 0, preexisting = {} }) {
+function runPs1Fixture(root, { release, setupExit = 0, preexisting = {}, nodeVersion = "v24.0.0", mode = "call", env = {} }) {
   const bin = join(root, "bin");
   const local = join(root, "Local AppData");
   const install = join(root, "kit");
   const temp = join(root, "temp");
   const fakeSystem = join(root, "system");
   const wrapper = join(root, "fixture.ps1");
+  const calls = join(root, "calls.log");
   const archive = "fixture archive\n";
   const hash = createHash("sha256").update(archive).digest("hex");
   for (const dir of [bin, local, temp, fakeSystem]) mkdirSync(dir, { recursive: true });
@@ -267,13 +346,15 @@ function runPs1Fixture(root, { release, setupExit = 0, preexisting = {} }) {
 $ErrorActionPreference = 'Continue'
 function Invoke-WebRequest {
   param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
+  Add-Content -LiteralPath '${calls.replaceAll("'", "''")}' -Value "download $Uri"
   $utf8 = New-Object System.Text.UTF8Encoding($false)
   if ($Uri -like '*/v1.2.3.tar.gz') { [IO.File]::WriteAllText($OutFile, "fixture archive\n", $utf8); return }
   if ($Uri -like '*/checksums.txt') { [IO.File]::WriteAllText($OutFile, '${hash}  v1.2.3.tar.gz' + "\n", $utf8); return }
   throw "unexpected URL $Uri"
 }
 function node {
-  if ($args[0] -eq '--version') { 'v20.19.0'; $global:LASTEXITCODE = 0; return }
+  if ($args[0] -eq '--version') { '${nodeVersion}'; $global:LASTEXITCODE = 0; return }
+  Add-Content -LiteralPath '${calls.replaceAll("'", "''")}' -Value "node $args"
   if ($args[0] -ne 'cli/zcode-kit.mjs' -or $args[1] -ne 'setup') { throw 'unexpected node invocation' }
   'setup stub'
   $global:LASTEXITCODE = ${setupExit}
@@ -292,12 +373,14 @@ $env:SystemRoot = '${fakeSystem.replaceAll("'", "''")}'
 $env:ZCODE_KIT_INSTALL_DIR = '${install.replaceAll("'", "''")}'
 $env:ZCODE_KIT_VERSION = 'v1.2.3'
 $env:PATH = '${bin.replaceAll("'", "''")};' + $env:PATH
-& $Installer
+${mode === "iex" ? "Get-Content -Raw -LiteralPath $Installer | Invoke-Expression\nWrite-Output 'SESSION_ALIVE'" : "& $Installer"}
 $rc = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
 exit $rc
 `, "utf8");
-  const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", wrapper, INSTALL_PS1], { encoding: "utf8", timeout: 30_000 });
-  return { result, install };
+  const state = () => ({ install: existsSync(install) ? snapshotTree(install) : null, temp: snapshotTree(temp), local: snapshotTree(local) });
+  const before = state();
+  const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", wrapper, INSTALL_PS1], { encoding: "utf8", timeout: 30_000, env: { ...process.env, ...env } });
+  return { result, install, calls, before, after: state() };
 }
 // Like a real release, it ships proxy/ and zcode-proxy-src/: robocopy /MIR
 // purges a whole directory the release no longer ships, protected files inside
@@ -358,6 +441,58 @@ test("install.ps1 treats setup exit 20 and 130 as installed-with-warning and any
   }
 });
 
+// ADR-0006 on the PowerShell path: Node below 24 is refused before the release
+// lookup, the temp directory and any file change; v24 and v26 install. The
+// refusal is three plain lines on stderr (what / why / next), the same shape
+// as install.sh: no PowerShell error record (`Exception:`, `Line |`, the
+// gutter), no escape sequences, no wrapping inside the text (C3), with and
+// without NO_COLOR, and `irm ... | iex` keeps the user's session open.
+const ps1FloorLines = (found) => [
+  `  [ERROR] Node.js 24 or newer is required (found ${found})`,
+  "    why:  the kit supports Node.js 24 and newer; nothing was downloaded, installed or changed",
+  "    next: winget install --id OpenJS.NodeJS.LTS --exact (or install Node.js 24 LTS or newer from https://nodejs.org/en/download), then open a new terminal and re-run this installer",
+];
+test("install.ps1 refuses Node v20 and v22 before any file changes; v24 and v26 install", { skip: process.platform !== "win32" }, (t) => {
+  if (!pwshAvailable()) return t.skip("pwsh is unavailable");
+  const preexisting = {
+    "package.json": '{"name":"zcode-agent-kit"}',
+    "cli/zcode-kit.mjs": "// release v1",
+    ".proxykey": "local-secret-key",
+    "proxy/config.yaml": "user: settings",
+    "logs/proxy.log": "history",
+  };
+  for (const [nodeVersion, mode, env] of [["v20.19.0", "call", {}], ["v22.23.4", "call", {}], ["v22.23.4", "call", { NO_COLOR: "1" }], ["v22.23.4", "iex", {}]]) {
+    const root = mkdtempSync(join(tmpdir(), "zcode-installer-ps-floor-"));
+    try {
+      const { result, calls, before, after } = runPs1Fixture(root, { release: PS1_RELEASE, preexisting, nodeVersion, mode, env });
+      const text = `${result.stdout}\n${result.stderr}`;
+      const label = `${nodeVersion} ${mode} ${JSON.stringify(env)}\n${text}`;
+      assert.equal(result.status, 1, label);
+      assert.equal(existsSync(calls), false, `no download or setup may run:\n${existsSync(calls) ? readFileSync(calls, "utf8") : ""}`);
+      assert.deepEqual(after, before, "the installation, TEMP and LOCALAPPDATA are byte-identical");
+      const lines = result.stderr.split(/\r?\n/);
+      const at = lines.indexOf(ps1FloorLines(nodeVersion)[0]);
+      assert.ok(at >= 0, label);
+      assert.deepEqual(lines.slice(at, at + 3), ps1FloorLines(nodeVersion), label);
+      assert.doesNotMatch(text, /\x1b/, `no escape sequences: ${label}`);
+      assert.doesNotMatch(text, /Exception:|Line \||^\s*\||ErrorRecord|At line/m, `no PowerShell error record: ${label}`);
+      if (mode === "iex") assert.match(result.stdout, /^SESSION_ALIVE$/m, `irm | iex must not end the user's session: ${label}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+  for (const nodeVersion of ["v24.0.0", "v26.13.0"]) {
+    const root = mkdtempSync(join(tmpdir(), "zcode-installer-ps-floor-ok-"));
+    try {
+      const { result, install } = runPs1Fixture(root, { release: PS1_RELEASE, preexisting, nodeVersion });
+      assert.equal(result.status, 0, `${nodeVersion}\n${result.stdout}\n${result.stderr}`);
+      assert.equal(readFileSync(join(install, "cli", "zcode-kit.mjs"), "utf8"), "// release v2");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("install.ps1 executes hermetically with mocked downloads/setup and writes a Unicode-safe shim", { skip: process.platform !== "win32" }, (t) => {
   const probe = spawnSync("pwsh", ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"], { encoding: "utf8" });
   if (probe.status !== 0) return t.skip("pwsh is unavailable");
@@ -372,7 +507,7 @@ test("install.ps1 executes hermetically with mocked downloads/setup and writes a
   const hash = createHash("sha256").update(archive).digest("hex");
   try {
     for (const dir of [bin, local, temp, fakeSystem]) mkdirSync(dir, { recursive: true });
-    writeFileSync(join(bin, "node.cmd"), "@echo off\r\nif \"%~1\"==\"--version\" (echo v20.19.0& exit /b 0)\r\necho WARN: optional configuration skipped\r\necho setup completed>setup-ran\r\nexit /b 0\r\n");
+    writeFileSync(join(bin, "node.cmd"), "@echo off\r\nif \"%~1\"==\"--version\" (echo v26.13.0& exit /b 0)\r\necho WARN: optional configuration skipped\r\necho setup completed>setup-ran\r\nexit /b 0\r\n");
     writeFileSync(join(bin, "bun.cmd"), "@echo off\r\necho 1.4.2\r\nexit /b 0\r\n");
     writeFileSync(wrapper, `param([string]$Installer)
 $ErrorActionPreference = 'Continue'
@@ -385,7 +520,7 @@ function Invoke-WebRequest {
   throw "unexpected URL $Uri"
 }
 function node {
-  if ($args[0] -eq '--version') { 'v20.19.0'; $global:LASTEXITCODE = 0; return }
+  if ($args[0] -eq '--version') { 'v26.13.0'; $global:LASTEXITCODE = 0; return }
   if ($args[0] -ne 'cli/zcode-kit.mjs' -or $args[1] -ne 'setup') { throw 'unexpected node invocation' }
   'WARN: optional configuration skipped'
   [IO.File]::WriteAllText((Join-Path (Get-Location) 'setup-ran'), 'setup completed')
