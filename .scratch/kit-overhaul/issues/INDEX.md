@@ -12,9 +12,9 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 06 | [CLI output module, capability record and the snapshot harness (no visible change)](06-cli-output-module-and-snapshot-harness.md) | glm | medium | 05 | ready-for-agent |
 | 07 | [CLI command-module split, part 1 (expand: dispatcher + status/doctor/proxy/models/logs)](07-cli-command-modules-part-1-expand.md) | glm | medium | 06 | ready-for-agent |
 | 08 | [CLI command-module split, part 2 (migrate remaining commands + contract)](08-cli-command-modules-part-2-migrate-and-contract.md) | glm | medium | 07, 10 | ready-for-agent |
-| 09 | [Batch 1a — CI toolchain: actions v7, Bun 1.4.4 in CI, nested proxy workflows removed](09-batch-1a-ci-toolchain-and-bun-1-4-4-in-ci.md) | glm | low | 02, 03, 04 | ready-for-agent |
+| 09 | [Batch 1a — CI toolchain: actions v7, Bun 1.4.2 in CI, nested proxy workflows removed](09-batch-1a-ci-toolchain-and-bun-1-4-4-in-ci.md) | glm | low | 02, 03, 04 | ready-for-agent |
 | 10 | [Batch 1b — Node 24 support floor, refuse before mutation, autostart Node-path check](10-batch-1b-node-24-floor.md) | glm | medium | 09 | ready-for-agent |
-| 11 | [Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs](11-batch-1c-bun-1-4-4-installers-and-proxy-typecheck.md) | glm | medium | 10 | ready-for-agent |
+| 11 | [Batch 1c — Bun 1.4.2 bootstrap in the installers, pinned proxy typecheck (Round 11 pin)](11-batch-1c-bun-1-4-4-installers-and-proxy-typecheck.md) | glm | medium | 10 | ready-for-agent |
 | 12 | [Batch 2 — proxy dependencies: happy-dom 21.0.4 (loading flags kept), undici 8.12.4, yaml 2.9.1](12-batch-2-proxy-dependencies.md) | glm | medium | 11 | ready-for-agent |
 | 13 | [Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24](13-batch-3-mcp-dependencies.md) | glm | medium | 12 | ready-for-agent |
 | 14 | [Event-line format and redaction for new log events (prefactor)](14-event-line-format-and-redaction.md) | glm | low | — | ready-for-agent |

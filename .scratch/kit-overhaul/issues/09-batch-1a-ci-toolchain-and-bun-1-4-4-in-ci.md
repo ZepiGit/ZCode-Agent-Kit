@@ -234,3 +234,25 @@ Spec stories: 126, 140
   - **Left for others:**
     - The spec still names Bun 1.4.4 in §1 (line 34), story 126, story 138 and §12 (lines 515–528, 609). That is outside this round's scope (§18 only); it belongs to the spec owner.
     - INDEX's row for 09 still reads "Bun 1.4.4" on the integration tip c8cb6a0 (orchestrator-owned).
+
+- **2026-11-07, round 4: workflow text read line-ending agnostic.**
+  - **Why.** Pre-merge run 42360554587 (`staging/09` ed47be8 = bac5caa, marker removed) was green on both `memory-budget` legs, ubuntu `test-kit` and both `ux-before` legs:
+    - Linux burst1 n = 7, median 217.5.
+    - Windows `unstable` median 251.9, none above 400.
+    - setup-bun reported 1.4.2+744846f84 on every leg.
+
+    Windows `test-kit` (Node 24 and 26) failed one test: `loop.test.mjs:656` "measurement mode is off by default …", at :673. The Windows checkout has ci.yml with CRLF, and `/bun-version: 1\.4\.3\n\s+no-cache: true/` assumes LF.
+  - **Commit 5344e93** (then the merge of tip c913261, docs only, as a63db5b):
+    - `loop.test.mjs`: the wiring assertions moved into `assertMeasurementWiring(ciText)`, which normalises CRLF to LF once (`lf()`); `ciWorkflow()` reads the file. The guard test calls it on the file as read. The new test "the measurement-mode wiring check reads ci.yml the same with LF and CRLF line endings" calls it on the LF text and on a CRLF copy, after asserting the copy really has `1.4.3\r\n          no-cache`. A Linux run now catches an LF-only match. The other LF-literal match in the same block (`indexOf("\n          bun-version: 1.4.2\n")`) is covered by the same normalisation.
+    - `release-audit.test.mjs`: all five workflow reads (4× release.yml, plus the per-file read in the pin test) now go through one `workflowText(path)` helper with `lf()`. Before, each read normalised inline, which is why the release audit was already green on Windows. A new test "workflow text reads the same with LF and CRLF line endings: same pins, same measurement arms" checks every tracked workflow.
+    - Other reads in the tests this ticket touched need no change: runtime outputs our own code writes (samples.csv, job summaries, `measure-S1-burst1.*`), JSON, a single-line MANIFEST match, and `config.example.yaml` (already normalised). The marker is CRLF-safe: `parseMeasureSpec` is pinned on `"24 bun=…\r\n"`, and the CI step strips `\r`.
+  - **RED → GREEN on a real CRLF checkout.** Scratch clone `git -c core.autocrlf=true clone` of this branch at `/home/AgentKit/overhaul-tools/t09-crlf` (ci.yml "with CRLF line terminators", 216 CR); proxy deps installed there with Bun 1.4.2 `--frozen-lockfile`.
+    - Unfixed test files (bac5caa), CRLF: 1 fail, at `loop.test.mjs:673:12`, exactly the CI failure (`reports/t09-r4-crlf-red2.log`).
+    - Fixed files written with CRLF: 66 pass, 0 fail, 5 skipped (`t09-r4-crlf-green2.log`).
+    - A first CRLF run without deps failed two ticket-03 OMP-host tests on `Cannot find module 'yaml'`; that is a clone artefact, gone with deps.
+    - LF worktree: 66 pass, 0 fail (`t09-r4-green-lf.log`).
+  - **Mutations** (restored; `cmp` against the saved copies):
+    - M1: `assertMeasurementWiring` without `lf()` (the LF-only match back). The new CRLF test fails on Linux with "1.4.3" (`t09-r4-mut1-lf.log`).
+    - M2: `workflowText` without `lf()`, on the CRLF clone. 8 tests fail, including every release.yml assertion and the new CRLF test (`t09-r4-mut2-crlf.log`); the 2 OMP tests in that run are the deps artefact above.
+  - **Suites** (Bun 1.4.2): `npm run test` 644 pass, 0 fail, 16 skipped on Node 26.7.0 and Node 24.22.2 (+2 new tests); `npm run test:proxy` 1343 / 0; `npm run test:mcp` 95 / 0 / 1 skipped (`reports/t09-r4-suite-*.log`). No memory-code change, so no memory job rerun.
+  - **Pending CI:** the windows `test-kit` legs (Node 24 and 26) green on the restaged branch.
