@@ -32,3 +32,5 @@ ADR: 0005
 Spec stories: 94, 95, 96, 116
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 10): install.sh and install.ps1 now refuse Node < 24 before any download; reshape that error text with the rest of the installer UX. PowerShell 7 for Linux (digest-verified download, see ticket 10 Comments) gives a real parse check and early-path runtime proof of install.ps1 locally.
