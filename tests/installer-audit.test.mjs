@@ -176,6 +176,82 @@ printf 'node %s\\n' "$*" >> "$AUDIT_LOG"; exit 91`);
   });
 }
 
+// Bun v1.4.2, pinned everywhere (Owner Proxy Round 11 Q1 condition 1). The
+// five SHA-256s come from the release's own SHASUMS256.txt
+// (https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/SHASUMS256.txt,
+// clearsigned by Robobun <robobun@oven.sh>, key F3DCC08A8572C0749B3E18888EAB4D40A7B22B59).
+// They match the GitHub release API's asset digests and a local download of each
+// asset (ticket 11 Comments). This table is the independent source of truth the
+// installers are checked against, not a copy read out of them.
+const BUN_VERSION = "1.4.2";
+const BUN_RELEASE_SHA256 = {
+  "bun-linux-x64.zip": "36368faef7527875d5ffa52e53cd48021741f2a83eb6208a8dd64068d422a913",
+  "bun-linux-aarch64.zip": "54328bbc2d9c8e0c9f892c544d66c57a83b84139e34909e5ee81758f1ac8fda7",
+  "bun-darwin-x64.zip": "80520d7e17526308c9185d261679ac6d27798d3803a0e9f7ff9121ab8affb012",
+  "bun-darwin-aarch64.zip": "90987a3a16d7db556d886ac3d551e7b6d3edf0a1cf43acaed622e8676be1d12f",
+  "bun-windows-x64.zip": "ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405",
+};
+const bunAssetUrl = (asset) => `https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${asset}`;
+const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+// Seam 8: a Bun download whose bytes do not hash to the pinned value for this
+// machine's asset is refused before it is extracted, run or recorded. This
+// covers every uname pair the installer maps, three kinds of tampering (other
+// bytes, an empty body, and the genuine digest of another platform's asset),
+// and the case where nothing of the kit is fetched or written afterwards.
+const SH_PLATFORMS = [
+  ["Linux", "x86_64", "bun-linux-x64.zip"],
+  ["Linux", "aarch64", "bun-linux-aarch64.zip"],
+  ["Linux", "arm64", "bun-linux-aarch64.zip"],
+  ["Darwin", "x86_64", "bun-darwin-x64.zip"],
+  ["Darwin", "arm64", "bun-darwin-aarch64.zip"],
+  ["Darwin", "aarch64", "bun-darwin-aarch64.zip"],
+];
+for (const [os, arch, asset] of SH_PLATFORMS) {
+  test(`install.sh refuses a tampered Bun ${BUN_VERSION} download on ${os}-${arch} (${asset}) before extracting it`, () => {
+    const other = Object.keys(BUN_RELEASE_SHA256).find((name) => name !== asset);
+    for (const [kind, body] of [["other bytes", "tampered bun archive\n"], ["an empty body", ""], [`the digest of ${other}`, "swapped asset\n"]]) {
+      const root = mkdtempSync(join(tmpdir(), "zcode-installer-bun-tamper-"));
+      const bin = join(root, "bin");
+      const home = join(root, "home");
+      const install = join(root, "target");
+      const temp = join(root, "tmp");
+      const log = join(root, "calls.log");
+      try {
+        for (const dir of [bin, home, temp]) mkdirSync(dir, { recursive: true });
+        executable(join(bin, "uname"), `case "\${1:-}" in -m) printf '${arch}\\n' ;; *) printf '${os}\\n' ;; esac`);
+        executable(join(bin, "node"), `if [ "\${1:-}" = --version ]; then printf 'v24.0.0\\n'; exit 0; fi
+printf 'node %s\\n' "$*" >> "$AUDIT_LOG"; exit 91`);
+        writeFileSync(join(root, "body"), body);
+        executable(join(bin, "curl"), `out=''; url=''
+while [ "$#" -gt 0 ]; do case "$1" in -o) out="$2"; shift 2 ;; -*) shift ;; *) url="$1"; shift ;; esac; done
+printf 'download %s\\n' "$url" >> "$AUDIT_LOG"
+case "$url" in */bun-*.zip) cat "$BODY" > "$out" ;; *) exit 83 ;; esac`);
+        executable(join(bin, "unzip"), `printf 'unzip %s\\n' "$*" >> "$AUDIT_LOG"; exit 90`);
+        // The swapped case: the bytes really are another platform's genuine
+        // asset, so the digest the installer sees is that asset's pinned value.
+        // The other two cases hash for real (no sha256sum stand-in).
+        if (kind.startsWith("the digest")) executable(join(bin, "sha256sum"), `printf '%s  %s\\n' '${BUN_RELEASE_SHA256[other]}' "$1"`);
+        const actual = kind.startsWith("the digest") ? BUN_RELEASE_SHA256[other] : sha256(body);
+
+        const result = runSh({ bin, home, install, temp, log, extraEnv: { BODY: join(root, "body") } });
+        const label = `${os}-${arch}, ${kind}\n${result.stdout}\n${result.stderr}`;
+        assert.equal(result.status, 1, label);
+        assert.match(result.stderr, /\[ERROR\] Bun download hash mismatch/, label);
+        assert.ok(result.stderr.includes(`expected ${BUN_RELEASE_SHA256[asset]}`), `the pinned ${asset} digest from bun-v${BUN_VERSION}/SHASUMS256.txt: ${label}`);
+        assert.ok(result.stderr.includes(`actual   ${actual}`), label);
+        assert.deepEqual(readFileSync(log, "utf8").trim().split(/\r?\n/), [`download ${bunAssetUrl(asset)}`],
+          `only the pinned Bun asset is fetched; nothing is extracted, no release is downloaded, setup never runs: ${label}`);
+        assert.equal(existsSync(join(home, ".bun")), false, `no Bun is installed: ${label}`);
+        assert.equal(existsSync(install), false, `no installation is created: ${label}`);
+        assert.deepEqual(readdirSync(temp), [], `the private temp (with the tampered archive) is removed: ${label}`);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  });
+}
+
 test("install.sh bootstraps Bun in its private temp, persists .bun-path, and accepts setup warnings with exit 0", () => {
   const root = mkdtempSync(join(tmpdir(), "zcode-installer-bun-"));
   const bin = join(root, "bin");
@@ -323,10 +399,15 @@ printf 'setup ran\\n'`);
  * returns; `nodeVersion` is what the mocked `node --version` prints. Every
  * download and non-version node call is appended to `calls.log`. `mode` "iex"
  * runs the script as `irm ... | iex` does (Invoke-Expression in the caller's
- * session, which then prints SESSION_ALIVE); `env` adds variables. Returns the
+ * session, which then prints SESSION_ALIVE); `env` adds variables. With
+ * `bun: false` no Bun is found (the fixture's and any real Bun directory leave
+ * PATH), so the installer bootstraps one: the Bun asset download serves
+ * `bunBody`. `bunDigest`, when set, is what Get-FileHash reports for the Bun
+ * archive (as the real cmdlet does, upper-case), standing in for the genuine
+ * asset's bytes; Expand-Archive then lays out a runnable `bun`. Returns the
  * spawn result plus the install dir.
  */
-function runPs1Fixture(root, { release, setupExit = 0, preexisting = {}, nodeVersion = "v24.0.0", mode = "call", env = {} }) {
+function runPs1Fixture(root, { release, setupExit = 0, preexisting = {}, nodeVersion = "v24.0.0", mode = "call", env = {}, bun = true, bunBody = null, bunDigest = null }) {
   const bin = join(root, "bin");
   const local = join(root, "Local AppData");
   const install = join(root, "kit");
@@ -338,17 +419,41 @@ function runPs1Fixture(root, { release, setupExit = 0, preexisting = {}, nodeVer
   const hash = createHash("sha256").update(archive).digest("hex");
   for (const dir of [bin, local, temp, fakeSystem]) mkdirSync(dir, { recursive: true });
   for (const [rel, body] of Object.entries(preexisting)) { mkdirSync(join(install, rel, ".."), { recursive: true }); writeFileSync(join(install, rel), body); }
-  writeFileSync(join(bin, "bun.cmd"), "@echo off\r\necho 1.4.2\r\nexit /b 0\r\n");
+  if (bun) writeFileSync(join(bin, "bun.cmd"), "@echo off\r\necho 1.4.2\r\nexit /b 0\r\n");
+  const q = (text) => text.replaceAll("'", "''");
   const writes = Object.entries(release).map(([rel, body]) =>
     `  New-Item -ItemType Directory -Path (Split-Path (Join-Path $out '${`kit\\${rel.replaceAll("/", "\\")}`.replaceAll("'", "''")}') -Parent) -Force | Out-Null\n` +
     `  [IO.File]::WriteAllText((Join-Path $out '${`kit\\${rel.replaceAll("/", "\\")}`.replaceAll("'", "''")}'), '${body.replaceAll("'", "''")}')`).join("\n");
+  // Bootstrap mocks (bun: false). Expand-Archive is always mocked and logged,
+  // so an extraction of a refused archive shows up in calls.log.
+  const bunMocks = bun ? "function bun { '1.4.2'; $global:LASTEXITCODE = 0 }" : `function Expand-Archive {
+  param([string]$Path, [string]$DestinationPath, [switch]$Force)
+  Add-Content -LiteralPath '${q(calls)}' -Value "expand $DestinationPath"
+  $dir = Join-Path $DestinationPath 'bun-windows-x64'
+  New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  [IO.File]::WriteAllText((Join-Path $dir 'bun.cmd'), "@echo off\`r\`necho 1.4.2\`r\`nexit /b 0\`r\`n")
+  # pwsh outside Windows (local runs only): the installer joins PATH with ';',
+  # so the directory is also appended with the platform separator.
+  if (-not $IsWindows) { [IO.File]::WriteAllText((Join-Path $dir 'bun'), "#!/bin/sh\`necho 1.4.2\`n"); & chmod +x (Join-Path $dir 'bun'); $env:PATH = $env:PATH + [IO.Path]::PathSeparator + $dir }
+  function global:bun { '1.4.2'; $global:LASTEXITCODE = 0 }
+}
+${bunDigest ? `function Get-FileHash {
+  param([string]$Path, [string]$Algorithm)
+  if ((Split-Path -Leaf $Path) -eq 'bun.zip') {
+    Add-Content -LiteralPath '${q(calls)}' -Value "hash bun.zip"
+    return [pscustomobject]@{ Algorithm = $Algorithm; Hash = '${bunDigest}'; Path = $Path }
+  }
+  Microsoft.PowerShell.Utility\\Get-FileHash -Path $Path -Algorithm $Algorithm
+}` : ""}
+$pathSep = [IO.Path]::PathSeparator
+$env:PATH = (@($env:PATH -split [regex]::Escape($pathSep)) | Where-Object { $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'bun.exe')) -and -not (Test-Path -LiteralPath (Join-Path $_ 'bun.cmd')) -and -not (Test-Path -LiteralPath (Join-Path $_ 'bun') -PathType Leaf) }) -join $pathSep`;
   writeFileSync(wrapper, `param([string]$Installer)
 $ErrorActionPreference = 'Continue'
 function Invoke-WebRequest {
   param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing)
   Add-Content -LiteralPath '${calls.replaceAll("'", "''")}' -Value "download $Uri"
   $utf8 = New-Object System.Text.UTF8Encoding($false)
-  if ($Uri -like '*/v1.2.3.tar.gz') { [IO.File]::WriteAllText($OutFile, "fixture archive\n", $utf8); return }
+${bunBody === null ? "" : `  if ($Uri -like '*/bun-*.zip') { [IO.File]::WriteAllText($OutFile, '${q(bunBody)}', $utf8); return }\n`}  if ($Uri -like '*/v1.2.3.tar.gz') { [IO.File]::WriteAllText($OutFile, "fixture archive\n", $utf8); return }
   if ($Uri -like '*/checksums.txt') { [IO.File]::WriteAllText($OutFile, '${hash}  v1.2.3.tar.gz' + "\n", $utf8); return }
   throw "unexpected URL $Uri"
 }
@@ -359,7 +464,7 @@ function node {
   'setup stub'
   $global:LASTEXITCODE = ${setupExit}
 }
-function bun { '1.4.2'; $global:LASTEXITCODE = 0 }
+${bunMocks}
 function tar {
   $idx = [Array]::IndexOf($args, '-C')
   if ($idx -lt 0) { $global:LASTEXITCODE = 91; return }
@@ -490,6 +595,62 @@ test("install.ps1 refuses Node v20 and v22 before any file changes; v24 and v26 
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+// Seam 8 on the PowerShell path: with no Bun on PATH, install.ps1 fetches the
+// pinned bun-windows-x64.zip and refuses any archive that does not hash to
+// that asset's SHA-256 from bun-v1.4.2/SHASUMS256.txt (other bytes, an empty
+// body, another platform's genuine asset). Nothing is extracted, no release is
+// fetched and the temp directory goes. The pinned digest itself is accepted
+// in the upper case Get-FileHash really returns, and the bootstrapped Bun is
+// the one recorded in .bun-path.
+// The PowerShell error view wraps the message under a `|` gutter at the console
+// width: compare without escapes, gutters and whitespace.
+const flatPs = (text) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/[\s|]+/g, "");
+test("install.ps1 refuses a tampered Bun 1.4.2 download (bun-windows-x64.zip) before extracting it", { skip: process.platform !== "win32" }, (t) => {
+  if (!pwshAvailable()) return t.skip("pwsh is unavailable");
+  const asset = "bun-windows-x64.zip";
+  for (const [kind, bunBody, bunDigest, actual] of [
+    ["other bytes", "tampered bun archive", null, sha256("tampered bun archive")],
+    ["an empty body", "", null, sha256("")],
+    ["the digest of bun-linux-x64.zip", "swapped asset", BUN_RELEASE_SHA256["bun-linux-x64.zip"].toUpperCase(), BUN_RELEASE_SHA256["bun-linux-x64.zip"]],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), "zcode-installer-ps-bun-tamper-"));
+    try {
+      const { result, install, calls, before, after } = runPs1Fixture(root, { release: PS1_RELEASE, bun: false, bunBody, bunDigest });
+      const text = `${result.stdout}\n${result.stderr}`;
+      const label = `${kind}\n${text}`;
+      assert.notEqual(result.status, 0, label);
+      assert.ok(flatPs(text).includes(flatPs(`bun download hash mismatch: expected ${BUN_RELEASE_SHA256[asset]} actual ${actual}`)), label);
+      assert.deepEqual(readFileSync(calls, "utf8").trim().split(/\r?\n/).filter((line) => !line.startsWith("hash ")), [`download ${bunAssetUrl(asset)}`],
+        `only the pinned Bun asset is fetched; nothing is extracted, no release is downloaded, setup never runs: ${label}`);
+      assert.equal(existsSync(join(root, "Local AppData", "bun")), false, `no Bun is installed: ${label}`);
+      assert.equal(existsSync(install), false, `no installation is created: ${label}`);
+      assert.deepEqual(after.local, before.local, `LOCALAPPDATA is as before: ${label}`);
+      assert.deepEqual(readdirSync(join(root, "temp")), [], `the private temp (with the tampered archive) is removed: ${label}`);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("install.ps1 accepts exactly the pinned Bun 1.4.2 digest, extracts it under LOCALAPPDATA and records it in .bun-path", { skip: process.platform !== "win32" }, (t) => {
+  if (!pwshAvailable()) return t.skip("pwsh is unavailable");
+  const root = mkdtempSync(join(tmpdir(), "zcode-installer-ps-bun-ok-"));
+  try {
+    const { result, install, calls } = runPs1Fixture(root, { release: PS1_RELEASE, bun: false, bunBody: "genuine asset stand-in", bunDigest: BUN_RELEASE_SHA256["bun-windows-x64.zip"].toUpperCase() });
+    const text = `${result.stdout}\n${result.stderr}`;
+    assert.equal(result.status, 0, text);
+    assert.match(result.stdout, /Downloading Bun v1\.4\.2 \(bun-windows-x64\.zip\)/);
+    const bunDir = join(root, "Local AppData", "bun");
+    assert.deepEqual(readFileSync(calls, "utf8").trim().split(/\r?\n/).slice(0, 3), [`download ${bunAssetUrl("bun-windows-x64.zip")}`, "hash bun.zip", `expand ${bunDir}`], text);
+    const bunPath = readFileSync(join(install, ".bun-path"), "utf8").trim();
+    // bun.cmd on Windows; the mock also lays out a plain `bun` where pwsh runs elsewhere.
+    assert.ok([".cmd", ""].some((ext) => bunPath.toLowerCase() === join(bunDir, "bun-windows-x64", `bun${ext}`).toLowerCase()), `the bootstrapped Bun is the one the kit runs: ${bunPath}`);
+    assert.equal(readFileSync(join(install, "cli", "zcode-kit.mjs"), "utf8"), "// release v2");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
