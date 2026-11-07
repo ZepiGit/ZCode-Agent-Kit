@@ -123,3 +123,48 @@ Spec stories: 124, 125
 2. `test-kit` ubuntu-latest × Node 24 and 26: green. On Node 24 the floor boundary is the running runtime.
 3. The `memory-budget` job on ubuntu and windows: verdicts unchanged from the tip (expected-RED list untouched).
 4. The release workflow's publish job runs on Node 24, exactly the floor: `node pack/build.mjs --tracked-only --dry-run-publish` must pass there.
+
+### 2026-11-07 — implementer, round 2 (pre-merge run 42370286615: windows `install.ps1 refuses Node v20 and v22 …` RED)
+
+**Cause.** The `install.ps1` refusal used `throw`, so the user saw a PowerShell error record: `Exception: …install.ps1:70`, `Line |`, the source line, a `|` gutter, `ESC[31;1m` colour codes and the text re-wrapped at the console width, with the why/next lines collapsed into one paragraph. That breaks C3, not only the test. The round-1 test flattened the gutter and so hid the problem; with the colour codes on the Windows runner even the flattened text no longer matched.
+
+**Fix (`653ed43`).**
+- The refusal writes three plain lines with `[Console]::Error.WriteLine`, the same shape as `install.sh`:
+  - `  [ERROR] Node.js 24 or newer is required (found vX)`
+  - `    why:  …nothing was downloaded, installed or changed`
+  - `    next: winget install --id OpenJS.NodeJS.LTS --exact (or …), then open a new terminal and re-run this installer`
+- Exit status:
+  - Run as a file (`$PSCommandPath` set): `exit 1`. That is the same code the `throw` gave.
+  - Under `irm … | iex` (no script path): `$global:LASTEXITCODE = 1` and `return`. `exit` there would close the user's PowerShell session. A `throw` also aborted whatever the caller ran after the `iex`, which RED case 4 shows.
+- "Nothing changed" is unchanged: the check still runs before the temp directory, the release lookup and any write.
+- The file stays ASCII-only and CRLF.
+- The other early refusals in `install.ps1` (the target guards at lines 51–61, the release lookup, the downloads, the hash and layout checks) are pre-existing `throw`/`Write-Error` calls with the same error-record decoration. This ticket did not touch them, and ticket 44 (installers and the PowerShell gate) owns their UX. The only refusal this ticket added is the Node floor one, now fixed.
+
+**Test.** `install.ps1 refuses Node v20 and v22 …` now runs four refusal cases: v20 run as a file, v22 run as a file, v22 with `NO_COLOR=1`, and v22 through `Get-Content -Raw | Invoke-Expression`, the way `irm | iex` runs it. Each asserts:
+- exit status exactly 1;
+- no download or node call;
+- the install, TEMP and LOCALAPPDATA trees byte-identical;
+- the exact three lines, consecutive, on stderr;
+- no `ESC`;
+- no `Exception:`, `Line |`, gutter line, `ErrorRecord` or `At line`;
+- in iex mode, `SESSION_ALIVE` printed after the installer returns.
+
+`runPs1Fixture` gained the `mode` (`call`, the default, or `iex`) and `env` options; the existing callers are unchanged.
+
+**RED → GREEN** (PowerShell 7.6.9 linux-x64, digest-checked, as in round 1; logs in `reports/`)
+- `t10-r2-red-ps1`: a scratch harness with the same mocks and assertions, run against the round-1 `install.ps1`, gives 21 failures.
+  - Pipes, the four cases above: the exact lines and the no-error-record checks fail; the iex session does not continue.
+  - A real PTY (`script`, `stty cols 40` and `200`, with and without `NO_COLOR`): `ESC[31;1mException:`, the gutter and the wrap at 40 columns. pwsh's error view colours the record even with `NO_COLOR=1`.
+- `t10-r2-green-ps1`: the same harness against the fixed `install.ps1` passes every check (ALL OK), including the PTY at 40 columns: the lines stay whole and contain no ESC.
+- The committed Windows test itself, run on Linux pwsh with `process.platform` faked to `win32` (`TEMP=/tmp`):
+  - `t10-r2-wintest-on-linux-red` against the round-1 script fails at the first refusal case (`v20.19.0 call {}`, `Exception: …install.ps1:70`).
+  - `t10-r2-wintest-on-linux` against the fix passes all four refusal cases. It then stops at the v24/v26 install half, which needs Windows (`bun.cmd`, robocopy) and is expected to fail on Linux.
+- `t10-r2-ps1-linux`: 0 parser errors; v24/v26 still complete a fresh install.
+- Not verifiable here: Windows PowerShell 5.1, which the tests do not run (they use `pwsh`). `[Console]::Error.WriteLine` and `$PSCommandPath` exist in 5.1 (PowerShell 3.0+); the 5.1 run is the owner action that ticket 54 records.
+
+**Full suites** after merging the integration tip `07fe8a4`/`f36b6a9` (docs-only; merge `640d1ba`):
+- `npm run test` (`t10-r2-full-kit2`): 685 tests, 668 pass, 0 fail, 17 skipped.
+- `npm run test:proxy` (`t10-r2-full-proxy`): 1343 pass, 0 fail.
+- `npm run test:mcp` (`t10-r2-full-mcp`): 96 tests, 95 pass, 0 fail, 1 skipped.
+
+**Pending CI, round 2.** On windows-latest × Node 24 and × Node 26, `install.ps1 refuses Node v20 and v22 before any file changes; v24 and v26 install` must run (not skip) and pass. That covers all four refusal cases (exact lines on stderr, exit 1, no ESC or error record, `SESSION_ALIVE` in iex mode) and the v24/v26 installs. Everything else in `test-kit` windows and ubuntu, ux-before and both memory-budget legs must stay as in run 42370286615.

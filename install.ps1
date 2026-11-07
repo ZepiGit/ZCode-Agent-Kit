@@ -67,9 +67,18 @@ $nodeFound = $null
 try { $nodeFound = [string](@(node --version 2>$null) | Select-Object -First 1) } catch { $nodeFound = $null }
 if (-not ($nodeFound -match '^v(\d+)\.' -and [int]$Matches[1] -ge $NodeFloor)) {
   $shown = if ($nodeFound) { $nodeFound.Trim() } else { 'no readable version' }
-  throw ("Node.js $NodeFloor or newer is required (found $shown).`n" +
-    "  why:  the kit supports Node.js $NodeFloor and newer; nothing was downloaded, installed or changed`n" +
-    "  next: winget install --id OpenJS.NodeJS.LTS --exact (or install Node.js $NodeFloor LTS or newer from https://nodejs.org/en/download), then open a new terminal and re-run this installer")
+  # Plain what/why/next lines straight to stderr, the same shape as install.sh:
+  # a thrown error would reach the user as a PowerShell error record (source
+  # line, `|` gutter, colour codes, the text wrapped at the console width).
+  # Exit 1 when run as a file; under `irm ... | iex` (no script path) return
+  # instead, because `exit` there would close the user's PowerShell session.
+  [Console]::Error.WriteLine('')
+  [Console]::Error.WriteLine("  [ERROR] Node.js $NodeFloor or newer is required (found $shown)")
+  [Console]::Error.WriteLine("    why:  the kit supports Node.js $NodeFloor and newer; nothing was downloaded, installed or changed")
+  [Console]::Error.WriteLine("    next: winget install --id OpenJS.NodeJS.LTS --exact (or install Node.js $NodeFloor LTS or newer from https://nodejs.org/en/download), then open a new terminal and re-run this installer")
+  if ($PSCommandPath) { exit 1 }
+  $global:LASTEXITCODE = 1
+  return
 }
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "zcode-kit-install-$([guid]::NewGuid().ToString('N'))")
 try {
