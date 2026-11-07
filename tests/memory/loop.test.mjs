@@ -803,6 +803,38 @@ const CI_REFUSED = {
   "42398295810 (windows)": "ci-42398295810-s3-hung-summary.json",
   "42398299724 (windows)": "ci-42398299724-s3-hung-summary.json",
 };
+// A real S3/hung run of the fixed scenario (Linux, Bun 1.4.2, 2026-11-07) in
+// the CI state: a scratch copy of the kit waited 3 s between taking the start
+// lock and spawning, so the adversary always killed the holder before its
+// proxy existed (ticket 65 Comments). Through the job it is the listed RED of
+// ticket 16, with the refusal as a check; without that check, or without the
+// stale-lock round, it is a harness failure.
+const S3_HUNG_REFUSED_RUN = join(dirname(CI_S3_HUNG), "local-20261107-s3-hung-refused-linux-summary.json");
+
+test("job: a real S3/hung run whose stale-lock start was refused passes the gate as ticket 16's RED; cut or unchecked it is a harness failure", () => {
+  const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: S3_HUNG_REFUSED_RUN });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(row, { key: "S3/hung", outcome: "RED", ticket: "16" });
+  assert.ok(result.redChecks.includes("start-over-stale-lock"), result.redChecks.join());
+  const dir = mkdtempSync(join(tmpdir(), "memloop-s3hung-"));
+  try {
+    const run = JSON.parse(readFileSync(S3_HUNG_REFUSED_RUN, "utf8"));
+    const variants = {
+      "the stale-lock round removed": [{ ...run, notes: { ...run.notes, rounds: run.notes.rounds.filter((x) => x.name !== "hung-10-with-stale-lock") } }, /round hung-10-with-stale-lock never ran/],
+      "the refusal check not RED": [{ ...run, checks: run.checks.map((c) => (c.name === "start-over-stale-lock" ? { ...c, red: false } : c)) }, /refused start but the start-over-stale-lock check is not RED/],
+    };
+    for (const [label, [summary, why]] of Object.entries(variants)) {
+      const cut = join(dir, "summary.json");
+      writeFileSync(cut, JSON.stringify(summary));
+      const v = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: cut });
+      assert.equal(v.row?.outcome, "HARNESS FAILURE", `${label}: ${v.r.stdout + v.r.stderr}`);
+      assert.match(v.result.error, why, label);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 for (const [run, file] of Object.entries(CI_REFUSED)) {
   test(`job: the S3/hung run of CI ${run} (stale-lock round skipped, start exited 1) stays a harness failure`, () => {
     const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: join(dirname(CI_S3_HUNG), file) });
