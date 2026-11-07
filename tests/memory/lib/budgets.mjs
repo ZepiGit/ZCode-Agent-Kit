@@ -34,6 +34,24 @@ export const MEMORY = {
   S7: { proxyLogMB: 6, earlyLogMB: 1, responsesStoreHeapMB: 96 },
 };
 
+/**
+ * Runs judged on the median of n fresh, sequential repetitions instead of one
+ * run (Round 6 Q1, ticket 60; lib/repetitions.mjs). The one place n lives.
+ * S1/burst1 (3 sequential ~10.8 MB requests per repetition): the median proxy
+ * peak against the 250 MB S1 peak, and every repetition ≤ 400 MB, §18's budget
+ * for 16 concurrent bodies (a run with ≤ 1 body in flight above it is a
+ * regression by definition). The value judged is the check's own: RSS/VmHWM
+ * on Linux, the working-set gate max(sampled WS, PeakWorkingSetSize) on
+ * Windows (Round 7 Q1); the ceiling applies to that same value. n = 5: the
+ * smallest odd n whose predicted false-RED rate is ≤ 5 % on the measured Linux
+ * distribution (METRICS.md: 5 of 48 runs above 250 MB on the tip → 3; with the
+ * 11 earlier runs, 8 of 59 → 5). Round 8 Q1 condition 3 may raise it (≤ 9)
+ * once the windows distribution is measured (job.mjs --measure-burst1).
+ */
+export const REPEATED = {
+  "S1/burst1": { n: 5, check: "procPeak:proxy", budgetMB: MEMORY.S1.peakMB, ceilingMB: MEMORY.S1.burstPeakMB.burst16 },
+};
+
 // Windows only: in paced runs no proxy sample may exceed ADR-0008's 512 MB
 // soft footprint limit in commit (Round 7 Q1 condition 2).
 export const PROXY_COMMIT_BACKSTOP = { role: "proxy", maxMB: 512 };

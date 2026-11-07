@@ -16,6 +16,8 @@ ADR: 0004
 
 - [ ] `protocol-contract`/`handler-resilience` assert byte-identical upstream bodies for each endpoint shape (seam 4).
 - [ ] Per-copy RSS-per-MB-in-flight delta recorded in METRICS (baseline ~4.5 MB RSS per MB); S1 stays GREEN on both legs.
+- [ ] S1/burst1 (Round 6 Q1, amended by Round 7 Q1): in a ≥ 20-repetition measurement of S1/burst1 on each leg (RSS on Linux, working set on Windows: max(sampled WS, PeakWorkingSetSize)), every repetition is ≤ 250 MB. The tail is gone, so the peak budget holds as a peak. The job keeps the median rule (ticket 60). If every repetition cannot reach ≤ 250 MB, the ticket comes back with numbers. The budget is never loosened.
+- [ ] Delete `S1/burst1` (windows) from `tests/memory/expected-red.json` (Round 7 Q3 condition 3). Round 8 Q1 condition 3 may strike this criterion before the ticket starts, if the windows distribution puts the entry's deletion in ticket 60's commit; the criterion above stays either way.
 
 **Common acceptance (every ticket):**
 
@@ -31,3 +33,6 @@ ADR: 0004
 Spec stories: 25
 
 ## Comments
+
+- 2026-11-06 (ticket 60, Round 6 Q1 condition 4): this ticket owns S1/burst1 (3 sequential ~10.8 MB requests per run). The burst1 tail above 250 MB comes from body copies overlapping for a short time: 5 of 48 runs on the tip at 97c2211, up to 268.9 MB, plus 299.2 MB earlier. New criterion above: every one of ≥ 20 repetitions ≤ 250 MB on each leg. It replaces the proposed "median ≤ 250 MB, every repetition ≤ 300 MB". Until then the job judges the median of 5 repetitions (≤ 250 MB) and requires every repetition ≤ 400 MB (`tests/memory/lib/budgets.mjs` `REPEATED`). Distribution: METRICS.md "S1/burst1 distribution and the median rule".
+- 2026-11-06 (ticket 60, Round 7 Q1/Q3 and Round 8 Q1): the windows leg judges S1/burst1 on the working-set gate, max(sampled WS, PeakWorkingSetSize), not on commit; the 400 MB per-run ceiling applies to that value, and commit is reported per repetition. The criterion text above is amended to match. Round 7 Q3 added the windows delete criterion. Round 8 Q1 condition 2 measures ≥ 20 fresh windows repetitions (`node tests/memory/job.mjs --measure-burst1 N`); condition 3 then keeps, deletes or reopens the windows entry and may raise n.

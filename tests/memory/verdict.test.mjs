@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkRatchet, issueIdsIn, readExpectedRed, validateExpectedRed } from "./lib/ratchet.mjs";
 import { JOB } from "./lib/catalogue.mjs";
+import { chooseRepetitions, medianFalseRedRate, medianVerdict, repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
 
 /** One proxy sample per second; `mb(i)` gives its RSS, progress = 10 units/s. */
 function series(n, mb, role = "proxy") {
@@ -277,6 +278,139 @@ test("Linux samples (no commit_kb) keep the RSS verdict unchanged", () => {
   assert.deepEqual(v.checks, verdict(rows, { procPeaks: { proxy: 250 } }).checks);
   assert.equal(v.redOnlyOnCommit, false);
   assert.equal(v.workingSet, null);
+});
+
+// ── S1/burst1: the median of n fresh repetitions (Round 6 Q1, ticket 60) ────
+// One repetition's summary as run.mjs writes it: the peak check plus the others.
+const rep = (peakMB, { exitCode = peakMB > 250 ? 1 : 0, others = [] } = {}) => ({ exitCode, checks: [{ name: "procPeak:proxy", red: peakMB > 250, value: peakMB, budget: 250, unit: "MB" }, { name: "count:proxy", red: false, value: 1 }, ...others] });
+const rule5 = { n: 5, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 };
+
+test("median rule: one high repetition passes, the median stays within the budget", () => {
+  const v = medianVerdict([rep(236), rep(299), rep(231), rep(240), rep(219)], rule5);
+  assert.equal(v.medianMB, 236);
+  assert.deepEqual(v.values, [236, 299, 231, 240, 219]);
+  assert.deepEqual([v.exitCode, v.red, v.redChecks], [0, false, []]);
+});
+
+test("median rule: a high majority fails", () => {
+  const v = medianVerdict([rep(236), rep(264), rep(257), rep(299), rep(219)], rule5);
+  assert.equal(v.medianMB, 257);
+  assert.deepEqual([v.exitCode, v.red, v.redChecks], [1, true, ["median:procPeak:proxy"]]);
+});
+
+test("per-run ceiling: one repetition above 400 MB fails although the median is within the budget", () => {
+  const v = medianVerdict([rep(236), rep(401), rep(231), rep(240), rep(219)], rule5);
+  assert.equal(v.medianMB, 236);
+  assert.deepEqual([v.exitCode, v.red, v.redChecks, v.overCeiling], [1, true, ["ceiling:procPeak:proxy"], [2]]);
+  // At the ceiling itself is still within it.
+  assert.equal(medianVerdict([rep(236), rep(400), rep(231), rep(240), rep(219)], rule5).red, false);
+});
+
+test("median rule: any other RED check in any one repetition is RED (only the peak is judged on the median)", () => {
+  const orphan = { name: "orphans", red: true, value: 1, budget: 0 };
+  const v = medianVerdict([rep(236), rep(231), rep(240, { exitCode: 1, others: [orphan] }), rep(219), rep(230)], rule5);
+  assert.deepEqual([v.exitCode, v.redChecks], [1, ["orphans"]]);
+});
+
+test("median rule: an incomplete set is never judged — a harness failure, a missing repetition or a missing peak is a harness failure", () => {
+  const four = [rep(236), rep(231), rep(240), rep(219)];
+  const short = medianVerdict(four, rule5);
+  assert.equal(short.exitCode, 2);
+  assert.match(short.error, /4 of 5 repetitions/);
+  const failed = medianVerdict([...four, { exitCode: 2, checks: [], error: "killed (memory cap 3G?)" }], rule5);
+  assert.equal(failed.exitCode, 2);
+  assert.match(failed.error, /repetition 5: killed \(memory cap 3G\?\)/);
+  const noPeak = medianVerdict([...four, { exitCode: 0, checks: [{ name: "count:proxy", red: false, value: 1 }] }], rule5);
+  assert.equal(noPeak.exitCode, 2);
+  assert.match(noPeak.error, /repetition 5: no procPeak:proxy value/);
+});
+
+test("false-RED rate of a median of n: the binomial tail, as Round 6 Q1 worked it", () => {
+  // A median of n fails when at least (n + 1) / 2 runs land in the tail.
+  assert.equal(Number(medianFalseRedRate(0.27, 3).toFixed(3)), 0.179); // 3p² − 2p³ ≈ 18 %
+  assert.equal(Number(medianFalseRedRate(0.25, 9).toFixed(3)), 0.049); // ≈ 4.9 %
+  assert.equal(medianFalseRedRate(0, 9), 0);
+  // n is the smallest odd number in {3, 5, 7, 9} at ≤ 5 %; none at all means the rule is not adopted.
+  assert.equal(chooseRepetitions(0.25), 9);
+  assert.equal(chooseRepetitions(0.1), 3);
+  assert.equal(chooseRepetitions(0.3), null);
+});
+
+test("repetitions run one after another, as many as the rule's n, and a harness failure ends the set", async () => {
+  let active = 0;
+  let overlapped = false;
+  const calls = [];
+  const runOnce = async (i) => {
+    calls.push(i);
+    if (++active > 1) overlapped = true;
+    await new Promise((r) => setTimeout(r, 5));
+    active -= 1;
+    return rep(230 + i);
+  };
+  const three = await runRepetitions({ ...rule5, n: 3 }, runOnce);
+  assert.deepEqual(calls, [1, 2, 3]);
+  assert.equal(overlapped, false, "never two repetitions at once (§6 resource safety)");
+  assert.deepEqual([three.exitCode, three.values, three.medianMB], [0, [231, 232, 233], 232]);
+  const failing = await runRepetitions(rule5, async (i) => (i === 2 ? { exitCode: 2, checks: [], error: "timed out" } : rep(230)));
+  assert.equal(failing.reps.length, 2);
+  assert.deepEqual([failing.exitCode, failing.error], [2, "repetition 2: timed out"]);
+});
+
+// Round 7 Q1 / Round 8 Q1: on Windows the S1/burst1 set is judged on the
+// working-set gate, max(sampled WS, PeakWorkingSetSize), and the 400 MB
+// per-run ceiling applies to that same value; commit is reported per repetition.
+// One repetition as job.mjs hands it over on Windows: osVerdict's checks plus the
+// all-WS verdict's RED checks.
+const winRep = ({ commit, ws, wsPeak = ws }) => {
+  const p = winProc(1, "proxy", { ws, commit, peakWs: wsPeak });
+  const v = osVerdict(rowsOf([p], [p]), { procPeaks: { proxy: 250 }, counts: { proxy: 1 }, orphans: 0 });
+  return { exitCode: v.red ? 1 : 0, checks: v.checks, metric: v.metric, workingSetRedChecks: v.workingSet.redChecks };
+};
+
+test("median rule on Windows: judged on the WS gate (max of sampled WS and PeakWorkingSetSize), commit beside it", () => {
+  // CI run 42265988296-like repetitions: ~420 MB commit, WS around the budget.
+  const reps = [winRep({ commit: 422, ws: 234.3, wsPeak: 255 }), winRep({ commit: 365.2, ws: 222 }), winRep({ commit: 424.5, ws: 248.3, wsPeak: 262 }), winRep({ commit: 410, ws: 230, wsPeak: 240 }), winRep({ commit: 400, ws: 236 })];
+  const v = medianVerdict(reps, rule5);
+  // The PeakWorkingSetSize between samples counts: 255 and 262, not 234.3 and 248.3.
+  assert.deepEqual(v.values, [255, 222, 262, 240, 236]);
+  assert.deepEqual([v.gate, v.medianMB, v.red, v.redChecks], ["ws", 240, false, []]);
+  // Commit is reported, never the gate: every repetition is above 250 commit and above 400 in three.
+  assert.deepEqual(v.commitValues, [422, 365.2, 424.5, 410, 400]);
+  assert.equal(v.commitMedianMB, 410);
+  assert.deepEqual(v.overCeiling, []);
+  assert.equal(v.redOnlyOnCommit, false);
+});
+
+test("median rule on Windows: a WS majority above 250 is RED, and the 400 MB ceiling applies to the WS gate value", () => {
+  const high = medianVerdict([winRep({ commit: 430, ws: 240, wsPeak: 256 }), winRep({ commit: 420, ws: 251 }), winRep({ commit: 380, ws: 230 }), winRep({ commit: 425, ws: 248, wsPeak: 270 }), winRep({ commit: 410, ws: 220 })], rule5);
+  assert.deepEqual([high.medianMB, high.red, high.redChecks, high.redOnlyOnCommit], [251, true, ["median:procPeak:proxy"], false]);
+  const spike = medianVerdict([winRep({ commit: 420, ws: 230 }), winRep({ commit: 520, ws: 300, wsPeak: 401 }), winRep({ commit: 400, ws: 231 }), winRep({ commit: 400, ws: 232 }), winRep({ commit: 400, ws: 233 })], rule5);
+  assert.deepEqual([spike.medianMB, spike.red, spike.redChecks, spike.overCeiling], [232, true, ["ceiling:procPeak:proxy"], [2]]);
+  // Linux repetitions carry no commit values.
+  const linux = medianVerdict([rep(236), rep(231), rep(240), rep(219), rep(230)], rule5);
+  assert.deepEqual([linux.gate, linux.commitValues, linux.redOnlyOnCommit], [null, null, false]);
+});
+
+// The S1/burst1 proxy peaks (VmHWM, MB) measured for ticket 60: 48 fresh,
+// sequential runs on the integration tip 97c2211 (Linux, Bun 1.4.2; METRICS.md).
+const BURST1_TIP = [
+  236.5, 205.9, 267.4, 235.5, 227.5, 239.4, 235.1, 255.6, 239.9, 191.2, 268.9, 240.3, 235, 234, 241.5, 235, 241.1, 214.7, 235.4, 239.7, 247.7, 207.3, 232.9, 237.3,
+  235.6, 203.9, 243.8, 225.3, 234.8, 248.9, 235.7, 240.1, 234.5, 239.4, 256, 227.3, 239.7, 226.9, 262.3, 237.8, 237.4, 237.8, 235.1, 236, 218, 235.2, 242.8, 240.4,
+];
+// The earlier samples on unchanged code Round 6 Q1 lists (plus one CI GREEN without a recorded value).
+const BURST1_EARLIER = { values: [219.1, 231.8, 234, 236.6, 236.7, 237.5, 237.7, 256.7, 264.6, 299.2], greenWithoutValue: 1 };
+
+test("S1/burst1 is the only run judged on a median: n from the measured distribution, the 250 MB peak budget, the 400 MB ceiling", () => {
+  const above = (xs) => xs.filter((v) => v > 250).length;
+  const tipP = above(BURST1_TIP) / BURST1_TIP.length; // 5 / 48
+  const pooledP = (above(BURST1_TIP) + above(BURST1_EARLIER.values)) / (BURST1_TIP.length + BURST1_EARLIER.values.length + BURST1_EARLIER.greenWithoutValue); // 8 / 59
+  assert.deepEqual([above(BURST1_TIP), BURST1_TIP.length], [5, 48]);
+  assert.equal(chooseRepetitions(tipP), 3); // 3.0 %
+  assert.equal(chooseRepetitions(pooledP), 5); // 3: 5.02 % > 5 %; 5: 2.0 %
+  // n is the larger of the two, so the ≤ 5 % false-RED bound holds on either estimate.
+  assert.deepEqual(repetitionRule("S1/burst1"), { n: 5, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 });
+  assert.ok(Math.max(...BURST1_TIP, ...BURST1_EARLIER.values) <= 400, "the ceiling sits above every measured run");
+  for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1") assert.equal(repetitionRule(key), null, `${os} ${key}`);
 });
 
 test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6", () => {
