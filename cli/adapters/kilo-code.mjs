@@ -39,7 +39,8 @@ Models — one row each, with the per-model toggles:
 Notes:
 - Anthropic Messages takes the base URL including /v1: Kilo appends
   /messages to it, matching the proxy's /v1/messages endpoint.
-- Models can also be auto-fetched from the /v1/models endpoint.
+- Kilo does not fetch the model list for Anthropic Messages ("Fetch
+  models" stays disabled): enter both models above by hand.
 - kilo.jsonc: the upstream docs describe model-level tuning only in the
   "Custom Models" guide; the kit deliberately does not write kilo.jsonc.
 

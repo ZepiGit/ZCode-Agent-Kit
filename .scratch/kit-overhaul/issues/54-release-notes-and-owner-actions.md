@@ -1,6 +1,6 @@
 # 54: Release notes vNEXT and owner actions
 
-**Blocked by:** 29 (CDN disk cache pruning), 44 (UX batch (b2): installer stages, `install.sh`/`install.ps1` text and the PowerShell 5.1 stderr gate), 45 (UX batch (c1): grouped help, per-command `--help`, usage errors, output overrides), 46 (UX batch (c2): `accounts` (+health), `auth status`, `models`), 48 (Proxy TUI redesign on the shared tokens), 52 (Docs: README × 5 at content parity), 53 (Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST)
+**Blocked by:** 29 (CDN disk cache pruning), 44 (UX batch (b2): installer stages, `install.sh`/`install.ps1` text and the PowerShell 5.1 stderr gate), 45 (UX batch (c1): grouped help, per-command `--help`, usage errors, output overrides), 46 (UX batch (c2): `accounts` (+health), `auth status`, `models`), 48 (Proxy TUI redesign on the shared tokens), 52 (Docs: README × 5 at content parity), 53 (Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST), 59 (Kilo `/v1/models` sheet line)
 
 **Status:** ready-for-agent
 
@@ -36,3 +36,5 @@ Spec stories: 138, 144
   For this ticket: the release notes state the stay-back reason (Bun 1.4.2 instead of the latest stable, with the paired numbers and ticket 62 as the re-entry path), as C5 requires a documented reason (Round 11 C6).
 
 - 2026-11-07 (orchestrator, from ticket 10): the release notes announce that Node 20 and 22 are no longer supported (floor 24; setup/update refuse before mutating, exit 2, what/why/next), alongside the Bun 1.4.2 stay-back reason.
+
+- 2026-11-07 (orchestrator, from ticket 59): the release notes list the refreshed Kilo Code sheet (the false 'Kilo fetches /v1/models' line is replaced; existing sheets refresh on the next setup/integrate).

@@ -2,7 +2,7 @@
 
 **Blocked by:** 09 (Batch 1a — CI toolchain: actions v7, Bun 1.4.4 in CI, nested proxy workflows removed)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -168,3 +168,5 @@ Spec stories: 124, 125
 - `npm run test:mcp` (`t10-r2-full-mcp`): 96 tests, 95 pass, 0 fail, 1 skipped.
 
 **Pending CI, round 2.** On windows-latest × Node 24 and × Node 26, `install.ps1 refuses Node v20 and v22 before any file changes; v24 and v26 install` must run (not skip) and pass. That covers all four refusal cases (exact lines on stderr, exit 1, no ESC or error record, `SESSION_ALIVE` in iex mode) and the v24/v26 installs. Everything else in `test-kit` windows and ubuntu, ux-before and both memory-budget legs must stay as in run 42370286615.
+
+Merged 2026-11-07 as 1e8f652c1f50c33aa5d53e771beb8b08e57b7ca5 (ticket/10-node-24-floor at e57d75d; first merge, no revert-of-revert step); fast suite: kit 668/685 (17 skipped, 0 fail; includes tests/node-floor.test.mjs), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; lockfiles changed (engines `>=24` in package-lock.json and mcp/zcode-harness-mcp/package-lock.json), so `npm ci` ran at the root and in mcp/zcode-harness-mcp; clean merge (no conflicts). Sanity: `git diff --stat staging/10 HEAD -- . ':!.scratch'` is empty (merged tree matches the staging/10 983439a tree CI judged). Pre-merge CI (draft PR #19, staging/10 983439a), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42374566358. From that run: windows test-kit Node 24 and 26 ran and passed `install.ps1 refuses Node v20 and v22 before any file changes; v24 and v26 install`; ratchet holds on both memory-budget legs. The earlier run 42370286615 was RED on that test (decorated PowerShell error record), fixed in round 2 (653ed43). Logs: .scratch/kit-overhaul/reports/merge-10-{npm-ci,npm-ci-mcp,test,proxy,mcp}.log.
