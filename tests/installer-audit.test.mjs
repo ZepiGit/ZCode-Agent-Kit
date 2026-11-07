@@ -321,10 +321,12 @@ printf 'setup ran\\n'`);
  * install.ps1 against mocked downloads/tar/node/bun (real robocopy). `release`
  * are the files the mocked tar extracts; `setupExit` is what the mocked setup
  * returns; `nodeVersion` is what the mocked `node --version` prints. Every
- * download and non-version node call is appended to `calls.log`. Returns the
+ * download and non-version node call is appended to `calls.log`. `mode` "iex"
+ * runs the script as `irm ... | iex` does (Invoke-Expression in the caller's
+ * session, which then prints SESSION_ALIVE); `env` adds variables. Returns the
  * spawn result plus the install dir.
  */
-function runPs1Fixture(root, { release, setupExit = 0, preexisting = {}, nodeVersion = "v24.0.0" }) {
+function runPs1Fixture(root, { release, setupExit = 0, preexisting = {}, nodeVersion = "v24.0.0", mode = "call", env = {} }) {
   const bin = join(root, "bin");
   const local = join(root, "Local AppData");
   const install = join(root, "kit");
@@ -371,13 +373,13 @@ $env:SystemRoot = '${fakeSystem.replaceAll("'", "''")}'
 $env:ZCODE_KIT_INSTALL_DIR = '${install.replaceAll("'", "''")}'
 $env:ZCODE_KIT_VERSION = 'v1.2.3'
 $env:PATH = '${bin.replaceAll("'", "''")};' + $env:PATH
-& $Installer
+${mode === "iex" ? "Get-Content -Raw -LiteralPath $Installer | Invoke-Expression\nWrite-Output 'SESSION_ALIVE'" : "& $Installer"}
 $rc = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }
 exit $rc
 `, "utf8");
   const state = () => ({ install: existsSync(install) ? snapshotTree(install) : null, temp: snapshotTree(temp), local: snapshotTree(local) });
   const before = state();
-  const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", wrapper, INSTALL_PS1], { encoding: "utf8", timeout: 30_000 });
+  const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", wrapper, INSTALL_PS1], { encoding: "utf8", timeout: 30_000, env: { ...process.env, ...env } });
   return { result, install, calls, before, after: state() };
 }
 // Like a real release, it ships proxy/ and zcode-proxy-src/: robocopy /MIR
@@ -440,7 +442,16 @@ test("install.ps1 treats setup exit 20 and 130 as installed-with-warning and any
 });
 
 // ADR-0006 on the PowerShell path: Node below 24 is refused before the release
-// lookup, the temp directory and any file change; v24 and v26 install.
+// lookup, the temp directory and any file change; v24 and v26 install. The
+// refusal is three plain lines on stderr (what / why / next), the same shape
+// as install.sh: no PowerShell error record (`Exception:`, `Line |`, the
+// gutter), no escape sequences, no wrapping inside the text (C3), with and
+// without NO_COLOR, and `irm ... | iex` keeps the user's session open.
+const ps1FloorLines = (found) => [
+  `  [ERROR] Node.js 24 or newer is required (found ${found})`,
+  "    why:  the kit supports Node.js 24 and newer; nothing was downloaded, installed or changed",
+  "    next: winget install --id OpenJS.NodeJS.LTS --exact (or install Node.js 24 LTS or newer from https://nodejs.org/en/download), then open a new terminal and re-run this installer",
+];
 test("install.ps1 refuses Node v20 and v22 before any file changes; v24 and v26 install", { skip: process.platform !== "win32" }, (t) => {
   if (!pwshAvailable()) return t.skip("pwsh is unavailable");
   const preexisting = {
@@ -450,19 +461,22 @@ test("install.ps1 refuses Node v20 and v22 before any file changes; v24 and v26 
     "proxy/config.yaml": "user: settings",
     "logs/proxy.log": "history",
   };
-  for (const nodeVersion of ["v20.19.0", "v22.23.4"]) {
+  for (const [nodeVersion, mode, env] of [["v20.19.0", "call", {}], ["v22.23.4", "call", {}], ["v22.23.4", "call", { NO_COLOR: "1" }], ["v22.23.4", "iex", {}]]) {
     const root = mkdtempSync(join(tmpdir(), "zcode-installer-ps-floor-"));
     try {
-      const { result, calls, before, after } = runPs1Fixture(root, { release: PS1_RELEASE, preexisting, nodeVersion });
+      const { result, calls, before, after } = runPs1Fixture(root, { release: PS1_RELEASE, preexisting, nodeVersion, mode, env });
       const text = `${result.stdout}\n${result.stderr}`;
-      assert.notEqual(result.status, 0, text);
+      const label = `${nodeVersion} ${mode} ${JSON.stringify(env)}\n${text}`;
+      assert.equal(result.status, 1, label);
       assert.equal(existsSync(calls), false, `no download or setup may run:\n${existsSync(calls) ? readFileSync(calls, "utf8") : ""}`);
       assert.deepEqual(after, before, "the installation, TEMP and LOCALAPPDATA are byte-identical");
-      // PowerShell's error view wraps the message under a `|` gutter: compare it flattened.
-      const flat = text.replace(/\s*\r?\n\s*(?:\|\s*)?/g, " ").replace(/\s+/g, " ");
-      assert.ok(flat.includes(`Node.js 24 or newer is required (found ${nodeVersion}).`), text);
-      assert.ok(flat.includes("nothing was downloaded, installed or changed"), text);
-      assert.ok(flat.includes("next: winget install --id OpenJS.NodeJS.LTS --exact (or install Node.js 24 LTS or newer from https://nodejs.org/en/download), then open a new terminal and re-run this installer"), text);
+      const lines = result.stderr.split(/\r?\n/);
+      const at = lines.indexOf(ps1FloorLines(nodeVersion)[0]);
+      assert.ok(at >= 0, label);
+      assert.deepEqual(lines.slice(at, at + 3), ps1FloorLines(nodeVersion), label);
+      assert.doesNotMatch(text, /\x1b/, `no escape sequences: ${label}`);
+      assert.doesNotMatch(text, /Exception:|Line \||^\s*\||ErrorRecord|At line/m, `no PowerShell error record: ${label}`);
+      if (mode === "iex") assert.match(result.stdout, /^SESSION_ALIVE$/m, `irm | iex must not end the user's session: ${label}`);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
