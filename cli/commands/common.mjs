@@ -6,10 +6,17 @@
 //     kit       the kit context (cli/context.mjs createCtx: paths, key(), port());
 //     env       the process environment;
 //     execPath  the Node executable that runs the manager;
+//     platform  process.platform;
 //     spawnSync the child_process boundary;
+//     runCommandSync the PATH-command boundary (lib/process.mjs: git, npm,
+//               claude);
 //     fetch     the HTTP boundary (the local proxy);
 //     progress  (line) => void, a stdout line written at once, for output that
-//               has to interleave with a child process sharing the terminal.
+//               has to interleave with a child process sharing the terminal
+//               or with a question asked on it (setup, update, integrate,
+//               uninstall);
+//     progressError (line) => void, the same on stderr.
+// `help` runs before the kit context exists: its ctx has `kit: null`.
 // The entry renders the records after `run` returns. Importing a command
 // module has no side effects: no argv or env reads, no process.exit and no
 // I/O at module scope (tests/cli-commands.test.mjs).
@@ -21,8 +28,36 @@
 //   { kind: "json", value }                              JSON.stringify(value, null, 2) + "\n" on stdout
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { resolveBun } from "../../lib/process.mjs";
+import { proxyEnv } from "../../lib/proxy-env.mjs";
 
 export const ADAPTER_IDS = ["omp", "pi", "claude-code", "codex", "opencode", "cline", "kilo-code", "aider", "continue", "goose"];
+
+// setup: the kit is configured but at least one harness failed. A dedicated
+// code (not 1, which Node uses for an uncaught error or a failed import) so
+// the installers and `update` can tell a partial success from a crash.
+export const EXIT_HARNESS_FAILED = 20;
+// setup: interrupted with Ctrl-C; answers already given were applied.
+export const EXIT_ABORTED = 130;
+
+/** `{ exitCode: 2 }` with the usage line for a harness id this kit has no adapter for, or null. */
+export function unknownHarness(id) {
+  if (ADAPTER_IDS.includes(id)) return null;
+  return { exitCode: 2, records: [stderrLine(`unknown harness "${id}". Known: ${ADAPTER_IDS.join(", ")}`)] };
+}
+
+/**
+ * The proxy's own CLI (`bun run src/index.ts <args>` in zcode-proxy-src) with
+ * the per-spawn proxy environment; returns the spawnSync result.
+ */
+export function proxyCli({ kit, env, spawnSync }, cliArgs, opts = {}) {
+  return spawnSync(resolveBun(kit.root, env), ["run", "src/index.ts", ...cliArgs], {
+    cwd: kit.proxySrc,
+    env: proxyEnv(kit, env),
+    encoding: "utf8",
+    ...opts,
+  });
+}
 
 export function loadAdapter(id) {
   return import(`../adapters/${id}.mjs`);
