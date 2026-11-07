@@ -14,6 +14,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "pack", "dist");
+// Node.js support floor (ADR-0006; the same number as lib/node-floor.mjs,
+// kept equal by tests/node-floor.test.mjs). The packed manifest declares it,
+// and the build itself refuses to run below it.
+const NODE_FLOOR = 24;
 
 // Allowlist: exactly what ships. Everything else (tests, backups, logs,
 // generated artifacts, vendored junk) never enters the package.
@@ -98,6 +102,15 @@ function resetDist() {
 }
 
 function main() {
+  const major = Number(/^v(\d+)\./.exec(process.version)?.[1]);
+  if (!(major >= NODE_FLOOR)) {
+    const step = process.platform === "win32"
+      ? "winget install --id OpenJS.NodeJS.LTS --exact"
+      : `install Node.js ${NODE_FLOOR} LTS or newer from https://nodejs.org/en/download (with nvm: nvm install ${NODE_FLOOR})`;
+    console.error(`pack: Node.js ${process.version} is below the support floor (Node.js ${NODE_FLOOR}); nothing was built`);
+    console.error(`  next: ${step}, then rerun node pack/build.mjs`);
+    process.exit(2);
+  }
   const dryRunPublish = process.argv.includes("--dry-run-publish");
   resetDist();
   mkdirSync(DIST, { recursive: true });
@@ -133,7 +146,7 @@ function main() {
     // exactly the same command surface. `zcode-agent-kit` makes the package
     // name directly executable; `zcode-kit` remains the concise primary CLI.
     bin: rootPkg.bin,
-    engines: { node: ">=20" },
+    engines: { node: `>=${NODE_FLOOR}` },
     // Fail closed at the package level, not only in CI (ZAK-012): a generated
     // package stays private unless pack/ALLOW_PUBLISH existed at build time
     // AND names this exact version.
@@ -156,11 +169,12 @@ function main() {
   console.log(`pack: assembled ${files.length} files into pack/dist (version ${rootPkg.version}, private: ${pkg.private})`);
 
   if (dryRunPublish) {
-    const res = spawnSync("npm", ["publish", "--dry-run"], {
-      cwd: DIST,
-      encoding: "utf8",
-      shell: process.platform === "win32", // npm is npm.cmd on Windows
-    });
+    // npm is npm.cmd on Windows, which needs a shell. A shell gets ONE fixed
+    // command string: an args array together with `shell` is DEP0190 on
+    // Node >= 24 (the arguments would be joined unescaped).
+    const res = process.platform === "win32"
+      ? spawnSync("npm publish --dry-run", { cwd: DIST, encoding: "utf8", shell: true })
+      : spawnSync("npm", ["publish", "--dry-run"], { cwd: DIST, encoding: "utf8" });
     console.log((res.stdout ?? "") + (res.stderr ?? ""));
     if (res.status !== 0) {
       console.error("pack: dry-run publish FAILED — fix the payload before any real release");
