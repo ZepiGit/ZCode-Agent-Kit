@@ -39,6 +39,11 @@ jobs:
         run: npm run test
       - name: Proxy tests (bun test)
         run: npm run test:proxy
+      # Through the proxy's pinned devDependencies (typescript 7.0.2,
+      # @types/bun 1.4.2), never a by-name runner that fetches typescript@latest.
+      # The baseline has no errors, so any type error fails the leg.
+      - name: Proxy typecheck (pinned tsc)
+        run: npm run test:proxy-typecheck
       - name: MCP bridge tests
         run: npm run test:mcp
 

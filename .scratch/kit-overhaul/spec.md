@@ -31,7 +31,7 @@ From the user's point of view, after this change:
 - **Every growing store has a bound** and a test that proves it: CDN cache in memory and on disk, stall counters, MCP task registry and files, per-task arrays and text, the TUI log pane, and `proxy.log` (rotated by the proxy while it runs, with early output kept in a small capped file).
 - **Users can see the memory state.** `proxy status`, its `--json`, `/health` details, `doctor` (four new checks) and the proxy TUI show per-process RSS and memory footprint, the solver cap, the enforcement mode, the restart budget and admission counters. Every WARN comes with an exact next command.
 - **Every command speaks one design language** (Ledger, ADR-0001). Aligned rows end with the verdict, and line mode has no boxes. Glyph tiers degrade to ASCII, and nothing is carried by colour alone. Every error says what happened, why, and the exact next command. Reports go to stdout and diagnostics to stderr. Off a TTY, `doctor` keeps the legacy check grammar for scripts, and `WARN` is its only new word. The Account Rotator question is asked once. Setup output is a compact report by default. Help is grouped, with examples, and every command has its own `--help`. The proxy TUI shows health, per-process RSS, a filterable log pane and key hints.
-- **The kit is current.** The support floor is Node 24 (CI runs 24 and 26), Bun is pinned to 1.4.4 everywhere, and happy-dom 21, undici 8.12, yaml 2.9, MCP SDK 1.32, zod 4.6.6, TypeScript 7 and the v7 GitHub Actions are in. The harness adapters write configs that the current harness versions accept.
+- **The kit is current.** The support floor is Node 24 (CI runs 24 and 26), Bun is pinned to 1.4.2 everywhere (Round 11: Bun ≥ 1.4.3 raises the S1/burst1 proxy peak on the CI runners; ticket 62 owns moving the pin forward), and happy-dom 21, undici 8.12, yaml 2.9, MCP SDK 1.32, zod 4.6.6, TypeScript 7 and the v7 GitHub Actions are in. The harness adapters write configs that the current harness versions accept.
 - **Nothing breaks silently.** Every behaviour change is additive or announced in the release notes. Every migration is automatic, idempotent and transactional. CI on ubuntu and windows enforces the memory budgets and the output snapshots.
 
 ## User Stories
@@ -178,7 +178,7 @@ From the user's point of view, after this change:
 
 124. As a user on Node 20 or 22, I want `setup` and `update` to refuse before changing anything, with what/why/next, and to leave my installation working, so that the new support floor cannot leave me with a broken kit.
 125. As an OMP user, I want the preflight to tell me when the autostart's pinned Node path is below the support floor or missing, so that a Node upgrade through a version manager does not silently break autostart.
-126. As a kit user, I want Bun 1.4.4 pinned everywhere (CI, release, both installers with verified SHA-256s, docs, SUPPORT_MATRIX), so that every path runs the same runtime.
+126. As a kit user, I want Bun 1.4.2 (Round 11) pinned everywhere (CI, release, both installers with verified SHA-256s, docs, SUPPORT_MATRIX), so that every path runs the same runtime.
 127. As a kit user, I want happy-dom 21.0.4 with CSS and iframe loading kept on, so that the code-execution advisory is fixed without changing what a solve loads.
 128. As a kit user, I want undici, yaml, the MCP SDK and zod raised to versions that fix their advisories, so that known vulnerabilities are gone.
 129. As a maintainer, I want staying on MCP protocol revision 2025-11-25 and SDK 1.x documented as a deliberate stay-back, so that the reason is on record.
@@ -190,7 +190,7 @@ From the user's point of view, after this change:
 135. As a kit user, I want every migration (lock version, retention pruning, rotator decision, adapter refresh, bridge flags) automatic, idempotent and safe to run twice, so that upgrading is a non-event.
 136. As a reader of the docs in English, German, Spanish, Japanese or Chinese, I want README, SECURITY, harness and MCP bridge docs updated with content parity in the same change, so that every language tells the truth.
 137. As a security reviewer, I want SECURITY to stop saying the solver is a worker thread and that the start lock is never taken over, and to state that the solver process is still not a sandbox and that the happy-dom loading surface is unchanged, so that the security statements stay accurate.
-138. As a kit user, I want release notes that list every user-visible change (stream move, WARN, Node floor, `auth status`, rotator migration, shedding, thresholds, recycle count, retention, log files, JSON additions, Bun 1.4.4, Windows graceful stop, launcher handover exit status, solver visible as a process), so that nothing is removed or changed silently.
+138. As a kit user, I want release notes that list every user-visible change (stream move, WARN, Node floor, `auth status`, rotator migration, shedding, thresholds, recycle count, retention, log files, JSON additions, Bun staying at 1.4.2 with the reason 1.4.3/1.4.4 are deferred (Round 11), Windows graceful stop, launcher handover exit status, solver visible as a process), so that nothing is removed or changed silently.
 139. As a maintainer, I want the existing update and upstream-config tests run by `npm run test`, plus a guard that fails when a test file is wired into no script, so that tests can no longer sit outside CI unnoticed.
 140. As a maintainer, I want CI on {ubuntu, windows} × {Node 24, 26} running the kit, proxy, proxy typecheck and MCP suites, so that every supported platform and runtime is tested.
 141. As a maintainer, I want a memory-budget job on both OS legs that fails on any RED scenario not on the expected-RED list and on any listed scenario that turns GREEN, so that the guardrail can land first and can only ratchet tighter.
@@ -236,8 +236,8 @@ The order follows PROMPT §7 Phase 3, with two recorded deviations (RUNLOG + ADR
 - **Baselines:**
   - the Linux reference is Bun 1.4.2 (`METRICS.md`);
   - the `memory-budget` CI job (ubuntu and windows, expected-RED list) lands together with the loop in step 1, so the Windows reference baseline exists before step 3;
-  - Windows records two runs before any memory fix merges: the Bun 1.4.2 reference run (the loop and its CI job merge before the toolchain batch, and the draft PR's first CI run measures it) and the Bun 1.4.4 attribution run right after the toolchain batch;
-  - if the sampler cannot run on the pre-upgrade code, the 1.4.4 run becomes the reference, with the reason in RUNLOG;
+  - Windows records the Bun 1.4.2 reference run before any memory fix merges (the loop and its CI job merge before the toolchain batch, and the draft PR's first CI run measures it). The planned Bun 1.4.4 attribution run is moot: the runtime stays at 1.4.2 (Round 11 Q1 condition 1);
+  - if the sampler had not run on the pre-upgrade code, a post-upgrade run would have become the reference, with the reason in RUNLOG (moot: the 1.4.2 reference run exists);
   - a scenario that is RED only on commit goes back to the owner. It is never adjusted silently.
 
 ### 2. Solver process (ADR-0002, Round 2 Q2, Round 3 Q10)
@@ -512,11 +512,11 @@ The order follows PROMPT §7 Phase 3, with two recorded deviations (RUNLOG + ADR
   - `engines.node >=24` in all three manifests, and installer gates (`install.sh`, `install.ps1`, pack build) at 24, with the exact upgrade step in the error;
   - `setup`/`update` on Node < 24 refuse before mutating state;
   - the preflight checks the OMP autostart's pinned Node path against the floor, and DEP0190 in the pack build is fixed;
-  - Bun 1.4.4 everywhere, with the five upstream SHA-256s (linux-x64, linux-aarch64, darwin-x64, darwin-aarch64, windows-x64) and the installer tests' fake versions moved to 24/26, plus a test that rejects v22;
+  - Bun 1.4.2 everywhere (Rounds 10–11; ticket 62 owns re-entry), with the five upstream SHA-256s (linux-x64, linux-aarch64, darwin-x64, darwin-aarch64, windows-x64) and the installer tests' fake versions moved to 24/26, plus a test that rejects v22;
   - `actions/checkout@v7`, `actions/setup-node@v7`, `oven-sh/setup-bun@v2`;
   - the nested vendored proxy workflows are deleted, with a MANIFEST vendor-change entry;
-  - the proxy typecheck moves into root CI through a pinned proxy `typescript` devDependency, and `@types/bun` is pinned to 1.4.4 exact. The typecheck baseline is recorded first, and any failures become tickets;
-  - the memory loop's short profile re-runs on 1.4.4.
+  - the proxy typecheck moves into root CI through a pinned proxy `typescript` devDependency, and `@types/bun` is pinned to 1.4.2 exact (Round 11). The typecheck baseline is recorded first, and any failures become tickets;
+  - the memory loop's short profile re-runs on the new Bun (moot under Round 11: the runtime stays at 1.4.2).
 - **Batch 2, proxy deps:** happy-dom `^21.0.4` with `enableCSSFileLoading: true` and `enableIframePageLoading: true` (the SSRF-relevant surface stays unchanged, not stricter, ADR-0007); undici `^8.12.4`; yaml `^2.9.1`. The captcha suite runs green after the happy-dom bump, before any other captcha-path change.
 - **Batch 3, MCP deps:**
   - `@modelcontextprotocol/sdk ^1.32.2`, `zod ^4.6.6` declared explicitly, TypeScript `7.0.2` exact (fallback `6.0.3`) and `@types/node ^24`, an intentional range downgrade;
@@ -525,7 +525,7 @@ The order follows PROMPT §7 Phase 3, with two recorded deviations (RUNLOG + ADR
 - Each batch is green before the next.
 - **CI layout:**
   - `test-kit` runs {ubuntu-latest, windows-latest} × {Node 24, 26} with the kit, proxy, proxy typecheck and MCP suites;
-  - a separate `memory-budget` job (Node 26) runs per OS with the short profile and artefacts; it lands in step 1 with the memory loop and the expected-RED list, before batch 1 (§0, deviation 2), and batch 1 only moves its Bun pin to 1.4.4: ubuntu S1–S7, windows S1, S2 (offline fixture), S3, S4, S5 and S7. S6 stays ubuntu-only. Each job runs under hard caps and timeouts (a `systemd-run --user` scope or `prlimit` on ubuntu, a Job Object on windows), with `ZCODE_MEMLOOP_ALLOW=1` only there;
+  - a separate `memory-budget` job (Node 26) runs per OS with the short profile and artefacts; it lands in step 1 with the memory loop and the expected-RED list, before batch 1 (§0, deviation 2), and its Bun pin stays at 1.4.2 (Rounds 10–11; batch 1 was to move it to 1.4.4): ubuntu S1–S7, windows S1, S2 (offline fixture), S3, S4, S5 and S7. S6 stays ubuntu-only. Each job runs under hard caps and timeouts (a `systemd-run --user` scope or `prlimit` on ubuntu, a Job Object on windows), with `ZCODE_MEMLOOP_ALLOW=1` only there;
   - snapshot tests run inside `npm run test`. `release.yml` changes only in versions and runs on Node 26, and the publish job's Node 24 OIDC requirement stays satisfied;
   - the update and upstream-config tests join `npm run test`, and a guard fails on any kit test file that no script references;
   - the long memory profile stays local.
@@ -606,7 +606,7 @@ On Bun, captcha fetches use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`, and 
   - MCP task text capped at 4 MiB with a head/tail marker;
   - CDN disk pruning;
   - log rotation while running and `proxy.early.log`;
-  - the Bun 1.4.4 requirement;
+  - the Bun 1.4.2 requirement, and why 1.4.3/1.4.4 are deferred (Round 11 Q1 condition 6);
   - compact setup by default;
   - the Windows graceful stop;
   - the execve handover's signal exit status and its opt-out `ZCODE_KIT_RESIDENT_LAUNCHER=1`;
@@ -785,7 +785,7 @@ Open, /pr-shaped and not merged.
 8. **Installer and adapter temp-HOME fixtures. Exists.**
    - **Covers:**
      - the Node floor refusing before mutation, v22 rejected;
-     - the Bun 1.4.4 hashes;
+     - the Bun 1.4.2 hashes (Round 11), and a tampered Bun download refused before extraction;
      - the adapter HIGH and confirmed MEDIUM fixes, byte-idempotent;
      - the bridge flag in the generated MCP entries;
      - the OMP extension's generated in-host token logic, and its waiter cause-line record logic (write before release, identity match, stale/corrupt/oversized records rejected, fixed-vocabulary validation; Round 4 Q2);
