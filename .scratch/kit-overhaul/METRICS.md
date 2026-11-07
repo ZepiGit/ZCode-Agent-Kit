@@ -326,6 +326,85 @@ Every CI run since 42252896054 that ran the full short profile, from the `memory
 - **What the ratchet does with it (Round 13 Q1, ticket 66):** windows `S5/short → 30` is `unstable` with a growth-value band on the commit value of `growth:mcp-bridge`: 5 < value ≤ 30 passes with either trend flag and prints `S5/short: unstable (growth:mcp-bridge <x> %/1k commit, budget 5, bound 30, trend <t>), owned by ticket 30`; above 30 fails; ≤ 5 fails as at budget but listed; any other RED, a harness failure or a missing growth value fails. The bound sits 3.76 above the highest of 28 values (normal fit: ≈ 0.07 % per run above 30, z = 3.20; log-normal ≈ 0.39 %). Linux stays the plain entry `S5/short → 30`.
 - **Replays at the job seam** (`tests/memory/loop.test.mjs`, fixtures `tests/memory/fixtures/ci-42404639968-s5-short-windows-summary.json` and `ci-42401136452-…`): run 42404639968 (RED, 23.71, trend true; window medians 77.5, 78.3, 80.2, 80.0, 81.6, 82.6 MB) and run 42401136452 (GREEN, 15.55, trend false; 77.3, 79.1, 80.6, 80.5, 82.6, 77.4 MB) both pass with their unstable line. On the integration tip a912cce the first fails as `S5/short: RED but not listed in expected-red.json (windows)`, as in CI.
 
+### RED check sets per listed single run, both legs (ticket 67, Round 14 Q1 condition 3)
+
+Source: the `memory-budget` job logs of the last 60 `ci.yml` runs (`gh run list --workflow ci.yml -L 60`, then `gh api …/actions/jobs/<id>/logs`; the job summary table's "red checks" column per run key). Logs and the parsed table: `/home/AgentKit/overhaul-tools/ci-art/t67-logs/` (`logs/<run>-<leg>.log`, `parsed.json`); scripts `/home/AgentKit/overhaul-tools/t67-scripts/`. A run counts when its job printed the summary table (the three S1-only measurement runs 42316982634, 42347506810, 42352122623 have none) and the key's row is GREEN or RED (a harness failure is not a valid run).
+
+**Matching code.** A run counts for a key when its tree matches the tree 67 merges onto in what that key executes:
+- `tests/memory/lib/verdict.mjs` and `tests/memory/lib/budgets.mjs` identical (true from 42360554587 on; earlier runs differ in both);
+- the job's Bun 1.4.2 (setup-bun line in each log; every run from 42360554587 on);
+- product code: ticket 10's preflight change (`cli/heal.mjs`, S3/S4 run preflights) present, so windows starts at 42378479007; the unmerged-at-the-time proxy dependency bumps of staging/12 (42391052837, 42398295810, 42415959288) excluded. Later product merges (08 CLI split, 59 Kilo sheet line, 11 installers, 32 TUI log pane, 42 Account Rotator setup flow, 68 CRLF config writers) touch no code path a listed key runs except `zcode-kit run` through 08's behaviour-preserving split (08's own S3/short comparison: no change);
+- linux only: the ticket 64 sampler fix (`tests/memory/lib/sampler.mjs`, a process sampled mid-exec), so linux starts at 42398294952; the windows sampler path is unchanged throughout;
+- S3/short and S3/hung only: ticket 65's `tests/memory/scenarios/s3-concurrency.mjs` (the kill-holder adversary and the stale-lock round), so only the runs on a tree with 65: 42404639968, 42415957165 (staging/65), 42420564808 (staging/12 final), 42421432504 (staging/68), 42421424292 (integration 385853c). S3/omp's code path is unchanged by 65 and keeps the full list.
+- Ticket 12 (proxy dependencies) merged while 67 was open (3b409b1). Only 42420564808 (staging/12 final, 8fdadde) runs that proxy tree; its RED sets per key fall inside the sets of the earlier runs on every key and leg (below). 67's pre-merge run is the second run on it.
+
+Linux, 13 runs: 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292. Windows, 21 runs: 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292. S3/short and S3/hung: the 5 (linux) and 5 (windows) runs with ticket 65, **below the 10-run floor** (pending CI on 67's branch).
+
+Each line: the outcome and RED set, (number of runs), run ids. "not owned" = RED in some run but not in the committed `owns`: an ownership question (ticket 67 Comments), never folded in.
+
+- **linux S1/burst4 → 19**, 13 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (13): 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **linux S1/burst16 → 19**, 13 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (13): 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **linux S1/burst32 → 19**, 13 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (13): 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **linux S1/bigbody → 19**, 13 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (13): 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **linux S2/short → 58**, 13 runs; owns solver:cost-per-generation, solver:retained-before-recycle; **not owned: cdn-cache:memory-growth, growth:scenario, procPeak:scenario**
+  - RED: cdn-cache:memory-growth, growth:scenario, procPeak:scenario, solver:cost-per-generation, solver:retained-before-recycle (11): 42398294952, 42398299724, 42401136452, 42404639968, 42412266693, 42415953488, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+  - RED: cdn-cache:memory-growth, procPeak:scenario, solver:cost-per-generation, solver:retained-before-recycle (2): 42408170742, 42415957165
+- **linux S3/short → 37**, 5 runs; owns peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:preflight, procPeak:proxy; **not owned: failed-launches, stale-lock-after-round, exactly-one-proxy-after-round**
+  - RED: failed-launches, peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:preflight, procPeak:proxy, stale-lock-after-round (1): 42404639968
+  - RED: failed-launches, peak:kit, procPeak:launcher, procPeak:mcp-bridge, stale-lock-after-round (2): 42415957165, 42420564808
+  - RED: failed-launches, peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:proxy, stale-lock-after-round (1): 42421432504
+  - RED: exactly-one-proxy-after-round, failed-launches, peak:kit, procPeak:launcher, procPeak:mcp-bridge, stale-lock-after-round (1): 42421424292
+- **linux S3/hung → 16**, 5 runs; owns exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round; **not owned: peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:preflight, procPeak:proxy**
+  - RED: failed-launches, peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:preflight, procPeak:proxy, stale-lock-after-round (2): 42404639968, 42421432504
+  - RED: failed-launches, peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:preflight, stale-lock-after-round (2): 42415957165, 42420564808
+  - RED: failed-launches, peak:kit, procPeak:launcher, procPeak:mcp-bridge, stale-lock-after-round (1): 42421424292
+- **linux S3/omp → 35**, 13 runs; owns omp:concurrent-preflights; **not owned: procPeak:proxy, procPeak:preflight**
+  - RED: omp:concurrent-preflights (6): 42398294952, 42398299724, 42415953488, 42415957165, 42415961268, 42421424292
+  - RED: omp:concurrent-preflights, procPeak:proxy (3): 42401136452, 42404639968, 42412266693
+  - RED: omp:concurrent-preflights, procPeak:preflight (3): 42408170742, 42415962768, 42420564808
+  - RED: omp:concurrent-preflights, procPeak:preflight, procPeak:proxy (1): 42421432504
+- **linux S4/short → 17**, 13 runs; owns stale-lock-after-ctrl-c, unstoppable-proxy-after-ctrl-c, respawn-recovers-despite-stale-lock
+  - RED: respawn-recovers-despite-stale-lock, stale-lock-after-ctrl-c (12): 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415962768, 42420564808, 42421432504, 42421424292
+  - RED: respawn-recovers-despite-stale-lock, stale-lock-after-ctrl-c, unstoppable-proxy-after-ctrl-c (1): 42415961268
+- **linux S5/short → 30**, 13 runs; owns growth:mcp-bridge
+  - RED: growth:mcp-bridge (13): 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **linux S7/short → 34**, 13 runs; owns proxy.early.log:bounded; **not owned: proxy.log:bounded-while-running**
+  - RED: proxy.log:bounded-while-running (13): 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **windows S1/burst4 → 19**, 21 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (21): 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **windows S1/burst16 → 19**, 21 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (21): 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **windows S1/burst32 → 19**, 21 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (21): 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **windows S1/bigbody → 19**, 21 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (21): 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **windows S1/stalled → 61**, 21 runs; owns procPeak:proxy
+  - RED: procPeak:proxy (21): 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+- **windows S2/short → 58**, 21 runs; owns solver:cost-per-generation, solver:retained-before-recycle; **not owned: cdn-cache:memory-growth, growth:scenario, procPeak:scenario**
+  - RED: cdn-cache:memory-growth, growth:scenario, procPeak:scenario, solver:cost-per-generation, solver:retained-before-recycle (12): 42378479007, 42381135168, 42387910869, 42395651721, 42398294952, 42398299724, 42401136452, 42408170742, 42415953488, 42420564808, 42421432504, 42421424292
+  - RED: cdn-cache:memory-growth, procPeak:scenario, solver:cost-per-generation, solver:retained-before-recycle (9): 42382114395, 42383999482, 42384925753, 42392375847, 42404639968, 42412266693, 42415957165, 42415961268, 42415962768
+- **windows S3/short → 37**, 5 runs; owns peak:kit; **not owned: exactly-one-proxy-after-round, failed-launches, stale-lock-after-round, orphans**
+  - RED: exactly-one-proxy-after-round, failed-launches, peak:kit, stale-lock-after-round (2): 42404639968, 42415957165
+  - RED: failed-launches, orphans, peak:kit, stale-lock-after-round (3): 42420564808, 42421432504, 42421424292
+- **windows S3/hung → 16**, 5 runs; owns orphans, exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round; **not owned: peak:kit**
+  - RED: failed-launches, orphans, stale-lock-after-round (4): 42404639968, 42415957165, 42420564808, 42421424292
+  - RED: exactly-one-proxy-after-round, failed-launches, peak:kit, stale-lock-after-round, start-over-stale-lock (1): 42421432504
+- **windows S3/omp → 35**, 21 runs; owns omp:concurrent-preflights; **not owned: peak:kit**
+  - RED: omp:concurrent-preflights (19): 42378479007, 42381135168, 42382114395, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+  - RED: omp:concurrent-preflights, peak:kit (2): 42383999482, 42415953488
+- **windows S4/short → 17**, 21 runs; owns proxy-left-after-stop, failed-lifecycle-steps, stale-lock-after-ctrl-c, unstoppable-proxy-after-ctrl-c, respawn-recovers-despite-stale-lock
+  - RED: respawn-recovers-despite-stale-lock, stale-lock-after-ctrl-c, unstoppable-proxy-after-ctrl-c (20): 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+  - RED: failed-lifecycle-steps, proxy-left-after-stop, respawn-recovers-despite-stale-lock, stale-lock-after-ctrl-c, unstoppable-proxy-after-ctrl-c (1): 42408170742
+- **windows S7/short → 34**, 21 runs; owns proxy.early.log:bounded; **not owned: proxy.log:bounded-while-running**
+  - RED: proxy.log:bounded-while-running (21): 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292
+
+Local supplement (not a CI leg; Linux, Node 26.7.0, Bun 1.4.2, `node tests/memory/job.mjs --only S3/hung`, ports 19671–19678, tip 5c68c2f, `/home/AgentKit/overhaul-tools/t67-memloop/s3hung-<i>/`): 8 of 8 S3/hung runs RED on failed-launches, stale-lock-after-round, peak:kit, procPeak:launcher, procPeak:mcp-bridge, plus procPeak:proxy in 6 of 8; no harness failure.
+Local S3/short, same setup on tip 58ad4c6 (with tickets 12 and 68), `…/t67-memloop/s3short-<i>/`: 8 of 8 RED on exactly peak:kit, procPeak:launcher, procPeak:mcp-bridge, failed-launches, stale-lock-after-round (32 s, 117 samples each).
+
 ## Current
 
 (pending)
