@@ -128,8 +128,11 @@ const loadAccountSetup = () => import(pathToFileURL(join(KIT, "cli", "account-se
  * `accounts`: the config's auth.accounts.enabled (true/false) or "absent" for a
  * pre-rotator config without the accounts block. `generated`: "none" (pre-consent
  * kit, no generated/ at all) or "harness-choices" (a stored harness decision).
+ * `eol`: "lf" or "crlf", the line endings of the user's proxy/config.yaml (a
+ * Windows checkout, installer or editor writes CRLF). The example config is
+ * read line-ending agnostic (a windows checkout has it as CRLF).
  */
-function kitFixture(t, { layout = "in-tree", accounts = false, generated = "none" } = {}) {
+function kitFixture(t, { layout = "in-tree", accounts = false, generated = "none", eol = "lf" } = {}) {
   const base = mkdtempSync(join(tmpdir(), "kit-rotator-"));
   t.after(() => rmSync(base, { recursive: true, force: true }));
   const root = layout === "npm" ? join(base, "lib", "node_modules", "zcode-agent-kit") : join(base, "kit");
@@ -154,13 +157,14 @@ function kitFixture(t, { layout = "in-tree", accounts = false, generated = "none
   ].join("\n"));
   writeFileSync(join(root, "package.json"), JSON.stringify({ name: "zcode-agent-kit", version: "0.2.42" }, null, 2) + "\n");
   // Older kit state, in the root where every older layout kept it.
-  let config = readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8")
+  let config = readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8").replace(/\r\n/g, "\n")
     .replace(/^  port: \d+/m, `  port: ${FIXTURE_PORT}`)
     .replace('proxyApiKey: "GENERATE_ME"', 'proxyApiKey: "synthetic-fixture-key"');
   if (accounts === "absent") config = config.replace(/^  accounts:\n(?:    .*\n)+/m, "");
   else config = config.replace(/^    enabled: false$/m, `    enabled: ${accounts}`);
   assert.equal(/^    enabled: /m.test(config), accounts !== "absent", "fixture config shape");
-  writeFileSync(join(root, "proxy", "config.yaml"), config);
+  if (accounts !== "absent") assert.match(config, new RegExp(`^    enabled: ${accounts}$`, "m"), "fixture config shape");
+  writeFileSync(join(root, "proxy", "config.yaml"), eol === "crlf" ? config.replace(/\n/g, "\r\n") : config);
   writeFileSync(join(root, ".proxykey"), "synthetic-fixture-key\n");
   if (generated === "harness-choices") {
     mkdirSync(join(root, "generated", "harness-choices"), { recursive: true });
@@ -382,6 +386,45 @@ for (const [name, accounts] of [["enabled: false", false], ["a pre-rotator confi
     assert.equal(asked(tty.out), 1, tty.out);
     assert.equal(f.decision(), "no/interactive");
     assert.equal(asked((await runPty(f, ["setup"], [], { timeout: 45000 })).out), 0, "asked once");
+  });
+}
+
+// Round 3: a Windows user's proxy/config.yaml has CRLF line endings. The
+// migration reads it; an answer rewrites it. Both must give the same result as
+// on an LF config, byte for byte up to the line endings, which are kept.
+const bareLf = (text) => /(^|[^\r])\n/.test(text);
+for (const [label, accounts] of [["enabled: true", true], ["enabled: false", false], ["auth.accounts absent", "absent"]]) {
+  test(`rotator on a CRLF proxy/config.yaml (${label}): the migration decides as on LF, and every rewrite keeps CRLF with nothing duplicated`, { timeout: 180000 }, async (t) => {
+    const crlf = kitFixture(t, { accounts, eol: "crlf" });
+    const lf = kitFixture(t, { accounts });
+    const before = crlf.config();
+    assert.ok(before.includes("\r\n") && !bareLf(before), "the fixture config is CRLF throughout");
+    for (let i = 0; i < 2; i++) {
+      const r = await runPlain(crlf, ["setup"]);
+      assert.equal(r.code, 0, r.text);
+      assert.equal(crlf.decision(), accounts === true ? "yes/migration" : null, `replay ${i + 1}: decision`);
+      assert.equal(crlf.config(), before, `replay ${i + 1}: config byte-identical`);
+    }
+    const yaml = createRequire(join(KIT, "zcode-proxy-src", "package.json"))("yaml");
+    // An answer that changes the setting, then the opposite one through accounts.
+    const answer = accounts === true ? "n" : "y";
+    const steps = [["setup", "--account-rotator", answer], ["accounts", answer === "y" ? "disable" : "enable"]];
+    for (const args of steps) {
+      for (const f of [crlf, lf]) {
+        const r = await runPlain(f, args);
+        assert.equal(r.code, 0, `${args.join(" ")}: ${r.text}`);
+      }
+      const out = crlf.config();
+      assert.ok(!bareLf(out), `${args.join(" ")}: no bare LF in the rewritten config`);
+      assert.equal(out, lf.config().replace(/\n/g, "\r\n"), `${args.join(" ")}: the same bytes as the LF config, with CRLF`);
+      assert.equal((out.match(/^    enabled: /gm) ?? []).length, 1, `${args.join(" ")}: auth.accounts.enabled exactly once`);
+      const enabled = args[0] === "setup" ? answer === "y" : answer !== "y";
+      assert.equal(yaml.parse(out).auth.accounts.enabled, enabled);
+      assert.equal(crlf.decision(), `${enabled ? "yes" : "no"}/${args[0] === "setup" ? "flag" : "accounts"}`);
+      const replay = await runPlain(crlf, args);
+      assert.equal(replay.code, 0, replay.text);
+      assert.equal(crlf.config(), out, `${args.join(" ")} replayed: config byte-identical`);
+    }
   });
 }
 
