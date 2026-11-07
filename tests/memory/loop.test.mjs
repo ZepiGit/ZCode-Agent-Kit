@@ -19,7 +19,9 @@ import { resolveBun } from "../../lib/process.mjs";
 import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { whileFrozen } from "./lib/freeze.mjs";
-import { makeHungRound } from "./scenarios/s3-concurrency.mjs";
+import * as s3Scenario from "./scenarios/s3-concurrency.mjs";
+const { makeHungRound } = s3Scenario;
+const refusedStartCheck = (rounds) => s3Scenario.refusedStartCheck(rounds);
 
 // The /proc sampler's own tests (Windows has its own below and in win-sampler.test.mjs).
 const linuxOnly = { skip: process.platform === "linux" ? false : `Linux /proc sampler (platform ${process.platform})` };
@@ -657,15 +659,16 @@ test("whileFrozen thaws after the work, after a failing work, and a failed thaw 
 // were skipped, and only kill-holder-10 ran (8 of 9 earlier ubuntu runs: 188 s).
 // The hung round freezes the run's own proxy that serves the isolated port;
 // it never freezes a process that is not this run's, and it never guesses.
-function fakeHungRound({ record = null, ours = [], listening = {}, startCode = 0 } = {}) {
-  const calls = [], notes = {};
-  const kit = { port: 19026, manager: async () => ({ code: startCode, out: "", err: "" }), pidRecord: () => record };
+function fakeHungRound({ record = null, ours = [], listening = {}, startCode = 0, startErr = "", lock = null } = {}) {
+  const calls = [], notes = {}, roundOpts = {};
+  const kit = { port: 19026, manager: async () => ({ code: startCode, out: "", err: startErr }), pidRecord: () => record };
   const hungRound = makeHungRound({
     kit, proxies: () => ours.map((pid) => ({ pid, role: "proxy", key: `${pid}` })), portsOf: (pid) => listening[pid] ?? [],
-    round: async (name) => { calls.push(`round ${name}`); }, note: (k, v) => { notes[k] = v; },
+    round: async (name, n, opts) => { calls.push(`round ${name}`); roundOpts[name] = { n, ...opts }; }, note: (k, v) => { notes[k] = v; },
     freeze: (pid) => calls.push(`freeze ${pid}`), thaw: (pid) => calls.push(`thaw ${pid}`), alive: () => true, graceMs: 0,
+    lockState: () => lock,
   });
-  return { hungRound, calls, notes };
+  return { hungRound, calls, notes, roundOpts };
 }
 
 test("S3 hung round: a proxy the killed start left without a pid record is frozen and the round runs (CI run 42281731448)", async () => {
@@ -697,6 +700,117 @@ test("S3 hung round: nothing of this run to freeze is a skipped round, never a g
     assert.ok(notes["hung-10.skipped"], `${label}: the skip is noted`);
   }
 });
+
+// ── CI runs 42395651721 (ubuntu), 42398295810 and 42398299724 (windows): the
+// kill-holder adversary killed the start lock holder before its proxy was up
+// (ubuntu and the first windows run: before the spawn; the second windows run:
+// inside it, a proxy process that never ran). The next `manager start` met the
+// stale lock with no healthy proxy and refused it (exit 1, "stale or unreadable
+// manager start lock … refusing automatic takeover"): the kit defect ticket 16
+// owns. In the stale-lock round that refusal is the measured outcome, not a
+// round that did not run: its launches still race the state the killed start
+// left, and the refusal is recorded with its exit code and stderr.
+const LOCK = "/fx/state/logs/manager.lock";
+const REFUSAL = `manager error: stale or unreadable manager start lock at ${LOCK} (holder pid 4089 is not alive, started 2026-11-07T17:37:21.369Z) — refusing automatic takeover. If no start is actually running, remove ${LOCK} manually and retry.\n`;
+const staleLock = { path: LOCK, holderPid: 4089, holderAlive: false };
+
+test("S3 hung round: a start refused over the killed holder's stale lock is a measured outcome; the round runs unfrozen (CI run 42395651721)", async () => {
+  const { hungRound, calls, notes, roundOpts } = fakeHungRound({ startCode: 1, startErr: REFUSAL, lock: staleLock });
+  await hungRound("hung-10-with-stale-lock", { staleLock: true });
+  assert.deepEqual(calls, ["round hung-10-with-stale-lock"], "nothing is frozen: no proxy of this run serves the port");
+  assert.equal(notes["hung-10-with-stale-lock.skipped"], undefined, "a refused start is not a skipped round");
+  const refused = notes["hung-10-with-stale-lock.startRefused"];
+  assert.equal(refused.startCode, 1);
+  assert.match(refused.stderr, /stale or unreadable manager start lock .*refusing automatic takeover/);
+  assert.deepEqual(refused.lock, { path: LOCK, holderPid: 4089, holderAlive: false });
+  assert.equal(refused.serving, 0);
+  assert.deepEqual(roundOpts["hung-10-with-stale-lock"], { n: 10, kind: "mixed", startRefused: refused }, "the round's launches still run, and its entry carries the refusal");
+});
+
+test("S3 hung round: the Windows killed-spawn orphan (ours, never serving the port) is no target; the refusal is still the measured outcome (CI run 42398299724)", async () => {
+  const { calls, notes, hungRound } = fakeHungRound({ startCode: 1, startErr: REFUSAL, lock: staleLock, ours: [8652], listening: {} });
+  await hungRound("hung-10-with-stale-lock", { staleLock: true });
+  assert.deepEqual(calls, ["round hung-10-with-stale-lock"]);
+  assert.equal(notes["hung-10-with-stale-lock.startRefused"].proxiesOfRun, 1);
+});
+
+test("S3 hung round: a failed start is a measured outcome only over a proven-stale lock in the stale-lock round; otherwise it stays a skip", async () => {
+  const cases = {
+    "not the stale-lock round": { opts: {}, c: { startCode: 1, startErr: REFUSAL, lock: staleLock } },
+    "no lock file": { opts: { staleLock: true }, c: { startCode: 1, startErr: REFUSAL, lock: null } },
+    // The round started before the killed holder was gone: a race of the scenario, never a kit verdict.
+    "the lock holder is still alive": { opts: { staleLock: true }, c: { startCode: 1, startErr: REFUSAL, lock: { ...staleLock, holderAlive: true } } },
+    "the lock names no holder": { opts: { staleLock: true }, c: { startCode: 1, startErr: REFUSAL, lock: { path: LOCK, holderPid: null, holderAlive: false } } },
+    "the failure does not name the lock": { opts: { staleLock: true }, c: { startCode: 1, startErr: "manager error: EACCES somewhere else\n", lock: staleLock } },
+    "no stderr at all": { opts: { staleLock: true }, c: { startCode: 1, startErr: "", lock: staleLock } },
+    "a proxy of this run serves the port": { opts: { staleLock: true }, c: { startCode: 1, startErr: REFUSAL, lock: staleLock, ours: [53], listening: { 53: [19026] } } },
+  };
+  for (const [label, { opts, c }] of Object.entries(cases)) {
+    const { hungRound, calls, notes } = fakeHungRound(c);
+    await hungRound("hung-10-with-stale-lock", opts);
+    assert.deepEqual(calls, [], label);
+    assert.ok(notes["hung-10-with-stale-lock.skipped"], `${label}: the skip is noted`);
+    assert.equal(notes["hung-10-with-stale-lock.startRefused"], undefined, label);
+    assert.equal(notes["hung-10-with-stale-lock.skipped"].startCode, 1, label);
+  }
+});
+
+test("S3: a refused start over the stale lock is a RED check, owned with S3/hung (ticket 16), naming the exit code and stderr", () => {
+  const refused = { startCode: 1, stderr: REFUSAL.trim(), lock: staleLock, proxiesOfRun: 0, serving: 0 };
+  const green = refusedStartCheck([{ name: "kill-holder-10" }, { name: "hung-10", startRefused: null }]);
+  assert.equal(green.name, "start-over-stale-lock");
+  assert.equal(green.red, false);
+  assert.equal(green.value, 0);
+  const red = refusedStartCheck([{ name: "kill-holder-10" }, { name: "hung-10-with-stale-lock", startRefused: refused }]);
+  assert.equal(red.red, true);
+  assert.equal(red.value, 1);
+  assert.equal(red.budget, 0);
+  assert.match(red.detail.join(), /hung-10-with-stale-lock: manager start exited 1: manager error: stale or unreadable manager start lock/);
+});
+
+// The gate (lib/completeness.mjs): a round carrying a refused start counts as
+// run only with its evidence, only in a stale-lock round and only with the RED
+// check; everything ticket 02 round 7 made a harness failure still is one.
+const refusedEvidence = { startCode: 1, stderr: REFUSAL.trim(), lock: staleLock, proxiesOfRun: 0, serving: 0 };
+const refusedRound = (over = {}) => ({ name: "hung-10-with-stale-lock", n: 10, launchMs: Array(10).fill(300), startRefused: refusedEvidence, ...over });
+const s3HungRun = ({ rounds, checks = [{ name: "start-over-stale-lock", red: true, value: 1, budget: 0 }], notes = {} }) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 190, samples: 600, checks, summary: { proxy: { maxCount: 1 }, launcher: { maxCount: 5 }, preflight: { maxCount: 9 } }, notes: { sampler: {}, rounds, ...notes } });
+
+test("run evidence: the stale-lock round with a refused start, its launches and the RED check is a run that ran", () => {
+  const rounds = [{ name: "kill-holder-10" }, refusedRound(), { name: "hung-10" }];
+  assert.deepEqual(runEvidence(s3HungRun({ rounds, notes: { "hung-10-with-stale-lock.startRefused": refusedEvidence } }), { key: "S3/hung", exitCode: 1 }), { ok: true, problems: [] });
+});
+
+test("run evidence: a refused start without its evidence, outside the stale-lock round, without launches or without the RED check is a harness failure", () => {
+  const run = (round, extra = {}) => runEvidence(s3HungRun({ rounds: [{ name: "kill-holder-10" }, round, { name: "hung-10" }], ...extra }), { key: "S3/hung", exitCode: 1 });
+  assert.match(run(refusedRound({ name: "hung-10-with-stale-lock", startRefused: { ...refusedEvidence, startCode: 0 } })).problems.join(), /round hung-10-with-stale-lock: refused start without its evidence/);
+  assert.match(run(refusedRound({ startRefused: { ...refusedEvidence, stderr: "" } })).problems.join(), /refused start without its evidence/);
+  assert.match(run(refusedRound({ startRefused: { ...refusedEvidence, lock: { ...staleLock, holderAlive: true } } })).problems.join(), /refused start without its evidence/);
+  assert.match(run(refusedRound({ startRefused: { ...refusedEvidence, lock: null } })).problems.join(), /refused start without its evidence/);
+  assert.match(run(refusedRound({ launchMs: [] })).problems.join(), /round hung-10-with-stale-lock: refused start but 0 of 10 launches ran/);
+  assert.match(run(refusedRound(), { checks: [{ name: "start-over-stale-lock", red: false, value: 0, budget: 0 }] }).problems.join(), /refused start but the start-over-stale-lock check is not RED/);
+  // hung-10 runs after the stale lock was cleared: a refusal there is no measured outcome.
+  const inHung10 = runEvidence(s3HungRun({ rounds: [{ name: "kill-holder-10" }, { name: "hung-10-with-stale-lock" }, refusedRound({ name: "hung-10" })] }), { key: "S3/hung", exitCode: 1 });
+  assert.match(inHung10.problems.join(), /round hung-10: a refused start counts only in a stale-lock round/);
+  // S3/short has no stale-lock round at all.
+  const short = runEvidence({ ...s3HungRun({ rounds: [{ name: "race-5#0" }, { name: "race-10#0" }, { name: "race-10-preflight#0" }, refusedRound({ name: "kill-holder-10" })] }), key: "S3/short" }, { key: "S3/short", exitCode: 1 });
+  assert.match(short.problems.join(), /round kill-holder-10: a refused start counts only in a stale-lock round/);
+});
+
+// The three CI runs' own summaries (written by the pre-fix scenario: a
+// `.skipped` note and no round entry) stay harness failures through the job.
+const CI_REFUSED = {
+  "42395651721 (ubuntu)": "ci-42395651721-s3-hung-summary.json",
+  "42398295810 (windows)": "ci-42398295810-s3-hung-summary.json",
+  "42398299724 (windows)": "ci-42398299724-s3-hung-summary.json",
+};
+for (const [run, file] of Object.entries(CI_REFUSED)) {
+  test(`job: the S3/hung run of CI ${run} (stale-lock round skipped, start exited 1) stays a harness failure`, () => {
+    const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: join(dirname(CI_S3_HUNG), file) });
+    assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+    assert.match(result.error, /round hung-10-with-stale-lock skipped: manager start exited 1; round hung-10-with-stale-lock never ran/);
+    assert.equal(r.status, 1);
+  });
+}
 
 test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery) needs no thaw", async () => {
   const thawed = [];
