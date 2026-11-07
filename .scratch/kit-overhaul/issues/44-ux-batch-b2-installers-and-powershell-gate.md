@@ -34,3 +34,5 @@ Spec stories: 94, 95, 96, 116
 ## Comments
 
 - 2026-11-07 (orchestrator, from ticket 10): install.sh and install.ps1 now refuse Node < 24 before any download; reshape that error text with the rest of the installer UX. PowerShell 7 for Linux (digest-verified download, see ticket 10 Comments) gives a real parse check and early-path runtime proof of install.ps1 locally.
+
+- 2026-11-07 (orchestrator, from ticket 10 round 2): install.ps1's older early refusals (target guards, release lookup, downloads, hash and layout checks) still use throw/Write-Error and reach the user as decorated PowerShell error records (Exception:/Line |, ANSI even under NO_COLOR, width-wrapped). Move them to the plain what/why/next stderr shape ticket 10 introduced for the Node floor ([Console]::Error.WriteLine, exit 1 / $LASTEXITCODE under iex).
