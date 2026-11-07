@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -42,6 +42,8 @@ function packageFixture(t) {
     // ADR-0011 shared output files, required by verify-payload since ticket 05.
     "zcode-proxy-src/src/tui/width-core.mjs", "zcode-proxy-src/src/tui/width-core.d.mts",
     "zcode-proxy-src/src/tui/tokens.mjs", "zcode-proxy-src/src/tui/tokens.d.mts",
+    // The CLI command modules, required by verify-payload since ticket 08.
+    ...readdirSync(join(KIT, "cli", "commands")).filter((f) => f.endsWith(".mjs")).map((f) => `cli/commands/${f}`),
   ]) put(root, path);
   put(root, "zcode-proxy-src/src/runtime.test.ts", "throw new Error('must not ship');\n");
   put(root, "zcode-proxy-src/src/__fixtures__/credential.json", "fixture\n");
