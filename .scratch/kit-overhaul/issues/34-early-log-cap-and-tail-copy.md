@@ -33,3 +33,5 @@ ADR: 0009
 Spec stories: 76, 78
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 32): in Bun 1.4.2 a substring keeps its whole parent string alive (probe in ticket 32 Comments: 2,000 short rows split from one 20 MB record kept all 20 MB). A bound that counts the bytes of slices, split parts or tail copies is beaten unless it makes a fresh copy of what it keeps. Check your truncation/tail copy for this and pin it with an adversarial test.
