@@ -31,3 +31,5 @@ ADR: 0002, 0003, 0007, 0014
 Spec stories: 126, 129, 136, 137
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 10): the READMEs (en, de, es, ja, zh-CN) and SUPPORT_MATRIX.json still name Node 20; the support floor is Node 24 (engines >=24 in all three manifests, ticket 10) and Bun 1.4.2 (Round 11).
