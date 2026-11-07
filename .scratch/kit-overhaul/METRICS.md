@@ -181,6 +181,8 @@ Linux reference check on the ticket 02 branch (Bun 1.4.2, 2026-11-06, `/home/Age
 
 Same run: kit total 373 MB (≤ 596), preflight peak 73.9 MB (≤ 76), proxy 60 MB; the host (34.7 MB per process) is not kit footprint. Measurement floor of the stub host (no-op hook) +0.6 to +0.75 MB; a stat + `fetch` waiter shape +2.9 to +3.3 MB. A throwaway single-flight prototype turned the variant GREEN in 4 of 4 runs with waiters at +3.3 to +4.1 MB (ticket 03 Comments). Windows: pending CI, after ticket 02 is re-merged.
 
+Re-run after merging the integration tip 5631511 (02 + 60), 2026-11-07, `/home/AgentKit/overhaul-tools/t03-memloop/r2-job-s3/`: unchanged. Both rounds 5 preflights at once (5 spawned), starters +3.1 to +3.8 MB, every surviving host printed `quota-unavailable`, kit total 372 MB, preflight 62.9 MB, proxy 60.8 MB, host 34.6 MB per process (not kit). 12 s, 36 samples; the run passes the S3/omp evidence floor (≥ 5 s, ≥ 14 samples, proxy + preflight + omp-host, both rounds). Windows (commit gate for the waiter cost, WS reported beside it): pending CI.
+
 ## Current
 
 (pending)

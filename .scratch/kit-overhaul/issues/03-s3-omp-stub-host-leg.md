@@ -129,3 +129,90 @@ Branch `ticket/03-s3-omp-stub-host`. Code head 50c027b, on base 1e8f753. That ba
   - mind the ~1 MB margin;
   - avoid the takeover race the positive control exposed;
   - the scenario gives you `notes.ompRounds` per host: preflights, cost, cause lines, last line.
+
+### 2026-11-07 — implementer, round 2 (claude-opus-5-5): integration tip merged, S3/omp on the merged Windows sampler
+
+Branch `ticket/03-s3-omp-stub-host`. Merge 18d6271 (tip 5631511: tickets 02 + 60), code 4386a38. Bun 1.4.2 (ticket 11 not merged), Node 26.7.0, port 19030.
+
+**Merge.** Two files conflicted. I resolved both by hand and kept both sides:
+- `lib/verdict.mjs`: `NOT_KIT` is the union (`tooling` from 02, `omp-host` from 03).
+- `loop.test.mjs`: the imports are merged, and every test from both sides is kept.
+
+`s3-concurrency.mjs`, `sampler.mjs`, `budgets.mjs`, `expected-red.json` and `METRICS.md` merged cleanly. `ci.yml` and `package.json` did not conflict. The merge commit holds only the resolution; the adaptation is the next commit.
+
+**What the merge broke (RED on the tip, shown).** The tip's evidence gate (`lib/completeness.mjs`) judged S3/omp on the S3 floor: ≥ 15 s, and roles proxy, launcher and preflight. S3/omp starts no launcher and runs 10–12 s. I fed real S3/omp summaries to the tip's gate (`reports/t03-r2-gate-red.log`):
+- the pre-merge run (50c027b) and the fresh merged run both fail with `scenario ran 12 s, below the S3 floor of 15 s` and `role launcher never seen`;
+- in the job, that is a harness failure, so both `memory-budget` legs would have failed the ratchet.
+
+**What landed (4386a38)**
+- `completeness.mjs`: a run key may carry its own floor, which replaces its scenario's.
+  - `S3/omp`: ≥ 5 s, ≥ 14 samples, roles `proxy`, `preflight` and `omp-host`. The numbers are half the shortest Linux run (10 s, 28 samples).
+  - `manager` is not required: it is too short-lived for a Windows poll, which is the same reason S3 does not require `mcp-bridge`.
+  - `ROUNDS["S3/omp"] = ["omp-5", "omp-5-kill-starter"]`. A run without the killed-starter round is a harness failure. That is a floor of its own, not an exemption.
+- `s3-concurrency.mjs`:
+  - `OMP_ROUNDS` is the single round table. A test pins it equal to the gate's list.
+  - The rounds are noted as `rounds`, the name the gate reads. They were `ompRounds`. **Ticket 35: read `notes.rounds`.**
+- `win-sampler.mjs`: a console host under an `omp-host` takes the host's role, because it belongs to the harness (ADR-0013 cond 4). The preflight the host spawns, with its PowerShell and console host, stays kit (Round 7 Q2 cond 3).
+- `fixtures/omp-host.ts` and `lib/omp-leg.mjs`: on Windows the host also measures its working-set delta (`wsCostMB`, from `process.memoryUsage().rss`). The waiter-cost check carries `gate: "commit"` and prints `+x MB commit / +y MB WS` per host (Round 7 Q1 cond 3). Linux output is unchanged.
+- `expected-red.json`: unchanged. `S3/omp → 35` is a plain string entry on both legs and fits the Round 9 schema. A test pins three things on both legs: RED passes the ratchet, GREEN asks for the deletion, and `unstable` is a schema error.
+- New fixture `fixtures/local-20261107-s3-omp-linux-summary.json`: the real merged Linux run, with no secrets, port 19030 and no external connections. It replays through the job as the listed RED. Cut to one round, it replays as a harness failure.
+
+**Tests (head 4386a38, tip 5631511)**
+- `npm run test`: 643 tests, 627 pass, 0 fail, 16 skipped. The tip had 620 / 604 / 16 (`reports/merge-02-60-test.log`). +23 tests: 17 from round 1 and 6 new. Log: `reports/t03-r2-full-kit.log`.
+- `npm run test:proxy`: 1343 pass, 0 fail, 90 files (`t03-r2-full-proxy.log`).
+- `npm run test:mcp`: 96 tests, 95 pass, 0 fail, 1 skipped (live). `git status` was clean after the build (`t03-r2-full-mcp.log`).
+- RED → GREEN: the 4 new behaviour tests failed first (`t03-r2-red1.log`):
+  - the S3/omp evidence floor;
+  - the round table;
+  - the omp-host conhost;
+  - the Windows waiter-cost report.
+
+  After the change, all memory tests pass (`t03-r2-green1.log`, then `t03-r2-green2.log` with the replay test).
+- Mutations (`t03-r2-mutants.log`, script `/home/AgentKit/overhaul-tools/t03-scripts/r2/mutants.sh`). Each was restored, and `git diff` was empty afterwards:
+  - M8 windows `S3/omp` made `unstable` → 8 tests fail;
+  - M9 windows entry deleted → 2 fail;
+  - M10 the tip's `completeness.mjs` → 3 fail;
+  - M11 the gate forgets the killed-starter round → 3 fail;
+  - M12 the scenario notes `ompRounds` again → no fast test fails. The live job is the guard there: `S3/omp: harness failure: … round omp-5 never ran; round omp-5-kill-starter never ran`, ratchet FAILED (`t03-r2-m12-job.log`).
+
+**Memory loop, Linux short profile** (`--only S3/short,S3/hung,S3/omp`, systemd cap, `reports/t03-r2-job-s3.log`, `/home/AgentKit/overhaul-tools/t03-memloop/r2-job-s3/`): **the ratchet holds.**
+
+| run | outcome | red checks | s / samples |
+|---|---|---|---|
+| S3/short → 37 | RED | peak:kit 855.1, procPeak:launcher 77.8, procPeak:mcp-bridge 86.8, failed-launches, stale-lock-after-round | 33 / 119 |
+| S3/hung → 16 | RED | peak:kit 853, launcher 79.1, mcp-bridge 86, proxy 62.5 (budget 62), failed-launches, stale-lock-after-round | 189 / 528 |
+| S3/omp → 35 | RED | omp:concurrent-preflights 5 (both rounds; 5 spawned) | 12 / 36 |
+
+- S3/short and S3/hung are RED on the same checks as before the merge, so the merge did not disturb them. The S3/hung proxy peak sits at its 62 MB edge, as it did on the tip.
+- S3/omp details:
+  - starters cost +3.1 to +3.8 MB;
+  - every surviving host printed `quota-unavailable`;
+  - kit 372 MB, preflight 62.9 MB, proxy 60.8 MB;
+  - host 34.6 MB per process (not kit).
+
+**Decisions**
+7. **Per-key evidence floor** instead of loosening the S3 floor or exempting S3/omp. The S3 floor stays as it was for S3/short and S3/hung (pinned).
+8. **The Windows waiter cost stays gated on commit.** Round 7 Q1 moved "the per-process peak and steady budgets … of the proxy, launcher, MCP bridge and preflight" to working set, and says "nothing else". The waiter cost is an in-host delta of the harness, so the earlier rule (Round 2 Q13: RED rules on commit) still applies. WS is reported beside it. If the waiter cost turns out RED only on commit on Windows once ticket 35 has waiters, Round 6 Q2 cond 1 applies: it goes to the owner with both numbers, and nothing is listed silently. Source for the metric: `Bun.unsafe.memoryFootprint()` is PrivateUsage, the commit charge, on Windows (https://bun.com/reference/bun/unsafe/memoryFootprint).
+9. **The stub host's conhost is the harness's,** the same rule as the other fixtures' conhosts.
+
+**Pending CI (orchestrator verifies after merge+push).** I cannot push. On the draft PR's run, check:
+1. `memory-budget` (windows):
+   - The job summary row is `S3/omp | RED | ticket 35`, with `omp:concurrent-preflights` among the red checks (expected value 5, or at least 2), and the ratchet holds. A `HARNESS FAILURE` row is a real RED.
+   - The evidence holds: `scenarioS` ≥ 5, samples ≥ 14, and `rolesSeen` with `omp-host 5`, `preflight` ≥ 1 and `proxy 1`; `jobApplied: true`; `metric: commit`; units self-test `ok`.
+   - `omp:starter-killed` ok (`taskkill /T` killed a starter), `omp:hosts-finished` ok, `simultaneous-proxies` 1, orphans 0.
+   - The `omp:waiter-cost` detail shows `commit / WS` for every host. Today every host is a starter (no waiters), so the check is vacuous.
+   - In `samples.csv`, no conhost whose ppid is an omp-host has a kit role.
+   - Expected RED reason: `omp:concurrent-preflights`. Other REDs are possible on Windows and accepted under the plain entry. The most likely is `peak:kit` on commit (514 MB total: 5 preflights, each with kit PowerShell). Record the numbers. If S3/omp windows is still RED on `peak:kit` once single-flight lands, ticket 35 cannot delete its entry, and that comes back with numbers (37's lever question).
+2. `memory-budget` (ubuntu): `S3/omp` RED → 35 on `omp:concurrent-preflights` only, as here.
+3. `test-kit` windows (Node 24 and 26) must run these three host tests, not skip them:
+   - "the stub OMP host runs the generated extension once …": metric `commit`, `wsCostMB` a number, one preflight spawned by the host itself;
+   - "killing a starter host takes its running preflight with it": the `taskkill /T` path;
+   - **the floor test** "… charges a hook that does nothing well under the 5 MB waiter gate": on commit, the no-op cost must be < 2.5 MB. If it fails there, the commit floor cannot tell a waiter from noise. That is a finding that comes back as a question with the number. It is not a reason to loosen the gate.
+4. `test-kit` ubuntu legs: green.
+
+**Left for others**
+- Orchestrator: the pending-CI checks above.
+- Ticket 35:
+  - the round 1 notes still hold (≈ 1 MB margin; the takeover race);
+  - the per-host data is now in `notes.rounds`;
+  - on Windows the waiter gate is commit with WS reported beside it (decision 8).
