@@ -2,7 +2,7 @@
 
 **Blocked by:** 09 (Batch 1a — CI toolchain: actions v7, Bun 1.4.4 in CI, nested proxy workflows removed)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
