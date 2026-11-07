@@ -156,6 +156,31 @@ other: 1
     expect(readFileSync(p, "utf-8")).toBe(before);
   });
 
+  // Ticket 68: a Windows user's CRLF config stays CRLF in every branch, and a
+  // replay leaves it byte-identical. The same branch on LF is the oracle (its
+  // random mid swapped for the CRLF run's).
+  for (const [branch, config] of [
+    ["fills an empty deviceMid", 'identity:\n  appVersion: "3.8.1"\n  deviceMid: ""\nother: 1\n'],
+    ["inserts under identity:", 'identity:\n  appVersion: "3.8.1"\nother: 1\n'],
+    ["appends identity:", "server:\n  port: 8080\n"],
+  ] as const) {
+    it(`keeps a CRLF config CRLF when it ${branch}`, () => {
+      mkdirSync(MID_TMP, { recursive: true });
+      const lfPath = join(MID_TMP, "lf.yaml");
+      const winPath = join(MID_TMP, "win.yaml");
+      writeFileSync(lfPath, config, "utf-8");
+      writeFileSync(winPath, config.replace(/\n/g, "\r\n"), "utf-8");
+      const lfMid = ensureDeviceMidInConfig(lfPath);
+      const mid = ensureDeviceMidInConfig(winPath);
+      const after = readFileSync(winPath, "utf-8");
+      expect((after.match(/(?<!\r)\n/g) ?? []).length).toBe(0);
+      expect(after).toBe(readFileSync(lfPath, "utf-8").replace(lfMid, mid).replace(/\n/g, "\r\n"));
+      expect(after.match(/deviceMid:/g)?.length).toBe(1);
+      expect(ensureDeviceMidInConfig(winPath)).toBe(mid);
+      expect(readFileSync(winPath, "utf-8")).toBe(after);
+    });
+  }
+
   it("produces a mid that buildIdentityHeaders emits as X-Device-Mid", () => {
     const p = writeConfig(`identity:
   appVersion: "3.8.1"

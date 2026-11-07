@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { commitFile, ensureDir } from "../lib/edit.mjs";
+import { withLineEndingsOf } from "../lib/line-endings.mjs";
 import { ABORTED, askYesNo } from "./harness-consent.mjs";
 
 export const ACCOUNT_ROTATOR_QUESTION = "Do you want to activate the Account Rotator feature?";
@@ -142,19 +143,11 @@ export async function decideAccountRotator({ ctx, tx, explicit, explicitSource, 
 }
 
 /**
- * `text` with the line endings `source` uses. The yaml library writes LF (and
- * keeps a CRLF only inside comments it carries over), so a Windows user's
- * CRLF config.yaml would come back with mixed line endings. A file with more
- * CRLF than bare LF breaks is written CRLF throughout; otherwise LF.
+ * Record the config change in the existing setup transaction; keep YAML
+ * comments/policies and line endings. The yaml library writes LF (keeping a
+ * CRLF only inside comments it carries over), so the document is written with
+ * the file's own line endings (lib/line-endings.mjs).
  */
-function withLineEndingsOf(source, text) {
-  const crlf = (source.match(/\r\n/g) ?? []).length;
-  const lf = (source.match(/(?:^|[^\r])\n/g) ?? []).length;
-  const lines = text.replace(/\r\n/g, "\n");
-  return crlf > lf ? lines.replace(/\n/g, "\r\n") : lines;
-}
-
-/** Record the config change in the existing setup transaction; keep YAML comments/policies and line endings. */
 export function configureAccountRotator(ctx, tx, enabled, runProxyCli) {
   const { parseDocument } = createRequire(join(ctx.proxySrc, "package.json"))("yaml");
   const source = readFileSync(ctx.config, "utf8");
