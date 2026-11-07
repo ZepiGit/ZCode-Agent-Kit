@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: high
@@ -127,3 +127,5 @@ There are no budget or memory-number changes:
 **Left for tickets 16/17 (kit lifecycle; not changed here):**
 - (1) The stale-lock refusal itself is now a named check.
 - (2) On Windows, a holder killed inside `spawn()` leaves a suspended, never-running proxy process. It is not on the port and has no pid record. It stays for the rest of the run and survives the final stop (42398299724: `finalStop.proxiesLeft 1`, `pidRecordLeft null`; hung-10 then shows 2 proxies at once, a fact the run already reports). Adoption cannot apply to it because it never answers. Only a proof tied to the spawn (ticket 16's record at spawn) can reap it.
+
+- Merged 2026-11-07 as 067bac978601a872742b30a81eaf569a929aa395 (ticket/65-s3-hung-stale-lock-round at 5b0d715 into 8cab554; first merge, no revert-of-revert step); fast suite: kit 747/766 (19 skipped, 0 fail), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes; clean merge (no conflicts). Sanity: `git diff --stat staging/65 HEAD -- . ':!.scratch'` is empty (merged tree matches the staging/65 31ae58d tree CI judged). Pre-merge CI (draft PR #25, staging/65 on the tip with ticket 66), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42415957165. The earlier run 42404639968 (S3/hung passed its gate on both legs; RED only on windows S5/short, settled by Round 13 / ticket 66) does not count against this ticket (Round 13 condition 6). Local `node tests/memory/job.mjs --only S3/hung` on the merged tree (linux, short profile, cap systemd, ZCODE_MEMLOOP_PORT=19650): passes the evidence gate (no harness failure), RED as listed (ticket 16), ratchet holds; 189 s, 556 samples, every role seen; `start-over-stale-lock` 0, `stale-lock-after-round` 2, `failed-launches` 13; peak:kit 864.4 MB, procPeak:proxy 62 MB. Logs: .scratch/kit-overhaul/reports/merge-65-{npm-ci,test,proxy,mcp,s3hung}.log.
