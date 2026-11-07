@@ -550,6 +550,12 @@ test("auth login: the proxy CLI's exit code passes through (no exit status is 1)
     assert.deepEqual(await run(args(["auth", "login", "bigmodel"], { import: true, account: "work" }), ctx), { exitCode: status, records: [] });
     assert.deepEqual(proxyCliArgs(calls), [viaProxyCli(["auth", "login", "bigmodel", "--import", "--account", "work"])]);
   }
+  // The proxy CLI runs with the per-spawn proxy environment (lib/proxy-env.mjs): an ambient egress proxy is not inherited.
+  const ambient = proxyCliCtx({ status: 0 });
+  ambient.ctx.env = { ...ambient.ctx.env, HTTPS_PROXY: "http://ambient.invalid:3128" };
+  await run(args(["auth", "login"]), ambient.ctx);
+  assert.equal(ambient.calls[0].opts.env.HTTPS_PROXY, undefined);
+  assert.equal(ambient.calls[0].opts.env.ZCODE_KIT_BUN, process.execPath);
   const killed = proxyCliCtx({ status: null, signal: "SIGINT" });
   assert.deepEqual(await run(args(["auth", "login"]), killed.ctx), { exitCode: 1, records: [] });
   assert.deepEqual(proxyCliArgs(killed.calls)[0][2], ["auth", "login", "zai"], "zai is the default provider");
