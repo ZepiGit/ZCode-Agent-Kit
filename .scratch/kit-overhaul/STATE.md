@@ -1,8 +1,9 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: wait for t60 round 3 (Owner Proxy round 9 conditions 1-3, 6, 8: unstable state for windows S1/burst1 only). Then on staging/02: git rm the marker tests/memory/measure-burst1 (db5f353), merge ticket/60 again, push, one pre-merge run (must be green on both legs; disagreement per R9 C7 -> question, no rerun-until-green). Green -> merge 02 then 60 via MERGER-BRIEF.md (staging/02 tree; revert the revert c252676 first). Then resume t03; frontier opens to 09, 61 (needs-triage).
+- Next action: t03 resumed (S3 OMP stub host; merge integration tip, pre-merge CI for its windows criteria). Frontier after 02: 03 (in progress), 61 (needs-triage, Round 7: comes back with numbers), 57/59 (needs-triage). 09 opens when 03 merges, then the chain 10 -> 11 -> 12 -> 13 opens 19, 24-26, 30, 36.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
+- Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul
 - Owner checkout (read-only for this run): /home/AgentKit/ZCode-Agent-Kit
