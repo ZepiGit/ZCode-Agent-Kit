@@ -6,6 +6,19 @@
 //   node tests/memory/job.mjs [--os linux|windows] [--out DIR] [--cap auto|systemd|prlimit|jobobject|none] [--only KEY,KEY]
 //                             [--run-script PATH]   (tests only: a stand-in for run.mjs)
 //   node tests/memory/job.mjs --measure-burst1 N [--os …] [--out DIR] [--cap …]
+//   node tests/memory/job.mjs --measure-burst1 "N bun=<pinned>,<candidate>[,…]" --bun <pinned>=PATH,<candidate>=PATH[,…] [--os …] [--out DIR] [--cap …]
+//
+// The paired form (Round 10 Q1 condition 1; ticket 62's re-entry tool) runs
+// N fresh S1/burst1 runs per arm, the arms interleaved in rotation (A, B, C,
+// A, …), each run with ZCODE_KIT_BUN = its arm's binary. The first arm is the
+// reference, the pinned Bun (1.4.2 since Round 11); the later arms are
+// candidates. --bun exists only here and must name exactly the marker's
+// arms. Every measurement run records the Bun its proxy actually executed and
+// the runtime environment inside its cap scope (lib/runtime-probe.mjs); in
+// the paired form a run whose proxy ran another Bun is invalid. The output
+// carries per arm the count above 250 MB, the stable-unlisted check at the
+// job's n, the over-400 runs, the one-sided Fisher p against the reference
+// and the per-leg re-entry reading of Round 11 Q1 condition 4.
 //
 // --measure-burst1 N (off unless given; CI switches it on only while the
 // marker file tests/memory/measure-burst1 exists, see ci.yml): instead of the
@@ -38,17 +51,17 @@
 // 1 when it does not, 2 when the job itself cannot run.
 // --only runs a subset (local use): runs left out are reported, not failed.
 // Runs RED only on commit (Windows) are listed for the owner (build-time gate 3).
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JOB, osLeg, parseRunKey } from "./lib/catalogue.mjs";
 import { checkRatchet, issueIdsIn, readExpectedRed } from "./lib/ratchet.mjs";
-import { assertSafeRun } from "./lib/isolated-kit.mjs";
+import { assertSafeRun, bunPath } from "./lib/isolated-kit.mjs";
 import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
 import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
-import { measureMarkdown, measureObservation, measureReport, parseMeasureCount } from "./lib/measure.mjs";
+import { measureMarkdown, measureObservation, measureReport, pairedMarkdown, pairedReport, parseBunArms, parseMeasureSpec } from "./lib/measure.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -71,16 +84,35 @@ function parseArgs(argv) {
     else if (argv[i] === "--cap") out.cap = argv[++i];
     else if (argv[i] === "--only") out.only = argv[++i].split(",").filter(Boolean);
     else if (argv[i] === "--run-script") out.runScript = resolve(argv[++i]); // tests: a stand-in for run.mjs
-    else if (argv[i] === "--measure-burst1") out.measure = parseMeasureCount(argv[++i]);
+    else if (argv[i] === "--measure-burst1") out.measure = parseMeasureSpec(argv[++i]);
+    else if (argv[i] === "--bun") out.bun = parseBunArms(argv[++i]);
     else throw new Error(`unknown argument ${argv[i]}`);
+  }
+  // --bun exists only for the paired measurement, and names exactly its arms (Round 10 Q1 condition 1).
+  if (out.bun && !out.measure) throw new Error("--bun exists only in measurement mode (--measure-burst1 \"N bun=<v>,<v>…\")");
+  if (out.measure?.arms || out.bun) {
+    const arms = out.measure.arms ?? [];
+    const given = Object.keys(out.bun ?? {});
+    if (!out.measure.arms) throw new Error(`--bun needs a marker that names the arms ("N bun=${given.join(",")}"); this one is a plain count`);
+    if (!out.bun) throw new Error(`the marker names the Bun arms ${arms.join(", ")}: pass --bun ${arms.map((v) => `${v}=<path>`).join(",")}`);
+    if (given.length !== arms.length || !arms.every((v) => out.bun[v])) throw new Error(`--bun gives ${given.join(", ")}, the marker names ${arms.join(", ")}: they must match exactly`);
+    for (const v of arms) if (!existsSync(out.bun[v])) throw new Error(`--bun ${v}=${out.bun[v]}: no such file`);
   }
   return out;
 }
 
-function runOne({ argv, timeoutMs }, logPath) {
+/** The job's own Bun (ZCODE_KIT_BUN or PATH) as `x.y.z+commit`, or null: the paired mode's reference check. */
+function jobBunRevision() {
+  try {
+    const r = spawnSync(bunPath(), ["--revision"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+    return r.status === 0 ? r.stdout.trim() || null : null;
+  } catch { return null; }
+}
+
+function runOne({ argv, timeoutMs }, logPath, env = process.env) {
   return new Promise((resolveRun) => {
     const t0 = Date.now();
-    const child = spawn(argv[0], argv.slice(1), { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const child = spawn(argv[0], argv.slice(1), { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let tail = "";
     const log = (b) => { process.stdout.write(b); appendFileSync(logPath, b); tail = (tail + b).slice(-8192); };
     child.stdout.on("data", log);
@@ -162,16 +194,19 @@ async function main() {
     issueIds = issueIdsIn(join(ROOT, ".scratch", "kit-overhaul", "issues"));
   } catch (err) { console.error(`memory-budget: cannot read the expected-RED list or the issues: ${err.message}`); return 2; }
   mkdirSync(args.out, { recursive: true });
-  console.log(args.measure ? `memory-budget: S1/burst1 measurement, ${args.measure} fresh runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}` : `memory-budget: ${selected.length} runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}`);
+  console.log(args.measure?.arms
+    ? `memory-budget: S1/burst1 paired Bun measurement, ${args.measure.count} runs per arm (${args.measure.arms.join(" → ")} in rotation) on ${args.os}, cap ${capChoice.cap}, output ${args.out}`
+    : args.measure ? `memory-budget: S1/burst1 measurement, ${args.measure.count} fresh runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}` : `memory-budget: ${selected.length} runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}`);
 
   // One fresh run of a key into `dir`, capped and timed out: its job result.
-  async function runIn(key, dir) {
+  // extraEnv (measurement mode only): the arm's Bun and the probes switch.
+  async function runIn(key, dir, extraEnv = null) {
     const { scenario, profile, variant } = parseRunKey(key);
     mkdirSync(dir, { recursive: true });
     const runArgs = [scenario, "--profile", profile, ...(variant ? ["--variant", variant] : []), "--out", dir];
     const size = CAP[key] ?? CAP[scenario] ?? DEFAULT_CAP;
     const cmd = commandFor(capChoice.cap, size, (TIMEOUT_S[scenario] ?? DEFAULT_TIMEOUT_S) * (TIMEOUT_FACTOR[args.os] ?? 1), runArgs, { runScript: args.runScript });
-    const r = await runOne(cmd, join(dir, "run.log"));
+    const r = await runOne(cmd, join(dir, "run.log"), extraEnv ? { ...process.env, ...extraEnv, ZCODE_MEMLOOP_CAP: size } : process.env);
     const summary = readSummary(dir);
     // run.mjs exits 0/1/2; anything else (timeout 124, a cap kill 137 / SIGKILL) is a harness failure.
     let exitCode = [0, 1, 2].includes(r.code) ? r.code : 2;
@@ -191,20 +226,29 @@ async function main() {
 
   if (args.measure) {
     // Measurement mode (Round 8 Q1 condition 2): the distribution, no verdict, no ratchet.
+    // With arms (Round 10 Q1 condition 1): N runs per arm, interleaved in
+    // rotation (never in blocks), each run on its arm's Bun.
     const key = "S1/burst1";
     const rule = repetitionRule(key);
+    const arms = args.measure.arms;
+    const plan = [];
+    for (let k = 1; k <= args.measure.count; k++) for (const bun of arms ?? [null]) plan.push(bun);
     const reps = [];
-    for (let i = 1; i <= args.measure; i++) {
-      console.log(`\n── ${key} measurement run ${i} of ${args.measure} ──`);
-      const dir = join(args.out, "measure-S1-burst1", `rep-${i}`);
-      const { result, summary } = await runIn(key, dir);
-      const obs = measureObservation({ rep: i, result, summary, csvText: readSamples(dir), rule });
-      console.log(`${key} measurement run ${i}: ${obs.outcome}, gate ${obs.gateMB ?? "—"} MB${obs.valid ? "" : ` (invalid: ${obs.problems.join("; ")})`}`);
+    for (const [idx, bun] of plan.entries()) {
+      const i = idx + 1;
+      console.log(`\n── ${key} measurement run ${i} of ${plan.length}${bun ? ` (Bun ${bun} arm)` : ""} ──`);
+      const dir = join(args.out, "measure-S1-burst1", bun ? `rep-${i}-bun-${bun}` : `rep-${i}`);
+      const extraEnv = { ZCODE_MEMLOOP_MEASURE_PROBES: "1", ...(bun ? { ZCODE_KIT_BUN: args.bun[bun] } : {}) };
+      const { result, summary } = await runIn(key, dir, extraEnv);
+      const obs = measureObservation({ rep: i, result, summary, csvText: readSamples(dir), rule, arm: bun, bunPath: bun ? args.bun[bun] : null });
+      console.log(`${key} measurement run ${i}${bun ? ` [${bun}, proxy ran ${obs.bunRuntime ?? "?"}]` : ""}: ${obs.outcome}, gate ${obs.gateMB ?? "—"} MB${obs.valid ? "" : ` (invalid: ${obs.problems.join("; ")})`}`);
       reps.push(obs);
     }
-    const report = { ...measureReport(reps, { key, os: args.os, requested: args.measure, rule }), cap: capChoice.cap, node: process.version };
+    const report = arms
+      ? { ...pairedReport(reps, { key, os: args.os, arms, perArm: args.measure.count, rule, jobBun: jobBunRevision() }), cap: capChoice.cap, node: process.version }
+      : { ...measureReport(reps, { key, os: args.os, requested: args.measure.count, rule }), cap: capChoice.cap, node: process.version };
     writeFileSync(join(args.out, "measure-S1-burst1.json"), JSON.stringify(report, null, 2));
-    const md = measureMarkdown(report);
+    const md = arms ? pairedMarkdown(report) : measureMarkdown(report);
     writeFileSync(join(args.out, "measure-S1-burst1.md"), md);
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
     console.log(`\n${md}`);

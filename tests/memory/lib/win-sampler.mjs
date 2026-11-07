@@ -164,6 +164,7 @@ export function createKitTracker({ rootPid, token }) {
         out.push({
           pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: roles.get(p.pid), comm: p.name,
           rssKb: p.rssKb, hwmKb: p.hwmKb, commitKb: p.commitKb, wsPeakKb: p.wsPeakKb, threads: p.threads, fds: p.fds,
+          exe: p.executablePath ?? null, // measurement mode's runtime-Bun record (lib/runtime-probe.mjs); not in samples.csv
           cmd: argv.slice(0, 4).map((a) => a.split(/[\\/]/).slice(-2).join("/")).join(" ").slice(0, 120),
         });
       }
