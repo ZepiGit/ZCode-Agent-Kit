@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createCtx } from './context.mjs';
-import { startupPreflight } from './heal.mjs';
+import { runtimeWarningLines, startupPreflight } from './heal.mjs';
 import { runCommandSync } from '../lib/process.mjs';
 
 export async function launchHarness(ctx, id, args = []) {
@@ -25,6 +25,7 @@ export async function launchHarness(ctx, id, args = []) {
   } else if (id === 'opencode') command = 'opencode';
   else throw new Error(`run: no launcher for "${id}" (use setup/integrate instead)`);
   const ready = await startupPreflight(ctx);
+  for (const line of runtimeWarningLines(ready.runtime)) console.error(line);
   console.error(ready.detail);
   if (ready.code) return ready.code;
   const result = runCommandSync(command, argv, { stdio: 'inherit', env });
