@@ -15,7 +15,7 @@ detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters
   models.yml already up to date
   config.yml already up to date
   [OK]   OMP / Oh My Pi
-[1G[0JConfigure ZCode as a provider with its supported models in pi? [y/n] [70Gn
+Configure ZCode as a provider with its supported models in pi? [y/n] n
 n
 n
 n
