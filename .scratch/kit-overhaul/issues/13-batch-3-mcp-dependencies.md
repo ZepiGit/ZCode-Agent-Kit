@@ -38,7 +38,9 @@ Spec stories: 128, 129
 **Branch:** `ticket/13-mcp-dependencies` (worktree `/home/AgentKit/wt/t13`), created on the integration tip `48dd754`. Ticket 12 had not merged. This ticket only touches `mcp/zcode-harness-mcp`, so it does not depend on 12's files. Commits:
 - `6ef55df` fix(mcp): SDK ^1.32.2, zod ^4.6.6, TypeScript 7.0.2, @types/node ^24 (`package.json`, both lockfiles, 1 new test in `test/integration/http-gate.test.mjs`);
 - `59a6341` docs(mcp): the stay-back note (`docs/KNOWN_LIMITATIONS.md` §6);
-- `834ef12` merge of the integration tip `5c68c2f` (tickets 32, 42 and 65 plus docs; clean, nothing under `mcp/`).
+- `834ef12` merge of the integration tip `5c68c2f` (tickets 32, 42 and 65 plus docs; clean, nothing under `mcp/`);
+- `15dc252` this comment, first version;
+- `9517cbb` merge of the integration tip `6b76a1e`, which brings in **ticket 12** (proxy deps; clean, nothing under `mcp/`).
 
 The head SHA is the commit that adds this comment. Node 26.7.0, npm 11.19.0, Bun 1.4.2 in every log.
 
@@ -96,9 +98,9 @@ The head SHA is the commit that adds this comment. Node 26.7.0, npm 11.19.0, Bun
 - On the tip (SDK 1.30.0) it fails with `a 101-message batch must be refused (got 200: [{"result":…` (gate file 6 pass / 1 fail, `reports/t13-red1.log`). On the branch it passes (7/7, `reports/t13-green1.log`).
 - The RED is the real tip, not a mutation, so no mutation script was needed.
 
-**Full suite on the merged head `834ef12`** (`reports/t13-final-*.log`):
+**Full suite on the merged head `9517cbb`, which includes ticket 12** (`reports/t13-final2-*.log`). Before it, the proxy deps were reinstalled with `bun install --frozen-lockfile`, and the bridge had `npm ci` plus `bun install --frozen-lockfile` ("no changes"):
 - `npm run test`: 799 tests, 780 pass, 0 fail, 19 skipped.
-- `npm run test:proxy`: 1354 pass, 0 fail (90 files).
+- `npm run test:proxy`: 1357 pass, 0 fail (90 files). On `834ef12`, before 12 was merged, it was 1354; the +3 are ticket 12's tests.
 - `npm run test:proxy-typecheck`: 0 errors.
 - `npm run test:mcp`: 97 tests, 96 pass, 0 fail, 1 skipped (the live test). The tip had 96/95/1, so this is +1, the new test. `git status` is clean after its build.
 - The pre-merge run on `59a6341` was also all green, with smaller kit and proxy counts (756/737/0/19 and 1343 pass). Both grew with the merged tickets 32/42/65 (`reports/t13-full-*.log`).
