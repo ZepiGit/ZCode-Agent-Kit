@@ -1,4 +1,4 @@
-# 59: Proxy-side effort normalisation for native `/v1/messages` and the Kilo `/v1/models` sheet line
+# 59: Kilo `/v1/models` sheet line (part (b); effort normalisation moved to 63)
 
 **Blocked by:** None (can start immediately)
 

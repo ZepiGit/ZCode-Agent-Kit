@@ -62,7 +62,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol (if accepted) | high | 13 | needs-triage |
 | 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol | medium | 30, 36 | ready-for-agent |
 | 58 | [Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)](58-solver-recycle-and-failure-semantics.md) | sol | high | 19, 25, 28 | ready-for-agent |
-| 59 | [Proxy-side effort normalisation and the Kilo `/v1/models` sheet line](59-proxy-effort-normalisation-and-kilo-models-line.md) | glm | low | — | ready-for-agent |
+| 59 | [Kilo `/v1/models` sheet line (part (b); effort normalisation moved to 63)](59-proxy-effort-normalisation-and-kilo-models-line.md) | glm | low | — | ready-for-agent |
 | 60 | [S1/burst1 judged on the median of n fresh runs, every run ≤ 400 MB](60-s1-burst1-median-rule.md) | sol | medium | 01, 02 | ready-for-agent |
 | 61 | [S1/stalled on Windows: proxy memory under many stalled streaming readers](61-s1-stalled-windows-response-side-memory.md) | sol | high | 02, 19, 20 | ready-for-agent |
 | 62 | [Bun ≥ 1.4.3 raises the S1/burst1 proxy peak on the CI runners (re-entry gate for a newer Bun)](62-bun-1-4-3-plus-s1-burst1-peak.md) | sol | medium | 20 | needs-triage |
