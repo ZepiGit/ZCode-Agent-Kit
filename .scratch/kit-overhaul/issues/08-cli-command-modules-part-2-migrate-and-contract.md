@@ -118,3 +118,19 @@ All four RED: the existing `S3/short` expected-RED entry (ticket 37); the failed
 **Acceptance criteria**
 - Every command dispatches through a module; the CLI entry has no command bodies left (structural test): ✓ (`t08-green6`, `t08-final-cmds`; M1/M1b/M2).
 - All spawn suites and snapshots unchanged; exit codes 0, 1, 2, 3, 4, 5, 20, 130 asserted per command where they occur today: ✓ on ubuntu (`t08-before-final`, `t08-final-kit`, table above); windows pending CI.
+
+### 2026-11-07 — implementer, round 2 (merge of ticket 11)
+
+**Merge:** `78be83d` merges `overhaul/stability-terminal-ux` at `e1ab798` (contains ticket 11's merge `11cbfcb`) into this branch. Only one file conflicted: `tests/release-audit.test.mjs`, and only in its `node:fs` import line. This branch had added `readdirSync` for the command-module fixture; ticket 11 added `symlinkSync` for its live pinned-tsc check. I resolved it by hand to one import that has both names. The rest of the file merged automatically. Against the integration tip, the file now differs only by this ticket's two additions (`readdirSync` in the import and the `cli/commands/*.mjs` fixture lines); ticket 11's tests and helpers are unchanged. Dependencies were reinstalled with Bun 1.4.2 (`t08-r2-install`; `bun install --frozen-lockfile` → typescript 7.0.2, @types/bun 1.4.2).
+
+**Suites on `78be83d`** (Node 26.7.0, Bun 1.4.2)
+- `npm run test` (`t08-r2-kit`): 744 tests, 725 pass, 0 fail, 19 skipped.
+- `npm run test:proxy` (`t08-r2-proxy`): 1343 pass, 0 fail, 90 files.
+- `npm run test:proxy-typecheck` (`t08-r2-typecheck`): `tsc --noEmit -p tsconfig.json`, exit 0.
+- `npm run test:mcp` (`t08-r2-mcp`): 96 tests, 95 pass, 0 fail, 1 skipped; `dist/` unchanged.
+- `npm run test:ux-before` (`t08-r2-before`, `UX_CAPTURE_PORT=19080`, 513 s): 1/1. All 640 captures are byte-identical.
+- `release-audit` + `release-marker` (`t08-r2-release`): 28/28. Both sides' tests pass:
+  - ticket 11's tests: "Bun 1.4.2 is the one pin…", "test-kit runs the proxy typecheck through the pinned typescript…", "the pinned proxy typecheck passes on the proxy source and fails on a new type error";
+  - this ticket's tests: "package build excludes source tests/fixtures…" (on the fixture that now has the command modules) and "payload verification rejects a payload without any one of the CLI command modules".
+
+The pending-CI checklist from round 1 still applies unchanged.
