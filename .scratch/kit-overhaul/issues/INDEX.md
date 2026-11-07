@@ -67,6 +67,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 61 | [S1/stalled on Windows: proxy memory under many stalled streaming readers](61-s1-stalled-windows-response-side-memory.md) | sol | high | 02, 19, 20 | ready-for-agent |
 | 62 | [Bun ≥ 1.4.3 raises the S1/burst1 proxy peak on the CI runners (re-entry gate for a newer Bun)](62-bun-1-4-3-plus-s1-burst1-peak.md) | sol | medium | 20 | needs-triage |
 | 63 | [Proxy-side effort normalisation for native `/v1/messages` (Claude Code effort for `glm-*`)](63-claude-code-effort-normalisation-live-probe.md) | sol | medium | — | needs-info |
+| 64 | [Sampler re-attribution after exec fails under CI load (test or sampler defect)](64-sampler-exec-reattribution-flake.md) | sol | medium | — | ready-for-agent |
 
 ## Initial frontier
 
