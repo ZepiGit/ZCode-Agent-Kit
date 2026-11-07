@@ -11,6 +11,7 @@
 - Ticket 08 merged 2026-11-07 as dabdc0b (resolved a513ae1; pre-merge CI 42387910869, 8/8 green).
 - Ticket 64 (sampler mid-exec fix) merged 2026-11-07 as e0f5349 (resolved 9a2b452; test infra only, confirmed by the next staging runs).
 - Ticket 66 (windows S5/short unstable band, round 13) merged 2026-11-07 as d44d629 (resolved 2a7fb8d; pre-merge CI 42412266693, 8/8 green).
+- Ticket 65 (S3/hung stale-lock round) merged 2026-11-07 as 067bac9 (resolved f184373; pre-merge CI 42415957165, 8/8 green).
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul
