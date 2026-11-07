@@ -151,9 +151,9 @@ function markdown({ os, cap, ratchet, results, partial }) {
     lines.push(`| ${row.key} | ${row.outcome}${row.state === "unstable" ? " (unstable)" : ""}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} | ${r?.samples ?? "—"} | ${Object.entries(r?.rolesSeen ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "—"} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
-  // Round 9 Q1 condition 2: every passing run of the unstable entry says so.
+  // Round 9 Q1 condition 2, Round 13 Q1 condition 1: every passing run of an unstable entry says so.
   const notes = ratchet.rows.filter((row) => row.note);
-  if (notes.length) lines.push("", "Unstable entries (Round 9 Q1; the only exit is the owner's ≥ 20-run measurement):", ...notes.map((row) => `- ${row.note}`));
+  if (notes.length) lines.push("", "Unstable entries (Round 9 Q1, Round 13 Q1; each leaves only through its owner's measured exit: ticket 20's ≥ 20 runs, ticket 30's ≥ 10 runs):", ...notes.map((row) => `- ${row.note}`));
   const repeated = results.filter((r) => r.median);
   if (repeated.length) {
     lines.push("", "Judged on the median of n fresh repetitions (one verdict per run key; every repetition must also stay within the per-run ceiling; Windows: the WS gate, commit reported):", "", "| run | n | gate | repetitions (MB) | median | budget | ceiling | over ceiling | commit per repetition (MB) |", "|---|---|---|---|---|---|---|---|---|");
@@ -220,6 +220,9 @@ async function main() {
     const result = { key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, scenarioS: summary?.durationS ?? null, samples: summary?.samples ?? null, rolesSeen: Object.fromEntries(Object.entries(summary?.summary ?? {}).filter(([role]) => role !== "*" && role !== "kit").map(([role, s]) => [role, s.maxCount])), units: summary?.notes?.sampler?.units ?? null, ...(r.job ? { jobApplied: r.job.applied === true, jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name),
       // Windows (Round 7 Q1): every memory check with both values and the metric that gates it.
       memoryChecks: (summary?.checks ?? []).filter((c) => c.commitValue !== undefined).map((c) => ({ name: c.name, red: c.red, gate: c.gate, commitMB: c.commitValue, wsMB: c.wsValue, budget: c.budget })),
+      // Every growth check with its value, trend and sample count, insufficient ones included:
+      // the ratchet judges an unstable growth band on it (lib/ratchet.mjs, Round 13 Q1).
+      growthChecks: (summary?.checks ?? []).filter((c) => /^growth:/.test(c.name)).map((c) => ({ name: c.name, red: c.red, value: c.value ?? null, commitValue: c.commitValue ?? null, wsValue: c.wsValue ?? null, gate: c.gate ?? null, budget: c.budget, trend: c.trend === true, insufficient: c.detail?.insufficient === true, samples: c.detail?.samples ?? null, windowMediansMB: c.detail?.windowMediansMB ?? null, risingWindows: c.detail?.risingWindows ?? null, netRisePct: c.detail?.netRisePct ?? null })),
       error: why ?? summary?.error ?? r.error ?? null };
     return { result, summary };
   }
