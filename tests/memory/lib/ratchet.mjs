@@ -1,14 +1,27 @@
 // The expected-RED ratchet for the memory-budget job.
 //
 // tests/memory/expected-red.json lists, per OS leg, every run key the job
-// expects to be RED today and the ticket that owns turning it GREEN:
+// expects to be RED today, the ticket that owns turning it GREEN and, for a
+// single run, the checks that ticket owns (Round 14 Q1):
 //
-//   { "linux": { "S1/burst16": "19", "S3/short": "37" } }
+//   { "linux": { "S1/burst16": { "ticket": "19", "owns": ["procPeak:proxy"] } } }
 //
 // A run key is `<scenario>/<variant>`, or `<scenario>/<profile>` for the run
-// without a variant (the job runs the short profile, so `S2/short`).
+// without a variant (the job runs the short profile, so `S2/short`). A
+// repeated key (lib/budgets.mjs REPEATED) is listed with its ticket id alone,
+// and `owns` is a schema error there and on either `unstable` key below; a
+// single run listed with a plain ticket id, an empty `owns`, a duplicate or a
+// non-string name is a schema error too.
+//
+// A listed single run passes while it is RED only on checks it owns (an owned
+// check may be GREEN), and prints "<key>: RED on <checks>, owned by ticket
+// <t>". `owns` only shrinks, in the owner ticket's own commit with its
+// evidence; no run, job or other ticket edits it (Round 14 Q1 condition 4).
 //
 // The job fails when (any of):
+//   - a listed single run is RED on a check its ticket does not own (that RED
+//     comes back as an ownership question), RED with no RED check named, or
+//     its ticket owns a check the run does not produce (stale or mistyped);
 //   - a run is RED and not listed;
 //   - a listed run is GREEN (delete the entry in the ticket that fixed it);
 //   - a run is a harness failure (exit 2): never expected, never listed;
@@ -78,11 +91,45 @@ function boundKindError(key, bound, repeated) {
   return `the \`unstable\` allow-list gives it ${JSON.stringify(bound)}${isRepeated ? " (a repeated key)" : " (a single run)"}; a repeated key takes { maxMedianMB }, a single run { growthBand: { check, budget, max } } (Round 13 Q1 condition 3)`;
 }
 
-/** An entry value → { ticket, state } ("red" for a plain ticket id), or { error }. */
+const SHAPES = `an entry is a ticket id or { "ticket", "state": "unstable" } or { "ticket", "owns": ["<check>", …] }`;
+
+/**
+ * An entry value → { ticket, state }, or { error }: "red" for a plain ticket id
+ * (a repeated key), "unstable", or "owned" with its `owns` list (Round 14 Q1).
+ * `ownsError` is a malformed list; `ownsWithState` an `owns` next to a state.
+ */
 function entryOf(value) {
   if (typeof value === "string" || typeof value === "number") return { ticket: value, state: "red" };
-  const ok = value !== null && typeof value === "object" && !Array.isArray(value) && value.state === "unstable" && Object.keys(value).sort().join() === "state,ticket";
-  return ok ? { ticket: value.ticket, state: "unstable" } : { ticket: null, state: null, error: `an entry is a ticket id or { "ticket", "state": "unstable" }, got ${JSON.stringify(value)}` };
+  const isObject = value !== null && typeof value === "object" && !Array.isArray(value);
+  const fields = isObject ? Object.keys(value).sort().join() : "";
+  if (isObject && value.state === "unstable" && fields === "state,ticket") return { ticket: value.ticket, state: "unstable" };
+  if (isObject && fields === "owns,state,ticket" && value.state === "unstable") return { ticket: value.ticket, state: "unstable", ownsWithState: true };
+  if (isObject && fields === "owns,ticket") return { ticket: value.ticket, state: "owned", owns: Array.isArray(value.owns) ? value.owns : [], ownsError: ownsError(value.owns) };
+  return { ticket: null, state: null, error: `${SHAPES}, got ${JSON.stringify(value)}` };
+}
+
+/** Why an `owns` value is not a list of distinct check names (Round 14 Q1 condition 1), or null. */
+function ownsError(owns) {
+  if (!Array.isArray(owns)) return `\`owns\` must be a list of check names, got ${JSON.stringify(owns)}`;
+  if (owns.length === 0) return "`owns` must name at least one check (Round 14 Q1 condition 1)";
+  const bad = owns.find((c) => typeof c !== "string" || c === "");
+  if (bad !== undefined) return `\`owns\` holds check names (non-empty strings), got ${JSON.stringify(bad)} (Round 14 Q1 condition 1)`;
+  const twice = owns.find((c, i) => owns.indexOf(c) !== i);
+  if (twice !== undefined) return `\`owns\` names ${twice} twice (Round 14 Q1 condition 1)`;
+  return null;
+}
+
+/** Why an entry's kind does not fit its key (Round 14 Q1 condition 1), or null. */
+function kindError(os, key, entry, { repeated, unstable }) {
+  const isRepeated = !!repetitionRule(key, repeated);
+  const isUnstableKey = Object.hasOwn(unstable[os] ?? {}, key);
+  const hasOwns = entry.state === "owned" || entry.ownsWithState;
+  if (hasOwns && isRepeated) return "`owns` is not allowed on a repeated key: it keeps its median rule (Round 9 Q1 condition 1, Round 14 Q1 condition 1)";
+  if (hasOwns && isUnstableKey) return "`owns` is not allowed on an `unstable` key: it keeps its own bound (Round 9 Q1, Round 13 Q1, Round 14 Q1 condition 1)";
+  if (entry.ownsWithState) return `${SHAPES}`;
+  if (entry.state === "owned") return entry.ownsError;
+  if (entry.state === "red" && !isRepeated) return `a listed single-run key names the checks its ticket owns: { "ticket": "<NN>", "owns": ["<check>", …] } (Round 14 Q1 condition 1)`;
+  return null;
 }
 
 /** Schema errors of the whole document (every OS leg), independent of any run. */
@@ -98,7 +145,9 @@ export function validateExpectedRed(expected, { job = JOB, issueIds, catalogue =
       else if (!(job[os] ?? []).includes(key)) errors.push(`${os} ${key}: not run by the ${os} job, so its state can never be checked`);
       const entry = entryOf(value);
       if (entry.error) { errors.push(`${os} ${key}: ${entry.error}`); continue; }
-      if (entry.state === "unstable") {
+      const kind = parsed.error ? null : kindError(os, key, entry, { repeated, unstable });
+      if (kind) errors.push(`${os} ${key}: ${kind}`);
+      if (entry.state === "unstable" && !entry.ownsWithState) {
         if (!Object.hasOwn(unstable[os] ?? {}, key)) errors.push(`${os} ${key}: \`unstable\` is allowed for ${Object.entries(unstable).flatMap(([o, keys]) => Object.keys(keys).map((k) => `${o} ${k}`)).join(", ")} only (Round 9 Q1 condition 3, Round 13 Q1 condition 3)`);
         else {
           const kindError = boundKindError(key, unstable[os][key], repeated);
@@ -130,7 +179,7 @@ export function checkRatchet({ expected, os, results, job = JOB, issueIds, catal
   for (const key of new Set([...(job[os] ?? []), ...byKey.keys()])) {
     const entry = Object.hasOwn(listed, key) ? entryOf(listed[key]) : null;
     const ticket = entry ? entry.ticket : null;
-    const isUnstable = entry?.state === "unstable" && Object.hasOwn(unstable[os] ?? {}, key);
+    const isUnstable = entry?.state === "unstable" && !entry.ownsWithState && Object.hasOwn(unstable[os] ?? {}, key);
     const result = byKey.get(key);
     if (!result) {
       rows.push({ key, outcome: "NOT RUN", ticket });
@@ -176,6 +225,18 @@ export function checkRatchet({ expected, os, results, job = JOB, issueIds, catal
       continue;
     }
     if (rule && ticket !== null && outcome === "RED") continue;
+    // Round 14 Q1 condition 2: a listed single run is RED only on checks its ticket owns.
+    if (!rule && !isUnstable && entry?.state === "owned" && outcome === "RED") {
+      const red = result.redChecks ?? [];
+      const names = result.checkNames;
+      const before = failures.length;
+      if (!Array.isArray(names)) failures.push(`${key}: the run reports no check names, so the checks ticket ${ticket} owns cannot be matched (${os}, Round 14 Q1, Round 3 Q8 condition 2)`);
+      else for (const c of entry.owns.filter((c) => !names.includes(c))) failures.push(`${key}: ticket ${ticket} owns ${c}, which this run does not produce: a stale or mistyped name (${os}, Round 14 Q1, Round 3 Q8 condition 2)`);
+      if (!red.length) failures.push(`${key}: RED with no RED check named, so nothing shows it is ticket ${ticket}'s (${os}, Round 14 Q1)`);
+      for (const c of red.filter((c) => !entry.owns.includes(c))) failures.push(`${key}: RED on ${c}, not owned by ticket ${ticket} (${os}, Round 14 Q1); the RED comes back as an ownership question, do not edit owns`);
+      if (failures.length === before) row.note = `${key}: RED on ${red.join(", ")}, owned by ticket ${ticket}`;
+      continue;
+    }
     if (outcome === "RED" && ticket === null) failures.push(`${key}: RED but not listed in expected-red.json (${os})`);
     else if (outcome === "GREEN" && ticket !== null) failures.push(`${key}: GREEN but listed for ticket ${ticket}: delete the entry from expected-red.json (${os})`);
     else if (outcome !== "RED" && outcome !== "GREEN") failures.push(`${key}: ${outcome.toLowerCase()} (exit ${result.exitCode}); a harness failure is never expected`);

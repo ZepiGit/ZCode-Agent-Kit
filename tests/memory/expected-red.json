@@ -1,30 +1,30 @@
 {
   "linux": {
-    "S1/burst4": "19",
-    "S1/burst16": "19",
-    "S1/burst32": "19",
-    "S1/bigbody": "19",
-    "S2/short": "58",
-    "S3/short": "37",
-    "S3/hung": "16",
-    "S3/omp": "35",
-    "S4/short": "17",
-    "S5/short": "30",
-    "S7/short": "34"
+    "S1/burst4": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S1/burst16": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S1/burst32": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S1/bigbody": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S2/short": { "ticket": "58", "owns": ["solver:cost-per-generation", "solver:retained-before-recycle"] },
+    "S3/short": { "ticket": "37", "owns": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+    "S3/hung": { "ticket": "16", "owns": ["exactly-one-proxy-after-round", "failed-launches", "start-over-stale-lock", "stale-lock-after-round"] },
+    "S3/omp": { "ticket": "35", "owns": ["omp:concurrent-preflights"] },
+    "S4/short": { "ticket": "17", "owns": ["stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
+    "S5/short": { "ticket": "30", "owns": ["growth:mcp-bridge"] },
+    "S7/short": { "ticket": "34", "owns": ["proxy.early.log:bounded"] }
   },
   "windows": {
     "S1/burst1": { "ticket": "20", "state": "unstable" },
-    "S1/burst4": "19",
-    "S1/burst16": "19",
-    "S1/burst32": "19",
-    "S1/bigbody": "19",
-    "S1/stalled": "61",
-    "S2/short": "58",
-    "S3/short": "37",
-    "S3/hung": "16",
-    "S3/omp": "35",
-    "S4/short": "17",
+    "S1/burst4": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S1/burst16": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S1/burst32": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S1/bigbody": { "ticket": "19", "owns": ["procPeak:proxy"] },
+    "S1/stalled": { "ticket": "61", "owns": ["procPeak:proxy"] },
+    "S2/short": { "ticket": "58", "owns": ["solver:cost-per-generation", "solver:retained-before-recycle"] },
+    "S3/short": { "ticket": "37", "owns": ["peak:kit"] },
+    "S3/hung": { "ticket": "16", "owns": ["orphans", "exactly-one-proxy-after-round", "failed-launches", "start-over-stale-lock", "stale-lock-after-round"] },
+    "S3/omp": { "ticket": "35", "owns": ["omp:concurrent-preflights"] },
+    "S4/short": { "ticket": "17", "owns": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
     "S5/short": { "ticket": "30", "state": "unstable" },
-    "S7/short": "34"
+    "S7/short": { "ticket": "34", "owns": ["proxy.early.log:bounded"] }
   }
 }

@@ -614,7 +614,8 @@ const S3_OMP_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "lo
 test("job: a real S3/omp run passes the evidence gate and is the listed RED; without its killed-starter round it is a harness failure", () => {
   const { r, row, result } = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: S3_OMP_RUN });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(row, { key: "S3/omp", outcome: "RED", ticket: "35" });
+  // Round 14 Q1 condition 2: the row names the tolerated RED and its owner.
+  assert.deepEqual(row, { key: "S3/omp", outcome: "RED", ticket: "35", note: "S3/omp: RED on omp:concurrent-preflights, owned by ticket 35" });
   assert.deepEqual(result.redChecks, ["omp:concurrent-preflights"]);
   const dir = mkdtempSync(join(tmpdir(), "memloop-s3omp-"));
   try {
@@ -812,10 +813,14 @@ const CI_REFUSED = {
 const S3_HUNG_REFUSED_RUN = join(dirname(CI_S3_HUNG), "local-20261107-s3-hung-refused-linux-summary.json");
 
 test("job: a real S3/hung run whose stale-lock start was refused passes the gate as ticket 16's RED; cut or unchecked it is a harness failure", () => {
-  const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: S3_HUNG_REFUSED_RUN });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(row, { key: "S3/hung", outcome: "RED", ticket: "16" });
+  const { r, row, result, report } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: S3_HUNG_REFUSED_RUN });
+  assert.deepEqual(row, { key: "S3/hung", outcome: "RED", ticket: "16" }, r.stdout + r.stderr);
   assert.ok(result.redChecks.includes("start-over-stale-lock"), result.redChecks.join());
+  // Round 14 Q1: the refusal and the lock checks are ticket 16's; the run's memory peaks
+  // are not in its text, so they fail the ratchet as the open ownership question
+  // (ticket 67 Comments), never as a harness failure.
+  assert.deepEqual(report.failures, ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:proxy"].map((c) => `S3/hung: RED on ${c}, not owned by ticket 16 (linux, Round 14 Q1); the RED comes back as an ownership question, do not edit owns`));
+  assert.equal(r.status, 1);
   const dir = mkdtempSync(join(tmpdir(), "memloop-s3hung-"));
   try {
     const run = JSON.parse(readFileSync(S3_HUNG_REFUSED_RUN, "utf8"));
@@ -1307,4 +1312,48 @@ test("job: the replayed windows S5/short fails above 30, at 5, with another RED 
     assert.equal(row.note, undefined, label);
     assert.doesNotMatch(stepSummary, /owned by ticket 30/, label);
   }
+});
+
+// ── The job prints every tolerated RED (Round 14 Q1 condition 2) ───────────────
+// The real S3/omp run (fixtures/local-20261107-s3-omp-linux-summary.json, RED on
+// omp:concurrent-preflights only) replayed through the job against the committed
+// list: its row and the summary say which checks were RED and which ticket owns
+// them. An orphan more, or the owned check renamed in the run, fails the job.
+function s3ompReplay(change = null) {
+  const dir = mkdtempSync(join(tmpdir(), "memloop-owns-"));
+  try {
+    let path = S3_OMP_RUN;
+    if (change) {
+      const s = JSON.parse(readFileSync(S3_OMP_RUN, "utf8"));
+      change(s);
+      s.red = s.checks.some((c) => c.red);
+      s.outcome = s.red ? "RED" : "GREEN";
+      path = join(dir, "summary.json");
+      writeFileSync(path, JSON.stringify(s));
+    }
+    return fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: path });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("job: a listed run RED only on its owned checks passes and the summary prints the tolerated RED with its owner", () => {
+  const { r, row, result } = s3ompReplay();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const line = "S3/omp: RED on omp:concurrent-preflights, owned by ticket 35";
+  assert.equal(row.note, line);
+  assert.ok(result.checkNames.includes("omp:concurrent-preflights") && result.checkNames.includes("orphans"), result.checkNames.join());
+  assert.match(r.stdout, /Tolerated REDs \(Round 14 Q1[^\n]*\n- S3\/omp: RED on omp:concurrent-preflights, owned by ticket 35/);
+});
+
+test("job: an unowned RED or an owned check the run no longer produces fails the job, with no tolerated line", () => {
+  const orphan = s3ompReplay((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 }));
+  assert.equal(orphan.r.status, 1, orphan.r.stdout);
+  assert.match(orphan.r.stdout, /- S3\/omp: RED on orphans, not owned by ticket 35 \(linux, Round 14 Q1\); the RED comes back as an ownership question, do not edit owns/);
+  assert.equal(orphan.row.note, undefined);
+  const renamed = s3ompReplay((s) => { s.checks.find((c) => c.name === "omp:concurrent-preflights").name = "omp:parallel-preflights"; });
+  assert.equal(renamed.r.status, 1, renamed.r.stdout);
+  assert.match(renamed.r.stdout, /- S3\/omp: ticket 35 owns omp:concurrent-preflights, which this run does not produce: a stale or mistyped name/);
+  assert.match(renamed.r.stdout, /- S3\/omp: RED on omp:parallel-preflights, not owned by ticket 35/);
+  assert.doesNotMatch(renamed.r.stdout, /owned by ticket 35\n/);
 });

@@ -152,7 +152,10 @@ function markdown({ os, cap, ratchet, results, partial }) {
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
   // Round 9 Q1 condition 2, Round 13 Q1 condition 1: every passing run of an unstable entry says so.
-  const notes = ratchet.rows.filter((row) => row.note);
+  // Round 14 Q1 condition 2: every tolerated RED of a listed single run, with the ticket that owns it.
+  const owned = ratchet.rows.filter((row) => row.note && row.state !== "unstable");
+  if (owned.length) lines.push("", "Tolerated REDs (Round 14 Q1: each listed run RED only on checks its ticket owns; `owns` only shrinks, in the owner's own commit):", ...owned.map((row) => `- ${row.note}`));
+  const notes = ratchet.rows.filter((row) => row.note && row.state === "unstable");
   if (notes.length) lines.push("", "Unstable entries (Round 9 Q1, Round 13 Q1; each leaves only through its owner's measured exit: ticket 20's ≥ 20 runs, ticket 30's ≥ 10 runs):", ...notes.map((row) => `- ${row.note}`));
   const repeated = results.filter((r) => r.median);
   if (repeated.length) {
@@ -218,6 +221,8 @@ async function main() {
     if (!evidence.ok) { exitCode = 2; why = `no evidence the scenario ran: ${evidence.problems.join("; ")}`; }
     if (why) console.log(`${key}: harness failure: ${why}`);
     const result = { key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, scenarioS: summary?.durationS ?? null, samples: summary?.samples ?? null, rolesSeen: Object.fromEntries(Object.entries(summary?.summary ?? {}).filter(([role]) => role !== "*" && role !== "kit").map(([role, s]) => [role, s.maxCount])), units: summary?.notes?.sampler?.units ?? null, ...(r.job ? { jobApplied: r.job.applied === true, jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name),
+      // Every check the run produced: the ratchet refuses an owned name the run never produces (Round 14 Q1).
+      checkNames: (summary?.checks ?? []).map((c) => c.name),
       // Windows (Round 7 Q1): every memory check with both values and the metric that gates it.
       memoryChecks: (summary?.checks ?? []).filter((c) => c.commitValue !== undefined).map((c) => ({ name: c.name, red: c.red, gate: c.gate, commitMB: c.commitValue, wsMB: c.wsValue, budget: c.budget })),
       // Every growth check with its value, trend and sample count, insufficient ones included:
