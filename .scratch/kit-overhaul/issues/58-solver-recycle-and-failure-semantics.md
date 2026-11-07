@@ -33,3 +33,5 @@ ADR: 0002, 0004
 Spec stories: 6, 11, 12, 13, 14
 
 ## Comments
+
+- 2026-11-07 (orchestrator, from ticket 12): S2's growth:scenario check flips between ok and RED on unchanged code from run to run (both happy-dom 20 and 21); one run cannot settle it, use repeated runs for this ticket's evidence. S2 cost per generation median 1034 (happy-dom 20) -> 1091 MB (21), ranges 1004-1115 vs 1019-1133.
