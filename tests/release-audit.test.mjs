@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -309,6 +309,101 @@ test("CI and release workflows pin checkout@v7, setup-node@v7, setup-bun@v2, Bun
   }
   const manifest = readFileSync(join(KIT, "MANIFEST.md"), "utf8");
   assert.match(manifest, /zcode-proxy-src\/\.github\/workflows\//, "MANIFEST.md records the nested-workflow vendor change");
+});
+
+// One Bun everywhere (story 126; Round 11 Q1 conditions 1 and 6): the installers'
+// bootstrap URLs and messages, README in all five languages and SUPPORT_MATRIX
+// name the CI pin and no other Bun. Moving the pin (ticket 62) moves all of them.
+test("Bun 1.4.2 is the one pin: both installers, README x5 and SUPPORT_MATRIX name no other Bun", () => {
+  const versions = (text, pattern) => [...new Set([...text.matchAll(pattern)].map((m) => m[1]))];
+  for (const file of ["install.sh", "install.ps1"]) {
+    const text = lf(readFileSync(join(KIT, file), "utf8"));
+    const urls = [...text.matchAll(/https:\/\/github\.com\/oven-sh\/bun\/releases\/download\/bun-v([^/\s"]+)\//g)].map((m) => m[1]);
+    assert.ok(urls.length >= 1, `${file} bootstraps Bun from the oven-sh/bun release assets`);
+    assert.deepEqual([...new Set(urls)], [BUN_PIN], `${file}: Bun download URLs`);
+    assert.deepEqual(versions(text, /\bbun-v(\d+\.\d+\.\d+(?:-[\w.]+)?)/g), [BUN_PIN], `${file}: every bun-vX reference`);
+    assert.deepEqual(versions(text, /\bBun v(\d+\.\d+\.\d+(?:-[\w.]+)?)/g), [BUN_PIN], `${file}: the version the installer prints`);
+  }
+  for (const readme of ["README.md", "README.de.md", "README.es.md", "README.ja.md", "README.zh-CN.md"]) {
+    assert.deepEqual(versions(readFileSync(join(KIT, readme), "utf8"), /\bBun (\d+\.\d+\.\d+)/g), [BUN_PIN], `${readme} names the tested Bun`);
+  }
+  assert.deepEqual(versions(readFileSync(join(KIT, "SUPPORT_MATRIX.json"), "utf8"), /\bBun (\d+\.\d+\.\d+)/g), [BUN_PIN], "SUPPORT_MATRIX.json");
+});
+
+// The proxy typecheck in root CI (ticket 11; ADR-0016 condition 2, spec §12,
+// story 140). Every test-kit leg runs it through the proxy's pinned
+// devDependencies: typescript 7.0.2 (research/typescript.md) and @types/bun at
+// the Bun pin. `bun x tsc`, `bunx` or `npx` would fetch typescript@latest at
+// run time, so the compiler would float. Its baseline on 1.4.2 / 7.0.2 has
+// no errors, so the step must pass as it is: any error fails it, and there is no
+// expected-error list.
+const TYPESCRIPT_PIN = "7.0.2";
+const PROXY = join(KIT, "zcode-proxy-src");
+const reEscape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const UNPINNED_RUNNER = /\bbunx\b|\bbun\s+x\b|\bnpx\b|\bpnpm\s+dlx\b|\byarn\s+dlx\b/;
+
+test("test-kit runs the proxy typecheck through the pinned typescript and @types/bun devDependencies, never an unpinned bun x", () => {
+  const proxy = JSON.parse(readFileSync(join(PROXY, "package.json"), "utf8"));
+  assert.equal(proxy.devDependencies?.typescript, TYPESCRIPT_PIN, "typescript is an exact proxy devDependency");
+  assert.equal(proxy.devDependencies?.["@types/bun"], BUN_PIN, "@types/bun is exact and equals the Bun pin (Round 11 Q1 condition 1)");
+  assert.equal(proxy.scripts?.typecheck, "tsc --noEmit -p tsconfig.json");
+  const lock = readFileSync(join(PROXY, "bun.lock"), "utf8");
+  for (const [name, version] of [["typescript", TYPESCRIPT_PIN], ["@types/bun", BUN_PIN], ["bun-types", BUN_PIN]]) {
+    assert.match(lock, new RegExp(`"${reEscape(name)}": \\["${reEscape(name)}@${reEscape(version)}"`), `bun.lock locks ${name}@${version}`);
+  }
+  const root = JSON.parse(readFileSync(join(KIT, "package.json"), "utf8"));
+  assert.equal(root.scripts["test:proxy-typecheck"], "cd zcode-proxy-src && bun run typecheck");
+  assert.match(root.scripts["test:all"], /&& npm run test:proxy-typecheck &&/, "test:all includes the typecheck");
+  for (const [name, command] of Object.entries({ ...root.scripts, ...proxy.scripts })) {
+    assert.doesNotMatch(command, UNPINNED_RUNNER, `script ${name} runs a package by name instead of the pinned devDependency`);
+  }
+
+  const ci = workflowText(".github/workflows/ci.yml");
+  const testKit = ci.split("\n  test-kit:\n")[1]?.split(/\n  [\w-]+:\n/)[0] ?? "";
+  assert.match(testKit, /os: \[ubuntu-latest, windows-latest\]/);
+  assert.match(testKit, /node: \[24, 26\]/);
+  const steps = testKit.split(/\n(?=      - )/);
+  const typecheck = steps.filter((step) => /^\s+run: npm run test:proxy-typecheck$/m.test(step));
+  assert.equal(typecheck.length, 1, "exactly one test-kit step runs the proxy typecheck");
+  assert.doesNotMatch(typecheck[0], /^\s+(if|continue-on-error):/m, "the typecheck runs, and counts, on every leg");
+  const install = steps.findIndex((step) => /cd zcode-proxy-src && bun install --frozen-lockfile/.test(step));
+  assert.ok(install >= 0 && install < steps.indexOf(typecheck[0]), "the typecheck runs after the frozen proxy install");
+  for (const file of trackedWorkflows()) {
+    for (const [, command] of workflowText(file).matchAll(/^\s+(?:-\s+)?run:\s*(.*)$/gm)) {
+      assert.doesNotMatch(command, UNPINNED_RUNNER, `${file}: ${command}`);
+    }
+    const code = workflowText(file).split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+    assert.doesNotMatch(code, /\bbun\s+x\s+tsc\b|\bbunx\s+tsc\b|\bnpx\s+tsc\b/, `${file} runs an unpinned tsc`);
+  }
+});
+
+test("the pinned proxy typecheck passes on the proxy source and fails on a new type error", (t) => {
+  const tsc = join(PROXY, "node_modules", "typescript", "bin", "tsc");
+  if (!existsSync(tsc)) return t.skip("proxy dependencies are not installed (cd zcode-proxy-src && bun install --frozen-lockfile)");
+  const version = spawnSync(process.execPath, [tsc, "--version"], { encoding: "utf8" });
+  assert.equal(version.stdout.trim(), `Version ${TYPESCRIPT_PIN}`, version.stderr);
+  const bunTypes = JSON.parse(readFileSync(join(PROXY, "node_modules", "bun-types", "package.json"), "utf8")).version;
+  assert.equal(bunTypes, BUN_PIN, "the installed bun-types are the pinned ones");
+
+  // The same script CI runs, on the real proxy source: the baseline is empty.
+  const clean = spawnSync("bun", ["run", "typecheck"], { cwd: PROXY, encoding: "utf8", timeout: 120_000 });
+  assert.equal(clean.status, 0, `proxy typecheck baseline is not clean:\n${clean.stdout}\n${clean.stderr}`);
+  assert.doesNotMatch(`${clean.stdout}\n${clean.stderr}`, /error TS\d+/);
+
+  // The same script, config and installed compiler on a project with one new
+  // error: `bun run` must pass tsc's failure through, or the step cannot fail.
+  const root = mkdtempSync(join(tmpdir(), "zcode-proxy-typecheck-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const proxyPkg = JSON.parse(readFileSync(join(PROXY, "package.json"), "utf8"));
+  put(root, "package.json", JSON.stringify({ name: "typecheck-fixture", private: true, type: "module", scripts: { typecheck: proxyPkg.scripts.typecheck } }));
+  put(root, "tsconfig.json", readFileSync(join(PROXY, "tsconfig.json"), "utf8"));
+  put(root, "src/ok.ts", "export const port: number = Bun.env.PORT ? Number(Bun.env.PORT) : 0;\n");
+  put(root, "src/bad.ts", "export const port: number = \"not a number\";\n");
+  symlinkSync(join(PROXY, "node_modules"), join(root, "node_modules"), "junction");
+  const broken = spawnSync("bun", ["run", "typecheck"], { cwd: root, encoding: "utf8", timeout: 120_000 });
+  assert.notEqual(broken.status, 0, `a new type error must fail the step:\n${broken.stdout}\n${broken.stderr}`);
+  assert.match(`${broken.stdout}\n${broken.stderr}`, /src[\\/]bad\.ts\(1,14\): error TS2322/);
+  assert.doesNotMatch(`${broken.stdout}\n${broken.stderr}`, /src[\\/]ok\.ts/, "Bun's globals resolve from the pinned bun-types");
 });
 
 test("release workflow: tests on Node 26, publish keeps Node 24 for OIDC, triggers unchanged", () => {
