@@ -71,6 +71,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 65 | [S3/hung's stale-lock round is skipped when `manager start` exits 1](65-s3-hung-stale-lock-round-start-refused.md) | sol | high | — | ready-for-agent |
 | 66 | [Windows S5/short re-listed under ticket 30 with a bounded unstable growth band](66-windows-s5-short-unstable-growth-band.md) | glm | low | — | ready-for-agent |
 | 67 | [A plain expected-RED listing of a single-run key accepts any RED](67-plain-listing-hides-other-reds.md) | sol | medium | — | needs-triage |
+| 68 | [Every writer of proxy/config.yaml and harness configs keeps the file's line endings (CRLF audit)](68-crlf-config-writers-audit.md) | sol | medium | 42 | ready-for-agent |
 
 ## Initial frontier
 
