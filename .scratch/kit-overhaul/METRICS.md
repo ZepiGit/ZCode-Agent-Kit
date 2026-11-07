@@ -255,6 +255,77 @@ Same run: kit total 373 MB (≤ 596), preflight peak 73.9 MB (≤ 76), proxy 60 
 
 Re-run after merging the integration tip 5631511 (02 + 60), 2026-11-07, `/home/AgentKit/overhaul-tools/t03-memloop/r2-job-s3/`: unchanged. Both rounds 5 preflights at once (5 spawned), starters +3.1 to +3.8 MB, every surviving host printed `quota-unavailable`, kit total 372 MB, preflight 62.9 MB, proxy 60.8 MB, host 34.6 MB per process (not kit). 12 s, 36 samples; the run passes the S3/omp evidence floor (≥ 5 s, ≥ 14 samples, proxy + preflight + omp-host, both rounds). Windows (commit gate for the waiter cost, WS reported beside it): pending CI.
 
+### S5/short growth:mcp-bridge across CI runs (ticket 66, Round 13 Q1)
+
+Every CI run since 42252896054 that ran the full short profile, from the `memory-budget` job logs (`gh api …/actions/jobs/<id>/logs`, the S5 check line and the "Memory checks" line), up to the pre-merge run 42404639968 that brought the question. The three S1-only measurement runs (42316982634, 42347506810, 42352122623) have no S5 line. Logs: `/home/AgentKit/overhaul-tools/ci-art/t66-full-logs/`. Budget 5 %/1k after warm-up; RED = over budget AND a trend (≥ 3 trailing rising windows, or a net rise ≥ 10 %; `growth()` in `tests/memory/lib/verdict.mjs`). Windows gates growth on commit and reports WS (Round 7 Q1).
+
+**Windows, 28 runs** (commit: n = 28, min 14.27, median 18.25, mean 19.04, sd 3.43, max 26.24; over budget in 28 of 28; RED in 1 of 28). WS ranges 13.22–41.39 and is not judged. \* Rows 1 and 2 (Round 7's runs 3 and 4) predate the commit / WS split in the log: their WS value is re-judged from the artefacts (`/home/AgentKit/overhaul-tools/t02-ci-artifact-<run>/`, `osVerdict` over `samples.csv`; the commit value matches the log).
+
+| # | Run | Branch | commit %/1k (gate) | WS %/1k (reported) | trend | verdict |
+|---|---|---|---|---|---|---|
+| 1 | 42252896054 | staging/02 | 26.24 | 31.66* | false | GREEN |
+| 2 | 42265988296 | staging/02 | 22.01 | 21.68* | false | GREEN |
+| 3 | 42281646419 | staging/02 | 20.73 | 26.99 | false | GREEN |
+| 4 | 42281731448 | staging/02 | 19.17 | 19.69 | false | GREEN |
+| 5 | 42326112543 | staging/02 | 15.5 | 27.05 | false | GREEN |
+| 6 | 42330994104 | overhaul/stability-terminal-ux | 15.88 | 13.22 | false | GREEN |
+| 7 | 42335478907 | staging/03 | 18.22 | 33.25 | false | GREEN |
+| 8 | 42338973997 | overhaul/stability-terminal-ux | 23.57 | 32.38 | false | GREEN |
+| 9 | 42344393581 | staging/09 | 14.27 | 29.71 | false | GREEN |
+| 10 | 42360554587 | staging/09 | 16.16 | 17.47 | false | GREEN |
+| 11 | 42364104638 | staging/09 | 21.81 | 15.47 | false | GREEN |
+| 12 | 42367395231 | overhaul/stability-terminal-ux | 15.64 | 23.3 | false | GREEN |
+| 13 | 42370286615 | staging/10 | 16.01 | 41.39 | false | GREEN |
+| 14 | 42374566358 | staging/10 | 20.07 | 25.37 | false | GREEN |
+| 15 | 42378479007 | overhaul/stability-terminal-ux | 16.75 | 28.38 | false | GREEN |
+| 16 | 42381135168 | staging/11 | 18.28 | 18.76 | false | GREEN |
+| 17 | 42382114395 | overhaul/stability-terminal-ux | 25.29 | 29.1 | false | GREEN |
+| 18 | 42383999482 | staging/08 | 21.21 | 22.82 | false | GREEN |
+| 19 | 42384925753 | overhaul/stability-terminal-ux | 14.97 | 20.65 | false | GREEN |
+| 20 | 42387910869 | staging/08 | 17.21 | 16.85 | false | GREEN |
+| 21 | 42391052837 | staging/12 | 15.2 | 27.66 | false | GREEN |
+| 22 | 42392375847 | overhaul/stability-terminal-ux | 21.62 | 14.53 | false | GREEN |
+| 23 | 42395651721 | staging/32 | 17.16 | 30.12 | false | GREEN |
+| 24 | 42398294952 | overhaul/stability-terminal-ux | 17.28 | 25.08 | false | GREEN |
+| 25 | 42398295810 | staging/12 | 22.92 | 15.34 | false | GREEN |
+| 26 | 42398299724 | staging/32 | 20.72 | 28.83 | false | GREEN |
+| 27 | 42401136452 | staging/42 | 15.55 | 26.39 | false | GREEN |
+| 28 | 42404639968 | staging/65 | 23.71 | 25.03 | true | RED |
+
+**Linux, 26 runs** (the runs with a windows S5 line above, less rows 1 and 2, 42252896054 and 42265988296; RSS: n = 26, min 38.21, median 42.63, mean 42.58, sd 1.99, max 46.33; RED with trend in 26 of 26). The other 11 Linux runs in the same period (Linux-only legs, and those two) are RED with trend too, at 37.53–43.93 %/1k: 42252896054 42.76, 42252927653 43.84, 42252974778 43.93, 42259233373 37.53, 42265988296 43.33, 42265998740 40.58, 42267516015 39.54, 42275502649 41.13, 42279882243 42.82, 42286030477 41.3, 42293233741 42.62 (all 37: mean 42.34, sd 1.99).
+
+| # | Run | Branch | RSS %/1k | trend | verdict |
+|---|---|---|---|---|---|
+| 1 | 42281646419 | staging/02 | 43.29 | true | RED |
+| 2 | 42281731448 | staging/02 | 42.63 | true | RED |
+| 3 | 42326112543 | staging/02 | 46.33 | true | RED |
+| 4 | 42330994104 | overhaul/stability-terminal-ux | 42.41 | true | RED |
+| 5 | 42335478907 | staging/03 | 44.53 | true | RED |
+| 6 | 42338973997 | overhaul/stability-terminal-ux | 42.01 | true | RED |
+| 7 | 42344393581 | staging/09 | 39.98 | true | RED |
+| 8 | 42360554587 | staging/09 | 40.54 | true | RED |
+| 9 | 42364104638 | staging/09 | 40.62 | true | RED |
+| 10 | 42367395231 | overhaul/stability-terminal-ux | 41.69 | true | RED |
+| 11 | 42370286615 | staging/10 | 42.72 | true | RED |
+| 12 | 42374566358 | staging/10 | 40.25 | true | RED |
+| 13 | 42378479007 | overhaul/stability-terminal-ux | 42.62 | true | RED |
+| 14 | 42381135168 | staging/11 | 43.54 | true | RED |
+| 15 | 42382114395 | overhaul/stability-terminal-ux | 45.59 | true | RED |
+| 16 | 42383999482 | staging/08 | 42.83 | true | RED |
+| 17 | 42384925753 | overhaul/stability-terminal-ux | 40.78 | true | RED |
+| 18 | 42387910869 | staging/08 | 44.38 | true | RED |
+| 19 | 42391052837 | staging/12 | 41.51 | true | RED |
+| 20 | 42392375847 | overhaul/stability-terminal-ux | 41.17 | true | RED |
+| 21 | 42395651721 | staging/32 | 40.91 | true | RED |
+| 22 | 42398294952 | overhaul/stability-terminal-ux | 44.51 | true | RED |
+| 23 | 42398295810 | staging/12 | 44.74 | true | RED |
+| 24 | 42398299724 | staging/32 | 44.91 | true | RED |
+| 25 | 42401136452 | staging/42 | 38.21 | true | RED |
+| 26 | 42404639968 | staging/65 | 44.44 | true | RED |
+
+- **What the ratchet does with it (Round 13 Q1, ticket 66):** windows `S5/short → 30` is `unstable` with a growth-value band on the commit value of `growth:mcp-bridge`: 5 < value ≤ 30 passes with either trend flag and prints `S5/short: unstable (growth:mcp-bridge <x> %/1k commit, budget 5, bound 30, trend <t>), owned by ticket 30`; above 30 fails; ≤ 5 fails as at budget but listed; any other RED, a harness failure or a missing growth value fails. The bound sits 3.76 above the highest of 28 values (normal fit: ≈ 0.07 % per run above 30, z = 3.20; log-normal ≈ 0.39 %). Linux stays the plain entry `S5/short → 30`.
+- **Replays at the job seam** (`tests/memory/loop.test.mjs`, fixtures `tests/memory/fixtures/ci-42404639968-s5-short-windows-summary.json` and `ci-42401136452-…`): run 42404639968 (RED, 23.71, trend true; window medians 77.5, 78.3, 80.2, 80.0, 81.6, 82.6 MB) and run 42401136452 (GREEN, 15.55, trend false; 77.3, 79.1, 80.6, 80.5, 82.6, 77.4 MB) both pass with their unstable line. On the integration tip a912cce the first fails as `S5/short: RED but not listed in expected-red.json (windows)`, as in CI.
+
 ## Current
 
 (pending)

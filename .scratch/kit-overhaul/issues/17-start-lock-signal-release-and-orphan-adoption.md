@@ -39,3 +39,5 @@ Spec stories: 44, 45, 60
 - 2026-11-06 (orchestrator, Round 7 Q4): ticket 17 adopts pid records that older kits already left without a start time (no kill on a pid alone); ticket 37 is now blocked by 17 so the Windows S3/short entry can clear.
 
 - 2026-11-06 (orchestrator, from ticket 02 round 7 Linux evidence): orphan adoption must also cover a healthy proxy on the installation's port with no `proxy.pid` at all (start killed between spawn and the record write; see ticket 16 Comments of the same date). Adoption needs the same proof strength as Round 7 Q4 condition 3: never on a port or pid alone.
+
+- 2026-11-07 (orchestrator, from ticket 65): Windows suspended-proxy orphan (see ticket 16 Comments of the same date) is a legacy/orphan state this ticket's adoption or stop must handle: a process with the proxy's command line that was never resumed, no pid record, not serving the port.

@@ -36,3 +36,17 @@ Remove-Variable key
 ```
 
 Port: replace 8457 if your `proxy/config.yaml` sets another. Unblocks: ticket 63 (re-triage).
+
+## OA-2 — Ctrl-C at a setup question in plain mode on a Windows console (ticket 42)
+
+In Windows PowerShell 5.1 and in PowerShell 7, in both conhost and Windows Terminal, on a machine where the kit is installed:
+
+```powershell
+$env:NO_COLOR = '1'
+zcode-kit setup --reask
+# at the first question press Ctrl-C
+echo "exit=$LASTEXITCODE"
+Remove-Item Env:NO_COLOR
+```
+
+Expected: setup stops at once with exit 130 and no traceback, no escape sequences are printed, and a second `zcode-kit setup --reask` asks the same question again (nothing was stored). Unblocks: ticket 42's plain-mode Ctrl-C criterion (no automated proof on a real console).

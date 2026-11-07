@@ -38,3 +38,5 @@ Spec stories: 138, 144
 - 2026-11-07 (orchestrator, from ticket 10): the release notes announce that Node 20 and 22 are no longer supported (floor 24; setup/update refuse before mutating, exit 2, what/why/next), alongside the Bun 1.4.2 stay-back reason.
 
 - 2026-11-07 (orchestrator, from ticket 59): the release notes list the refreshed Kilo Code sheet (the false 'Kilo fetches /v1/models' line is replaced; existing sheets refresh on the next setup/integrate).
+
+- 2026-11-07 (orchestrator, from ticket 42): the release notes describe the Account Rotator question asked once, with automatic migration of the old answer.
