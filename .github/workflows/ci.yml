@@ -25,12 +25,12 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       # The proxy + MCP bridge suites need bun (their vendored toolchain).
-      # Pinned to the CI Bun (1.4.4, ADR-0016 batch 1); the memory budgets'
-      # reference stays the Bun 1.4.2 baseline (METRICS.md).
+      # Pinned to 1.4.2 everywhere (Rounds 10–11: Bun >= 1.4.3 raises the
+      # S1/burst1 proxy peak on the CI runners; ticket 62 owns re-entry);
       # older bun (e.g. 1.2.20) rejects the mcp bridge's lockfileVersion 2.
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.2
       - name: Install bridge/proxy dependencies
         run: |
           cd zcode-proxy-src && bun install --frozen-lockfile
@@ -64,7 +64,7 @@ jobs:
           node-version: 26
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.4
+          bun-version: 1.4.2
       - name: Install proxy dependencies
         run: cd zcode-proxy-src && bun install --frozen-lockfile
       - name: Windows baseline from the base commit (until tests/ux-before/windows is committed)
@@ -129,23 +129,15 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26
-      # Paired Bun measurement (Round 10 Q1 condition 1), only with the
-      # measurement marker: Bun 1.4.2 and 1.4.3 through setup-bun (the same
+      # Paired Bun measurement (Round 10 Q1 condition 1; ticket 62's re-entry
+      # tool, Round 11 Q1 condition 4), only with the measurement marker: the
+      # candidate Bun versions 1.4.3 and 1.4.4 through setup-bun (the same
       # release-asset endpoint as the job's own Bun), each copied aside and
-      # checked by its --revision. setup-bun always installs to ~/.bun/bin, so
-      # the job's own Bun comes last and stays the one on PATH; no-cache keeps
-      # the post step from caching that last binary under these versions.
-      - name: Bun 1.4.2 for the paired measurement
-        id: bun-142
-        if: hashFiles('tests/memory/measure-burst1') != ''
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.2
-          no-cache: true
-      - name: Keep Bun 1.4.2 aside
-        if: hashFiles('tests/memory/measure-burst1') != ''
-        shell: bash
-        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-142.outputs.bun-path }}" 1.4.2 "${{ runner.temp }}/bun-arms"
+      # checked by its --revision. The job's own Bun (the pinned 1.4.2) is the
+      # reference arm. setup-bun always installs to ~/.bun/bin, so the job's
+      # own Bun comes last and stays the one on PATH; no-cache keeps the post
+      # step from caching that last binary under these versions. A new
+      # candidate gets its own pair of steps here (ticket 62).
       - name: Bun 1.4.3 for the paired measurement
         id: bun-143
         if: hashFiles('tests/memory/measure-burst1') != ''
@@ -157,14 +149,26 @@ jobs:
         if: hashFiles('tests/memory/measure-burst1') != ''
         shell: bash
         run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-143.outputs.bun-path }}" 1.4.3 "${{ runner.temp }}/bun-arms"
-      - uses: oven-sh/setup-bun@v2
-        id: bun-job
+      - name: Bun 1.4.4 for the paired measurement
+        id: bun-144
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+          no-cache: true
       - name: Keep Bun 1.4.4 aside
         if: hashFiles('tests/memory/measure-burst1') != ''
         shell: bash
-        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-job.outputs.bun-path }}" 1.4.4 "${{ runner.temp }}/bun-arms"
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-144.outputs.bun-path }}" 1.4.4 "${{ runner.temp }}/bun-arms"
+      # The pinned Bun (Rounds 10–11: 1.4.2 everywhere).
+      - uses: oven-sh/setup-bun@v2
+        id: bun-job
+        with:
+          bun-version: 1.4.2
+      - name: Keep Bun 1.4.2 aside
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-job.outputs.bun-path }}" 1.4.2 "${{ runner.temp }}/bun-arms"
       - name: Install bridge/proxy dependencies
         run: |
           cd zcode-proxy-src && bun install --frozen-lockfile
@@ -174,7 +178,9 @@ jobs:
       # marker tests/memory/measure-burst1 is committed on the branch under
       # test; a test fails while it exists, so it never merges. Its content:
       # "N" (N runs on the job's Bun) or "N bun=1.4.2,1.4.3,1.4.4" (the paired
-      # measurement: N runs per arm, interleaved in rotation, Round 10 Q1).
+      # measurement: N runs per arm, interleaved in rotation, Round 10 Q1; the
+      # pinned Bun first, as the reference arm). Each arm named in the marker
+      # must have been kept aside above.
       - name: Memory loop (short profile) and expected-RED ratchet
         if: hashFiles('tests/memory/measure-burst1') == ''
         run: node tests/memory/job.mjs --out "${{ runner.temp }}/memloop"
@@ -184,8 +190,11 @@ jobs:
         run: |
           ARMS="${{ runner.temp }}/bun-arms"
           EXE=""; [ "$RUNNER_OS" = "Windows" ] && EXE=".exe"
+          SPEC="$(tr -d '\r' < tests/memory/measure-burst1)"
           if grep -q 'bun=' tests/memory/measure-burst1; then
-            node tests/memory/job.mjs --measure-burst1 "$(cat tests/memory/measure-burst1)" --bun "1.4.2=$ARMS/1.4.2/bun$EXE,1.4.3=$ARMS/1.4.3/bun$EXE,1.4.4=$ARMS/1.4.4/bun$EXE" --out "${{ runner.temp }}/memloop"
+            BUNS=""
+            for v in $(printf '%s' "${SPEC#*bun=}" | tr ',' ' '); do BUNS="${BUNS:+$BUNS,}$v=$ARMS/$v/bun$EXE"; done
+            node tests/memory/job.mjs --measure-burst1 "$SPEC" --bun "$BUNS" --out "${{ runner.temp }}/memloop"
           else
             node tests/memory/job.mjs --measure-burst1 "$(cat tests/memory/measure-burst1)" --out "${{ runner.temp }}/memloop"
           fi

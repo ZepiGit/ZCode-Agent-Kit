@@ -446,8 +446,12 @@ const unstableDoc = { windows: { "S1/burst1": UNSTABLE_ENTRY } };
 const wsFive = (...ws) => ws.map((x) => winRep({ commit: 410, ws: x }));
 
 test("unstable: a median of 251 and a median of 230 both pass, each with its unstable line", () => {
-  for (const [peaks, medianMB] of [[[255, 251, 240, 262, 230], 251], [[230, 220, 240, 235, 225], 230]]) {
-    const r = judgeBurst(unstableDoc, setResult("S1/burst1", wsFive(...peaks)));
+  // The job's own rule (n = 7 since Round 11 Q1 condition 2), seven repetitions.
+  const rule = repetitionRule("S1/burst1");
+  assert.equal(rule.n, 7);
+  for (const [peaks, medianMB] of [[[255, 251, 240, 262, 230, 280, 245], 251], [[230, 220, 240, 235, 225, 260, 228], 230]]) {
+    assert.equal(peaks.length, rule.n);
+    const r = judgeBurst(unstableDoc, setResult("S1/burst1", wsFive(...peaks), rule));
     assert.deepEqual(r.failures, [], String(medianMB));
     const row = r.rows.find((x) => x.key === "S1/burst1");
     assert.equal(row.state, "unstable");
@@ -518,8 +522,17 @@ test("S1/burst1 is the only run judged on a median: n from the measured distribu
   assert.deepEqual([above(BURST1_TIP), BURST1_TIP.length], [5, 48]);
   assert.equal(chooseRepetitions(tipP), 3); // 3.0 %
   assert.equal(chooseRepetitions(pooledP), 5); // 3: 5.02 % > 5 %; 5: 2.0 %
-  // n is the larger of the two, so the ≤ 5 % false-RED bound holds on either estimate.
-  assert.deepEqual(repetitionRule("S1/burst1"), { n: 5, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 });
+  // Round 11 Q1 condition 2: the paired run's Bun 1.4.2 arm (CI 42352122623,
+  // Linux) had 5 of 24 above 250 MB, the less favourable estimate against the
+  // pooled 1.4.2 CI history of 6 of 48 (with run 42316982634's 1 of 24).
+  assert.equal(chooseRepetitions(5 / 24), 7); // 5: 6.45 % > 5 %; 7: 3.83 %
+  // The pooled estimate alone would allow n = 3 (4.30 %; Round 11's "returns 5"
+  // quotes the n = 5 rate, 1.61 %). The less favourable estimate decides.
+  assert.equal(chooseRepetitions(6 / 48), 3);
+  assert.ok(Math.abs(medianFalseRedRate(5 / 24, 5) - 0.0645) < 5e-4 && Math.abs(medianFalseRedRate(5 / 24, 7) - 0.0383) < 5e-4);
+  // n is the largest over the estimates, so the ≤ 5 % false-RED bound holds on each of them.
+  assert.equal(Math.max(chooseRepetitions(tipP), chooseRepetitions(pooledP), chooseRepetitions(5 / 24), chooseRepetitions(6 / 48)), 7);
+  assert.deepEqual(repetitionRule("S1/burst1"), { n: 7, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 });
   assert.ok(Math.max(...BURST1_TIP, ...BURST1_EARLIER.values) <= 400, "the ceiling sits above every measured run");
   for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1") assert.equal(repetitionRule(key), null, `${os} ${key}`);
 });

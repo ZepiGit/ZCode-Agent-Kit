@@ -72,51 +72,62 @@ export function fisherOneSided(a, n1, c, n2) {
   return Math.min(1, Number(p.toPrecision(12)));
 }
 
-// "Stable unlisted" (Round 6 Q1 condition 2, Round 8 condition 3, Round 10
-// condition 2): P(median of 5 RED) ≤ 5 % at the arm's p, i.e. at most 4 of 24.
-export const STABLE_MEDIAN_N = 5;
+// "Stable unlisted" (Round 6 Q1 condition 2, Round 8 condition 3, Round 11
+// condition 4 (ii)): P(median of n RED) ≤ 5 % at the arm's p, where n is the
+// job's own (budgets.mjs REPEATED; 7 since Round 11, i.e. at most 5 of 24).
 export const STABLE_MAX_RATE = 0.05;
 export const FISHER_ALPHA = 0.05;
-export const CONDITION1_RUNS = 24;
-const R10_ARMS = ["1.4.2", "1.4.3", "1.4.4"];
+export const PAIRED_RUNS = 24;
+export const WINDOWS_MEDIAN_MAX_MB = 300;
 
-export function stableUnlisted(arm) {
-  return arm.valid > 0 && medianFalseRedRate(arm.aboveBudget / arm.valid, STABLE_MEDIAN_N) <= STABLE_MAX_RATE;
+export function stableUnlisted(arm, n) {
+  if (!Number.isInteger(n) || n < 1) throw new Error(`stableUnlisted needs the job's n (got ${n})`);
+  return arm.valid > 0 && medianFalseRedRate(arm.aboveBudget / arm.valid, n) <= STABLE_MAX_RATE;
+}
+
+/** The largest count above the budget, of `runs`, that is still stable unlisted at n. */
+export function stableMaxCount(runs, n) {
+  let k = -1;
+  while (k + 1 <= runs && medianFalseRedRate((k + 1) / runs, n) <= STABLE_MAX_RATE) k++;
+  return k;
 }
 
 const fmtP = (p) => (p === null || p === undefined ? "—" : p < 0.0001 ? p.toExponential(2) : String(Number(p.toFixed(4))));
 
 /**
- * Round 10 Q1 condition 2, applied in order to the Linux arms
- * [{ bun, requested, valid, aboveBudget, overCeiling }]. Mechanical: it names
- * the branch and, for (c), the version the rule gives. The job pins nothing;
- * condition 3 acts on the reading.
+ * Round 11 Q1 condition 4, the re-entry rule for a newer Bun (ticket 62),
+ * on one leg. arms[0] is the reference: the pinned Bun, listed first in the
+ * marker. Each later arm is a candidate. A candidate passes on this leg when:
+ *   (i)   every run of its arm and of the reference arm is valid and ≤ the ceiling;
+ *   (ii)  Linux: its arm is stable unlisted at the job's current n;
+ *   (iii) Linux: one-sided Fisher against the reference arm gives p > 0.05;
+ *   (iv)  Windows: its median is ≤ 300 MB (no run above the ceiling is (i)).
+ * Mechanical and per leg. It never pins: V needs both legs, and (ii) also on
+ * the candidate's pooled CI history when that is less favourable, which only
+ * the triage can see. n is never raised to admit a candidate.
  */
-export function condition2Reading(arms) {
-  const by = Object.fromEntries(arms.map((a) => [a.bun, a]));
-  if (arms.length !== R10_ARMS.length || !R10_ARMS.every((v) => by[v])) {
-    return { branch: null, why: `no reading: the rule is fixed for the arms ${R10_ARMS.join(", ")} (this run: ${arms.map((a) => a.bun).join(", ")})` };
-  }
-  const ref = by["1.4.2"];
-  const fisher = Object.fromEntries(["1.4.3", "1.4.4"].map((v) => [v, fisherOneSided(by[v].aboveBudget, by[v].valid, ref.aboveBudget, ref.valid)]));
-  const stable = Object.fromEntries(arms.map((a) => [a.bun, stableUnlisted(a)]));
-  const caution = arms.some((a) => a.requested !== CONDITION1_RUNS)
-    ? `not the condition 1 run: the rule is fixed for ${CONDITION1_RUNS} valid runs per arm (this run: ${arms.map((a) => `${a.bun} ${a.requested}`).join(", ")})`
-    : null;
-  const base = { fisher, stable, caution };
-  const invalid = arms.filter((a) => a.valid !== a.requested);
-  const over = arms.filter((a) => a.overCeiling.length);
-  if (invalid.length || over.length || !stable["1.4.2"]) {
-    const why = [
-      ...invalid.map((a) => `${a.requested - a.valid} invalid run(s) in the ${a.bun} arm`),
-      ...over.map((a) => `${a.bun} arm: run(s) ${a.overCeiling.map((i) => `#${i}`).join(", ")} above the ceiling`),
-      ...(!stable["1.4.2"] ? [`the 1.4.2 arm is not stable unlisted (${ref.aboveBudget} of ${ref.valid} above the budget)`] : []),
-    ].join("; ");
-    return { ...base, branch: "a", why: `(a) invalid, back as a question: ${why}` };
-  }
-  if (fisher["1.4.4"] > FISHER_ALPHA) return { ...base, branch: "b", why: `(b) no Bun effect shown, back as a question: 1.4.4 vs 1.4.2 p = ${fmtP(fisher["1.4.4"])} > ${FISHER_ALPHA}` };
-  const v = stable["1.4.3"] && fisher["1.4.3"] > FISHER_ALPHA ? "1.4.3" : "1.4.2";
-  return { ...base, branch: "c", v, why: `(c) Bun-caused (1.4.4 vs 1.4.2 p = ${fmtP(fisher["1.4.4"])} ≤ ${FISHER_ALPHA}): the rule gives V = ${v} (1.4.3 arm ${stable["1.4.3"] ? "stable unlisted" : "NOT stable unlisted"}, 1.4.3 vs 1.4.2 p = ${fmtP(fisher["1.4.3"])})` };
+export function reentryReading(arms, { os, n, jobBun = null }) {
+  const [ref, ...candidates] = arms;
+  const notes = [];
+  if (!ref || !candidates.length) return { reference: ref?.bun ?? null, n, candidates: [], notes: ["no reading: the paired mode needs a reference arm and at least one candidate"] };
+  if (arms.some((a) => a.requested !== PAIRED_RUNS)) notes.push(`not a re-entry run: the rule is fixed for ${PAIRED_RUNS} valid runs per arm (this run: ${arms.map((a) => `${a.bun} ${a.requested}`).join(", ")})`);
+  const jobVersion = jobBun ? jobBun.split("+")[0] : null;
+  if (jobVersion !== ref.bun) notes.push(`the reference arm ${ref.bun} is not the job's own Bun (${jobBun ?? "unknown"}): list the pinned Bun first in the marker`);
+  const clean = (a) => a.valid === a.requested && !a.overCeiling.length;
+  const out = candidates.map((c) => {
+    const fisherP = fisherOneSided(c.aboveBudget, c.valid, ref.aboveBudget, ref.valid);
+    const checks = {
+      i: { pass: clean(c) && clean(ref), detail: [c, ref].filter((a) => !clean(a)).map((a) => `${a.bun}: ${a.requested - a.valid} invalid, over the ceiling ${a.overCeiling.map((i) => `#${i}`).join(", ") || "none"}`).join("; ") || "all runs valid and within the ceiling" },
+    };
+    if (os === "windows") {
+      checks.iv = { pass: c.medianMB !== null && c.medianMB <= WINDOWS_MEDIAN_MAX_MB, detail: `median ${c.medianMB ?? "—"} MB (≤ ${WINDOWS_MEDIAN_MAX_MB})` };
+    } else {
+      checks.ii = { pass: stableUnlisted(c, n), detail: `${c.aboveBudget} of ${c.valid} above the budget (stable at n = ${n}: ≤ ${stableMaxCount(c.valid || PAIRED_RUNS, n)} of ${c.valid || PAIRED_RUNS}); also check the pooled CI history` };
+      checks.iii = { pass: fisherP > FISHER_ALPHA, detail: `one-sided Fisher vs ${ref.bun}: p = ${fmtP(fisherP)} (needs > ${FISHER_ALPHA})` };
+    }
+    return { bun: c.bun, fisherP, checks, pass: Object.values(checks).every((x) => x.pass) };
+  });
+  return { reference: ref.bun, n, candidates: out, notes };
 }
 
 const mb1 = (kb) => Number((kb / 1024).toFixed(1));
@@ -202,26 +213,25 @@ export function measureReport(reps, { key, os, requested, rule }) {
 }
 
 /**
- * The paired measurement (Round 10 Q1 conditions 1–2): one measureReport per
- * arm over its own runs, the arms' runtime environments, the Fisher tests
- * against the first arm and, on Linux, condition 2's reading; on Windows the
- * condition 5 flags (information only).
+ * The paired measurement (Round 10 Q1 condition 1; ticket 62's re-entry
+ * tool): one measureReport per arm over its own runs, the arms' runtime
+ * environments, the Fisher tests against the first arm (the reference, the
+ * pinned Bun) and the per-leg re-entry reading of Round 11 Q1 condition 4 at
+ * the job's n. jobBun: the job's own Bun revision (checked against arm 1).
  */
-export function pairedReport(reps, { key, os, arms, perArm, rule }) {
+export function pairedReport(reps, { key, os, arms, perArm, rule, jobBun = null }) {
   const armReports = arms.map((bun) => {
     const own = reps.filter((r) => r.bun === bun);
     const m = measureReport(own, { key, os, requested: perArm, rule });
     const envs = [...new Map(own.filter((r) => r.env).map((r) => [JSON.stringify(stableEnv(r.env)), r.env])).values()];
-    return { bun, requested: m.requested, valid: m.valid, complete: m.complete, aboveBudget: m.aboveBudget, p: m.p, stable: stableUnlisted(m), overCeiling: m.overCeiling, minMB: m.minMB, medianMB: m.medianMB, maxMB: m.maxMB, ...(m.commitMedianMB !== undefined ? { commitMedianMB: m.commitMedianMB, commitMaxMB: m.commitMaxMB } : {}), medianRedProbability: m.medianRedProbability, bunRuntime: [...new Set(own.map((r) => r.bunRuntime).filter(Boolean))], env: envs[0] ?? null, envVariants: envs.length };
+    return { bun, requested: m.requested, valid: m.valid, complete: m.complete, aboveBudget: m.aboveBudget, p: m.p, stable: stableUnlisted(m, rule.n), overCeiling: m.overCeiling, minMB: m.minMB, medianMB: m.medianMB, maxMB: m.maxMB, ...(m.commitMedianMB !== undefined ? { commitMedianMB: m.commitMedianMB, commitMaxMB: m.commitMaxMB } : {}), medianRedProbability: m.medianRedProbability, bunRuntime: [...new Set(own.map((r) => r.bunRuntime).filter(Boolean))], env: envs[0] ?? null, envVariants: envs.length };
   });
   const ref = armReports[0];
   const fisherVsFirst = Object.fromEntries(armReports.slice(1).map((a) => [a.bun, fisherOneSided(a.aboveBudget, a.valid, ref.aboveBudget, ref.valid)]));
-  const reading = os === "windows" ? null : condition2Reading(armReports);
-  const condition5 = os === "windows" ? armReports.map((a) => ({ bun: a.bun, medianMB: a.medianMB, medianAbove300: a.medianMB !== null && a.medianMB > 300, overCeiling: a.overCeiling })) : null;
   return {
-    mode: "paired", key, os, rotation: arms, perArm, requested: perArm * arms.length,
-    rule: "paired measurement (Round 10 Q1 conditions 1–2): no verdict, no ratchet, no pin", check: rule.check, budgetMB: rule.budgetMB, ceilingMB: rule.ceilingMB,
-    complete: armReports.every((a) => a.complete), arms: armReports, fisherVsFirst, reading, condition5, reps,
+    mode: "paired", key, os, rotation: arms, perArm, requested: perArm * arms.length, n: rule.n, jobBun,
+    rule: "paired measurement (Round 10 Q1 condition 1; re-entry rule Round 11 Q1 condition 4): no verdict, no ratchet, no pin", check: rule.check, budgetMB: rule.budgetMB, ceilingMB: rule.ceilingMB,
+    complete: armReports.every((a) => a.complete), arms: armReports, fisherVsFirst, reading: reentryReading(armReports, { os, n: rule.n, jobBun }), reps,
   };
 }
 
@@ -240,8 +250,8 @@ export function pairedMarkdown(m) {
   const v = (x) => (x === null || x === undefined ? "—" : x);
   const lines = [
     `## ${m.key} paired Bun measurement (${m.os}, ${m.perArm} runs per arm, rotation ${m.rotation.join(" → ")})`, "",
-    `Not a ratchet run (Round 10 Q1 condition 1): ${m.requested} fresh, isolated runs, the arms interleaved in rotation, each on its arm's Bun (the proxy's runtime version is checked per run). Value: the ${m.check} ${win ? "WS gate = max(sampled WS, PeakWorkingSetSize); commit reported" : "RSS gate = max(sampled RSS, VmHWM)"}. Budget ${m.budgetMB} MB, ceiling ${m.ceilingMB} MB per run. Nothing here changes a pin.`, "",
-    `| arm | valid | above ${m.budgetMB} MB | stable unlisted (P(median of ${STABLE_MEDIAN_N} RED) ≤ ${STABLE_MAX_RATE}, ≤ 4 of 24) | over ${m.ceilingMB} MB | min / median / max (MB) | ${win ? "commit median / max (MB)" : "p"} | proxy's runtime Bun |`,
+    `Not a ratchet run (Round 10 Q1 condition 1): ${m.requested} fresh, isolated runs, the arms interleaved in rotation, each on its arm's Bun (the proxy's runtime version is checked per run). Reference arm: ${m.rotation[0]} (the job's own Bun: ${v(m.jobBun)}). Value: the ${m.check} ${win ? "WS gate = max(sampled WS, PeakWorkingSetSize); commit reported" : "RSS gate = max(sampled RSS, VmHWM)"}. Budget ${m.budgetMB} MB, ceiling ${m.ceilingMB} MB per run. Nothing here changes a pin.`, "",
+    `| arm | valid | above ${m.budgetMB} MB | stable unlisted (P(median of ${m.n} RED) ≤ ${STABLE_MAX_RATE}; ≤ ${stableMaxCount(m.perArm, m.n)} of ${m.perArm}) | over ${m.ceilingMB} MB | min / median / max (MB) | ${win ? "commit median / max (MB)" : "p"} | proxy's runtime Bun |`,
     "|---|---|---|---|---|---|---|---|",
   ];
   for (const a of m.arms) {
@@ -249,13 +259,13 @@ export function pairedMarkdown(m) {
   }
   lines.push("");
   for (const [bun, p] of Object.entries(m.fisherVsFirst)) lines.push(`- Fisher one-sided p, ${bun} vs ${m.rotation[0]}: ${fmtP(p)} (${p <= FISHER_ALPHA ? "≤" : ">"} ${FISHER_ALPHA})`);
-  if (m.reading) {
-    lines.push("", `**Condition 2 reading (Round 10 Q1, mechanical):** ${m.reading.branch ? m.reading.why : m.reading.why}`);
-    if (m.reading.caution) lines.push("", `Caution: ${m.reading.caution}.`);
-  }
-  if (m.condition5) {
-    lines.push("", "**Condition 5 (Windows, information only):** " + m.condition5.map((c) => `${c.bun} median ${v(c.medianMB)} MB${c.medianAbove300 ? " (ABOVE 300: a question if this is V)" : ""}${c.overCeiling.length ? `, run(s) above ${m.ceilingMB} MB: ${c.overCeiling.map((i) => `#${i}`).join(", ")} (a question)` : ""}`).join("; "));
-  }
+  const r = m.reading;
+  lines.push("", `**Re-entry reading (Round 11 Q1 condition 4, ${m.os} leg, mechanical; reference ${r.reference}, n = ${r.n}):**`, "");
+  const names = win ? { i: "(i) valid, ≤ ceiling", iv: `(iv) median ≤ ${WINDOWS_MEDIAN_MAX_MB} MB` } : { i: "(i) valid, ≤ ceiling", ii: `(ii) stable at n = ${r.n}`, iii: "(iii) Fisher p > 0.05" };
+  lines.push(`| candidate | ${Object.values(names).join(" | ")} | this leg |`, `|---|${Object.keys(names).map(() => "---|").join("")}---|`);
+  for (const c of r.candidates) lines.push(`| ${c.bun} | ${Object.keys(names).map((k) => `${c.checks[k].pass ? "pass" : "FAIL"}: ${c.checks[k].detail}`).join(" | ")} | ${c.pass ? "**passes**" : "**fails**"} |`);
+  lines.push("", `A candidate becomes V only if it passes on both legs and (ii) also holds on its pooled CI history when that is less favourable (the triage, ticket 62); n is never raised to admit a candidate.`);
+  for (const note of r.notes) lines.push("", `Caution: ${note}.`);
   lines.push("", "Runtime environment per arm (inside the run's cap scope):", "", "| arm | Bun (probe) | constrainedMemory | availableMemory | hardwareConcurrency | availableParallelism | nproc | CPU model | cgroup | scope MemoryMax | cap requested | variants |", "|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const a of m.arms) {
     const e = a.env ?? {};
@@ -264,7 +274,7 @@ export function pairedMarkdown(m) {
   }
   lines.push("", `| run | arm | proxy's runtime Bun | outcome | ${win ? "WS gate" : "RSS gate"} (MB) | sampled (MB) | ${win ? "ws_peak_kb" : "VmHWM (MB)"} | commit (MB) | valid |`, "|---|---|---|---|---|---|---|---|---|");
   for (const r of m.reps) lines.push(`| ${r.rep} | ${r.bun} | ${v(r.bunRuntime)} | ${r.outcome} | ${v(r.gateMB)} | ${v(r.sampledMB)} | ${v(win ? r.wsPeakKb : r.peakMB)} | ${v(r.commitMB)} | ${r.valid ? "yes" : `no: ${r.problems.join("; ")}`} |`);
-  lines.push("", `- complete: ${m.complete ? "yes" : "NO — an arm has invalid runs; condition 2(a)"}`);
+  lines.push("", `- complete: ${m.complete ? "yes" : "NO — an arm has invalid runs; re-entry check (i) fails"}`);
   return lines.join("\n") + "\n";
 }
 

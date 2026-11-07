@@ -1,4 +1,4 @@
-# 09: Batch 1a — CI toolchain: actions v7, Bun 1.4.4 in CI, nested proxy workflows removed
+# 09: Batch 1a — CI toolchain: actions v7, Bun 1.4.2 in CI, nested proxy workflows removed
 
 **Blocked by:** 02 (Windows sampler and the windows leg of the `memory-budget` job (Bun 1.4.2 reference run)), 03 (S3 OMP stub-host leg in the memory loop), 04 (Pre-existing findings: unwired tests, the test-wiring guard and CI Node coverage)
 
@@ -10,12 +10,14 @@ Risk: low
 
 ADR: 0006, 0016
 
-**What to build:** `actions/checkout@v7`, `actions/setup-node@v7`, `oven-sh/setup-bun@v2`; Bun 1.4.4 in `ci.yml`, `release.yml` and the `memory-budget` job; the three nested vendored proxy workflows deleted with a MANIFEST vendor-change entry; `release.yml` changes only in versions, runs on Node 26, publish job keeps Node 24 for OIDC.
+Retitled 2026-11-07 (Round 11 Q1 condition 6): the pin is Bun 1.4.2, not 1.4.4. Bun 1.4.3 and 1.4.4 raise the Linux S1/burst1 proxy peak on the CI runners (Rounds 10–11; ticket 62 owns the newer Bun). The file name keeps `1-4-4` so existing links stay valid.
+
+**What to build:** `actions/checkout@v7`, `actions/setup-node@v7`, `oven-sh/setup-bun@v2`; Bun 1.4.2 in `ci.yml` (all three jobs), `release.yml` and the `memory-budget` job (Round 11 Q1 condition 1; the paired measurement mode keeps 1.4.3/1.4.4 as marker-only candidate arms); S1/burst1 judged on a median of 7 (Round 11 Q1 condition 2); the three nested vendored proxy workflows deleted with a MANIFEST vendor-change entry; `release.yml` changes only in versions, runs on Node 26, publish job keeps Node 24 for OIDC.
 
 **Acceptance criteria:**
 
-- [ ] All CI legs and both `memory-budget` legs green on Bun 1.4.4 with the unchanged `expected-red.json` (any entry turned GREEN by the runtime alone is deleted here, with evidence, and its fix ticket re-scoped).
-- [ ] A release-audit test asserts the pins (no `bun-version: 1.4.2`/`1.4.0`, no `node-version: 20`) (seam 9).
+- [ ] All CI legs and both `memory-budget` legs green on Bun 1.4.2 with the unchanged `expected-red.json` (Round 11 Q1 condition 3; one pre-merge confirmation run with the marker removed and n = 7, no rerun until green).
+- [ ] A release-audit test asserts the pins (`bun-version: 1.4.2` exactly in every Bun-using job, no `1.4.0`, no `node-version: 20`) (seam 9; Round 11 Q1 condition 1 replaces "no `bun-version: 1.4.2`").
 
 **Common acceptance (every ticket):**
 
@@ -172,3 +174,63 @@ Spec stories: 126, 140
     - Ubuntu decides by condition 2; windows is information by condition 5.
     - After V is chosen, condition 3 is a follow-up round on this branch: the `bun-version` pins, the release-audit `BUN_PIN`, and the arm list if V ≠ 1.4.4.
     - Delete the marker before the pre-merge run.
+
+- **2026-11-07, round 3 (Round 11 Q1): Bun 1.4.2 pinned, n = 7, records.**
+  - **The paired run** (https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42352122623, `staging/09` e407916, marker `24 bun=1.4.2,1.4.3,1.4.4`; artefacts `/home/AgentKit/overhaul-tools/ci-art/t09-paired-1fRC/`). All 144 runs are valid, every proxy ran its arm's Bun, and no run is above 400 MB. Both legs ran on an INTEL(R) XEON(R) PLATINUM 8573C with 4 cores; Linux is cgroup v2-only with `constrainedMemory` = `memory.max` = 3 GiB, and Windows runs under a 3G Job Object (Bun reports the host's 16 GiB there). The Round 10 reading was (a), because the 1.4.2 arm is 5/24, not ≤ 4/24 at n = 5. Round 11 decided on that data.
+
+    | leg | 1.4.2 | 1.4.3 | 1.4.4 |
+    |---|---|---|---|
+    | linux, above 250 of 24 | 5 | 14 | 13 |
+    | linux median / max (MB) | 219.4 / 260.5 | 272.8 / 331.4 | 252.6 / 333.2 |
+    | linux one-sided Fisher vs 1.4.2 | — | 0.0086 | 0.0178 |
+    | windows, above 250 of 24 | 12 | 17 | 19 |
+    | windows median / max (MB) | 250.1 / 291.5 | 254.4 / 296.1 | 257.7 / 292 |
+    | windows one-sided Fisher vs 1.4.2 | — | 0.119 | 0.0344 |
+
+    The full per-run values are in METRICS.md, "S1/burst1 and the Bun version: the paired measurement".
+  - **Commits:**
+    - **ed12235** `test(memory): S1/burst1 median of 7 repetitions on both legs` (condition 2, a commit of its own).
+      - `REPEATED["S1/burst1"].n` goes from 5 to 7 in `tests/memory/lib/budgets.mjs`, still the one place n lives. No budget, ceiling, metric, list or unstable change.
+      - Tests: `chooseRepetitions(5/24) = 7` (6.45 % at n = 5, 3.83 % at n = 7); `repetitionRule("S1/burst1").n === 7`; the largest n over the four estimates is 7. The `unstable` 251/230 median case is re-expressed with 7 repetitions, both in `verdict.test.mjs` and at the job seam in `loop.test.mjs` (the >300 case too).
+      - **Discrepancy:** Round 11 condition 2 says `chooseRepetitions(6/48)` returns 5, but it returns **3** (4.30 % at n = 3 is already ≤ 5 %; the round quoted the n = 5 rate, 1.61 %). The test pins the true value 3 with a comment. The decision, n = 7 from the less favourable 5/24, is unaffected.
+      - RED first: 3 tests failed on n = 5 (`reports/t09-r3-n7-red2.log`). GREEN: 118/118 (`t09-r3-n7-green.log`).
+      - Mutations: n = 5 fails 3 tests; n = 9 fails 3 tests; dropping 7 from the `chooseRepetitions` candidates fails 1 test.
+    - **e637c4c** `ci: pin Bun 1.4.2 in ci.yml and release.yml` (condition 1).
+      - `bun-version: 1.4.2` in `test-kit`, `ux-before` and `memory-budget`, and in release.yml. release.yml now differs from the original tip caf1517 only in action majors, Node versions and comments; its Bun line is 1.4.2 again. The v7 actions and the deleted nested workflows stay.
+      - Release-audit: `BUN_PIN = "1.4.2"`. Every Bun-using job must be exactly 1.4.2 (ci.yml test-kit/ux-before/memory-budget, release.yml test), 1.4.0 and Node 20 are still rejected, and the scanner self-check now uses 1.4.4/1.4.3 as stale examples. Round 11 Q1 condition 1 is the named justification for replacing round 1's "no `bun-version: 1.4.2`".
+      - **The paired mode stays as ticket 62's re-entry tool:**
+        - The job's own Bun (1.4.2) is the reference arm, installed last so it stays on PATH. 1.4.3 and 1.4.4 are marker-only candidate arms (`no-cache`, `keep-bun-arm.mjs`).
+        - `--bun` is now built from the marker's own arm list, so a future candidate needs only its own pair of setup/keep steps plus the marker.
+        - The Round 10 decision reading (`condition2Reading`, hard-coded to 1.4.4 and n = 5) is replaced by Round 11 condition 4's per-leg re-entry reading `reentryReading`:
+          - (i) every run of the candidate and of the reference is valid and ≤ 400;
+          - (ii) Linux: stable unlisted at **the job's n** (read from `REPEATED`; at n = 7 that is ≤ 5 of 24);
+          - (iii) Linux: one-sided Fisher against the reference gives p > 0.05;
+          - (iv) Windows: median ≤ 300.
+        - The summary says V needs both legs plus (ii) on the pooled CI history (the triage's part), and that n is never raised to admit a candidate.
+        - It flags a reference arm that is not the job's own Bun (`jobBun`, from `bun --revision`).
+        - Justification for replacing that pre-existing test: the Round 10 rule was a one-run decision rule, now applied (run 42352122623); condition 4 is the rule the mode serves from now on.
+      - RED first: with the new tests and the old 1.4.4 workflows, the release-audit pin test and the CI guard fail (`t09-r3-pin-red.log`). GREEN: 132 pass, 0 fail, 5 skipped across loop, verdict and release-audit (`t09-r3-pin3.log`).
+      - Mutations (restored, `cmp` against the saved copies): `ux-before` back to 1.4.4; release.yml to 1.4.3; a marker-guarded 1.4.4 arm step in release.yml. Each fails the pin test.
+    - **This commit:** the records (ADR-0016 amendment, this ticket's title/text/criteria, METRICS paired block, spec §18 S1 row n = 7) and the merge of the integration tip.
+  - **Records written (condition 6, my part):**
+    - `docs/adr/0016-…md` gets an "Amended 2026-11-07 (Rounds 10–11)" section: "the job's Bun pin stays at 1.4.2", replacing the Consequences line. Condition 3 is upheld.
+    - Ticket 09 is retitled to Bun 1.4.2 (file name unchanged, so links stay valid), with What to build and both criteria updated.
+    - METRICS.md gets the paired block in the Round 8 style.
+    - Spec §18 S1 row records n = 7 as a measurement-rule amendment.
+    - Not mine (orchestrator, c8cb6a0): DECISIONS, RUNLOG, INDEX, ticket 62, Comments on 11 and 54. Not mine (tickets 11, 53, 54): README, SUPPORT_MATRIX, release notes.
+  - **Linux full memory job, Bun 1.4.2, n = 7** (`node tests/memory/job.mjs` as CI runs it; e637c4c; Node 26.7.0; cap systemd; port 19090; 2322 s; `reports/t09-r3-linux-job.log`; run dirs `/home/AgentKit/overhaul-tools/t09-memloop/r3-linux-job/`). Deps were reinstalled first with Bun 1.4.2 `--frozen-lockfile`, and no lockfile changed (`t09-r3-deps.log`).
+    - **The ratchet holds** with the unchanged `expected-red.json`.
+    - S1/burst1 is GREEN: median **237.3** of [**264.4**, 242.1, 208.7, 234, 244.9, 236.4, 237.3], none over 400. Repetition 1 alone would have been RED, which is exactly what the median rule absorbs.
+    - S1/short is GREEN (steady 124.3, peak 173.8), and S1/stalled is GREEN (peak 195.4).
+    - Every listed entry is RED on its owner's checks.
+    - Observation: S4/short's `unstoppable-proxy-after-ctrl-c` was 0 of 8 this run (1 of 8 in the 1.4.2 reference and in round 1's 1.4.4 run). The entry stays RED on `stale-lock-after-ctrl-c` 5/8 and `respawn-recovers-despite-stale-lock`, so the ratchet is unaffected. That check is a race; ticket 17 owns it.
+  - **CI path of the paired step** (`t09-r3-ci-sim.log`): `keep-bun-arm.mjs` for 1.4.3, 1.4.4 and 1.4.2, then the measurement step's exact `run:` text from ci.yml with a CRLF marker `1 bun=1.4.2,1.4.3,1.4.4`. The arms were kept, the rotation ran, each proxy ran its arm, and the re-entry table was written with no reference-arm caution (`jobBun` = 1.4.2). The marker was removed afterwards.
+  - **Suites** (Bun 1.4.2, Linux):
+    - `npm run test`: 642 pass, 0 fail, 16 skipped on Node 26.7.0 and Node 24.22.2 (round 2 had 640; +3 re-entry tests, −1 Round 10 reading test).
+    - `npm run test:proxy`: 1343 pass, 0 fail.
+    - `npm run test:mcp`: 95 pass, 0 fail, 1 skipped.
+    - Logs: `reports/t09-r3-suite-*.log`.
+  - **Duration:** n = 7 adds 2 repetitions per leg, ≈ 40 s on Linux and ≈ 45–52 s on Windows. The local S1/burst1 set took 140 s. The paired mode with 24 runs per arm takes about the same as in round 2 (CI: Linux 1368 s, Windows 1632 s).
+  - **Left for others:**
+    - The spec still names Bun 1.4.4 in §1 (line 34), story 126, story 138 and §12 (lines 515–528, 609). That is outside this round's scope (§18 only); it belongs to the spec owner.
+    - INDEX's row for 09 still reads "Bun 1.4.4" on the integration tip c8cb6a0 (orchestrator-owned).

@@ -131,6 +131,73 @@ The 300 MB bound rests on two numbers. 0 of 27 windows values are above 300. At 
 
 A listed repeated key also no longer masks its ceiling or any other RED check (condition 1). The entry's only exit is ticket 20's ≥ 20-run measurement with every windows run ≤ 250 MB.
 
+### S1/burst1 and the Bun version: the paired measurement (ticket 09, Rounds 10–11)
+
+**Why.** Ticket 09 moved CI to Bun 1.4.4. Its staged pre-merge run (https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42344393581, `staging/09`) failed on ubuntu `memory-budget` only: `S1/burst1: RED but not listed (linux)`, median 252.3 of [252.3, 280.6, 246, 221.2, 302.2]. A 24-run single-arm measurement on Bun 1.4.4 (run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42347506810; artefacts `ci-art/t09-measure-XAT9/`) then gave:
+
+- Linux: 12 of 24 above 250, median 246.4, max 318.8.
+- Windows: 14 of 24 above 250, median 252.4, max 295.9.
+
+Against the Bun 1.4.2 run 42316982634 above (Linux 1/24, Windows 13/24). Both ran on runner image `ubuntu-26.04` 20261101.186.1 with Node 26.13.0 and identical proxy source. Each version still ran on its own VM, so Round 10 Q1 ordered one paired run.
+
+**Paired mode.** `node tests/memory/job.mjs --measure-burst1 "24 bun=1.4.2,1.4.3,1.4.4" --bun …`:
+
+- 24 fresh S1/burst1 runs per arm, interleaved in rotation (1.4.2, 1.4.3, 1.4.4, 1.4.2, …) in one job on one VM.
+- Each run starts the proxy with its arm's Bun.
+- A run counts only if the proxy's live executable reports that arm's `--revision`.
+- Once per arm, inside the cap scope, the run records `process.constrainedMemory()`, `navigator.hardwareConcurrency`, the CPU model, `nproc`, the cgroup type and the scope's `memory.max`.
+
+**CI paired run.** Run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42352122623, `staging/09` e407916, Node v26.13.0. Artefacts are in `/home/AgentKit/overhaul-tools/ci-art/t09-paired-1fRC/memory-budget-{linux,windows}/measure-S1-burst1.{json,md}`.
+
+- All 144 runs are valid, and in every run the proxy's runtime Bun equals its arm: `1.4.2+744846f84`, `1.4.3+c6da4a4d3`, `1.4.4+38afee6c8`.
+- No run is above 400 MB.
+- Environment, identical across arms: INTEL(R) XEON(R) PLATINUM 8573C, 4 cores (`nproc` = `hardwareConcurrency` = 4).
+  - Linux: cgroup **v2-only**, `constrainedMemory` = scope `memory.max` = 3221225472.
+  - Windows: Job Object 3G; `constrainedMemory` reports the host's 17174360064, because the Job Object limit is not visible to Bun.
+- Run time: Linux 1368 s for 72 runs, Windows 1632 s.
+
+**Linux** (RSS gate = max(sampled RSS, VmHWM), MB, run order within each arm):
+
+- 1.4.2: 216.4, **251.3**, **260.5**, 216.6, **254.9**, 225.4, 222, 219.7, 218.7, **259.2**, 219.3, 218.4, 219.9, 219.5, 249.7, **255.5**, 209.5, 204, 217.6, 221.3, 211.7, 212.7, 206.7, 208.2
+- 1.4.3: **276.9**, 245, 239, 206.5, **318**, **279.6**, 223.3, **296.3**, **294**, **273.5**, **272**, **315.2**, **317.7**, **288.4**, **331.4**, 220.3, 213.9, 238.9, 228.5, **319.9**, **278**, **266.8**, 210.4, 216.4
+- 1.4.4: 236.3, **258.9**, 239.8, 217.6, 225.3, 238.7, **282.2**, **258.7**, 236.3, **252.2**, **290**, 234, 243, **282.8**, **261.2**, **252.9**, **288.9**, 245.8, **285.7**, **281.9**, **333.2**, 229.5, 241.5, **279.9**
+
+**Windows** (WS gate = max(sampled WS, PeakWorkingSetSize), MB):
+
+- 1.4.2: **250.7**, 245.3, **281.5**, 246, **253.2**, 247.7, 246.6, **281.3**, 227.4, **252.2**, 248.6, 248.4, 229.8, **252.9**, **264.2**, **250.5**, 249.7, **291.5**, 249.2, **268.9**, 248, **290.2**, 248.6, **262.5**
+- 1.4.3: 216.4, **296.1**, **294.4**, **250.1**, 240.8, **251.1**, **265.6**, 230.2, **255.4**, **270.5**, 234.1, 235, **257.2**, **251.5**, **251**, **278.8**, **282.3**, **289.2**, 248.4, **255.4**, **253.5**, 222.4, **293.1**, **259.7**
+- 1.4.4: **255.2**, **250.6**, **267.4**, **292**, 210.4, **263.9**, **267.7**, 207.5, **279.2**, **261**, **250.8**, **280.8**, **271.7**, **256**, **250.7**, **270.8**, **254.6**, 245.1, **269.4**, 216.3, **256.2**, 220.5, **259.2**, **281.3**
+
+| leg | arm | above 250 of 24 | min / median / max (MB) | commit median / max (MB) | one-sided Fisher vs 1.4.2 |
+|---|---|---|---|---|---|
+| linux | 1.4.2 | 5 | 204 / 219.4 / 260.5 | — | — |
+| linux | 1.4.3 | 14 | 206.5 / 272.8 / 331.4 | — | 0.0086 |
+| linux | 1.4.4 | 13 | 217.6 / 252.6 / 333.2 | — | 0.0178 |
+| windows | 1.4.2 | 12 | 227.4 / 250.1 / 291.5 | 403.3 / 443 | — |
+| windows | 1.4.3 | 17 | 216.4 / 254.4 / 296.1 | 405.7 / 450.2 | 0.119 |
+| windows | 1.4.4 | 19 | 207.5 / 257.7 / 292 | 407.2 / 448.1 | 0.0344 |
+
+Reading of the data (Round 11 Q1's own recomputation):
+
+- **Linux:** both Fisher p values survive a Holm correction for two comparisons. A one-sided Mann-Whitney test on the values agrees (z = 3.50 and 4.11). All five 1.4.2 exceedances lie between 251.3 and 260.5 MB.
+- **Windows:** 0.034 does not survive Holm (threshold 0.025), and Mann-Whitney gives p = 0.20 / 0.12. Windows is information only.
+- **Hypothesis ruled out:** the 1.4.4 hybrid-cgroup heap-sizing change cannot explain the step, since the runners are v2-only, and the step already appears at 1.4.3.
+- **Local machine contrast:** AMD EPYC 7B12, 8 cores, cgroup v2-only, `constrainedMemory` = 3221225472 for every arm. There Linux 1.4.2 gave 2/20 and 1.4.4 gave 0/20, and a 3-per-arm paired run gave 0 / 1 / 0 of 3. The CPU class difference is a hypothesis, not a finding. **Evidence missing:** the CPU of run 42316982634's runner was not recorded.
+
+**Decision (Round 11 Q1).**
+
+- **Bun 1.4.2 everywhere.** That covers `ci.yml` test-kit, ux-before and memory-budget, release.yml, and the installers via ticket 11. Linux S1/burst1 stays unlisted, with no budget change.
+- **n for S1/burst1 goes from 5 to 7 on both legs.** The less favourable Linux estimate is the paired 1.4.2 arm, 5/24, against the pooled 1.4.2 CI history of 6/48.
+
+  | p (Linux, Bun 1.4.2) | n = 3 | n = 5 | n = 7 | n = 9 | smallest n ≤ 5 % |
+  |---|---|---|---|---|---|
+  | 0.208 (paired arm, 5/24) | 11.21 % | 6.45 % | 3.83 % | 2.32 % | 7 |
+  | 0.125 (pooled CI, 6/48) | 4.30 % | 1.61 % | 0.62 % | 0.25 % | 3 |
+
+  Stable unlisted at n = 7 means at most 5 of 24 above 250 (p ≤ 0.225).
+- **Unchanged:** the 250 MB budget, the 400 MB ceiling, the metric split and both `expected-red.json` lists. No windows value in the 1.4.2 arms is above 300, so the `unstable` entry's 300 MB bound holds at n = 7.
+- **Owner of the newer Bun:** ticket 62 ("Bun ≥ 1.4.3 raises the S1/burst1 proxy peak on the CI runners"). It owns the newer Bun with the paired mode as its re-entry tool: 1.4.2 is the reference arm, and Round 11 Q1 condition 4 gives the rule.
+
 ### Windows reference run, Bun 1.4.2 (ticket 02)
 
 Run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42265988296 (`pull/14` merge of staging/02 82de0da, 2026-11-06). This is the first clean windows run (Round 7 Q2 condition 1). Run 3 (42252896054) corroborates it.

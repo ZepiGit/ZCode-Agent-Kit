@@ -42,14 +42,16 @@ export const MEMORY = {
  * for 16 concurrent bodies (a run with ≤ 1 body in flight above it is a
  * regression by definition). The value judged is the check's own: RSS/VmHWM
  * on Linux, the working-set gate max(sampled WS, PeakWorkingSetSize) on
- * Windows (Round 7 Q1); the ceiling applies to that same value. n = 5: the
- * smallest odd n whose predicted false-RED rate is ≤ 5 % on the measured Linux
- * distribution (METRICS.md: 5 of 48 runs above 250 MB on the tip → 3; with the
- * 11 earlier runs, 8 of 59 → 5). Round 8 Q1 condition 3 may raise it (≤ 9)
- * once the windows distribution is measured (job.mjs --measure-burst1).
+ * Windows (Round 7 Q1); the ceiling applies to that same value. n = 7: the
+ * smallest odd n whose predicted false-RED rate is ≤ 5 % on the less
+ * favourable Linux estimate (Round 11 Q1 condition 2). That estimate is the
+ * Bun 1.4.2 arm of the paired CI run 42352122623, 5 of 24 above 250 MB:
+ * 6.45 % at n = 5, 3.83 % at n = 7. Earlier estimates gave 3 (5 of 48 on the
+ * ticket-60 tip) and 5 (8 of 59 with the earlier runs; Round 6 Q1, ticket 60).
+ * One n for both legs; Round 6 Q1 allows n ≤ 9.
  */
 export const REPEATED = {
-  "S1/burst1": { n: 5, check: "procPeak:proxy", budgetMB: MEMORY.S1.peakMB, ceilingMB: MEMORY.S1.burstPeakMB.burst16 },
+  "S1/burst1": { n: 7, check: "procPeak:proxy", budgetMB: MEMORY.S1.peakMB, ceilingMB: MEMORY.S1.burstPeakMB.burst16 },
 };
 
 // Windows only: in paced runs no proxy sample may exceed ADR-0008's 512 MB

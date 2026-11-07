@@ -1,4 +1,4 @@
-# 11: Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs
+# 11: Batch 1c — Bun 1.4.2 bootstrap in the installers, pinned proxy typecheck (Round 11 pin)
 
 **Blocked by:** 10 (Batch 1b — Node 24 support floor, refuse before mutation, autostart Node-path check)
 
@@ -32,3 +32,6 @@ ADR: 0006, 0016
 Spec stories: 126, 140
 
 ## Comments
+
+- 2026-11-07 (orchestrator, Owner Proxy round 11, binding): the kit pins **Bun 1.4.2** everywhere, not 1.4.4 (paired CI run 42352122623: Bun ≥ 1.4.3 raises the Linux S1/burst1 peak; ticket 62 owns re-entry). This explicitly amends Round 1 Q15, Round 2 Q10 condition 4 and the ADR-0016 Consequences line.
+  For this ticket: installers bootstrap Bun 1.4.2 with its SHA-256s taken from the primary source (Bun's GitHub release assets), `@types/bun` 1.4.2 exact; the "1.4.4 attribution runs" criterion is moot (Round 11 C1). Retitle to 1.4.2. SUPPORT_MATRIX.json and README × 5 name 1.4.2 (Round 11 C6).
