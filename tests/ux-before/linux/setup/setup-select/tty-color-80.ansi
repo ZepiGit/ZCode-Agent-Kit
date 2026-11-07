@@ -17,7 +17,7 @@ detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters
     5) OpenCode
     6) Continue
   note: selecting OMP / Oh My Pi or Claude Code also registers the kit's MCP bridge "zcode-harness" there (skip with --no-mcp).
-[1G[0J  Configure ZCode as a provider with its supported models in which assistants? (numbers, all, none) [21G1,4
+  Configure ZCode as a provider with its supported models in which assistants? (numbers, all, none) 1,4
 n
 == omp: OMP / Oh My Pi (answered y) ==
   wrote <HOME>/.omp/agent/extensions/zcode-proxy-autostart.ts

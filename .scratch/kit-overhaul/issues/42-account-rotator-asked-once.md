@@ -156,3 +156,55 @@ Both are RED on the existing `S3/short` expected-RED entry (tickets 16/37); the 
 **Acceptance criteria**
 - `account-setup` fixtures (seam 8): migration replayed twice, enabled → yes recorded silently, no TTY → no prompt and no hang (timeout-guarded), `--reask` prompts, overrides win. ✓ (`t42-green3`, `t42-full-kit`; mutants M1–M8). The transaction side, including rollback of the migration and of `accounts`, is proven through the CLI in the same fixtures. No `transaction-audit` change was needed.
 - Snapshots for the prompt in TTY variants: ✓. `tests/snapshots/setup/rotator-prompt/*` covers the 6 TTY variants, and the refreshed ux-before pty captures cover the 5 TTY variants end to end. The Windows snapshots are pending CI.
+
+### 2026-11-07 — implementer, round 2 (pre-merge CI run 42401136452 RED: the prompt snapshots)
+
+**Commits:** `503bc0a` (fix + tests + snapshots), `2b34269` (merge of the integration tip `ad0d572`, docs only), `b7e4891` (ux-before refresh). The head SHA is the commit that adds this comment.
+
+**Root cause.**
+- Node's readline `rl.prompt()` redraws the line with cursor control (`ESC[1G ESC[0J <prompt> ESC[<col>G`) unless the **process's** `process.env.TERM` is `"dumb"`. It ignores the env the kit passes in and the capability record.
+- This agent shell runs with `TERM=dumb`, so round 1 recorded the plain path. The CI runners do not set TERM=dumb and took the redraw path; all four `test-kit` legs failed on the 6 snapshots.
+- Reproduced locally: `t42-r2-red-term-{xterm-256color,unset}` (6/6 fail, byte-identical to the CI diff).
+- It is a C3 defect, not only a test problem. Every setup question (harness questions included, since they share `createPrompter`) carried cursor control under `NO_COLOR=1`: the 7 prompting captures of the committed BEFORE set have `ESC[1G ESC[0J` in their `no-color.ansi`.
+
+**How the bytes are decided now**
+- `lib/term/caps.mjs` gains `promptStyle(caps) → { redraw: caps.animate && caps.color }`. The record itself is unchanged.
+- `cli/harness-consent.mjs` `createPrompter({ …, platform, redraw })` takes the decision from the output stream's capability record on the first question. It is loaded lazily through `lib/term/load.mjs` `loadPromptStyle`, which loads only `caps.mjs`: the proxy manager imports this module, and its static graph stays free of presentation code (`term-boundaries` green).
+- The kit writes the question text itself on every terminal; `rl.prompt()` and its TERM check are gone.
+- **redraw** (colour TTY with motion): readline owns the line in raw mode as before. It echoes, edits and redraws the question on resize; Ctrl-C comes through the readline SIGINT event.
+- **plain** (TERM=dumb, NO_COLOR, colour off; CI and pipes never ask): readline only reads lines (`terminal: false`). The terminal's line discipline echoes and edits, no byte the kit writes carries an escape sequence, and Ctrl-C arrives as a process SIGINT. A listener is registered only while the prompter is open and takes the same ABORTED path.
+- `[y/N]`/Enter = n, the typed-ahead queue, the no-TTY and CI behaviour and `update`'s stdin rule are unchanged.
+
+**Tests** (`tests/account-setup.test.mjs`, `tests/term-caps.test.mjs`; RED `t42-r2-red1`: 16/16 fail on readline's cursor control under the unset process TERM)
+- Snapshots of the rotator step and of one per-harness question in the 6 TTY variants (`tests/snapshots/setup/{rotator,harness}-prompt/*`). Each is rendered under process TERM unset, `dumb` and `xterm-256color` and must be byte-identical. The colour variants keep round 1's bytes; `no-color`/`term-dumb` now contain no readline echo (the terminal echoes there).
+- No ESC byte in either question under `no-color` and `term-dumb`, also after a resize and an erased key, under all three process TERM values.
+- `promptStyle` rule: redraw on a colour TTY (TERM set or unset, conhost), never under NO_COLOR, TERM=dumb, CI, `--color=never` or a pipe (forced colour included).
+- The touched suites (account-setup, harness-consent, cli-commands, term-*, update, test-wiring) passed 279/279 under each process TERM value (`t42-r2-green3-{dumb,xterm-256color,unset}`). Under `TERM=dumb` the pty Ctrl-C tests (account-setup and harness-consent) run the plain path, where Ctrl-C is a SIGINT from the line discipline; under the other two values they run the redraw path.
+- Mutations (`t42-r2-mutants`, committed tree, each file restored from HEAD, `cli`/`lib` clean afterwards):
+  - R1, `rl.prompt()` again → 8 colour-variant snapshots fail;
+  - R2, redraw without colour → both NO_COLOR scans and the rule test fail;
+  - R3, always `terminal: true` → 4 plain snapshots and 4 scans fail;
+  - R4, plain mode without the SIGINT listener → both pty Ctrl-C tests fail.
+
+**Harness consent prompts:** they had the same exposure (the same `createPrompter`) and are fixed by the same change. There were no byte snapshots of them before; `harness-prompt/*` is new. The existing harness-consent tests match by substring and needed no change.
+
+**Pre-existing test change (justified):** `tests/account-setup.test.mjs` "terminal redraw keeps the y/n question visible before and during input" now waits for the question before its first assertion. The question is drawn after the capability record has loaded, one async step later. The test's assertions are unchanged.
+
+**ux-before:** 49 Linux files refreshed from `t42-r2-before1`, in the 7 prompting scenarios.
+- `tty-color-80`/`-120`/`ascii-locale`: `.ansi` only, with the redraw bytes gone from the question line.
+- `no-color`/`term-dumb`: the questions carry no escape sequence, and answers typed ahead appear once, where they were typed (the line discipline's echo at the top of the capture), instead of a second time after each question (readline's raw-mode echo).
+- `linux/INDEX.md` lists the refresh. The Windows baseline (pipe/ci only, no question) is unchanged.
+- Remaining ESC bytes in `no-color`/`term-dumb` captures are not prompts: SGR from `setup-output`/install.sh under TERM=dumb (A-13, the setup and installer batches 43/44), git's `ESC[K` in `update-checkout`, and the TUI (48).
+- `t42-r2-before-final`: 1/1.
+
+**Full suites** (merged head `2b34269` + `b7e4891`; Node 26.7.0, Bun 1.4.2)
+- `npm run test`, TERM unset (`t42-r2-full-kit`) and TERM=dumb (`t42-r2-full-kit-dumb`): each 776 tests, 757 pass, 0 fail, 19 skipped.
+- `npm run test:proxy`: 1343 pass, 0 fail.
+- `npm run test:proxy-typecheck`: exit 0.
+- `npm run test:mcp`: 96 tests, 95 pass, 0 fail, 1 skipped; `dist/` unchanged.
+- `npm run test:ux-before`: 1/1.
+
+**Pending CI (in addition to round 1's list)**
+1. All four `test-kit` legs: the 12 snapshots and 4 scans, now independent of the runner's TERM.
+2. windows-latest: the redraw path through readline on conhost and Windows Terminal (raw mode as before). The `wgl4` snapshot is rendered with forced streams, so it does not depend on the runner's console. Ctrl-C in the plain path on a Windows console (NO_COLOR set) arrives as SIGINT; there is no automated proof of it on Windows, so it stays an owner check.
+3. The ubuntu `ux-before` leg against the 49 refreshed files.
