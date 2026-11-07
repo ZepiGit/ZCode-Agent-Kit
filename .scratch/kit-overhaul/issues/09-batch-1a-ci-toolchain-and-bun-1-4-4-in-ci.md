@@ -2,7 +2,7 @@
 
 **Blocked by:** 02 (Windows sampler and the windows leg of the `memory-budget` job (Bun 1.4.2 reference run)), 03 (S3 OMP stub-host leg in the memory loop), 04 (Pre-existing findings: unwired tests, the test-wiring guard and CI Node coverage)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -256,3 +256,7 @@ Spec stories: 126, 140
     - M2: `workflowText` without `lf()`, on the CRLF clone. 8 tests fail, including every release.yml assertion and the new CRLF test (`t09-r4-mut2-crlf.log`); the 2 OMP tests in that run are the deps artefact above.
   - **Suites** (Bun 1.4.2): `npm run test` 644 pass, 0 fail, 16 skipped on Node 26.7.0 and Node 24.22.2 (+2 new tests); `npm run test:proxy` 1343 / 0; `npm run test:mcp` 95 / 0 / 1 skipped (`reports/t09-r4-suite-*.log`). No memory-code change, so no memory job rerun.
   - **Pending CI:** the windows `test-kit` legs (Node 24 and 26) green on the restaged branch.
+- Merged 2026-11-07 as 793fa0ddb7bdc97e350613e19399c1859470c86c (ticket/09-ci-toolchain 85e0f10 into tip 50e4d5a, no conflicts); fast suite (Bun 1.4.2): kit 644/660 (0 fail, 16 skipped), proxy 1343/1343, mcp 95/96 (0 fail, 1 skipped); `mcp/zcode-harness-mcp/dist/` unchanged after the build. Logs: `reports/merge-09-npm-ci.log`, `reports/merge-09-test.log`, `reports/merge-09-test-proxy.log`, `reports/merge-09-test-mcp.log`.
+  - Pre-merge CI gate: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42364104638 (draft PR #18, staging/09 9c8b880), green on all 8 jobs. Linux S1/burst1 n = 7, median 234.1 of [215.4, 235.1, 214.3, 234.1, 234.2, 234, 235.6]; windows (unstable) median 247.8 of [247.7, 253.6, 240.5, 250.7, 248.1, 247.4, 247.8]; Bun 1.4.2+744846f84 on every leg. The Bun 1.4.2 pin (instead of 1.4.4) follows Owner Proxy rounds 10 and 11.
+  - Sanity check: `git diff --stat staging/09 HEAD -- . ':!.scratch'` on the merge commit is empty (the merged tree matches the tree CI judged outside `.scratch`).
+  - Path: first merge of this ticket (never merged or reverted before), so no revert-of-revert step.
