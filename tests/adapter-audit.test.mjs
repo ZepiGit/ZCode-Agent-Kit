@@ -400,6 +400,62 @@ test('integrate adds Kilo Code per-model Reasoning and Image toggles to the valu
   assert.ok(!migrated.includes(f.key), 'the sheet never embeds the proxy key');
 });
 
+// --- Ticket 59: the false Kilo `/v1/models` auto-fetch note (seam 8) ---------
+// Kilo's Custom provider dialog gates both its debounced model fetch and the
+// "Fetch models" button on `canFetch`, which is false for `@ai-sdk/anthropic`
+// (Kilo-Org/kilocode@v7.8.27 CustomProviderDialog.tsx:232-233, 253, 708).
+const KILO_FALSE_NOTE = '- Models can also be auto-fetched from the /v1/models endpoint.\n';
+const KILO_TRUE_NOTE = '- Kilo does not fetch the model list for Anthropic Messages ("Fetch\n  models" stays disabled): enter both models above by hand.\n';
+
+// The Kilo sheet the tip wrote after ticket 51 (byte-exact with
+// `zcode-kit integrate kilo-code` on 74899d2), before ticket 59.
+function kiloSheetAfterMediumFix() {
+  return kiloSheetAfterHighFix().replace('\nNotes:\n', `
+Models — one row each, with the per-model toggles:
+
+| Model ID       | Name           | Reasoning | Image |
+|----------------|----------------|-----------|-------|
+| glm-5.3        | GLM-5.3        | on        | off   |
+| glm-5.3-flash  | GLM-5.3-Flash  | on        | on    |
+
+Notes:
+`);
+}
+
+test('integrate replaces the false Kilo /v1/models auto-fetch note in every earlier sheet, idempotently and reversibly', t => {
+  for (const [generation, before] of [['before ticket 50', kiloSheetBeforeFix()], ['after ticket 50', kiloSheetAfterHighFix()], ['after ticket 51', kiloSheetAfterMediumFix()]]) {
+    const f = existingInstall(t);
+    const sheet = path.join(f.state, 'generated', 'kilo-zcode-values.md');
+    assert.ok(before.includes(KILO_FALSE_NOTE), `fixture ${generation} carries the false note`);
+    const migrated = refreshCycle(f, 'kilo-code', sheet, before);
+    assert.doesNotMatch(migrated, /auto-fetch|\/v1\/models/, `no auto-fetch claim left (${generation})`);
+    assert.equal(migrated, kiloSheetAfterMediumFix().replace(KILO_FALSE_NOTE, KILO_TRUE_NOTE),
+      `the sheet is the current one with only the note replaced (${generation})`);
+  }
+});
+
+test('the next plain setup replaces the false Kilo auto-fetch note for a user with a stored decision, idempotently and reversibly', t => {
+  const f = existingInstall(t);
+  const sheet = path.join(f.state, 'generated', 'kilo-zcode-values.md');
+  const before = kiloSheetAfterMediumFix();
+  fs.writeFileSync(sheet, before);
+  // Plain setup refreshes detected harnesses only; the decision skips the prompt.
+  fs.mkdirSync(path.join(f.home, '.vscode', 'extensions', 'kilocode.kilo-code-7.8.27'), { recursive: true });
+  const choices = path.join(f.state, 'generated', 'harness-choices');
+  fs.mkdirSync(choices);
+  fs.writeFileSync(path.join(choices, 'kilo-code.json'), JSON.stringify({ schema: 1, harness: 'kilo-code', decision: 'configured', source: 'prompt', decidedAt: '2026-11-06T00:00:00.000Z' }, null, 2) + '\n');
+
+  const txId = f.txOf(f.kit('setup'));
+  assert.ok(txId, 'the refresh is recorded as a transaction');
+  const after = fs.readFileSync(sheet, 'utf8');
+  assert.ok(after.includes(KILO_TRUE_NOTE), 'the sheet says the models are entered by hand');
+  assert.doesNotMatch(after, /auto-fetch|\/v1\/models/);
+  f.kit('setup');
+  assert.equal(fs.readFileSync(sheet, 'utf8'), after, 'second setup is byte-idempotent');
+  f.kit('rollback', txId);
+  assert.equal(fs.readFileSync(sheet, 'utf8'), before, 'rollback restores the earlier sheet byte for byte');
+});
+
 function clineSheetBeforeFix() {
   return `# Cline × ZCode — prepared values (manual confirmation required)
 
