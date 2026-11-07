@@ -662,20 +662,21 @@ test("measurement mode is off by default: the ratchet step runs unless the marke
   assert.match(measure, /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/);
   assert.match(measure, /--measure-burst1 "\$\(cat tests\/memory\/measure-burst1\)"/);
   assert.match(step("Upload memory loop artefacts"), /measure-S1-burst1\.json[\s\S]*measure-S1-burst1\.md/);
-  // Round 10 Q1 condition 1: the extra Bun arms are installed only with the
-  // marker, uncached (setup-bun's post step would cache the binary then on
-  // ~/.bun/bin under the wrong version), and --bun is passed only when the
-  // marker names the arms.
-  for (const v of ["1.4.2", "1.4.3"]) {
+  // Round 10 Q1 condition 1 / Round 11 Q1 condition 4: the candidate Bun arms
+  // are installed only with the marker, uncached (setup-bun's post step would
+  // cache the binary then on ~/.bun/bin under the wrong version); the job's
+  // own Bun, the pinned 1.4.2 and the reference arm, comes last so it stays
+  // on PATH; --bun is built from the marker's own arm list.
+  for (const v of ["1.4.3", "1.4.4"]) {
     const arm = step(`Bun ${v} for the paired measurement`);
     assert.match(arm, /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/, v);
     assert.match(arm, new RegExp(`bun-version: ${v.replace(/\./g, "\\.")}\\n\\s+no-cache: true`), v);
     assert.match(step(`Keep Bun ${v} aside`), /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/, v);
   }
-  assert.match(step("Keep Bun 1.4.4 aside"), /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/);
-  const ownBun = job.indexOf("\n          bun-version: 1.4.4\n");
-  assert.ok(ownBun > 0 && job.indexOf("- name: Keep Bun 1.4.3 aside") < ownBun && ownBun < job.indexOf("- name: Keep Bun 1.4.4 aside"), "the job's own Bun is installed last, so it stays the one on PATH");
-  assert.match(measure, /grep -q 'bun=' tests\/memory\/measure-burst1[\s\S]*--bun "1\.4\.2=[^"]*,1\.4\.3=[^"]*,1\.4\.4=[^"]*"/);
+  assert.match(step("Keep Bun 1.4.2 aside"), /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/);
+  const ownBun = job.indexOf("\n          bun-version: 1.4.2\n");
+  assert.ok(ownBun > 0 && job.indexOf("- name: Keep Bun 1.4.4 aside") < ownBun && ownBun < job.indexOf("- name: Keep Bun 1.4.2 aside"), "the job's own Bun is installed last, so it stays the one on PATH");
+  assert.match(measure, /grep -q 'bun=' tests\/memory\/measure-burst1[\s\S]*for v in \$\(printf '%s' "\$\{SPEC#\*bun=\}" \| tr ',' ' '\); do BUNS="\$\{BUNS:\+\$BUNS,\}\$v=\$ARMS\/\$v\/bun\$EXE"; done[\s\S]*--bun "\$BUNS"/);
   // A measurement run turns the ratchet off; a committed marker must never reach the integration branch.
   assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-burst1"), false, "tests/memory/measure-burst1 is a one-run switch: delete it before the pre-merge run");
 });
@@ -754,7 +755,8 @@ test("measurement mode rejects a count that is not a whole number from 1 to 50 b
 // ── Paired Bun measurement (Round 10 Q1 conditions 1–2, ticket 09) ──
 // The marker names the arms ("N bun=1.4.2,1.4.3,1.4.4"); --bun gives their
 // binaries; the arms run interleaved in rotation, N valid runs each, and the
-// output carries condition 2's mechanical reading. The fake run reports the
+// output carries the re-entry reading (Round 11 Q1 condition 4) at the job's
+// n, with the first arm as the reference. The fake run reports the
 // proxy's runtime Bun from FAKE_RUN_BUN_REVISIONS (path → revision).
 function bunArms(home, versions) {
   const paths = {};
@@ -766,7 +768,7 @@ function bunArms(home, versions) {
   return paths;
 }
 
-function pairedJob({ spec, arms = ["1.4.2", "1.4.3", "1.4.4"], peaks, shape = "linux", revisions = (v) => `${v}+fake${v.replace(/\./g, "")}`, bunArg, extraArgs = [] }) {
+function pairedJob({ spec, arms = ["1.4.2", "1.4.3", "1.4.4"], peaks, shape = "linux", revisions = (v) => `${v}+fake${v.replace(/\./g, "")}`, bunArg, extraArgs = [], jobBunEnv = null }) {
   const home = mkdtempSync(join(tmpdir(), "memloop-paired-"));
   const paths = bunArms(home, arms);
   const stepSummary = join(home, "step-summary.md");
@@ -774,7 +776,7 @@ function pairedJob({ spec, arms = ["1.4.2", "1.4.3", "1.4.4"], peaks, shape = "l
   const map = Object.fromEntries(Object.entries(paths).map(([v, p]) => [p, revisions(v)]));
   const bun = bunArg === undefined ? Object.entries(paths).map(([v, p]) => `${v}=${p}`).join(",") : bunArg;
   const args = ["--os", shape === "win32" ? "windows" : "linux", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN, ...(spec === null ? [] : ["--measure-burst1", spec]), ...(bun === null ? [] : ["--bun", bun]), ...extraArgs];
-  const r = runJob(args, { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "burst1", FAKE_RUN_SHAPE: shape, FAKE_RUN_PEAKS: JSON.stringify(peaks), FAKE_RUN_BUN_REVISIONS: JSON.stringify(map), GITHUB_STEP_SUMMARY: stepSummary });
+  const r = runJob(args, { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "burst1", FAKE_RUN_SHAPE: shape, FAKE_RUN_PEAKS: JSON.stringify(peaks), FAKE_RUN_BUN_REVISIONS: JSON.stringify(map), GITHUB_STEP_SUMMARY: stepSummary, ZCODE_KIT_BUN: jobBunEnv ?? join(home, "no-job-bun") });
   const read = (p) => { try { return readFileSync(join(home, "job", p), "utf8"); } catch { return null; } };
   const files = (() => { try { return readdirSync(join(home, "job")); } catch { return []; } })();
   const measureText = read("measure-S1-burst1.json");
@@ -812,35 +814,49 @@ test("one-sided Fisher exact test on counts above the budget (arm more often abo
   assert.ok(fisherOneSided(3, 24, 1, 24) > 0.05, "3/24 vs 1/24 is no shown effect");
 });
 
-test("condition 2 reading: (a) invalid, (b) no Bun effect, (c) V = 1.4.3 or 1.4.2, applied in order", async () => {
-  const { condition2Reading } = await import("./lib/measure.mjs");
-  const arm = (bun, above, { valid = 24, requested = 24, overCeiling = [] } = {}) => ({ bun, valid, requested, aboveBudget: above, overCeiling });
-  const read = (a, b, c, opts = {}) => condition2Reading([arm("1.4.2", a, opts.a), arm("1.4.3", b, opts.b), arm("1.4.4", c, opts.c)]);
-  // Stable unlisted = P(median of 5 RED) ≤ 5 %: at most 4 of 24.
-  assert.equal(read(4, 0, 12).branch, "c");
-  assert.equal(read(5, 0, 12).branch, "a");
-  assert.match(read(5, 0, 12).why, /1\.4\.2 arm is not stable unlisted \(5 of 24/);
-  assert.equal(read(1, 0, 12, { b: { valid: 23 } }).branch, "a", "one invalid run anywhere");
-  assert.equal(read(1, 0, 12, { c: { overCeiling: [7] } }).branch, "a", "one run above 400 MB anywhere");
-  const b = read(1, 2, 3);
-  assert.equal(b.branch, "b");
-  assert.ok(b.fisher["1.4.4"] > 0.05);
-  const c143 = read(1, 2, 12);
-  assert.deepEqual([c143.branch, c143.v], ["c", "1.4.3"]);
-  assert.ok(c143.fisher["1.4.4"] <= 0.05 && c143.fisher["1.4.3"] > 0.05);
-  assert.deepEqual([read(1, 5, 12).branch, read(1, 5, 12).v], ["c", "1.4.2"], "1.4.3 not stable unlisted");
-  // At 24 per arm a stable 1.4.3 (≤ 4) is never significantly above a stable
-  // 1.4.2: the closest case, 4 against 0, is p = C(24,4)/C(48,4) ≈ 0.0546.
-  const edge = read(0, 4, 12);
-  assert.deepEqual([edge.branch, edge.v], ["c", "1.4.3"]);
-  assert.ok(Math.abs(edge.fisher["1.4.3"] - 10626 / 194580) < 1e-9);
-  // The rule is fixed for exactly the three arms; anything else gets no reading.
-  assert.equal(condition2Reading([arm("1.4.2", 1), arm("1.4.4", 12)]).branch, null);
-  // A count other than 24 per arm is read, but flagged as not the condition 1 run.
-  assert.match(read(0, 0, 0, { a: { valid: 3, requested: 3 }, b: { valid: 3, requested: 3 }, c: { valid: 3, requested: 3 } }).caution, /24 valid runs per arm/);
+test("stable unlisted follows the job's n: at most 3 / 4 / 5 / 6 of 24 for n = 3 / 5 / 7 / 9 (Round 11)", async () => {
+  const { stableMaxCount, stableUnlisted } = await import("./lib/measure.mjs");
+  assert.deepEqual([3, 5, 7, 9].map((n) => stableMaxCount(24, n)), [3, 4, 5, 6]);
+  const arm = (above) => ({ valid: 24, aboveBudget: above });
+  assert.deepEqual([stableUnlisted(arm(5), 5), stableUnlisted(arm(5), 7), stableUnlisted(arm(6), 7)], [false, true, false]);
+  assert.throws(() => stableUnlisted(arm(1)), /the job's n/, "no default n: the caller passes the job's");
 });
 
-test("paired measurement: arms interleaved in rotation, each run on its arm's Bun, per-arm counts and the condition 2 reading in the summary", () => {
+test("re-entry reading (Round 11 Q1 condition 4): (i) valid and within the ceiling, (ii) stable at the job's n, (iii) Fisher p > 0.05 on Linux; (iv) median ≤ 300 on Windows", async () => {
+  const { reentryReading } = await import("./lib/measure.mjs");
+  const arm = (bun, above, { valid = 24, requested = 24, overCeiling = [], medianMB = 240 } = {}) => ({ bun, valid, requested, aboveBudget: above, overCeiling, medianMB });
+  const linux = (ref, ...cands) => reentryReading([ref, ...cands], { os: "linux", n: 7, jobBun: "1.4.2+744846f84" });
+  const verdict = (r) => r.candidates.map((c) => [c.bun, c.pass, ...["i", "ii", "iii"].map((k) => c.checks[k].pass)]);
+  // The paired CI run 42352122623 (Linux): 1.4.2 5/24, 1.4.3 14/24, 1.4.4 13/24.
+  const ci = linux(arm("1.4.2", 5), arm("1.4.3", 14), arm("1.4.4", 13));
+  assert.equal(ci.reference, "1.4.2");
+  assert.deepEqual(verdict(ci), [["1.4.3", false, true, false, false], ["1.4.4", false, true, false, false]]);
+  assert.ok(Math.abs(ci.candidates[0].fisherP - 0.0086) < 5e-4 && Math.abs(ci.candidates[1].fisherP - 0.0178) < 5e-4);
+  assert.deepEqual(ci.notes, []);
+  // A candidate that passes all three on this leg.
+  assert.deepEqual(verdict(linux(arm("1.4.2", 1), arm("1.4.5", 3))), [["1.4.5", true, true, true, true]]);
+  // Stable at n = 7 (5 of 24) but significantly above a clean reference (5 vs 0: p = C(24,5)/C(48,5) ≈ 0.0248).
+  const sig = linux(arm("1.4.2", 0), arm("1.4.5", 5));
+  assert.deepEqual(verdict(sig), [["1.4.5", false, true, true, false]]);
+  assert.ok(Math.abs(sig.candidates[0].fisherP - 42504 / 1712304) < 1e-9);
+  // Not stable at n = 7 (6 of 24), although no worse than the reference.
+  assert.deepEqual(verdict(linux(arm("1.4.2", 5), arm("1.4.5", 6))), [["1.4.5", false, true, false, true]]);
+  // (i): one invalid run in the reference, or one run above the ceiling in the candidate.
+  assert.deepEqual(verdict(linux(arm("1.4.2", 1, { valid: 23 }), arm("1.4.5", 1))), [["1.4.5", false, false, true, true]]);
+  assert.deepEqual(verdict(linux(arm("1.4.2", 1), arm("1.4.5", 1, { overCeiling: [7] }))), [["1.4.5", false, false, true, true]]);
+  // n is the job's: the same 5 of 24 is not stable at n = 5.
+  assert.equal(reentryReading([arm("1.4.2", 1), arm("1.4.5", 5)], { os: "linux", n: 5, jobBun: "1.4.2+x" }).candidates[0].checks.ii.pass, false);
+  // Windows: (i) and (iv) only.
+  const win = reentryReading([arm("1.4.2", 12), arm("1.4.3", 17, { medianMB: 300 }), arm("1.4.4", 19, { medianMB: 300.1 })], { os: "windows", n: 7, jobBun: "1.4.2+x" });
+  assert.deepEqual(win.candidates.map((c) => [c.bun, Object.keys(c.checks).sort().join(), c.pass]), [["1.4.3", "i,iv", true], ["1.4.4", "i,iv", false]]);
+  // Cautions: not 24 per arm; the reference arm is not the job's own Bun.
+  const notes = reentryReading([arm("1.4.4", 0, { valid: 3, requested: 3 }), arm("1.4.2", 0, { valid: 3, requested: 3 })], { os: "linux", n: 7, jobBun: "1.4.2+744846f84" }).notes.join("\n");
+  assert.match(notes, /24 valid runs per arm/);
+  assert.match(notes, /reference arm 1\.4\.4 is not the job's own Bun \(1\.4\.2\+744846f84\)/);
+  assert.match(reentryReading([arm("1.4.2", 0), arm("1.4.5", 0)], { os: "linux", n: 7, jobBun: null }).notes.join(), /not the job's own Bun \(unknown\)/);
+});
+
+test("paired measurement: arms interleaved in rotation, each run on its arm's Bun, per-arm counts and the re-entry reading at the job's n in the summary", () => {
   // Rotation 1.4.2, 1.4.3, 1.4.4 ×4: 1.4.2 never above 250, 1.4.3 once, 1.4.4 three times.
   const hwm = [230, 240, 260, 231, 255, 270, 229, 241, 280, 232, 242, 245];
   const { r, measure, measureMd, stepSummary, paths } = pairedJob({ spec: "4 bun=1.4.2,1.4.3,1.4.4", peaks: hwm.map((h) => ({ rss: 200, hwm: h })) });
@@ -853,27 +869,45 @@ test("paired measurement: arms interleaved in rotation, each run on its arm's Bu
   assert.ok(measure.reps.every((x) => x.valid));
   assert.deepEqual(measure.arms.map((a) => [a.bun, a.requested, a.valid, a.aboveBudget, a.complete]), [["1.4.2", 4, 4, 0, true], ["1.4.3", 4, 4, 1, true], ["1.4.4", 4, 4, 3, true]]);
   assert.deepEqual(measure.arms.map((a) => [a.env?.bun?.hardwareConcurrency, a.env?.nproc, a.env?.cgroup?.type, a.env?.cgroup?.memoryMax, a.env?.capRequested, a.envVariants]), Array(3).fill([4, 4, "v2-only", "3221225472", "3G", 1]), "the runtime environment once per arm; free memory alone does not make a variant");
-  assert.ok(measure.reading && "branch" in measure.reading && typeof measure.reading.fisher["1.4.4"] === "number");
-  assert.match(measure.reading.caution, /24 valid runs per arm/);
+  // The reading uses the job's own n (budgets.mjs REPEATED) and the first arm as the reference.
+  assert.deepEqual([measure.n, measure.reading.reference, measure.reading.n, measure.reading.candidates.map((c) => c.bun)], [7, "1.4.2", 7, ["1.4.3", "1.4.4"]]);
+  assert.match(measure.reading.notes.join("\n"), /24 valid runs per arm/);
   for (const text of [measureMd, stepSummary]) {
     assert.match(text, /S1\/burst1 paired Bun measurement \(linux, 4 runs per arm, rotation 1\.4\.2 → 1\.4\.3 → 1\.4\.4\)/);
-    assert.match(text, /\| 1\.4\.4 \| 4 of 4 \| 3 \| (pass|FAIL) \|/);
+    // 1 of 4 is p = 0.25, above the 0.225 that n = 7 still allows.
+    assert.match(text, /stable unlisted \(P\(median of 7 RED\) ≤ 0\.05; ≤ 0 of 4\)/);
+    assert.match(text, /\| 1\.4\.4 \| 4 of 4 \| 3 \| FAIL \|/);
     assert.match(text, /Fisher one-sided p, 1\.4\.4 vs 1\.4\.2: \d/);
     assert.match(text, /Fisher one-sided p, 1\.4\.3 vs 1\.4\.2: \d/);
-    assert.match(text, /Condition 2 reading/);
+    assert.match(text, /Re-entry reading \(Round 11 Q1 condition 4, linux leg, mechanical; reference 1\.4\.2, n = 7\)/);
+    assert.match(text, /\| 1\.4\.4 \| pass: [^|]* \| FAIL: 3 of 4 above the budget[^|]* \| [^|]* \| \*\*fails\*\* \|/);
     assert.match(text, /\| 3 \| 1\.4\.4 \| 1\.4\.4\+fake144 \| RED \| 260 \|/);
   }
 });
 
-test("paired measurement on Windows: no condition 2 reading (information only), the condition 5 flags per arm", () => {
+test("paired measurement: the job's own Bun is the reference check; a marker that lists another Bun first is flagged", linuxOnly, () => {
+  const home = mkdtempSync(join(tmpdir(), "memloop-jobbun-"));
+  try {
+    const own = join(home, "bun");
+    writeFileSync(own, "#!/bin/sh\nprintf '1.4.2+744846f84\\n'\n", { mode: 0o755 });
+    const peaks = Array.from({ length: 2 }, () => ({ rss: 200, hwm: 230 }));
+    const ok = pairedJob({ spec: "1 bun=1.4.2,1.4.4", arms: ["1.4.2", "1.4.4"], peaks, jobBunEnv: own });
+    assert.equal(ok.measure.jobBun, "1.4.2+744846f84");
+    assert.equal(ok.measure.reading.notes.some((n) => /not the job's own Bun/.test(n)), false);
+    const flipped = pairedJob({ spec: "1 bun=1.4.4,1.4.2", arms: ["1.4.2", "1.4.4"], peaks, jobBunEnv: own });
+    assert.match(flipped.measure.reading.notes.join(), /reference arm 1\.4\.4 is not the job's own Bun \(1\.4\.2\+744846f84\): list the pinned Bun first/);
+    assert.match(flipped.measureMd, /Caution: the reference arm 1\.4\.4 is not the job's own Bun/);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("paired measurement on Windows: the re-entry reading checks (i) and (iv) only", () => {
   // Rotation ×2: 1.4.4's median 305 is above 300; 1.4.3 has one run above 400.
   const ws = [250, 260, 300, 252, 410, 310].map((w) => ({ ws: w, wsPeak: w, commit: 420 }));
   const { r, measure, measureMd } = pairedJob({ spec: "2 bun=1.4.2,1.4.3,1.4.4", peaks: ws, shape: "win32" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(measure.reading, null);
-  assert.deepEqual(measure.condition5.map((c) => [c.bun, c.medianMB, c.medianAbove300, c.overCeiling]), [["1.4.2", 251, false, []], ["1.4.3", 335, true, [5]], ["1.4.4", 305, true, []]]);
-  assert.match(measureMd, /Condition 5 \(Windows, information only\)/);
-  assert.match(measureMd, /1\.4\.3 median 335 MB \(ABOVE 300: a question if this is V\), run\(s\) above 400 MB: #5 \(a question\)/);
+  assert.deepEqual(measure.reading.candidates.map((c) => [c.bun, c.checks.i.pass, c.checks.iv.pass, "ii" in c.checks, c.pass]), [["1.4.3", false, false, false, false], ["1.4.4", true, false, false, false]]);
+  assert.match(measureMd, /Re-entry reading \(Round 11 Q1 condition 4, windows leg/);
+  assert.match(measureMd, /\| 1\.4\.3 \| FAIL: 1\.4\.3: 0 invalid, over the ceiling #5 \| FAIL: median 335 MB \(≤ 300\) \| \*\*fails\*\* \|/);
   assert.match(measureMd, /\| 1\.4\.2 \| 2 of 2 \| 1 \| FAIL \| none \| 250 \/ 251 \/ 252 \| 420 \/ 420 \|/);
 });
 
@@ -883,7 +917,7 @@ test("paired measurement: a run whose proxy ran another Bun than its arm, or rep
   assert.equal(wrong.r.status, 2, wrong.r.stdout + wrong.r.stderr);
   assert.deepEqual(wrong.measure.reps.map((x) => x.valid), [true, false, true, true, false, true]);
   assert.match(wrong.measure.reps[1].problems.join(), /proxy ran Bun 1\.4\.4\+38afee6c8, not the 1\.4\.3 arm/);
-  assert.equal(wrong.measure.reading.branch, "a");
+  assert.deepEqual(wrong.measure.reading.candidates.map((c) => [c.bun, c.checks.i.pass]), [["1.4.3", false], ["1.4.4", true]], "re-entry check (i): an invalid run fails its arm");
   const none = pairedJob({ spec: "1 bun=1.4.2,1.4.4", arms: ["1.4.2", "1.4.4"], peaks, revisions: () => "" });
   assert.equal(none.r.status, 2);
   assert.ok(none.measure.reps.every((x) => !x.valid && /no runtime Bun version recorded for the proxy/.test(x.problems.join())));

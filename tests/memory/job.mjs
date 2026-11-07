@@ -6,17 +6,19 @@
 //   node tests/memory/job.mjs [--os linux|windows] [--out DIR] [--cap auto|systemd|prlimit|jobobject|none] [--only KEY,KEY]
 //                             [--run-script PATH]   (tests only: a stand-in for run.mjs)
 //   node tests/memory/job.mjs --measure-burst1 N [--os …] [--out DIR] [--cap …]
-//   node tests/memory/job.mjs --measure-burst1 "N bun=1.4.2,1.4.3,1.4.4" --bun 1.4.2=PATH,1.4.3=PATH,1.4.4=PATH [--os …] [--out DIR] [--cap …]
+//   node tests/memory/job.mjs --measure-burst1 "N bun=<pinned>,<candidate>[,…]" --bun <pinned>=PATH,<candidate>=PATH[,…] [--os …] [--out DIR] [--cap …]
 //
-// The paired form (Round 10 Q1 condition 1) runs N fresh S1/burst1 runs per
-// arm, the arms interleaved in rotation (1.4.2, 1.4.3, 1.4.4, 1.4.2, …), each
-// run with ZCODE_KIT_BUN = its arm's binary. --bun exists only here and must
-// name exactly the marker's arms. Every measurement run records the Bun its
-// proxy actually executed and the runtime environment inside its cap scope
-// (lib/runtime-probe.mjs); in the paired form a run whose proxy ran another
-// Bun is invalid. The output carries per arm the count above 250 MB, the
-// stable-unlisted check, the over-400 runs, the one-sided Fisher p against
-// the first arm and, on Linux, condition 2's mechanical reading.
+// The paired form (Round 10 Q1 condition 1; ticket 62's re-entry tool) runs
+// N fresh S1/burst1 runs per arm, the arms interleaved in rotation (A, B, C,
+// A, …), each run with ZCODE_KIT_BUN = its arm's binary. The first arm is the
+// reference, the pinned Bun (1.4.2 since Round 11); the later arms are
+// candidates. --bun exists only here and must name exactly the marker's
+// arms. Every measurement run records the Bun its proxy actually executed and
+// the runtime environment inside its cap scope (lib/runtime-probe.mjs); in
+// the paired form a run whose proxy ran another Bun is invalid. The output
+// carries per arm the count above 250 MB, the stable-unlisted check at the
+// job's n, the over-400 runs, the one-sided Fisher p against the reference
+// and the per-leg re-entry reading of Round 11 Q1 condition 4.
 //
 // --measure-burst1 N (off unless given; CI switches it on only while the
 // marker file tests/memory/measure-burst1 exists, see ci.yml): instead of the
@@ -49,13 +51,13 @@
 // 1 when it does not, 2 when the job itself cannot run.
 // --only runs a subset (local use): runs left out are reported, not failed.
 // Runs RED only on commit (Windows) are listed for the owner (build-time gate 3).
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JOB, osLeg, parseRunKey } from "./lib/catalogue.mjs";
 import { checkRatchet, issueIdsIn, readExpectedRed } from "./lib/ratchet.mjs";
-import { assertSafeRun } from "./lib/isolated-kit.mjs";
+import { assertSafeRun, bunPath } from "./lib/isolated-kit.mjs";
 import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
 import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
@@ -97,6 +99,14 @@ function parseArgs(argv) {
     for (const v of arms) if (!existsSync(out.bun[v])) throw new Error(`--bun ${v}=${out.bun[v]}: no such file`);
   }
   return out;
+}
+
+/** The job's own Bun (ZCODE_KIT_BUN or PATH) as `x.y.z+commit`, or null: the paired mode's reference check. */
+function jobBunRevision() {
+  try {
+    const r = spawnSync(bunPath(), ["--revision"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+    return r.status === 0 ? r.stdout.trim() || null : null;
+  } catch { return null; }
 }
 
 function runOne({ argv, timeoutMs }, logPath, env = process.env) {
@@ -235,7 +245,7 @@ async function main() {
       reps.push(obs);
     }
     const report = arms
-      ? { ...pairedReport(reps, { key, os: args.os, arms, perArm: args.measure.count, rule }), cap: capChoice.cap, node: process.version }
+      ? { ...pairedReport(reps, { key, os: args.os, arms, perArm: args.measure.count, rule, jobBun: jobBunRevision() }), cap: capChoice.cap, node: process.version }
       : { ...measureReport(reps, { key, os: args.os, requested: args.measure.count, rule }), cap: capChoice.cap, node: process.version };
     writeFileSync(join(args.out, "measure-S1-burst1.json"), JSON.stringify(report, null, 2));
     const md = arms ? pairedMarkdown(report) : measureMarkdown(report);
