@@ -40,7 +40,7 @@ import { causeLinesOf, ompLegChecks } from "../lib/omp-leg.mjs";
 import { PREFLIGHT_WARNINGS } from "../../../cli/heal.mjs";
 import { osLeg } from "../lib/catalogue.mjs";
 import { resumeProcess, suspendProcess } from "../lib/win-process.mjs";
-import { whileFrozen } from "../lib/freeze.mjs";
+import { isAlive, whileFrozen } from "../lib/freeze.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The promise's value, or `fallback` after `ms` (the timer never outlives the race). */
@@ -84,10 +84,46 @@ export function hungTarget({ startCode, record, proxies, port, portsOf }) {
   return { pid: null, reason: `${recorded}, ${serving.length} proxies of this run serve port ${port}` };
 }
 
-export function makeHungRound({ kit, proxies, portsOf, round, note, freeze, thaw, alive, graceMs = 65_000 }) {
-  return async (name) => {
+// The stale-lock round's start refused (CI runs 42395651721 ubuntu, 42398295810
+// and 42398299724 windows). The kill-holder adversary kills the lock holder at
+// whatever point it first sees it. When that is before the holder's proxy is
+// up (before the spawn, or on Windows inside it: a proxy process that never
+// runs), no healthy proxy exists and the next `manager start` refuses the dead
+// holder's lock (exit 1: "stale or unreadable manager start lock … refusing
+// automatic takeover"). That refusal is the kit defect ticket 16 owns (takeover
+// on proof), measured, not a round that did not run. It counts as the round's
+// outcome only on observable state: a lock file whose holder pid is not alive,
+// a start that failed naming that lock file, and no proxy of this run serving
+// the port. Anything else stays a skipped round (a holder still alive is the
+// scenario's own race, and is never charged to the kit).
+export function refusedOverStaleLock({ start, lock, proxies, port, portsOf }) {
+  if (start.code === 0 || !lock || !Number.isInteger(lock.holderPid) || lock.holderAlive !== false) return null;
+  const stderr = `${start.err ?? ""}${start.out ?? ""}`.trim();
+  if (!stderr.includes(lock.path)) return null;
+  const serving = proxies.filter((p) => portsOf(p.pid).includes(port)).length;
+  if (serving !== 0) return null;
+  return { startCode: start.code, stderr: stderr.split("\n").slice(-3).join("\n").slice(0, 600), lock: { path: lock.path, holderPid: lock.holderPid, holderAlive: false }, proxiesOfRun: proxies.length, serving };
+}
+
+/** The S3 check a refused start in the stale-lock round turns RED (owned with S3/hung by ticket 16). */
+export function refusedStartCheck(rounds) {
+  const refused = rounds.filter((r) => r.startRefused);
+  return {
+    name: "start-over-stale-lock", red: refused.length > 0, value: refused.length, budget: 0, unit: "refused starts",
+    detail: refused.map((r) => `${r.name}: manager start exited ${r.startRefused.startCode}: ${r.startRefused.stderr.split("\n")[0]}`),
+  };
+}
+
+export function makeHungRound({ kit, proxies, portsOf, round, note, freeze, thaw, alive, lockState = () => null, graceMs = 65_000 }) {
+  return async (name, { staleLock = false } = {}) => {
     const start = await kit.manager(["start"]);
-    if (start.code !== 0) return note(`${name}.skipped`, { startCode: start.code, reason: `manager start exited ${start.code}` });
+    if (start.code !== 0) {
+      const refused = staleLock ? refusedOverStaleLock({ start, lock: lockState(), proxies: proxies(), port: kit.port, portsOf }) : null;
+      if (!refused) return note(`${name}.skipped`, { startCode: start.code, reason: `manager start exited ${start.code}`, stderr: `${start.err ?? ""}${start.out ?? ""}`.trim().split("\n").slice(-2).join("\n").slice(0, 400) });
+      note(`${name}.startRefused`, refused);
+      // Nothing to freeze: the round's launches race the state the killed start left.
+      return round(name, 10, { kind: "mixed", startRefused: refused });
+    }
     await sleep(graceMs); // past the manager's 60 s startup grace (Windows also sees a new process only at its next poll)
     const target = hungTarget({ startCode: start.code, record: kit.pidRecord(), proxies: proxies(), port: kit.port, portsOf });
     if (target.pid === null) return note(`${name}.skipped`, { startCode: start.code, reason: target.reason });
@@ -128,7 +164,7 @@ export async function run(ctx) {
     return { label, code: r.code, tail: (r.out + r.err).trim().split("\n").slice(-2), proxiesLeft: left.length };
   }
 
-  async function round(name, n, { kind = "mixed", adversary = null } = {}) {
+  async function round(name, n, { kind = "mixed", adversary = null, startRefused = null } = {}) {
     const before = proxies().length;
     const seen = new Set();
     let maxSimultaneous = 0, maxListeners = 0;
@@ -167,6 +203,7 @@ export async function run(ctx) {
       launchMs: results.map((r) => r.ms).sort((a, b) => a - b),
       staleLockLeft: existsSync(lockFile) ? readFileSync(lockFile, "utf8").slice(0, 120) : null,
       adversary: advResult,
+      startRefused,
     };
     ctx.log(`${name}: max simultaneous proxies ${maxSimultaneous}, distinct ${seen.size}, failed launches ${result.failedLaunches.length}/${n}, stale lock ${result.staleLockLeft ? "YES" : "no"}`);
     result.stop = await stopAll(name);
@@ -174,11 +211,19 @@ export async function run(ctx) {
     return result;
   }
 
-  const hungRound = makeHungRound({ kit, proxies, portsOf, round, note: ctx.note, freeze, thaw });
+  // The start lock as the next start meets it: its holder, and whether that holder is alive.
+  const lockState = () => {
+    if (!existsSync(lockFile)) return null;
+    let holderPid = null;
+    try { const pid = JSON.parse(readFileSync(lockFile, "utf8")).pid; if (Number.isInteger(pid)) holderPid = pid; } catch {}
+    return { path: lockFile, holderPid, holderAlive: holderPid === null ? null : isAlive(holderPid) };
+  };
+  const hungRound = makeHungRound({ kit, proxies, portsOf, round, note: ctx.note, freeze, thaw, lockState });
   const killHolder = async () => {
     await round("kill-holder-10", 10, {
       kind: "preflight",
       adversary: async () => {
+        const t0 = Date.now();
         let notOurs = null;
         for (let i = 0; i < 200; i++) {
           try {
@@ -186,9 +231,12 @@ export async function run(ctx) {
             if (Number.isInteger(holder.pid)) {
               // Only processes of this run carry the marker: never signal anything else.
               // (Windows sees a new process with the next poll, so keep looking until then.)
-              if (scan(ctx.marker).some((p) => p.pid === holder.pid)) {
+              const procs = scan(ctx.marker);
+              if (procs.some((p) => p.pid === holder.pid)) {
                 process.kill(holder.pid, "SIGKILL");
-                return { killed: holder.pid };
+                // Where in its start the holder died decides what it leaves (ticket 65). Recorded
+                // after the kill, from the scan that found it, so the kill's timing is unchanged.
+                return { killed: holder.pid, afterMs: Date.now() - t0, proxiesAtKill: procs.filter((p) => p.role === "proxy").length, pidRecordAfterKill: kit.pidRecord() };
               }
               notOurs = holder.pid;
             }
@@ -309,7 +357,7 @@ export async function run(ctx) {
   if (ctx.variant === "hung") {
     // A hung proxy while a stale lock is present (the chain a killed start leaves) …
     await killHolder();
-    await hungRound("hung-10-with-stale-lock");
+    await hungRound("hung-10-with-stale-lock", { staleLock: true });
     await clearStaleLock("hung-stale");
     // … and a clean hung-own recovery raced by 10 launches.
     await hungRound("hung-10");
@@ -355,6 +403,7 @@ export async function run(ctx) {
         // A hung-own recovery legitimately replaces the proxy once.
         { name: "proxy-generations/round", red: rounds.some((r) => r.distinctProxyProcesses > (r.name.startsWith("hung") ? 2 : 1)), value: worst("distinctProxyProcesses"), budget: 1, unit: "procs" },
         { name: "failed-launches", red: failed > PROCESSES.failedLaunches, value: failed, budget: PROCESSES.failedLaunches, unit: "launches" },
+        refusedStartCheck(rounds),
         { name: "stale-lock-after-round", red: rounds.filter((r) => r.staleLockLeft).length > PROCESSES.staleLocks, value: rounds.filter((r) => r.staleLockLeft).length, budget: PROCESSES.staleLocks, unit: "rounds" },
       ],
     },
