@@ -14,7 +14,7 @@
     "build:darwin-arm64": "bun build --compile --target bun-darwin-arm64 --define \"require.resolve=undefined\" src/index.ts src/proxy/captcha-solver-worker.ts --outfile zcode-proxy-darwin-arm64"
   },
   "dependencies": {
-    "happy-dom": "^20.11.6",
+    "happy-dom": "^21.0.4",
     "undici": "^8.10.0",
     "yaml": "^2.5.0"
   },
