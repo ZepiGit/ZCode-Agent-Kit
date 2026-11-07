@@ -1,0 +1,18 @@
+# Owner Proxy round 13 — windows S5/short went RED after Round 7 Q3 removed its entry
+
+Answers file: `/home/AgentKit/overhaul-tools/rounds/round-13-answers.md` (write nothing inside the integration worktree).
+
+## Q1 — windows S5/short: the growth value is over budget in every run, the verdict flips on the trend flag
+
+**Facts**
+- Round 7 Q3 removed the windows `S5/short` entry (it was GREEN then). Round 6 Q2 condition 3: a later windows run that disagrees with the calibrated list comes back as a question with its numbers; nobody edits the list a second time.
+- Pre-merge run 42404639968 (staging/65, PR #25): every job green except windows memory-budget: `S5/short: RED but not listed in expected-red.json (windows)`. Detail: `RED growth:mcp-bridge 23.71 %/1k (budget 5) trend=true [commit 23.71 / WS 25.03, gate commit]`; procPeak:mcp-bridge 75.4 MB WS (budget 150) ok; orphans 0; reboot-cost-of-history 3 MB ok; task failures 0. Bridge RSS: empty 78 MB, after 400 tasks 79 MB, reboot with history 81 MB.
+- **Windows S5/short growth:mcp-bridge across the last 17 windows memory-budget runs (commit %/1k, WS %/1k, verdict):** 23.71/25.03 RED (42404639968); 15.55/26.39, 20.72/28.83, 22.92/15.34, 17.16/30.12, 15.2/27.66, 17.21/16.85, 21.21/22.82, 18.28/18.76, 20.07/25.37, 16.01/41.39, 21.81/15.47, 16.16/17.47, 14.27/29.71, 18.22/33.25, 15.5/27.05, 19.17/19.69 all "ok". So the value exceeds the 5 %/1k budget in **17 of 17** runs; the check is RED only when the trailing-rise trend flag is also set (`growth()` in tests/memory/lib/verdict.mjs: RED = over budget AND still rising across the last 3 windows). Observed RED rate 1/17.
+- **Linux S5/short** is listed `S5/short → 30` (RED on growth:mcp-bridge), owned by ticket 30 (MCP task retention, 500 / 7 days), which is blocked by 13 (MCP dependencies), which is next on the critical path after 12.
+- Round 9 condition 3 forbids extending the `unstable` state to any other key. A plain listing `S5/short → 30` on windows would fail the ratchet as "GREEN but listed" in ~16 of 17 runs.
+- Consequence today: every pre-merge run has a ~6 % chance of a windows RED on S5/short unrelated to the ticket; under the no-rerun-until-green rule that blocks merges. Tickets 12, 32, 42 and 65 are queued behind green runs.
+
+**Orchestrator recommendation**
+Treat it as the same defect as Linux S5/short, owned by ticket 30, and list windows `S5/short → 30` with the Round 9 `unstable` state, explicitly overriding Round 9 condition 3 for this one key with a bound that keeps the real signal: the windows entry accepts GREEN or RED only while `growth:mcp-bridge` stays ≤ 30 %/1k (commit) and every other S5 check (procPeak, orphans, reboot cost, task failures) stays GREEN; > 30 %/1k or any other RED fails the ratchet. The highest of 17 values is 23.71; 30 leaves room for noise without hiding a step change. Ticket 30's criteria gain "delete `S5/short (windows)` with every one of ≥ 10 windows runs GREEN on growth:mcp-bridge", and ticket 55's no-unstable-entries criterion already forces the exit. The calibration change lands as its own commit on ticket 65's branch (or a separate small ticket, as you prefer), so the four queued tickets can be judged on runs where this key cannot flip them.
+
+Alternatives considered: (a) change the growth verdict to ignore the trend flag on windows (a measurement-rule change that would make it RED in 17/17 and require a plain listing; equivalent signal, but it amends the growth rule for every scenario that uses it); (b) wait for ticket 30 (blocks the critical path at ~6 % per run for many hours, and the merges in between would need reruns that the rules forbid); (c) plain listing (fails ~16/17).

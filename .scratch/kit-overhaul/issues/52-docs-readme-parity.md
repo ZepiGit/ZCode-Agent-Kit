@@ -33,3 +33,5 @@ Spec stories: 136
 ## Comments
 
 - 2026-11-07 (orchestrator, from ticket 10): the READMEs (en, de, es, ja, zh-CN) and SUPPORT_MATRIX.json still name Node 20; the support floor is Node 24 (engines >=24 in all three manifests, ticket 10) and Bun 1.4.2 (Round 11).
+
+- 2026-11-07 (orchestrator, from ticket 42): README x5 and docs/ACCOUNT_ROTATOR.md still quote `[y/n]` and the old ask-every-time behaviour; the rotator prompt is now `[y/N]` (Enter = no), asked once, stored in generated/account-rotator.json, re-asked by `setup --reask`.

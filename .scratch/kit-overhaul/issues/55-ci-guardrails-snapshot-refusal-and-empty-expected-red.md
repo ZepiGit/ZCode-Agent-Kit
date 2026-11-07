@@ -35,3 +35,5 @@ Spec stories: 141, 142
 ## Comments
 
 - 2026-11-07 (orchestrator, Owner Proxy round 9 Q1 condition 5 and Shared understanding): new edges 55 <- 20 (owner of the windows `S1/burst1` unstable entry) and 55 <- 61 (owner of the windows `S1/stalled` entry); new criterion: no `unstable` entry and no allow-list remain. If 61 is never accepted out of needs-triage, the 55 <- 61 edge comes back to the Owner Proxy as a question.
+
+- 2026-11-07 (orchestrator, Owner Proxy round 13 C5): the unstable allow-list now has two keys (windows S1/burst1 owned by 20, windows S5/short owned by 30); this ticket's criterion covers both.

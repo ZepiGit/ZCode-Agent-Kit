@@ -24,6 +24,7 @@
     "S3/hung": "16",
     "S3/omp": "35",
     "S4/short": "17",
+    "S5/short": { "ticket": "30", "state": "unstable" },
     "S7/short": "34"
   }
 }
