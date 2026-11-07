@@ -65,6 +65,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 59 | [Proxy-side effort normalisation and the Kilo `/v1/models` sheet line](59-proxy-effort-normalisation-and-kilo-models-line.md) | sol | medium | — | needs-triage |
 | 60 | [S1/burst1 judged on the median of n fresh runs, every run ≤ 400 MB](60-s1-burst1-median-rule.md) | sol | medium | 01, 02 | ready-for-agent |
 | 61 | [S1/stalled on Windows: proxy memory under many stalled streaming readers](61-s1-stalled-windows-response-side-memory.md) | sol | medium | 02 | needs-triage |
+| 62 | [Bun ≥ 1.4.3 raises the S1/burst1 proxy peak on the CI runners (re-entry gate for a newer Bun)](62-bun-1-4-3-plus-s1-burst1-peak.md) | sol | medium | 20 | needs-triage |
 
 ## Initial frontier
 
