@@ -502,3 +502,91 @@ test('generated OMP extension recovers after disk module repair without restarti
   assert.equal(result.code, 0, result.stderr);
   assert.equal(result.stdout, '', 'print-mode stdout remains reserved for model output');
 });
+
+// ADR-0006 condition 2 (spec story 125, seam 8): the preflight reports when
+// the OMP autostart's pinned absolute Node path is below the support floor or
+// missing, so a Node upgrade through a version manager cannot silently break
+// or age the autostart. A fake old Node is a wrapper that answers --version
+// with an old version and runs the real Node with a version-faking preload.
+function fakeNode(dir, version) {
+  const preload = join(dir, `fake-node-${version}.mjs`);
+  writeFileSync(preload, `Object.defineProperty(process, 'version', { value: ${JSON.stringify(version)} });\n` +
+    `Object.defineProperty(process.versions, 'node', { value: ${JSON.stringify(version.slice(1))} });\n`);
+  const bin = join(dir, `node-${version}`);
+  writeFileSync(bin, `#!/bin/sh\nif [ "\${1:-}" = --version ]; then printf '%s\\n' ${version}; exit 0; fi\n` +
+    `exec ${JSON.stringify(process.execPath)} --import ${JSON.stringify(pathToFileURL(preload).href)} "$@"\n`, { mode: 0o755 });
+  return bin;
+}
+function pinRuntime(extension, runtime) {
+  writeFileSync(extension, readFileSync(extension, 'utf8').replace(/^const RUNTIME = .*;$/m, () => `const RUNTIME = ${JSON.stringify(runtime.replace(/\\/g, '/'))};`));
+}
+function preflightKit(t) {
+  const ctx = fixture(t);
+  cpSync(join(ROOT, 'cli'), join(ctx.root, 'cli'), { recursive: true });
+  cpSync(join(ROOT, 'lib'), join(ctx.root, 'lib'), { recursive: true });
+  cpSync(join(ROOT, 'proxy', 'zcode-proxy-manager.mjs'), join(ctx.root, 'proxy', 'zcode-proxy-manager.mjs'));
+  return ctx;
+}
+
+test('generated OMP autostart running a pinned Node below the floor warns with the next command', { skip: process.platform === 'win32' && 'a fake old Node is a POSIX wrapper script' }, async t => {
+  const ctx = preflightKit(t); await mock(t, ctx);
+  const { PREFLIGHT_WARNINGS } = await api();
+  for (const version of ['v20.19.0', 'v22.23.4']) {
+    const stderr = await runExtension(ctx, { runtime: fakeNode(ctx.root, version) });
+    assert.equal(stderr, `[zcode-autostart] runtime-floor: ${PREFLIGHT_WARNINGS['runtime-floor']}\n`);
+    assert.match(stderr, /Node\.js 24/);
+    assert.match(stderr, /zcode-kit setup/);
+  }
+});
+
+test('generated OMP autostart on a pinned Node 24 or 26 stays silent', { skip: process.platform === 'win32' && 'a fake Node is a POSIX wrapper script' }, async t => {
+  const ctx = preflightKit(t); await mock(t, ctx);
+  for (const version of ['v24.0.0', 'v26.13.0']) assert.equal(await runExtension(ctx, { runtime: fakeNode(ctx.root, version) }), '');
+});
+
+test('preflight reports a pinned autostart Node below the floor or missing as a WARN with the next command, and logs one event line', async t => {
+  const ctx = preflightKit(t); await mock(t, ctx);
+  const extension = generateExtension(ctx);
+  const env = { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home };
+  const cases = [['missing', join(ctx.root, 'removed-by-a-version-manager', process.platform === 'win32' ? 'node.exe' : 'node'), 'runtime-missing', 'the pinned Node.js path no longer exists']];
+  if (process.platform !== 'win32') cases.push(['v22', fakeNode(ctx.root, 'v22.23.4'), 'runtime-floor', 'the pinned Node.js v22.23.4 is below the support floor (Node.js 24)']);
+  for (const [label, runtime, cause, detail] of cases) {
+    pinRuntime(extension, runtime);
+    rmSync(join(ctx.root, 'logs', 'heal.log'), { force: true });
+    const result = await runNode(join(ctx.root, 'cli', 'heal.mjs'), [], env);
+    assert.equal(result.code, 0, `${label}: the warning does not fail the preflight\n${result.stderr}`);
+    // The off-TTY check grammar (design-language §4.3): WARN row, then next.
+    const lines = result.stderr.split('\n');
+    const at = lines.indexOf(`WARN  OMP autostart runtime \u2014 ${detail}`);
+    assert.ok(at >= 0, `${label}:\n${result.stderr}`);
+    assert.equal(lines[at + 1], '  next: zcode-kit setup, then restart OMP');
+    const log = readFileSync(join(ctx.root, 'logs', 'heal.log'), 'utf8').trim().split('\n');
+    const events = log.filter(line => / WARN preflight /.test(line));
+    assert.equal(events.length, 1, log.join('\n'));
+    assert.match(events[0], new RegExp(`^\\d{4}-\\d\\d-\\d\\dT[^ ]+Z WARN preflight OMP autostart runtime check cause=${cause} action=runtime-check result=warning$`));
+    assert.ok(!events[0].includes(ctx.root) && !events[0].includes(ctx.home), 'no path becomes a log field');
+    const diagnostic = await runNode(join(ctx.root, 'cli', 'heal.mjs'), ['--diagnostic-code'], env);
+    assert.match(diagnostic.stderr, new RegExp(`^\\[zcode-preflight\\] cause=${cause}$`, 'm'));
+  }
+});
+
+test('preflight stays silent for a supported pinned runtime, a pinned Bun, another kit copy and no autostart', async t => {
+  const ctx = preflightKit(t); await mock(t, ctx);
+  const env = { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home };
+  const quiet = async (label) => {
+    rmSync(join(ctx.root, 'logs', 'heal.log'), { force: true });
+    const result = await runNode(join(ctx.root, 'cli', 'heal.mjs'), [], env);
+    assert.equal(result.code, 0, `${label}\n${result.stderr}`);
+    assert.doesNotMatch(result.stderr, /WARN|autostart runtime/, label);
+    assert.doesNotMatch(readFileSync(join(ctx.root, 'logs', 'heal.log'), 'utf8'), /runtime/, label);
+  };
+  await quiet('no OMP autostart installed');
+  const extension = generateExtension(ctx);
+  await quiet('pinned to the Node that ran setup (>= 24)');
+  if (process.platform !== 'win32') for (const version of ['v24.0.0', 'v26.13.0']) { pinRuntime(extension, fakeNode(ctx.root, version)); await quiet(`pinned ${version}`); }
+  pinRuntime(extension, resolveBun(ROOT));
+  await quiet('pinned Bun (the floor is a Node floor)');
+  pinRuntime(extension, join(ctx.root, 'missing', 'node'));
+  writeFileSync(extension, readFileSync(extension, 'utf8').replace(/^const ROOT = .*;$/m, () => `const ROOT = ${JSON.stringify(join(ctx.root, 'another-kit-copy').replace(/\\/g, '/'))};`));
+  await quiet('an autostart that belongs to another kit copy');
+});

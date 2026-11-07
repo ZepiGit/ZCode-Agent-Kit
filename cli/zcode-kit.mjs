@@ -60,6 +60,8 @@ import { run as runStatus } from "./commands/status.mjs";
 import { run as runProxy } from "./commands/proxy.mjs";
 import { run as runModels } from "./commands/models.mjs";
 import { run as runDoctor } from "./commands/doctor.mjs";
+import { nodeFloorRefusal } from "../lib/node-floor.mjs";
+import { loadOutput } from "../lib/term/load.mjs";
 import { ADAPTER_IDS, assertNotCheckoutWrite as assertNotCheckoutWriteFor, loadAdapter, proxyFetch as fetchFromProxy } from "./commands/common.mjs";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -110,6 +112,16 @@ const COMMANDS = {
 
 async function main() {
   if (command === "help" || flags.help) return usage(0);
+  // ADR-0006: on a Node below the support floor, setup and update refuse
+  // before anything else runs (no state read for writing, no lock, no proxy
+  // stop, no download), so the existing installation stays as it was.
+  if (command === "setup" || command === "update") {
+    const refusal = nodeFloorRefusal(command);
+    if (refusal) {
+      (await loadOutput()).error(refusal);
+      return refusal.exit;
+    }
+  }
   ctx = createCtx(ROOT);
   BACKUP_DIR = ctx.backupDir;
 
