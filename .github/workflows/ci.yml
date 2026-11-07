@@ -20,16 +20,17 @@ jobs:
         # Support floor 24 (ADR-0006) and the current Active LTS 26.
         node: [24, 26]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       # The proxy + MCP bridge suites need bun (their vendored toolchain).
-      # Pinned to the version the test evidence was produced with (1.4.2);
+      # Pinned to the CI Bun (1.4.4, ADR-0016 batch 1); the memory budgets'
+      # reference stays the Bun 1.4.2 baseline (METRICS.md).
       # older bun (e.g. 1.2.20) rejects the mcp bridge's lockfileVersion 2.
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - name: Install bridge/proxy dependencies
         run: |
           cd zcode-proxy-src && bun install --frozen-lockfile
@@ -55,15 +56,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 26
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - name: Install proxy dependencies
         run: cd zcode-proxy-src && bun install --frozen-lockfile
       - name: Windows baseline from the base commit (until tests/ux-before/windows is committed)
@@ -124,13 +125,13 @@ jobs:
       # Disposable runner: the only place the loop may run without run-capped.sh.
       ZCODE_MEMLOOP_ALLOW: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 26
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.4.2
+          bun-version: 1.4.4
       - name: Install bridge/proxy dependencies
         run: |
           cd zcode-proxy-src && bun install --frozen-lockfile

@@ -161,6 +161,109 @@ test("root attributes normalize scripts and keep release archives free of CI/tes
   }
 });
 
+// CI toolchain pins (ticket 09, ADR-0006/0016, seam 9). Every tracked workflow
+// file is scanned, so a vendored copy with stale pins that reappears anywhere
+// in the tree (the nested proxy workflows pinned Bun 1.4.0) fails here too.
+const BUN_PIN = "1.4.4";
+const ACTION_MAJORS = { "actions/checkout": "v7", "actions/setup-node": "v7", "oven-sh/setup-bun": "v2" };
+const NODE_FLOOR = 24;
+
+function trackedWorkflows() {
+  const result = spawnSync("git", ["ls-files", "-z"], { cwd: KIT, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.split("\0").filter((path) => /(^|\/)\.github\/workflows\/[^/]+\.ya?ml$/.test(path));
+}
+
+/** Pin violations in one workflow text: wrong action majors, Bun not 1.4.4, Node below the floor. */
+function pinViolations(text) {
+  const problems = [];
+  const unquote = (value) => value.trim().replace(/\s+#.*$/, "").replace(/^["']|["']$/g, "");
+  for (const [, action, ref] of text.matchAll(/uses:\s*["']?([\w.-]+\/[\w.-]+)@([^\s"'#]+)/g)) {
+    if (ACTION_MAJORS[action] && ref !== ACTION_MAJORS[action]) problems.push(`${action}@${ref} (want @${ACTION_MAJORS[action]})`);
+  }
+  if (/uses:\s*["']?oven-sh\/setup-bun@/.test(text) && !/bun-version:/.test(text)) problems.push("setup-bun without an explicit bun-version");
+  for (const [, raw] of text.matchAll(/bun-version:([^\n]*)/g)) {
+    if (unquote(raw) !== BUN_PIN) problems.push(`bun-version: ${unquote(raw)} (want ${BUN_PIN})`);
+  }
+  const majorOk = (value) => /^\d+/.test(value) && Number(value.match(/^\d+/)[0]) >= NODE_FLOOR;
+  for (const [, raw] of text.matchAll(/node-version:([^\n]*)/g)) {
+    const value = unquote(raw);
+    if (/^\$\{\{\s*matrix\.node\s*\}\}$/.test(value)) continue;
+    if (!majorOk(value)) problems.push(`node-version: ${value} (floor ${NODE_FLOOR})`);
+  }
+  for (const [, list] of text.matchAll(/^\s*node:\s*\[([^\]]*)\]/gm)) {
+    for (const item of list.split(",").map(unquote)) if (!majorOk(item)) problems.push(`matrix node ${item} (floor ${NODE_FLOOR})`);
+  }
+  return problems;
+}
+
+test("pin scanner catches stale pins in every spelling (scanner self-check)", () => {
+  assert.deepEqual(pinViolations([
+    "      - uses: actions/checkout@v7",
+    "      - uses: actions/setup-node@v7",
+    "        with:",
+    "          node-version: ${{ matrix.node }}",
+    "      - uses: oven-sh/setup-bun@v2",
+    "        with:",
+    "          bun-version: 1.4.4",
+    "        node: [24, 26]",
+    "          node-version: 26",
+  ].join("\n")), []);
+  for (const [bad, why] of [
+    ["- uses: actions/checkout@v4", /checkout@v4/],
+    ["- uses: 'actions/setup-node@v6'", /setup-node@v6/],
+    ["- uses: actions/checkout@0123abc # v7", /checkout@0123abc/],
+    ["bun-version: 1.4.2", /1\.4\.2/],
+    ['bun-version: "1.4.0"', /1\.4\.0/],
+    ["bun-version: latest", /latest/],
+    ["- uses: oven-sh/setup-bun@v2", /without an explicit bun-version/],
+    ["node-version: 20", /node-version: 20/],
+    ["node-version: '22.x'", /22\.x/],
+    ["node-version: lts/*", /lts/],
+    ["    node: [20, 24]", /matrix node 20/],
+  ]) {
+    const problems = pinViolations(bad);
+    assert.ok(problems.some((p) => why.test(p)), `${JSON.stringify(bad)} must be flagged, got ${JSON.stringify(problems)}`);
+  }
+});
+
+test("CI and release workflows pin checkout@v7, setup-node@v7, setup-bun@v2, Bun 1.4.4 and Node >= 24", () => {
+  const files = trackedWorkflows();
+  assert.deepEqual(files.sort(), [".github/workflows/ci.yml", ".github/workflows/release.yml"],
+    "only the root workflows exist; the nested vendored proxy workflows are deleted (they never ran and pinned Bun 1.4.0)");
+  for (const file of files) {
+    const text = readFileSync(join(KIT, file), "utf8").replace(/\r\n/g, "\n");
+    assert.deepEqual(pinViolations(text), [], `${file} has stale toolchain pins`);
+    assert.doesNotMatch(text, /bun-version:\s*["']?1\.4\.[02]\b/, `${file} still pins an old Bun`);
+    assert.doesNotMatch(text, /node-version:\s*["']?20\b/, `${file} still pins Node 20`);
+  }
+  for (const nested of ["zcode-proxy-src/.github/workflows/ci.yml", "zcode-proxy-src/.github/workflows/release.yml", "zcode-proxy-src/.github/release.yml"]) {
+    assert.equal(existsSync(join(KIT, nested)), false, `${nested} must stay deleted`);
+  }
+  const manifest = readFileSync(join(KIT, "MANIFEST.md"), "utf8");
+  assert.match(manifest, /zcode-proxy-src\/\.github\/workflows\//, "MANIFEST.md records the nested-workflow vendor change");
+});
+
+test("release workflow: tests on Node 26, publish keeps Node 24 for OIDC, triggers unchanged", () => {
+  const workflow = readFileSync(join(KIT, ".github", "workflows", "release.yml"), "utf8").replace(/\r\n/g, "\n");
+  const job = (name, next) => workflow.split(`  ${name}:\n`)[1]?.split(next ? `  ${next}:\n` : /\n(?! )/)[0] ?? "";
+  const nodeVersions = (text) => [...text.matchAll(/node-version:\s*["']?([^\s"']+)/g)].map((m) => m[1]);
+  assert.deepEqual(nodeVersions(job("test", "release-and-publish")), ["26"], "release test job runs on Node 26");
+  assert.deepEqual(nodeVersions(job("release-and-publish", "feature-account-rotator-prerelease")), ["24"],
+    "the publish job stays on Node 24 (npm OIDC Trusted Publishing path)");
+  assert.deepEqual(nodeVersions(job("feature-account-rotator-prerelease")), ["26"]);
+  // Exactly these events start release.yml: a push to main or
+  // feature/account-rotator, a v* tag push, or a manual dispatch. Any other
+  // branch push (an overhaul staging branch) must never start it (B6).
+  const on = workflow.split("\non:\n")[1]?.split("\n\n")[0];
+  assert.equal(on, [
+    "  push:",
+    '    branches: ["main", "feature/account-rotator"]',
+    '    tags: ["v*"]',
+    "  workflow_dispatch:",
+  ].join("\n"));
+});
+
 test("release marker verifier describes a consistency check rather than human authorization", () => {
   const root = mkdtempSync(join(tmpdir(), "zcode-marker-consistency-"));
   try {
