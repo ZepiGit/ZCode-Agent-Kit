@@ -2,7 +2,7 @@
 
 **Blocked by:** 01 (Memory loop with budgets …), 02 (Windows sampler …)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: medium
@@ -44,3 +44,5 @@ Spec stories: as for ticket 01 (budgets and measurement).
   - **Condition 8 records on this branch:** spec §18 S1 row (the amendment), METRICS.md (windows and Linux CI 24-run blocks next to the local 20), ticket 20 Comments (state and only exit), this note. DECISIONS, RUNLOG, INDEX edges and ticket 55 are the orchestrator's.
   - **After merging the integration tip 605aaac** (round 9 records; `ticket/02` unchanged at 3dd5d2c). Suites: `npm run test` 604 pass / 0 fail / 16 skipped; `test:proxy` 1343 / 0; `test:mcp` 95 / 0 (`reports/t60-r3-{kit,proxy,mcp}.log`). Linux memory loop, short profile, through the job: S1/burst1 GREEN, median 236.6 of [235.6, 234.7, 236.6, 236.7, 257.7]; S1/short GREEN, proxy peak 182.4, steady 119.2. The ratchet holds (`reports/t60-r3-job-{burst1,s1short}.log`). A direct fake-run job check on `--os windows --only S1/burst1` against the committed list prints `| S1/burst1 | RED (unstable) | ticket 20 |` and `- S1/burst1: unstable (median 251 MB, budget 250), owned by ticket 20` and exits 0 for a median of 251; it exits 1 with "unstable median 301 MB is above the 300 MB bound" for 301.
   - **Pending CI:** the pre-merge `staging/02` run (02 first, then 60, marker removed). It must be green on both legs, with no disagreement as Round 9 Q1 condition 7 defines it.
+
+- 2026-11-07 (merger): Merged 2026-11-07 as 6236873fb27bf33e2d60e526cd06052feec31d11 via staging/02 36d4ebd (ticket/02 3dd5d2c first, ticket/60 91c7092 second, per Owner Proxy rounds 8-9), together with ticket 02 after the revert of its revert (bbd43efc6cc9963536e6ed406d77b7e6018d0612); fast suite: kit 604/620 (16 skipped, 0 fail), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes. Pre-merge CI green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42326112543 (draft PR #14, staging/02 36d4ebd). Windows S1/burst1 in that run: median 247.4 MB of [240.7, 268.1, 271.6, 247.4, 237.6], entry state unstable (ticket 20). Code tree equals staging/02 (`git diff staging/02 HEAD -- . ':!.scratch'` empty). Logs: .scratch/kit-overhaul/reports/merge-02-60-{npmci,test,proxy,mcp}.log.

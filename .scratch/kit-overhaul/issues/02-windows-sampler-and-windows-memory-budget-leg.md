@@ -2,7 +2,7 @@
 
 **Blocked by:** 01 (Memory loop with budgets, process-count harness, expected-RED ratchet and the ubuntu `memory-budget` job)
 
-**Status:** claimed
+**Status:** resolved
 
 Model: sol
 
@@ -454,3 +454,5 @@ The 15 s floor and the roles are unchanged.
 - Tickets 16/17: the Linux unrecorded-proxy window above.
 - Out of scope here: the windows `S1/burst1 → 20` entry and Round 8's condition 1 `ws_peak_kb` check (Owner Proxy round 8; `expected-red.json` untouched).
 - CI must show next: ubuntu S3/hung passes the gate with all three rounds (a run that hits the window shows `via: listener` and stays RED as listed). Windows S3/hung keeps its three rounds (161 s in this run).
+
+- 2026-11-07 (merger): Re-merged 2026-11-07 as 6236873fb27bf33e2d60e526cd06052feec31d11: first reverted the revert c252676 (bbd43efc6cc9963536e6ed406d77b7e6018d0612), then merged staging/02 36d4ebd (ticket/02 3dd5d2c first, ticket/60 91c7092 second, per Owner Proxy rounds 8-9) together with ticket 60; fast suite: kit 604/620 (16 skipped, 0 fail), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes. Pre-merge CI green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42326112543 (draft PR #14, staging/02 36d4ebd). Windows S1/burst1 in that run: median 247.4 MB of [240.7, 268.1, 271.6, 247.4, 237.6], entry state unstable (ticket 20). Code tree equals staging/02 (`git diff staging/02 HEAD -- . ':!.scratch'` empty). Logs: .scratch/kit-overhaul/reports/merge-02-60-{npmci,test,proxy,mcp}.log.
