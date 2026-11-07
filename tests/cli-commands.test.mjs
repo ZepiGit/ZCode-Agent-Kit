@@ -1047,3 +1047,28 @@ test("entry: usage errors of the migrated commands go to stderr only, exit 2", a
   assert.deepEqual(await cli(["setup", "--harness", "vim"]), { code: 2, stdout: "", stderr: `unknown harness "vim" in --harness. Known: ${known}, none (or auto for detection)\n` });
   assert.deepEqual(await cli(["update", "--version", "latest"]), { code: 2, stdout: "", stderr: 'update: --version expects a release tag like v0.2.11 (got "latest").\n' });
 });
+
+test("uninstall on Windows removes the installer's zcode-kit.cmd + .ps1 pair only when the .ps1 points at this kit", async (t) => {
+  const { run } = await load("uninstall");
+  const kit = await tempKit(t, { config: false });
+  const local = join(kit.root, "Local AppData");
+  const apps = join(local, "Microsoft", "WindowsApps");
+  mkdirSync(apps, { recursive: true });
+  const cmd = join(apps, "zcode-kit.cmd");
+  const ps1 = join(apps, "zcode-kit.ps1");
+  const shimPair = (entry) => {
+    writeFileSync(cmd, '@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0zcode-kit.ps1" %*\r\n');
+    // install.ps1 writes the entry path as a single-quoted PowerShell string.
+    writeFileSync(ps1, `& node '${entry.replaceAll("'", "''")}' @args\r\n`);
+  };
+  const windows = () => fakeCtx({ kit, platform: "win32", env: { LOCALAPPDATA: local } });
+  shimPair("C:\\elsewhere\\cli\\zcode-kit.mjs");
+  const foreign = windows();
+  assert.deepEqual(await run(args(["uninstall"]), foreign.ctx), { exitCode: 0, records: [] });
+  assert.deepEqual([existsSync(cmd), existsSync(ps1)], [true, true], "another installation's shims stay");
+  shimPair(join(kit.root, "cli", "zcode-kit.mjs"));
+  const ours = windows();
+  assert.deepEqual(await run(args(["uninstall"]), ours.ctx), { exitCode: 0, records: [] });
+  assert.deepEqual([existsSync(cmd), existsSync(ps1)], [false, false]);
+  assert.equal(ours.progress.at(-1), `out:removed kit-owned command shims: ${cmd}`);
+});
