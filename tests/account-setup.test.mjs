@@ -192,7 +192,7 @@ function kitFixture(t, { layout = "in-tree", accounts = false, generated = "none
   }
   const stateDir = () => {
     if (layout !== "npm") return root;
-    const installs = join(base, "state", "zcode-agent-kit", "installs");
+    const installs = join(base, process.platform === "win32" ? "localappdata" : "state", "zcode-agent-kit", "installs");
     const ids = existsSync(installs) ? readdirSync(installs).filter((n) => !n.includes(".")) : [];
     assert.ok(ids.length <= 1);
     return ids.length ? join(installs, ids[0]) : null;
@@ -397,6 +397,12 @@ test("rotator overrides win over the stored decision and are recorded: --account
   assert.equal(n.code, 0, n.text);
   assert.equal(f.decision(), "no/env");
   assert.match(f.config(), /^    enabled: false$/m);
+  // An override left set for every run (unattended installs) is a replay: nothing is rewritten.
+  const bytes = f.decisionBytes();
+  const again = await runPlain(f, ["setup"], { env: { ZCODE_KIT_ACCOUNT_ROTATOR: "n" } });
+  assert.equal(again.code, 0, again.text);
+  assert.equal(f.decisionBytes(), bytes, "replayed override: decision byte-identical");
+  assert.equal(txIdOf(again.stdout), undefined, "replayed override: no transaction");
   const bad = await runPlain(f, ["setup", "--account-rotator", "maybe"]);
   assert.equal(bad.code, 2, bad.text);
   assert.equal(f.decision(), "no/env", "a bad override writes nothing");
