@@ -74,7 +74,7 @@ Each seam is the highest point that can observe its properties. Existing seams a
 8. **Installer and adapter temp-HOME fixtures.** Tests:
    - the Node 24 refusal before mutation;
    - (R4, add. 3) the preflight check of the OMP autostart's pinned Node path against the floor;
-   - the Bun 1.4.4 hashes;
+   - the Bun 1.4.2 hashes (Round 11), and a tampered Bun download refused before extraction;
    - the adapter HIGH and confirmed MEDIUM fixes;
    - the bridge flag in generated entries;
    - the OMP in-host token and (R4, add. 3 / Q2) the waiter cause-line record logic (write before release, identity match, stale/corrupt/oversized records rejected, fixed-vocabulary validation);
