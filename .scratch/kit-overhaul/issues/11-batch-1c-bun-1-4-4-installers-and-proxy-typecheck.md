@@ -10,13 +10,14 @@ Risk: medium
 
 ADR: 0006, 0016
 
-**What to build:** Both installers bootstrap Bun 1.4.4 with the five upstream SHA-256s (linux-x64, linux-aarch64, darwin-x64, darwin-aarch64, windows-x64) from the primary source. The proxy typecheck runs in root CI through a pinned proxy `typescript` devDependency and `@types/bun` 1.4.4 exact; its baseline is recorded first and every failure becomes a ticket. The memory loop's short profile re-runs on 1.4.4 on both legs (the Windows attribution run).
+**What to build:** Both installers bootstrap Bun 1.4.2 (Round 11 Q1 condition 1) with the five upstream SHA-256s (linux-x64, linux-aarch64, darwin-x64, darwin-aarch64, windows-x64) from the primary source, Bun's GitHub release assets. The proxy typecheck runs in root CI through a pinned proxy `typescript` devDependency and `@types/bun` 1.4.2 exact. Its baseline is recorded first, and every failure becomes a ticket. The re-run of the memory loop's short profile on a new Bun (the Windows attribution run) is moot, because the runtime stays at 1.4.2 (Round 11 Q1 condition 1).
 
 **Acceptance criteria:**
 
 - [ ] Installer tests assert the five hashes and reject a tampered download (seam 8).
 - [ ] `test-kit` legs include the proxy typecheck through the pinned devDependency, never an unpinned `bun x`. Its baseline error list is recorded before any fix. If the list is non-empty, the step compares against a committed expected-error list with the same ratchet as `expected-red.json` (a new error fails; a listed error that disappears fails until it is removed), and each listed error names a filed ticket.
-- [ ] METRICS.md records the Linux and Windows 1.4.4 attribution runs next to the 1.4.2 reference; typecheck-baseline failures (if any) are filed as tickets (build-time gate 7).
+- [ ] ~~METRICS.md records the Linux and Windows 1.4.4 attribution runs next to the 1.4.2 reference~~ (moot, Round 11 Q1 condition 1: METRICS.md records why); typecheck-baseline failures (if any) are filed as tickets (build-time gate 7).
+- [ ] SUPPORT_MATRIX.json and README × 5 name Bun 1.4.2 (Round 11 Q1 condition 6), and spec.md's 1.4.4 mentions outside §18 move to 1.4.2 with a pointer to Round 11.
 
 **Common acceptance (every ticket):**
 
