@@ -2,7 +2,7 @@
 
 **Blocked by:** 10 (Batch 1b — Node 24 support floor, refuse before mutation, autostart Node-path check)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -159,3 +159,5 @@ So the installers needed no change. They already bootstrap 1.4.2, the Bun 1.4.4 
    - the four existing `install.ps1` tests are unchanged.
 3. `ux-before` on both legs and `memory-budget` on both legs: verdicts unchanged from the tip, no runtime change, `expected-red.json` untouched.
 4. `release.yml` is unchanged: no run, no trigger change.
+
+Merged 2026-11-07 as 11cbfcb (ticket/11-bun-1-4-2-installers at 285b932; first merge, no revert-of-revert step); fast suite: kit 679/698 (19 skipped, 0 fail; includes `the pinned proxy typecheck passes on the proxy source and fails on a new type error`), proxy 1343/1343, proxy typecheck green (`tsc --noEmit -p tsconfig.json`, typescript 7.0.2), mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged. zcode-proxy-src/bun.lock changed, so `bun install --frozen-lockfile` (Bun 1.4.2) in zcode-proxy-src and `npm ci` in mcp/zcode-harness-mcp also ran, both green. Clean merge (no conflicts). Sanity: `git diff --stat staging/11 HEAD -- . ':!.scratch' ':!cli/adapters/kilo-code.mjs' ':!tests/adapter-audit.test.mjs'` is empty (ticket 59's two files are the only non-.scratch difference). Pre-merge CI (draft PR #20, staging/11), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42381135168 — "Proxy typecheck (pinned tsc)" ran on all four test-kit legs; both install.ps1 Bun 1.4.2 tests (exact digest accepted; tampered download refused before extraction) ran and passed on windows Node 24 and 26; the ratchet holds on both memory-budget legs. Logs: .scratch/kit-overhaul/reports/merge-11-{npm-ci,bun-install,mcp-npm-ci,test,proxy,proxy-typecheck,mcp}.log.
