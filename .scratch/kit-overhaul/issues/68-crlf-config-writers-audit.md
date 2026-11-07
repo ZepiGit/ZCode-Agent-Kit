@@ -2,7 +2,7 @@
 
 **Blocked by:** 42 (Account Rotator decision asked once, with migration)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: medium
@@ -114,3 +114,7 @@ ADR: no
 2. windows `test-kit`: 42's three CRLF rotator tests, now on the shared helper.
 3. The proxy legs (`bun test`, typecheck) on every OS, including `src/config/line-endings.test.ts`, and the `bun build --compile` matrix for all five targets.
 4. ubuntu and windows `test-kit`: the unchanged LF suites (adapter-audit, setup-regressions, continue-compatibility, auto-heal).
+
+### 2026-11-07 — merger
+
+Merged 2026-11-07 as aff5c05 (`aff5c0589ef272e6a54df2b1b1acf0c22011f5b0`) onto 3ecfa7e (after ticket 12); no conflicts. Fast suite: kit 797/816 (0 fail, 19 skipped), proxy 1364/1364, mcp 95/96 (0 fail, 1 skipped; `dist/` unchanged); `npm run test:proxy-typecheck` exit 0. `bun build --compile --target bun-linux-x64` (Bun 1.4.2): 657 modules, `withLineEndingsOf` present in the binary, `--help` exits 0. Pre-merge CI (draft PR #27, staging/68), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42421432504. Sanity: `git diff staging/68 HEAD` over the 20 non-.scratch files ticket 68 changed (`staging/68^1..staging/68`) is empty; the only non-.scratch differences from staging/68 are ticket 12's four files. This merge also carries the writer table above onto the integration branch. Logs: `reports/merge-68-{npm-ci,bun-install,test,test-proxy,test-proxy-typecheck,test-mcp,compile,compile-help}.log`.
