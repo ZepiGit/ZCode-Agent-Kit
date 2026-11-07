@@ -129,24 +129,66 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26
+      # Paired Bun measurement (Round 10 Q1 condition 1), only with the
+      # measurement marker: Bun 1.4.2 and 1.4.3 through setup-bun (the same
+      # release-asset endpoint as the job's own Bun), each copied aside and
+      # checked by its --revision. setup-bun always installs to ~/.bun/bin, so
+      # the job's own Bun comes last and stays the one on PATH; no-cache keeps
+      # the post step from caching that last binary under these versions.
+      - name: Bun 1.4.2 for the paired measurement
+        id: bun-142
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+          no-cache: true
+      - name: Keep Bun 1.4.2 aside
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-142.outputs.bun-path }}" 1.4.2 "${{ runner.temp }}/bun-arms"
+      - name: Bun 1.4.3 for the paired measurement
+        id: bun-143
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - name: Keep Bun 1.4.3 aside
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-143.outputs.bun-path }}" 1.4.3 "${{ runner.temp }}/bun-arms"
       - uses: oven-sh/setup-bun@v2
+        id: bun-job
         with:
           bun-version: 1.4.4
+      - name: Keep Bun 1.4.4 aside
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-job.outputs.bun-path }}" 1.4.4 "${{ runner.temp }}/bun-arms"
       - name: Install bridge/proxy dependencies
         run: |
           cd zcode-proxy-src && bun install --frozen-lockfile
           cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile
       # A measurement run (Round 8 Q1 condition 2, ticket 60) replaces the
       # ratchet with N fresh S1/burst1 runs. It is on only while the one-run
-      # marker tests/memory/measure-burst1 (holding N) is committed on the
-      # branch under test; a test fails while it exists, so it never merges.
+      # marker tests/memory/measure-burst1 is committed on the branch under
+      # test; a test fails while it exists, so it never merges. Its content:
+      # "N" (N runs on the job's Bun) or "N bun=1.4.2,1.4.3,1.4.4" (the paired
+      # measurement: N runs per arm, interleaved in rotation, Round 10 Q1).
       - name: Memory loop (short profile) and expected-RED ratchet
         if: hashFiles('tests/memory/measure-burst1') == ''
         run: node tests/memory/job.mjs --out "${{ runner.temp }}/memloop"
       - name: S1/burst1 measurement (only with the tests/memory/measure-burst1 marker)
         if: hashFiles('tests/memory/measure-burst1') != ''
         shell: bash
-        run: node tests/memory/job.mjs --measure-burst1 "$(cat tests/memory/measure-burst1)" --out "${{ runner.temp }}/memloop"
+        run: |
+          ARMS="${{ runner.temp }}/bun-arms"
+          EXE=""; [ "$RUNNER_OS" = "Windows" ] && EXE=".exe"
+          if grep -q 'bun=' tests/memory/measure-burst1; then
+            node tests/memory/job.mjs --measure-burst1 "$(cat tests/memory/measure-burst1)" --bun "1.4.2=$ARMS/1.4.2/bun$EXE,1.4.3=$ARMS/1.4.3/bun$EXE,1.4.4=$ARMS/1.4.4/bun$EXE" --out "${{ runner.temp }}/memloop"
+          else
+            node tests/memory/job.mjs --measure-burst1 "$(cat tests/memory/measure-burst1)" --out "${{ runner.temp }}/memloop"
+          fi
       - name: Upload memory loop artefacts
         if: always()
         uses: actions/upload-artifact@v7

@@ -197,6 +197,46 @@ function pinViolations(text) {
   return problems;
 }
 
+// The one exception (Round 10 Q1 condition 1): the paired Bun measurement
+// installs other Bun versions as measurement arms. Such a step must be a
+// setup-bun step that runs only with the one-run marker (which never merges),
+// is uncached and sits in the memory-budget job; release.yml never has one.
+const MARKER_IF = "if: hashFiles('tests/memory/measure-burst1') != ''";
+
+/** text → { rest: text without the exempt arm steps, arms: [{ job, version, problems }] }. */
+function splitMeasurementArms(text) {
+  const arms = [];
+  let job = null;
+  const kept = [];
+  for (const block of text.split(/\n(?=      - |  [\w-]+:\n)/)) {
+    const jobHead = block.match(/^  ([\w-]+):\n/);
+    if (jobHead) job = jobHead[1];
+    const isArm = /uses:\s*oven-sh\/setup-bun@/.test(block) && block.includes(MARKER_IF) && !/bun-version:\s*["']?1\.4\.4["']?\s*$/m.test(block);
+    if (!isArm) { kept.push(block); continue; }
+    const version = block.match(/bun-version:\s*["']?([^\s"']+)/)?.[1] ?? null;
+    const problems = [];
+    if (job !== "memory-budget") problems.push(`measurement arm outside the memory-budget job (${job})`);
+    if (!/no-cache:\s*true/.test(block)) problems.push("measurement arm without no-cache: true");
+    if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) problems.push(`measurement arm with a non-exact bun-version ${version}`);
+    arms.push({ job, version, problems });
+  }
+  return { rest: kept.join("\n"), arms };
+}
+
+test("pin scanner: only a marker-guarded, uncached setup-bun step in memory-budget may install another Bun (scanner self-check)", () => {
+  const wf = (job, step) => ["jobs:", `  ${job}:`, "    steps:", "      - uses: oven-sh/setup-bun@v2", "        with:", "          bun-version: 1.4.4", step].join("\n");
+  const arm = (extra = "") => ["      - name: Bun 1.4.2 for the paired measurement", `        ${MARKER_IF}`, "        uses: oven-sh/setup-bun@v2", "        with:", "          bun-version: 1.4.2", extra].filter(Boolean).join("\n");
+  const ok = splitMeasurementArms(wf("memory-budget", arm("          no-cache: true")));
+  assert.deepEqual(ok.arms.map((a) => [a.version, a.problems]), [["1.4.2", []]]);
+  assert.deepEqual(pinViolations(ok.rest), []);
+  assert.match(splitMeasurementArms(wf("memory-budget", arm())).arms[0].problems.join(), /no-cache/);
+  assert.match(splitMeasurementArms(wf("test-kit", arm("          no-cache: true"))).arms[0].problems.join(), /outside the memory-budget job \(test-kit\)/);
+  // Without the marker guard it is an ordinary pin and is flagged.
+  const unguarded = splitMeasurementArms(wf("memory-budget", arm("          no-cache: true").replace(`        ${MARKER_IF}\n`, "")));
+  assert.deepEqual(unguarded.arms, []);
+  assert.deepEqual(pinViolations(unguarded.rest), ["bun-version: 1.4.2 (want 1.4.4)"]);
+});
+
 test("pin scanner catches stale pins in every spelling (scanner self-check)", () => {
   assert.deepEqual(pinViolations([
     "      - uses: actions/checkout@v7",
@@ -232,9 +272,12 @@ test("CI and release workflows pin checkout@v7, setup-node@v7, setup-bun@v2, Bun
   assert.deepEqual(files.sort(), [".github/workflows/ci.yml", ".github/workflows/release.yml"],
     "only the root workflows exist; the nested vendored proxy workflows are deleted (they never ran and pinned Bun 1.4.0)");
   for (const file of files) {
-    const text = readFileSync(join(KIT, file), "utf8").replace(/\r\n/g, "\n");
+    const { rest: text, arms } = splitMeasurementArms(readFileSync(join(KIT, file), "utf8").replace(/\r\n/g, "\n"));
+    assert.deepEqual(arms.flatMap((a) => a.problems), [], `${file}: measurement arm steps`);
+    if (file.endsWith("release.yml")) assert.deepEqual(arms, [], "release.yml never installs a measurement arm");
+    else assert.deepEqual(arms.map((a) => a.version), ["1.4.2", "1.4.3"], "the paired measurement's extra arms (Round 10 Q1 condition 1)");
     assert.deepEqual(pinViolations(text), [], `${file} has stale toolchain pins`);
-    assert.doesNotMatch(text, /bun-version:\s*["']?1\.4\.[02]\b/, `${file} still pins an old Bun`);
+    assert.doesNotMatch(text, /bun-version:\s*["']?1\.4\.[02]\b/, `${file} still pins an old Bun outside a measurement arm`);
     assert.doesNotMatch(text, /node-version:\s*["']?20\b/, `${file} still pins Node 20`);
   }
   for (const nested of ["zcode-proxy-src/.github/workflows/ci.yml", "zcode-proxy-src/.github/workflows/release.yml", "zcode-proxy-src/.github/release.yml"]) {
