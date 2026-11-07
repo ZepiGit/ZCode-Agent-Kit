@@ -15,28 +15,21 @@ detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters
   models.yml already up to date
   config.yml already up to date
   [OK]   OMP / Oh My Pi
-Configure ZCode as a provider with its supported models in pi? [y/n] n
-n
-n
-n
-  [SKIP] pi — answered n
+Configure ZCode as a provider with its supported models in pi? [y/n]   [SKIP] pi — answered n
   note: y also registers the kit's MCP bridge "zcode-harness" for Claude Code (skip with --no-mcp).
-Configure ZCode as a provider with its supported models in Claude Code? [y/n] n
-  [SKIP] Claude Code — answered n
+Configure ZCode as a provider with its supported models in Claude Code? [y/n]   [SKIP] Claude Code — answered n
 == codex: Codex CLI (previously configured) ==
   [OK]   Codex CLI
-Configure ZCode as a provider with its supported models in OpenCode? [y/n] n
-  [SKIP] OpenCode — answered n
-Configure ZCode as a provider with its supported models in Continue? [y/n] n
-  [SKIP] Continue — answered n
+Configure ZCode as a provider with its supported models in OpenCode? [y/n]   [SKIP] OpenCode — answered n
+Configure ZCode as a provider with its supported models in Continue? [y/n]   [SKIP] Continue — answered n
 == mcp: zcode-harness bridge ==
   omp: "zcode-harness" already registered
   NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n]   Account Rotator setting unchanged (no interactive answer).
-  Enable later: zcode-kit accounts enable
+  [INFO] Account Rotator disabled (saved choice; not asked again).
+  Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
 transaction <TX> recorded — undo with: zcode-kit rollback <TX>
 

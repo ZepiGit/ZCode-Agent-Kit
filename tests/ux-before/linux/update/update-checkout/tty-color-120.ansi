@@ -16,11 +16,11 @@ remote: Total 3 (delta 2), reused 0 (delta 0), pack-reused 0[K
 Unpacking objects:  33% (1/3)
 Unpacking objects:  66% (2/3)
 Unpacking objects: 100% (3/3)
-Unpacking objects: 100% (3/3), 270 bytes | 270.00 KiB/s, done.
+Unpacking objects: 100% (3/3), 271 bytes | 271.00 KiB/s, done.
 From <FIXTURE>/origin
-   aa096ee..3970d07  main       -> origin/main
+   c5c20a0..c88954d  main       -> origin/main
 not running
-Updating aa096ee..3970d07
+Updating c5c20a0..c88954d
 Fast-forward
  package.json | 2 [32m+[m[31m-[m
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -44,10 +44,8 @@ detected harnesses: omp — adapters run only after consent (y answer, stored de
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-[1G[0JDo you want to activate the Account Rotator feature? [y/n] [60Gn
-n
-n
-  [OK] Account Rotator disabled. Saved accounts are kept.
+  [INFO] Account Rotator disabled (saved choice; not asked again).
+  Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
   Configuration saved.
   Assistants: 1 configured, 0 skipped, 0 failed.

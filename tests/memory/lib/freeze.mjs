@@ -5,7 +5,7 @@
 // kit verdict (CI run 42252896054, ticket 02 round 4).
 // A process that is gone after the work (the kit's hung-own recovery killed
 // it, which is what the S3 hung rounds test) needs no thaw.
-const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
+export const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
 
 export async function whileFrozen(pid, work, { freeze, thaw, alive = isAlive }) {
   freeze(pid);

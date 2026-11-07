@@ -2,11 +2,13 @@
 // owns encryption, redaction, its output (on the terminal) and the exit code
 // (no exit status: 1); this command forwards to it and never starts a serving
 // process. `enable|disable` switch the Account Rotator in the proxy config
-// through a transaction (exit 0) and restart a running proxy of this kit.
+// through a transaction (exit 0), record it as the stored Account Rotator
+// decision (generated/account-rotator.json, the one setup asks about), and
+// restart a running proxy of this kit.
 // A missing account id or an unknown subcommand: exit 2.
 import { acquireLock, beginTransaction, releaseLock } from "../../lib/transaction.mjs";
 import { ensureState } from "../../lib/state.mjs";
-import { configureAccountRotator, restartForAccountChange } from "../account-setup.mjs";
+import { configureAccountRotator, recordRotatorDecision, restartForAccountChange } from "../account-setup.mjs";
 import { assertNotCheckoutWrite, proxyCli, stderrLine, stdoutLine } from "./common.mjs";
 
 /** @param {{ positional: string[], flags: Record<string, unknown> }} args */
@@ -46,8 +48,12 @@ async function toggle(enable, ctx) {
   const lock = acquireLock(kit.backupDir);
   const tx = beginTransaction(kit.backupDir, `zcode-kit accounts ${enable ? "enable" : "disable"}`);
   let result;
-  try { result = configureAccountRotator(kit, tx, enable, (cliArgs, opts) => proxyCli(ctx, cliArgs, opts)); }
-  finally { try { tx.finish(); } finally { releaseLock(lock); } }
+  try {
+    result = configureAccountRotator(kit, tx, enable, (cliArgs, opts) => proxyCli(ctx, cliArgs, opts));
+    // One meaning (Round 1 Q8 cond 2): this is also the stored answer setup
+    // reads, in the same transaction. An unreadable decision file is left alone.
+    recordRotatorDecision(kit, tx, enable, "accounts");
+  } finally { try { tx.finish(); } finally { releaseLock(lock); } }
   if (result.changed) await restartForAccountChange(kit);
   return {
     exitCode: 0,

@@ -29,32 +29,19 @@ n
 
   [1;36mAssistant integrations[0m
   note: y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
-Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] y
-n
-n
-y
-y
-n
-n
-  [32m[OK][0m   OMP / Oh My Pi
-Configure ZCode as a provider with its supported models in pi? [y/n] n
-  [SKIP] pi — answered n
+Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n]   [32m[OK][0m   OMP / Oh My Pi
+Configure ZCode as a provider with its supported models in pi? [y/n]   [SKIP] pi — answered n
   note: y also registers the kit's MCP bridge "zcode-harness" for Claude Code (skip with --no-mcp).
-Configure ZCode as a provider with its supported models in Claude Code? [y/n] n
-  [SKIP] Claude Code — answered n
-Configure ZCode as a provider with its supported models in Codex CLI? [y/n] y
-  [32m[OK][0m   Codex CLI
-Configure ZCode as a provider with its supported models in OpenCode? [y/n] y
-  [32m[OK][0m   OpenCode
-Configure ZCode as a provider with its supported models in Continue? [y/n] n
-  [SKIP] Continue — answered n
+Configure ZCode as a provider with its supported models in Claude Code? [y/n]   [SKIP] Claude Code — answered n
+Configure ZCode as a provider with its supported models in Codex CLI? [y/n]   [32m[OK][0m   Codex CLI
+Configure ZCode as a provider with its supported models in OpenCode? [y/n]   [32m[OK][0m   OpenCode
+Configure ZCode as a provider with its supported models in Continue? [y/n]   [SKIP] Continue — answered n
 
   [1;36mAccount Rotator[0m
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
-  [OK] Account Rotator disabled. Saved accounts are kept.
+Do you want to activate the Account Rotator feature? [y/N]   [OK] Account Rotator disabled. Saved accounts are kept.
 
   Configuration saved.
   Assistants: 3 configured, 3 skipped, 0 failed.

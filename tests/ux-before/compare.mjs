@@ -3,7 +3,9 @@
 // tree. Used by tests/ux-before-equivalence.test.mjs, the proof of "no visible
 // change" for tickets 06–08.
 //
-// The baseline files stay verbatim (640 captures at 0960696). Values that
+// The baseline files stay verbatim (640 captures at 0960696), except the
+// captures a later ticket changed on purpose and refreshed (listed in the
+// baseline's INDEX.md and in that ticket's file). Values that
 // change from run to run, whatever the code, are normalised on BOTH sides by
 // the explicit list below; nothing else is. The list never touches status
 // words, exit codes or the check grammar (spec, Testing Decisions).
