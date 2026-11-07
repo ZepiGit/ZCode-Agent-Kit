@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { buildFrame, findRegion, type FrameState } from "./frame.js";
 import { displayWidth, stripAnsi } from "./width.js";
+import { LogPane } from "./log-pane.js";
 
 function baseState(overrides: Partial<FrameState> = {}): FrameState {
   return {
@@ -211,6 +212,38 @@ describe("buildFrame", () => {
     for (const raw of buildFrame(state).text.split("\n")) {
       expect(displayWidth(raw)).toBeLessThanOrEqual(state.width);
     }
+  });
+
+  test("rows from the capped log pane: 64 KB CJK, emoji and mixed lines, one row each at 80 columns", () => {
+    const pane = new LogPane();
+    pane.push("[cjk] " + "上游服务暂时不可用".repeat(2427), "warn");
+    pane.push("[emoji] " + "🚀".repeat(20_000));
+    pane.push("[mixed] " + "x".repeat(64 * 1024 - 2) + "😀", "error");
+    const view = pane.view(10);
+    const lines = plainLines(baseState({ logTotal: view.total, logView: view.lines }));
+    const title = lines.findIndex((l) => l.startsWith("╭─ Logs"));
+    expect(lines.slice(title, title + 5)).toEqual([
+      "╭─ Logs (3) ─────────────────────────────────────────────────────── following ─╮",
+      "│   [cjk] 上游服务暂时不可用上游服务暂时不可用上游服务暂时不可用上游服务暂时…  │",
+      "│   [emoji] 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀…  │",
+      "│   [mixed] xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… │",
+      "╰──────────────────────────────────────────────────────────────────────────────╯",
+    ]);
+    for (const l of lines.slice(title, title + 5)) expect(displayWidth(l)).toBe(80);
+  });
+
+  test("a line above 8 MB renders as one truncated row from its head", () => {
+    const pane = new LogPane();
+    pane.push("r001 ANT glm-5.3 200 stream 307ms");
+    pane.push("[huge] " + "z".repeat(9 * 1024 * 1024), "error");
+    const view = pane.view(10);
+    const lines = plainLines(baseState({ logTotal: view.total, logView: view.lines }));
+    const title = lines.findIndex((l) => l.startsWith("╭─ Logs"));
+    expect(lines.slice(title, title + 3)).toEqual([
+      "╭─ Logs (1) ─────────────────────────────────────────────────────── following ─╮",
+      "│   [huge] zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz… │",
+      "╰──────────────────────────────────────────────────────────────────────────────╯",
+    ]);
   });
 
   test("box borders span the full width", () => {
