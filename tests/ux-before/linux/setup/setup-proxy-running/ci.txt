@@ -24,8 +24,8 @@ detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-  Account Rotator setting unchanged (no interactive answer).
-  Enable later: zcode-kit accounts enable
+  [INFO] Account Rotator disabled (saved choice; not asked again).
+  Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
   Configuration saved.
   Assistants: 2 configured, 4 skipped, 0 failed.

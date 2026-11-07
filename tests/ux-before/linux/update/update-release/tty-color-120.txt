@@ -4,7 +4,7 @@ n
 update: downloading v9.9.9 ...
 update: verified v9.9.9 (sha256) — updating v0.2.42 → v9.9.9
 not running
-update: applied v9.9.9 (36 files updated, 0 removed)
+update: applied v9.9.9 (60 files updated, 0 removed)
 update: refreshing consented integrations (stored answers are respected; new harnesses are asked only on a terminal)...
 == bootstrap ==
   proxy/config.yaml already present — left untouched
@@ -25,10 +25,8 @@ detected harnesses: omp — adapters run only after consent (y answer, stored de
 
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/n] n
-n
-n
-  [OK] Account Rotator disabled. Saved accounts are kept.
+  [INFO] Account Rotator disabled (saved choice; not asked again).
+  Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
   Configuration saved.
   Assistants: 1 configured, 0 skipped, 0 failed.
