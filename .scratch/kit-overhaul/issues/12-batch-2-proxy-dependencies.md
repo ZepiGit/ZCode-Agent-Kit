@@ -2,7 +2,7 @@
 
 **Blocked by:** 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -135,3 +135,12 @@ The head SHA is the commit that adds this comment. Bun 1.4.2 everywhere (`bun --
 - the security doc wording on the unchanged loading surface → 53;
 - undici under Bun → 26;
 - S2 cost/retained → 58, plus the `growth:scenario` instability noted above.
+
+### 2026-11-07: merger
+
+Merged 2026-11-07 as 3b409b1 (ticket head c2b77cd, integration tip 5c68c2f, no conflicts); fast suite: kit 780/799 (19 skipped, 0 fail), proxy 1357/1357 (90 files), mcp 95/96 (1 skipped, 0 fail); `test:proxy-typecheck` 0 errors.
+- Pre-merge CI green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42420564808 (draft PR #22, staging/12 8fdadde). Earlier runs 42391052837 (sampler mid-exec flake, ticket 64), 42398295810 and 42415959288 (S3/hung stale-lock skip, ticket 65) are not attributable to ticket 12. This closes criterion 3 (both `memory-budget` legs).
+- Captcha suites alone, run first (B1): `captcha-happy` + `captcha-solver` + `captcha-cdn-cache` 39/39; all 13 `src/proxy/captcha-*.test.ts` files 133/133. Same as the implementer's counts.
+- `bun install --frozen-lockfile` (Bun 1.4.2) installed happy-dom 21.0.4, undici 8.12.4, yaml 2.9.1 with no lock change. `mcp/zcode-harness-mcp/dist/` unchanged after the build (B5).
+- Sanity: `git diff --stat staging/12 HEAD -- . ':!.scratch'` is empty, so the merged tree outside `.scratch` equals the tree CI judged.
+- Logs: `reports/merge-12-{npm-ci,bun-install,mcp-ci,captcha3,captcha-all,kit,proxy,typecheck,mcp}.log`.
