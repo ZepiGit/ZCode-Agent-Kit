@@ -14,6 +14,7 @@
 - Ticket 65 (S3/hung stale-lock round) merged 2026-11-07 as 067bac9 (resolved f184373; pre-merge CI 42415957165, 8/8 green).
 - Ticket 32 (TUI log pane caps) merged 2026-11-07 as 0c75be5 (resolved f2c0e74; pre-merge CI 42415961268).
 - Ticket 42 (Account Rotator asked once) merged 2026-11-07 as 928565e (resolved cc3e77e; pre-merge CI 42415962768).
+- Ticket 12 (proxy dependencies) merged 2026-11-07 as 3b409b1 (resolved 6b76a1e; pre-merge CI 42420564808).
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul
