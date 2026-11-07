@@ -1,0 +1,194 @@
+{
+  "id": "S5-short-2026-11-07T1935-73176f",
+  "key": "S5/short",
+  "scenario": "S5",
+  "profile": "short",
+  "variant": null,
+  "platform": "win32",
+  "node": "v26.13.0",
+  "outcome": "RED",
+  "metric": "commit",
+  "workingSet": {
+    "red": true,
+    "redChecks": [
+      "growth:mcp-bridge"
+    ]
+  },
+  "redOnlyOnCommit": false,
+  "durationS": 722,
+  "red": true,
+  "checks": [
+    {
+      "name": "growth:mcp-bridge",
+      "red": true,
+      "value": 23.71,
+      "budget": 5,
+      "unit": "%/1k",
+      "trend": true,
+      "detail": {
+        "samples": 704,
+        "warmupSamples": 176,
+        "meanMB": 80.3,
+        "firstPostMB": 75.4,
+        "lastMB": 79.4,
+        "slopeMBPer1k": 19.04,
+        "growthPctPer1k": 23.71,
+        "slopeMBPerMin": 0.64,
+        "windowMediansMB": [
+          77.5,
+          78.3,
+          80.2,
+          80,
+          81.6,
+          82.6
+        ],
+        "risingWindows": 3,
+        "netRisePct": 6.6,
+        "heapSlopeMBPer1k": null,
+        "axis": "progress"
+      },
+      "gate": "commit",
+      "commitValue": 23.71,
+      "wsValue": 25.03
+    },
+    {
+      "name": "procPeak:mcp-bridge",
+      "red": false,
+      "value": 75.4,
+      "budget": 150,
+      "unit": "MB",
+      "gate": "ws",
+      "commitValue": 90.8,
+      "wsValue": 75.4
+    },
+    {
+      "name": "orphans",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "procs",
+      "detail": []
+    },
+    {
+      "name": "bridge:reboot-cost-of-history",
+      "red": false,
+      "value": 3,
+      "budget": 20,
+      "unit": "MB"
+    },
+    {
+      "name": "bridge:task-failures",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "tasks"
+    }
+  ],
+  "summary": {
+    "*": {
+      "peakMB": 110.4,
+      "peakProcMB": 86.6,
+      "peakHwmMB": 90.8,
+      "maxCount": 3,
+      "maxFds": 496,
+      "maxThreads": 34,
+      "distinctPids": 4,
+      "peakHeapMB": null
+    },
+    "kit": {
+      "peakMB": 86.6,
+      "peakProcMB": 86.6,
+      "peakHwmMB": 90.8,
+      "maxCount": 1,
+      "maxFds": 216,
+      "maxThreads": 18,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    },
+    "mcp-bridge": {
+      "peakMB": 86.6,
+      "peakProcMB": 86.6,
+      "peakHwmMB": 90.8,
+      "maxCount": 1,
+      "maxFds": 216,
+      "maxThreads": 18,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    },
+    "fake-harness": {
+      "peakMB": 24.2,
+      "peakProcMB": 22.9,
+      "peakHwmMB": 23.6,
+      "maxCount": 2,
+      "maxFds": 280,
+      "maxThreads": 16,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    }
+  },
+  "budgets": {
+    "growth": {
+      "role": "mcp-bridge",
+      "axis": "progress",
+      "maxPctPer1k": 5,
+      "risingWindows": 3,
+      "netRisePct": 10,
+      "warmupFraction": 0.25,
+      "fromT": 3717,
+      "untilT": 713225
+    },
+    "procPeaks": {
+      "mcp-bridge": 150
+    },
+    "orphans": 0,
+    "extra": [
+      {
+        "name": "bridge:reboot-cost-of-history",
+        "red": false,
+        "value": 3,
+        "budget": 20,
+        "unit": "MB"
+      },
+      {
+        "name": "bridge:task-failures",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "tasks"
+      }
+    ]
+  },
+  "orphans": [],
+  "observations": [],
+  "notes": {
+    "sampler": {
+      "units": {
+        "compared": 131,
+        "commitRatio": 1,
+        "rssRatio": 1,
+        "hwmToCommit": 1.158,
+        "ok": true,
+        "reason": null
+      },
+      "overhead": {
+        "pid": 1572,
+        "polls": 715,
+        "pollMsMedian": 38,
+        "pollMsMax": 66,
+        "peakCommitKb": 123500,
+        "peakRssKb": 140604
+      }
+    },
+    "bridge": {
+      "tasks": 400,
+      "failures": 0,
+      "emptyRssMB": 78,
+      "afterTasksRssMB": 79,
+      "rebootWithHistoryRssMB": 81,
+      "dataDirMB": 1.9,
+      "dataDirFiles": 1200
+    }
+  },
+  "samples": 715,
+  "csv": "D:\\a\\_temp\\memloop\\S5-short\\S5-short-2026-11-07T1935-73176f\\samples.csv"
+}
