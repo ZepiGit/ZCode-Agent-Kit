@@ -40,3 +40,5 @@ Spec stories: 138, 144
 - 2026-11-07 (orchestrator, from ticket 59): the release notes list the refreshed Kilo Code sheet (the false 'Kilo fetches /v1/models' line is replaced; existing sheets refresh on the next setup/integrate).
 
 - 2026-11-07 (orchestrator, from ticket 42): the release notes describe the Account Rotator question asked once, with automatic migration of the old answer.
+
+- 2026-11-07 (orchestrator, from ticket 69): release-notes sentence (proposed by its implementer): "Proxy: an empty, unquoted `deviceMid:` under `identity:` in `config.yaml` is now read as empty, as `deviceMid: ""` already was, so on its first `serve`, `claim` or `auth login` after this update the proxy writes a generated device ID into that line and sends it from then on (such a config previously ran without one)."
