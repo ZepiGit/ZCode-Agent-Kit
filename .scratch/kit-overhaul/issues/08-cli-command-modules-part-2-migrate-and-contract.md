@@ -2,7 +2,7 @@
 
 **Blocked by:** 07 (CLI command-module split, part 1 (expand: dispatcher + status/doctor/proxy/models/logs)), 10 (Batch 1b — Node 24 support floor, refuse before mutation, autostart Node-path check)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -134,3 +134,5 @@ All four RED: the existing `S3/short` expected-RED entry (ticket 37); the failed
   - this ticket's tests: "package build excludes source tests/fixtures…" (on the fixture that now has the command modules) and "payload verification rejects a payload without any one of the CLI command modules".
 
 The pending-CI checklist from round 1 still applies unchanged.
+
+Merged 2026-11-07 as dabdc0b (ticket/08-cli-command-modules-part-2 at 873df4f; first merge, no revert-of-revert step); fast suite: kit 725/744 (19 skipped, 0 fail), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged. Also: proxy typecheck green (`tsc --noEmit -p tsconfig.json`), `test:ux-before` 1/1 (every capture byte-identical to the BEFORE baseline: tty-color-80, tty-color-120, no-color, term-dumb, ascii-locale, pipe, ci; 532 s). No lockfile changes, so only the root `npm ci` ran. Clean merge (no conflicts). Sanity: `git diff --stat staging/08 HEAD -- . ':!.scratch'` is empty. Pre-merge CI (draft PR #21, staging/08 after round 2), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42387910869 (the ratchet holds on both memory-budget legs; the earlier run 42383999482, before ticket 11 landed, was also 8/8). Logs: .scratch/kit-overhaul/reports/merge-08-{npm-ci,test,proxy,mcp,ux-before,proxy-typecheck}.log.
