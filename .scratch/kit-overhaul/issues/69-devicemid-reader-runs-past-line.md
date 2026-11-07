@@ -2,7 +2,7 @@
 
 **Blocked by:** 68 (Every writer of proxy/config.yaml and harness configs keeps the file's line endings (CRLF audit))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: high
@@ -154,3 +154,4 @@ An empty unquoted `deviceMid:` as the file's very last line already got a mid be
 - The residual forms from round 14's Shared understanding still disagree with the loader: `deviceMid:  # note`, `deviceMid: "x" # y`, `~`, `null`.
 - The insert branch's `identityBlockLine` `/^identity:\s*$/m` also crosses a line break. On `identity:` followed by a blank line, it swallows that blank line when it inserts the key. That is a writer cosmetic, not a read, and condition 1 keeps that branch unchanged. It is a candidate for a `needs-triage` note under the same B1 question.
 - 68's "Left for another ticket" note ("which then becomes X-Device-Mid") is wrong on the same point round 14 corrected. It is in 68's file, so it is left to the orchestrator.
+Merged 2026-11-07 as 9441486 (`9441486ac805545312b44a6ad8154e5db09f927f`) onto 908cf9a; no conflicts. Fast suite: kit 797/816 (0 fail, 19 skipped), proxy 1384/1384, mcp 95/96 (0 fail, 1 skipped; `dist/` unchanged); `npm run test:proxy-typecheck` exit 0. No lockfile changes. Pre-merge CI: no CI-only criteria; CI runs on the next integration push. Sanity: no staging/69 branch exists; `git diff ticket/69-devicemid-reader HEAD` over the ticket's two non-.scratch files (`zcode-proxy-src/src/index.ts`, `zcode-proxy-src/src/device-mid-config.test.ts`) is empty; the only other differences from the ticket branch are the integration tip's docs commits (`.scratch/kit-overhaul/` RUNLOG, rounds/round-15, issues 54 and 68). Logs: `reports/merge-69-{npmci,test,proxy,proxy-typecheck,mcp}.log`.
