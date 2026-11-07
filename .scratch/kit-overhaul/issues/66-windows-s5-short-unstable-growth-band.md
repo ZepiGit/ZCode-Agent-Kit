@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 Risk: low
@@ -69,3 +69,4 @@ ADR: no
 
     The ubuntu leg must be unchanged (`S5/short` RED → ticket 30), and every other job green. Disagreement (Round 13 Q1 condition 6) is any condition-1 ratchet failure on windows S5/short or anything else RED that is not listed: the numbers come back, with no rerun.
   - **Left for others:** ticket 30 owns the only exit (≥ 10 windows runs ≤ 5 %/1k regardless of trend, then delete the entry and the `S5/short` key in `UNSTABLE`); ticket 55 removes the allow-list; ticket 67 owns the gap that plain listings accept any RED.
+- Merged 2026-11-07 as d44d629368fd09295c9bf4285d0b9817e8d290fd (ticket/66-windows-s5-unstable-band at 35fb83e into 33e39d0; first merge, no revert-of-revert step); fast suite: kit 737/756 (19 skipped, 0 fail), proxy 1343/1343, mcp 95/96 (1 skipped, 0 fail); mcp dist unchanged; no lockfile changes; clean merge (no conflicts). Sanity: `git diff --stat staging/66 HEAD -- . ':!.scratch'` is empty (merged tree matches the staging/66 948589f tree CI judged). Pre-merge CI (draft PR #26, staging/66), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42412266693. From that run: windows `S5/short: unstable (growth:mcp-bridge 19.11 %/1k commit, budget 5, bound 30, trend false), owned by ticket 30`, row GREEN (unstable); ubuntu `S5/short` RED → 30 as listed; ratchet holds on both legs. Logs: .scratch/kit-overhaul/reports/merge-66-{npm-ci,test,test-proxy,test-mcp}.log.
