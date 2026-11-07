@@ -208,3 +208,35 @@ Both are RED on the existing `S3/short` expected-RED entry (tickets 16/37); the 
 1. All four `test-kit` legs: the 12 snapshots and 4 scans, now independent of the runner's TERM.
 2. windows-latest: the redraw path through readline on conhost and Windows Terminal (raw mode as before). The `wgl4` snapshot is rendered with forced streams, so it does not depend on the runner's console. Ctrl-C in the plain path on a Windows console (NO_COLOR set) arrives as SIGINT; there is no automated proof of it on Windows, so it stays an owner check.
 3. The ubuntu `ux-before` leg against the 49 refreshed files.
+
+### 2026-11-07 — implementer, round 3 (restaged run 42408170742 RED on windows test-kit: CRLF)
+
+**Commits:** `04dfbaa` (product fix, fixture fix, tests) and `eefca1e` (merge of the integration tip `f7d73d3`, docs only). The head SHA is the commit that adds this comment.
+
+**Fixture (the CI RED).**
+- The windows checkout has `proxy/config.example.yaml` with CRLF line endings, so `kitFixture`'s `/^  accounts:\n(?:    .*\n)+/m` did not match and the "pre-rotator" config kept its accounts block. The same exposure affected `/^    enabled: false$/m`.
+- The fixture now normalises the example to LF once on read, then writes the user config with the requested line endings (new `eol: "lf" | "crlf"` option). A second shape assertion pins `enabled: <value>` too.
+- Reproduced locally (`t42-r3-mutants` W1): CRLF example plus the round-2 fixture gives `fixture config shape`, as on CI. W2 shows the same CRLF example with the fixed fixture: 8/8 green.
+
+**Product code: affected.**
+- Reads were already correct on CRLF:
+  - the migration's `configuredRotator` and the mismatch check parse with the `yaml` library;
+  - `ctx.port()`'s `/^  port:\s*(\d+)/m` matches before `\r`.
+- The rewrite was wrong. `configureAccountRotator` (setup's answer or override, `accounts enable|disable`) wrote `String(doc)`, and the yaml library renders LF, keeping CRLF only inside carried-over comments. Measured on the example config: 10 CRLF and 56 bare LF line breaks, content otherwise identical. A Windows user's config came back with mixed line endings.
+- Fix: `withLineEndingsOf(source, text)` writes the document with the file's own line endings (majority rule: CRLF throughout when CRLF breaks outnumber bare LF, else LF). Only line-break bytes change; what is written, when, and the import order are unchanged (B1).
+
+**Tests** (`tests/account-setup.test.mjs`, +3; RED `t42-r3-red1`: all 3 fail with `no bare LF in the rewritten config`). For a CRLF config with `enabled: true`, `enabled: false` and `auth.accounts` absent:
+- `setup` replayed twice without a terminal gives the decision as on LF (`yes/migration` or undecided), with the config byte-identical.
+- `setup --account-rotator y|n`, then the opposite through `accounts enable|disable`. Each must produce exactly the LF fixture's bytes with CRLF line endings, no bare LF, `auth.accounts.enabled` exactly once with the right value, and the decision recorded. Each replay leaves the config byte-identical.
+- Mutations (committed tree, restored from HEAD, clean afterwards): M1, a rewrite without line-ending handling, makes the 3 CRLF tests fail; M2, always CRLF, fails them too, because an LF config must stay LF.
+
+**Suites** (merged head `eefca1e`; Node 26.7.0, Bun 1.4.2)
+- `npm run test`: 779 tests, 760 pass, 0 fail, 19 skipped.
+- `npm run test:proxy`: 1343 pass, 0 fail.
+- `npm run test:proxy-typecheck`: exit 0.
+- `npm run test:mcp`: 96 tests, 95 pass, 0 fail, 1 skipped; `dist/` unchanged.
+- `npm run test:ux-before`: 1/1, with no visible change in this round.
+
+**Pending CI:** windows `test-kit` (Node 24, 26), the CRLF tests and the pre-rotator test on the CRLF checkout. Round 1–2's list otherwise stands.
+
+**Not covered here:** `bootstrap` creates `config.yaml` from the example, keeping the checkout's line endings, and other writers of `config.yaml` outside this ticket (harness adapters, upstream-config) were not audited. This round covered only the Account Rotator paths.

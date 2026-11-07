@@ -141,7 +141,20 @@ export async function decideAccountRotator({ ctx, tx, explicit, explicitSource, 
   return apply(choice, "interactive");
 }
 
-/** Record the config change in the existing setup transaction; keep YAML comments/policies. */
+/**
+ * `text` with the line endings `source` uses. The yaml library writes LF (and
+ * keeps a CRLF only inside comments it carries over), so a Windows user's
+ * CRLF config.yaml would come back with mixed line endings. A file with more
+ * CRLF than bare LF breaks is written CRLF throughout; otherwise LF.
+ */
+function withLineEndingsOf(source, text) {
+  const crlf = (source.match(/\r\n/g) ?? []).length;
+  const lf = (source.match(/(?:^|[^\r])\n/g) ?? []).length;
+  const lines = text.replace(/\r\n/g, "\n");
+  return crlf > lf ? lines.replace(/\n/g, "\r\n") : lines;
+}
+
+/** Record the config change in the existing setup transaction; keep YAML comments/policies and line endings. */
 export function configureAccountRotator(ctx, tx, enabled, runProxyCli) {
   const { parseDocument } = createRequire(join(ctx.proxySrc, "package.json"))("yaml");
   const source = readFileSync(ctx.config, "utf8");
@@ -158,7 +171,7 @@ export function configureAccountRotator(ctx, tx, enabled, runProxyCli) {
     doc.setIn(["auth", "accounts", "enabled"], enabled);
     // An external editor must not lose changes made while the import ran.
     if (readFileSync(ctx.config, "utf8") !== source) throw new Error("Proxy config changed during account import; run setup again.");
-    commitFile(ctx, tx, ctx.config, String(doc));
+    commitFile(ctx, tx, ctx.config, withLineEndingsOf(source, String(doc)));
   }
   if (process.env.ZCODE_ACCOUNTS_ENABLED !== undefined) {
     console.warn("ZCODE_ACCOUNTS_ENABLED overrides this setting. Unset it to use the saved Account Rotator choice.");
