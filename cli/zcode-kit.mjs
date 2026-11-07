@@ -30,7 +30,7 @@
 import { beginTransaction, acquireLock, releaseLock, rollbackTransaction, listTransactions } from "../lib/transaction.mjs";
 import { detectHarnesses } from "../lib/detect.mjs";
 import { createCtx, bootstrap, kitRoot } from "./context.mjs";
-import { repairManaged, setupSmoke, startupPreflight } from "./heal.mjs";
+import { setupSmoke, startupPreflight } from "./heal.mjs";
 import { diagnoseQuota, quotaAuthValid } from "./quota-diagnostics.mjs";
 import { spawnSync } from "node:child_process";
 import { runCommandSync, resolveBun } from "../lib/process.mjs";
@@ -51,29 +51,27 @@ import { launchHarness } from "./launch.mjs";
 import { askAccountRotator, configureAccountRotator, restartForAccountChange, rotatorChoice } from "./account-setup.mjs";
 import { setupOutput } from "./setup-output.mjs";
 import {
-  ABORTED, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, consentStatus, consentedForRepair, createPrompter, decideHarness,
-  decisionFileChecks, forgetHarnessChoice, isUnreadableChoice, ownedIntegration, parseSelection, readHarnessChoices,
-  recordHarnessChoice, resolveHarnessSelection, storedDecisionIds,
+  ABORTED, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, createPrompter, decideHarness,
+  isUnreadableChoice, ownedIntegration, parseSelection, readHarnessChoices,
+  recordHarnessChoice, resolveHarnessSelection,
 } from "./harness-consent.mjs";
-import { upstreamChecks } from "./upstream-config.mjs";
 import { ACCOUNT_ROTATOR_QUESTION } from "./account-setup.mjs";
+import { run as runStatus } from "./commands/status.mjs";
+import { run as runProxy } from "./commands/proxy.mjs";
+import { run as runModels } from "./commands/models.mjs";
+import { run as runDoctor } from "./commands/doctor.mjs";
+import { ADAPTER_IDS, assertNotCheckoutWrite as assertNotCheckoutWriteFor, loadAdapter, proxyFetch as fetchFromProxy } from "./commands/common.mjs";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
-const ADAPTER_IDS = ["omp", "pi", "claude-code", "codex", "opencode", "cline", "kilo-code", "aider", "continue", "goose"];
 // setup: the kit is configured but at least one harness failed. A dedicated
 // code (not 1, which Node uses for an uncaught error or a failed import) so
 // the installers and `update` can tell a partial success from a crash.
 const EXIT_HARNESS_FAILED = 20;
 // setup: interrupted with Ctrl-C; answers already given were applied.
 const EXIT_ABORTED = 130;
-
-function loadAdapter(id) {
-  // eslint-disable-next-line no-bitwise
-  return import(`./adapters/${id}.mjs`);
-}
 
 function parseArgs(argv) {
   const positional = [];
@@ -101,19 +99,25 @@ const ROOT = kitRoot();
 let BACKUP_DIR;
 let ctx;
 
+// Commands that live in command modules (cli/commands/): each returns
+// `{ exitCode, records }` and the entry renders the records.
+const COMMANDS = {
+  status: runStatus,
+  proxy: runProxy,
+  models: runModels,
+  doctor: runDoctor,
+};
+
 async function main() {
   if (command === "help" || flags.help) return usage(0);
   ctx = createCtx(ROOT);
   BACKUP_DIR = ctx.backupDir;
 
+  if (Object.hasOwn(COMMANDS, command)) return dispatch(COMMANDS[command]);
   switch (command) {
     case "setup": return cmdSetup();
     case "integrate": return cmdIntegrate();
     case "run": return cmdRun();
-    case "doctor": return cmdDoctor();
-    case "status": return cmdStatus();
-    case "proxy": return cmdProxy();
-    case "models": return cmdModels();
     case "usage": return cmdUsage();
     case "auth": return cmdAuth();
     case "accounts": return cmdAccounts();
@@ -123,6 +127,43 @@ async function main() {
     default:
       console.error(`unknown command: ${command}`);
       return usage(2);
+  }
+}
+
+/** The command ctx a command module runs with (cli/commands/common.mjs). */
+function commandCtx() {
+  return {
+    kit: ctx,
+    env: process.env,
+    execPath: process.execPath,
+    spawnSync,
+    fetch: (...args) => fetch(...args),
+    progress: (line) => console.log(line),
+  };
+}
+
+/**
+ * Run a command module and render its records. A module that throws may
+ * attach the records it had collected (`err.records`); they are printed
+ * first, as the inline command printed them before failing.
+ */
+async function dispatch(run) {
+  let result;
+  try {
+    result = await run({ positional, flags, passthrough }, commandCtx());
+  } catch (err) {
+    if (Array.isArray(err?.records)) render(err.records);
+    throw err;
+  }
+  render(result.records);
+  return result.exitCode;
+}
+
+function render(records) {
+  for (const record of records) {
+    if (record.kind === "text") (record.stream === "stderr" ? process.stderr : process.stdout).write(record.text);
+    else if (record.kind === "json") process.stdout.write(JSON.stringify(record.value, null, 2) + "\n");
+    else throw new TypeError(`unknown record kind ${JSON.stringify(record.kind)}`);
   }
 }
 
@@ -182,29 +223,14 @@ function runProxyCli(args, opts = {}) {
 }
 
 function proxyFetch(path, init = {}, timeoutMs = 8000) {
-  const key = ctx.key();
-  const port = ctx.port();
-  return fetch(`http://127.0.0.1:${port}${path}`, {
-    ...init,
-    headers: { authorization: `Bearer ${key}`, ...(init.headers ?? {}) },
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  return fetchFromProxy({ kit: ctx, fetch }, path, init, timeoutMs);
 }
 
 // ------------------------------------------------------------------- setup
 
-// A tarball install carries no .git; a source checkout always does. Writing
-// user configs against a checkout root silently forks machine state when two
-// copies exist (install dir + checkout share one home), so it needs an
-// explicit opt-in. Read-only paths (doctor, status, --dry-run) stay open.
+// The checkout-write guard (cli/commands/common.mjs) for the inline commands.
 function assertNotCheckoutWrite() {
-  if (ctx.dryRun) return;
-  if (!existsSync(join(ctx.root, ".git"))) return;
-  if (process.env.ZCODE_KIT_ALLOW_CHECKOUT === "1") return;
-  throw new Error(
-    `refusing to write user configs from a source checkout (${ctx.root}) — ` +
-      "run the installed copy instead, or set ZCODE_KIT_ALLOW_CHECKOUT=1 to proceed intentionally",
-  );
+  assertNotCheckoutWriteFor(ctx, process.env);
 }
 
 async function cmdSetup() {
@@ -586,189 +612,6 @@ async function cmdRun() {
   const id = positional[1];
   requireHarness(id);
   return launchHarness(ctx, id, passthrough ?? []);
-}
-
-// ------------------------------------------------------------------ doctor
-/**
- * `doctor --forget <id>`: remove one stored harness decision (readable or
- * not) through a transaction; the integration itself stays as it is and the
- * next setup asks again.
- */
-async function forgetDecision() {
-  const id = typeof flags.forget === "string" ? flags.forget.trim() : "";
-  const stored = storedDecisionIds(ctx);
-  if (!id || (!ADAPTER_IDS.includes(id) && !stored.includes(id))) {
-    console.error(`Usage: zcode-kit doctor --forget <harness> (known: ${ADAPTER_IDS.join(", ")}${stored.length ? `; stored: ${stored.join(", ")}` : ""})`);
-    return 2;
-  }
-  if (!stored.includes(id)) {
-    console.log(`No stored decision for ${id}; nothing to forget.`);
-    return 0;
-  }
-  assertNotCheckoutWrite();
-  ensureState(ctx);
-  acquireLock(BACKUP_DIR);
-  let tx = null;
-  let txId = null;
-  let result;
-  try {
-    tx = beginTransaction(BACKUP_DIR, `zcode-kit doctor --forget ${id}`);
-    result = forgetHarnessChoice(ctx, tx, id);
-  } finally {
-    let finishErr = null;
-    try { if (tx) txId = tx.finish(); } catch (err) { finishErr = err; }
-    releaseLock(join(BACKUP_DIR, ".setup-lock"));
-    if (finishErr) console.error(`WARN: recording the transaction failed (${finishErr.message})`);
-  }
-  if (result?.removed) {
-    console.log(`Decision for ${id} removed. Its integration is unchanged; the next zcode-kit setup asks again.`);
-    if (txId) console.log(`transaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
-  }
-  return 0;
-}
-
-async function cmdDoctor() {
-  if (flags.forget !== undefined) return forgetDecision();
-  const ids = flags.harness ? String(flags.harness).split(",").map(s => s.trim()).filter(Boolean) : [...ADAPTER_IDS];
-  for (const id of ids) requireHarness(id);
-  const detected = detectHarnesses(ctx.home);
-  if (flags.fix) {
-    assertNotCheckoutWrite();
-    const loaded = Object.fromEntries(await Promise.all(ids.map(async id => [id, (await loadAdapter(id)).default])));
-    // Repairs never widen consent: without --harness only harnesses the user
-    // consented to (stored decision or an existing kit integration) are re-applied.
-    const targets = flags.harness ? ids : consentedForRepair(ctx, ids, detected, loaded);
-    const adapters = targets.map(id => loaded[id]);
-    const repaired = await repairManaged(ctx, adapters, flags.json ? () => {} : console.log);
-    if (repaired.id && !flags.json) console.log(`transaction ${repaired.id} recorded — undo with: zcode-kit rollback ${repaired.id}`);
-  }
-  const checks = [];
-  const add = (name, ok, detail) => checks.push({ name, ok, detail });
-  const managerPath = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
-  if (flags.fix) {
-    // A down or hung proxy is the most common reason to run doctor --fix; the
-    // manager's safe start (with its hung-own proof) is the only repair path.
-    const { createManager } = await import(pathToFileURL(managerPath).href);
-    if (await createManager({ root: ROOT, home: ctx.home }).healthIdentify() !== "ours") {
-      const started = spawnSync(process.execPath, [managerPath, "start"], {
-        encoding: "utf8", timeout: 180000, stdio: flags.json ? ["ignore", "pipe", "pipe"] : "inherit",
-      });
-      const code = started.error || started.signal ? null : started.status;
-      add("proxy start (--fix)", code === 0, code === 0 ? "proxy running and healthy"
-        : `manager start exit ${code ?? "timeout"} — see zcode-kit proxy logs; next: zcode-kit proxy restart`);
-      if (!flags.json) console.log(code === 0 ? "doctor --fix: proxy started" : `doctor --fix: proxy start failed (exit ${code ?? "timeout"})`);
-    }
-  }
-  const core = spawnSync(process.execPath, [managerPath, "doctor"], { encoding: "utf8", timeout: 25000 });
-  if (core.error || core.signal) add("manager doctor completed", false, "manager check failed or timed out");
-  // Parse the manager doctor output in BOTH modes: the text summary and exit
-  // code must count the same FAILs the user is shown, not only adapter checks.
-  const lines = (core.stdout ?? "").split("\n");
-  if (core.status !== 0 && !core.error && !core.signal && !lines.some(line => /^FAIL\s+/.test(line))) {
-    add("manager doctor completed", false, `manager check exited ${core.status ?? "unknown"} without a diagnostic failure result`);
-  }
-  for (const line of lines) {
-    const m = line.match(/^(PASS|FAIL|SKIP)\s+(.+?)(?:\s+—\s+(.*))?$/);
-    if (m) checks.push({ name: m[2], ok: m[1] === "PASS" ? true : m[1] === "FAIL" ? false : null, detail: m[3] ?? "" });
-  }
-  if (!flags.json) {
-    process.stdout.write(core.stdout ?? "");
-  }
-
-  const choices = readHarnessChoices(ctx);
-  for (const id of ids) {
-    const { default: adapter } = await loadAdapter(id);
-    if (!flags.harness) {
-      // A harness the user declined (or never answered for) is not a failed
-      // check: only consented or kit-owned integrations are verified.
-      const status = consentStatus(ctx, id, adapter, Boolean(detected[id]), choices);
-      if (!status.verify) {
-        checks.push({ name: `${id}: integration`, ok: null, detail: status.detail });
-        continue;
-      }
-    }
-    for (const c of adapter.verify(ctx)) checks.push({ name: `${id}: ${c.name}`, ok: c.ok, detail: c.detail ?? "" });
-  }
-  // The decision files themselves: an unreadable one silently blocks every
-  // refresh of its harness, so it is reported with the way out.
-  for (const c of decisionFileChecks(ctx, ADAPTER_IDS, detected, choices)) {
-    if (flags.harness && !ids.some((id) => c.name.startsWith(`${id}:`))) continue;
-    checks.push(c);
-  }
-  // Opt-in: the only doctor check that talks to the vendor (two unauthenticated GETs).
-  if (flags.upstream === true) {
-    for (const c of await upstreamChecks(join(ROOT, "proxy", "config.yaml"))) checks.push(c);
-  }
-
-  const failed = checks.filter((c) => c.ok === false).length;
-  const skipped = checks.filter((c) => c.ok === null).length;
-  if (flags.json) {
-    console.log(JSON.stringify({ ok: failed === 0, failed, skipped, checks }, null, 2));
-  } else {
-    for (const c of checks) {
-      const tag = c.ok === null ? "SKIP" : c.ok ? "PASS" : "FAIL";
-      console.log(`${tag}  ${c.name}${c.detail ? ` — ${c.detail}` : ""}`);
-    }
-    console.log(failed === 0 ? `doctor: ${skipped} skipped, ${failed} failed — OK` : `doctor: ${failed} check(s) failed`);
-  }
-  return failed === 0 ? 0 : 1;
-}
-
-// ------------------------------------------------------------------ status
-async function cmdStatus() {
-  const manager = join(ROOT, "proxy", "zcode-proxy-manager.mjs");
-  const res = spawnSync(process.execPath, [manager, "status", ...(flags.json === true ? ["--json"] : [])], { stdio: "inherit" });
-  return res.status ?? 1;
-}
-
-// ------------------------------------------------------------------- proxy
-// Thin forwarding to the manager: it owns identity, ownership proofs and exit codes.
-async function cmdProxy() {
-  const sub = positional[1];
-  if (!["start", "stop", "restart", "status", "logs"].includes(sub)) {
-    console.error("Usage: zcode-kit proxy start|stop|restart|status|logs [n]");
-    return 2;
-  }
-  const args = [join(ROOT, "proxy", "zcode-proxy-manager.mjs"), sub];
-  if (sub === "logs" && positional[2] !== undefined) args.push(String(positional[2]));
-  if (sub === "status" && flags.json === true) args.push("--json");
-  const res = spawnSync(process.execPath, args, { stdio: "inherit" });
-  return res.status ?? 2;
-}
-
-// ------------------------------------------------------------------ models
-async function cmdModels() {
-  let list = null;
-  let fromProxy = false;
-  try {
-    const res = await proxyFetch("/v1/models");
-    if (res.ok) {
-      const body = await res.json();
-      list = (body.data ?? []).map((m) => m.id);
-      fromProxy = true;
-    }
-  } catch {}
-  if (!list) {
-    // Proxy down: report the registry snapshot from the kit's synced copy.
-    const registry = await loadAdapterRegistrySnapshot();
-    list = registry;
-  }
-  if (flags.json) {
-    // source must reflect where the list actually came from — a registry
-    // fallback is NOT a proxy answer and must not be labeled as one.
-    console.log(JSON.stringify({ models: list, source: fromProxy ? "proxy" : "registry" }, null, 2));
-  } else {
-    console.log(list.join("\n"));
-  }
-  if (flags["show-key"]) {
-    console.error("\nlocal proxy key (never share; shown because --show-key was given):");
-    console.log(ctx.key());
-  }
-  return 0;
-}
-
-async function loadAdapterRegistrySnapshot() {
-  return ["glm-5.3", "glm-5.3-flash"];
 }
 
 // ------------------------------------------------------------------- usage

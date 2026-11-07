@@ -74,17 +74,22 @@ function snapshot(pid, marker, cache) {
   const starttime = fields[19];
   const key = `${pid}:${starttime}`;
   let meta = cache.get(key);
-  if (meta === undefined) {
+  if (meta === null) return null;
+  // pid and start time survive an exec, the command line does not: a child
+  // first seen between fork and exec shows its parent's argv (a proxy spawned
+  // by a start lock holder killed inside spawn() was role "preflight" for a
+  // whole S3/hung run). A marked process is re-read whenever its command line changed.
+  const cmdline = readText(`/proc/${pid}/cmdline`) ?? "";
+  if (meta === undefined || meta.cmdline !== cmdline) {
     const environ = readText(`/proc/${pid}/environ`);
     if (environ === null || !environ.split("\0").includes(marker)) {
       cache.set(key, null);
       return null;
     }
-    const argv = (readText(`/proc/${pid}/cmdline`) ?? "").split("\0").filter(Boolean);
-    meta = { argv, role: roleOf(argv), comm: stat.slice(stat.indexOf("(") + 1, close) };
+    const argv = cmdline.split("\0").filter(Boolean);
+    meta = { cmdline, argv, role: roleOf(argv), comm: stat.slice(stat.indexOf("(") + 1, close) };
     cache.set(key, meta);
   }
-  if (meta === null) return null;
   const status = readText(`/proc/${pid}/status`) ?? "";
   const kb = (name) => Number((status.match(new RegExp(`^${name}:\\s+(\\d+)`, "m")) ?? [])[1] ?? 0);
   let fds = 0;

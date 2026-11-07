@@ -40,6 +40,44 @@ const thaw = (pid) => (process.platform === "win32" ? resumeProcess(pid) : proce
 // peak (VmHWM, read while it is alive) reaches the per-role verdict.
 export const sampleIntervalMs = 250;
 
+// A hung round: our running proxy is frozen past the manager's startup grace,
+// then 10 mixed launches race the kit's hung-own recovery.
+//
+// Which proxy: the one the kit's pid record names, when it is a process of
+// this run; otherwise the single proxy of this run that serves the isolated
+// port. A start lock holder killed between spawning the proxy and writing
+// proxy.pid leaves exactly that: a healthy proxy without a record, and
+// `manager start` answers 0 (CI run 42281731448, ubuntu). That proxy is the
+// state the round must test, not a reason to skip it. Anything else (no proxy
+// of this run, none on the port, two on it, a failed start) is a skipped
+// round, noted with its reason; the evidence gate makes the run a harness
+// failure (lib/completeness.mjs). Only processes carrying the run marker are
+// ever frozen (`proxies` is the run's own scan).
+export function hungTarget({ startCode, record, proxies, port, portsOf }) {
+  if (startCode !== 0) return { pid: null, reason: `manager start exited ${startCode}` };
+  const ours = proxies.map((p) => p.pid);
+  const recordedPid = record?.pid ?? null;
+  if (recordedPid !== null && ours.includes(recordedPid)) return { pid: recordedPid, via: "pid-record", recordedPid };
+  const serving = ours.filter((pid) => portsOf(pid).includes(port));
+  if (serving.length === 1) return { pid: serving[0], via: "listener", recordedPid };
+  const recorded = recordedPid === null ? "no pid record" : `pid record ${recordedPid} is not a proxy of this run`;
+  return { pid: null, reason: `${recorded}, ${serving.length} proxies of this run serve port ${port}` };
+}
+
+export function makeHungRound({ kit, proxies, portsOf, round, note, freeze, thaw, alive, graceMs = 65_000 }) {
+  return async (name) => {
+    const start = await kit.manager(["start"]);
+    if (start.code !== 0) return note(`${name}.skipped`, { startCode: start.code, reason: `manager start exited ${start.code}` });
+    await sleep(graceMs); // past the manager's 60 s startup grace (Windows also sees a new process only at its next poll)
+    const target = hungTarget({ startCode: start.code, record: kit.pidRecord(), proxies: proxies(), port: kit.port, portsOf });
+    if (target.pid === null) return note(`${name}.skipped`, { startCode: start.code, reason: target.reason });
+    note(`${name}.target`, target);
+    // Our own proxy, frozen: /health stops answering. It is always thawed, and
+    // a failed thaw ends the run as a harness failure (lib/freeze.mjs).
+    await whileFrozen(target.pid, () => round(name, 10, { kind: "mixed" }), { freeze, thaw, ...(alive ? { alive } : {}) });
+  };
+}
+
 export async function run(ctx) {
   const session = await startProxySession(ctx, { startProxy: false });
   const { kit } = session;
@@ -116,15 +154,7 @@ export async function run(ctx) {
     return result;
   }
 
-  const hungRound = async (name) => {
-    const start = await kit.manager(["start"]);
-    const pid = kit.pidRecord()?.pid;
-    if (start.code !== 0 || !pid) return ctx.note(`${name}.skipped`, start.code);
-    await sleep(65_000); // past the manager's 60 s startup grace
-    // Our own proxy, frozen: /health stops answering. It is always thawed, and
-    // a failed thaw ends the run as a harness failure (lib/freeze.mjs).
-    await whileFrozen(pid, () => round(name, 10, { kind: "mixed" }), { freeze, thaw });
-  };
+  const hungRound = makeHungRound({ kit, proxies, portsOf, round, note: ctx.note, freeze, thaw });
   const killHolder = async () => {
     await round("kill-holder-10", 10, {
       kind: "preflight",
