@@ -83,3 +83,74 @@ The recommendation was right on the scope and the test list. It needed two corre
 ---
 
 - Correction (round 14): the misread value is NOT sent upstream today (all four callers discard the return value; loadConfig reads an empty unquoted deviceMid as absent, so that config never gets a device ID and sends no X-Device-Mid). After the fix the unquoted form gets the quoted form's treatment (UUID generated and written), so its upstream requests DO change; release-notes line in 54.
+
+### 2026-11-07 — implementer (branch `ticket/69-devicemid-reader`)
+
+**Base and commits.** Built on the integration tip `06aa96b`, which includes 68 (`aff5c05`). `f69e9fb` holds the fix, the tests and the condition-4 text correction. The head SHA is the commit that adds this comment. Before reporting, `git merge overhaul/stability-terminal-ux`: already up to date (tip still `06aa96b`).
+
+**The change (condition 1).** One expression in `zcode-proxy-src/src/index.ts`, plus a three-line comment:
+- before: `/^(\s*)deviceMid:\s*(.*)$/m`
+- after: `/^(\s*)deviceMid:[^\S\r\n]*(.*)$/m`
+The separator is `\s` minus CR and LF. Everything else is untouched: the indent capture, the quote stripping, the fill/insert/append branches, `randomUUID()`, the written line format, the log line and 68's `withLineEndingsOf`. No caller changes.
+
+**Why only the empty unquoted spelling can change.** `^(\s*)deviceMid:` is unchanged, so every match starts at the same place with the same indent, and the rest (`[^\S\r\n]*(.*)$`) always matches. The old separator and the new one consume the same characters unless the whitespace run after `deviceMid:` holds a CR or LF. That happens only when the rest of the line is whitespace: the empty unquoted forms. Then the new reader stops at its own line end, so `(.*)` is empty and the existing empty-value path runs, the same path as `deviceMid: ""`.
+
+**Tests (condition 2).** New file `zcode-proxy-src/src/device-mid-config.test.ts`: 10 forms × {LF, CRLF} = 20 tests, temp-dir fixtures only (B2/B3).
+- The forms are the round's eight, plus "empty unquoted followed by a blank line":
+  - quoted value; unquoted value; empty quoted;
+  - empty unquoted followed by another key / followed by a blank line / with trailing spaces and a tab;
+  - empty unquoted on the last line, with and without a final newline;
+  - no key under `identity:`; no `identity:` block.
+- `randomUUID` is stubbed with `spyOn(crypto, "randomUUID")` and restored after each test. The first call gets a pinned UUID. Later calls get a different one, so a second fill would show in (b).
+- The expected file bytes and return values are literals.
+- Per form the tests check:
+  - the returned value;
+  - the exact file bytes;
+  - (a) `loadConfig(path).identity.deviceMid` equals the return value, and `buildIdentityHeaders(...)["X-Device-Mid"]` carries it;
+  - (b) a repeat call returns the same value and leaves the file byte-identical;
+  - (c) a CRLF file has no bare LF, and an LF file has no CR.
+- The existing `index.test.ts` deviceMid tests are unchanged.
+
+**Pre-fix proof (condition 3).**
+- RED, log `t69-red-prefix`: `src/index.ts` restored from the parent commit (`git checkout f69e9fb~1 -- zcode-proxy-src/src/index.ts`), then the new tests plus `index.test.ts` were run. 29 pass, 8 fail. The 8 failures are exactly the empty-unquoted forms, LF and CRLF each:
+  1. followed by another key;
+  2. followed by a blank line;
+  3. with trailing spaces;
+  4. on the last line with a final newline.
+  Cases 1–3 fail on the return value: it returned `appVersion: "3.8.1`. With that, the fill and the loader agreement fail too: there was no write, and the loader read the value as absent. Case 4 fails on the file bytes only. The old `\s*` also ate the file's final line break: `  deviceMid:\n` (or `\r\n`) at EOF became `  deviceMid: "<uuid>"` with no final break. The return value, the loader and the header there were already correct.
+- Passing on the pre-fix code: every other form, including "empty unquoted on the last line without a final newline" (LF and CRLF), and all 17 `index.test.ts` tests.
+- The same RED run on the unchanged tip before the fix: `t69-red-tip`, 12 pass / 8 fail, the same 8.
+- GREEN: `t69-green-fix`, 37/37, after restoring with `git checkout f69e9fb -- zcode-proxy-src/src/index.ts`. `git status` was clean.
+- Full-output equivalence, `reports/t69-equivalence.log`. A scratch harness derived from the committed test (sed adds a JSON dump line; harness kept outside the repo, logs `t69-dump-prefix` and `t69-dump-fix`) recorded each case's return value, file bytes and complete `buildIdentityHeaders(loadConfig(path).identity)` object, both on the pre-fix code and the fix. 12 of 20 cases are identical in all three. The 8 above differ:
+  - cases 1–3: pre-fix `mid="appVersion: \"3.8.1"` and no `X-Device-Mid` header; post-fix the pinned UUID, persisted and sent;
+  - case 4: file bytes only (the final line break is now kept). The mid and headers are identical.
+
+**Mutation proofs** (`t69-mut-*`; committed tree, each mutant restored with `git checkout f69e9fb -- zcode-proxy-src/src/index.ts`; `git status` clean afterwards):
+- M1, an existing value is never returned (always regenerate): 24 fail, among them all 20 new tests (through (b) or the literal bytes) and 4 `index.test.ts` tests.
+- M2, the write skips `withLineEndingsOf`: 4 fail (the CRLF insert and append forms, plus 68's two matching tests).
+- M3, no quote stripping: 22 fail.
+- M4, the separator stops at LF but crosses CR (`[^\S\n]*`): 0 fail. This is expected and is not a gap in coverage. On a CRLF file, the only extra thing this mutant eats is the line's own `\r`. 68's whole-document conversion puts it back, so the output is byte-identical to the fix. No test can tell them apart. The committed reader still excludes `\r`, as condition 1 asks.
+
+**Suites** (head after the merge check; Node 26.7.0, Bun 1.4.2):
+- `npm run test`: 816 tests, 797 pass, 0 fail, 19 skipped (`t69-full-kit`).
+- `npm run test:proxy`: 1384 pass, 0 fail, 92 files (`t69-full-proxy`). That is the merge-68 count of 1364 plus the 20 new tests.
+- `npm run test:proxy-typecheck`: exit 0.
+- `npm run test:mcp`: 96 tests, 95 pass, 0 fail, 1 skipped; `dist/` unchanged.
+- Memory loop: not run. No scenario exercises this function's input forms, and the change is one regex in a once-per-start config edit.
+
+**Decisions.**
+1. The separator is `[^\S\r\n]*`, not `[ \t]*`. It is exactly the old `\s*` minus the line breaks, which makes the equivalence argument above hold character for character (other Unicode whitespace is treated as before).
+2. The tests are in a new file, so `index.test.ts` stays byte-unchanged (condition 3's last sentence).
+3. One form beyond the round's list: "empty unquoted followed by a blank line". It is the other way the old separator crossed lines.
+4. `randomUUID` is stubbed with `spyOn` on the `node:crypto` namespace, restored per test, rather than injected. Injection would change the function's signature, which condition 1 rules out. Randomness is a system boundary (tdd `mocking.md`).
+5. The acceptance checkboxes are left for the orchestrator, as in 68 and 42.
+
+**Release-notes line for ticket 54 (condition 5; the orchestrator's to record).** Proposed sentence:
+> Proxy: an empty, unquoted `deviceMid:` under `identity:` in `config.yaml` is now read as empty, as `deviceMid: ""` already was, so on its first `serve`, `claim` or `auth login` after this update the proxy writes a generated device ID into that line and sends it from then on (such a config previously ran without one).
+
+An empty unquoted `deviceMid:` as the file's very last line already got a mid before the fix (only its final line break was lost), so the sentence stays true for it. The TUI calls the function only on a config it has just created from the template (`deviceMid: ""`), so the sentence leaves the TUI out.
+
+**Left for another ticket (not changed here).**
+- The residual forms from round 14's Shared understanding still disagree with the loader: `deviceMid:  # note`, `deviceMid: "x" # y`, `~`, `null`.
+- The insert branch's `identityBlockLine` `/^identity:\s*$/m` also crosses a line break. On `identity:` followed by a blank line, it swallows that blank line when it inserts the key. That is a writer cosmetic, not a read, and condition 1 keeps that branch unchanged. It is a candidate for a `needs-triage` note under the same B1 question.
+- 68's "Left for another ticket" note ("which then becomes X-Device-Mid") is wrong on the same point round 14 corrected. It is in 68's file, so it is left to the orchestrator.
