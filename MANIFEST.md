@@ -32,6 +32,7 @@ systems or across all harnesses.
 
 - `zcode-proxy-src/node_modules/` — installed by `setup.mjs` with `bun install`.
 - `zcode-proxy-src/Android-APP/` (209 MB) — not needed for Desktop/harness integration; its build path was removed (`scripts/build-android-apk.sh`, `build:android-*` npm scripts, the esbuild dev dependency, and the vendored `.github/workflows/release.yml` Android build job).
+- `zcode-proxy-src/.github/workflows/` (`ci.yml`, `release.yml`) and `zcode-proxy-src/.github/release.yml` — vendored upstream CI and release workflows, removed. GitHub runs only the root `.github/workflows/`, so they never ran in this repository, and they pinned Bun 1.4.0. The root CI covers the proxy tests.
 - `mcp/zcode-harness-mcp/node_modules/` — installed by `setup.mjs`.
 
 Automated checks: [GitHub Actions](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/workflows/ci.yml). Effort mapping: [EFFORT_MAPPING.md](EFFORT_MAPPING.md); its German snapshot is [EFFORT_MAPPING.de.md](EFFORT_MAPPING.de.md).
