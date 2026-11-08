@@ -151,3 +151,43 @@ Root cause: the test asserted something the pre-15 code never guaranteed on Wind
 - The Windows stop path with the new exit check (PowerShell probe after `TerminateProcess` only while the pid still answers): manager-safety "stop cleanly kills a verified-own process" and the S4 windows leg.
 
 - Merged 2026-11-08 as af5caa8d07bbc5de5114d9bcf9a47cba298335cd (ticket/15-proxy-lifecycle-module at b11064a into e88821f; first merge, never reverted, so no revert-of-revert step; the branch's `Revert` commits are 02/06 history from the integration tip; no conflicts). Fast suite on Bun 1.4.2: kit 833/852 (19 skipped, 0 fail), proxy 1413/1413 (93 files), proxy typecheck clean, mcp 96/97 (1 skipped, 0 fail); `mcp/zcode-harness-mcp/dist/` unchanged; lockfiles unchanged (npm ci only). `npm run test:ux-before`: 1/1 pass (no visible change). Memory loop (linux, `--only S3/short,S3/hung,S4/short`, port 19150, `/home/AgentKit/overhaul-tools/merge-15-memloop`): ratchet holds; S3/short RED on checks owned by 16/37, S3/hung RED on checks owned by 16/37, S4/short RED on `stale-lock-after-ctrl-c` and `respawn-recovers-despite-stale-lock` (owner 17); `unstoppable-proxy-after-ctrl-c` 0 of 8 this run. Pre-merge CI: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42469139184 (staging/15 on the tip with ticket 19, all 8 jobs green; the earlier RED run 42444449351 on windows test-kit, proxy-lifecycle.test.mjs:266, was fixed in round 2). Sanity diff: staging/15's last commit merges the tip into the ticket, so the ticket's files are `git diff --name-only staging/15^2 staging/15 -- . ':!.scratch'` (13 files); `git diff staging/15 HEAD` over them is empty. The `^1..` variant lists ticket 19's 17 files, and that diff is empty too; `git diff staging/15 HEAD` is empty over the whole tree, .scratch included, so no ticket merged since staging/15 was cut. Logs: `reports/merge-15-{npm-ci,test,proxy,proxy-typecheck,mcp,ux-before,memloop}.log`.
+
+### 2026-11-08 — implementer (ticket 15, round 3: Windows teardown EPERM)
+
+**Branch:** `ticket/15-fix-windows-teardown` (worktree `/home/AgentKit/wt/t15b`, from the integration tip `eaa91b3`). Commits: `caf6c5a` (teardown) and `579fb8f` (mock servers unref'd). Tip `8126454` merged in. The head SHA is the commit that adds this comment. Test-only change.
+
+**Verdict: (B).** It was a teardown race in the test, not an orphan from the product or a test-ownership leak.
+- **CI evidence** (run 42484868282, jobs 128744437802 / 128744437890, windows Node 26 / 24): only `proxy-lifecycle.test.mjs:341` failed (the old-proxy respawn test), in its after-hook. The error was `EPERM … rm` on `C:\Users\RUNNER~1\AppData\Local\Temp\kit-lifecycle-mgu4xy` (resp. `-d945oD`), raised at `rmSync` (`:74`). Every assertion of the test passed: the after-hook ran, and the failure is the hook's. The other spawned tests of the file passed teardown. Those tests stop their proxy before teardown (stop intent / manager CLI stop / restart). This test was the only one that left a live proxy for teardown.
+- **Teardown as written in round 2:** the deferred `killFixtureProxy(root, fresh.pid)` → `process.kill(pid, "SIGKILL")`, then `rmSync(root)` synchronously in the same tick. On Windows that kill is `TerminateProcess`, which "is asynchronous; it initiates termination and returns immediately" (https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess; the same primary source ticket 70 cites). The dying proxy's cwd is `<fixture>\zcode-proxy-src` (the manager spawns it with `cwd: PROXY_SRC`). Its stdout/stderr are the inherited `<fixture>\logs\proxy.log` handle. Windows refuses to delete a directory that is a live process's current directory, or that holds an open file, hence EPERM. The staging run (42469139184) won the race, so the failure is intermittent.
+- **Why not (A).** The process holding the directory was the test's own respawned proxy, and it was alive at teardown by design: the test never stopped it. The product did what it should: the respawn succeeded and the record was complete. Nothing in the log shows a process the test did not start, or one that survived the kill. The race window is exactly the async termination of the process teardown had just killed. The new teardown makes the remaining doubt observable. If anything still names the fixture after the bounded wait, it fails with that process's pid and command line, so a real orphan would now be named, not inferred.
+
+**Fix (tests/proxy-lifecycle.test.mjs only)**
+- The respawn test stops what it started: `manager stop` (which returns only after the exit) must print `stopped (pid N)`. On Windows, with no start time (ticket 16), stop refuses; the test then logs a diagnostic and teardown kills the proxy.
+- `tearDownFixture`:
+  - It runs the deferred stops and kills.
+  - It waits, bounded at 20 s, until no process other than this one has a command line naming the fixture directory. On Windows this uses CIM `Win32_Process`; on Linux `/proc/*/cmdline`; on macOS `ps`. Everything the file starts names its unique mkdtemp directory: the proxies, the old-proxy stand-in, the manager hook.
+  - It then removes the directory with up to 10 × 200 ms retries on EPERM/EBUSY/ENOTEMPTY.
+  - A process still present is reported as `still running after teardown: pid N: <command line>` and killed (it names this fixture). A removal that still fails says `after 10 attempt(s); processes naming the fixture: …`, or `no process names the fixture`, or that the process table was unreadable. Nothing is swallowed.
+- The identity mock servers are `unref()`'d. A failing teardown skips the later after-hooks, and an open server then kept the run alive until the cap. The mutant below found this.
+- New test: the scan sees a spawned process naming the fixture and drops it after its exit. It runs on Windows too, which exercises the CIM query.
+
+**Mutations** (committed first, restored from HEAD, empty diff)
+- `r3-m1`: the test leaks its proxy (no stop, no deferred kill). The respawn test fails with `still running after teardown: pid 3747906: …/bun run /tmp/kit-lifecycle-IpxqKT/zcode-proxy-src/src/index.ts serve`.
+- `r3-m2`: a blind scan (always empty). The scan test fails.
+- `r3-m3`: `rmSync` always EPERM. It hung until the 600 s cap (open mock servers), which led to the `unref` fix. `r3-m3b` then fails in 24 s with `after 10 attempt(s); no process names the fixture`.
+- Linux cannot produce the EPERM itself (a POSIX directory that is a cwd can be removed), so the Windows part rests on the CI log plus the documented TerminateProcess semantics.
+
+**Suites after merging `8126454`**
+- `npm run test` (`t15b-test`): 882 tests, 864 pass, 0 fail, 18 skipped.
+- `npm run test:proxy`: 1451 pass, 0 fail, 98 files.
+- typecheck: clean.
+- `npm run test:mcp`: 100 tests, 99 pass, 0 fail, 1 skipped.
+- `proxy-lifecycle.test.mjs`: 15/15, three runs in a row, nothing left running.
+- `test:ux-before` was not rerun: the change touches only this test file.
+
+**Pending CI:** windows test-kit Node 24/26, `proxy-lifecycle.test.mjs`, which includes the new scan test (the CIM query path).
+
+**Round 3 addendum: free ports** (orchestrator request: implementers of tickets 71 and 29 hit false EADDRINUSE on 19152/19159 while this file ran in another worktree)
+- `f1ef3db`: every test in `tests/proxy-lifecycle.test.mjs` takes its own free loopback port. `freePort()` binds `127.0.0.1:0`, reads the port back and releases it; the repo has no shared helper, and the other kit tests inline `listen(0)`. Every assertion is kept; the foreign-port line names the chosen port.
+- Evidence: 15/15 three times in a row, and two copies of the file run in parallel are both 15/15 (`t15b-parallel-a/b`). Mutant `r3-m4` pins `freePort()` to 19159 and runs two copies in parallel; it fails 6 and 1 tests with `EADDRINUSE: address already in use 127.0.0.1:19159` (`t15b-mut-r3-m4-fixed-a/b`). That is the failure the other implementers saw. Restored from HEAD, empty diff.
+- `npm run test` after merging tip `c457fd8` (`t15b-test2`): 882 tests, 864 pass, 0 fail, 18 skipped.
