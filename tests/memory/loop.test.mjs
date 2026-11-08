@@ -812,12 +812,19 @@ const CI_REFUSED = {
 // stale-lock round, it is a harness failure.
 const S3_HUNG_REFUSED_RUN = join(dirname(CI_S3_HUNG), "local-20261107-s3-hung-refused-linux-summary.json");
 
-test("job: a real S3/hung run whose stale-lock start was refused passes the gate as ticket 16's RED; cut or unchecked it is a harness failure", () => {
+test("job: a real S3/hung run whose stale-lock start was refused passes the evidence gate as RED; the lock checks ticket 16 removed now fail it; cut or unchecked it is a harness failure", () => {
   const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: S3_HUNG_REFUSED_RUN });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Round 15 Q1: the refusal and the lock checks are ticket 16's, the memory peaks ticket 37's.
-  assert.deepEqual(row, { key: "S3/hung", outcome: "RED", ticket: "16, 37", owners: ["16", "37"], note: "S3/hung: RED on peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:proxy, exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round, owned by ticket 16 (exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round), ticket 37 (peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:proxy)" });
+  // The gate: a measured RED, not a harness failure.
+  assert.equal(row?.outcome, "RED", r.stdout + r.stderr);
   assert.ok(result.redChecks.includes("start-over-stale-lock"), result.redChecks.join());
+  // Ticket 16 removed failed-launches and stale-lock-after-round from S3/hung
+  // (Round 15 Q1 condition 5): this pre-fix run's REDs on them are unowned now.
+  assert.equal(r.status, 1, "the ratchet fails on the removed names");
+  const unowned = r.stdout.split("\n").filter((l) => / not owned by /.test(l)).map((l) => l.trim());
+  assert.deepEqual(unowned, [
+    "- S3/hung: RED on failed-launches, not owned by tickets 16, 37 (linux, Round 14 Q1, Round 15 Q1); the RED comes back as an ownership question, do not edit owners",
+    "- S3/hung: RED on stale-lock-after-round, not owned by tickets 16, 37 (linux, Round 14 Q1, Round 15 Q1); the RED comes back as an ownership question, do not edit owners",
+  ]);
   const dir = mkdtempSync(join(tmpdir(), "memloop-s3hung-"));
   try {
     const run = JSON.parse(readFileSync(S3_HUNG_REFUSED_RUN, "utf8"));

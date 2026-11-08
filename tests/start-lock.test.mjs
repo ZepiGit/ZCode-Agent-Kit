@@ -376,7 +376,12 @@ import { join } from "node:path";
 const config = (await Bun.file(process.env.ZCODE_PROXY_CONFIG).text());
 const port = Number(config.match(/^  port:\\s*(\\d+)/m)[1]);
 const key = config.match(/proxyApiKey:\\s*"([^"]+)"/)[1];
-writeFileSync(join(import.meta.dir, "..", "..", "spawned", String(process.pid)), "");
+const root = join(import.meta.dir, "..", "..");
+writeFileSync(join(root, "spawned", String(process.pid)), "");
+// listen-delay-ms: a proxy that takes this long to come up (a cold start).
+let delay = 0;
+try { delay = Number(await Bun.file(join(root, "listen-delay-ms")).text()) || 0; } catch {}
+if (delay) await Bun.sleep(delay);
 createServer((req, res) => {
   if (req.headers.authorization !== "Bearer " + key) return res.writeHead(401).end("{}");
   if (req.url === "/health") return res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pid: process.pid } }));
@@ -444,6 +449,54 @@ for (const [i, killAt] of ["spawn:intent-recorded", "spawn:spawned", "spawn:pid-
   });
 }
 
+for (const [i, killAt] of ["spawn:spawned", "spawn:pid-recorded", "spawn:start-recorded"].entries()) {
+  test(`a start killed at ${killAt} while its proxy is still coming up: the next start waits for that proxy instead of spawning a second`, { timeout: 180_000 }, async (t) => {
+    const port = 19163 + i;
+    const root = stateFixture(t, port, { kit: true });
+    defer(root, () => killFixtureProxies(root));
+    // Windows: the killed start's own PowerShell probe can take seconds before the kill.
+    writeFileSync(join(root, "listen-delay-ms"), process.platform === "win32" ? "6000" : "4000");
+    const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+    const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt })], { env, encoding: "utf8", timeout: 120_000 });
+    assert.equal(killed.stdout, "", `the start was killed at ${killAt}`);
+    const early = (await health(port)).state;
+    if (process.platform === "win32" && early !== "down") t.diagnostic(`windows: the orphaned proxy was already up (${early}) before the next start; the adoption path ran instead of the wait`);
+    else assert.equal(early, "down", "test premise: the orphaned proxy is not up yet");
+    const start = manager(root, ["start"], env);
+    assert.equal(start.status, 0, start.stdout + start.stderr);
+    await sleep(500);
+    const spawned = readdirSync(join(root, "spawned"));
+    assert.equal(spawned.length, 1, `no second proxy was spawned (spawned: ${spawned.join(", ")})`);
+    const live = liveProxies(root);
+    assert.equal(live.length, 1);
+    assert.equal((await health(port)).pid, live[0]);
+    const record = readJson(join(root, "logs", "proxy.pid"));
+    assert.equal(record?.pid, live[0], JSON.stringify(record));
+    assert.ok(Number.isFinite(record.startedMs));
+    const stop = manager(root, ["stop"], env);
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    assert.deepEqual(liveProxies(root), []);
+  });
+}
+
+test("the spawner itself completes the record when its start-time probe answers only during the health wait", { timeout: 180_000 }, async (t) => {
+  const port = 19167;
+  const root = stateFixture(t, port, { kit: true });
+  defer(root, () => killFixtureProxies(root));
+  const bun = bunOrFail();
+  const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
+  const real = createLifecycle({ root, home: join(root, "home") }).processStartMs;
+  // Slow for longer than the spawn's own 5 s probe window, then answering.
+  const until = Date.now() + 6000;
+  const slow = createLifecycle({ root, home: join(root, "home"), bunResolver: () => bun, processStartMsImpl: (pid, opts) => (Date.now() < until ? null : real(pid, opts)) });
+  const started = await slow.ensureRunning({ waitMs: 30_000 });
+  assert.equal(started.outcome, "started", JSON.stringify(started));
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  assert.equal(record.pid, started.pid);
+  assert.ok(Number.isFinite(record.startedMs), `the start finished with a complete record: ${JSON.stringify(record)}`);
+  assert.equal((await slow.stop()).outcome, "stopped");
+});
+
 test("a start whose start-time probe times out (no kill) leaves a proxy the next start completes and stop stops", { timeout: 180_000 }, async (t) => {
   const port = 19167;
   const root = stateFixture(t, port, { kit: true });
@@ -453,7 +506,7 @@ test("a start whose start-time probe times out (no kill) leaves a proxy the next
   const real = createLifecycle({ root, home: join(root, "home") }).processStartMs;
   // The spawner's probes never answer in time (two slow PowerShell calls on Windows).
   const slow = createLifecycle({ root, home: join(root, "home"), bunResolver: () => bun, processStartMsImpl: () => null });
-  const started = await slow.ensureRunning({ waitMs: 30_000 });
+  const started = await slow.ensureRunning({ waitMs: 8000 });
   assert.equal(started.outcome, "started", JSON.stringify(started));
   const before = readJson(join(root, "logs", "proxy.pid"));
   assert.equal(before.pid, started.pid);
@@ -479,7 +532,7 @@ test("stop completes a record left without a start time and stops its proxy (the
   const bun = bunOrFail();
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
   const real = createLifecycle({ root, home: join(root, "home") }).processStartMs;
-  const started = await createLifecycle({ root, home: join(root, "home"), bunResolver: () => bun, processStartMsImpl: () => null }).ensureRunning({ waitMs: 30_000 });
+  const started = await createLifecycle({ root, home: join(root, "home"), bunResolver: () => bun, processStartMsImpl: () => null }).ensureRunning({ waitMs: 8000 });
   assert.equal(started.outcome, "started");
   assert.equal(readJson(join(root, "logs", "proxy.pid")).startedMs, null);
   const stopped = await createLifecycle({ root, home: join(root, "home"), processStartMsImpl: (pid, opts) => real(pid, opts) }).stop();
