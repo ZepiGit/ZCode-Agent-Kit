@@ -65,14 +65,81 @@ const cleanups = new Map();
 /** Run fn when the fixture is torn down, before its directory is removed (t.after hooks run in order). */
 const defer = (root, fn) => cleanups.get(root).push(fn);
 
+/**
+ * Processes other than this one whose command line names the fixture
+ * directory: every process a fixture's test starts (proxies, the old-proxy
+ * stand-in, the manager hook) does, and the mkdtemp name is unique. null when
+ * the process table cannot be read.
+ */
+function fixtureProcesses(root) {
+  const tag = basename(root).toLowerCase();
+  if (!/^[a-z0-9-]+$/.test(tag)) return null;
+  if (process.platform === "win32") {
+    const script = `Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine.ToLower().Contains('${tag}') } | ForEach-Object { "$($_.ProcessId)\`t$($_.CommandLine)" }`;
+    const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+    if (r.status !== 0) return null;
+    return r.stdout.split(/\r?\n/).filter(Boolean).map((line) => { const [pid, ...rest] = line.split("\t"); return { pid: Number(pid), commandLine: rest.join("\t") }; });
+  }
+  if (process.platform === "linux") {
+    const found = [];
+    for (const name of readdirSync("/proc")) {
+      if (!/^\d+$/.test(name) || Number(name) === process.pid) continue;
+      let commandLine;
+      try { commandLine = readFileSync(`/proc/${name}/cmdline`, "utf8").split("\0").filter(Boolean).join(" "); } catch { continue; }
+      if (commandLine.toLowerCase().includes(tag)) found.push({ pid: Number(name), commandLine });
+    }
+    return found;
+  }
+  const r = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8", timeout: 15_000 });
+  if (r.status !== 0) return null;
+  return r.stdout.split("\n").map((l) => l.trim().match(/^(\d+)\s+(.*)$/)).filter((m) => m && Number(m[1]) !== process.pid && m[2].toLowerCase().includes(tag)).map((m) => ({ pid: Number(m[1]), commandLine: m[2] }));
+}
+const describeProcesses = (list) => list.map((p) => `pid ${p.pid}: ${p.commandLine}`).join("; ");
+
+/**
+ * Teardown waits on the observable state, never on time: the deferred stops
+ * and kills run, then every process naming the fixture must be gone (Windows
+ * TerminateProcess is asynchronous, and a live process's cwd or open log
+ * file keeps the directory from being removed), then the directory is
+ * removed with a short retry for handles Windows releases late (EPERM/EBUSY).
+ * A process still there is reported by pid and command line, and killed
+ * (it names this fixture, so this test started it); a removal that still
+ * fails names what holds the directory.
+ */
+async function tearDownFixture(root) {
+  for (const fn of cleanups.get(root).splice(0).reverse()) { try { await fn(); } catch {} }
+  let left = null;
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    left = fixtureProcesses(root);
+    if ((left && left.length === 0) || Date.now() > deadline) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  let orphans = null;
+  if (left && left.length) {
+    orphans = `still running after teardown: ${describeProcesses(left)}`;
+    for (const p of left) { try { process.kill(p.pid, "SIGKILL"); } catch {} }
+  }
+  for (let attempt = 1; ; attempt++) {
+    try { rmSync(root, { recursive: true, force: true }); break; }
+    catch (err) {
+      if (!["EPERM", "EBUSY", "ENOTEMPTY"].includes(err.code) || attempt >= 10) {
+        const holders = fixtureProcesses(root);
+        err.message += ` — after ${attempt} attempt(s); ${holders === null ? "the process table could not be read" : holders.length ? `processes naming the fixture: ${describeProcesses(holders)}` : "no process names the fixture"}`;
+        if (orphans) err.message += `; ${orphans}`;
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  if (orphans) throw new Error(`fixture ${root}: ${orphans}`);
+}
+
 /** A kit copy (cli/, lib/, the manager) in a temp root that is also its state directory. */
 function kitFixture(t, port, { proxySrc = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "kit-lifecycle-"));
   cleanups.set(root, []);
-  t.after(() => {
-    for (const fn of cleanups.get(root).splice(0).reverse()) { try { fn(); } catch {} }
-    rmSync(root, { recursive: true, force: true });
-  });
+  t.after(() => tearDownFixture(root));
   for (const member of ["cli", "lib"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "logs")); mkdirSync(join(root, "home"));
   cpSync(join(ROOT, "proxy", "zcode-proxy-manager.mjs"), join(root, "proxy", "zcode-proxy-manager.mjs"));
@@ -150,6 +217,19 @@ const NEVER_ALLOCATED_PID = 2147483644;
 // answer in time leaves startedMs null: today's behaviour (DECISIONS Round 7
 // Q4), which ticket 16 closes. Only Windows can hit it.
 const startTimeMissing = (record) => process.platform === "win32" && record?.startedMs === null;
+
+test("the teardown's process scan sees a process naming the fixture, and loses it once it exited", { timeout: 60_000 }, async (t) => {
+  const root = kitFixture(t, 19150);
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", join(root, "marker")], { stdio: "ignore" });
+  defer(root, () => killChild(child));
+  await new Promise((r) => child.once("spawn", r));
+  const seen = await until("the scan to list the child", () => fixtureProcesses(root)?.some((p) => p.pid === child.pid), 30_000);
+  assert.equal(seen, true);
+  const exited = new Promise((r) => child.once("exit", r));
+  child.kill("SIGKILL");
+  await exited;
+  await until("the scan to drop the child", () => fixtureProcesses(root)?.every((p) => p.pid !== child.pid), 30_000);
+});
 
 // --------------------------------------------------------- spawned preflight
 test("a spawned preflight loads the lifecycle module and no presentation module, with today's output", async (t) => {
@@ -396,6 +476,14 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
   const spawned = readJson(envOut);
   assert.equal(spawned.pid, fresh.pid);
   assert.deepEqual({ node: canonicalPath(spawned.node), manager: canonicalPath(spawned.manager), argv: spawned.argv }, { node: canonicalPath(process.execPath), manager: canonicalPath(manager), argv: ["serve"] });
+  // The test stops what it started: the manager's own stop (it returns only
+  // after the exit) rather than a teardown kill.
+  const stop = spawnSync(process.execPath, [manager, "stop"], { env, encoding: "utf8", timeout: 60_000 });
+  if (startTimeMissing(record)) t.diagnostic(`windows: no start time, stop refuses (ticket 16); teardown kills pid ${fresh.pid} by its fixture command line`);
+  else {
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    assert.equal(stop.stdout, `stopped (pid ${fresh.pid})\n`);
+  }
 });
 
 /** Run fn with console.log/console.warn recorded per stream (not passed through). */
