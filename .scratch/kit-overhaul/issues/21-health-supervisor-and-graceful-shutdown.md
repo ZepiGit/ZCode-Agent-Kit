@@ -2,7 +2,7 @@
 
 **Blocked by:** 19 (Admission control: 64 MB in-flight byte cap, FIFO queue, 503 shed contract), 14 (Event-line format and redaction for new log events (prefactor))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -286,3 +286,5 @@ The memory-loop and footprint evidence above stands: 21's product code is unchan
 - `npm run test:mcp` (`t21r3-full-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped.
 
 **Pending CI (orchestrator):** the windows `memory-budget` S1/short ×5 on a restaged staging/21. The orphan is unowned by 21 and needs an owner decision (a re-run, or the new kill-guard ticket above).
+
+Merged 2026-11-08 as 2aab7db (`2aab7db91e8eb8424129123202963637cf519264`; ticket/21-health-supervisor at 68d1d9d) onto 4d1543d; clean merge (no conflicts). Plain merge, no revert-of-revert step: `git log --grep 'ticket 21'` on the integration branch shows no earlier merge, and `git log --grep 'Revert'` shows only the 02/06 reverts. Fast suite: kit 867/885 (0 fail, 18 skipped), proxy 1501/1501 (103 files), mcp 99/100 (0 fail, 1 skipped); mcp `dist/` unchanged after the build; no lockfile changes, so only the root `npm ci` ran. `npm run test:proxy` ran without credentials (isolated HOME). The tip has no suite-wide egress guard yet (ticket 76 is staged, not merged), so the run could reach a real host; the log names no real host, only the mock upstream's ECONNREFUSED retries. Pre-merge CI (staging/21 089c917, restaged onto tip f21d3ac), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42509546483. The earlier RED run 42500996594 (windows S1/short rep 2 `orphans 1`) comes from the tip's windows kill-guard tick truncation (ticket 77), not from 21 (round 3 above). Sanity: `git diff --name-only staging/21^1 staging/21 -- . ':!.scratch'` gives only `tests/proxy-lifecycle.test.mjs` (from the tip merge 5412490), and `git diff staging/21 HEAD` over it is empty. That list undercounts, because staging/21 was restaged. `git diff f21d3ac staging/21 -- . ':!.scratch'` gives 16 files and matches the merge's own non-.scratch diff (4d1543d..HEAD, 16 files, +1358/-240). Whole tree: `git diff staging/21 HEAD -- . ':!.scratch'` touches 7 files, and the patch is byte-identical to `git diff f21d3ac 4d1543d` over them: the six captcha-cdn files come from ticket 29's merge 5f754b8, and `docs/adr/0004-admission-shed-contract.md` comes from f257719 (round 28). Nothing else differs. Logs: `.scratch/kit-overhaul/reports/merge-21-{npmci,kit,proxy,mcp}.log`.
