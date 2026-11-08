@@ -34,7 +34,7 @@ Schlüssel im separaten Zustand dieser Installation außerhalb von `node_modules
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` (Windows) oder `~/.config/goose/custom_providers/zcode.json` (macOS/Linux) | Credential über dokumentierten `auth.command`-Helper (Kit-Key-Resolver, ohne Shell) |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | Kit fasst VS-Code-State nie an; Werte einmalig in der UI eintragen |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | Custom-Provider (Anthropic Messages) in der UI; kilo.jsonc schreibt das Kit bewusst nicht |
-| MCP-fähige Harnesses | stdio-Server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: Eintrag in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (nur wenn erkannt und zugestimmt); Codex: im isolierten Home. MCP allein zählt NICHT als Modellintegration |
+| MCP-fähige Harnesses | stdio-Server `zcode-harness` (`node --max-semi-space-size=1 mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: Eintrag in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (nur wenn erkannt und zugestimmt); Codex: im isolierten Home. MCP allein zählt NICHT als Modellintegration |
 
 Pfade unter `generated/` beziehen sich auf den Kit-Zustand: bei Release-/
 Quellcode-Installationen im Kit-Verzeichnis, bei npm im separaten Zustandsverzeichnis.
@@ -85,7 +85,7 @@ Unter Windows aktiviert das isolierte Codex-Profil die Restricted-Token-Sandbox 
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<absoluter-kit-installationspfad>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["--max-semi-space-size=1", "<absoluter-kit-installationspfad>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
