@@ -130,3 +130,54 @@ Spec stories: 34, 135
     - S5/short growth is 40.98 %/1k (trend), procPeak 90.8 MB;
     - "ratchet holds": S3/short and S3/hung are RED only on 16's and 37's owned checks, S5/short only on 30's.
   - Under Round 16 Q2(c), linux `procPeak:mcp-bridge` (37's name, not marked `flips`) is now GREEN in S3/short and S3/hung on this tree. 67's ratchet accepts a GREEN owned check inside a RED run. The name stays under 37; removing it is 37's step (Round 15 Q1 condition 5).
+
+- 2026-11-08 (implementer, round 2). Pre-merge run 42454650683 was RED on windows test-kit, Node 24 and 26: `tests\cli-audit.test.mjs:69` "Claude MCP registration recognizes equivalent Windows paths without changing ownership", `equivalent registration is not replaced` (`/home/AgentKit/overhaul-tools/ci-art/t36-r2/job-128650978529.log`). I merged the integration tip `1aa3784` first (tickets 26, 67 and 70 had landed).
+
+  **Root cause: the test's premise, not the equivalence logic.**
+  - The fixture's fake `claude mcp get` shows an equivalent spelling (forward slashes, upper case) **without** the flag, and records any other call as an attempt.
+  - Setup recognised the registration as this installation's: there was no "another kit copy" warning, and that assertion passed in CI.
+  - Because the flag was missing, the ticket 36 migration ran `claude mcp remove`, which the fake recorded and failed. The result: "WARN: claude mcp remove failed … left as registered", and the attempt file exists.
+  - Reproduced on Linux through the same code path, with a scratch copy of the old test using a POSIX shim and a `/./` spelling (`/home/AgentKit/overhaul-tools/t36-scripts/r2/repro.test.mjs`, `reports/t36-r2-repro.log`):
+    - without the flag: ✖, the attempt is `mcp remove zcode-harness --scope user`;
+    - with the flag: ✔, "already registered", no attempt.
+  - So ownership was never at risk. "No claude call for an equivalent registration" now holds only for a registration that already carries the flag; a flagless one is this installation's outdated entry and must be migrated once (this ticket's Seam 8).
+
+  **Changes.**
+  - `lib/mcp-bridge.mjs`: `sameInstallationPath(candidate, expected, { platform })` (moved from `setup.mjs`, with an explicit platform: `path.win32` / `path.posix` normalisation, lower-casing on win32, realpath only for the host's platform) and `claudeRegistrationState(output, serverJs, { platform })` → `foreign` / `current` / `outdated`.
+  - `cli/commands/setup.mjs` uses them, with unchanged host behaviour. An unreadable `get` display still counts as foreign.
+  - New cross-platform unit test in `tests/adapter-audit.test.mjs`: "Claude Code registration: equivalent path spellings with and without the bridge flag, per platform". It was RED before the refactor (`sameInstallationPath is not a function`, `reports/t36-r2-red1.log`).
+    - win32 spellings: original, upper case, lower case, `/` separators, upper-case `/`, `\.\`, `\dist\..\dist\`, a doubled `\\`, quoted, quoted upper-case `/`, all with a space in the path.
+    - posix spellings: `/./`, `//`, `/../`, quoted.
+    - Each must be the same installation: `current` with the flag (also when ANSI-coloured), `outdated` without it or with `--max-semi-space-size=2`.
+    - Foreign: `.foreign` suffix, a sibling dir, another drive, relative paths, upper case on posix, backslashes on posix, each with and without the flag. Unreadable displays (empty, no Args, no `--stdio`) are also foreign.
+
+  **Pre-existing test change (justified, extended, not weakened).** The cli-audit test keeps its name and its two original assertions (no "another kit copy"; `equivalent registration is not replaced`), now for an equivalent spelling that carries the flag. It adds:
+  - the same spelling without the flag is migrated exactly once (`[mcp remove …]`, then `[mcp add … -- node --max-semi-space-size=1 <server> --stdio]`), with no foreign warning;
+  - two replays make no further call.
+
+  It now runs on every host: Windows keeps its separator/case spelling and `.cmd` shim, other hosts use a `/./` spelling and an `sh` shim. The fake is stateful (`get` shows the stored Args, `remove` drops it, `add` stores it). Its sibling test (foreign prefix) is unchanged.
+
+  **Mutations** (committed 9f72507, restored with `git checkout 9f72507 -- <file>`, clean diffs; `/home/AgentKit/overhaul-tools/t36-scripts/mutate-r2.py`, `reports/t36-r2-mut-*.log`). All 7 killed:
+  - R1: win32 case-sensitive;
+  - R2: no win32 separator normalisation;
+  - R3: flag ignored;
+  - R4: always outdated;
+  - R5: substring ownership;
+  - R6: add without remove;
+  - R7: relative path adopted.
+
+  **Suites** on 9f72507 (`reports/t36-r2-*.log`):
+  - kit: 844 tests, 826 pass, 0 fail, 18 skipped (+1 test; −1 skip, since the cli-audit test now runs on Linux);
+  - `test:proxy`: 1387 pass, 0 fail;
+  - `test:proxy-typecheck`: clean;
+  - `test:mcp`: 100 tests, 99 pass, 0 fail, 1 skipped;
+  - Node 24.22.2: `adapter-audit` + `cli-audit` 29/31 (2 Windows skips).
+
+  **Run 42454650683, memory-budget** (both legs success; "ratchet holds").
+  - windows (job 128650978593), compared with the Windows baseline in METRICS (S3/short bridge 78.6 / 72.1 commit/WS, kit 734.5):
+    - S3/short: procPeak:mcp-bridge 66.9 commit / 61.0 WS (gate WS, budget 75, ok); peak:kit 664.7 commit (budget 514, RED, owned by 37). RED on 16/17/37's checks.
+    - S3/hung: peak:kit 459.3 commit, ok.
+    - S3/omp: peak:kit 428.3 commit, ok.
+    - S5/short: growth:mcp-bridge 15.43 %/1k commit (WS 35.21), trend false, inside the band 5 < v ≤ 30, so "unstable … owned by ticket 30". procPeak 82.1 commit / 59.7 WS. The run is GREEN.
+  - linux (job 128650978580): S3/short and S3/hung procPeak:mcp-bridge 74.1 / 73.4 (ok); S5/short growth 40.87 %/1k, trend true, RED, owned by 30.
+  - The round-1 projection for windows S5 (≈ 28.6–31) did not show in this single run: 15.43 is below the 28-run mean of 19.04. It is one run, not conclusive.
