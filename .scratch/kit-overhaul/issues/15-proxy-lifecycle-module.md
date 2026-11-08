@@ -186,3 +186,8 @@ Root cause: the test asserted something the pre-15 code never guaranteed on Wind
 - `test:ux-before` was not rerun: the change touches only this test file.
 
 **Pending CI:** windows test-kit Node 24/26, `proxy-lifecycle.test.mjs`, which includes the new scan test (the CIM query path).
+
+**Round 3 addendum: free ports** (orchestrator request: implementers of tickets 71 and 29 hit false EADDRINUSE on 19152/19159 while this file ran in another worktree)
+- `f1ef3db`: every test in `tests/proxy-lifecycle.test.mjs` takes its own free loopback port. `freePort()` binds `127.0.0.1:0`, reads the port back and releases it; the repo has no shared helper, and the other kit tests inline `listen(0)`. Every assertion is kept; the foreign-port line names the chosen port.
+- Evidence: 15/15 three times in a row, and two copies of the file run in parallel are both 15/15 (`t15b-parallel-a/b`). Mutant `r3-m4` pins `freePort()` to 19159 and runs two copies in parallel; it fails 6 and 1 tests with `EADDRINUSE: address already in use 127.0.0.1:19159` (`t15b-mut-r3-m4-fixed-a/b`). That is the failure the other implementers saw. Restored from HEAD, empty diff.
+- `npm run test` after merging tip `c457fd8` (`t15b-test2`): 882 tests, 864 pass, 0 fail, 18 skipped.
