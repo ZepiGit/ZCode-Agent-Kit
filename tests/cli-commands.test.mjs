@@ -807,10 +807,10 @@ test("entry: run passes the preflight's refusal (3) and the harness's exit code 
     if (req.url === "/quota") return res.end(JSON.stringify({ provider: "zai", serverTime: 1, jwt: null, balances: [], errors: [] }));
     res.writeHead(404).end("{}");
   });
-  await new Promise((resolve) => server.listen(19083, "127.0.0.1", resolve));
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   t.after(() => { server.closeAllConnections(); server.close(); });
   writeFileSync(join(root, ".proxykey"), "synthetic-key");
-  writeFileSync(join(root, "proxy", "config.yaml"), `server:\n  port: 19083\n  proxyApiKey: "synthetic-key"\n`);
+  writeFileSync(join(root, "proxy", "config.yaml"), `server:\n  port: ${server.address().port}\n  proxyApiKey: "synthetic-key"\n`);
   const { spawn } = await import("node:child_process");
   const kitRun = (exit) => new Promise((resolve, reject) => {
     const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, ZCODE_KIT_SKIP_DEPS: "1", FAKE_HARNESS_EXIT: String(exit) };
