@@ -1,0 +1,3091 @@
+{
+ "messages: text, non-streaming": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "268"
+     ]
+    ],
+    "length": 268,
+    "sha256": "2e903d5d73b6170d8c585af294bfb7c15c3145c2331888003ee7f00541945119",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "messages: streaming with system, tools, tool use and results, stale cache_control, metadata": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "958"
+     ]
+    ],
+    "length": 958,
+    "sha256": "406eb0ea5f4385aba13cc51b5316d742d12866c0276fdaf7cf2176ab466bbdbb",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":256,\"stream\":true,\"system\":\"Be brief.\",\"tools\":[{\"name\":\"read_file\",\"description\":\"Read a file\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]},\"cache_control\":{\"type\":\"ephemeral\"}},{\"name\":\"write_file\",\"description\":\"Write a file\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"}}}}],\"tool_choice\":{\"type\":\"auto\"},\"metadata\":{\"foo\":\"bar\",\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"},\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Read README.md\"}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Reading.\"},{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"read_file\",\"input\":{\"path\":\"README.md\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_01\",\"content\":\"# Title\\nbody ünïcödé\",\"cache_control\":{\"type\":\"ephemeral\"}}]}]}"
+   }
+  ]
+ },
+ "messages: image block, glm-5.3-flash with thinking disabled": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "4459"
+     ]
+    ],
+    "length": 4459,
+    "sha256": "7141d884a8a9958eda1bfbf15a008a8189f9aff25b7983e2fd2032f1c0b4ebd4"
+   }
+  ]
+ },
+ "messages: glm-5.3-flash with an explicit effort": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "375"
+     ]
+    ],
+    "length": 375,
+    "sha256": "230a54729e19c60afc1face5556e7e4feb5175db34d38c3908c661dbf5103446",
+    "body": "{\"model\":\"glm-5.3-flash\",\"max_tokens\":4096,\"stream\":true,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2048},\"output_config\":{\"effort\":\"high\"},\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"think\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "messages: unicode, numbers, duplicate and __proto__ keys, pretty-printed": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "458"
+     ]
+    ],
+    "length": 458,
+    "sha256": "61a881bc087eb7aa1d383f3e94b2569748eb2e5f9d705867a26eccaef7cd2e14",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"x\":2,\"__proto__\":{\"polluted\":true},\"temperature\":1,\"top_p\":0.1,\"seed\":12345678901234567000,\"big\":1e+21,\"neg0\":0,\"tiny\":1e-7,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"café é 😀 😀 lone \\ud800 sep   nul \\u0000 tab\\t quote\\\" slash/\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "messages: body the transforms leave unmodified is forwarded verbatim": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "208"
+     ]
+    ],
+    "length": 208,
+    "sha256": "e252b974ff5f88d78c4f2481a06f43010d49702f53346849cea1823280ebb9ca",
+    "body": "{\n    \"model\" : \"glm-5.3\",\n    \"max_tokens\" : 16,\n    \"messages\" : [ ],\n    \"metadata\" : { \"user_id\" : \"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\" }\n}\n"
+   }
+  ]
+ },
+ "messages: gzip request body": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "6263"
+     ]
+    ],
+    "length": 6263,
+    "sha256": "f6e9c41272018a41bf42f09c6d9c47bdca761ab68c260b591438e2db2ec5f8b7"
+   }
+  ]
+ },
+ "messages: 3 MB multi-byte body": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "3146003"
+     ]
+    ],
+    "length": 3146003,
+    "sha256": "dc0858056e6aaea6f1f6e859c21ebc8e99feb02c33a9281eed32278fcc361efe"
+   }
+  ]
+ },
+ "messages: chunked body without content-length, multi-byte characters split across chunks": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "78277"
+     ]
+    ],
+    "length": 78277,
+    "sha256": "1a0cdd77a57011406836bde9c277f76b859443451afd99d6c22e0f054c8411d4"
+   }
+  ]
+ },
+ "messages: invalid UTF-8 and a byte order mark": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "301"
+     ]
+    ],
+    "length": 301,
+    "sha256": "1e6d8cf751f7cf50d3b511037e98f466942d32fcf08f13f3fc4e28fe0e550c0d",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"bad byte: � and a truncated euro: �\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "chat: text, non-streaming": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "357"
+     ]
+    ],
+    "length": 357,
+    "sha256": "4e15def77f8cff072c889dcd090f205f8d254301cb857c92b9818388f94b9ea1",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "chat: streaming with tools, tool calls and tool results": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "773"
+     ]
+    ],
+    "length": 773,
+    "sha256": "6bd0dc8f5b591c7ec525ad40e1120caa1c794229d52b4a6cd513265a27876c4f",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":\"Read README.md\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"call_01\",\"name\":\"read_file\",\"input\":{\"path\":\"README.md\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"call_01\",\"content\":\"# Title\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":32200,\"system\":\"You are terse.\",\"stream\":true,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"tools\":[{\"name\":\"read_file\",\"description\":\"Read a file\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}}],\"tool_choice\":{\"type\":\"auto\"},\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "chat: image_url data URI": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "4462"
+     ]
+    ],
+    "length": 4462,
+    "sha256": "bafcf72e5916f4bda89e62afd68f12fa2e8ee9628d98ce561089972a1de5783f"
+   }
+  ]
+ },
+ "chat: streaming with stream_options and reasoning effort": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "375"
+     ]
+    ],
+    "length": 375,
+    "sha256": "196dc507592fdde961968998ecd58d812769eb2faf8a1435149b9df33ac29cff",
+    "body": "{\"model\":\"glm-5.3-flash\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"stream\":true,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":16000},\"output_config\":{\"effort\":\"high\"},\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "responses: string input, non-streaming, then a previous_response_id chain": {
+  "status": [
+   200,
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "362"
+     ]
+    ],
+    "length": 362,
+    "sha256": "6f62e32a6f006c77faaf4892304d8c770f97d59b40468a880860ff7c6514dfc6",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"first turn\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-5>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-6>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-7>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-8>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "438"
+     ]
+    ],
+    "length": 438,
+    "sha256": "ca09091faa86c08574ed530fe1a1ed0802fd78401a138d7a72193cf27bc43b5e",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":\"first turn\"},{\"role\":\"assistant\",\"content\":\"ok\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"second turn\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "responses: streaming with function tools and array input": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "696"
+     ]
+    ],
+    "length": 696,
+    "sha256": "83fda577330d44af30dfa8794cc1c4c05b9f5dbab111fe45b78ecdb5e941b041",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":\"Read it\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"call_9\",\"name\":\"read_file\",\"input\":{\"path\":\"a\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"call_9\",\"content\":\"contents\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"system\":\"Be brief.\",\"stream\":true,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"tools\":[{\"name\":\"read_file\",\"description\":\"Read\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   }
+  ]
+ },
+ "async messages: streaming and non-streaming": {
+  "status": [
+   200,
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/v1/off-peak/anthropic/v1/messages",
+    "headers": [
+     [
+      "authorization",
+      "Bearer capture.jwt.token"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-device-mid",
+      "0b6f8d1e-5a77-4c3e-9e21-capturemid01"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-coding-plan-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-off-peak-ticket-id",
+      "t-capture"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "accept-encoding",
+      "gzip, deflate, br, zstd"
+     ],
+     [
+      "content-length",
+      "934"
+     ]
+    ],
+    "length": 934,
+    "sha256": "cf148e6b9f614ed6d76619233440b4beddce08170dad611ff959778e4aeb0171",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"stream\":true,\"system\":[{\"type\":\"text\",\"text\":\"sys\"}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Read README.md\"}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Reading.\"},{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"read_file\",\"input\":{\"path\":\"README.md\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_01\",\"content\":\"# Title\\nbody ünïcödé\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"tools\":[{\"name\":\"read_file\",\"description\":\"Read a file\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]},\"cache_control\":{\"type\":\"ephemeral\"}},{\"name\":\"write_file\",\"description\":\"Write a file\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"},\"text\":{\"type\":\"string\"}}}}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/v1/off-peak/anthropic/v1/messages",
+    "headers": [
+     [
+      "authorization",
+      "Bearer capture.jwt.token"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-device-mid",
+      "0b6f8d1e-5a77-4c3e-9e21-capturemid01"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-coding-plan-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-off-peak-ticket-id",
+      "t-capture"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "accept-encoding",
+      "gzip, deflate, br, zstd"
+     ],
+     [
+      "content-length",
+      "4342"
+     ]
+    ],
+    "length": 4342,
+    "sha256": "a8ca9cae87ed0d16f113d663ef94ce7ef7e2b25e4e2a5915da16a501a08d256e"
+   }
+  ]
+ },
+ "async chat: streaming with tools, non-streaming with an image": {
+  "status": [
+   200,
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/v1/off-peak/anthropic/v1/messages",
+    "headers": [
+     [
+      "authorization",
+      "Bearer capture.jwt.token"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-device-mid",
+      "0b6f8d1e-5a77-4c3e-9e21-capturemid01"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-coding-plan-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-off-peak-ticket-id",
+      "t-capture"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "accept-encoding",
+      "gzip, deflate, br, zstd"
+     ],
+     [
+      "content-length",
+      "744"
+     ]
+    ],
+    "length": 744,
+    "sha256": "bb6c2ec3323b3b91d3f211c769833fb92916ff6314d3182a558f3ce402ca55f3",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":\"Read README.md\"},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"call_01\",\"name\":\"read_file\",\"input\":{\"path\":\"README.md\"}}]},{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"call_01\",\"content\":\"# Title\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"system\":\"You are terse.\",\"stream\":true,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"tools\":[{\"name\":\"read_file\",\"description\":\"Read a file\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"]}}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/v1/off-peak/anthropic/v1/messages",
+    "headers": [
+     [
+      "authorization",
+      "Bearer capture.jwt.token"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-device-mid",
+      "0b6f8d1e-5a77-4c3e-9e21-capturemid01"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-coding-plan-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-off-peak-ticket-id",
+      "t-capture"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "accept-encoding",
+      "gzip, deflate, br, zstd"
+     ],
+     [
+      "content-length",
+      "4437"
+     ]
+    ],
+    "length": 4437,
+    "sha256": "b89ec781db0ec3810c434a5215da1304c01694201ffb604dd23b7a5fb3be6324"
+   }
+  ]
+ },
+ "observe: explicit session header (ordered transport) and body metadata session": {
+  "status": [
+   200,
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-request-id",
+      "req-explicit-1"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-session-id",
+      "ses-explicit-1"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "content-length",
+      "282"
+     ],
+     [
+      "connection",
+      "close"
+     ]
+    ],
+    "length": 282,
+    "sha256": "9cf50eb2ea9fa55f8b6160c5c6d0948f26a92e60af9b56ced11c96828894b734",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"ses-explicit-1\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "trace-from-body"
+     ],
+     [
+      "x-session-id",
+      "ses-from-body"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "content-length",
+      "339"
+     ],
+     [
+      "connection",
+      "close"
+     ]
+    ],
+    "length": 339,
+    "sha256": "1b3df4ee62e610c6b104f64beb9f17bc3404a6077f8c8bb9696b9d308d4b42c2",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"metadata\":{\"session_id\":\"ses-from-body\",\"trace_id\":\"trace-from-body\",\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"ses-from-body\\\"}\"},\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\",\"cache_control\":{\"type\":\"ephemeral\"}}]}]}"
+   }
+  ]
+ },
+ "observe: inferred lineage, a continued conversation keeps its session": {
+  "status": [
+   200,
+   200,
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "314"
+     ]
+    ],
+    "length": 314,
+    "sha256": "a1cd32fff1f00c3b1efb0623ebaf30d8a7c1ee93ea6155b28e9a2f82a264cfa2",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"system\":\"lineage-observe\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"turn one\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"<ses-1>\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-5>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-6>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-7>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-8>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "387"
+     ]
+    ],
+    "length": 387,
+    "sha256": "6d1ae79515bdbec24e521be63e5ba1fad58db1ad052748535e78f9c0aa673a47",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"system\":\"lineage-observe\",\"messages\":[{\"role\":\"user\",\"content\":\"turn one\"},{\"role\":\"assistant\",\"content\":\"ok\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"turn two\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"<ses-1>\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-9>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-10>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-11>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-12>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "418"
+     ]
+    ],
+    "length": 418,
+    "sha256": "8cb7af6fc959caa6ee6a14d5a6fd305fbc496a174acc07ec3b48a8d226321f12",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"other conversation\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"system\":\"lineage-observe-chat\",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"<ses-2>\\\"}\"}}"
+   }
+  ]
+ },
+ "enforce: inferred lineage forwarded upstream (ordered transport)": {
+  "status": [
+   200,
+   200,
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-request-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "content-length",
+      "328"
+     ],
+     [
+      "connection",
+      "close"
+     ]
+    ],
+    "length": 328,
+    "sha256": "3a85a5e0e84e3b612856e10cde5c5a59ba19bb1181eeba40b349a05dae0aa03d",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"system\":\"lineage-enforce\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"turn one\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"<ses-1>\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-request-id",
+      "<uuid-4>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-5>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "content-length",
+      "401"
+     ],
+     [
+      "connection",
+      "close"
+     ]
+    ],
+    "length": 401,
+    "sha256": "c1331ec71fa77117b56408b80d2cf83db950e832cb97cf3bed872f181929f71b",
+    "body": "{\"model\":\"glm-5.3\",\"max_tokens\":64,\"system\":\"lineage-enforce\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"turn one\"},{\"role\":\"assistant\",\"content\":\"ok\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"turn two\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"<ses-1>\\\"}\"}}"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-request-id",
+      "<uuid-6>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-7>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-8>"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "content-length",
+      "395"
+     ],
+     [
+      "connection",
+      "close"
+     ]
+    ],
+    "length": 395,
+    "sha256": "ff95ce24ead2453618df40970a5cb5618724c57ddbb0b4aa85ca1b424e2a5c7c",
+    "body": "{\"model\":\"glm-5.3\",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"enforced chat\",\"cache_control\":{\"type\":\"ephemeral\"}}]}],\"max_tokens\":128000,\"stream\":true,\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":32000},\"output_config\":{\"effort\":\"max\"},\"metadata\":{\"user_id\":\"{\\\"device_id\\\":\\\"0b6f8d1e-5a77-4c3e-9e21-capturemid01\\\",\\\"account_uuid\\\":\\\"\\\",\\\"session_id\\\":\\\"<ses-2>\\\"}\"}}"
+   }
+  ]
+ }
+}
