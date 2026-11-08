@@ -297,3 +297,48 @@ describe("CDN disk prune with several installations sharing the directory", () =
     }
   }, 30_000);
 });
+
+describe("CDN disk retention-pruning migration (ADR-0012 condition 4)", () => {
+  /** Names, sizes, modification times and content hashes: the whole directory. */
+  const snapshot = (dir: string) => listing(dir).map((name) => {
+    const file = path.join(dir, name);
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile()) return [name, "dir"];
+    // Large entries are sparse here: their first bytes carry the header.
+    const fd = fs.openSync(file, "r");
+    const head = Buffer.alloc(Math.min(stat.size, 64 * 1024));
+    try { fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
+    return [name, stat.size, stat.mtimeMs, sha(head)];
+  });
+
+  it("replayed twice on a directory left by older kits, the second run is a no-op", () => {
+    const dir = directory();
+    // What a directory shared with earlier kits can hold.
+    envelope(dir, urlOf(1), T0 - 30 * DAY, bodyOf(1)); // expired at 14 days
+    envelope(dir, urlOf(2), T0 - 13 * DAY, bodyOf(2)); // expired under 24 h, kept until 14 days
+    envelope(dir, urlOf(3), T0 - HOUR, bodyOf(3)); // fresh
+    for (let i = 10; i < 16; i++) largeEnvelope(dir, urlOf(i), T0 - (16 - i) * HOUR, 50 * MiB); // 300 MiB, fresh
+    legacy(dir, nameOf(urlOf(4)), 5_000, T0 - 20 * DAY); // raw body, kits up to v0.2.31
+    legacy(dir, nameOf(urlOf(5)), 5_000, T0 - 2 * DAY);
+    legacy(dir, crypto.createHash("sha1").update(urlOf(6)).digest("hex"), 5_000, T0 - 90 * DAY);
+    const temp = `${nameOf(urlOf(7))}.999.${crypto.randomUUID()}.tmp`;
+    legacy(dir, temp, 5_000, T0 - 90 * DAY);
+    legacy(dir, "notes.txt", 5_000, T0 - 90 * DAY);
+    const initial = snapshot(dir);
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    const once = snapshot(dir);
+    expect(once.length).toBeLessThan(initial.length);
+    expect(totalBytes(dir)).toBeLessThanOrEqual(256 * MiB + 2 * 5_000);
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    expect(snapshot(dir)).toEqual(once);
+    // Kept: the newest entries up to 256 MiB (the 13-day envelope and the
+    // 2-day legacy file are older than the large ones, so they go first),
+    // temp and foreign files.
+    expect(listing(dir)).toEqual([
+      nameOf(urlOf(3)),
+      ...[11, 12, 13, 14, 15].map((i) => nameOf(urlOf(i))),
+      temp,
+      "notes.txt",
+    ].sort());
+  });
+});
