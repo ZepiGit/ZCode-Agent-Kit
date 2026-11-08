@@ -105,7 +105,7 @@ Spec stories: none (measurement rule, Round 24 Q1)
   - the windows ceiling re-confirmation round (Round 25 Q1 condition 5);
   - the pre-merge run.
 
-  **Staging note.** `git merge-tree` of the tip (cbe2abb) with this branch conflicts in `issues/30-*.md` and `tests/memory/loop.test.mjs`, which ticket 30 alone already conflicts in, and in `tests/memory/lib/ratchet.mjs`. That last one is the tip's `os` parameter in `boundKindError` against this branch's removal of the band; keep both. The spec S5 row sits next to the tip's changed S6/S7 rows.
+  **Staging note.** `git merge-tree` of the tip (cbe2abb) with this branch conflicts in `issues/30-*.md` and `tests/memory/loop.test.mjs`, which ticket 30 alone already conflicts in, and in `tests/memory/lib/ratchet.mjs`. That last one is the tip's `os` parameter in `boundKindError` against this branch's removal of the band; keep both. With this docs commit, `issues/74-*.md` (the tip's Round 25/26 text is copied in, then this comment), `METRICS.md` (this section is appended at the end) and `spec.md` (the S5 row sits next to the tip's changed S6/S7 rows) conflict as well; keep both sides in each.
 
   **For the Owner Proxy (no option taken here):**
   - on this evidence, the post-bound window separates M1 from the tree by slope (≈ 8–18 vs ≈ 3–6 MB/1k) but not by the trend flag, and the tree itself sits around the 5 %/1k budget (2.85–5.75);
