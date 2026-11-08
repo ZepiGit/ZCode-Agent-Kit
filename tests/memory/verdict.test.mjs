@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkRatchet, issueIdsIn, readExpectedRed, UNSTABLE, validateExpectedRed } from "./lib/ratchet.mjs";
 import { JOB } from "./lib/catalogue.mjs";
-import { chooseRepetitions, medianFalseRedRate, medianVerdict, repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
+import { chooseRepetitions, floorMeasurement as floorMeasurementOf, medianFalseRedRate, medianVerdict, repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
 
 /** One proxy sample per second; `mb(i)` gives its RSS, progress = 10 units/s. */
 function series(n, mb, role = "proxy") {
@@ -761,10 +761,27 @@ test("OMP floor n from data (Round 17 Q4 condition 1): the smallest odd n in {3,
   assert.equal(Math.max(one.n, floorMeasurement([2.55, ...Array(15).fill(0.7)], { thresholdMB: 2.5, gateMB: 5 }).n), 5);
 });
 
-test("OMP floor rule: thresholds are half the waiter gate and the gate itself, unchanged; n = 5 until the CI measurement sets it", async () => {
+// The floor measurement, CI run 42467078897 (marker tests/memory/measure-omp-floor = 20):
+// one test-kit leg per OS reached the tests (the other two failed in setup-bun, HTTP 504).
+const FLOOR_WINDOWS_COMMIT = [0.06, 0.06, 2.49, 0, 0, 2.43, 0.06, 0.06, 0.13, 0, 0.06, 0.06, 0.06, 0, 0, 0.06, 0.13, 0, 0.13, 0.13]; // Node 24.22.2
+const FLOOR_LINUX_RSS = [0.44, 0.44, 0.5, 0.31, 0.5, 0.31, 0.53, 0.44, 0.56, 0.69, 0.56, 0.59, 0.31, 0.31, 0.56, 0.44, 0.31, 0.44, 0.31, 0.31]; // Node 26.13.0
+// The windows record before the measurement: 1 of 16 legs failed at 2.55 MB (42436440284); a passing leg printed no value.
+const FLOOR_WINDOWS_RECORD = { atOrAbove: 1, legs: 16 };
+
+test("OMP floor rule: thresholds are half the waiter gate and the gate itself, unchanged; n = 5, the largest n over the measured estimates (Round 17 Q4 condition 1)", async () => {
   const { OMP_FLOOR } = await import("./lib/budgets.mjs");
-  // Provisional n from the windows record (1 of 16 legs at 2.55 MB); the
-  // ≥ 20-per-leg CI measurement replaces it (Round 17 Q4 condition 1).
+  const opts = { thresholdMB: OMP_FLOOR.medianBelowMB, gateMB: OMP_FLOOR.everyBelowMB };
+  const win = floorMeasurementOf(FLOOR_WINDOWS_COMMIT, opts);
+  const linux = floorMeasurementOf(FLOOR_LINUX_RSS, opts);
+  assert.deepEqual([win.count, win.atOrAbove, win.maxMB, win.n, win.comesBack], [20, 0, 2.49, 3, []]);
+  assert.deepEqual([linux.count, linux.atOrAbove, linux.maxMB, linux.n, linux.comesBack], [20, 0, 0.69, 3, []]);
+  // Windows pooled with its record: 1 of 36 → n = 3 (0.23 %); the record alone: 1 of 16 → n = 5 (n = 3: 1.12 %).
+  const pooled = (FLOOR_WINDOWS_RECORD.atOrAbove + win.atOrAbove) / (FLOOR_WINDOWS_RECORD.legs + win.count);
+  assert.equal(chooseRepetitions(pooled, { target: 0.01 }), 3);
+  assert.equal(chooseRepetitions(FLOOR_WINDOWS_RECORD.atOrAbove / FLOOR_WINDOWS_RECORD.legs, { target: 0.01 }), 5);
+  // No measurement reaches the gate; the less favourable estimate decides n.
+  assert.ok(Math.max(...FLOOR_WINDOWS_COMMIT, ...FLOOR_LINUX_RSS) < 5);
+  assert.equal(Math.max(win.n, linux.n, chooseRepetitions(pooled, { target: 0.01 }), chooseRepetitions(1 / 16, { target: 0.01 })), 5);
   assert.deepEqual(OMP_FLOOR, { n: 5, medianBelowMB: 2.5, everyBelowMB: OMP_LEG.waiterCostMB });
 });
 

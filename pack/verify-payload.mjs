@@ -32,6 +32,10 @@ const REQUIRED_FILES = [
   "cli/adapters/pi.mjs",
   "cli/adapters/goose.mjs",
   "proxy/zcode-proxy-manager.mjs",
+  // Ticket 15: the proxy lifecycle module the manager CLI and the preflight
+  // share, and the heal log it writes.
+  "lib/proxy-lifecycle.mjs",
+  "lib/heal-log.mjs",
   "proxy/resolve-zcode-proxy-key.mjs",
   "proxy/config.example.yaml",
   "mcp/zcode-harness-mcp/dist/index.js",

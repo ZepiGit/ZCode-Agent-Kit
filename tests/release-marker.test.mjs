@@ -107,6 +107,20 @@ test("payload verification rejects a missing transaction runtime import", (t) =>
   assert.match(bad.stderr, /required file missing: lib\/transaction\.mjs/);
 });
 
+test("payload verification rejects a payload without the proxy lifecycle module or the heal log (ticket 15)", (t) => {
+  const { root, build } = packageFixture(t);
+  const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
+  for (const file of ["lib/proxy-lifecycle.mjs", "lib/heal-log.mjs"]) {
+    build();
+    const good = verify();
+    assert.equal(good.status, 0, good.stderr);
+    rmSync(join(root, "pack/dist", file));
+    const bad = verify();
+    assert.equal(bad.status, 1, `a package missing ${file} must fail closed`);
+    assert.match(bad.stderr, new RegExp(`required file missing: ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  }
+});
+
 test("payload verification rejects a payload without the shared width core, token set or their type declarations", (t) => {
   const { root, build } = packageFixture(t);
   const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
