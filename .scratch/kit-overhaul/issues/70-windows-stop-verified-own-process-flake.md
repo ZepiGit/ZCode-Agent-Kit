@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: high
@@ -69,3 +69,5 @@ ADR: no
 **Left for another ticket (not done here):**
 - Kit, fail-closed false negative, not observed: `waitForExit` also probes by PID. If Windows reuses the PID before the first 300 ms poll sees ESRCH, stop waits 5 s. The guard then sees a start-time mismatch and refuses to signal the stranger (C6 holds), and stop reports `ERROR killing pid` (code 2) although the proxy died. The fix belongs in the kill script: keep the `OpenProcess` handle and `WaitForSingleObject` on it after `TerminateProcess`. That is the stop path ticket 15 rewrites, so it is 15's or a new ticket's.
 - Memory-loop tests with the same PID-after-death probe on Windows: `tests/memory/win-sampler.test.mjs:157,205` and `tests/memory/loop.test.mjs:347,374,450`. They hold no `ChildProcess` handle for those pids (pollers, grandchildren), so the fix there is different. No CI failure attributed to them yet.
+
+Merged 2026-11-08 as 24f4621 (`24f4621dadeef671bcdd474d4f7d4d2ad5a7d99e`; ticket/70-windows-stop-flake at 466296f; first merge, no revert-of-revert step) onto 482ad7c; clean merge (no conflicts). Fast suite: kit 797/816 (0 fail, 19 skipped), proxy 1384/1384, mcp 96/97 (0 fail, 1 skipped); mcp `dist/` unchanged; no lockfile changes, so only the root `npm ci` ran. No pre-merge CI run: the change is tests only (`tests/manager-safety.test.mjs`, `tests/manager-audit.test.mjs`), and the root cause is shown deterministically by the PID-reuse simulation; the Windows confirmation (pending-CI items 1-5 above) builds up over later windows test-kit legs. Sanity: no staging/70 branch exists; `git diff ticket/70-windows-stop-flake HEAD` over the ticket's two non-.scratch files is empty; the only other differences from the ticket branch are the integration tip's docs commits since c3f5464 (ecf1076 Owner Proxy round 18: ADR-0004, ADR-0008, spec, DECISIONS, METRICS, issues 15/19/20/21, rounds/round-18-answers; 482ad7c: RUNLOG, INDEX, issue 72). Logs: `.scratch/kit-overhaul/reports/merge-70-{npm-ci,kit,proxy,mcp}.log`.
