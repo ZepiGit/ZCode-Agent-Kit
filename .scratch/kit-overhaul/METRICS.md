@@ -326,6 +326,30 @@ Every CI run since 42252896054 that ran the full short profile, from the `memory
 - **What the ratchet does with it (Round 13 Q1, ticket 66):** windows `S5/short → 30` is `unstable` with a growth-value band on the commit value of `growth:mcp-bridge`: 5 < value ≤ 30 passes with either trend flag and prints `S5/short: unstable (growth:mcp-bridge <x> %/1k commit, budget 5, bound 30, trend <t>), owned by ticket 30`; above 30 fails; ≤ 5 fails as at budget but listed; any other RED, a harness failure or a missing growth value fails. The bound sits 3.76 above the highest of 28 values (normal fit: ≈ 0.07 % per run above 30, z = 3.20; log-normal ≈ 0.39 %). Linux stays the plain entry `S5/short → 30`.
 - **Replays at the job seam** (`tests/memory/loop.test.mjs`, fixtures `tests/memory/fixtures/ci-42404639968-s5-short-windows-summary.json` and `ci-42401136452-…`): run 42404639968 (RED, 23.71, trend true; window medians 77.5, 78.3, 80.2, 80.0, 81.6, 82.6 MB) and run 42401136452 (GREEN, 15.55, trend false; 77.3, 79.1, 80.6, 80.5, 82.6, 77.4 MB) both pass with their unstable line. On the integration tip a912cce the first fails as `S5/short: RED but not listed in expected-red.json (windows)`, as in CI.
 
+**Windows, 85 runs to 42484868282 (Owner Proxy Round 25 Q1 correction 5 and condition 9).** Recomputed from the windows `memory-budget` job logs of every `ci.yml` run from 42404639968 to 42484868282 (`/home/AgentKit/overhaul-tools/ci-art/r25-logs/win/<run>.log`, list `runs.txt`; 42467078897's memory legs never ran, setup-bun HTTP 504), plus the 28 Round 13 values above. Commit %/1k, the gate metric:
+
+| set | n | min | median | mean | sd | max | > 30 |
+|---|---|---|---|---|---|---|---|
+| Round 13's 28 (to 42404639968) | 28 | 14.27 | 18.25 | 19.04 | 3.43 | 26.24 | 0 |
+| before 13, after Round 13 (42408170742–42424608767) | 11 | 14.74 | 17.98 | 17.75 | 1.72 | 20.34 | 0 |
+| 13 tree without 36 (42425069025–42481592284) | 41 | 11.99 | 18.08 | 19.06 | 4.31 | **30.23** | 1 |
+| trees with 36 (42454650683 15.43, 42469209389 18.14, 42483637377 **34.62**, 42483787372 19.82, 42484868282 24.83) | 5 | 15.43 | 19.82 | 22.57 | 7.56 | 34.62 | 1 |
+| all | 85 | 11.99 | 18.14 | 19.09 | 4.08 | 34.62 | 2 |
+
+- Per-run P(> 30): all 85, normal 0.37 % / log-normal 0.94 %, empirical 2/85 = 2.35 % (95 % Clopper-Pearson 0.29–8.24 %). On the 13 tree scaled by 36's ×1.09 (the base every tree now has): 2.47 % / 3.72 % (1.38 % / 2.61 % without 42480631098). Round 13 Q1 condition 2's 0.07 % / 0.39 % (bullet above) is superseded; the 30 bound is unchanged.
+- The two values above 30: 42480631098 (staging/21, 13 tree without 36): 30.23 commit / WS 42.29, trend false, 24.42 MB/1k on a mean of 80.8 MB, window medians 76.7, 79, 80.7, 81.1, 83.2, 82.6 MB; signature (vi)'s first occurrence (Round 25 Q1 conditions 1 and 3; recorded in ticket 74). 42483637377 (ticket 30's restage, a53152d, with 36): 34.62 commit / WS 19.17, trend true, 26.24 MB/1k on a mean of 75.8 MB, window medians 70.9, 74.4, 76.9, 76.3, 77.4, 78.7 MB; not covered by (vi) (30's diff touches `mcp/**`).
+
+**Round 25 Q1 condition 4's pre-registered set: the first 20 windows S5/short values on trees that contain ticket 36, any branch** (run-creation order; triggers: ≥ 3 of the 20 above 30, any value above 35, or a 20-run mean above 23 %/1k). Kept current until complete; it is the table ticket 74's merge precondition (Round 25 Q1 condition 5) needs.
+
+| # | Run | Tree | commit %/1k |
+|---|---|---|---|
+| 1 | 42454650683 | with 36 | 15.43 |
+| 2 | 42469209389 | with 36 | 18.14 |
+| 3 | 42483637377 | ticket 30's tree (a53152d), trend true | 34.62 |
+| 4 | 42483787372 | with 36 | 19.82 |
+| 5 | 42484868282 | integration eaa91b3 (36 + 15's `setup.mjs`) | 24.83 |
+| 6–20 | — | pending | — |
+
 ### RED check sets per listed single run, owners and flips, both legs (ticket 67; Round 14 Q1 condition 3, Round 15 Q1 and Q2)
 
 Source: the `memory-budget` job logs of `ci.yml` runs up to 42429164758, and the `memory-budget-<leg>` artefacts of the ten runs on the ticket-13 tree (`gh api …/actions/jobs/<id>/logs`; the job summary table's "red checks" column per run key). Logs and the parsed table: `/home/AgentKit/overhaul-tools/ci-art/t67-logs/` (`logs/<run>-<leg>.log`, `parsed.json`); scripts `/home/AgentKit/overhaul-tools/t67-scripts/` (`parse.mjs`, `rates.mjs`, `replay.mjs`). A run counts when its job printed the summary table and the key's row is GREEN or RED (a harness failure is no valid run). Only CI runs of the leg's full short profile count (Round 15 Q2 condition 1).
