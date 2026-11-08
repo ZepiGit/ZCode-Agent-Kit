@@ -33,3 +33,12 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 
 - **Condition 3 is a strict order, not one equal constant.** `STOP_GRACE_MS = 10_000` is the proxy's own hard deadline: drain + the 3 s account-metadata flush + exit. The manager forces only after `STOP_GRACE_MS + STOP_EXIT_MARGIN_MS`, a named margin of at least a few 300 ms poll intervals (for example 2 s). Both constants live in one shared module and are tested together. Two equal 10 s timers would race, and the manager could kill the proxy in the middle of the flush, which is the defect condition 3 exists to remove. Details in [ADR-0014](0014-graceful-stop-request-over-loopback.md).
 - **Condition 1 is realised by the respawn acknowledgement** in [ADR-0015](0015-respawn-acknowledgement-before-drain.md). The respawn wait (30 s) stays longer than the acknowledgement wait + `STOP_GRACE_MS` + margin.
+
+## Note 2026-11-08 (Round 18, Q3 condition 3): the designed maximum is out of date
+
+Recorded by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 18, Q3; [ADR-0004](0004-admission-shed-contract.md), amendment of 2026-11-08 (Round 18, Q1–Q3).
+
+- **The designed maximum is out of date.** The "designed maximum of about 450 MB … 64 MB × ~4.5" above is out of date: the measured linux maximum under the cap is 608.5 MB (RSS, S1/burst32, ticket 19's tree). The soft limit of 512 MB, which only WARNs, can therefore fire under legitimate cap-saturating load. The hard limit of 1024 MB has more than 400 MB of margin on linux.
+- **The thresholds do not change.** Soft 512 MB and hard 1024 MB, each held for 3 samples 15 s apart, stay as decided.
+- **Windows: EVIDENCE MISSING.** The windows footprint on ticket 19's tree has not been measured; the ≥ 10 staging/19 CI runs of Round 18 Q2 condition 1 record it.
+- **Ticket 21** records the proxy footprint the supervisor samples, per leg, for the S1 burst runs on its tree. If that footprint can hold at or above 1024 MB for 3 samples, 21 comes back with numbers before it merges (C1: no restart storms).

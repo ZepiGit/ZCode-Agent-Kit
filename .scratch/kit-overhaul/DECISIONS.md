@@ -2611,3 +2611,485 @@ Open branches I still see (none blocks 67 once Q2's gate is met):
 - **Windows S3 at ≤ 514 MB is probably out of reach of 37's mechanisms** (Round 7 Q2 condition 5: proxy plus five bridges already make 576 MB). The Q3 return path will likely be used. The levers are named. None is adopted now.
 - **EVIDENCE MISSING: the mechanism of the windows S3 `orphans` in the matching runs** (carried over from Round 15). `summary.json` does record per-phase notes (as for S4 here). If the S3 artifacts carry similar notes, they can settle it without a new run.
 - **Q2 condition 3(c) may fire** if 13's SDK/zod bump moves `procPeak:mcp-bridge` or linux S5/short `growth:mcp-bridge`. That would be a measured change by 13, decided then on its numbers.
+
+
+---
+
+# Round 17 (2026-11-08) — the rare REDs from ticket 67's evidence runs
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–16 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it says so by name.
+
+I checked the evidence myself, read-only:
+- `gh run view <id> --log` for all 8 runs (logs read into a scratch directory outside the worktree). All 8 head commits carry the same tree, 4a7e58e. Failures: 42436010878 windows memory (S7), 42436186573 linux memory (S5) **and** windows test-kit Node 24 (`manager-safety.test.mjs:160`, ticket 70), 42436354758 windows memory (S1/short), 42436440284 windows test-kit Node 26 (`loop.test.mjs:459`, the floor test). That is five failures in four runs, as the round says.
+- The archived memory-job logs `/home/AgentKit/overhaul-tools/ci-art/t67-logs/logs/*.log` (every CI run up to 42429164758), recounted per key and leg for the three values in question.
+- `ticket/67-owned-checks` at 3b414b2: `tests/memory/expected-red.json`, `tests/memory/lib/budgets.mjs`, `.scratch/kit-overhaul/METRICS.md` lines 258–373, `tests/memory/scenarios/s7-disk.mjs`, `tests/memory/loop.test.mjs:459-476`, `tests/memory/fixtures/omp-host.ts:25-89`.
+- Integration tree d170038: issues 03, 19, 20, 21, 25, 30, 33, 35, 36, 61 and INDEX.md; spec §7 (bounded collections), §18 MEMORY rows, the ratchet and baseline paragraphs; `zcode-proxy-src/src/responses/store.ts:48-104`, `runtime/health-monitor.ts:166-171`; DECISIONS Rounds 6, 13–16; PROMPT §7 Phase 4; RUNLOG to 03:02Z.
+
+**Corrections to the round's facts.**
+1. **Q3: windows S1/short has been RED before, and the earlier RED was never recorded.** Integration run 42382114395 (`overhaul/stability-terminal-ux`, 2026-11-07 14:37Z) shows `RED growth:proxy 5.27 %/1k trend=true [commit 5.27 / WS 1.47]`, then `ratchet FAILED` and `S1/short: RED but not listed in expected-red.json (windows)`. Neither RUNLOG, METRICS nor DECISIONS mentions it. Recounted over every windows run with an S1/short line (n = 49: 41 archived + 8 new), commit growth is min 1.43, median 3.56, mean 3.41, sd 0.93, max 5.27. It is RED in **2 of 49** (4.1 %; 95 % Clopper-Pearson 0.5–14.0 %), and the round's "~3.7–4.0" understates the spread. Normal fit P(> 5) = 4.3 %, log-normal 7.8 %. WS growth is −5.6 to +3.5. Linux S1/short across 70 runs: max 4.43, never RED; it was 3.08 in the RED run.
+2. **Q1: the check was never RED before, but it has a tail.** `responses-store:heap-at-cap` (heap growth, one `/health` reading 5 s after the load, no GC):
+   - windows, n = 51: 46 values in 60–65 MB; tail 71, 71, 86, 87, **98** (42415959288, 42378479007, 42421424292, 42281646419, 42436010878);
+   - linux, n = 70: 69 values in 59–65 MB; one 77 (42367395231).
+
+   The store cannot cause that spread. `ResponseStore.set` evicts synchronously against a serialized-byte bound (64 MiB) and a count bound (1,000 entries), and S7 sends identical input every run (1,500 × 64 KB). So its retained size is the same in every run, which is the 59–65 MB cluster. The extra 6–34 MB is other heap that is not collected 5 s after the load. `heapUsedMB` is `process.memoryUsage().heapUsed` (`health-monitor.ts:171`), read without a GC.
+3. **Q1: the short-profile S7 check has almost no power against its own defect class.** 1,500 × 64 KB = 93.75 MiB, which is below the 96 MB budget. A store with no bound at all would read about 94–100 MB, about where today's 98 tail reading lies. The long profile (4,000 → 250 MiB) can tell them apart. Q1 does not decide this. It is recorded in Shared understanding.
+4. **Q4: the Node version is not a variable.** The stub OMP host runs under Bun (`resolveBun(KIT)`), and Node only runs the test harness. The windows floor test passed 15 of 16 windows legs across the 8 runs (Node 24 8/8, Node 26 7/8) and all 16 Linux legs. **EVIDENCE MISSING: the windows commit no-op floor distribution.** A passing run prints no value, so 2.55 MB is the only windows number on record. Linux (RSS) is +0.63 to +0.75 MB (ticket 03).
+5. **Q2: the GREEN is the net-rise branch missing by a small margin.** On the 13 tree, linux S5/short is RED in 9 of 10 runs (42425069025, 42429164758 and the 8). The values are 39.53–45.99 %/1k, median about 42.0, the same as before 13 (37.53–46.33, median 42.63). Run 42436186573 is 39.53 with `trend=false`; every other S5 check is GREEN, at a peak of 102.6 MB.
+
+---
+
+## Q1 — windows S7/short `responses-store:heap-at-cap` RED, unowned (1 of 8)
+
+**DECISION:** REJECTED, both routes. No ticket owns the check, and no entry lists it. Instead, the check gets a measurement-rule amendment that lands in new ticket **71**.
+- **Rejected: ticket 25 as owner.** 25's What-to-build says the responses-store logic "is lifted into one module (responses store behaviour and tests unchanged)", and spec §7 has "Responses store | unchanged (64 MB / 1,000 entries)". 25's text promises *no* change to this bound, so it cannot be the fix that clears the RED (Round 15 Q1 condition 2; Round 14 Q1 condition 3(b)). 33's acceptance names only `proxy.log:bounded-while-running`, and 34 owns nothing (Round 15 Q1, E).
+- **Rejected: a needs-triage owner.** Listing the name would tolerate any value of a check that, at the short profile, already cannot tell an unbounded store from a bounded one (correction 3). That masks rather than triages.
+
+Binding conditions:
+1. **What the check judges.** The 96 MB budget and the check name stay. The value becomes the store's *retained* heap:
+   - After the existing 5 s wait, the scenario reads `/health` `heapUsedMB` at least 30 times, 1 s apart.
+   - `heap-at-cap` = the **minimum** of that series minus `h0`.
+   - `summary.json` and the check detail record the series: first reading (today's value), minimum, maximum, and RSS before and after.
+
+   No product code changes: no GC hook, no new endpoint (C6). Why the minimum loosens nothing: memory the store retains is present in every reading, so a store over its bound is RED under both rules, and the minimum is never above the first reading. Transient garbage stays bounded by S7's unchanged `procPeak:proxy` (WS 250 MB) and `commit-backstop:proxy` (512 MB). The short-profile load (1,500) and the long profile (4,000) stay as they are.
+2. **Tests, RED first.** These run at the job seam with fixture series:
+   - a series [98, 97, 80, 64, …] is GREEN;
+   - a series that never drops below 97 is RED;
+   - a series with a missing or non-numeric reading is a harness failure, never GREEN;
+   - a series shorter than 30 readings is a harness failure.
+
+   Plus one local mutant, never committed: the store with both bounds removed, run on the **long** profile, is RED under the new rule. Record its short-profile value under both rules as information (correction 3).
+3. **Evidence and what comes back.** 71's pre-merge run and every later run record the series. If any run's minimum lies above 66 MB, it comes back as a question with the series, but it does not block 71's merge. That would be heap retained beyond the store's cluster, which is a real finding and not GC timing.
+4. **Records.** Spec §18 S7 row gains: "responses store heap at its cap ≤ 96 MB, judged on the minimum of ≥ 30 `/health` readings 1 s apart after the load (Round 17 Q1)". METRICS gets the 51/70 table (correction 2). Ticket 25's Comments gain: "Round 17 Q1: 25 does not own `responses-store:heap-at-cap`. Its lift keeps the store unchanged."
+
+**Rationale:** The numbers settle the cause. In 115 of 121 runs the reading sits on the store's cap, and the store's bound is enforced synchronously on identical input. So the 6–34 MB tail in six runs cannot be the store; it is uncollected heap read at a random moment. Listing the name would hand a rare GC-timing artefact to an owner whose text promises not to touch the store, and it would tolerate a store regression of any size. Measuring what the budget names, the store's retained heap, removes the false RED, keeps the bound's full force on real retention, and adds a mutant proof the check never had. It is test code in one scenario.
+
+**Charter:** C1 (the store's bound is proven by the quantity it bounds; transient memory stays bounded by the unchanged peak and backstop checks), C6 (no product endpoint or GC hook), C9 (stronger measured evidence: 121 runs plus the store's code; smaller blast radius: one scenario's reading), §9 (96 MB unchanged), Round 14 Q1 condition 3(b), Round 15 Q1 conditions 2 and 6, PROMPT §7 Phase 4.
+
+**REVERSIBILITY:** Two-way door (test code and spec text). ADR: no.
+
+---
+
+## Q2 — linux S5/short `growth:mcp-bridge` over budget but GREEN on the trend flag (1 of 8)
+
+**DECISION:** ACCEPTED with conditions. 67 marks `growth:mcp-bridge` as `flips` in linux `S5/short` (owner 30). Ticket 30's linux exit is judged on the value, not on GREEN.
+
+**This explicitly contradicts:**
+- **Round 13 Q1 condition 4, third bullet** ("The Linux deletion stays on the normal verdict"). Linux now uses the value-based exit that windows already has.
+
+It is the return path that **Round 16 Q2 condition 3(c) and (d)** named: a name not marked `flips` turned GREEN on the 13 tree, and linux S5/short was GREEN with no `flips` name. It follows **Round 15 Q1 condition 4**: 67 marks a name from its evidence when it is RED in fewer than all matching runs, here 9 of 10 on the 13 tree. Windows `S5/short` stays `unstable` under Round 13, unchanged. No third `unstable` key is added, so Round 13 Q1 condition 3 stands.
+
+Binding conditions:
+1. **The list edit (in 67, before it merges).** Linux `"S5/short": { "owners": { "30": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] }`. METRICS records the rate per tree: 0 GREEN of 37 before 13, 1 of 10 on the 13 tree (42436186573, 39.53, trend false).
+2. **Ticket 30's linux exit (Acceptance).** The name, and with it the entry, is removed only when every one of ≥ 10 fresh matching linux CI runs on 30's tree has `growth:mcp-bridge` ≤ 5 %/1k, whatever the trend flag says, and every other S5 check is GREEN. A GREEN at 39 %/1k is a missed trend, not a fix. Today the flag would meet a GREEN-based exit by chance in about 1 of 47 runs.
+3. **Wrong-owner watch (orchestrator, because the ratchet cannot see it).** For every linux S5/short run that is GREEN before 30 merges, the orchestrator records the value and the window medians in 30's Comments. Any value ≤ 5 %/1k before 30's fix lands (for example after 36's semi-space flag) comes back as an ownership question with the run id. This is the linux counterpart of Round 13 Q1 condition 1's "≤ 5 fails".
+4. **Nothing else changes:** the 5 %/1k budget, `growth()`, `MEMORY.growth`, the windows band and bound 30, and the other S5 checks.
+
+**Rationale:** The value is 8× over budget in every run on both trees. Only the net-rise branch of the trend flag fell short once (correction 5). The flip mark is no looser than today's listing: an owned RED already passes at any value, and the mark only adds a GREEN pass. It is a list edit inside the open ticket that owns list edits, so it costs no new mechanism. The value-based exit closes the one hole the mark opens, an exit met by trend noise. The watch closes the other, a fix landing under the wrong owner.
+
+**Charter:** C1 (bridge growth stays owned and its exit is honest), C7 (linux brought to the windows exit rule), C9 (stronger evidence: 47 runs; smaller blast radius and simpler: one list mark rather than a third `unstable` key), §9, Round 13 Q1 conditions 1 and 4, Round 15 Q1 conditions 4 and 5, Round 16 Q1 condition 4 (orchestrator record), Round 16 Q2 condition 3.
+
+**REVERSIBILITY:** Two-way door (one list mark, ticket text). ADR: no.
+
+---
+
+## Q3 — windows S1/short `growth:proxy` RED (unlisted key, 1 of 8)
+
+**DECISION:** REJECTED, all three routes; the key stays unlisted:
+- **Rejected: 19 as owner.** 19's loop line names only `S1/burst4/16/32/bigbody`.
+- **Rejected: 21 as owner.** 21's acceptance has no loop growth line at all. A trace to either ticket would be invented (Round 15 Q1 conditions 2 and 6).
+- **Rejected: a needs-triage listing.** This is the path Round 6 Q2 condition 1 permits. It is not taken, because with `owners` and `flips` it would tolerate `growth:proxy` at any value on the primary platform's main proxy-growth check.
+
+Decision: windows `S1/short` is judged on **5 sequential repetitions** (measurement-rule amendment, in ticket 71). The 5 %/1k budget, `growth()` and Round 7 Q1's commit gate are unchanged.
+
+**No earlier decision is contradicted.** Round 6 Q1 condition 6 and Round 6 Q2 condition 3 require "its own decision with its own distribution"; this is that decision, on the 49-run distribution. **It departs from the `REPEATED` comment "One n for both legs"**: this key is windows-only, because Linux shows no tail (70 runs, max 4.43).
+
+Binding conditions:
+1. **The rule (exact shape is the implementer's choice, in `REPEATED`, one place):**
+   - windows `S1/short` runs n = 5 fresh, isolated repetitions, one after another;
+   - `growth:proxy` is RED when ≥ 3 of 5 repetitions are RED under the unchanged `growth()` (commit value > 5 AND trend); the reported value is the median;
+   - **every** repetition must be ≤ 10 %/1k on commit (a ceiling: 4.73 above the observed max, z = 7.1);
+   - every other S1/short check (`procPeak`, `steady`, `count`, `orphans`, `commit-backstop`) is judged in **each** repetition, and a RED in any one fails;
+   - `summary.json` and the job summary print all five values, trends and the median.
+
+   Linux `S1/short` stays a single run.
+2. **Why n = 5.** It is the smallest odd n whose predicted false-RED rate is ≤ 1 % on the less favourable fit (log-normal p = 0.078: n = 3 → 1.73 %, n = 5 → 0.42 %; empirical 2/49: 0.06 %; at the 95 % upper bound p = 0.14: 2.2 %). The bar is stricter than Round 6 Q1's 5 % because the job's false-RED rate is the sum over its keys. It costs about 18 min on a 42-min windows job, against a 150-min timeout.
+3. **Tests, RED first:**
+   - five fixture repetitions with 2 RED pass;
+   - 3 RED fail;
+   - one repetition at 10.1 %/1k fails with a GREEN median;
+   - one repetition with `steady` RED fails;
+   - a missing repetition is a harness failure;
+   - the S1/burst1 cases are unchanged.
+4. **Records.** Spec §18 S1 row gains the rule. METRICS gets the 49-run windows table and the 70-run Linux range. Tickets 20 and 61 gain a Comments line: their "S1 stays GREEN / does not regress" criteria are judged under this rule on windows. RUNLOG records correction 1. **No revert is owed for 42382114395:** this round attributes it to the pre-existing tail on unchanged code.
+
+**Rationale:** Two REDs in 49 runs, on a variant whose WS growth is about zero and whose Linux twin never exceeds 4.43, describe a commit-noise tail around a mean of 3.4 against a 5 budget. They do not describe a defect that any queued ticket fixes. The Round 6 Q1 repetition rule is the measured, budget-preserving answer to exactly this shape. Its ceiling and per-repetition hard checks keep it stricter than today on everything except the tail itself. Owning the RED instead would invent a trace or tolerate unbounded growth.
+
+**Charter:** C1 (proxy growth stays gated at 5 %/1k, with a ceiling it lacks today), C7 (windows fixed, Linux unchanged), C9 (stronger measured evidence: 49 + 70 runs; smaller blast radius: one key on one leg), §9, Round 6 Q1 conditions 2–6, Round 6 Q2 conditions 1 and 3, Round 7 Q1 condition 1, Round 15 Q1 conditions 2 and 6, PROMPT §7 Phase 4.
+
+**REVERSIBILITY:** Two-way door (test code and spec text). ADR: no.
+
+---
+
+## Q4 — ticket 03's floor test: "no-op hook charged 2.55 MB" (1 of 16 windows legs)
+
+**DECISION:** REJECTED in part. Neither (a) nor (b) is taken as stated. The 2.5 MB floor threshold and the 5 MB waiter gate are unchanged. The floor test becomes **n fresh-host repetitions with two clauses**:
+- the **median** no-op cost is < 2.5 MB;
+- **every** repetition is < 5 MB;
+- every value is printed, pass or fail.
+
+n is set in ticket 71 from measured data. The finding goes to ticket 35, where the gate becomes live.
+
+Why each option is rejected:
+- **(a), "like the burst1 median rule", is wrong as stated.** Burst1's median is the gate's own statistic. The waiter gate stays one measurement per host, so a median-only floor would claim a noise floor the gate does not have. The every-repetition < 5 clause is what ties the test to the gate: no single no-op measurement may reach it.
+- **(b) has no defined goal.** Ticket 03 already removed the two known baseline errors (stdin reader, post-GC baseline; floor 4.9 → 0.63–0.75 MB on Linux). Nothing on record shows that a deterministic subtraction of windows commit exists.
+
+Binding conditions:
+1. **n from data (Round 6 Q1 condition 2's method).** 71 first records ≥ 20 no-op measurements on windows CI and ≥ 20 on Linux CI, through an off-by-default mode, with the values in METRICS. n is the smallest odd number in {3, 5, 7, 9} whose predicted false-fail rate (binomial on the measured fraction above 2.5 MB, less favourable leg) is ≤ 1 %. If none reaches it, or any no-op measurement is ≥ 5 MB, it comes back with the numbers. Nobody raises 2.5.
+2. **Ticket 35 gains an Acceptance line:** "Windows waiter gate (Round 17 Q4): before removing `omp:concurrent-preflights`, record every waiter's commit and WS cost over ≥ 10 windows runs beside ticket 71's windows no-op floor distribution. If any waiter exceeds 5 MB on commit, or the floor's maximum plus the waiter's measured cost leaves no margin, it comes back with the numbers. A commit-only RED follows Round 6 Q2 condition 1, and the 5 MB gate is never loosened." Edge **35 ← 71**.
+3. **Ticket 03's Comments** gain one line: the floor finding (2.55 MB, run 42436440284) was brought back as its text required, and was decided in Round 17 Q4.
+
+**Rationale:** The floor test did its job: it found that the windows commit floor reaches the half-gate in about 1 of 16 runs. Linux waiters cost 3.3–4.1 MB, so that matters for ticket 35, not for ticket 03. A single-sample assertion cannot measure a tail. n samples with a median clause and a gate clause measure both the typical floor and the gate-relevant tail, and keep both thresholds. Sending the number to 35 puts it where a false waiter RED would otherwise appear later.
+
+**Charter:** C9 (stronger evidence: measure before fixing n; simpler: no undefined "deterministic" ticket), C7 (windows evidence drives the windows gate), §9 / ADR-0013 condition 4 (5 MB per host unchanged), Round 6 Q1 condition 2, Round 6 Q2 condition 1, ticket 03 decision 8.
+
+**REVERSIBILITY:** Two-way door (one test and ticket text). ADR: no.
+
+---
+
+## Cross-question conditions (binding for Q1–Q4)
+
+1. **New ticket 71**, "Measurement rules for three rare tails: S7 retained heap, windows S1/short repetitions, the OMP no-op floor":
+   - `Status: ready-for-agent`, Model sol, Risk low, ADR no, **blocked by 67**;
+   - content: Q1 conditions 1–4, Q3 conditions 1–4, Q4 condition 1;
+   - INDEX.md gains its row, and row 35 gains blocker 71.
+
+   It is one ticket, not three. Three tickets would each need a pre-merge run exposed to the other two tails; one tree lets a single run confirm all three. 71's pre-merge run confirms, it does not decide. Any of the three signatures there is a disagreement and comes back. Acyclicity: 67 has no blockers, and 71's descendants (35, then 37 and 55) do not include 67.
+2. **Interim until the fix lands** (71 for the signatures from Q1, Q3 and Q4; 67 for Q2's). A staged or post-merge run whose **only** failures match one of the signatures below does not count against the ticket, does not block its merge, and causes no revert. The condition: the ticket's diff does not touch the code that signature executes. Each occurrence is recorded in 71's Comments (or 30's, for S5) with the run id and values. The signatures:
+   - (i) S7/short `responses-store:heap-at-cap` RED, either leg, value ≤ 128 MB, every other S7 check as listed. Ineligible: `zcode-proxy-src/**`, `s7-disk.mjs`, `proxy-session.mjs`;
+   - (ii) windows S1/short RED only on commit on `growth:proxy` alone, ≤ 10 %/1k. Ineligible: `zcode-proxy-src/**`, `s1-proxy-steady.mjs`;
+   - (iii) the floor test failing with a no-op cost < 5 MB. Ineligible: `fixtures/omp-host.ts`, `lib/omp-host.mjs`, the generated OMP extension;
+   - (iv) linux S5/short "GREEN but listed" with `growth:mcp-bridge` > 5 %/1k and every other S5 check GREEN. Ineligible: `mcp/**`, `s5-mcp.mjs`.
+
+   For every signature, a change to `tests/memory/lib/{verdict,budgets,sampler*}.mjs` or to the Bun pin also makes a ticket ineligible.
+
+   **This explicitly departs from:**
+   - Round 13 Q1 condition 6, which had a ticket in this position restaged after the fix;
+   - Round 6 Q2 condition 4's last bullet and PROMPT §7 Phase 4's revert rule, for these four signatures only.
+
+   It is not a rerun-until-green, because nothing is rerun: each cause is decided here and owned by a named ticket, and the exception ends when that ticket merges. A ticket whose diff touches the measured code gets no exception, so the code that could cause a real regression is never covered.
+3. **67's merge gate (amends Round 16 Q2 condition 2).** Runs 42436010878 and 42436354758 count as valid floor runs. Their only ratchet failures are signatures (i) and (ii), which are excluded from the replay judgement. Run 42436186573 passes the replay with Q2's mark. 67's final pre-merge run falls under condition 2. The test-kit failure `manager-safety.test.mjs:160` is ticket 70's and is not decided here.
+
+---
+
+## Shared understanding
+
+Open branches I still see (none blocks 67 or 71):
+- **Ticket 70's stop flake still blocks merges** at an unknown rate (1 of 16 windows test-kit legs here). Condition 2 does not cover it; it needs 70's RED-first evidence.
+- **The short-profile S7 check cannot tell an unbounded store from a bounded one** (1,500 × 64 KB = 93.75 MiB against 96 MB; correction 3). The long profile can. Raising the short load could push S7's `procPeak:proxy` (WS 217 of 250 on windows) into a new tail. It comes back as its own question if the orchestrator wants it fixed before the Phase 6 long-profile run.
+- **Windows S1/short commit growth (mean 3.4 %/1k) while WS is about 0** is not attributed (allocator commit vs heap). Q3 needs no attribution. If ticket 19 or 20 moves the commit mean toward 5, the 5-repetition rule will show it as more repetitions RED, and the numbers come back.
+- **Linux S5/short has no value ceiling** under its owned listing, as before Q2. A bridge regression from 42 to 100 %/1k would pass until ticket 30.
+- **Integration-run memory legs went unchecked once** (42382114395, correction 1). The orchestrator should read the memory ratchet line of every post-merge run, as Phase 4 requires.
+- **The job's aggregate false-RED rate** is the sum over its keys. The largest remaining predicted term is S1/burst1 at about 3.8 % per Linux run (Round 11). If it starts blocking merges, it comes back with its distribution.
+
+
+---
+
+# Round 18 (2026-11-08) — ticket 19 memory result: S1 owners, burst32, ADR-0004 factor
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–16 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it names the decision. Round 17 is being answered in parallel. Where the two rounds touch, this file says so (Q2 condition 6, Shared understanding).
+
+I checked the evidence myself, read-only:
+- `ticket/19-admission-control` at c1fb594 (`git -C /home/AgentKit/wt/t19 show HEAD:…`): `issues/19-*.md` (implementer report), `tests/memory/expected-red.json`, `zcode-proxy-src/src/server/admission.ts:33-47, 272-293` (cap constant and `admissionCost`), `tests/memory/scenarios/s1-proxy-steady.mjs:52-61, 116-126` (body construction, bigbody mix and pacing).
+- `ticket/67-owned-checks` at 8901fae: `tests/memory/expected-red.json` (owners/flips schema; every S1 burst entry is `{ "owners": { "19": ["procPeak:proxy"] } }`, with no `flips`), `METRICS.md` S1 rows.
+- Integration tree f087813: `docs/adr/0004-*.md`, `docs/adr/0008-*.md:7`, `issues/19-*.md`, `20-*.md`, `21-*.md`, `INDEX.md`, `tests/memory/expected-red.json` (the plain `"S1/burst32": "19"` entry is still present on both legs), `spec.md:633-634, 648`, `METRICS.md:33, 50-60, 215-240`, PROMPT §9, DECISIONS.md Round 1 Q5, Rounds 6, 9, 14, 15 and 16 in full, `rounds/round-17.md`.
+- Logs in `reports/`: `t19-meas-impl.log` (5 runs at 93cb559), `t19-final-meas.log` (20 burst32 runs at cfdcbb9, plus S1/short, stalled, burst1 ×7), `t19-final-job.log` (144c031), `t19-v2-meas.log` (the variant that was not adopted).
+
+**Statistics, recomputed** (python, from the log values):
+- burst32 at cfdcbb9, 20 runs: median 549.65, min 479.8, max 608.5, mean 550.9, sd 32.5, 2 above 600 (602, 608.5). p = 0.10, Clopper–Pearson 95 % interval 0.012–0.317. Pooled with the 5 runs at 93cb559 and the final job: 2 of 26 above 600, p = 0.077 (0.009–0.251), median 551.6.
+- 5-run medians: burst4 329.2 (296.2–371), burst16 488.6 (428.5–524.5), bigbody 358.3 (329.8–375.1). Against the single tip run: −10.1 %, −46.5 %, −14.2 %, and burst32 −56.8 % (20-run median) or −55.0 % (5-run median 573).
+- A median of n repetitions at p = 0.10 goes RED with probability 2.8 % (n = 3) and 0.86 % (n = 5). At the interval's upper end, p = 0.32, those rates are 24 % and 19 %.
+
+**Corrections to the round's facts.**
+1. **Six bodies are admitted under the cap, not five.** The cap is 64 MiB (`DEFAULT_MAX_IN_FLIGHT_BYTES = 64 * 1024 * 1024` = 67,108,864 B). A request is charged its `Content-Length`. The S1 body is `"lorem ipsum dolor sit amet "` × 400,000 = 10,800,000 B plus about 100 B of JSON. 6 × 10.8 MB = 64.8 MB fits, and 7 does not. So burst16 and burst32 hold **64.8 MB** in flight, not 54.
+2. **The factor, recomputed on ADR-0004's own formula** (peak = ~90 MB base + factor × MB in flight):
+   - burst16, 6 bodies: (488.6 − 90) / 64.8 = **6.2 MB per MB** at the median, range 5.2–6.7.
+   - burst32, the same 6 bodies plus up to 26 queued requests: median 7.1, range 6.0–8.0. The ~61 MB between the burst16 and burst32 medians, with the same bytes admitted, is a cost of the queue, not of the bytes in flight.
+   - burst4, 43.2 MB, where the cap does not bind: 5.5.
+   - burst1, one 10.8 MB body at a time: (182.7 − 90) / 10.8 = 8.6.
+   - On the tip, unbounded, the same formula gives 4.8 at burst16 and 3.4 at burst32. That is where the ~4.5 came from.
+
+   The round's "7–8 MB per MB" comes out only as (peak − 90) / 54 with five bodies, or as total RSS / 64.8 at burst16 (6.6–8.1). The ratio is also not constant: 5.5–8.6 across the variants. A single linear factor does not predict the peaks.
+3. **The "1 linux job in 10" figure is local only.** All 26 burst32 values come from this machine. CI's Linux S1 peaks have run higher than local ones before (Rounds 10–11: the CI Bun 1.4.2 arm had S1/burst1 above 250 MB in 5 of 24 runs). The windows leg has **no** value on 19's tree. EVIDENCE MISSING: the CI distribution of every S1 burst key on 19's tree, on both legs. Q2 condition 1 supplies it.
+4. **`S1/burst32` has not left the list.** The deletion is ccd5d27, on the unmerged branch. The integration list still holds `"S1/burst32": "19"` on both legs. So keeping the key listed is a re-point, not a re-add (Round 15 Q1 condition 5 forbids re-adds).
+5. **bigbody is paced.** It sends 240 requests at 4 requests/s and concurrency 16, mixing 10.8 MB text bodies with 8 MB images. The cap binds only some of the time.
+6. **Stale text.** Ticket 20's Acceptance cites "baseline ~4.5 MB RSS per MB". Spec §18 (`spec.md:634`) and ADR-0004 point 7 say "the byte cap alone: 64 × ~4.5 + ~90 ≈ 380 MB". ADR-0008:7 derives its "designed maximum of about 450 MB" from the same 4.5.
+7. **The collection is a lever, not part of the contract.** One deferred full GC runs after a release of ≥ 4 MiB. The cap without it left burst32 at 677.8 and 733.8 MB, RED. With it, burst32 is GREEN at the median. The collection is part of why 600 MB is met. Its pause length while other streams are open was not measured (Shared understanding).
+
+---
+
+## Q1 — who owns `S1/burst4`, `S1/burst16`, `S1/bigbody` now?
+
+**DECISION:** ACCEPTED with conditions. Owner **20**, on both legs, check `procPeak:proxy`. Ticket 19's memory criterion is amended so that 19 can close on what admission delivers. Ticket 20's Acceptance names the three budgets, plus burst32's (Q2). No budget changes. No new ticket. No new edge: 55 ← 20 and 61 ← 20 already exist.
+
+**This explicitly contradicts Round 1 Q5 condition 5**, "the byte cap alone meets both budgets". The measurement refutes it: burst16 has a median of 488.6 MB against a budget of 400 with the cap in place. The budgets now need the cap (point 1) and fewer copies (point 6) together. Round 6 Q1 condition 6 said that burst4 and bigbody "come back with numbers once ticket 19 lands". This is that return. No other earlier decision is contradicted.
+
+Binding conditions:
+1. **Trace (Round 15 Q1 condition 2).** Once 19's line below replaces its budget line, 20 is the only claimant: its new Acceptance line names each key and its budget. 20 is also 19's descendant on the blocking graph (20 ← 19), so the several-claimants rule gives the same owner. ADR-0004 point 6 names the mechanism.
+2. **Ticket 19's Acceptance.** Replace the line "Loop S1 burst: HWM ≤ 400 MB at 16 and ≤ 600 MB at 32 × 10.8 MB bodies (≥ 30 % peak improvement); bigbody within budget. **Delete `S1/burst4`, `S1/burst16`, `S1/burst32`, `S1/bigbody` (linux, windows).**" with:
+   > - [ ] Loop S1 (Round 18 Q1): `procPeak:proxy` improves by ≥ 30 % at S1/burst16 and S1/burst32 on each leg. Linux: the tip f906014 against this branch (burst16 912.9 → 488.6, 5-run median; burst32 1,272.4 → 549.7, 20-run median). Windows: the median of the ≥ 10 staging/19 CI runs (Round 18 Q2 condition 1) on the WS gate, against the median of ticket 67's matching windows runs on the pre-19 tree. S1/burst4 and S1/bigbody are recorded per leg. The byte cap's hard bound is proven by the seam-4 loopback tests above. 19's `procPeak:proxy` names in `S1/burst4`, `S1/burst16`, `S1/burst32` and `S1/bigbody` (both legs) move to ticket 20 in 19's commit (Round 18 Q1 and Q2). The budgets (≤ 250 / 400 / 600 / 250 MB) are ticket 20's criteria.
+
+   If windows misses ≥ 30 % at burst16 or burst32, 19 comes back with the numbers.
+3. **Ticket 20's Acceptance gains:**
+   > - [ ] Loop S1, both legs (Round 18 Q1/Q2): `procPeak:proxy` ≤ 250 MB (S1/burst4), ≤ 400 MB (S1/burst16), ≤ 600 MB (S1/burst32), ≤ 250 MB (S1/bigbody). Linux judges RSS, windows the WS gate (Round 7 Q1). 20 removes its names from these four entries with Round 15 Q1 condition 5's evidence. For a name RED in every matching run: 20's recorded loop runs plus its pre-merge CI run GREEN on that check and leg. For a `flips` name: ≥ 10 GREEN matching CI runs of that leg on 20's tree. If a budget cannot be reached, 20 comes back with numbers per key and leg. It also names the levers outside 20, measured or not: a lower `server.admission.maxInFlightMB` default, a body-processing concurrency limit (Round 1 Q5 condition 2; ticket 19's table is the first evidence for it), and Bun `--smol`. The budgets are never loosened, and the names stay under 20 until then.
+
+   In the existing line, "(baseline ~4.5 MB RSS per MB)" becomes "(baseline: ticket 19's tree, ADR-0004 amendment of Round 18; per copy removed, record the S1/burst4/16/32/bigbody peaks and (peak − 90) / MB admitted)".
+4. **Comments.** 19 and 20 each get a line naming this round. 19's line corrects "5 bodies of 10.8 MB" to 6 bodies, 64.8 MB (correction 1). 20's line says that a passing burst entry is ungated against regressions while listed (Shared understanding) and that 20 measures against the ≥ 10-run distribution of Q2 condition 1. "Comes back with numbers" covers every key.
+5. **Merge check (Round 15 Q1 condition 5).** 19's evidence lists every name it owned with its status ("moved to 20, Round 18"). After the move, 19 owns no S1 name, unless Round 17 Q3 gives it one (Q2 condition 6).
+6. **Nothing else changes:** the four budgets, the 64 MB default, ADR-0004's shed contract, n = 7 and the windows `S1/burst1` `unstable` entry with its only exit (Round 9 Q1 condition 4). Linux burst1's 182.7 MB median edits nothing.
+
+**Rationale:** The evidence settles that admission alone cannot meet these budgets. Burst4 holds 43.2 MB, below the cap, so the cap never acts on it. Burst16 holds the full 64.8 MB and still peaks at 489 MB. Bigbody is paced. What remains between the measured peaks and the budgets is per-body overhead, and that is exactly the subject of 20's What-to-build and ADR-0004 point 6. Keeping the names under 19 would leave a finished, high-risk ticket open on criteria its mechanism cannot reach. Moving them silently would break Round 15's "only the owner removes its names". A named re-assignment in an Owner Proxy round, with numbers, is the return path Round 16 Q3 described ("the Owner Proxy then decides the follow-up's names in the open"). 19 keeps a measurable criterion of its own: ≥ 30 % at the two variants where the cap binds, on both legs. That is §9's rule applied to the share 19 can deliver. The budgets stay whole and move to the ticket that can meet them. If it cannot, the numbers come back.
+
+**Charter:** C1 (bounded in-flight bytes proven at seam 4; memory budgets kept, with an owner able to meet them), C7 (≥ 30 % checked on windows, not assumed), C9 (stronger measured evidence: 26 + 15 loop runs; smaller blast radius: ticket text and owner ids, no budget or default change), §9 (no budget loosened; the ≥ 30 % rule applied), Round 1 Q5 conditions 2 and 4, Round 6 Q1 conditions 4 and 6, Round 15 Q1 conditions 2 and 5, Round 16 Q3.
+
+**REVERSIBILITY:** Two-way door (ticket text and owner ids). ADR: no. ADR-0004's consequence is recorded under Q3.
+
+---
+
+## Q2 — `S1/burst32`: delete now, or keep listed?
+
+**DECISION:** REJECTED in part.
+- **Accepted:** `S1/burst32` stays listed on both legs under owner 20 (`procPeak:proxy`), on ticket 67's schema. 67 merges first, and 19 is restaged on 67's schema before its pre-merge run. ccd5d27's deletion is reverted on 19's branch. 20 deletes the entry through Round 15's flipping-name rule.
+- **Rejected:**
+  - marking `flips` from the 2 of 20 local runs and one windows pre-merge run;
+  - deleting the entry (the implementer's choice);
+  - holding 19 until 20 lands.
+
+  The `flips` marks for every S1 burst key are set from ≥ 10 matching CI runs per leg on 19's tree.
+
+**This explicitly contradicts Round 15 Q1 condition 4**, "a name is marked only by 67 … A mark is never added later". For S1 keys on 19's tree, 19's restaged commit sets marks. It sets them by condition 4's own test (RED in fewer than all matching runs of the leg) and Round 15 Q2's counting (CI runs only). This is the return path Round 16 Q2 condition 3(c) named for a name that turns GREEN after a merge. It is not a silent mark. It also departs from Round 6 Q2 condition 2's "removal with numbers" in one respect: under condition 3 below, a local RED can block a deletion. The local runs still never set a mark.
+
+Binding conditions:
+1. **Evidence before 19 merges.** ≥ 10 valid CI runs of the full short profile on staging/19, on both legs (one run covers both). The S1 matching rule is METRICS.md's rule applied to S1: the same `s1-proxy-steady.mjs`, `verdict.mjs`, `budgets.mjs` and proxy request path (`zcode-proxy-src/src/server/*`, both `handler.ts`, `config/loader.ts`), on Bun 1.4.2. 19 changes that path, so every S1 key's matching count restarts on 19's tree (Round 15 Q2 condition 2, Round 16 Q2). The runs may start now, on the tree with burst32 deleted. Each run's S1 RED sets are replayed through 67's final ratchet with this round's S1 entries (`t67-scripts/replay.mjs`, Round 16 Q2 condition 2). Restaging onto 67 does not reset the count, because the list, `ratchet.mjs` and the tests are outside the matching rule. METRICS.md records every value per key and leg. The 26 local burst32 values go there as a labelled supplement.
+2. **Marks from those runs, per S1 burst key and leg** (Round 15 Q1 condition 4's test):
+   - RED in some runs and GREEN in others: owner 20, marked `flips`;
+   - RED in every run: owner 20, no mark;
+   - GREEN in every run: 19's commit deletes that leg's entry and cites the run ids (the ≥ 10-GREEN floor is met). The exception is condition 3.
+3. **Linux burst32 keeps a mark whatever the CI count shows**, unless it is RED in every run, in which case it carries no mark. The local supplement shows the check RED in 2 of 26 runs on this code. Deleting the entry would make an unlisted RED likely about once every 10–13 jobs (p 0.077–0.10), which is the random merge block that Rounds 9, 13 and 15 refused. A local RED can block a deletion. It can never set a mark (Round 15 Q2 condition 1 stands).
+4. **What comes back with run ids, with no rerun-until-green and no list edit in between:**
+   - any S1 RED not owned under this round (for example a ceiling, `count:proxy`, an orphan, a linux S1/short or S1/stalled RED);
+   - windows `S1/stalled` (owner 61, no mark) GREEN in any run (Round 16 Q2 condition 3(d));
+   - a windows `S1/burst1` result outside its `unstable` bounds;
+   - a harness failure or an invalid run, which does not count.
+
+   Rare REDs on non-S1 keys follow Round 17's answers and do not invalidate a run's S1 count, provided the run's summary table printed.
+5. **Expected default.** Linux burst32 marked `flips`. Linux burst4, burst16 and bigbody unmarked. Windows decided by condition 2. 19's pre-merge run on its restaged tip passes the ratchet and counts as one more run. No owner list or mark changes after it.
+6. **Round 17 interplay.** This answer does not depend on Round 17's outcome, with one addition. If Round 17 Q3 lists windows `S1/short` (`growth:proxy`), that key's matching runs also restart on 19's tree, because 19 changes S1's request path, and the staging/19 runs are its floor too. If Round 17 names 19 as that key's owner, 19 holds that name: it lists the name in its merge check and closes only after removing it with ≥ 10 GREEN windows CI runs on its tree (Round 15 Q1 condition 5). For the record, 19's text, before and after Q1, names no growth bound. Its only S1/short evidence is linux GREEN at 2.46 %/1k.
+
+**Rationale:** Each option has a measured cost:
+- **Deleted:** the entry fails about one linux job in 10–13 at random, and windows is unknown.
+- **Listed plain:** it fails about nine in ten as GREEN-but-listed.
+- **Holding 19 for 20:** a high-risk, finished ticket waits on a medium ticket that is blocked by it, and three other tickets wait behind 19 (21, 39, 58).
+
+Listing with a measured `flips` mark is the only state that passes deterministically, and it uses the mechanism Round 15 built for exactly this case. The recommendation's evidence for the mark is the weak part. Round 15 Q2 rejected local runs for marks because CI behaved differently, and S1 has a history of CI peaks above local ones. One windows run cannot show that a check flips. Ten CI runs cost no local resources, settle the windows distribution that is still missing for all four keys, and turn the mark into Round 15's own test rather than an exception to it. The cost of listing is that a burst32 regression passes as an owned RED until 20 removes the name. The listed burst4, burst16 and bigbody entries already have that cost, as all four had before 19, and the gap closes at the very next ticket in the chain.
+
+**Charter:** C1 (bounded memory still proven by every non-owned check; no random merge blocks that would revert good work), C7 (windows decided on its own numbers), C9 (stronger measured evidence: CI runs over local runs; smaller blast radius: one entry per leg, an existing mechanism, no new code), Round 9 Q1 condition 3 (`unstable` not extended), Round 15 Q1 conditions 4 and 5, Round 15 Q2 conditions 1 and 2, Round 16 Q2 conditions 2 and 3, PROMPT §0, PROMPT §7 Phase 4.
+
+**REVERSIBILITY:** Two-way door (list entries, marks and run scheduling). ADR: no.
+
+---
+
+## Q3 — ADR-0004's per-MB factor
+
+**DECISION:** ACCEPTED with corrections. ADR-0004 gets an amendment that records the measured result with the corrected numbers: 6 bodies and 64.8 MB, a factor of about 6.2 at burst16, and a ratio that is not constant. It supersedes point 7's "the byte cap alone meets both". The 64 MB default stays. Ticket 20 re-measures, and the ADR gets a second amendment with its result. Spec §18 and ADR-0008 get matching one-line corrections. Every threshold and budget is unchanged. **ADR: yes** (an amendment to ADR-0004, with a cross-reference note in ADR-0008).
+
+**This explicitly contradicts Round 1 Q5 condition 5**, as Q1 does. Nothing else is contradicted. The shed contract, the queue bounds, the idle rule (Round 5 Q4) and the no-concurrency-cap decision (Round 1 Q5 condition 2) stand.
+
+Binding conditions:
+1. **Append to ADR-0004:**
+   > ## Amended 2026-11-08 (Round 18, Q1–Q3)
+   >
+   > Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 18.
+   >
+   > - **The factor under the cap (ticket 19, linux, RSS).** The default cap is 64 MiB (67,108,864 bytes; the key `server.admission.maxInFlightMB` counts MiB), so six 10.8 MB bodies (64.8 MB) are admitted at once. With them, S1/burst16 peaks at 428.5–524.5 MB (median 488.6, 5 runs): about 6.2 MB RSS per MB admitted above a ~90 MB base (5.2–6.7), not the ~4.5 measured at 16–32 unbounded bodies. S1/burst32 peaks at 479.8–608.5 MB (median 549.7, 20 runs; 2 above 600) with the same bytes admitted. The ~61 MB more than burst16 is the cost of the queued requests. The ratio is not constant (5.5 at 4 bodies, 8.6 at 1), so the linear formula in point 7 does not predict peaks.
+   > - **Point 7's "the byte cap alone meets both" is superseded.** On today's code the cap alone meets neither budget at 16 bodies, and meets 32 only at the median, with ticket 19's one deferred collection after a ≥ 4 MiB release (cap only: 678–734 MB). The budgets stand unchanged. They are met by points 1 and 6 together, and ticket 20 owns them (≤ 250 / 400 / 600 / 250 MB for S1/burst4 / burst16 / burst32 / bigbody). If 20 cannot reach them, the question comes back with numbers. The levers outside 20 are a lower cap default, a body-processing concurrency limit (point 5) and Bun `--smol`.
+   > - **The 64 MB default stays.** No lower value has been measured, and a lower one would queue and shed parallel sessions sooner (point 5's reasoning). It is a two-way door through the config key.
+   > - **Ticket 20 re-measures** (peak − 90) / MB admitted at S1/burst16 and burst32 per copy removed. The result is recorded here as a further amendment naming the ticket.
+2. **Spec §18, `spec.md:634`.** "(the byte cap alone: 64 × ~4.5 + ~90 ≈ 380 MB)" becomes "(the byte cap plus fewer copies, ticket 20; under the cap alone, burst16 median 488.6 MB at 64.8 MB admitted, ADR-0004 amendment Round 18)". Mark it as a measurement-record amendment. Budgets unchanged.
+3. **ADR-0008 gets a cross-reference note, and its thresholds do not change.** Its "designed maximum of about 450 MB … 64 MB × ~4.5" is out of date: the measured linux maximum under the cap is 608.5 MB (RSS, S1/burst32). The soft limit of 512 MB, which only WARNs, can therefore fire under legitimate cap-saturating load. The hard limit of 1024 MB has more than 400 MB of margin on linux. The windows footprint on 19's tree is EVIDENCE MISSING; Q2 condition 1's runs record it. Ticket 21 gets a Comments line naming this round: its evidence records the proxy footprint the supervisor samples, per leg, for the S1 burst runs on its tree. If that footprint can hold at or above 1024 MB for 3 samples, 21 comes back with numbers before it merges (C1: no restart storms).
+4. **METRICS.md line 33** keeps its Phase 1B "~4.5 MB RSS per MB in flight" as history and gains the 19-tree figures next to it.
+5. **Records.** RUNLOG names this round. The ADR amendment is written by the orchestrator, not by 19 or 20.
+
+**Rationale:** The ADR is the place a later reader goes to learn why 64 MB was chosen and whether it meets the budgets. Today it says the cap alone suffices, and the measurement says it does not. Leaving that text in place would point ticket 20, ticket 21 (whose thresholds were derived from it) and any future tuning at a wrong model. The recommended wording would have recorded a factor that cannot be reproduced from the code (five bodies) and that hides the queue cost. The corrected amendment records what was measured and how to recompute it. Keeping the default is the reversible, evidence-backed choice: lowering the cap has no measurement behind it and costs parallel sessions directly. The re-measure after 20 closes the loop.
+
+**Charter:** C1 (memory model and supervisor thresholds kept honest; no restart storm from a stale derivation), C2 (default unchanged; config key unchanged), C8 (ADR, spec and METRICS consistent), C9 (stronger measured evidence; then the smaller, reversible option: text only, no default change), §9 (no budget loosened), Round 1 Q5 conditions 2, 4 and 5, Round 5 Q4.
+
+**REVERSIBILITY:** Two-way door for the text and the default. The ADR amendment records a hard-to-reverse fact (the shed contract's memory model) and is permanent history. **ADR: yes.**
+
+---
+
+## Shared understanding
+
+Open branches I still see. None blocks 19 once Q2's runs are in and 67 has merged:
+- **19 waits on 67.** If 67's merge is delayed by Round 17 (its rare REDs), 19 waits with it. Wall-clock time does not matter (PROMPT §0). The staging/19 runs can still run in the meantime.
+- **burst4 and bigbody may be out of 20's reach.** The implementer's own estimate with copies halved gives about 263 MB at 4 bodies, still above 250. Expect the Q1 condition 3 return path. The named levers are not adopted now.
+- **While listed, the S1 burst entries are ungated against regressions.** An owned RED passes at any value until 20 removes the name, as it did before 19. 20 measures against Q2 condition 1's recorded distribution, and its pre-merge evidence shows any drift.
+- **EVIDENCE MISSING: the pause length of the coalesced `Bun.gc(true)` while other response streams are open.** It is a C1/C3 question (stalled streaming during a full collection). Nobody has measured it. If 20 or 21 measures stream latency, it belongs there. Today it is not a merge condition.
+- **Round 17 Q3 (windows S1/short `growth:proxy`)** touches 19 only as described in Q2 condition 6. This file decides no owner for it.
+
+
+---
+
+# Round 19 (2026-11-08) — ticket 26 on Bun 1.4.2
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–18 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it names the decision.
+
+I checked the evidence myself, read-only:
+- `ticket/26-captcha-egress-bun` at 2378294 (`git -C /home/AgentKit/wt/t26 show HEAD:…`):
+  - `issues/26-*.md` (the implementer report);
+  - the diff 482eef5..HEAD, which touches only three files: `captcha-happy.ts` (+23/−6), `captcha-egress.test.ts` (+116) and the ticket;
+  - `captcha-egress.test.ts:147-161`: the unset case is gated as `Bun.semver.satisfies(Bun.version, ">=1.4.3") ? it : it.failing`. The test name is "goes direct when the setting is unset, even with ambient HTTP(S)_PROXY" and **does not carry the version condition**. The recommendation's "with the version condition in the test name" is therefore a change still to be made, not a description of the branch;
+  - `src/index.ts:244-253`: the `captcha egress:` banner already prints "explicit proxy (invalid URL; requests will fail)" for an invalid setting.
+- Call sites: `captcha-happy.ts` is loaded only by `captcha-solver-worker.ts:69` (dynamic import) and by tests. `captchaFetch` (cookie priming `:1776`, passthrough `:399`) and the sync-XHR worker (`SYNC_WORKER_SRC`, a thread spawned inside the solver) both run inside the solver. Once ticket 27 runs the solver as a child process, **all** captcha egress runs in that child's process environment.
+- `reports/t26-*`:
+  - `probe2.log`: on 1.4.2 `proxy: false`, `""`, `null` and `undefined` all go via the ambient proxy; `{}` and `{url:""}` are rejected; `{respectNoProxy}` with `NO_PROXY=*` still goes via the proxy. On 1.4.3 and 1.4.4 only `false` goes direct. So **no per-request option gives a direct route on 1.4.2.**
+  - `probe3.log`: env changes inside a Worker (delete, `NO_PROXY=*`, the `env` option) have no effect. Only a main-thread `NO_PROXY` does.
+  - `probe-tf.log`: `it.failing` and `Bun.semver` work on 1.4.2.
+  - `red-142`/`red-144`/`green-142`/`green-144`/`mutants`: match the report (five mutants killed, restored clean each time).
+  - `green-142.log:11` prints the declared-failing case as `(pass)`, so it cannot be told apart from a real pass in the output.
+  - `captcha-last.log`: 136 pass, 0 fail. `full-kit`: 836 / 817 pass / 0 fail / 19 skipped. `full-mcp`: 97 / 96 / 0 / 1. `full-proxy`: 1387 pass, 0 fail. `full-typecheck`: 0 `error TS`.
+- `research/undici-yaml.md` items 2–3 and lines 73–79: the dispatcher is ignored (oven-sh/bun#38840), and Bun reads `HTTP(S)_PROXY`/`ALL_PROXY` on each fetch.
+- Integration tree 5e99b52:
+  - `lib/proxy-env.mjs`: the managed proxy strips `HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY` and the npm/yarn/pnpm proxy variables, in any case;
+  - `proxy/config.example.yaml:57-59`: "ambient HTTP_PROXY/HTTPS_PROXY variables are ignored";
+  - `spec.md` §2 (environment parity, thread transport = "tests and fallback") and §13;
+  - `docs/adr/0002-*.md:46, 54`;
+  - `issues/24`, `27`, `28`, `54`, `62`.
+- DECISIONS.md Round 1 Q17, Round 2 Q2 condition 5, Round 5 (26 → Risk medium), Rounds 10–11 (the 1.4.2 pin, the re-entry rule in condition 4, the forgone-fix list, the release-note stay-back).
+
+---
+
+## Q1 — how does ticket 26 close when half of it needs Bun ≥ 1.4.3?
+
+**DECISION:** REJECTED in part.
+
+**Accepted:**
+- Ticket 26 closes with the configured-proxy half and the fail-closed behaviour.
+- Its unset-setting guarantee moves to ticket 27, which strips the ambient proxy variables from the solver child's environment.
+- The `it.failing` declaration is accepted as the record of a known runtime gap.
+- Ticket 62 records the gap.
+- The pin stays at Bun 1.4.2.
+
+**Rejected:**
+- **"…unless `ZCODE_PROXY_UPSTREAM_PROXY` is set".** The child is spawned **always** without ambient proxy variables. The set is the one `lib/proxy-env.mjs` already strips: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` in any case, plus the npm/yarn/pnpm proxy variables. Only the setting itself passes. When the setting is set, the configured URL reaches every routed fetch through the explicit `proxy:` option, which test 1 shows is honoured on 1.4.2. Leaving the ambient variables in the child would only keep a latent route for any fetch that does not pass `proxy:`. Ambient `NO_PROXY` would also leave open whether it bypasses the configured proxy. One unconditional rule is stricter (C6) and simpler (C9). Round 1 Q17 already decided that ambient variables are never an egress input.
+- **"`it.failing` … with the version condition in the test name" as a description.** The branch's name lacks the condition (see the evidence above). The rename is a binding change, because the runner prints the declared-failing case as `(pass)` and the gap would otherwise be invisible.
+
+**Explicit relation to earlier rounds:**
+- **Round 1 Q17** stands as decided. Its premise that `proxy: false` gives a direct route holds only from Bun 1.4.3. On the 1.4.2 pin (Round 11) the guarantee is delivered by 26 and 27 together. This corrects the premise, not the decision.
+- **Round 2 Q2 condition 5 / ADR-0002** ("the child gets the inputs the worker gets today"). **This narrows that wording explicitly.** The ambient proxy variables are no longer passed. They are not a solve input but the undeclared route Q17 removes. Solve inputs, outputs and the 90 s deadline stay byte-identical, and so do the unsandboxed flag, the CDN cache variables and the egress setting.
+- **Round 11:** unchanged. This finding is **not** a reason to move the pin. 1.4.3 has failed the memory re-entry rule, and there is a 1.4.2 remedy that does not touch the proxy's own traffic.
+- **Round 11 condition 4 (re-entry rule):** gains one explicit item (condition 4 below). It is a tightening already implied by C5's "passes the full test suite". It loosens nothing.
+
+Binding conditions:
+
+1. **Ticket 26 closes on this criterion** (the text is in "Ticket-text changes" below):
+   - configured setting: fetch, sync-XHR and https CONNECT go through the configured proxy, and the ambient proxy and the targets receive nothing;
+   - invalid setting: fails closed, and no listener receives anything;
+   - unset setting with ambient variables: a plain test on Bun ≥ 1.4.3, declared `it.failing` on Bun < 1.4.3.
+
+   The CI item ("fast suite and `memory-budget` on ubuntu and windows") stays open until the orchestrator has verified it after merge and push, as the ticket says. Nothing else is re-run.
+2. **The declared-failing test.**
+   - The gate stays exactly `>=1.4.3`.
+   - The name gains the condition, for example: `goes direct when the setting is unset, even with ambient HTTP(S)_PROXY (declared failing on Bun < 1.4.3: proxy:false ignored, ticket 62)`.
+   - The ticket's suite counts say "136 pass, including 1 declared-failing case on Bun 1.4.2" (and the same for the proxy suite's 1387).
+   - The gap is not hidden: tests 1 and 3 use the same child harness, so a harness break still turns them RED. `it.failing` itself turns RED if the case passes unexpectedly.
+   - This is an accepted known-gap record, not a skip. It is the only such declaration this round allows.
+3. **Ticket 27 owns the process-level guarantee on 1.4.2.**
+   - What it builds:
+     - the solver child's environment excludes the ambient proxy set from the Rejected list, whether or not the setting is set;
+     - `ZCODE_PROXY_UPSTREAM_PROXY` passes unchanged.
+   - Its new seam-3 test runs on the pinned 1.4.2 as a **plain test with no version gate**. It goes through the child adapter, with mixed-case ambient `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` in the parent's environment:
+     - unset → `captchaFetch` (http and https CONNECT) and the sync-XHR path go direct, and the ambient recording proxy receives nothing;
+     - set → all three go only through the configured proxy;
+     - a unit assertion that the child's environment holds none of the stripped names, in any case.
+
+     The test uses loopback mocks only, on port 0.
+   - The test must exercise the real `captchaFetch`/`syncFetchBlocking` inside the child. A fixture backend that bypasses them does not satisfy it.
+   - Ticket 28 is unaffected.
+4. **Ticket 62 records the gap and guards against re-gating.**
+   - The forgone-fix list (Round 11 condition 4) gains an entry: "`fetch({ proxy: false })` ignored on 1.4.2 when ambient proxy variables are set". The entry carries:
+     - the evidence (`reports/t26-probe2.log`, measured);
+     - the primary release-note reference if one exists, otherwise "observed, not found in the release notes";
+     - the kit path that hits it: captcha egress under the thread transport, plus the module-level test. The child adapter is covered by 27.
+   - Re-entry gains item (v): the candidate passes `captcha-egress.test.ts` with the unset case running as a plain test. **The `>=1.4.3` gate is never moved to admit a candidate**, just as n is never raised.
+5. **Residual exposure.** On Bun 1.4.2, after 27, ambient egress is possible only when all three hold:
+   - a standalone proxy (the managed proxy is stripped by `proxyEnv`);
+   - ambient proxy variables in its shell;
+   - the thread transport.
+
+   **EVIDENCE MISSING: how the thread transport ("tests and fallback", spec §2) is selected in a non-test run.** Ticket 27 decides this and records it. If the thread transport can run outside tests on Bun < 1.4.3, it comes back to the Owner Proxy as a finding. The question then is the `captcha egress:` banner's "direct" claim in that case. I do not prescribe banner wording now. Nothing reaches users before Phase 6 (B6), so the interim state on the integration branch is not a release exposure.
+6. **Announced, not silent (C2, C8).**
+   - Ticket 54's release notes gain one line: "On Bun, captcha egress now honours `ZCODE_PROXY_UPSTREAM_PROXY`. An invalid value now fails captcha requests, as the startup banner already stated and as Node already did."
+   - If condition 5's residual is reachable in the shipped build, the Bun 1.4.2 stay-back text (Round 11 condition 6) also names it.
+   - `config.example.yaml`'s "ambient … ignored" line stays. It is true for the managed proxy and, after 27, for the child adapter.
+   - No README, SECURITY or SUPPORT_MATRIX change: no command, flag, env var or support claim changes.
+7. **Records.**
+   - Spec §13 gains one sentence: "On Bun < 1.4.3 `proxy: false` is ignored when ambient proxy variables are set. The unset case is then guaranteed by the solver child's environment (§2, ticket 27)."
+   - Spec §2's environment-parity bullet gains the exclusion.
+   - ADR-0002 gets an amendment line next to line 54: "Round 19: the solver process's environment also excludes the ambient proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case, and the npm/yarn/pnpm proxy variables); `ZCODE_PROXY_UPSTREAM_PROXY` passes."
+   - RUNLOG records this round as narrowing Round 2 Q2 condition 5.
+
+**Rationale:** The evidence settles that no change confined to captcha code can give a direct route on Bun 1.4.2:
+- every per-request option either still takes the ambient proxy or is rejected (probe2);
+- worker-scoped env changes are ignored (probe3);
+- a process-wide `NO_PROXY` would reroute the proxy's own LLM traffic, which B1/C2 forbid.
+
+Moving the pin is closed by Round 11's measured memory result. The process boundary that ticket 27 builds anyway is the only remedy inside the boundaries. Every captcha fetch runs in the solver, and a child's environment is its own, so stripping there closes the gap without touching anything else. Splitting the ticket this way keeps 26's verified gains: the configured setting is honoured, and an invalid URL now fails closed instead of silently taking the ambient route. Making the strip unconditional removes a branch and a latent route at no cost, because the configured URL is always passed explicitly. The test-name and count conditions exist because the runner reports the known gap as a pass.
+
+**Charter:** C6 (no undeclared egress route; stricter, never weaker), B1 (routing and environment only; solve I/O, the 90 s deadline and challenge handling unchanged; the proxy's own traffic untouched), C2 (the managed proxy is unchanged; the invalid-URL behaviour matches the banner and Node; announced in the release notes), C5 and C1 (the 1.4.2 pin from Round 11 stands; re-entry tightened, not loosened), C8 (spec, ADR amendment, release notes), C9 (stronger measured evidence: probes on three Bun versions and five killed mutants; smaller blast radius: one environment rule in an already-planned ticket; simpler: one unconditional strip set, shared in meaning with `proxyEnv`), Round 1 Q17, Round 2 Q2 condition 5 (narrowed explicitly), Round 11 conditions 4 and 6.
+
+**REVERSIBILITY:** Two-way door: ticket text, a test name, an environment filter on a not-yet-built child and an amendment line. ADR: no new ADR; one amendment line in ADR-0002.
+
+### Ticket-text changes (exact)
+
+**`issues/26-captcha-egress-routing-under-bun.md`** — replace the single acceptance criterion with:
+
+```
+- [ ] Seam 3 test with a local recording proxy (Round 19): setting set → all captcha egress (`captchaFetch` http, sync-XHR, https CONNECT) goes through it and the ambient proxy receives nothing; setting invalid → all three fail closed and no listener receives anything; setting unset with ambient `HTTP(S)_PROXY` set → no proxy used, a plain test on Bun ≥ 1.4.3 and declared `it.failing` on Bun < 1.4.3 with that condition in the test name (gate `>=1.4.3`, never moved). On the pinned Bun 1.4.2 the unset-case guarantee is delivered by ticket 27 (solver child environment without ambient proxy variables).
+```
+
+and add a Comment: `- 2026-11-08 (orchestrator, Owner Proxy round 19, binding): closes on the amended criterion; the unset case on Bun 1.4.2 moves to ticket 27; suite counts include 1 declared-failing case on 1.4.2; the test name carries the version condition.`
+
+**`captcha-egress.test.ts`** (on ticket 26's branch before merge) — the unset case's name becomes:
+`goes direct when the setting is unset, even with ambient HTTP(S)_PROXY (declared failing on Bun < 1.4.3: proxy:false ignored, ticket 62)`
+
+**`issues/27-solver-child-process.md`**:
+- In What to build, replace `Environment parity: \`ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA\`, CDN cache variables and the egress setting pass; \`ZCODE_KIT_RESPAWN_*\` and \`ZCODE_KIT_STOP_TOKEN\` are excluded;` with:
+  `Environment parity: \`ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA\`, CDN cache variables and the egress setting (\`ZCODE_PROXY_UPSTREAM_PROXY\`) pass; \`ZCODE_KIT_RESPAWN_*\`, \`ZCODE_KIT_STOP_TOKEN\` and the ambient proxy variables (\`HTTP_PROXY\`, \`HTTPS_PROXY\`, \`ALL_PROXY\`, \`NO_PROXY\`, any case, and the npm/yarn/pnpm proxy variables, the set \`lib/proxy-env.mjs\` strips) are excluded, whether or not the egress setting is set (Round 19);`
+- Add acceptance items:
+  ```
+  - [ ] Seam 3 (egress, Round 19, from ticket 26): on the pinned Bun 1.4.2, through the child adapter, with mixed-case ambient `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` in the parent's environment: setting unset → the real `captchaFetch` (http and https CONNECT) and the sync-XHR path inside the child go direct and the ambient recording proxy receives nothing; setting set → all three go through the configured proxy only; the child's environment contains none of the excluded proxy names in any case. Plain test, no version gate; loopback mocks only.
+  - [ ] The ticket records how the thread transport is selected outside tests. If it can run outside tests on Bun < 1.4.3, that returns to the Owner Proxy as a finding (Round 19 condition 5) before closing.
+  ```
+
+**`issues/62-bun-1-4-3-plus-s1-burst1-peak.md`**:
+- Append to the re-entry rule paragraph: `Round 19: the candidate also passes \`captcha-egress.test.ts\` with the unset case running as a plain test; the \`>=1.4.3\` gate is never moved to admit a candidate.`
+- Add acceptance item:
+  ```
+  - [ ] The forgone-fix list includes "`fetch({ proxy: false })` ignored on 1.4.2 when ambient proxy variables are set" (measured: reports/t26-probe2.log; primary release-note reference, or "observed, not found in the release notes"); kit path hit: captcha egress under the thread transport and the module-level egress test; the child adapter is covered by ticket 27's environment strip (Round 19).
+  ```
+
+**`issues/54-*.md`** — add a Comment: `- 2026-11-08 (orchestrator, Owner Proxy round 19, binding): release-notes line: "On Bun, captcha egress now honours ZCODE_PROXY_UPSTREAM_PROXY; an invalid value now fails captcha requests, as the startup banner already stated and as Node already did." If ticket 27's record shows the thread transport reachable outside tests on Bun < 1.4.3, the Bun 1.4.2 stay-back text also names the ambient-proxy gap.`
+
+**`issues/28-*.md`** — no change.
+
+---
+
+## Shared understanding
+
+Open branches I still see (none blocks merging ticket 26):
+- **EVIDENCE MISSING:** how the thread transport is selected outside tests. Ticket 27 records it, and if it is reachable on Bun < 1.4.3 it returns as a finding about the `captcha egress:` banner (condition 5).
+- Ticket 27's new egress test fails on 1.4.2 through the child adapter. That would mean Bun reads something other than the child's process environment, and it comes back as a question. No version gate is added to make it pass.
+- Ticket 26's CI item (both `memory-budget` legs, fast suite on ubuntu and windows) is still to be verified after merge and push.
