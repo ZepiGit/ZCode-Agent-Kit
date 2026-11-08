@@ -56,6 +56,43 @@ export const STALE_LOCK_ROUNDS = {
   "S3/hung": ["hung-10-with-stale-lock"],
 };
 
+// The kill-holder rounds (scenarios/s3-concurrency.mjs): the adversary SIGKILLs
+// the start lock holder, one of the round's own launches, and that launch is
+// reported as `killedByAdversary`, never as a failed launch. Owner Proxy round
+// 27 Q1 condition 2: such a round counts as run only if the adversary recorded
+// a kill (an integer pid) and exactly one of the round's launches carries that
+// pid and exited non-zero. No kill, a pid that matches no launch, a matched
+// launch that exited 0, or two or more launches on the pid (a reused pid,
+// which would hide a real failure) are harness failures, never GREEN: a
+// missing observation must not read as the killed-holder case passing
+// (Round 8 Q1 condition 1).
+export const KILL_HOLDER_ROUNDS = {
+  "S3/short": ["kill-holder-10"],
+  "S3/long": ["kill-holder-10"],
+  "S3/hung": ["kill-holder-10"],
+};
+
+const KILL_HOLDER_RULE = "a kill-holder round counts only with exactly one launch that carries the killed pid and exited non-zero (Round 27 Q1)";
+
+function killHolderProblems(key, rounds, killHolderRounds) {
+  const problems = [];
+  for (const r of rounds) {
+    if (!(killHolderRounds[key] ?? []).includes(r?.name)) continue;
+    const adversary = r.adversary ?? null;
+    const fail = (state) => problems.push(`round ${r.name}: ${state}; ${KILL_HOLDER_RULE} (adversary ${JSON.stringify(adversary)})`);
+    const killed = adversary?.killed;
+    if (!Number.isInteger(killed)) { fail("the adversary recorded no kill"); continue; }
+    if (!Array.isArray(r.launches)) { fail(`the round recorded no launch pids, so the killed pid ${killed} matches no launch`); continue; }
+    if (r.launches.length !== r.n) { fail(`${r.launches.length} of ${r.n ?? 0} launches recorded`); continue; }
+    const matched = r.launches.filter((l) => l?.pid === killed);
+    const names = matched.map((l) => `${l.via}#${l.i}`).join(", ");
+    if (matched.length === 0) fail(`the killed pid ${killed} matches no launch`);
+    else if (matched.length > 1) fail(`${matched.length} launches carry the killed pid ${killed} (${names})`);
+    else if (matched[0].code === 0) fail(`the launch with the killed pid ${killed} (${names}) exited 0`);
+  }
+  return problems;
+}
+
 function refusedStartProblems(key, rounds, checks, staleLockRounds) {
   const problems = [];
   for (const r of rounds) {
@@ -80,7 +117,7 @@ const OUTCOME_OF_EXIT = { 0: "GREEN", 1: "RED" };
  * summary: the run's parsed summary.json, or null when there is none.
  * Returns { ok, problems }. An exit 2 is already a harness failure and needs no evidence.
  */
-export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, rounds = ROUNDS, staleLockRounds = STALE_LOCK_ROUNDS }) {
+export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, rounds = ROUNDS, staleLockRounds = STALE_LOCK_ROUNDS, killHolderRounds = KILL_HOLDER_ROUNDS }) {
   if (exitCode !== 0 && exitCode !== 1) return { ok: true, problems: [] };
   if (!summary) return { ok: false, problems: [`exit ${exitCode} but no summary.json: the run never finished its scenario`] };
   const problems = [];
@@ -105,6 +142,7 @@ export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, round
   const ran = new Set(roundList.map((r) => r?.name));
   for (const name of rounds[key] ?? []) if (!ran.has(name)) problems.push(`round ${name} never ran`);
   problems.push(...refusedStartProblems(key, roundList, Array.isArray(summary.checks) ? summary.checks : [], staleLockRounds));
+  problems.push(...killHolderProblems(key, roundList, killHolderRounds));
   if (summary.platform === "win32" && summary.metric !== "commit") problems.push(`windows run with metric ${summary.metric ?? "none"}: no commit_kb was sampled`);
   if (summary.metric === "commit" && summary.notes?.sampler?.units?.ok !== true) problems.push("the units self-test did not pass");
   return { ok: problems.length === 0, problems };
