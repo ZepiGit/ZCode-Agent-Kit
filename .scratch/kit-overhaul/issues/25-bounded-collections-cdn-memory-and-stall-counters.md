@@ -68,3 +68,29 @@ Spec stories: 62, 65
   - **Common acceptance:** no new log events (the `[pe-cache-evict]` line is the existing one, byte-identical), config keys or env overrides. The new test files run in `npm run test:proxy` (bun discovers `*.test.ts`). The ubuntu/windows `test-kit` and `memory-budget` CI legs are **pending CI (orchestrator verifies after merge+push)**.
   - **For other tickets:** 24 changes `captcha-solver.ts` and adds one fixture scene (`env:`); merging it should only touch the fixture's switch. 27/28: the generation reset holds wherever `captcha-happy` is loaded once per generation (thread or child); `captcha-generation-bounds.test.ts` goes through `runCaptchaSolve`, so it keeps proving it after the transport switch. 29: the disk tier is untouched by this ticket. 31/36 (MCP): the module is proxy TypeScript; sharing it with the MCP package needs a byte-identical copy with a drift test (ticket 68's pattern). Spec §7 / METRICS: the S2 CDN row could name the 32 MiB body budget beside the 64 MB memory bound (docs, not done here).
 - 2026-11-08 (orchestrator, Owner Proxy round 20): Round 20 Q1 confirms Decision 1 (≤ 32 MiB of bodies, constant, no config key; 256 entries and the 64 MB check unchanged) and moves its B1 proof into Acceptance (seam 3 replay; S2 cannot count fetches: phase D only calls put() and egress is blocked). Decision 1's text gains: phase D alone measures 70 MB at 32 MiB, so the GREEN (57–58 MB, 6–7 MB margin on Linux) holds inside full S2/short; and a read-back from a shared directory may return another installation's newer envelope for the same URL, as every generation start already does. (Decision 1 is not yet in this file on the integration branch, so these three facts are recorded here.)
+- 2026-11-08 (implementer, round 2, Owner Proxy round 20 Q1; replay 3e5cc33; integration tip e056af6 merged in 5ac0898 and 064cfec in 6cdbacf; the head SHA is in the final report). Ticket 24 had not landed, so it is not merged.
+  - **Condition 1:** the cap stays the code constant `CDN_MEMORY_MAX_BYTES` (32 MiB), with no config key and no env override. To run replay (c), the cache constructor takes a test-only `memoryMaxBytes` option (`CdnCacheOptions`, documented "tests only; production always uses CDN_MEMORY_MAX_BYTES"). No production call site passes it (`captcha-happy.ts` constructs `new CaptchaCdnCache()`).
+  - **Condition 2: seam-3 replay** `src/proxy/captcha-cdn-replay.test.ts` (3 tests, run by `npm run test:proxy`).
+    - Recording `__fixtures__/cdn-sequence.json`: 2,527 calls of one generation. It has 373 URLs and 106.2 MiB of bodies: 72 pe bundles of 0.75–1.25 MiB, one 33 MiB bundle, and 300 small SDK files, so both the 256-entry and the byte caps evict. It includes repeat reads of evicted URLs, 20 stall invalidations, concurrent pairs, and a 10-minute TTL expiry on a fake clock. Ops follow captcha-happy's interceptor: async `get ?? load`, sync `get ?? put`, plain `get`, `invalidate`. The generator is `/home/AgentKit/overhaul-tools/t25-scratch/record-cdn-sequence.mjs`.
+    - Pre-change cache: `__fixtures__/captcha-cdn-cache.8e11d15.ts`, verbatim. The test checks its git blob id `1b047f1c…` (= `git rev-parse 8e11d15:zcode-proxy-src/src/proxy/captcha-cdn-cache.ts`).
+    - Network: a local fixture whose n-th fetch of a URL returns version n of its body, so a spurious refetch changes the bytes. Run under the egress block. `noegress.sh` now also lists `[::1]` in `NO_PROXY`; without it the IPv6 loopback server test was routed to the dead proxy port.
+
+    | replay (temp disk tier) | fetches (`fetchBody` + sync) | served calls | from memory | from disk | from network | equal to (a): fetch log, bytes, sha256, fetchedAt |
+    |---|---|---|---|---|---|---|
+    | (a) pre-change @ 8e11d15, unbounded | 428 | 1,254 | 825 | 0 | 428 | — |
+    | (b) head, 32 MiB | 428 | 1,254 | 513 | 312 | 428 | yes |
+    | (c) head, 64 MiB | 428 | 1,254 | 517 | 308 | 428 | yes |
+
+    Fetches after the TTL expiry: 35 in every replay. Disk tier unavailable (recorded, not a gate): (a) 428, (b) 735, (c) 734 fetches.
+  - **RED → GREEN.** Before `memoryMaxBytes` existed, (c) ran at 32 MiB and the check "64 MiB evicts less than 32" failed: 312 disk reads in both (`reports/t25-r2-red-replay.log`). GREEN at 3e5cc33 (`reports/t25-r2-green-replay.log`). The equality itself pins behaviour that already holds, so it is proven by mutants. Each was applied to the committed `captcha-cdn-cache.ts` and restored with `git checkout 3e5cc33 --`; `git diff` was empty after each (`reports/t25-r2-mutate-replay.log`):
+    - "read-back resets fetchedAt": killed, same 428 fetches but the served `fetchedAt` differs (…000250 vs …020880).
+    - "read-back skips the freshness check": killed, 393 fetches instead of 428 (stale envelopes served after the expiry).
+    - Extra mutant "commit writes no disk envelope": killed.
+  - **Full suite at 6cdbacf:**
+    - `npm run test`: 836 tests, 817 pass, 0 fail, 19 skipped.
+    - `npm run test:proxy`: 1413 pass, 0 fail, 96 files (+3).
+    - Typecheck clean.
+    - `npm run test:mcp`: 97 tests, 96 pass, 0 fail, 1 skipped.
+    - Linux compile: 659 modules. Pack + `verify-payload` OK (`__fixtures__` excluded).
+    - Captcha suites last: 149 pass, 0 fail, 16 files (`reports/t25-r2-captcha-last.log`).
+  - **Pending CI (orchestrator verifies after merge+push):** windows `memory-budget` S2/short `cdn-cache:memory-growth` ok at 32 MiB (Round 20 Q1 condition 3); the linux leg; `test-kit` on ubuntu/windows × Node 24/26.
