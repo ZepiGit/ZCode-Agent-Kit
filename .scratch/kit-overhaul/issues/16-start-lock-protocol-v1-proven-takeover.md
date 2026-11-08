@@ -368,3 +368,73 @@ The head is the commit that adds this report.
   - `test:mcp`: 100 tests, 99 pass, 0 fail, 1 skipped. `dist/` unchanged.
 - Linux S3 loop on 3395c0c (`r2-merged9256-1–3`, logs `t16-r2-merged9256-mem1–3`): in 3 of 3 runs, S3/short and S3/hung have `failed-launches` 0, `stale-lock-after-round` 0 and `exactly-one-proxy-after-round` 0. Every kill-holder round has 1 `killedByAdversary` and 1 launch on the killed pid (145–220 ms), so the gate never fires. REDs are 37's only, and the ratchet holds 3/3. Over the whole of round 2, that makes 14 of 14 kill-holder rounds clean.
 - **Ticket 18 (orchestrator note):** it is not on the tip at de4dec2, so nothing changes here. If 18 merges before 16, the merge into this branch must keep 18's `stopToken` and the 0600 mode wherever 16 rewrites `proxy.pid`. That means `writePidJson` (temp + rename, already `mode: 0o600` on the temp file and the fallback), `writePidFile`, and `completeRecord`, which must copy the token from the existing record for the same pid. The merge also needs a test that `completeRecord` keeps the token and the mode, and must never print the token (B2).
+
+### 2026-11-08 — implementer (ticket 16), round 3 (merge with ticket 77)
+
+**Branch:** `ticket/16-start-lock-v1`, from 0a7d5c3. The merger could not merge it: the tip contains ticket 77 (merge 78f51bd, exact start identity `{ ms, ticks }`, `startTicks` in `proxy.pid`).
+- `88f07dc`: merge of the integration tip 8160c69 (`overhaul/stability-terminal-ux`), conflicts resolved below.
+- `5599613`: three cross-ticket tests (16's records × 77's ticks).
+
+The head is the commit that adds this report.
+
+**Resolution, hunk by hunk (`lib/proxy-lifecycle.mjs`)**
+- **Hunk 1, the pid record writer.**
+  - There is one record builder now, `pidRecord(pid, start, { spawning })`, which gives `{ pid, startedMs, startedIso, startTicks?, spawning? }`. 16's atomic `writePidJson` (temp + rename, mode 0600) writes everything it builds.
+  - `writePidFile(pid, start, spawning = null)` takes 77's identity `{ ms, ticks }` or null.
+  - `startTicks` is recorded whenever the identity carries ticks. `spawning` is kept only while the start is unknown.
+  - The spawn intent goes through the same builder (`pidRecord(null, null, { spawning })`), and its bytes are unchanged.
+  - 16's `readPidJson()` and `pendingSpawn()` are kept unchanged. A record counts as unfinished on a missing `startedMs` only. So a record with damaged `startTicks` is not "completed" over 77's fail-closed refusal (77's test "start ticks present but unreadable" still passes).
+  - Ticket 18's `stopToken` gets one place to go, `pidRecord` (or its options), so all writers keep it. 18 itself is not implemented.
+- **Hunk 2, the spawn start-time probe loop.** 16's `startOf` (ms, through `processStartMsImpl`) is gone. Every start read of 16's paths is now 77's `liveStartOf`. It gives `processStartIdentity` (with ticks on Windows) or, when a test injects `processStartMsImpl`, `{ ms, ticks: null }`. So the probe keeps 16's rule that every spawn probe goes through the injection point, and it records ticks in production.
+- **16's callers that assumed ms:**
+  - `completeRecord`: `before` and `after` are identities, and `sameStart(before, after)` is exact when both reads carry ticks. Otherwise it keeps 77's ms rule, with 1 ms on Windows only for identities without ticks. The intent check uses `before.ms`. The completed record is `writePidFile(pid, before)`, so it carries `startTicks`.
+  - `awaitHealthy` `fillStart`: `liveStartOf` gives an identity, which is written with ticks.
+  - The start lock's `processStart`: `liveStartOf(pid)?.ms`. The lock record format is unchanged (`holderStartMs` upper bound, Linux `holderStartId`). On Windows the holder's ms now comes from exact ticks, without the float loss.
+  - `resumeNeverStarted`: the CIM scan's start is compared as `{ ms, ticks: null }`, under the 1 ms rule. The reason is that CIM `CreationDate` is a DMTF datetime with microsecond resolution, so its ticks cannot equal `Get-Process` ticks exactly. `spawnedChildren` now converts through 77's `startFromTicks`, with no float loss. This path never signals a kill. The resumed proxy is adopted only through `completeRecord`'s exact proof.
+- **B4:** every kill still passes `verifyOwnProcess` (exact ticks against a ticked record) and 77's integer kill guard. No path signals a process on a ms match when both sides have ticks.
+
+**New tests** (`tests/start-lock.test.mjs`; fake Windows via 77's `tests/fixtures/fake-powershell.mjs`; skipped on win32, where the real-PowerShell tests run):
+1. "a record completed by 16's proof carries the exact start ticks …": an unfinished record (pid, no start) and a spawn intent are each completed to `{ pid, startedMs, startedIso, startTicks }`, with a start one tick past a ms boundary.
+2. "16's proof never completes a record when the listener's pid changed hands between its two reads within one millisecond (other ticks)": the two proof reads give T and T+1 (same ms), and the record stays byte-identical.
+3. "the kill guard after a record 16 completed uses the exact ticks …":
+   - After completion, stop runs one guard with `if ($created -ne [long]'<FILETIME>') { exit 4 }`, and the proxy exits.
+   - With the pid reused one tick later, stop gives `code 4, reuse-suspect`, with no guard run. The process is never signalled and the record stays.
+
+**Mutation proof** (the tests pin behaviour the merge already has; implementation committed first; `/home/AgentKit/overhaul-tools/t16-scripts/r3-mutate.py`; each mutant was restored with `git checkout 5599613 -- lib/proxy-lifecycle.mjs`, and `git diff` was empty after each; logs `reports/t16-r3-mut-*`). All 3 were killed:
+- r1, the builder drops `startTicks`: killed by tests 1 and 3, and by 77's "a proxy the manager starts on Windows records its exact start ticks".
+- r2, `completeRecord` compares in ms only: killed by test 2.
+- r3, the completed record is written from ms only: killed by tests 1 and 3.
+  - With test 3's ticks assertion removed (a scratch copy, deleted afterwards), the reuse branch alone fails: `reused one tick later: stopped`, `code 0`. So an ms-only record lets the guard stop a pid reused within the same millisecond, which is the B4 hole the exact record closes (`t16-r3-mut-r3-guardonly`).
+
+**Suites on the merged tree** (5599613; Bun 1.4.2, Node 26.7.0)
+- `npm run test` (`t16-r3-final2-test`): 940 tests, 922 pass, 0 fail, 18 skipped.
+  - The first run (`t16-r3-final-test`) overlapped another worktree's full kit suite and failed only `json-superset` (`status --json (down): exit 0, baseline 1`: something else answered on the fixed capture port).
+  - It passed alone (`t16-r3-recheck-json`: json-superset plus ux-before-capture, 22/22), and then in the full rerun. This is ticket 75's class; no file changed.
+- `tests/proxy-lifecycle.test.mjs` + `tests/start-lock.test.mjs` right after the resolution (`t16-r3-merge-lifecycle`): 57/57. That includes every 77 test, and 16's spawn-window, probe-timeout, reuse and never-started tests.
+- `npm run test:proxy` (`t16-r3-final-proxy`): 1596 pass, 0 fail, 107 files. `test:proxy-typecheck`: clean.
+- `npm run test:mcp` (`t16-r3-final-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped. `dist/` unchanged, git clean.
+
+**Linux S3 loop** (`job.mjs --os linux --only S3/short,S3/hung`, free loopback ports 42169/34301/38943; `/home/AgentKit/overhaul-tools/t16-memloop/r3-1..3`; logs `t16-r3-mem1–3`):
+
+| run | S3/short failed-launches / stale / exactly-one | S3/hung failed-launches / stale / exactly-one | kill-holder rounds (killedByAdversary, failedLaunches, launches on the killed pid; kill at) | ratchet |
+|---|---|---|---|---|
+| r3-1 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 0, 1 (156 ms) and 1, 0, 1 (170 ms) | holds |
+| r3-2 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 0, 1 (164 ms) and 1, 0, 1 (216 ms) | holds |
+| r3-3 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 0, 1 (174 ms) and 1, 0, 1 (205 ms) | holds |
+
+- `start-over-stale-lock` and `orphans` are 0 in all 6 keys.
+- The round-27 gate never fired. There was no HARNESS FAILURE, and each victim (`code=null`, SIGKILL) is the single launch on the killed pid, among 10 launch records.
+- REDs are 37's only: `peak:kit`, `procPeak:launcher`, plus `procPeak:proxy` 62.3 MB (budget 62) once, in r3-3 S3/short.
+
+**Pending CI (orchestrator verifies after merge+push)**
+- **windows-latest test-kit, Node 24 and 26.** `tests/start-lock.test.mjs` must be green there: the windows seam proofs of round 2 (a)–(e) and "a start killed while its proxy never ran …". These now run with the real PowerShell recording `startTicks`. The three new tests skip on win32 by design, and so do 77's fake-Windows tests.
+- **The same run's `tests/proxy-lifecycle.test.mjs`:** 77's real-Windows paths go through 16's writer.
+- **The windows memory leg (round 27 condition 4)** must show, on the pre-merge run of THIS head:
+  - `failed-launches` and `stale-lock-after-round` GREEN in S3/short and S3/hung;
+  - in both kill-holder rounds, one `killedByAdversary` and 0 `failedLaunches`;
+  - the gate not firing.
+- **Also watch:** that Windows stops of 16-completed records go through 77's exact guard (no `kill guard exit 4` on the right process).
+
+**Decisions taken**
+1. **Ticks are compared exactly only where both identities carry them.** That covers `completeRecord`'s two reads, and `verifyOwnProcess`/`exited` against a ticked record (77). The CIM resume scan stays on the ms rule (DMTF microsecond resolution). Its resumed proxy is recorded only through the exact proof.
+2. **The start lock's v1 record does not gain Windows ticks.** That would mean a PowerShell call for the holder's own start on every acquisition (round 1 decision 2). The ticket asks for exact comparison "when both sides have them", and the lock's holder side has no ticks on Windows.
