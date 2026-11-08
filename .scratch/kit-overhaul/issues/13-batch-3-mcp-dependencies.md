@@ -2,7 +2,7 @@
 
 **Blocked by:** 12 (Batch 2 — proxy dependencies: happy-dom 21.0.4 (loading flags kept), undici 8.12.4, yaml 2.9.1)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -142,3 +142,7 @@ The head SHA is the commit that adds this comment. Node 26.7.0, npm 11.19.0, Bun
 - `mcp/zcode-harness-mcp/README*.md` still says "Node.js 20 or newer" (drift.md) → 10/52.
 - `docs/MCP_API.md:4` says "`2025-06-18` kompatibel", which is true but understated → 53.
 - The S5 growth shift above → 30.
+
+### 2026-11-08: merger
+
+Merged 2026-11-08 as f383d6b; fast suite: kit 797/816 (19 skipped, 0 fail), proxy 1384/1384, mcp 96/97 (1 skipped, 0 fail); `test:proxy-typecheck` clean. Pre-merge CI (draft PR #28, staging/13): https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42425069025, green on all 8 jobs; windows S5/short unstable at 12.4 %/1k (bound 30). `npm ci` in `mcp/zcode-harness-mcp` (SDK 1.32.2, zod 4.6.7, TypeScript 7.0.2) before the suites; `mcp/zcode-harness-mcp/dist/` unchanged after the `test:mcp` build (B5). Sanity diff: `git diff staging/13 HEAD` over the ticket's 5 files is empty; the other differences come from tickets 68 and 69, merged since. Logs: `.scratch/kit-overhaul/reports/merge-13-{npm-ci,mcp-npm-ci,test,test-proxy,test-proxy-typecheck,test-mcp}.log`.
