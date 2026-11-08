@@ -24,7 +24,7 @@
       "owners": { "17": ["stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
       "flips": ["unstoppable-proxy-after-ctrl-c"]
     },
-    "S5/short": { "owners": { "30": ["growth:mcp-bridge"] } },
+    "S5/short": { "owners": { "30": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] },
     "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }
   },
   "windows": {

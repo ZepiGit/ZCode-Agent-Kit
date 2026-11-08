@@ -510,7 +510,8 @@ test("the committed list marks windows S1/burst1 unstable for ticket 20 and wind
   // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30); linux stays
   // a binary entry (since Round 14/15 Q1 one that names the check ticket 30 owns).
   assert.deepEqual(expected.windows["S5/short"], { ticket: "30", state: "unstable" });
-  assert.deepEqual(expected.linux["S5/short"], { owners: { 30: ["growth:mcp-bridge"] } });
+  // Round 17 Q2: its one name flips (RED in 9 of 10 runs on ticket 13's tree, run 42436186573 GREEN on the trend flag).
+  assert.deepEqual(expected.linux["S5/short"], { owners: { 30: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] });
   const unstable = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => v?.state === "unstable").map(([k]) => `${os} ${k}`));
   assert.deepEqual(unstable, ["windows S1/burst1", "windows S5/short"]);
 });
