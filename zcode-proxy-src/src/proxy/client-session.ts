@@ -186,7 +186,7 @@ function firstHeader(headers: Headers, names: string[]): string | null {
 function bodyMetadataTrace(body: string | undefined, parsedBody?: unknown): ExplicitTraceContext {
   if (!body && parsedBody === undefined) return {};
   try {
-    const parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body)) as Record<string, unknown>;
+    const parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body as string)) as Record<string, unknown>;
     const metadata = parsed?.metadata as Record<string, unknown> | undefined;
     if (!metadata || typeof metadata !== "object") return {};
     return {
@@ -212,7 +212,7 @@ function canonicalize(body: string | undefined, format: Format, fallbackModel: s
   if (!body && parsedBody === undefined) return null;
   let parsed: Record<string, unknown>;
   try {
-    parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body)) as Record<string, unknown>;
+    parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body as string)) as Record<string, unknown>;
   } catch {
     return null;
   }

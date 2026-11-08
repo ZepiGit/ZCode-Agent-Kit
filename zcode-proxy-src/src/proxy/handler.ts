@@ -125,7 +125,7 @@ export async function proxyRequest(
   let parsedBody: Record<string, unknown> | undefined;
   if (parseFromBytes) {
     try {
-      const parsed: unknown = await new Response(bodyBytes).json();
+      const parsed: unknown = await new Response(bodyBytes as BodyInit).json();
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse(400, 'invalid_request_error', 'Request body must be a JSON object');
       parsedBody = parsed as Record<string, unknown>;
     } catch { return errorResponse(400, format === 'openai' ? 'translation_failed' : 'invalid_request_error', 'Request body is not valid JSON'); }
