@@ -73,6 +73,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 67 | [A plain expected-RED listing of a single-run key accepts any RED](67-plain-listing-hides-other-reds.md) | sol | medium | — | ready-for-agent |
 | 68 | [Every writer of proxy/config.yaml and harness configs keeps the file's line endings (CRLF audit)](68-crlf-config-writers-audit.md) | sol | medium | 42 | ready-for-agent |
 | 69 | [`ensureDeviceMidInConfig` reads past the end of an empty unquoted `deviceMid:` line](69-devicemid-reader-runs-past-line.md) | sol | high | 68 | ready-for-agent |
+| 70 | [Windows: "stop cleanly kills a verified-own process" finds the process still alive](70-windows-stop-verified-own-process-flake.md) | sol | high | — | ready-for-agent |
 
 ## Initial frontier
 
