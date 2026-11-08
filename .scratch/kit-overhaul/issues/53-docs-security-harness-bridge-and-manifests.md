@@ -1,6 +1,6 @@
 # 53: Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST
 
-**Blocked by:** 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs), 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 16 (Start lock protocol v1 with proven takeover (no judge-then-rename race)), 22 (Graceful stop request `POST /__kit/stop`, shared deadlines and the manager's stop path), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 51 (Harness adapters: confirmed MEDIUM fixes and record refresh), 58 (Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)), 57 (MCP runtime restart budget)
+**Blocked by:** 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs), 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 16 (Start lock protocol v1 with proven takeover (no judge-then-rename race)), 22 (Graceful stop request `POST /__kit/stop`, shared deadlines and the manager's stop path), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 51 (Harness adapters: confirmed MEDIUM fixes and record refresh), 58 (Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)), 57 (MCP runtime restart budget), 56 (MCP SDK 2.x and protocol revision 2026-07-28 migration)
 
 **Status:** ready-for-agent
 
@@ -10,7 +10,7 @@ Risk: medium
 
 ADR: 0002, 0003, 0007, 0014
 
-**What to build:** SECURITY (+de): solver is a separate OS process with a cap and still not a sandbox; takeover rules replace "never taken over"; happy-dom flags keep the 20.x surface; `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA` unchanged; stop-token protections. `harnesses/README*` and `EFFORT_MAPPING*` where effort/image flags changed. The five MCP bridge READMEs at parity with the Node 24 floor and the stay-back note. `docs/MCP_API.md`: 4 MiB cap (1 MiB head + 3 MiB tail), marker, `truncated`, idempotency window. `SUPPORT_MATRIX.json` (date, Node/Bun versions, tested harness versions reconciled with MANIFEST) and `MANIFEST*`.
+**What to build:** SECURITY (+de): solver is a separate OS process with a cap and still not a sandbox; takeover rules replace "never taken over"; happy-dom flags keep the 20.x surface; `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA` unchanged; stop-token protections. `harnesses/README*` and `EFFORT_MAPPING*` where effort/image flags changed. The five MCP bridge READMEs at parity with the Node 24 floor and with ticket 56's outcome (SDK 2.x and dual-era serving, or the remaining protocol stay-back); `MANIFEST*` names the SDK package that 56 ships. `docs/MCP_API.md`: 4 MiB cap (1 MiB head + 3 MiB tail), marker, `truncated`, idempotency window. `SUPPORT_MATRIX.json` (date, Node/Bun versions, tested harness versions reconciled with MANIFEST) and `MANIFEST*`.
 
 **Acceptance criteria:**
 

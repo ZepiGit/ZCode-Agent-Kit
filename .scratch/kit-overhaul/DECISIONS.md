@@ -3093,3 +3093,593 @@ Open branches I still see (none blocks merging ticket 26):
 - **EVIDENCE MISSING:** how the thread transport is selected outside tests. Ticket 27 records it, and if it is reachable on Bun < 1.4.3 it returns as a finding about the `captcha egress:` banner (condition 5).
 - Ticket 27's new egress test fails on 1.4.2 through the child adapter. That would mean Bun reads something other than the child's process environment, and it comes back as a question. No version gate is added to make it pass.
 - Ticket 26's CI item (both `memory-budget` legs, fast suite on ubuntu and windows) is still to be verified after merge and push.
+
+
+---
+
+# Round 20 (2026-11-08) — ticket 25 CDN memory body cap
+
+
+Evidence read (read-only):
+- Ticket 25 at head a18d465: `git -C /home/AgentKit/wt/t25 show HEAD:.scratch/kit-overhaul/issues/25-bounded-collections-cdn-memory-and-stall-counters.md`, including the implementer's Decisions 1–3.
+- `zcode-proxy-src/src/proxy/captcha-cdn-cache.ts` at a18d465, the whole file.
+- `tests/memory/scenarios/s2-captcha.mjs:101-125` and `tests/memory/scenarios/s2-captcha-run.ts:95-109`, at a18d465.
+- `docs/adr/0009-bounded-stores-and-task-retention.md` at a18d465.
+- Reports `t25-s2-{before,after}-{1,2,3}.log`, `t25-s2-after64-1.log`, `t25-s2-exp32.log`, `t25-s2-exp24.log`, `t25-probe-D.log` and `t25-probe-budget.log`.
+- `/home/AgentKit/overhaul-tools/t25-memloop/alternate.txt` and the run directories.
+- spec.md §7 (bounds table, CDN memory row) and §18 (S2 CDN memory row), plus stories 62–64.
+- `issues/25-*.md` and `issues/29-cdn-disk-cache-pruning.md`.
+- DECISIONS.md Round 2 Q3, Round 15 Q1 (conditions 3, 5, 6 and 7) and Round 17 Q1.
+- PROMPT.md §5 B1 and §9 BOUNDS.
+
+**Corrections to the round's facts.**
+1. **S2 does not measure what the recommendation's condition asks for.** Phase D (`s2-captcha-run.ts:95-109`) only calls `cache.put()` on 600 distinct URLs with 256 KiB bodies. It never calls `get()` or `load()`. S2's solves run against the fixture backend with egress blocked, so they never reach the vendor CDN. On S2's workload, the "CDN fetch count per solve" is zero both before and after the change, by construction. It cannot show whether a smaller memory tier causes more network fetches.
+2. **The 392-invalidation replay proves the stall-counter bound, not the body cap.** That recording (`__fixtures__/stall-recording.json`) replays the stall path. It does not exercise eviction of memory-tier bytes, so it says nothing about how often bodies are fetched under a 32 MiB cap.
+3. **The 64 MB budget is not "tightened".** The 64 MB bound in spec §7 and §18 and in ADR-0009 stays exactly as it is, as the memory the tier costs (`cdn-cache:memory-growth`). The 32 MiB is the mechanism that meets that bound: the bytes the tier may hold. Also, "Charter §9" is not a Charter clause. §9 is PROMPT's acceptance section, and its BOUNDS line names no number for this store.
+4. **The headroom depends on the scenario.** Phase D run alone in a fresh process (`t25-probe-budget.log`) measures **70 MB at 32 MiB**, which is above 64. The 57–58 MB GREEN holds inside full S2/short, where phases A–C have already warmed the allocator. The Linux margin is 6–7 MB, and the windows number does not exist yet.
+5. **Verified as stated:**
+   - 64 MiB → 90 MB RED (`t25-s2-after64-1.log:52`).
+   - 32 MiB → 57/57/57 MB (after-1..3) and 58 MB (exp32), 4/4 ok.
+   - Before → 151 MB RED in 3/3 runs.
+   - 24 MiB → 50 MB.
+   - Windows is pending CI.
+   - The ticket adds no config key or env override for the cap. It is the constant `CDN_MEMORY_MAX_BYTES`.
+
+## Q1 — confirm or reject the 32 MiB body cap
+
+**DECISION:** ACCEPTED with conditions. I confirm the cap of 32 MiB of bodies. I **REJECT** the recommendation's B1 evidence condition, because it cannot be measured on S2 (correction 1). A replay proof at seam 3 replaces it. Binding conditions:
+
+1. **The cap.**
+   - The memory tier holds ≤ 256 entries and ≤ 32 MiB (33,554,432 bytes) of bodies, as the code constant `CDN_MEMORY_MAX_BYTES`.
+   - No config key and no env override. The ticket exposes none, so the recommendation's "as a config value if the ticket already exposes one" does not apply. Adding a knob nobody has asked for would add surface without evidence (C9, simpler).
+   - The 64 MB budget of `cdn-cache:memory-growth` and the 256-entry limit are unchanged.
+
+2. **B1 replay proof (replaces "CDN fetch count per solve on S2").** Add a seam-3 test, wired into `npm run test:proxy`, that replays a recorded sequence of `load()`, `get()` and `invalidate()` calls within one generation.
+   - **The recording:**
+     - distinct URLs whose bodies total more than 64 MiB, so both caps evict;
+     - repeat reads of evicted URLs;
+     - stall invalidations;
+     - at least one TTL expiry on a fake clock.
+   - **Three replays, each with a temp disk tier:**
+     - (a) the pre-change cache, `captcha-cdn-cache.ts` at 8e11d15 evaluated verbatim, with an unbounded memory tier. This uses the same method as the stall recording.
+     - (b) head at 32 MiB.
+     - (c) head with the byte budget set to 64 MiB.
+   - **What must match across (a), (b) and (c):**
+     - the sequence of `fetchBody` invocations (URL, order and count) is identical;
+     - every returned entry has identical body bytes, `sha256` and `fetchedAt`;
+     - only `source` (memory or disk) may differ.
+   - **Mutants that must be killed:**
+     - a disk read-back that resets `fetchedAt`;
+     - a read-back that skips the freshness check.
+   - **Disk tier unavailable.** Record the fetch counts of (a), (b) and (c) in the ticket evidence. This is a recorded number, not a gate.
+
+3. **Return paths.**
+   - **The replay differs between (a) and (b) with the disk tier available.** It comes back with the numbers. The implementer changes neither the cap nor the test.
+   - **The windows leg is RED.** The pre-merge CI windows memory leg must show `cdn-cache:memory-growth` ok. If it is RED, it comes back with the numbers: commit, working set and the Linux value (Round 6 Q2 condition 1, Round 15 Q1 condition 5). Three things are forbidden:
+     - lowering the cap to 24 MiB unilaterally;
+     - re-adding the name to `S2/short`;
+     - touching the 64 MB budget.
+
+4. **Records.** Apply the text changes below, with a Comments line naming this round. Decision 1 in ticket 25 gains three facts:
+   - the 70 MB figure for phase D alone (correction 4);
+   - that the GREEN is measured inside full S2/short;
+   - the shared-directory read-back nuance (rationale, last paragraph).
+
+**Rationale:**
+- **Why a tier bound cannot be held as bytes.** The measurement shows that 64 MiB of held bodies cannot meet a 64 MB tier bound:
+  - 90 MB in full S2;
+  - 101 MB for phase D alone;
+  - a plain-array control at +141/+74 MB, which places the overhead in the runtime's allocator, not in the cache.
+
+  The honest choice under C1 is to keep the measured bound and shrink what the tier holds. Re-reading "64 MB" as bytes held would loosen the budget past what the check measures, which is forbidden.
+- **Why 32 MiB.** It meets the check in 4/4 Linux runs. It is the larger of the two measured passing budgets, so it evicts least. 24 MiB buys margin at the cost of more evictions, with no evidence that the margin is needed.
+- **Why B1 holds with the disk tier available.** On B1, the code settles the question more strongly than an S2 count could:
+  - `get()` applies the same `fresh(fetchedAt)` test to memory and to the disk envelope (`captcha-cdn-cache.ts:84-107`);
+  - promotion keeps `fetchedAt`;
+  - `commit()` writes the envelope at the same moment it inserts into memory.
+
+  So with the disk tier available, an entry evicted from memory produces the same network-fetch decision and the same bytes as an unbounded tier. Condition 2 turns that reading into a replay against the verbatim pre-change code, which is Round 2 Q3's rule ("changes memory, never which bytes are served") applied as a test.
+- **Where a network fetch can still follow an eviction.** Only where the envelope is missing:
+  - the disk tier is unavailable;
+  - the envelope is corrupt;
+  - another installation invalidated it;
+  - ticket 29's 256 MB size prune removed it.
+
+  Any memory bound has this effect, including the spec's own 64 MiB. Round 2 Q3 and ADR-0009 accepted it for the memory caches. It is the same in kind as the existing per-generation reset, which already empties memory at every recycle. Halving the cap moves the threshold. It does not create a new behaviour, and it touches nothing on B1's out-of-scope list (pass rates, client mimicry, rotation, quotas). It falls under the IN SCOPE item "hard memory caps, bounded pools".
+- **Shared directory.** In the same way, a read-back from a directory shared with another installation can return that installation's newer envelope for the same URL. The pre-change code already does this at the start of every generation. The ticket records it rather than claiming it never happens.
+
+**Consistency with earlier decisions:**
+- **Round 2 Q3 / ADR-0009:** the 64 MB / 256 bound stands, and the tier is clarified, not changed.
+- **Round 15 Q1:** 25 still owns `cdn-cache:memory-growth` at 64 MB. Its removal from `S2/short` still needs the windows pre-merge GREEN (condition 5).
+- **Round 17 Q1:** the responses store stays unchanged. The ticket keeps 1,000 / 24 h / 64 MB, and this decision does not touch the store.
+- **Spec:** "≤ 64 MB" is kept. The amended text names the body budget beside it.
+
+No earlier round and no spec text is contradicted.
+
+**EVIDENCE MISSING:** the real per-generation CDN working set (the number and size of distinct bodies one solver generation loads in real use). If it is below 32 MiB, the cap is never reached and nothing changes in practice. The decision does not depend on it, because condition 2 proves equivalence for any working set while the disk tier is available. It would size the disk-unavailable effect recorded in condition 2.
+
+**Charter:**
+- C1: the tier's memory is bounded by what the OS measures, and the bound is not redefined to fit.
+- C9: stronger measured evidence (4/4 runs, plus the allocator control); then the smaller blast radius (one constant and docs; the 256-entry limit and the budget unchanged); then the simpler option (no new config key).
+- C2: no key, flag or state change.
+- C7: the windows leg is gated before the name is removed.
+- C8: spec, ticket and ADR text aligned.
+- PROMPT §5 B1, with its IN SCOPE "hard memory caps, bounded pools".
+- PROMPT §9 BOUNDS.
+- Round 2 Q3, Round 15 Q1 conditions 5 and 6, Round 17 Q1.
+
+**REVERSIBILITY:** Two-way door. It is one constant behind an unchanged 64 MB check, and the cache contents are rebuilt every generation. **ADR: no.** ADR-0009 gains an amendment note for the record only.
+
+### Exact text changes (the orchestrator applies them on ticket 25's branch before merge)
+
+**Ticket 25, What to build.** Replace
+`The CDN memory cache is bounded to ≤ 64 MB and ≤ 256 entries and resets with each solver generation;`
+with
+`The CDN memory cache is bounded to ≤ 64 MB of memory (\`cdn-cache:memory-growth\`) and ≤ 256 entries, holding ≤ 32 MiB of bodies (Round 20 Q1), and resets with each solver generation;`
+
+**Ticket 25, Acceptance.** Add after the "Seam 3 (B1)" item:
+`- [ ] Seam 3 (B1, Round 20 Q1): a recorded load/get/invalidate sequence within one generation (bodies > 64 MiB in total, repeat reads of evicted URLs, stall invalidations, a TTL expiry on a fake clock), replayed with a temp disk tier against the pre-change cache (8e11d15, verbatim, unbounded memory), head at 32 MiB and head at 64 MiB, makes identical \`fetchBody\` calls (URL, order, count) and returns identical bytes, \`sha256\` and \`fetchedAt\` (only \`source\` may differ); mutants "read-back resets fetchedAt" and "read-back skips the freshness check" are killed; the fetch counts with the disk tier unavailable are recorded for all three. A difference with the disk tier available comes back with the numbers.`
+`- [ ] Loop S2 windows (Round 20 Q1): the pre-merge CI windows memory leg shows \`cdn-cache:memory-growth\` ok at 32 MiB; if RED it comes back with commit, working set and the Linux value — the cap, the list and the 64 MB budget are not changed.`
+
+**Ticket 25, Comments.** Add:
+`- 2026-11-08 (orchestrator, Owner Proxy round 20): Round 20 Q1 confirms Decision 1 (≤ 32 MiB of bodies, constant, no config key; 256 entries and the 64 MB check unchanged) and moves its B1 proof into Acceptance (seam 3 replay; S2 cannot count fetches: phase D only calls put() and egress is blocked). Decision 1's text gains: phase D alone measures 70 MB at 32 MiB, so the GREEN (57–58 MB, 6–7 MB margin on Linux) holds inside full S2/short; and a read-back from a shared directory may return another installation's newer envelope for the same URL, as every generation start already does.`
+
+**spec.md §7, bounds table, row "CDN cache, memory".** Replace
+`| CDN cache, memory | ≤ 64 MB and ≤ 256 entries; resets with each solver generation |`
+with
+`| CDN cache, memory | ≤ 64 MB of memory (measured, \`cdn-cache:memory-growth\`) and ≤ 256 entries; holds ≤ 32 MiB of bodies, because the runtime keeps evicted bodies' memory for a while (Round 20 Q1); an evicted entry is read back from its disk envelope or fetched again; resets with each solver generation |`
+
+**spec.md §18, budget table, row "S2 CDN memory".** Replace
+`| S2 CDN memory | ≤ 64 MB and ≤ 256 entries | +151 MB / 600 URLs | ADR-0009, loop |`
+with
+`| S2 CDN memory | ≤ 64 MB and ≤ 256 entries (32 MiB body budget: 57–58 MB on Linux in full S2/short; 64 MiB of bodies measured 90 MB) | +151 MB / 600 URLs | ADR-0009, loop, Round 20 Q1 |`
+
+**Spec story 62:** unchanged. The user-facing bound is still 64 MB and 256 entries.
+
+**ADR-0009.** Append:
+`## Amended 2026-11-08 (Round 20, Q1)` / `The CDN memory cache's 64 MB bound is the memory the tier costs, as measured by \`cdn-cache:memory-growth\`. To meet it, the tier holds at most 32 MiB of bodies (and 256 entries): with 64 MiB held, S2 measured 90 MB, because the runtime keeps the memory of evicted bodies for a while. An evicted entry is read back from its disk envelope with the same bytes and \`fetchedAt\`, so with the disk tier available the network fetches are those of an unbounded tier (seam 3 replay, ticket 25). The bound and the two-way-door consequence are unchanged.`
+
+**Ticket 29, Comments** (informational; no criterion, no ownership; Round 15 Q1 condition 6):
+`- 2026-11-08 (orchestrator, Owner Proxy round 20): Round 20 Q1: the memory tier holds ≤ 32 MiB of bodies, and an entry evicted from memory is read back from its disk envelope. 29's size prune therefore decides when such an entry becomes a network fetch; 29's B1 evidence ("without serving different bytes") covers that case.`
+
+**METRICS.md:** the S2 CDN row names the 32 MiB body budget beside the 64 MB bound, as the implementer suggested.
+
+## Shared understanding
+
+Open branches:
+- **The windows leg of `cdn-cache:memory-growth` at 32 MiB is unmeasured.** A RED comes back under condition 3.
+- **The 6–7 MB Linux margin depends on S2's phase order** (phase D alone: 70 MB). A future reorder of S2, or a runtime upgrade that changes allocator retention, can turn the check RED with no code change in the cache. That RED comes back as an unowned RED (Round 15 Q1 condition 5), not as a quiet cap change.
+- **EVIDENCE MISSING: the real per-generation CDN working set.** It sizes only the disk-unavailable effect recorded under condition 2.
+- **The interaction of ticket 29's 256 MB size prune with the memory tier** (an entry evicted from both tiers is fetched again) is 29's B1 evidence to give. It is not decided here.
+
+
+---
+
+# Round 21 (2026-11-08) — linux S6/short adversarial line-heap tail
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–20 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it names the decision.
+
+Evidence read (read-only; scratch copies outside the worktree in `/tmp/r21`):
+- The linux `memory-budget` job log of run 42446461464, through `gh api …/actions/jobs/128626314087/logs`. `gh run view --log` returned an empty file, so I used the job-log API instead. I also read its windows memory log (job of the same run) and its `memory-budget-linux` artefact (`S6-short/…/summary.json`, all phase marks).
+- The `memory-budget-linux` artefacts of all 10 staging/19 evidence runs (42446103818 … 42446746036). All 10 heads carry tree 6f25f13.
+- The linux memory-job log of every completed CI run from 42415961268 (ticket 32's pre-merge run) to 42454650683: 34 runs. I checked each head with `git diff --quiet <head> HEAD -- zcode-proxy-src/src/tui tests/memory/scenarios/s6-tui*`. 33 judge the same S6 and pane code as the integration tip. The 34th, staging/42 (42415962768), predates 32.
+- Integration tip 064cfec: `tests/memory/scenarios/s6-tui.mjs`, `s6-tui-run.ts`, `tests/memory/lib/budgets.mjs`, `tests/memory/lib/repetitions.mjs`, `zcode-proxy-src/src/tui/log-pane.ts` (and its imports `width.ts`, `width-core.mjs`, `frame.ts`, `tokens.mjs`).
+- `issues/32-*.md` (with Comments), `49-*.md`, `71-*.md`, INDEX.md, spec §18 S6 row and §13 (S6 is ubuntu-only), RUNLOG to 07:14Z.
+- DECISIONS.md Round 17 (Q1, Q3, cross-question conditions 1–3), Round 18 Q2 condition 5, Round 6 Q1, Round 15 Q1.
+- Ticket 19's own diff: `git diff --stat $(git merge-base HEAD ef0a331c) ef0a331c`, 15 files.
+
+**Corrections to the round's facts.**
+1. **This is not a tail around the cap. It is a discrete 20 MB event at a different mark.** In all 32 GREEN CI runs on identical S6 code, the check reads exactly **8 MB**. The worst mark is `D-huge` (heap 10 − `C-start` 2: the 8 MB truncated line). In the RED run, `D-huge` is the usual 10 and `D-cjk` the usual 7. But `D-records` reads **22 MB** where the 9 other staging/19 runs read **2 MB** (9 of 9), and `end` reads 22 again (2 in 9 of 9). Pane 2,000 lines throughout, end RSS 242 MB (others 198–269).
+2. **The readings are already taken after a forced GC.** `mark()` calls `Bun.gc(true)` before every reading (`s6-tui-run.ts:27-31`). The 20 MB survived two consecutive forced full collections, at `D-records` and `end` with a `scrollDown` between them. Round 17 Q1's premise does not hold here. That premise was a heap reading without GC, taken at a random moment, which a later reading undercuts.
+3. **The rate is 1 of 33 CI runs, not only 1 of 10.** 1/33 = 3.0 % (95 % Clopper-Pearson 0.08–15.8 %); 1/10 on the staging/19 tree = 10 % (0.25–44.5 %). `tui:long-line-heap` is 7–8 MB in all 33.
+4. **Cause: not attributed.** 20 MB is the size of one `D-records` parent. It is also the value ticket 32's `t32-s6-red2` showed without the copy. But the pane copies every stored row through UTF-8 (`log-pane.ts:66-75`), with no shared state and a fixed input. A pane-held parent would therefore read about 20 MB in every run, not in 1 of 33. The evidence fits a reference held outside the pane's rows, by the runtime or by the S6 body itself, and it varies per process. Nothing on record proves which.
+5. **Ticket 19 cannot have caused it.** 19's diff (15 files) touches no file under `zcode-proxy-src/src/tui/`, neither S6 file, no `tests/memory/lib/{verdict,budgets,sampler*}.mjs` and not the Bun pin. The same run's windows memory failure is `S1/burst16: GREEN but listed for ticket 19`. That failure is 19's own exit signal, already handled in t19 round 2, and it is not part of this question.
+6. **Minor record drift.** INDEX rows 32 and 67 say `ready-for-agent`, but both files say `resolved`. RUNLOG 07:14Z says t71 is already spawned.
+
+---
+
+## Q1 — who owns the tail of S6's adversarial line-heap check?
+
+**DECISION:** REJECTED in part.
+- **Accepted:** the fix belongs in ticket **71** as a measurement-rule amendment, not as an owned RED. Signature (v) joins Round 17's interim rule until 71 merges. The 16 MB budget and the check name stay.
+- **Rejected:** the measurement shape (the minimum of ≥ 10 readings after the adversarial phase), on three grounds:
+  - the readings are already post-GC, and the excess survived two of them (corrections 1–2), so nothing shows a later reading would drop it;
+  - judging only after the phase throws away the per-part marks (`D-mixed`, `D-huge`, `D-cjk`) that the check was built to judge;
+  - the evidence that does exist says the event is per process (32 of 33 fresh processes read 8). What re-rolls it is a **fresh process**, not another reading in the same one.
+- **Also rejected:** naming ticket 49 as a fallback owner. 49's text says nothing about pane memory beyond "byte cap from 32 kept" (Round 15 Q1 condition 2).
+
+Instead, **linux `S6/short` is judged on the median of n = 5 fresh, sequential repetitions**, through the existing `REPEATED` mechanism.
+
+Binding conditions:
+1. **The rule (in 71; one `REPEATED` entry, the mechanism of `lib/repetitions.mjs` unchanged):**
+   - the entry is `"S6/short": { n: 5, check: "tui:adversarial-line-heap", budgetMB: MEMORY.S6.longLineHeapMB /* 16 */, ceilingMB: 32 }`;
+   - each repetition is a fresh S6 body process, run one after another. The check's value per repetition is unchanged: the worst of `D-mixed`, `D-huge`, `D-cjk`, `D-records` and `end`, minus `C-start`, each read after `Bun.gc(true)`;
+   - RED when the median of the 5 is > 16 MB, or when **any** repetition is > 32 MB;
+   - `orphans`, `tui:log-pane-heap`, `tui:resize-storm-heap` and `tui:long-line-heap` are judged in **each** repetition, and a RED in any one fails. This is the existing behaviour of `medianVerdict`;
+   - `summary.json` and the job summary print all five values and the median.
+
+   Windows is unaffected (S6 is ubuntu-only).
+2. **Why n = 5, and why 32 MB.**
+   - n follows Round 17 Q3's method: the smallest odd n whose predicted false-RED rate is ≤ 1 % on the less favourable estimate. The staging/19 tree's 1/10 gives n = 3 → 2.80 % and n = 5 → 0.86 %. The 33-run 1/33 gives 0.27 % and 0.027 %, and 3.0 % at its 95 % upper bound.
+   - An S6 body takes about 3 s (log 04:56:52 → 04:56:55), so the cost is about 12 s per linux job.
+   - The ceiling is 2× the budget, as in Round 17 Q3. It clears the pane's own 8 MB plus the one stray 20 MB object seen here at any mark (about 28 MB). It fails an uncapped pane (about 125 MB) or two retained parents (≥ 40 MB) in a single repetition.
+   - The median loses nothing against the defect class: the pane is deterministic code on fixed input, so a pane defect reads RED in every repetition (32's own red2: 20 MB).
+3. **Attribution, recorded as information and not gated:**
+   - every S6 mark gains `paneBytes` (`pane.bytes`);
+   - after `end`, the body pushes 2,000 short ordinary lines, which evicts every stored row, and takes a `flushed` mark.
+
+   The checks' marks are unchanged.
+4. **Tests, RED first, at the job seam with fixture repetitions:**
+   - [8, 8, 20, 8, 8] is GREEN;
+   - [20, 20, 20, 8, 8] is RED (median);
+   - [8, 8, 33, 8, 8] is RED (ceiling) with a GREEN median;
+   - a repetition with `tui:long-line-heap` RED fails;
+   - a missing repetition or a non-numeric value is a harness failure, never GREEN;
+   - the S1/burst1 cases and 71's windows S1/short cases are unchanged.
+
+   Plus one local mutant, never committed: `fitLine` storing the raw row without the copy must be RED under the new rule (expected median about 20 MB). Record the value.
+5. **What comes back** (none of these blocks 71's merge, except a RED in its pre-merge run, which Round 17 cross-question condition 1 already covers):
+   - any repetition > 16 MB whose `flushed` reading returns to within 2 MB of `C-start`. Releasing the pane's rows freed the excess, so the pane held it, and correction 4 is wrong;
+   - a median > 16 MB on a tree whose diff does not touch the pane. That is a real leak with an unknown owner. It comes back as an ownership question, with the series and marks, to a new ticket and not to 49;
+   - a per-repetition rate above 10 % over ≥ 50 recorded repetitions. That is n's basis, so n comes back.
+6. **Interim (amends Round 17 cross-question condition 2 by one signature):**
+   - (v) linux S6/short RED with `tui:adversarial-line-heap` as its only RED check, value ≤ 32 MB, and `orphans`, `tui:log-pane-heap`, `tui:resize-storm-heap`, `tui:long-line-heap` GREEN.
+   - Ineligible: `zcode-proxy-src/src/tui/**`, `tests/memory/scenarios/s6-tui.mjs`, `tests/memory/scenarios/s6-tui-run.ts`, plus Round 17's common clause (`tests/memory/lib/{verdict,budgets,sampler*}.mjs`, the Bun pin).
+   - Recording, the exception's end, and the departure from PROMPT §7 Phase 4's revert rule are as in Round 17, for this signature too.
+   - Run 42446461464 is its first occurrence: it does not count against ticket 19 (correction 5) and causes no revert. Its S1 counts stand under Round 18 Q2 condition 5.
+   - Tickets 48 and 49 touch `src/tui/**` and get no exception.
+7. **Records:**
+   - Spec §18 S6 row gains "`tui:adversarial-line-heap` judged on the median of 5 fresh repetitions of the S6 body, every repetition ≤ 32 MB, the other S6 checks in each repetition (Round 21 Q1)".
+   - METRICS gets the 33-run table: 32 × 8 MB, 1 × 20 MB (42446461464, `D-records`/`end` 22 MB against 2 MB in 9 of 9), plus `tui:long-line-heap` 7–8 MB.
+   - Ticket 32's and 49's Comments gain one line each (ticket-text changes below).
+   - RUNLOG records corrections 1–6.
+
+**Rationale:** The numbers do not describe the noisy tail Round 17 Q1 handled. They describe a deterministic check, exactly 8 MB in 32 of 33 processes, plus one process in which a 20 MB object stayed reachable through two forced full collections at a mark that otherwise reads 2 MB. A minimum over more readings in the same process is a guess at a mechanism the evidence already contradicts. Taking it only after the phase would also blind the check to the parts where the pane holds most. A fresh-process median is the measured answer to a per-process event. The existing `REPEATED` mechanism provides it with one entry, and it costs about 12 s. Because the pane's behaviour is deterministic, the median gives up no power against a pane defect. The 32 MB ceiling makes the check stricter than today against any single-run blow-up. The attribution mark turns the unproven cause into something the next occurrence can settle. Owning the RED instead would tolerate any value of the check that proves the pane's byte cap, and naming 49 would invent a trace.
+
+**Charter:** C1 (the pane's byte cap is proven on the quantity it bounds, with a new hard per-run ceiling), C6 (test code only; no product change, endpoint or GC hook), C7 (linux only; windows unaffected), C9 (stronger measured evidence: 33 runs and per-mark readings over Round 17 Q1's analogy; smaller blast radius and simpler: one `REPEATED` entry in an existing mechanism), §9 (16 MB unchanged; the ceiling only tightens), Round 6 Q1 (repetition rule, n ≤ 9), Round 15 Q1 condition 2, Round 17 Q3 condition 2 (method for n), Round 17 cross-question conditions 1–2, Round 18 Q2 condition 5, PROMPT §7 Phase 4.
+
+**Departures, named explicitly:**
+- **Round 17 cross-question condition 1:** 71's content grows from three tails to four. Its single-pre-merge-run reasoning is applied, not changed.
+- **Round 17 cross-question condition 2:** gains signature (v), with the same departure from PROMPT §7 Phase 4's revert rule and from Round 6 Q2 condition 4's last bullet, for (v) only.
+- **Ticket 32's Loop S6 criterion** ("log pane ≤ 16 MB heap"): from now on it is judged under this rule. 32 stays resolved, and nothing is reopened.
+- **The `REPEATED` comment** "One n for both legs": the S6 entry has its own n, as 71's S1/short entry already does. S6 is linux-only.
+- **No contradiction with Round 17 Q1.** Its minimum rule stays for S7, where the readings are taken without a GC. This answer only declines to transfer it.
+
+**REVERSIBILITY:** Two-way door (one `REPEATED` entry, test code, spec and ticket text). ADR: no.
+
+### Ticket-text changes (exact)
+
+**`issues/71-measurement-rules-rare-tails.md`**
+- Title line → `# 71: Measurement rules for four rare tails: S7 retained heap, windows S1/short repetitions, the OMP no-op floor, linux S6/short repetitions`
+- What to build, first paragraph: replace "Owner Proxy round 17 (DECISIONS.md, binding; Q1 conditions 1–4, Q3 conditions 1–4, Q4 condition 1). Three rare tails seen in ticket 67's eight evidence runs" with "Owner Proxy rounds 17 and 21 (DECISIONS.md, binding; Round 17 Q1 conditions 1–4, Q3 conditions 1–4, Q4 condition 1; Round 21 Q1 conditions 1–5). Three rare tails seen in ticket 67's eight evidence runs, and one in ticket 19's ten,". Replace "confirms all three" with "confirms all four". In "Every budget, …" insert "the 16 MB S6 budget," after "Every budget,".
+- New What-to-build item after item 3:
+  `4. **Linux S6/short repetitions (Round 21 Q1 conditions 1–3).** One `REPEATED` entry, `"S6/short": { n: 5, check: "tui:adversarial-line-heap", budgetMB: MEMORY.S6.longLineHeapMB, ceilingMB: 32 }`; each repetition a fresh S6 body process, one after another; the check's per-repetition value unchanged (worst of D-mixed, D-huge, D-cjk, D-records, end minus C-start, each after Bun.gc(true)); RED when the median > 16 MB or any repetition > 32 MB; the other S6 checks judged in each repetition; summary.json and the job summary print all five values and the median. Information, not gated: every S6 mark gains paneBytes, and after end the body pushes 2,000 short lines and takes a flushed mark. Why n = 5: smallest odd n with predicted false-RED ≤ 1 % on the less favourable estimate (1/10 on the staging/19 tree: n = 3 → 2.80 %, n = 5 → 0.86 %; 1/33 over all CI runs: 0.027 %); cost about 12 s per linux job. The minimum-of-readings shape of item 1 is not used here: S6 readings are already post-GC (Round 21 correction 2).`
+- Interim paragraph: replace "or (iii) the floor test failing with a no-op cost < 5 MB," with "(iii) the floor test failing with a no-op cost < 5 MB; or (v) linux S6/short RED with `tui:adversarial-line-heap` as its only RED check, value ≤ 32 MB, the other S6 checks GREEN (Round 21 Q1 condition 6),". Replace "the generated OMP extension;" with "the generated OMP extension; (v): `zcode-proxy-src/src/tui/**`, `tests/memory/scenarios/s6-tui.mjs`, `tests/memory/scenarios/s6-tui-run.ts`;". Change "(Round 17 cross-question condition 2)" to "(Round 17 cross-question condition 2, Round 21 Q1 condition 6)".
+- New acceptance criteria, before "Pre-merge run":
+  - `- [ ] S6 rule (Round 21 Q1 condition 1): the REPEATED entry above; median of 5 fresh repetitions ≤ 16 MB, every repetition ≤ 32 MB, other S6 checks in each repetition; values and median printed; windows unaffected.`
+  - `- [ ] S6 tests, RED first (Round 21 Q1 condition 4): [8, 8, 20, 8, 8] GREEN; [20, 20, 20, 8, 8] RED; [8, 8, 33, 8, 8] RED with a GREEN median; a repetition with tui:long-line-heap RED fails; a missing repetition or non-numeric value is a harness failure; S1/burst1 and windows S1/short cases unchanged.`
+  - `- [ ] S6 mutant (Round 21 Q1 condition 4), local, never committed: fitLine storing the raw row without the copy is RED under the new rule; value recorded.`
+  - `- [ ] S6 attribution and records (Round 21 Q1 conditions 3, 5, 7): paneBytes on every mark and a flushed mark (information); spec §18 S6 row gains the rule; METRICS gets the 33-run table. Comes back, not blocking: a repetition > 16 MB whose flushed reading returns within 2 MB of C-start; a median > 16 MB on a tree that does not touch the pane (ownership question, new ticket); a per-repetition rate > 10 % over ≥ 50 repetitions.`
+- Pre-merge run criterion: "confirms the three rules" → "confirms the four rules"; "Any of the three signatures" → "Any of the four signatures (i)–(iii), (v)".
+- Comments gains: `- 2026-11-08 (orchestrator, Round 21 Q1): signature (v), first occurrence: run 42446461464 (staging/19, tree 6f25f13), tui:adversarial-line-heap 20 MB (budget 16); D-records and end 22 MB heap against 2 MB in the other 9 staging/19 runs; not counted against ticket 19.`
+
+**`issues/INDEX.md`** row 71: the title follows the new title. (Drift, correction 6: rows 32 and 67 → `resolved`.)
+
+**`issues/32-tui-log-pane-caps.md`** Comments gains: `- 2026-11-08 (Owner Proxy round 21 Q1): tui:adversarial-line-heap read 20 MB once in 33 CI runs (42446461464; 8 MB in the other 32). From ticket 71's merge on, the check is judged on the median of 5 fresh S6 repetitions, every repetition ≤ 32 MB; budget 16 MB unchanged. The ticket stays resolved.`
+
+**`issues/49-proxy-tui-log-pane-filter-scroll-follow.md`** Comments gains: `- 2026-11-08 (Owner Proxy round 21 Q1): 49 touches zcode-proxy-src/src/tui/**, so it gets no interim exception for signature (v); its memory-budget evidence judges linux S6/short under ticket 71's 5-repetition rule. 49 owns no S6 check.`
+
+---
+
+## Shared understanding
+
+Open branches I still see (none blocks 71 or 19):
+- **The 20 MB object is unattributed** (correction 4). Condition 3's `flushed` mark and `paneBytes` settle it on the next occurrence. A pane-held retention comes back (condition 5).
+- **If t71 has already produced its pre-merge run before this amendment reaches it**, the S6 part goes in as t71's next round on the same branch, not as a new ticket. One pre-merge run must still confirm all four rules (Round 17 cross-question condition 1).
+- **The staging/19 restage 42457112513 was still running** when I read the evidence. Signature (v) covers it if it repeats. Its S6 values join the METRICS count.
+- **The job's aggregate false-RED rate.** Until 71 merges, this key fails a single run at about 3–10 %, and signature (v) excuses those failures. After 71 merges, it adds about 0.86 % on the 1/10 estimate (0.027 % on 1/33). Round 17's Shared-understanding item on the per-key sum stands.
+
+
+---
+
+# Round 22 (2026-11-08) — linux S3/short orphans
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–21 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it names the decision.
+
+Evidence read (read-only; scratch copies outside the worktree):
+- Run 42457112513 (staging/19, head b3e8fe7, tree on 67's schema): job list through `gh run view --json jobs`. Only `memory-budget (ubuntu-latest)` (job 128658388839) failed. Both test-kit legs, both ux-before jobs and the windows memory job passed. The linux job log came through `gh api …/actions/jobs/128658388839/logs` (`/home/AgentKit/overhaul-tools/ci-art/r22-job-linux-mb.log`, lines 440–480 and 600–630).
+- Its `memory-budget-linux` artefact, in `/home/AgentKit/overhaul-tools/ci-art/r22-42457112513-5sdK/`. I read every field of `S3-short/S3-short-2026-11-08T0719-11b141/summary.json` (`checks`, `orphans`, `notes.rounds`, `notes.afterKillHolder`, `notes.cleanup`), plus the S3/hung and S3/omp summaries.
+- The `memory-budget-linux` artefacts of the 10 earlier staging/19 runs (42446103818 … 42446746036, tree 6f25f13), in `/home/AgentKit/overhaul-tools/ci-art/r22-s19runs-h9ae/`. From each I took the S3 summaries' orphans, RED sets, kill-holder round fields and final stop code.
+- `/home/AgentKit/overhaul-tools/ci-art/t67-logs/parsed.json` (62 linux and 46 windows archived runs up to 42429164758). For every run with linux S3/short or S3/hung `orphans` RED I checked the log lines. METRICS.md lines 333–402: the matching rule, the 13-tree restart and the S3 tables before and on the 13 tree.
+- DECISIONS.md Rounds 15, 16, 17, 18 and 21 in full. Issues 16, 17, 19 and 37, plus INDEX rows 16, 17, 19 and 37.
+- `tests/memory/expected-red.json` on the integration tip 76edd8a and on b3e8fe7. `tests/memory/verdict.test.mjs:1007-1045` on b3e8fe7 (the real-list test). `tests/memory/scenarios/s3-concurrency.mjs:84-95, 222-244` (the kill-holder adversary). `proxy/zcode-proxy-manager.mjs:610-639, 746`.
+- Ticket 19's diff: `git diff --stat e056af6 b3e8fe7`, 15 files: the 19 issue file, `lib/proxy-env.mjs` (one name added to the env exception list), both `config.example.yaml`, `tests/proxy-env.test.mjs`, `tests/memory/expected-red.json`, and `zcode-proxy-src/src/{async/handler.ts, config/*, proxy/handler.ts, server/admission*.ts, server/server.ts}`. Between 6f25f13 and b3e8fe7 only 67's ratchet, list, `job.mjs` and test files changed, plus ADR text.
+
+Statistics, recomputed (python, exact binomial, Clopper–Pearson 95 %):
+- Linux S3/short `orphans`, matching CI runs on S3's current executed code (13 tree onward: 2 + 8 staging/67, 10 staging/19 on 6f25f13, 1 on b3e8fe7): **1 of 21** = 4.8 % (0.12–23.8 %). Every run with 65's scenario: **1 of 29** = 3.4 % (0.09–17.8 %). Every linux run on record (62 archived + 8 + 10 + 1): **4 of 81** = 4.9 % (1.4–12.2 %): 42246379763, 42281646419, 42415959288, 42457112513.
+- Linux S3/hung `orphans`: **0 of 29** on runs with 65's scenario (upper bound 11.9 %). 2 of 81 overall, both before 65: 42228536094 and 42281731448.
+- Each of the 6 linux S3 `orphans` REDs on record (4 S3/short, 2 S3/hung) came with `exactly-one-proxy-after-round` RED in the same entry. The converse does not hold: 4 runs had that check RED with no orphan.
+- Under the pooled 4/81 rate, P(≥ 1 orphan RED in 11 runs on 19's trees) = 0.43. Nothing points to an effect of 19.
+- A name RED at p = 3.4–4.8 % stays GREEN in 10 consecutive runs with P = 0.70–0.61, even with no fix at all.
+
+**Corrections to the round's facts.**
+1. **The orphan is the proxy spawned by the killed lock holder, left with no pid record.** That is the spawn → record-write window in 16's and 17's 2026-11-06 Linux Comments. Evidence from `summary.json`:
+   - `orphans: [{ pid: 4080, role: "proxy", cmd: "bin/bun run src/index.ts serve" }]`;
+   - in kill-holder-10 the adversary killed holder 4001 after 229 ms, with `proxiesAtKill: 0` (the scan before the kill) and `pidRecordAfterKill: null`;
+   - the holder's launch (`preflight#0`) ended `code=null` after its last line "starting zcode-proxy ...", which the manager logs just before `spawn()` (`zcode-proxy-manager.mjs:610`). It writes the record afterwards (`:632`);
+   - the other 9 launches failed `code=4 cause=startup`. The round ended with 1 proxy and `pidFileMatchesListener: false`;
+   - the round's stop was refused on the dead holder's stale lock (exit 4), and the final cleanup stop was refused with "proxy healthy but no pid file — refusing to guess" (exit 4, `zcode-proxy-manager.mjs:746`). The proxy outlived the scenario.
+
+   In all 10 earlier staging/19 runs the kill-holder round also left a stale lock and a refused round stop. There `pidFileMatchesListener` was `true`, so the final stop succeeded (exit 0) and there was no orphan. That pid record is the only difference.
+2. **"1 of the runs on this tree" is 1 of 1 on b3e8fe7, 1 of 11 on 19's trees, and 1 of 21 on S3's matching code.** S3's matching rule (METRICS.md: scenario, `verdict.mjs`, `budgets.mjs`, lifecycle/manager/launcher/preflight/bridge paths) does not include 19's proxy request path or 67's ratchet and list. So the 10 + 1 staging/19 runs and the 10 13-tree runs judge the same S3 code. "0 of 10 on 13's tree" is correct.
+3. **The round's linux S3/short owner list is correct, with one omission.** On the integration tip and on b3e8fe7, linux S3/short is: 16 → failed-launches, stale-lock-after-round, exactly-one-proxy-after-round†; 37 → peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:preflight†, procPeak:proxy†. The windows entry already has `"17": ["orphans"]` with `orphans` in `flips`. This run also has 16's `exactly-one-proxy-after-round` RED ("kill-holder-10: 1 proxies, pid file does not match"), which is the same event as the orphan.
+4. **Ticket 19 cannot have produced the orphan.** It changes no file under `proxy/`, no lock, launcher or lifecycle code, not `s3-concurrency.mjs`, not `tests/memory/lib/{verdict,budgets,sampler*}.mjs`, and not the Bun pin. Its only change on the manager's spawn path is one constant name in `proxyEnv`'s exception list, computed before `spawn()`. That cannot move the kill relative to the `spawn()` → `writePidFile()` window. The orphan is a healthy proxy that lacks a record, so nothing in the proxy's own request path made it an orphan.
+
+---
+
+## Q1 — who owns linux S3/short `orphans`?
+
+**DECISION:** ACCEPTED with conditions. Owner **17**, linux `S3/short`, marked `flips`. It is traced to 17's What-to-build ("The next start adopts an orphaned proxy through the identity proof and never spawns a second one … Every child is reaped on stop/restart/crash/update"). 17's Acceptance gains a linux loop line and a deterministic seam proof. Two parts are REJECTED:
+- **(i)** "mirroring the windows one" in `S3/hung` is not taken as a list edit. Linux `S3/hung` gets no `orphans` name, because the check was never RED there in 29 runs with 65's scenario. The new acceptance line still requires 0 orphans in both keys.
+- **(ii)** the ≥ 10-GREEN-run removal floor is not enough on its own to remove this name. At a 3–5 % rate it passes by chance in 61–70 % of cases, so removal also needs condition 3's seam proof.
+
+The run does **not** count against ticket 19. No new ticket. No new edge: 17 ← 16 exists, 37 ← 17 exists, and 55's guard already covers 17.
+
+**This explicitly contradicts:**
+- **Round 15 Q1 condition 4** ("a name is marked only by 67 … A mark is never added later"). As in Round 16 Q1 and Round 18 Q2, the mark is set later. It is set by condition 4's own test: RED in fewer than all matching runs of the leg, 1 of 21, on CI runs only (Round 15 Q2 condition 1).
+- **Round 15 Q1 condition 3, row "S3/short | linux"**: 17 joins 16 and 37 as an owner.
+- **Round 18 Q2 condition 5**, "No owner list or mark changes after [19's pre-merge run]", for this one name only. Round 18 Q2 condition 4 and Round 15 Q2 condition 4 name this as the return path ("comes back as a question with the run ids"). It is not a fold-in.
+
+It does **not** contradict Round 15 Q1 condition 5 ("no … other ticket edits another owner's names"). The edit is this decision, applied by the orchestrator in a commit of its own, and 19's own commits touch no name of 17. It does **not** contradict Round 16 Q1 condition 2 either: linux `S3/hung` stays unlisted under that condition's own rule (never RED, so no evidence).
+
+Binding conditions:
+1. **Owner and trace (Round 15 Q1 conditions 2 and 6).** Claimants:
+   - **17** by What-to-build (above);
+   - **16** only through its 2026-11-06 Linux Comments line ("Closing the window covers spawn → record write"). That line is a measured finding and assigns nothing (Round 15 Q1 condition 6). 16's Acceptance names `orphans` on no leg since Round 15.
+
+   Even if 16 counted as a claimant, 17 descends from 16 and owns the check. That is the same reasoning as Round 15's windows decision, and it avoids holding 16 on an adoption that only 17 delivers. 17's Comments cite the What-to-build line and run 42457112513 with correction 1's record as the measured link.
+2. **The list edit (exact; one commit, only `tests/memory/expected-red.json`, by the orchestrator on staging/19, message naming Owner Proxy round 22).** The linux `S3/short` entry becomes:
+   ```json
+       "S3/short": {
+         "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], "17": ["orphans"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+         "flips": ["exactly-one-proxy-after-round", "orphans", "procPeak:preflight", "procPeak:proxy"]
+       },
+   ```
+   Nothing else in the file changes. Linux `S3/hung` and the whole windows leg stay unchanged, and so do 19's own S1 edits.
+
+   The real-list test (`verdict.test.mjs:1012-1045`) handles this without edits: for this key it picks `count:proxy` as the unowned extra, and the failure message names owners 16, 17, 37. No test changes.
+
+   The edit restarts no count, because `expected-red.json` is outside every matching rule (Round 16 Q2 condition 1, Round 18 Q2 condition 1). It goes on 19's branch, not on the integration branch, because 19 edits the same file. A separate integration commit would conflict with 19's merge for no gain (C9, smaller blast radius).
+3. **17's Acceptance gains (exact text in "Ticket-text changes" below):**
+   - a **linux loop line**: 0 orphans after the scenario's stop in `S3/short` and `S3/hung`;
+   - a **deterministic seam proof on both legs**: a start whose holder dies between `spawn()` and the pid-record write ends with exactly 1 proxy, adopted or reaped, and 0 orphans.
+
+   **Removing the name needs both:**
+   - the seam proof, RED first on today's code;
+   - Round 15 Q1 condition 5's ≥ 10 GREEN matching linux CI runs on 17's tree.
+
+   The floor alone cannot show the fix (statistics: P = 0.61–0.70 with no fix). The seam proof turns the 1-in-21 event into a forced one. It follows Round 17 Q1's mutant reasoning: a check with no power against its defect class needs a constructed case.
+4. **Attribution watch while tolerated (Round 16 Q1 condition 4's pattern; the ratchet cannot see roles).** For every linux `S3/short` `orphans` RED before 17 merges, the orchestrator records in 17's Comments:
+   - the run id;
+   - each `orphans[]` entry (pid, role, cmd);
+   - the kill-holder round's `pidFileMatchesListener` and `adversary.pidRecordAfterKill`;
+   - `cleanup.finalStop.tail`.
+
+   Run 42457112513 is the first record (correction 1). An occurrence comes back as an ownership question with its run id, even though the ratchet passed it, if:
+   - the value is > 1;
+   - any orphan's role is not `proxy`;
+   - or the kill-holder round's pid record matched the listener (not the spawn → record window).
+5. **Run 42457112513 does not count against ticket 19.**
+   - Its only failure is this RED (correction 4).
+   - It stays a valid run for 19's S1 counts (Round 18 Q2 condition 4) and for S3's matching count.
+   - It is not rerun. It is replayed: its per-key RED sets, both legs, go through the amended list and 67's ratchet (`t67-scripts/replay.mjs`, Round 16 Q2 condition 2) and must pass. Any other failure in the replay comes back with numbers.
+   - The list commit changes 19's tip, so 19 merges only after one CI run on the final tip passes: test-kit checks the list schema and the real-list test, and the memory leg is judged normally. Round 17/21's interim signatures (i)–(v) apply. Any unowned RED in it comes back with run ids, with no list edit in between.
+   - This is no rerun-until-green: 42457112513 stands as counted, and its RED is decided here.
+6. **Linux `S3/hung` (Rejected part (i)).** No `orphans` name, because it was 0 of 29 on 65's scenario. A linux S3/hung `orphans` RED comes back as a question with its run id and condition 4's record, as Round 16 Q1 condition 2 ruled for a never-RED name. If its record shows the same spawn → record window, the Owner Proxy expects to apply this answer. It is still not applied silently.
+7. **Records.**
+   - METRICS.md, linux S3/short rows: `17 orphans 0/8 †` before 13, and `17 orphans 1/21 †` on the 13 tree onward (42457112513). Add the 4-of-81 all-run count and the co-occurrence with `exactly-one-proxy-after-round`.
+   - Spec §18: no change, since budgets and rules are unchanged.
+   - RUNLOG names this round and corrections 1–4.
+   - Budgets, `orphans: 0`, every other owner, name and mark are unchanged (§9).
+
+**Rationale:** The artefact settles the mechanism, not only the count. The killed holder logged its spawn line, its proxy came up, the pid record never appeared, and the kit's own stop then refused the healthy, unrecorded proxy. That is exactly the state 17's What-to-build adopts ("never spawns a second one") and its Linux Comments describe ("a healthy proxy on the installation's port with no `proxy.pid` at all"). The same state recurs on linux at about 5 % across 81 runs and every tree, always together with 16's `exactly-one-proxy-after-round`.
+
+Leaving it unowned would block a random 1-in-20 run of every ticket on a question whose answer is already known. Rounds 9, 13, 15 and 16 all refused that kind of random merge block. Listing it with a mark is the mechanism Round 16 Q1 used for the windows twin.
+
+The cost of tolerating it is bounded:
+- one name, on one key and leg;
+- a role check that sends any non-proxy or out-of-window orphan back;
+- a removal that needs a forced reproduction, not luck.
+
+19 changes neither the manager's spawn → record path nor the scenario, and the rate on its trees is what the pooled rate predicts. Counting the run against 19 would hold a finished ticket on a defect two tickets downstream.
+
+**Charter:** C1 (every child reaped and exactly one proxy: the check stays enforced, attributed to the ticket that adopts or reaps, and gains a deterministic proof), C7 (linux brought to the windows ownership; windows unchanged), C9 (stronger measured evidence: the per-round record and 81 runs; smaller blast radius: one name in one entry, one list-only commit, no edge; simpler than a new ticket), C2 (no test change), §9 (no budget touched), Round 7 Q4, Round 15 Q1 conditions 2, 4, 5 and 6, Round 15 Q2 conditions 1 and 4, Round 16 Q1 conditions 2 and 4, Round 16 Q2 conditions 1 and 2, Round 17 Q1 (mutant reasoning) and cross-question condition 2, Round 18 Q2 conditions 4 and 5, Round 21 Q1 condition 6, PROMPT §7 Phase 4.
+
+**REVERSIBILITY:** Two-way door (one list name and mark, ticket text, run scheduling). ADR: no.
+
+### Ticket-text changes (exact)
+
+**`issues/17-start-lock-signal-release-and-orphan-adoption.md`**
+- Acceptance, new line after "Loop S3 (windows): …":
+  `- [ ] Loop S3 (linux, Round 22 Q1): 0 orphans (`orphans`) after the scenario's stop in `S3/short` and `S3/hung`, including after a kill-holder round whose holder died between spawning the proxy and writing `proxy.pid` (run 42457112513: orphan pid 4080, role proxy, final stop "proxy healthy but no pid file"). **Remove 17's name (`orphans`) from the linux `S3/short` entry in `expected-red.json`** only with both the seam proof below (RED first on today's code) and Round 15 Q1 condition 5's evidence for a `flips` name (≥ 10 GREEN matching linux CI runs on 17's tree).`
+- Acceptance, new line after the first "Seam 2 …" line:
+  `- [ ] Seam 2, ubuntu and windows-latest (Round 22 Q1): a start whose lock holder is killed after `spawn()` and before the pid record is written (kill injected deterministically at that point, not by timing) leaves a healthy proxy with no `proxy.pid`; the next start adopts it through the identity proof (never on a port or pid alone) or `stop` reaps it; the test ends with exactly 1 proxy, 0 orphans and no second proxy spawned.`
+- Comments gains:
+  `- 2026-11-08 (orchestrator, Owner Proxy round 22 Q1): linux S3/short `orphans` is owned by 17 and marked flips in expected-red.json (1 of 21 matching linux CI runs on the 13 tree onward, 42457112513; 4 of 81 linux runs on record, each with exactly-one-proxy-after-round RED). Mechanism: kill-holder holder 4001 killed at 229 ms after logging "starting zcode-proxy ..." and spawning proxy 4080, before writing proxy.pid (pidRecordAfterKill null, pidFileMatchesListener false); the round stop was refused on the stale lock (exit 4), the final stop with "proxy healthy but no pid file" (exit 4). Linux S3/hung `orphans` is not listed (0 of 29); a RED there comes back. Attribution watch (Round 22 Q1 condition 4): for every linux S3/short orphans RED before 17 merges, record run id, orphans[] (pid, role, cmd), the kill-holder round's pidFileMatchesListener and pidRecordAfterKill, and cleanup.finalStop.tail; a value > 1, a non-proxy role or a matching pid record comes back as an ownership question. First record: 42457112513 as above.`
+
+**`issues/16-start-lock-protocol-v1-proven-takeover.md`** Comments gains:
+`- 2026-11-08 (orchestrator, Owner Proxy round 22 Q1): linux S3/short `orphans` goes to 17 (descendant rule, as windows in Round 15); 16's `exactly-one-proxy-after-round` RED in run 42457112513 is the same event (pid file does not match the listener). If 16 closes the spawn → record window first, 17 removes a GREEN name. 16's own names and Acceptance are unchanged.`
+
+**`issues/19-admission-control-and-503-shed.md`** Comments gains:
+`- 2026-11-08 (orchestrator, Owner Proxy round 22 Q1): pre-merge run 42457112513 failed only on linux S3/short RED on orphans (unowned). The orphan is the kill-holder proxy left without a pid record; 19's diff touches no manager, lock, launcher, lifecycle or S3 scenario code. The name is assigned to 17 (flips) in a list-only orchestrator commit on staging/19; the run does not count against 19, is replayed through the amended list, and its S1 and S3 counts stand. 19 merges after one passing CI run on its final tip.`
+
+**`issues/37-…`, INDEX.md:** no change. 37's "Delete `S3/short` (linux)" is covered by Round 15 Q1 condition 5 (the commit that removes the last name deletes the entry). 37 is blocked by 17, so it never waits on a name 17 has not yet removed out of order.
+
+---
+
+## Shared understanding
+
+Open branches I still see (none blocks 19):
+- **16's and 17's low-rate `flips` names share the power problem in condition 3.** For example, linux S3/short `exactly-one-proxy-after-round` is 1 of 21, and linux S3/hung `start-over-stale-lock` is 0 of 29. Ten GREEN runs prove little for them. 16's Acceptance already has seam tests for its lock names (kill at every protocol step). If 16 removes a name on the floor alone, that comes back with numbers.
+- **The spawn → record window has two possible closers.** 16 could write the identity before or at spawn, or 17 could adopt or reap afterwards. Whichever lands first clears the event. 16's windows seam line covers it only on windows-latest. Whether 16 should also prove the window closed on ubuntu is not decided here. 17's new seam proof covers the outcome on both legs.
+- **Linux S3/hung `orphans`** stays unlisted (condition 6). The same kill-holder code runs there, and it was RED twice before 65. A recurrence comes back once, and is then expected to follow this answer.
+- **EVIDENCE MISSING: whether 42457112513's windows memory leg recorded any S3 orphan outside 17's known windows mechanism.** It passed the ratchet, but Round 15/16's open item on the windows orphan mechanism remains open.
+
+
+---
+
+# Round 23 (2026-11-08) — triage of ticket 56 (MCP SDK 2.x)
+
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The Round 1–22 decisions in DECISIONS.md bind these answers. Where an answer departs from one of them, it names the decision.
+
+Evidence read (read-only):
+- `OWNER-PROXY-BRIEF.md`, `rounds/round-23.md`.
+- Issues 56, 30, 31, 36, 53 and 57 in full, and `issues/INDEX.md`. Ticket 13 shows `Status: resolved`. `git show --stat f383d6b` shows the merge "ticket 13: MCP dependencies (SDK 1.32.2, zod 4.6, TypeScript 7.0.2, @types/node 24)", which touched `KNOWN_LIMITATIONS.md` (+24 lines).
+- `research/mcp-sdk.md` (2026-11-06) in full.
+- On the integration branch `overhaul/stability-terminal-ux` (tip f322df8):
+  - `mcp/zcode-harness-mcp/package.json` has `"@modelcontextprotocol/sdk": "^1.32.2"`, `"zod": "^4.6.6"` and `engines.node >=24`.
+  - `bun.lock:20`: SDK 1.32.2 already pulls in `express`, `hono`, `@hono/node-server`, `cors`, `jose`, `express-rate-limit` and more.
+  - `docs/KNOWN_LIMITATIONS.md` §6 says SDK 1.x `^1.32.2`, at most `2025-11-25`, a deliberate stay-back, and a deadline of "at least until 2027-01-27". It also says "Overhaul-Ticket 56, `needs-triage`".
+  - `src/mcp/server.ts`: `:41-44` declares `tools: { listChanged: false }`, `resources: { subscribe: false }` and `logging: {}`. `:99` returns `-32002`. `:278-293` is the stateless JSON-mode transport per request. Its `res.on("close")` is still attached after `handleRequest`, and the error path closes nothing.
+  - `src/mcp/resources.ts:33-35`: the bridge's "tasks" are its own tool and resource objects (`zcode://tasks/...`), not the MCP protocol's experimental Tasks.
+  - `grep`: the only docs that name the SDK or 2025-11-25 are `MANIFEST.md`, `MANIFEST.de.md`, `mcp/zcode-harness-mcp/docs/PROTOCOL.md` and `KNOWN_LIMITATIONS.md`. README × 5, SECURITY and SUPPORT_MATRIX do not.
+- `docs/agents/triage-labels.md`. `DECISIONS.md` Round 1 Q15/Q16 and Round 12 Q1. `spec.md:34, 129 (story), 523-525, 677, 808`. `PROMPT.md` C5, §5 B1–B6 and the CURRENCY DoD (`:571-572`).
+- `STATE.md:4` lists 30 as "Ready" and t36 as running. The round says 30 is "in progress". This does not affect the answer.
+
+Primary sources (checked 2026-11-08, Parallel web_search/web_fetch, session 7f3c9a2e-5b41-4d8e-9c6a-1e2f3a4b5c6d):
+- npm registry `@modelcontextprotocol/server`: `dist-tags.latest = 2.4.0`. Release times: 2.0.0 2026-07-27T23:55Z, 2.1.0 09-23, 2.2.0 09-28, 2.3.0 10-02, 2.3.1 10-05, 2.4.0 2026-10-23T18:20Z. Pre-releases (alpha/beta) ran 2026-04 to 2026-07-21, and the stable line has had 5 releases since. https://registry.npmjs.org/@modelcontextprotocol/server
+- npm registry `@modelcontextprotocol/sdk`: `dist-tags.latest = 1.32.2`. https://registry.npmjs.org/@modelcontextprotocol/sdk
+- GitHub releases: v2.4.0 is marked "Latest" (2026-10-23 18:32Z), with server/client/core/server-legacy/codemod 2.4.0 and node 2.1.2. 1.32.2 was released 2026-10-23 18:06Z. There is no release after 2026-10-23. https://github.com/modelcontextprotocol/typescript-sdk/releases, https://github.com/modelcontextprotocol/typescript-sdk/releases/tag/v2.4.0, https://github.com/modelcontextprotocol/typescript-sdk/releases/tag/1.32.2
+- v1.x README: "Support for the 2026-07-28 spec is not planned for v1.x: it is in v2, the current stable release, which … continues to receive bug fixes and security updates for at least six months after the v2 release (2026-07-27)". https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.x/README.md and https://ts.sdk.modelcontextprotocol.io/
+- ROADMAP (main): "v2.0.0 is the stable release line (main)"; "2026-07-28 spec revision board — implemented in v2.0.0 (released 2026-07-27, alongside the spec)"; "v1.x … at least six months after the v2 release (2026-07-27). It targets the 2025-11-25 spec revision; new spec revisions are implemented on main only." https://github.com/modelcontextprotocol/typescript-sdk/blob/main/ROADMAP.md
+- `support-2026-07-28.md`: "Nothing in v2 puts a 2026-07-28 byte on the wire by default". `createMcpHandler(factory)` with the default `legacy: 'stateless'` serves both eras, and "a v1 stateless `StreamableHTTPServerTransport` hosting … maps directly onto the default entry". `serveStdio(factory)` serves both eras unless `legacy: 'reject'`. When serving 2026-07-28, the cache fields default to `ttlMs: 0` and `cacheScope: 'private'`. https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/support-2026-07-28.md
+- MCP spec changelog 2026-07-28 ("changes … since the previous revision, 2025-11-25"): sessions removed, `initialize` removed, `server/discover` MUST be implemented, `subscriptions/listen`, a required `resultType`, and renumbered error codes. https://modelcontextprotocol.io/specification/2026-07-28/changelog
+- The spec versioning page came back only as a cache from 2026-06-04, which still names 2025-11-25 as "current". That is older than the 2026-07-28 release. Its GitHub source path returned 404. https://modelcontextprotocol.io/specification/versioning
+
+**Facts the round asked for.**
+1. **Is 2.x stable now? Yes.** It is the npm `latest` tag, GitHub "Latest", and named "the current stable release" by the v1.x README and "the stable release line" by the ROADMAP. 2.0.0 is 104 days old, and 2.4.0 is the fifth stable release.
+2. **What is 2027-01-27? A guaranteed minimum, not an announced end-of-support date.** The SDK promises 1.x fixes "for at least six months after the v2 release (2026-07-27)". **EVIDENCE MISSING: a published v1.x end-of-support date.** No primary source names one (README, ROADMAP and releases checked). After 2027-01-27, 1.x fixes are no longer guaranteed. `research/mcp-sdk.md` and `KNOWN_LIMITATIONS.md` §6 both say "at least" and are correct. Ticket 56's "support horizon … (2027-01-27)" should say "guaranteed floor".
+3. **Protocol revision.** 2026-07-28 is a published revision. The SDK implemented it in 2.0.0, "alongside the spec". 1.x will never support it. **EVIDENCE MISSING (not decision-relevant): a live copy of the spec versioning page's "current" marker.** The only copy obtained predates 2026-07-28. The decision does not depend on it, because C5 asks for the latest revision that passes the suite, and 2026-07-28 is published and implemented in the stable SDK.
+
+---
+
+## Q1 — Ticket 56: role, label, edges
+
+**DECISION:** ACCEPTED with conditions. The recommendation's "2.x is stable" branch applies. Its edges are accepted, and the ticket is rewritten as two staged tracer bullets with pre-registered gates and a fallback. No edge is cut. The ticket is not yet fully specified as written: its only criterion is "Owner decides go/no-go". This decision makes the go call and fixes the criteria, so an AFK agent never makes the owner's call.
+
+- **Triage role / label:** `ready-for-agent` (`Status: ready-for-agent`). Model **sol**, Risk **high**, **ADR: yes**, a new ADR (next free number, 0017 on the current tree): "MCP SDK 2.x and dual-era serving (2025-11-25 + 2026-07-28)".
+- **Spec amendment.** Spec §Out of Scope (`spec.md:808`), "MCP SDK 2.x and protocol revision 2026-07-28. They become a `needs-triage` ticket.", becomes "MCP SDK 2.x and protocol revision 2026-07-28: triaged in Round 23 as ticket 56 (in scope, staged; the stay-back stays documented until it lands)." This follows the Round 12 precedent for 57. It does not contradict Round 1 Q16: Q16 sent 2.x to a `needs-triage` ticket, and this is that triage.
+- **Binding conditions.** They go into the ticket's Acceptance, exact text below.
+  1. **Stage A: package swap on the 2025-era wire.** Replace `@modelcontextprotocol/sdk` with `@modelcontextprotocol/server`, using the latest stable 2.x when implemented and ≥ 2.4.0. Add `@modelcontextprotocol/node` (≥ 2.1.2) only if the HTTP path needs it. `zod` stays `^4.6.6`, which meets the 2.x minimum of 4.2. Both lockfiles are regenerated (bun.lock, package-lock.json), and versions are re-verified on npm on the day.
+     - The bridge still answers `initialize` and negotiates at most 2025-11-25.
+     - Every existing raw-JSON-RPC test and example passes unedited, the 2025-06-18 clients included. A test edit that touches a wire assertion comes back as a question (C2).
+     - 36's lazy HTTP import survives: stdio mode loads no HTTP adapter.
+     - On whatever code path lands, the per-request server and transport are closed on every path, the error path included. A seam 7 test closes the response before `handleRequest` returns. Today's `server.ts:285-293` attaches the listener late and the error path closes nothing.
+     - The transitive package count and install size are recorded before and after (C4). If the tree grows, the ticket comes back with the numbers.
+     - `dist/` is regenerated by the build (B5).
+  2. **Stage B: serve 2026-07-28 additively.** Only after stage A is GREEN.
+     - HTTP goes through `createMcpHandler(factory)` with `legacy: 'stateless'`. It builds a fresh server per request and never shares an instance (typescript-sdk #2607).
+     - The bridge's own Host, Bearer and Origin checks, `MAX_IN_FLIGHT = 16` and the bounded body pre-read still run before the SDK sees a request. GET and DELETE still get 405. Loopback-only is unchanged (C6).
+     - stdio goes through `serveStdio(factory)`, accepts 2025 openings and keeps the stdin-end shutdown.
+     - 2025-era output (capabilities, results, the `-32002` resource error) is byte-identical to stage A: recorded 2025-06-18 and 2025-11-25 transcripts are replayed. 2026-era behaviour follows the spec (`server/discover`, `resultType`, `-32602`, SDK default cache fields `ttlMs: 0` / `cacheScope: 'private'`).
+     - No capability is added. `tools.listChanged: false` and `resources.subscribe: false` stay. Any long-lived stream the SDK keeps open is capped and closed on stop (C1).
+     - Seam 7 adds a 2026-07-28 client, raw JSON-RPC like the existing tests and with no new devDependency, on HTTP and on stdio: discover, `tools/list`, `tools/call`, and `resources/read` on a task resource.
+  3. **Memory gates (both stages; values, not verdicts).**
+     - Per leg, ≥ 5 fresh `memory-budget` runs on the ticket's tree record these values next to the base tip's: S3 bridge-role peak (`procPeak:mcp-bridge`), S5 `growth:mcp-bridge`, S5 bridge peak and task failures, and 57's `S5/restart` numbers.
+     - Every run must stay within the existing budgets. A listed expected-RED name (37 holds the `procPeak:mcp-bridge` names; S5/short is listed under 30 if still listed) does not cover a change in the value.
+     - If the 5-run median of any bridge value rises by more than 10 % over the base, the ticket comes back with the numbers. It is not auto-failed and not auto-accepted.
+     - **No expected-RED entry is added by 56**, so 55 needs no edge to 56.
+  4. **Fallback (pre-registered).** If stage B misses any gate, stage A lands alone, and `KNOWN_LIMITATIONS.md` §6 says "SDK 2.x; protocol 2025-11-25 stay-back" with the measured reason. Stage B then comes back to the Owner Proxy with its numbers. Stage B never lands without stage A. If stage A misses a gate, the ticket comes back with numbers. Edge 53 ← 56 is then cut, and 53 documents today's stay-back unchanged.
+  5. **Docs (C8).**
+     - 56 itself rewrites `mcp/zcode-harness-mcp/docs/KNOWN_LIMITATIONS.md` §6 and `docs/PROTOCOL.md` to say what landed. 13 established that the package docs are owned by the code change.
+     - 53 updates `MANIFEST.md`/`MANIFEST.de.md` (they name the v1 package), the five bridge READMEs ("stay-back note" or its replacement), `docs/MCP_API.md` and SUPPORT_MATRIX. 54 carries the change into the release notes through 54 ← 53.
+     - Until 56 merges, §6's "needs-triage" wording is stale. It is corrected by 56's rewrite, not by a separate product-file edit now.
+  6. **Re-check tripwire.** The orchestrator re-reads the v1.x README and ROADMAP at each merge of 30, 31, 36 and 57, and again on 2027-01-27. The question comes back to the owner with dates if any of these happens:
+     - (a) the SDK announces a v1.x end-of-support date before 56 can land;
+     - (b) a v1.x security advisory that affects the bridge is published without a 1.x fix;
+     - (c) 56 is not merged by 2027-01-27.
+- **Edges.**
+  - **56 ← 30, 31, 36, 57 accepted** (13 stays listed, resolved).
+    - 36 edits `server.ts:11` and `index.ts:16` (the lazy HTTP import), which is the same block stage A replaces.
+    - 31 edits the tool descriptions, the result shape (`truncated`) and `dist/`, all served through `server.ts`.
+    - 57 edits `index.ts` (the crash handler) and `runtime/manager.ts`.
+    - 30 shares `s5-mcp.mjs` and the S5 bridge measurements, the same separation reason as 57 ← 30 in Round 12.
+    - These are same-file edges (Round 5 Q2) plus measurement separation, so the swap lands on the final bridge code and its numbers are not mixed with four tickets' changes. 57 ← 30, 36 and 31 ← 30 already exist, so 30 and 36 are also transitive. They stay listed for clarity.
+  - **53 ← 56 accepted.**
+  - **No edge 55 ← 56** (condition 3). **No edge 56 ← 37:** no file overlap; condition 3 covers the shared `procPeak:mcp-bridge` names. **No edge 52 ← 56:** README × 5 do not name the SDK (grep).
+  - **Acyclic, checked mechanically** (DFS over every INDEX row plus the two new edges).
+    - 56 had no dependents. Its ancestors are 30, 31, 36, 57, 13 ← 12 ← 11 ← 10 ← 09 ← 02, 03, 04, and 01.
+    - Its only descendants are 53 and then 54. Neither is an ancestor of 30, 31, 36 or 57, so no cycle forms.
+
+**Rationale:**
+- The round made its recommendation conditional on a primary-source fact, and the fact holds: 2.x is the stable line. C5 names "@modelcontextprotocol/sdk and MCP protocol revision" explicitly. The ROADMAP says new revisions land on main only, so staying on 1.x means staying off every future revision, and 1.x fixes are guaranteed only to a floor date with no end date announced.
+- The documented stay-back meets the run's DoD today (`PROMPT.md:571-572`). It was a deferral, not a verdict: Round 1 Q16 condition 2 justified it by cost ("an architectural step") and by the 1.x window. Neither argues against moving now that the window's end is in sight.
+- The cost is small. One file imports the SDK, and the v2 stateless entry "maps directly" onto the bridge's current hosting. 1.32.2 already pulls in express and hono, so the swap may well shrink the tree, and condition 1 measures it instead of assuming it.
+- The risk is real. The bridge's memory budgets are the run's hardest gates, a new major can move them, and v2-only defects were open on 2026-11-06 (#3148, #3097, #3036). That is why:
+  - the ticket sits behind the four open MCP tickets;
+  - its gates compare measured values, not listed verdicts;
+  - the protocol adoption (the one-way part: once `server/discover` advertises 2026-07-28, withdrawing it is a deprecation under C2) is a separate stage with a fallback to a smaller, reversible stage A.
+- The edges put 56 at the end of the MCP chain and in front of 53 → 54, the run's tail. The pre-registered fallback and the edge cut in condition 4 keep a stalled 56 from holding the release notes hostage. The tripwire keeps the 2027-01-27 floor from passing in silence.
+
+**Charter:** C5 (SDK and protocol revision currency), C1 (memory gates, a per-request factory, capped streams, no added long-lived state), C2 (2025-era wire byte-identical; additive 2026 era; deprecation announced, never silent), C4 (footprint measured; no new framework), C6 (loopback, bearer, Host/Origin checks ahead of the SDK; no new endpoint), C8 (docs split between 56 and 53), C9 (stronger evidence first: primary sources; then the smaller blast radius: stage A before B, with a fallback). Also Round 1 Q16 (the triage it deferred to), Round 5 Q2 (same-file edges), Round 12 Q1 (56 to be ordered against 57; the spec amendment precedent), B5 (`dist/` by build), B6 (no kit version bump; dependency versions only).
+
+**REVERSIBILITY:**
+- Stage A is a two-way door: one dependency swap in one file, reverted by a revert commit.
+- Stage B is one-way once released: a served protocol revision can only be withdrawn through an announced deprecation.
+- **ADR: yes** (new ADR, next free number, 0017 on the current tree).
+
+### Exact text changes
+
+**`issues/56-mcp-sdk-2-migration.md`.** Replace everything from `**Blocked by:**` through the end of the `**Acceptance criteria:**` list (up to `**Common acceptance (every ticket):**`) with:
+
+```
+**Blocked by:** 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 30 (MCP task retention (500 / 7 days) and the idempotency window), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 36 (MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries), 57 (MCP runtime restart budget)
+
+**Status:** ready-for-agent
+
+Model: sol
+
+Risk: high
+
+ADR: 0017 (MCP SDK 2.x and dual-era serving; next free number)
+
+**What to build:** Move the bridge off SDK 1.x (whose fixes are guaranteed only until at least 2027-01-27; no end date announced) onto the stable SDK 2.x line, in two stages (Round 23 Q1). Stage A swaps the packages and keeps the 2025-era wire byte-identical. Stage B then serves protocol revision 2026-07-28 in addition, on HTTP (`createMcpHandler`, `legacy: 'stateless'`, a fresh server per request) and on stdio (`serveStdio`), behind the bridge's existing Host/Bearer/Origin checks and in-flight cap. If stage B misses a gate, stage A lands alone with a documented protocol stay-back.
+
+**Acceptance criteria:**
+
+- [ ] Stage A: `@modelcontextprotocol/sdk` replaced by `@modelcontextprotocol/server` (latest stable 2.x, ≥ 2.4.0, re-verified on npm on the day) and, only if the HTTP path needs it, `@modelcontextprotocol/node` (≥ 2.1.2); `zod` stays `^4.6.6`; bun.lock and package-lock.json regenerated; `dist/` regenerated by the build (B5).
+- [ ] Stage A, wire: the bridge still answers `initialize` and negotiates at most 2025-11-25; every existing raw-JSON-RPC test and example (2025-06-18 clients included) passes unedited. A test edit touching a wire assertion comes back as a question.
+- [ ] Stage A: stdio mode loads no HTTP adapter (36's lazy import, its seam 7 test unchanged); the per-request server and transport are closed on every path including errors, pinned by a seam 7 test that closes the response before `handleRequest` returns.
+- [ ] Stage A: transitive package count and install size recorded before/after; a larger tree comes back with the numbers (C4).
+- [ ] Stage B (only after stage A is GREEN): 2025-06-18 and 2025-11-25 transcripts recorded on stage A replay byte-identical (capabilities, results, `-32002`); a 2026-07-28 raw-JSON-RPC client on HTTP and on stdio passes `server/discover`, `tools/list`, `tools/call` and `resources/read` on a task resource, with `-32602` for an unknown resource; no capability is added (`tools.listChanged: false`, `resources.subscribe: false`); any long-lived stream is capped and closed on stop; GET/DELETE stay 405; Host/Bearer/Origin checks, `MAX_IN_FLIGHT` and the bounded body pre-read still run before the SDK.
+- [ ] Memory, each stage, values not verdicts: ≥ 5 fresh `memory-budget` runs per leg record S3 `procPeak:mcp-bridge`, S5 `growth:mcp-bridge`, S5 bridge peak and task failures, and `S5/restart`, next to the base tip's values. Every run is within the existing budgets whether or not a name is listed. A 5-run median rising > 10 % over the base on any bridge value comes back with the numbers. 56 adds no expected-RED entry.
+- [ ] Fallback: if stage B misses a gate, stage A lands alone and stage B comes back with numbers. If stage A misses a gate, the ticket comes back and edge 53 ← 56 is cut.
+- [ ] Docs: `mcp/zcode-harness-mcp/docs/KNOWN_LIMITATIONS.md` §6 and `docs/PROTOCOL.md` state what landed (SDK 2.x; dual-era serving, or the 2025-11-25 stay-back with its measured reason). MANIFEST, bridge READMEs × 5, `docs/MCP_API.md` and SUPPORT_MATRIX are 53's scope.
+```
+
+`Spec stories: none (follow-up to 129)` stays as it is: story 129, the stay-back on record, holds until 56 lands, and 56 changes no stored state, so story 135 does not apply. Add under `## Comments`:
+
+```
+- 2026-11-08 (orchestrator, Owner Proxy round 23, binding): triaged ready-for-agent. 2.x is the stable line (npm latest 2.4.0, 2026-10-23; 2.0.0 2026-07-27). 2027-01-27 is the guaranteed floor for 1.x fixes, not an announced end date. Edges 56 ← 30, 31, 36, 57 and 53 ← 56; acyclic. Tripwire: the orchestrator re-reads the v1.x README/ROADMAP at each merge of 30, 31, 36 and 57 and on 2027-01-27. The question comes back to the owner if a v1.x end date before 56 can land is announced, if an unfixed v1.x advisory affects the bridge, or if 56 is not merged by 2027-01-27.
+```
+
+**`issues/53-docs-security-harness-bridge-and-manifests.md`.** Append to the `**Blocked by:**` line: `, 56 (MCP SDK 2.x and protocol revision 2026-07-28 migration)`. In **What to build**, replace `The five MCP bridge READMEs at parity with the Node 24 floor and the stay-back note.` with `The five MCP bridge READMEs at parity with the Node 24 floor and with ticket 56's outcome (SDK 2.x and dual-era serving, or the remaining protocol stay-back); \`MANIFEST*\` names the SDK package that 56 ships.`
+
+**`issues/INDEX.md`.**
+- Row 56 becomes: `| 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol | high | 13, 30, 31, 36, 57 | ready-for-agent |`
+- Row 53's Blocked-by cell becomes: `11, 13, 16, 22, 31, 51, 58, 57, 56`
+
+**`spec.md:808`.** Replace `- **MCP SDK 2.x and protocol revision 2026-07-28.** They become a \`needs-triage\` ticket.` with `- **MCP SDK 2.x and protocol revision 2026-07-28.** Triaged in Round 23 as ticket 56 (in scope, staged; the stay-back stays documented until it lands).`
+
+---
+
+## Shared understanding
+
+Open branches I still see:
+1. **Stage B's go/no-go is measured, not decided.** Whether 2026-07-28 is served in this run depends on condition 3's numbers. If it falls back, the protocol stay-back stays documented, and stage B comes back as its own owner question.
+2. **Run-tail timing.** 56 now sits between the MCP chain (30 → 31, 36 → 57) and 53 → 54. If that chain is not done well before 2027-01-27, tripwire (c) brings the question back. The SDK has announced no end date, so the floor is not a hard stop.
+3. **Side observation, not decided here.** `spec.md:809` still reads "An MCP runtime restart budget … becomes a `needs-triage` ticket". Round 12 Q1 condition 7 ordered it amended to "triaged in Round 12 as ticket 57", and the amendment is not on the tree (f322df8).
+4. **EVIDENCE MISSING, carried:** (a) a published v1.x end-of-support date; none exists today. (b) A live copy of the spec versioning page's "current" marker; the only copy obtained (2026-06-04) predates 2026-07-28.

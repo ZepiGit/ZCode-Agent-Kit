@@ -10,6 +10,14 @@
 export const EXAMPLE_CONFIG_YAML: string = `server:
   port: 8080
   host: "127.0.0.1"
+  # Admission control (optional): cap on the request-body bytes the proxy
+  # holds at once, in MB (default 64, allowed 1-4096). Requests beyond it wait
+  # unread in a FIFO (at most 64 waiting, at most 15 s), then get HTTP 503 with
+  # Retry-After in their endpoint's error shape, never 429. An idle proxy always
+  # admits one request. Open response streams are never limited.
+  # Env override: ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB.
+  # admission:
+  #   maxInFlightMB: 64
 
 auth:
   # Key that clients must provide to use the proxy.

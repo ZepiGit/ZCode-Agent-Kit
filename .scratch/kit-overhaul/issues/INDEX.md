@@ -35,7 +35,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 29 | [CDN disk cache pruning](29-cdn-disk-cache-pruning.md) | sol | medium | 25 | ready-for-agent |
 | 30 | [MCP task retention (500 / 7 days) and the idempotency window](30-mcp-task-retention-and-idempotency-window.md) | sol | high | 13 | ready-for-agent |
 | 31 | [Per-task caps and 4 MiB head/tail truncation of task text](31-mcp-task-caps-and-text-truncation.md) | sol | medium | 30 | ready-for-agent |
-| 32 | [TUI log pane capped at 2,000 lines and 8 MB](32-tui-log-pane-caps.md) | glm | low | 05, 11 | ready-for-agent |
+| 32 | [TUI log pane capped at 2,000 lines and 8 MB](32-tui-log-pane-caps.md) | glm | low | 05, 11 | resolved |
 | 33 | [`proxy.log` single rotator: size-capped writer, manager rotation under the lock, file modes](33-proxy-log-single-rotator.md) | sol | high | 14, 16, 18, 21 | ready-for-agent |
 | 34 | [Early log (`proxy.early.log`): 1 MB cap and the tail copy into `proxy.log`](34-early-log-cap-and-tail-copy.md) | sol | medium | 33 | ready-for-agent |
 | 35 | [OMP in-host single-flight preflight with the cause-line result record](35-omp-single-flight-preflight.md) | sol | high | 03, 15, 33, 71 | ready-for-agent |
@@ -56,10 +56,10 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 50 | [Harness adapters: HIGH fixes (Continue, Kilo Code)](50-harness-adapters-high-fixes.md) | glm | low | — | ready-for-agent |
 | 51 | [Harness adapters: confirmed MEDIUM fixes and record refresh](51-harness-adapters-medium-fixes.md) | glm | medium | 50 | ready-for-agent |
 | 52 | [Docs: README × 5 at content parity](52-docs-readme-parity.md) | glm | medium | 10, 19, 21, 30, 31, 33, 34, 37, 41, 42, 43, 47, 58 | ready-for-agent |
-| 53 | [Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST](53-docs-security-harness-bridge-and-manifests.md) | glm | medium | 11, 13, 16, 22, 31, 51, 58, 57 | ready-for-agent |
+| 53 | [Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST](53-docs-security-harness-bridge-and-manifests.md) | glm | medium | 11, 13, 16, 22, 31, 51, 58, 57, 56 | ready-for-agent |
 | 54 | [Release notes vNEXT and owner actions](54-release-notes-and-owner-actions.md) | glm | low | 29, 44, 45, 46, 48, 52, 53, 59, 69 | ready-for-agent |
 | 55 | [CI guardrails: snapshot-update refusal and an empty expected-RED list](55-ci-guardrails-snapshot-refusal-and-empty-expected-red.md) | glm | low | 06, 16, 17, 19, 20, 30, 32, 34, 35, 37, 58, 61, and every typecheck-baseline ticket filed by 11, 67 | ready-for-agent |
-| 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol (if accepted) | high | 13 | needs-triage |
+| 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol | high | 13, 30, 31, 36, 57 | ready-for-agent |
 | 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol | medium | 30, 36 | ready-for-agent |
 | 58 | [Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)](58-solver-recycle-and-failure-semantics.md) | sol | high | 19, 25, 28 | ready-for-agent |
 | 59 | [Kilo `/v1/models` sheet line (part (b); effort normalisation moved to 63)](59-proxy-effort-normalisation-and-kilo-models-line.md) | glm | low | — | ready-for-agent |
@@ -70,11 +70,11 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 64 | [Sampler re-attribution after exec fails under CI load (test or sampler defect)](64-sampler-exec-reattribution-flake.md) | sol | medium | — | ready-for-agent |
 | 65 | [S3/hung's stale-lock round is skipped when `manager start` exits 1](65-s3-hung-stale-lock-round-start-refused.md) | sol | high | — | resolved |
 | 66 | [Windows S5/short re-listed under ticket 30 with a bounded unstable growth band](66-windows-s5-short-unstable-growth-band.md) | glm | low | — | ready-for-agent |
-| 67 | [A plain expected-RED listing of a single-run key accepts any RED](67-plain-listing-hides-other-reds.md) | sol | medium | — | ready-for-agent |
+| 67 | [A plain expected-RED listing of a single-run key accepts any RED](67-plain-listing-hides-other-reds.md) | sol | medium | — | resolved |
 | 68 | [Every writer of proxy/config.yaml and harness configs keeps the file's line endings (CRLF audit)](68-crlf-config-writers-audit.md) | sol | medium | 42 | ready-for-agent |
 | 69 | [`ensureDeviceMidInConfig` reads past the end of an empty unquoted `deviceMid:` line](69-devicemid-reader-runs-past-line.md) | sol | high | 68 | ready-for-agent |
 | 70 | [Windows: "stop cleanly kills a verified-own process" finds the process still alive](70-windows-stop-verified-own-process-flake.md) | sol | high | — | ready-for-agent |
-| 71 | [Measurement rules for three rare tails: S7 retained heap, windows S1/short repetitions, the OMP no-op floor](71-measurement-rules-rare-tails.md) | sol | low | 67 | ready-for-agent |
+| 71 | [Measurement rules for four rare tails: S7 retained heap, windows S1/short repetitions, the OMP no-op floor, linux S6/short repetitions](71-measurement-rules-rare-tails.md) | sol | low | 67 | ready-for-agent |
 | 72 | [Memory-loop tests check a PID after the process died (Windows PID reuse)](72-memory-tests-pid-after-death.md) | sol | low | 70 | ready-for-agent |
 | 73 | [Memory loop: `whileFrozen` resume and `scanWindows` filter by PID only](73-freeze-and-scanwindows-pid-identity.md) | sol | medium | 72 | ready-for-agent |
 

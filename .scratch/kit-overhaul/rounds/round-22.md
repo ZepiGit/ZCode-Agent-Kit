@@ -1,0 +1,9 @@
+# Owner Proxy round 22 — linux S3/short `orphans` RED (unowned on linux)
+
+Answers file: `/home/AgentKit/overhaul-tools/rounds/round-22-answers.md` (write nothing inside the integration worktree).
+
+## Q1 — who owns linux S3/short `orphans`?
+
+Facts: staging/19's final pre-merge run 42457112513 (ticket 19 on 67's schema; ticket 19 changes the proxy's request admission only, not S3's scenario, the launcher, the manager or the lifecycle code): everything green except ubuntu memory-budget: `S3/short: RED on orphans, not owned by tickets 16, 37 (linux, Round 14 Q1, Round 15 Q1)`. The run's S3/short RED set: peak:kit 878.5/596, procPeak:launcher 80.9/74, procPeak:mcp-bridge 87.7/75, procPeak:preflight 76.1/76, orphans 1/0, exactly-one-proxy-after-round 1, failed-launches 9, stale-lock-after-round 1. Round 15 gave windows `orphans` on S3/short and S3/hung to 17 (16 is blocked by... the reap that only 17 delivers); linux `orphans` was 0 in the matching runs ticket 67 counted (linux S3/short list owns 16: failed-launches, stale-lock-after-round, exactly-one-proxy-after-round†; 37: peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:preflight†, procPeak:proxy†). Ticket 17's Acceptance (round 15/16 edits): windows S3 0 orphans; S4 count:proxy; "every child is reaped on stop/restart/crash/update" in its What-to-build.
+
+Recommendation: owner 17 on linux too, marked `flips` (1 of the runs on this tree; 0 of 10 on 13's tree), traced to 17's What-to-build reap line and a new acceptance line "Loop S3 (linux): 0 orphans (`orphans`) after the scenario's stop in S3/short and S3/hung" mirroring the windows one; add the name in a small list-only commit on ticket 19's branch (or a separate list ticket if you prefer), and the run does not count against 19 (19 does not touch the code that produces the orphan). Before 17 merges, the orchestrator records which process role each linux S3 orphan was.
