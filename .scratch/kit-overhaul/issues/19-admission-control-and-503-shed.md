@@ -15,7 +15,7 @@ ADR: 0004
 **Acceptance criteria:**
 
 - [ ] Loopback tests (seam 4): byte cap holds; queued bodies unread (server-side read counter); FIFO order; count bound and 15 s bound each shed with the right shape per endpoint; no 429 anywhere; 17+ concurrent streams not limited.
-- [ ] Loop S1 burst: HWM ≤ 400 MB at 16 and ≤ 600 MB at 32 × 10.8 MB bodies (≥ 30 % peak improvement); bigbody within budget. **Delete `S1/burst4`, `S1/burst16`, `S1/burst32`, `S1/bigbody` (linux, windows).**
+- [ ] Loop S1 (Round 18 Q1): `procPeak:proxy` improves by ≥ 30 % at S1/burst16 and S1/burst32 on each leg. Linux: the tip f906014 against this branch (burst16 912.9 → 488.6, 5-run median; burst32 1,272.4 → 549.7, 20-run median). Windows: the median of the ≥ 10 staging/19 CI runs (Round 18 Q2 condition 1) on the WS gate, against the median of ticket 67's matching windows runs on the pre-19 tree. S1/burst4 and S1/bigbody are recorded per leg. The byte cap's hard bound is proven by the seam-4 loopback tests above. 19's `procPeak:proxy` names in `S1/burst4`, `S1/burst16`, `S1/burst32` and `S1/bigbody` (both legs) move to ticket 20 in 19's commit (Round 18 Q1 and Q2). The budgets (≤ 250 / 400 / 600 / 250 MB) are ticket 20's criteria. If windows misses ≥ 30 % at burst16 or burst32, 19 comes back with the numbers.
 - [ ] Config key documented in `config.example.yaml`; invalid value rejected with what/why/next.
 - [ ] Adversarial (C2): with nothing else in flight, a single request at today's maximum body size (32 MB wire, `handler.ts:859`; 64 MB inflated, `handler.ts:894`) is admitted and served, never shed. The cap rule is 'admit when in-flight bytes + this request ≤ cap, or when in-flight bytes are 0'. The ticket states how a body without `Content-Length` is accounted, and tests that the cap holds for concurrent chunked bodies.
 
@@ -107,3 +107,46 @@ Other S1 runs on cfdcbb9 (`t19-final-meas`): S1/short GREEN (growth 2.46 %/1k, p
 - [ ] `test-kit` legs (ubuntu/windows × Node 24/26) green, including `tests/proxy-env.test.mjs`.
 
 **For later tickets:** 21 and 58 call `shedResponse(shape, { why, retryAfterSeconds, next })` and pick the shape per route as `server.ts` does. 39 reads `ProxyServer.admission()`. 20: the collection on release already removed most of the burst1 tail; measure your copy removals against this tree.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 18): Q1 replaces the Loop S1 burst criterion with the ≥ 30 % `procPeak:proxy` improvement at S1/burst16 and S1/burst32 on each leg; the four burst budgets and 19's `procPeak:proxy` names in `S1/burst4`, `S1/burst16`, `S1/burst32` and `S1/bigbody` (both legs) move to ticket 20 in 19's commit. Correction 1: the 64 MiB cap (67,108,864 B) admits 6 bodies of 10.8 MB, 64.8 MB in flight, not "5 bodies of 10.8 MB" (54 MB). Q2: `S1/burst32` stays listed on both legs under owner 20 on ticket 67's schema (ccd5d27's deletion is reverted, 19 is restaged on 67 after 67 merges); the `flips` marks for every S1 burst key and leg are set in 19's restaged commit from ≥ 10 valid CI runs of the full short profile on staging/19 (Q2 conditions 1–5; linux burst32 keeps a mark unless RED in every run). Merge check (Q1 condition 5): 19's evidence lists every name it owned with its status ("moved to 20, Round 18"); after the move 19 owns no S1 name unless Round 17 Q3 gives it one (Q2 condition 6).
+
+### 2026-11-08 — implementer, round 2 (Owner Proxy round 18)
+
+**Branch:** `ticket/19-admission-control`. Commits: `39a41ca` (revert of ccd5d27, the burst32 deletion), `aa1480d` (merge of the integration tip `c9c4062`, with ticket 67's schema), `5d4a9e8` (the four S1 `procPeak:proxy` names move from 19 to 20, both legs), `3cedb69` (`flips` marks and the windows burst32 deletion); the head SHA is the commit that adds this comment. Product code is unchanged since `cfdcbb9`.
+
+**Correction (round 18 correction 1):** the 64 MiB cap admits **6** bodies of 10.8 MB (64.8 MB), not 5 (54 MB) as my first report said.
+
+**Evidence runs:** 10 CI runs of the full short profile on staging/19 (empty commits on one tree; the S1 request path — `zcode-proxy-src/src/server/*`, both `handler.ts`, `config/loader.ts`, `s1-proxy-steady.mjs`, `verdict.mjs`, `budgets.mjs` — is byte-identical to this branch): 42446103818, 42446173104, 42446247315, 42446315329, 42446391907, 42446461464, 42446534840, 42446603243, 42446678546, 42446746036. The `memory-budget-<leg>` artefacts are in `/home/AgentKit/overhaul-tools/ci-art/t19r2/<run>-<leg>/`. They were replayed through ticket 67's final ratchet with the list at `3cedb69` (`t67-scripts/replay-artifacts.mjs`; output `/home/AgentKit/overhaul-tools/t19-memloop/replay-r2.txt`). There were no invalid runs and no harness failures, and every key was present.
+
+**Marks per key and leg (owner 20, `procPeak:proxy`; linux RSS, windows WS gate, MB)**
+
+| key | leg | RED / 10 | min – max (median) | result |
+|---|---|---|---|---|
+| S1/burst4 | linux | 10 | 285.1 – 400.3 (342.6) | owner 20, no mark |
+| S1/burst16 | linux | 10 | 462.5 – 520.8 (490.7) | owner 20, no mark |
+| S1/burst32 | linux | 1 (612.2 in 42446103818) | 489.6 – 612.2 (525.4) | owner 20, `flips` (also condition 3) |
+| S1/bigbody | linux | 10 | 257.3 – 283.6 (266.6) | owner 20, no mark |
+| S1/burst4 | windows | 10 | 253.2 – 357.6 (319.9) | owner 20, no mark |
+| S1/burst16 | windows | 1 (418.4 in 42446678546) | 314.5 – 418.4 (359.9) | owner 20, `flips` |
+| S1/burst32 | windows | 0 | 358.0 – 437.8 (392.5; commit 504.6 – 594.6) | **entry deleted** (GREEN 10/10) |
+| S1/bigbody | windows | 10 | 256.2 – 296.0 (291.3) | owner 20, no mark |
+
+This matches round 18 Q2 condition 5's expected default on linux. Other S1 keys: linux S1/short and S1/stalled were GREEN 10/10. Windows S1/stalled (61) was RED 10/10. S1/burst1 was GREEN on both legs in every run: linux medians 191.6–200.7 MB, windows WS medians 180.8–191.2, none over the 400 MB ceiling. That is inside windows' `unstable` bounds, and the replay accepts it.
+
+**Merge check (round 18 Q1 condition 5):** 19 owned `procPeak:proxy` in `S1/burst4`, `S1/burst16`, `S1/burst32` and `S1/bigbody` on linux and windows. All of them moved to 20 (Round 18), except windows `S1/burst32`, which was deleted (GREEN 10/10). 19 now owns no S1 name.
+
+**≥ 30 % criterion, windows (round 18 Q1 condition 2, WS gate):** compared with ticket 67's 34 matching windows runs on the pre-19 tree (the 26 Round-2 runs from their job logs, plus the 13-tree artefact runs in `ci-art/t67-r3-art`):
+- burst16: 798.0 → 359.9 (−54.9 %);
+- burst32: 1,367.0 → 392.5 (−71.3 %).
+
+The 13-tree artefacts alone give 802.3 → −55.1 % and 1,397.3 → −71.9 %. Recorded: burst4 409.1 → 319.9 (−21.8 %), bigbody 325.8 → 291.3 (−10.6 %). Linux CI, against 67's 10 linux 13-tree runs: burst16 877.4 → 490.7 (−44.1 %), burst32 1,425.7 → 525.4 (−63.1 %), burst4 464.3 → 342.6, bigbody 380.5 → 266.6. The linux criterion (local) stays as recorded above: burst16 −46.5 %, burst32 −56.8 %. ✓ on both legs.
+
+**Comes back with run ids (no edit made):**
+- linux `S6/short` RED on `tui:adversarial-line-heap` 20 MB (budget 16) in **42446461464**; 8 MB in the other 9 runs. It is not owned, and not one of round 17's four signatures. It is a non-S1 key, so it does not invalidate that run's S1 count (its summary table printed).
+- Logged and excluded under the round 17 interim rule: windows `S1/short` `growth:proxy` 5.01 %/1k, commit only, in **42446534840** (signature ii).
+
+**Full suites after the merge** (Bun 1.4.2, Node 26.7.0):
+- `npm run test` (`t19r2-full-kit2`): 837 tests, 818 pass, 0 fail, 19 skipped. The first attempt (`t19r2-full-kit`) was SIGTERMed from outside after 4.6 s (rc 143, 36 cancelled, no test failures), so I reran it.
+- `npm run test:proxy` (`t19r2-full-proxy`): 1410 pass, 0 fail, 93 files. Typecheck passes.
+- `npm run test:mcp` (`t19r2-full-mcp`): 97 tests, 96 pass, 0 fail, 1 skipped.
+- The memory tests on the new list (`t19r2-memtests`, after `5d4a9e8`): 185 tests, 180 pass, 0 fail. They are in the kit suite above as well.

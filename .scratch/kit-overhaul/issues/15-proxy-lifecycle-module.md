@@ -35,3 +35,5 @@ Spec stories: 61
 ## Comments
 
 - 2026-11-08 (orchestrator, Owner Proxy round 15): the "S3 starter-preflight role peak ≤ 76 MB (loop)" criterion binds 15 on its own evidence, while ticket 37 holds the `procPeak:preflight` names in `expected-red.json` (Q1 condition 2, several claimants: 37 is the descendant). 15 removes no names; if 15 lands with the preflight peak still RED, it comes back with the numbers (Round 15 Shared understanding).
+
+- 2026-11-08 (orchestrator, from ticket 70): the kit's own exit poll after a kill also checks by PID. If Windows reuses the PID before the first 300 ms poll, stop refuses to touch the new process (safe) but reports code 2 although the proxy died. Fix in the lifecycle stop path by waiting on the kill script's own process handle (or identity by PID + start time), keeping C6. Not seen in CI yet.

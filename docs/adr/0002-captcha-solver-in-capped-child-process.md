@@ -52,3 +52,4 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 - The 90 s per-solve deadline still starts at dispatch. The cold-start cost (spawn + cap handshake + module load) is measured on Linux and Windows and recorded in METRICS; above 4.5 s (5 % of the deadline) it returns as a finding. The deadline is not moved.
 - An idle exit releases the cap container (closes the Job Object, ends the scope) and leaves 0 solver processes. The S4/S2 orphan checks assert it.
 - The solver process's environment excludes `ZCODE_KIT_RESPAWN_*` and `ZCODE_KIT_STOP_TOKEN` (Round 3, Q3; [ADR-0014](0014-graceful-stop-request-over-loopback.md)).
+- Round 19: the solver process's environment also excludes the ambient proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case, and the npm/yarn/pnpm proxy variables); `ZCODE_PROXY_UPSTREAM_PROXY` passes.

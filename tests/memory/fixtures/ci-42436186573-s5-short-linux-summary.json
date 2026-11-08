@@ -1,0 +1,167 @@
+{
+  "id": "S5-short-2026-11-08T0218-c1db79",
+  "key": "S5/short",
+  "scenario": "S5",
+  "profile": "short",
+  "variant": null,
+  "platform": "linux",
+  "node": "v26.13.0",
+  "outcome": "GREEN",
+  "metric": "rss",
+  "durationS": 714,
+  "red": false,
+  "checks": [
+    {
+      "name": "growth:mcp-bridge",
+      "red": false,
+      "value": 39.53,
+      "budget": 5,
+      "unit": "%/1k",
+      "trend": false,
+      "detail": {
+        "samples": 702,
+        "warmupSamples": 175,
+        "meanMB": 95.3,
+        "firstPostMB": 87.8,
+        "lastMB": 94.8,
+        "slopeMBPer1k": 37.65,
+        "growthPctPer1k": 39.53,
+        "slopeMBPerMin": 1.29,
+        "windowMediansMB": [
+          88.7,
+          91.9,
+          95.6,
+          96.5,
+          97.3,
+          97.3
+        ],
+        "risingWindows": 0,
+        "netRisePct": 9.7,
+        "heapSlopeMBPer1k": null,
+        "axis": "progress"
+      }
+    },
+    {
+      "name": "procPeak:mcp-bridge",
+      "red": false,
+      "value": 102.6,
+      "budget": 150,
+      "unit": "MB"
+    },
+    {
+      "name": "orphans",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "procs",
+      "detail": []
+    },
+    {
+      "name": "bridge:reboot-cost-of-history",
+      "red": false,
+      "value": 3,
+      "budget": 20,
+      "unit": "MB"
+    },
+    {
+      "name": "bridge:task-failures",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "tasks"
+    }
+  ],
+  "summary": {
+    "*": {
+      "peakMB": 158.9,
+      "peakProcMB": 102.6,
+      "peakHwmMB": 102.6,
+      "maxCount": 2,
+      "maxFds": 49,
+      "maxThreads": 18,
+      "distinctPids": 3,
+      "peakHeapMB": null
+    },
+    "kit": {
+      "peakMB": 102.6,
+      "peakProcMB": 102.6,
+      "peakHwmMB": 102.6,
+      "maxCount": 1,
+      "maxFds": 26,
+      "maxThreads": 11,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    },
+    "mcp-bridge": {
+      "peakMB": 102.6,
+      "peakProcMB": 102.6,
+      "peakHwmMB": 102.6,
+      "maxCount": 1,
+      "maxFds": 26,
+      "maxThreads": 11,
+      "distinctPids": 2,
+      "peakHeapMB": null
+    },
+    "fake-harness": {
+      "peakMB": 56.7,
+      "peakProcMB": 56.7,
+      "peakHwmMB": 56.7,
+      "maxCount": 1,
+      "maxFds": 23,
+      "maxThreads": 7,
+      "distinctPids": 1,
+      "peakHeapMB": null
+    }
+  },
+  "budgets": {
+    "growth": {
+      "role": "mcp-bridge",
+      "axis": "progress",
+      "maxPctPer1k": 5,
+      "risingWindows": 3,
+      "netRisePct": 10,
+      "warmupFraction": 0.25,
+      "fromT": 3328,
+      "untilT": 705834
+    },
+    "procPeaks": {
+      "mcp-bridge": 150
+    },
+    "orphans": 0,
+    "extra": [
+      {
+        "name": "bridge:reboot-cost-of-history",
+        "red": false,
+        "value": 3,
+        "budget": 20,
+        "unit": "MB"
+      },
+      {
+        "name": "bridge:task-failures",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "tasks"
+      }
+    ]
+  },
+  "orphans": [],
+  "observations": [],
+  "notes": {
+    "sampler": {
+      "units": null,
+      "overhead": null
+    },
+    "bridge": {
+      "tasks": 400,
+      "failures": 0,
+      "emptyRssMB": 87,
+      "afterTasksRssMB": 95,
+      "rebootWithHistoryRssMB": 90,
+      "dataDirMB": 1.9,
+      "dataDirFiles": 1200
+    }
+  },
+  "samples": 713,
+  "csv": "/home/runner/work/_temp/memloop/S5-short/S5-short-2026-11-08T0218-c1db79/samples.csv"
+}
