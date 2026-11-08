@@ -358,3 +358,13 @@ The head is the commit that adds this report.
 **Left for other tickets**
 - **77:** the stop path's millisecond kill guard is untouched. The resume path compares start times with `sameStart`, from CIM `CreationDate` against `Get-Process` `StartTime`, which come from the same FILETIME.
 - **17:** removes its windows S3 `orphans` names once they are GREEN on this tree.
+
+**Addendum, the same day: two more tip merges**
+- `3395c0c` merges the tip 9256a33 (tickets 20, 21 and 76). The only conflict was METRICS.md, where both sides added a section at the same place; I kept both, ticket 20's first. `expected-red.json` merged on its own; 16's S3 entries are unchanged.
+- `de4dec2` merges the tip f56c46d (round 29). It touches only `.scratch`, so no code changes after 3395c0c.
+- Suites on 3395c0c:
+  - `npm run test` (`t16-r2-merged9256-test`): 929 tests, 911 pass, 0 fail, 18 skipped.
+  - `test:proxy` (`t16-r2-merged9256-proxy`, with 76's egress guard): 1596 pass, 0 fail, 107 files. Typecheck clean.
+  - `test:mcp`: 100 tests, 99 pass, 0 fail, 1 skipped. `dist/` unchanged.
+- Linux S3 loop on 3395c0c (`r2-merged9256-1–3`, logs `t16-r2-merged9256-mem1–3`): in 3 of 3 runs, S3/short and S3/hung have `failed-launches` 0, `stale-lock-after-round` 0 and `exactly-one-proxy-after-round` 0. Every kill-holder round has 1 `killedByAdversary` and 1 launch on the killed pid (145–220 ms), so the gate never fires. REDs are 37's only, and the ratchet holds 3/3. Over the whole of round 2, that makes 14 of 14 kill-holder rounds clean.
+- **Ticket 18 (orchestrator note):** it is not on the tip at de4dec2, so nothing changes here. If 18 merges before 16, the merge into this branch must keep 18's `stopToken` and the 0600 mode wherever 16 rewrites `proxy.pid`. That means `writePidJson` (temp + rename, already `mode: 0o600` on the temp file and the fallback), `writePidFile`, and `completeRecord`, which must copy the token from the existing record for the same pid. The merge also needs a test that `completeRecord` keeps the token and the mode, and must never print the token (B2).
