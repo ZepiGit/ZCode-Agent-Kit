@@ -36,3 +36,253 @@ Spec stories: 26, 27, 28, 52
 
 - 2026-11-08 (orchestrator, Owner Proxy round 18): Q3 condition 3 — ADR-0008's "designed maximum of about 450 MB … 64 MB × ~4.5" is out of date: the measured linux maximum under the cap is 608.5 MB (RSS, S1/burst32, ticket 19's tree), so the 512 MB soft limit (WARN only) can fire under legitimate cap-saturating load; the 1024 MB hard limit keeps more than 400 MB of margin on linux; the windows footprint is EVIDENCE MISSING. The thresholds do not change. This ticket's evidence records the proxy footprint the supervisor samples, per leg, for the S1 burst runs on its tree. If that footprint can hold at or above 1024 MB for 3 samples, this ticket comes back with numbers before it merges (C1: no restart storms).
 - 2026-11-08 (orchestrator, Owner Proxy round 25): pre-merge run 42480631098: the windows memory failure (S5/short 30.23 %/1k above the 30 bound) is signature (vi) and not charged to 21 (diff touches no bridge, S5 or measurement code). The run is still a failed pre-merge run: windows test-kit Node 26 fails login-store.test.ts:181 ("kit setup, enable/disable … through the real wrapper", 5 s timeout, accounts enable status null), unexcused and charged to 21 under the normal rules; seen in no other failed test-kit job of runs 42446391907–42484868282.
+
+
+### 2026-11-08 — implementer
+
+**Branch:** `ticket/21-health-supervisor` (worktree `/home/AgentKit/wt/t21`). Commits: `9961d3b` (implementation), `15adb27` (test fix-forward after the mutation run). The integration tip `e88821f` was merged before the final suites ("Already up to date"). Ticket 15 had not landed (it is on `staging/15` only), so nothing was merged from it. The head SHA is the commit that adds this comment.
+
+**What landed**
+- `zcode-proxy-src/src/runtime/supervisor.ts`, the health supervisor (ADR-0008). It owns:
+  - the heartbeat watcher (`installWatchdog`, unchanged: `watchdogStep` is still its pure core and the SAB heartbeat is kept) and the event-loop lag monitor;
+  - memory sampling: `memoryFootprint()` = `Bun.unsafe.memoryFootprint()` (Pss on Linux, PrivateUsage on Windows), falling back to RSS where it is missing;
+  - the thresholds: soft 512 / hard 1024 MB, each held for 3 samples taken 15 s apart on the injected clock (`DEFAULT_MEMORY_THRESHOLDS`, in the leaf module `memory-thresholds.ts`). The soft limit only writes one WARN event line per episode and never recycles the solver; an INFO line follows when the footprint is back under it. The hard limit requests a respawn through the handoff point `RespawnHandoff`, which today is the manager hook's spawn confirmation (`managerRespawnHandoff`). Only a confirmed request runs the graceful shutdown. Without a hook it writes one WARN per episode and keeps serving. A hook that does not start gives one ERROR and the proxy keeps serving, with no retry until the episode ends;
+  - `createGracefulShutdown`, the one shutdown sequence. It drains (the listener stays open), stops background work (claim scheduler, captcha runtime), gives accepted requests the drain window, then cuts at the force point and writes one event line: `INFO|WARN shutdown drain finished reason=… waitedMs=… cut=N shed=M`. After that come the bounded account-metadata flush, closing the listener and `exit(0)`, all under a hard deadline timer. A second trigger joins the running sequence;
+  - `handleShutdownSignals`: SIGINT and SIGTERM both run that sequence. SIGINT keeps its `\nShutting down...` line byte-identical.
+- `server.ts`: the drain gate.
+  - `ProxyServer` gains `beginDrain`, `draining`, `inFlight`, `whenIdle`, `cutInFlight` and `drainShed`.
+  - While draining, every route after the Host/Origin/bearer checks is shed with 19's `shedResponse` (503 + `Retry-After`, in the endpoint's shape), except `/health` and `/`. A request still waiting for admission when the drain starts leaves the queue and is shed at once.
+  - In-flight means a response that is not finished yet.
+- `index.ts` (serve):
+  - `MemoryGuard` and both lifecycle closures (the memory-restart closure and `stop`) are gone; serve builds the shutdown and the supervisor and wires them;
+  - the signal handlers are now installed before the `listening on` line. The spawned test found that a SIGINT sent right after that line killed the proxy outright. The tip has the same race.
+- `health-monitor.ts`: `MemoryGuard` removed. `requestCaptchaRecycle` is kept for 58 (now unused).
+- Config: `health.memory.{softLimitMB, hardLimitMB, samples, sampleIntervalSeconds}`.
+  - Every key is optional. A key left out keeps its default.
+  - Ranges: 64–65536 MB for both limits, `samples` 1–20, `sampleIntervalSeconds` 1–600. The hard limit must be above the soft limit, defaults included.
+  - Invalid values stop the load with what/why/next.
+  - No env override, so no `proxyEnv` entry (ADR-0008 cond 6).
+  - Documented, commented out, in `proxy/config.example.yaml`, `zcode-proxy-src/config.example.yaml` and the vendored `template.ts`.
+- New event lines (ticket 14 format), component `supervisor`: `memory above the soft limit`, `memory back under the soft limit`, `memory above the hard limit` (`action=respawn-request`), `memory above the hard limit; no manager hook, keeps serving`, `respawn hook did not start; keeps serving`. Component `shutdown`: `started`, `drain finished`, `deadline reached; exiting`.
+
+**Timings (decision; spec/ADRs fix only the ≤ 10 s respawn cap and leave the signal deadline to ticket 22)**
+- Memory respawn: drain 6 s, deadline 10 s, the same as before.
+- Signal: drain 1 s, deadline 4.5 s (drain + 3 s flush + close). This keeps it inside the manager's current 5 s SIGTERM → SIGKILL grace until ticket 22 introduces `STOP_GRACE_MS` and the shared margin.
+- Drain `Retry-After` = the seconds left until the force point + 2.
+- C2: a `stop` with requests in flight now waits up to 1 s for them before the flush; an idle stop exits at once (S4: 95 shutdowns, all `waitedMs` ≤ 2 when idle).
+
+**Tests**
+- `src/runtime/supervisor.test.ts` (8, injected sampler and clock):
+  - soft held 3× gives one WARN in the event-line format, with no respawn and 0 solver recycles (a spy registered as the captcha runtime);
+  - hard held 3× at 15/30/45 s gives exactly one request at 45 000 ms, then the graceful shutdown;
+  - thresholds, sample count and interval come from config;
+  - no hook: one WARN per episode, sampling continues, never a shutdown;
+  - hook not started: ERROR, keeps serving, no retry within the episode;
+  - adversarial: hard, hard, below-hard repeated 5× never requests a respawn;
+  - adversarial: 0 samples at 14 999 ms, the 3rd sample (and the request) only at 45 000 ms;
+  - `memoryFootprint` reads the footprint and falls back to RSS.
+- `src/server/drain.test.ts` (5, seam 4, in-process proxy on an ephemeral loopback port, injected upstream):
+  - during the drain the anthropic, openai and GET `/v1/models` requests get 503 + `Retry-After` in their shapes, never 429; `/health` answers 200 and an unauthenticated call is still 401; the accepted request completes with 200; the order is background → flush → exit; one `drain finished … cut=0 shed=3` line;
+  - two open SSE streams are cut at the 300 ms force point, with one `WARN … cut=2` line;
+  - adversarial: a request queued in admission at drain start is shed at once and never reaches upstream;
+  - adversarial: a second trigger joins (one `started`, one `drain finished`, one exit);
+  - adversarial: a flush that never returns still exits at the 600 ms deadline, exactly once.
+- `src/runtime/supervisor-serve.test.ts` (2, POSIX; the real `serve` entry spawned against a loopback mock, with `--preload src/runtime/__fixtures__/egress-guard.ts` refusing and reporting any non-loopback fetch, asserted absent):
+  - SIGTERM with a request in flight: a new request gets 503, the held request completes with 200, exit 0 in < 5 s;
+  - SIGINT idle: the `Shutting down...` line, exit 0 in < 2.5 s.
+- `src/config/loader.test.ts`: +11 (optional, values, partial block, 7 invalid values, hard ≤ soft).
+- Pre-existing test change: the `MemoryGuard` describe in `src/runtime/health-monitor.test.ts` (4 tests) is deleted. It pinned what this ticket removes: a solver recycle on the soft limit, 1536/3072 MB RSS and the `[memory] …` lines. Its no-hook and failed-hook cases are covered by the new supervisor tests. No other existing test changed.
+- Wiring: `bun test` discovers every `*.test.ts` under `zcode-proxy-src` (proxy 93 → 96 files). The fixture sits under `__fixtures__/`, which the payload excludes (`pack/build.mjs`).
+
+**RED → GREEN** (logs in the integration worktree's `reports/`)
+- `t21-red1` (supervisor module missing) → `t21-green1` 8/8.
+- `t21-red2` (loader, 11 fail) → `t21-green2` 56/56.
+- `t21-red3` (`createGracefulShutdown` missing) → `t21-green3c` 13/13.
+- Behavioural RED on the tip: the spawned serve test copied into a detached `e88821f` worktree (`/home/AgentKit/overhaul-tools/t21-tip`, files removed after; status clean), `t21-red-tip-serve`, failed 2/2. With SIGTERM the in-flight request got `ECONNRESET`; with SIGINT there was no drain. The egress guard was preloaded: no RED run could reach a real host, and none tried (no `EGRESS-BLOCKED` line).
+- GREEN on the branch: `t21-green4b-{1,2,3}` 2/2 three times.
+- Mutation run (`t21-mutants`, `/home/AgentKit/overhaul-tools/t21-scripts/mutants.py`, on the committed `9961d3b`; each mutant restored with `git checkout 9961d3b -- <file>`, `git status` clean after). 17 of 18 killed:
+  - M1 soft recycles the solver;
+  - M2 hard after samples − 1;
+  - M3 the hard streak survives a below-hard sample;
+  - M4 the interval ignores config;
+  - M5 no hook still shuts down;
+  - M6 soft WARN after 1 sample;
+  - M7 a refused hook is retried within the episode;
+  - M8 always RSS;
+  - M9 the drain closes the listener;
+  - M11 queued requests are not shed at the drain;
+  - M12 no drain window;
+  - M13 the cut is not counted;
+  - M14 no deadline;
+  - M15 a second trigger starts a second sequence;
+  - M16 flush before the drain;
+  - M17 signals wired to the old `server.stop(true)`;
+  - M18 the drain sheds `/health` too.
+- **M10 (no route-level drain check) survived.** Body routes are already shed through the admission path. `15adb27` adds a GET `/v1/models` shed assertion; after it M10 is killed (`t21-mutants-m10`, restored from `15adb27`).
+
+**Full suites after the merge** (Bun 1.4.2, Node 26.7.0)
+- `npm run test` (`t21-full-kit`): 837 tests, 818 pass, 0 fail, 19 skipped.
+- `npm run test:proxy` (`t21-full-proxy`): 1435 pass, 0 fail, 96 files (1413 + 26 new − 4 removed). `npm run test:proxy-typecheck`: clean.
+- `npm run test:mcp` (`t21-full-mcp`): 97 tests, 96 pass, 0 fail, 1 skipped; `dist/` unchanged.
+
+**Memory loop, linux, short profile** (`node tests/memory/job.mjs --only S1/burst1,S1/burst4,S1/burst16,S1/burst32,S1/bigbody,S4/short --cap systemd`, port 19210/19213; before = detached tip `e88821f`, after = detached `9961d3b`; run dirs `/home/AgentKit/overhaul-tools/t21-memloop/{before,after}/`). In both runs the ratchet holds.
+
+| run | before | after | budget | note |
+|---|---|---|---|---|
+| S1/burst1 (median of 7) | 187.7 | 186.8 | 250 | GREEN both |
+| S1/burst4 | 357.5 | 324.3 | 250 | RED both (owner 20) |
+| S1/burst16 | 478.0 | 494.0 | 400 | RED both (owner 20) |
+| S1/burst32 | 542.3 | 515.1 | 600 | GREEN both (listed, `flips`, owner 20) |
+| S1/bigbody | 340.6 | 366.4 | 250 | RED both (owner 20) |
+
+The single-run differences are inside the run-to-run spread ticket 19 measured (burst16 428–525, bigbody 330–375): 21 does not touch the request-body path.
+
+S4/short, before → after:
+- `stale-lock-after-ctrl-c` 5/8 → 5/8 and `respawn-recovers-despite-stale-lock` 0 → 0, RED both (owner 17);
+- `unstoppable-proxy-after-ctrl-c` 1/8 → 0/8. It is listed with `flips` for 17 on linux, so this is not claimed;
+- unchanged: `count:proxy` 1, orphans 0, `proxy-left-after-stop` 0, failed steps 0, respawns 3/15 min (no storm), 1 log file.
+
+In the after runs `proxy.log` shows 95 `shutdown started reason=signal`, every `drain finished` with `cut=0`, and no `supervisor` line (no S1 run lasts 30 s).
+
+**Round 18: the proxy footprint the supervisor samples, per leg, S1 burst runs**
+- hold3 = the highest level held by 3 samples 15 s apart at any phase: max over t of min(f(t), f(t+15 s), f(t+30 s)), from the loop's 1 s samples.
+- Peak bound = VmHWM on linux and PeakPageFileUsage (the commit high-water mark) on windows. It bounds the footprint at every instant, between samples too. On linux the footprint (Pss) ≤ RSS ≤ VmHWM.
+- Linux "this tree" additionally has Pss itself, sampled every 1 s by `/home/AgentKit/overhaul-tools/t21-scripts/pss-poll.mjs` from `smaps_rollup`, which is the source `memoryFootprint()` reads.
+- Windows: the commit charge is the footprint itself. This tree has no windows run yet (pending CI). The 10 staging/19 CI runs (ticket 19's evidence, artefacts `/home/AgentKit/overhaul-tools/ci-art/t19r2/`) have a byte-identical request path; 21 adds only the drain, which does not run during a burst.
+- Script: `/home/AgentKit/overhaul-tools/t21-scripts/footprint-hold.mjs`.
+
+| leg | key | source (runs) | max footprint sampled | max hold3 | max peak bound | holds ≥ 1024 × 3? |
+|---|---|---|---|---|---|---|
+| linux | S1/burst1 | this tree (7) | Pss 177.8 | n/a (run 16 s) | 189.3 | no |
+| linux | S1/burst4 | this tree (1) | Pss 195.2 | n/a (20 s) | 324.3 | no |
+| linux | S1/burst16 | this tree (1) | Pss 360.0 | n/a (23 s) | 494.0 | no |
+| linux | S1/burst32 | this tree (1) | Pss 361.4 | n/a (30 s) | 515.1 | no |
+| linux | S1/bigbody | this tree (1) | Pss 296.9 | Pss 121.7 | 366.4 | no |
+| linux | S1/burst32 | staging/19 CI (10) | RSS 506.4 | n/a | 612.2 | no |
+| linux | S1/burst16 | staging/19 CI (10) | RSS 442.3 | n/a | 520.8 | no |
+| linux | S1/bigbody | staging/19 CI (10) | RSS 238.5 | RSS 219.0 | 283.6 | no |
+| windows | S1/burst1 | staging/19 CI (70) | commit 335.9 | n/a | 347.0 | no |
+| windows | S1/burst4 | staging/19 CI (10) | commit 424.3 | n/a | 517.0 | no |
+| windows | S1/burst16 | staging/19 CI (10) | commit 465.5 | n/a | 570.1 | no |
+| windows | S1/burst32 | staging/19 CI (10) | commit 535.7 | n/a | 594.6 | no |
+| windows | S1/bigbody | staging/19 CI (10) | commit 424.8 | commit 255.9 | 445.1 | no |
+
+The footprint cannot hold at or above 1024 MB for 3 samples on either leg:
+- the any-instant maximum is 612.2 MB (linux RSS) and 594.6 MB (windows commit), more than 400 MB under the hard limit;
+- the burst runs end before a third sample 30 s after the first could fall.
+
+So 21 does not come back on the hard limit. The soft limit: windows commit peaks above 512 in burst16/burst32 (570.1/594.6), and Pss stays under 512 on linux in this tree. Only a cap-saturating load held for 30 s would WARN, which matches Round 18's expectation. **Windows on this tree: pending CI** (the same script over the `memory-budget-windows` artefacts).
+
+**Release-notes item for 54 (proposed sentence):** "Proxy memory health: the health supervisor now samples the proxy's memory footprint (commit charge on Windows, Pss on Linux) instead of RSS, with thresholds 1536/3072 MB → 512/1024 MB, each held for 3 samples 15 s apart (config `health.memory.*`). The soft limit only logs a WARN; it no longer recycles the captcha solver. The hard limit asks the kit manager for a respawn (budget unchanged, 3 per 15 min). During the drain before a respawn or stop the proxy keeps its port open, answers new requests with 503 + Retry-After and lets running requests finish; responses still open at the force point are cut and counted in the log."
+
+**Decisions taken (spec/ADRs silent)**
+1. The soft limit is also held for `samples` samples (ADR-0008: "each held for 3 samples"). It WARNs once per episode; an episode ends with a sample at or under the soft limit.
+2. A no-hook or refused respawn is not retried within the episode (today's rule). Ticket 23 replaces this with one hook per budget window.
+3. The handoff point is today's confirmation (the hook process started). 23 swaps `RespawnHandoff.request` for the acknowledgement wait without touching the supervisor's policy.
+4. The signal timings are as above (1 s / 4.5 s); ticket 22 moves them to `STOP_GRACE_MS` and the shared module.
+5. `/health` keeps answering during the drain (hung-proxy detection); every other route is shed after authentication. Drain sheds are counted in the `drain finished` line (`shed=`), not in admission's `shedTotal`, and get no per-request line.
+6. Config path `health.memory`, interval in seconds, ranges as listed, no env override.
+7. TUI and Android entries are unchanged: the TUI has no supervisor and keeps its own quit. "No hook → log and keep serving" is what any proxy without the manager's hook env does.
+
+**Left for other tickets:**
+- 22: `shutdown.run("stop")` from `/__kit/stop` with the shared deadlines.
+- 23: the acknowledgement in `RespawnHandoff`, and one hook per window.
+- 39: `/health` `memory[]` can read `supervisor.memory()` (last sample, cached) and `ProxyServer.draining()`.
+- 58: `requestCaptchaRecycle` is still there for footprint-based solver recycling.
+
+**Pending CI (orchestrator verifies after merge+push)**
+- [ ] ubuntu `memory-budget`: ratchet holds (S1 bursts as listed for 20, S4/short as listed for 17).
+- [ ] windows `memory-budget`: ratchet holds. Run `footprint-hold.mjs` over the leg's artefacts to fill this tree's windows rows; expected under 1024 as on staging/19.
+- [ ] `test-kit` and the proxy legs green on ubuntu/windows × Node 24/26. `supervisor-serve.test.ts` skips on windows; `drain.test.ts` and `supervisor.test.ts` run there.
+
+**Addendum (same day): ticket 15 landed during the work.**
+- The integration tip moved to `a3959cc` (ticket 15, the proxy lifecycle module). I merged it into this branch (`47e599a`, clean, no conflicts). The lifecycle keeps the 5 s SIGTERM → SIGKILL escalation (`lib/proxy-lifecycle.mjs` `killOwned`), so the 4.5 s signal deadline still fits.
+- Suites on `47e599a`:
+  - `npm run test` (`t21-full2-kit`): 852 tests, 833 pass, 0 fail, 19 skipped;
+  - `npm run test:proxy` (`t21-full2-proxy`): 1435 pass, 0 fail, 96 files; typecheck clean;
+  - `npm run test:mcp` (`t21-full2-mcp`): 96/97, 1 skipped, 0 fail; `dist/` unchanged.
+- Memory loop on `47e599a` (`--only S1/burst32,S4/short`, port 19214, `/home/AgentKit/overhaul-tools/t21-memloop/after-merge/`): the ratchet holds.
+  - S1/burst32: 622.3 MB, RED; it is listed with `flips` for 20. Footprint: Pss peak 559.8, VmHWM 622.3, hold3 n/a (30 s run). Under 1024 by 400 MB; this is the highest linux bound seen in this ticket.
+  - S4/short: identical to the tip except `unstoppable-proxy-after-ctrl-c` 1/8. It was 0/8 in the earlier after-run and 1/8 on the tip, which confirms it flips and is not attributable to 21.
+  - 85 graceful shutdowns, all `cut=0`; no supervisor line.
+- Then ticket 24 landed as well (tip `16bfaa2`). I merged it (`c4aa995`, clean). Suites on `c4aa995`:
+  - kit (`t21-full3-kit`): 833/852, 19 skipped, 0 fail;
+  - proxy (`t21-full3-proxy`): 1442 pass, 0 fail, 97 files; typecheck clean;
+  - mcp (`t21-full3-mcp`): 96/97, 1 skipped, 0 fail.
+- 24 touches only the captcha solver dispatcher. 21 does not call the solver: the soft limit never recycles it, and shutdown uses the existing `shutdownCaptchaRuntime`. The memory-loop numbers above stand.
+
+### 2026-11-08 — implementer, round 2 (pre-merge run 42480631098, Owner Proxy rounds 25/26)
+
+**Branch:** `ticket/21-health-supervisor`. Merged the integration tip `f79da34` (tickets 15, 24, 25, 36, 71) as `1e0e45b`, with no conflicts. Product code is unchanged since `9961d3b`; the head SHA is the commit that adds this comment.
+
+**The charged failure:** windows test-kit Node 26, `login-store.test.ts:181`, "kit setup, enable/disable … through the real wrapper", 5372 ms, Bun's 5 s default timeout, `accounts enable` status null. Job 128731568530; log at `/home/AgentKit/overhaul-tools/t21r2/win26.log`.
+
+**Root cause: not found in 21's diff, and the evidence shows 21's code does not run in that test.** No product or test change was made: there is nothing in 21 to fix, and raising the timeout is not justified, because no inherent new duration exists.
+
+1. **What the test executes.** I ran the test under `strace -f -e execve,openat` on this branch (linux; `/home/AgentKit/overhaul-tools/t21r2/strace.txt`). The complete process tree is:
+   - `node cli/zcode-kit.mjs` for setup, `accounts enable/disable` and `auth login`;
+   - `bun run src/index.ts auth …` subcommands (`auth accounts import-current`, `auth login`).
+   There is no `serve`, no manager, no proxy start and no signal anywhere, so the drain, the signal handlers (and their move before the listening line) and the supervisor start never run. 21's only contact is that each `bun src/index.ts` process loads two more small modules (`runtime/supervisor.ts`, `runtime/memory-thresholds.ts`), which define functions and constants and run no code at load time.
+2. **The extra module load costs nothing measurable.** `bun src/index.ts --cli version` over 25 runs: tip `16bfaa2` 80/78 ms median, this branch 77/78 ms (`t21r2-startup`).
+3. **Per call, the test is identical on both trees.** I timed each wrapper call (an instrumented copy of the test, removed afterwards, 3 runs per tree, `t21r2-probe-*`):
+   - tip: setup 161–179 ms, `accounts enable` 250–260 ms, whole test 1166–1191 ms;
+   - branch: setup 171 ms, `accounts enable` 262–266 ms, whole test 1186–1193 ms;
+   - the first branch run (419/365 ms, 1541 ms) paid the first transpile of the merged files.
+4. **The test runs before any of 21's tests in that process.** Bun ran the files in path order (`src\auth\login-store` before `src\config`, `src\runtime`, `src\server`), so no supervisor, drain or loader test had run in that process when it failed.
+5. **Windows CI history** (this test's duration, from the job logs; `/home/AgentKit/overhaul-tools/t21r2/j-*.log`):
+   - the same commit on windows Node 24 (job 128731568417): 1631.55 ms, pass;
+   - 24 windows jobs of runs 42448791937–42483787372: 1171–1722 ms, all pass;
+   - 6 later windows jobs without 21 (42493218404 integration 8126454, 42494299680 staging/29, 42495987510 staging/15b): 1109–1659 ms, all pass. That includes staging/29, whose proxy suite ran 117–127 s, so a slow runner alone did not produce it there.
+6. **The failing job itself.**
+   - The previous test passed at 12:33:14.557, and Bun's "killed 1 dangling process" came at 12:33:19.559, exactly at the 5 s budget. setup had returned 0 (line 176 passed), so the killed child was `node … accounts enable`. Normally setup + enable take ≈ 0.45 s.
+   - The same job was slow elsewhere too: proxy suite 64.09 s (the same commit on Node 24: 40.47 s; the other windows jobs 31–58 s); "15 consecutive CLI logins" 2528.79 ms and "corrupt pool …" 665.71 ms were the highest of all 25 windows jobs.
+
+**Conclusion:** one occurrence in one leg, in a test whose processes run none of 21's code, while the other leg passed on the same commit. A transient stall of that runner is the explanation the evidence supports. I cannot reproduce on windows (no windows host here; I cannot push). Round 26 asks for evidence that it also occurs without 21; I have none, because it has not recurred in any run, with or without 21. This needs the orchestrator's decision:
+- (a) re-run job 128731568530 of run 42480631098 on the same commit, or restage staging/21 on `1e0e45b`;
+- (b) for the next occurrence: the test gives each wrapper call 15 s (`spawnSync` timeout) but the whole test only Bun's default 5 s. That inconsistency is the test's, not 21's, and the only lever that would not touch 21's code.
+
+**Full suites on `1e0e45b`** (Bun 1.4.2, Node 26.7.0):
+- `npm run test` (`t21r2-full-kit`): 881 tests, 863 pass, 0 fail, 18 skipped;
+- `npm run test:proxy` (`t21r2-full-proxy`): 1473 pass, 0 fail, 101 files; `test:proxy-typecheck` clean;
+- `npm run test:mcp` (`t21r2-full-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped; `dist/` unchanged.
+
+The memory-loop and footprint evidence above stands: 21's product code is unchanged, and the merged tickets touch the solver, collections, MCP and measurement rules, none of 21's paths.
+- Ticket 72 landed while round 2 ran (tip `9e98295`). I merged it as `2414c44`; the one conflict was this file, and I kept both texts, the orchestrator's round 25 line before the implementer sections. Suites on the merged tree:
+  - kit (`t21r2-full2-kit`): 866/884, 18 skipped, 0 fail;
+  - proxy (`t21r2-full2-proxy`): 1473 pass, 0 fail, 101 files; typecheck clean;
+  - mcp (`t21r2-full2-mcp`): 99/100, 1 skipped, 0 fail.
+
+### 2026-11-08 — implementer, round 3 (restaged pre-merge run 42500996594, windows S1/short rep 2 `orphans 1`)
+
+**Branch:** `ticket/21-health-supervisor`. Merged the integration tip `f21d3ac` as `5412490`, with no conflicts. Product code is unchanged since `9961d3b`; the head SHA is the commit that adds this comment.
+
+**Verdict: the orphan is not caused by ticket 21's code. No product change.** The kit's windows kill refused to terminate the proxy. The refusal comes from a float-precision defect in the kit's PID-reuse guard (`lib/proxy-lifecycle.mjs`). That code is byte-identical on the tip and dates from September, and ticket 21's shutdown code never runs in this path.
+
+1. **What the run itself records** (`/home/AgentKit/overhaul-tools/ci-art/t21-r3/win/S1-short/rep-2/…/summary.json`, `notes`):
+   - `stop.code: 2`;
+   - `stop.output`: twice `refusing to signal pid 5132: process handle identity could not be confirmed`, then `ERROR killing pid 5132`.
+   
+   The stop did not wait too short for an exiting proxy. The manager never terminated it: both `TerminateProcess` attempts were refused, and the proxy was still idle and alive (WS ~96 MB, stable) when the orphan check ran 13 s later. In the 4 GREEN reps the same command printed `stopped (pid …)`.
+2. **How the kit stops the proxy on win32** (`stopVerified` → `killOwnedIn`):
+   - the ownership guard runs;
+   - then one PowerShell script opens a handle, compares `GetProcessTimes` creation with `FromUnixTimeMilliseconds(Math.trunc(expected))` (`exit 4` if `|Δ| > 1 ms`) and calls `TerminateProcess`;
+   - after `waitForExit(5000)` the same steps repeat.
+   
+   No signal and no HTTP stop request reaches the proxy before that, so `createGracefulShutdown`, the drain and the supervisor never run on this path. The target process cannot delay or block `TerminateProcess`, whatever its timers or handlers are.
+3. **The mechanism.** The guard's `expected` comes from `processStartMs`: `Number(<.NET Ticks string>) / 10000 - 62135596800000`. The ticks are ~6.39e17, above 2^53, so a JS Number holds them only to the nearest 128 ticks. The division adds more error, and `expected` ends up as much as ~8 µs below the true start. When the true start lies within those few µs above a millisecond boundary, `Math.trunc` drops a whole millisecond. The script then sees `Δ = 1.000x ms > 1` and refuses on every attempt for that process. A deterministic refusal on both attempts is exactly what the run shows. Worked example: ticks `639297530400030001` (true …240003.0001 ms) give `processStartMs` …240002.9922 and trunc …240002, so Δ = 10001 × 100 ns > 1 ms and `exit 4`. A simulation of the exact expressions over 2 M uniformly drawn start ticks: 571 refusals, about 1 in 3 500 processes, max Δ 10009 (`/home/AgentKit/overhaul-tools/t21-scripts/tick-trunc-sim.mjs`). The script's other failure branches do not depend on the target's code either: `OpenProcess`/`GetProcessTimes` on an own-user live process, an `Add-Type` compile failure, or the 15 s timeout (the script ran ~1–2 s: `csc.exe` visible at t=259.5 s, gone at 260.5 s).
+4. **The same window on the tip.**
+   - `git diff staging/21 overhaul/stability-terminal-ux -- lib/proxy-lifecycle.mjs lib/process.mjs proxy/zcode-proxy-manager.mjs tests/memory/` is empty;
+   - 21's diff against the tip touches only `zcode-proxy-src/` and the two `config.example.yaml` files;
+   - both expressions (`.Ticks` → Number, `Math.trunc(expected)` against a 1 ms tolerance) come from `35a9c4a`/`b20d4ca` (2026-09) and moved unchanged into the lifecycle module (`931a219`).
+   
+   So every windows S1 stop in the history ran this window: 764 of 765 stops in `/home/AgentKit/overhaul-tools/ci-art/` returned code 0. At about 1 in 3 500, P(at least one in 765) ≈ 20 %, so a single occurrence is in line with the rate. The rate on a given runner can be higher if process creation times are quantised to clock ticks.
+5. **No test added in this ticket.** The defect is not 21's: fixing it changes the kill guard (ticket 15's module), and a RED test for it here would fail the integration suite.
+   - Suggested owner/new ticket: carry the exact tick value end to end, either as a BigInt/string from `.Ticks` or `ToFileTimeUtc()`, into the PowerShell comparison (integer ticks, no truncation). Alternatively compare at a tolerance that covers the float error. The seam is `processStartMs`/`sameStart` plus the PS script; a linux-provable unit can pin the arithmetic.
+   - `sameStart` (tolerance 1 ms on win32) has the same float exposure, but both of its sides go through the same conversion, so it does not refuse here.
+
+**Full suites on `5412490`** (Bun 1.4.2, Node 26.7.0):
+- `npm run test` (`t21r3-full-kit`): 885 tests, 867 pass, 0 fail, 18 skipped;
+- `npm run test:proxy` (`t21r3-full-proxy`): 1473 pass, 0 fail, 101 files; `test:proxy-typecheck` clean;
+- `npm run test:mcp` (`t21r3-full-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped.
+
+**Pending CI (orchestrator):** the windows `memory-budget` S1/short ×5 on a restaged staging/21. The orphan is unowned by 21 and needs an owner decision (a re-run, or the new kill-guard ticket above).
