@@ -192,3 +192,14 @@ So 21 does not come back on the hard limit. The soft limit: windows commit peaks
 - [ ] ubuntu `memory-budget`: ratchet holds (S1 bursts as listed for 20, S4/short as listed for 17).
 - [ ] windows `memory-budget`: ratchet holds. Run `footprint-hold.mjs` over the leg's artefacts to fill this tree's windows rows; expected under 1024 as on staging/19.
 - [ ] `test-kit` and the proxy legs green on ubuntu/windows × Node 24/26. `supervisor-serve.test.ts` skips on windows; `drain.test.ts` and `supervisor.test.ts` run there.
+
+**Addendum (same day): ticket 15 landed during the work.**
+- The integration tip moved to `a3959cc` (ticket 15, the proxy lifecycle module). I merged it into this branch (`47e599a`, clean, no conflicts). The lifecycle keeps the 5 s SIGTERM → SIGKILL escalation (`lib/proxy-lifecycle.mjs` `killOwned`), so the 4.5 s signal deadline still fits.
+- Suites on `47e599a`:
+  - `npm run test` (`t21-full2-kit`): 852 tests, 833 pass, 0 fail, 19 skipped;
+  - `npm run test:proxy` (`t21-full2-proxy`): 1435 pass, 0 fail, 96 files; typecheck clean;
+  - `npm run test:mcp` (`t21-full2-mcp`): 96/97, 1 skipped, 0 fail; `dist/` unchanged.
+- Memory loop on `47e599a` (`--only S1/burst32,S4/short`, port 19214, `/home/AgentKit/overhaul-tools/t21-memloop/after-merge/`): the ratchet holds.
+  - S1/burst32: 622.3 MB, RED; it is listed with `flips` for 20. Footprint: Pss peak 559.8, VmHWM 622.3, hold3 n/a (30 s run). Under 1024 by 400 MB; this is the highest linux bound seen in this ticket.
+  - S4/short: identical to the tip except `unstoppable-proxy-after-ctrl-c` 1/8. It was 0/8 in the earlier after-run and 1/8 on the tip, which confirms it flips and is not attributable to 21.
+  - 85 graceful shutdowns, all `cut=0`; no supervisor line.
