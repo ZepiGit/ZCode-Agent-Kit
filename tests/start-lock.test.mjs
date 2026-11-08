@@ -22,7 +22,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { processCommandLine, resolveBun } from "../lib/process.mjs";
 import { suspendProcess } from "./memory/lib/win-process.mjs";
@@ -738,4 +738,135 @@ test("a start waiting on a live holder takes the lock over once that holder dies
   assert.equal(liveProxies(root).length, 1);
   assert.equal(readJson(join(root, "logs", "proxy.pid")).pid, liveProxies(root)[0]);
   assert.deepEqual(lockFiles(root), []);
+});
+
+// ---------------------------- exact start identity in 16's records (16 × 77)
+// Ticket 77 made the Windows start identity exact ({ ms, ticks }, `startTicks`
+// in proxy.pid); ticket 16 writes records of its own (completeRecord, the
+// spawn path). These tests drive those paths as Windows: process.platform
+// reads win32 and `powershell` on PATH is 77's stand-in
+// (tests/fixtures/fake-powershell.mjs), which answers the start-time reader
+// and evaluates the kill guard's identity check. POSIX hosts only; the
+// windows-latest legs run the real PowerShell through the tests above.
+const FAKE_POWERSHELL = join(ROOT, "tests", "fixtures", "fake-powershell.mjs");
+const UNIX_EPOCH_TICKS = 621355968000000000n;
+const FILETIME_OF = (ticks) => ticks - 504911232000000000n;
+const fakeWindows = { skip: process.platform === "win32" && "fakes Windows on a POSIX host; windows-latest runs the real PowerShell" };
+/** .NET ticks of a start `ms` ms from now, `sub` ticks into its millisecond. */
+const ticksAt = (ms, sub) => (BigInt(Math.floor(Date.now() + ms)) * 10000n) + UNIX_EPOCH_TICKS + BigInt(sub);
+const msOfTicks = (ticks) => Number((ticks - UNIX_EPOCH_TICKS) / 10000n) + Number((ticks - UNIX_EPOCH_TICKS) % 10000n) / 10000;
+
+/** Run as Windows with 77's stand-in PowerShell; `processes` as in its state file. */
+function asWindows(processes) {
+  const dir = mkdtempSync(join(tmpdir(), "fake-powershell-"));
+  const state = join(dir, "state.json");
+  const log = join(dir, "calls.jsonl");
+  const write = (p) => writeFileSync(state, JSON.stringify({ log, processes: p }));
+  write(processes);
+  writeFileSync(join(dir, "powershell"), `#!/bin/sh\nFAKE_POWERSHELL_STATE='${state}' exec '${process.execPath}' '${FAKE_POWERSHELL}' "$@"\n`, { mode: 0o755 });
+  const saved = { platform: Object.getOwnPropertyDescriptor(process, "platform"), path: process.env.PATH };
+  Object.defineProperty(process, "platform", { ...saved.platform, value: "win32" });
+  process.env.PATH = dir + delimiter + saved.path;
+  return {
+    calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []),
+    set: write,
+    restore() {
+      Object.defineProperty(process, "platform", saved.platform);
+      process.env.PATH = saved.path;
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+test("a record completed by 16's proof carries the exact start ticks: an unfinished record and a spawn intent, as Windows", { ...fakeWindows, timeout: 60_000 }, async (t) => {
+  for (const kind of ["recorded pid", "spawn intent"]) {
+    const port = await freePort();
+    const root = await stateFixture(t, port);
+    const proxy = harmless(t);
+    await identityListener(t, port, proxy.pid);
+    const at = Date.now();
+    const ticks = ticksAt(50, 1); // one tick past a millisecond boundary
+    const unfinished = kind === "recorded pid"
+      ? { pid: proxy.pid, startedMs: null, startedIso: null, spawning: { by: DEAD_PID, at } }
+      : { pid: null, startedMs: null, startedIso: null, spawning: { by: DEAD_PID, at } };
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify(unfinished) + "\n");
+    const lifecycle = await lifecycleFor(root);
+    const win = asWindows({ [proxy.pid]: { ticks: String(ticks) } });
+    let started;
+    try { started = await lifecycle.ensureRunning(); } finally { win.restore(); }
+    assert.equal(started.outcome, "already-running", `${kind}: ${started.lines.join("\n")}`);
+    const ms = msOfTicks(ticks);
+    assert.deepEqual(readJson(join(root, "logs", "proxy.pid")), { pid: proxy.pid, startedMs: ms, startedIso: new Date(ms).toISOString(), startTicks: String(ticks) }, kind);
+    assert.ok(untouched(proxy), kind);
+    assert.deepEqual(lockFiles(root), [], kind);
+  }
+});
+
+test("16's proof never completes a record when the listener's pid changed hands between its two reads within one millisecond (other ticks)", { ...fakeWindows, timeout: 60_000 }, async (t) => {
+  // Under the millisecond rule (1 ms on Windows) these two reads are the
+  // "same" start; only the exact ticks tell the generations apart.
+  const port = await freePort();
+  const root = await stateFixture(t, port);
+  const proxy = harmless(t);
+  const first = ticksAt(-60_000, 1000);
+  const reused = first + 1n; // the same millisecond, one tick later
+  let win = null;
+  const server = http.createServer((req, res) => {
+    if (req.headers.authorization !== `Bearer ${KEY}`) return res.writeHead(401).end();
+    // Once the proof read the start once, the pid names another process.
+    if (win && win.calls().some((c) => c.kind === "read" && c.pid === proxy.pid)) win.set({ [proxy.pid]: { ticks: String(reused) } });
+    res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pid: proxy.pid } }));
+  });
+  await new Promise((r) => server.listen(port, "127.0.0.1", r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const recordText = JSON.stringify({ pid: proxy.pid, startedMs: null, startedIso: null }) + "\n";
+  writeFileSync(join(root, "logs", "proxy.pid"), recordText);
+  const lifecycle = await lifecycleFor(root);
+  win = asWindows({ [proxy.pid]: { ticks: String(first) } });
+  let started, reads;
+  try {
+    started = await lifecycle.ensureRunning();
+    reads = win.calls().filter((c) => c.kind === "read" && c.pid === proxy.pid).map((c) => c.ticks);
+  } finally { win.restore(); }
+  assert.equal(started.outcome, "already-running", started.lines.join("\n"));
+  assert.deepEqual(reads.slice(0, 2), [String(first), String(reused)], "the proof read two generations of the pid");
+  assert.equal(Math.floor(msOfTicks(first)), Math.floor(msOfTicks(reused)), "both reads lie in one millisecond");
+  assert.equal(readFileSync(join(root, "logs", "proxy.pid"), "utf8"), recordText, "not completed: the start identity changed");
+  assert.ok(untouched(proxy));
+});
+
+test("the kill guard after a record 16 completed uses the exact ticks: the same tick is stopped, a pid reused one tick later is never signalled", { ...fakeWindows, timeout: 120_000 }, async (t) => {
+  for (const reuse of [false, true]) {
+    const label = reuse ? "reused one tick later" : "the same process";
+    const port = await freePort();
+    const root = await stateFixture(t, port);
+    const proxy = harmless(t);
+    await identityListener(t, port, proxy.pid);
+    const ticks = ticksAt(-60_000, 1);
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: proxy.pid, startedMs: null, startedIso: null }) + "\n");
+    const lifecycle = await lifecycleFor(root);
+    const win = asWindows({ [proxy.pid]: { ticks: String(ticks) } });
+    let completed, stopped, calls;
+    try {
+      assert.equal((await lifecycle.ensureRunning()).outcome, "already-running");
+      completed = readJson(join(root, "logs", "proxy.pid"));
+      // A pid reused within the same millisecond: the legacy 1 ms rule would pass it.
+      if (reuse) win.set({ [proxy.pid]: { ticks: String(ticks + 1n) } });
+      stopped = await lifecycle.stop();
+      calls = win.calls();
+    } finally { win.restore(); }
+    assert.equal(completed.startTicks, String(ticks), `${label}: the completed record carries the ticks`);
+    const guards = calls.filter((c) => c.kind === "guard");
+    if (!reuse) {
+      assert.deepEqual({ code: stopped.code, lines: stopped.lines }, { code: 0, lines: [`stopped (pid ${proxy.pid})`] }, label);
+      assert.deepEqual(guards.map((g) => ({ exit: g.exit, check: g.check })), [{ exit: 0, check: [`if ($created -ne [long]'${FILETIME_OF(ticks)}') { exit 4 }`] }], `${label}: one guard run, an exact integer check`);
+      await pollFor("the stopped proxy to exit", () => !untouched(proxy), 10_000);
+      assert.equal(existsSync(join(root, "logs", "proxy.pid")), false);
+    } else {
+      assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 4, outcome: "reuse-suspect" }, `${label}: ${stopped.lines.join("\n")}`);
+      assert.deepEqual(guards, [], `${label}: no signal attempt at all`);
+      assert.ok(untouched(proxy), `${label}: never signalled`);
+      assert.deepEqual(readJson(join(root, "logs", "proxy.pid")), completed, `${label}: the record stays`);
+    }
+  }
 });
