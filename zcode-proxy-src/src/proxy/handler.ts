@@ -22,7 +22,7 @@ import { getDefaultEndpointRouting, type EndpointRoutingService } from "./endpoi
 import { getDefaultClientSigning, sendWithClientSigning, type ClientSigningManager } from "./client-signing.js";
 import { credentialString, type Credential } from "../auth/types.js";
 import { isPostWriteError, sendOrderedUpstreamRequest } from "./ordered-transport.js";
-import { applyRequestBodyTransforms, transformRequestBody } from "./body-transformer.js";
+import { applyRequestBodyTransforms, jsonCopy, transformRequestBody } from "./body-transformer.js";
 import { CAPTCHA_CHALLENGE_HEADER, isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
 import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
@@ -181,7 +181,14 @@ export async function proxyRequest(
   }
 
   let upstreamBody = body;
-  if (translateOpenAIToAnthropic) {
+  // A translated request kept as an object (ticket 20): it is transformed and
+  // serialised once below. Debug mode serialises it here to log its size.
+  let translatedRequest: object | undefined;
+  if (translateOpenAIToAnthropic && !debug) {
+    const translated = translateOpenAIRequest(body, parsedBody);
+    if (translated instanceof Response) return translated;
+    translatedRequest = translated;
+  } else if (translateOpenAIToAnthropic) {
     const translated = translateOpenAIBody(body, parsedBody);
     if (translated instanceof Response) return translated;
     upstreamBody = translated;
@@ -197,11 +204,19 @@ export async function proxyRequest(
   // injected user_id is the device/session blob, never the account uuid.
   const metadataUserId = buildAnthropicMetadataUserId(config.identity.deviceMid, clientSession?.sessionId);
   const transformContext = { format: upstreamFormat, metadataUserId, startPlan };
-  // Passthrough transforms the parsed client body in place; a translated body
-  // is new text and goes through the text form. Either way the bytes are
-  // those of transformRequestBody(upstreamBody).
+  // Passthrough transforms the parsed client body in place; a translated
+  // request is transformed as built; translated text (debug mode) goes
+  // through the text form. Every way, the bytes are those of
+  // transformRequestBody(the text the request would have been).
   let transformedBody: string | undefined;
-  if (upstreamBody === body && parsedBody) {
+  if (translatedRequest) {
+    body = upstreamBody = undefined;
+    parsedBody = undefined;
+    // translatedRequest is already a jsonCopy: transformBuiltRequestBody minus its copy.
+    applyRequestBodyTransforms(translatedRequest, transformContext);
+    transformedBody = JSON.stringify(translatedRequest);
+    translatedRequest = undefined;
+  } else if (upstreamBody === body && parsedBody) {
     if (applyRequestBodyTransforms(parsedBody, transformContext)) {
       // The client's text is not sent: let it go before the new text is
       // built (ticket 20). Debug output still compares the two.
@@ -1054,6 +1069,27 @@ function translateOpenAIBody(body: string | undefined, alreadyParsed?: unknown):
   try {
     const translated = translateRequestOpenAIToAnthropic(parsed as OpenAIChatRequest);
     return JSON.stringify(translated);
+  } catch (err) {
+    return errorResponse(400, "translation_failed", `OpenAI→Anthropic translation failed: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * translateOpenAIBody without the text: the translated request as the object
+ * JSON.parse would give for that text (jsonCopy), or the same error response.
+ */
+function translateOpenAIRequest(body: string | undefined, alreadyParsed: unknown): Response | object {
+  if (body === undefined || body.length === 0) {
+    return errorResponse(400, "translation_failed", "OpenAI request body is empty; cannot translate.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = alreadyParsed ?? JSON.parse(body);
+  } catch (err) {
+    return errorResponse(400, "translation_failed", `OpenAI request body is not valid JSON: ${(err as Error).message}`);
+  }
+  try {
+    return jsonCopy(translateRequestOpenAIToAnthropic(parsed as OpenAIChatRequest)) as object;
   } catch (err) {
     return errorResponse(400, "translation_failed", `OpenAI→Anthropic translation failed: ${(err as Error).message}`);
   }

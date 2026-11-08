@@ -59,6 +59,76 @@ export function transformRequestBody(body: string | undefined, ctx: TransformCon
 }
 
 /**
+ * `transformRequestBody(JSON.stringify(value), ctx)` for a request this
+ * process built (a translated body), without serialising it and parsing the
+ * text back (ticket 20: two fewer copies of every translated body). The
+ * transforms run on `jsonCopy(value)`, which is what parsing that text would
+ * give, and the result is serialised once. When nothing changed, that
+ * serialisation is the text `JSON.stringify(value)` itself, so the bytes are
+ * the same either way.
+ */
+export function transformBuiltRequestBody(value: object, ctx: TransformContext): string {
+  const copy = jsonCopy(value) as object;
+  applyRequestBodyTransforms(copy, ctx);
+  return JSON.stringify(copy);
+}
+
+const SKIP = Symbol("json-skip");
+
+/**
+ * `JSON.parse(JSON.stringify(value))` without the text: a copy with the same
+ * keys, order and values, built the way JSON.stringify serialises (toJSON,
+ * wrapper objects unwrapped, non-finite numbers and dropped array elements as
+ * null, -0 as 0, undefined/function/symbol properties left out, an own
+ * `__proto__` key kept as a data property) and the way JSON.parse builds
+ * (plain objects and arrays). Strings are immutable and shared, so a long
+ * string is never copied. Throws the TypeErrors JSON.stringify throws (cycle,
+ * BigInt). Returns undefined where JSON.stringify returns undefined.
+ */
+export function jsonCopy(value: unknown): unknown {
+  const copied = copyJsonProperty("", value, []);
+  return copied === SKIP ? undefined : copied;
+}
+
+function copyJsonProperty(key: string, input: unknown, stack: object[]): unknown {
+  let value = input;
+  if (value !== null && (typeof value === "object" || typeof value === "bigint")) {
+    const toJSON = (value as { toJSON?: unknown }).toJSON;
+    if (typeof toJSON === "function") value = toJSON.call(value, key);
+  }
+  if (value instanceof Number) value = Number(value);
+  else if (value instanceof String) value = String(value);
+  else if (value instanceof Boolean) value = value.valueOf();
+  if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? (value === 0 ? 0 : value) : null;
+  if (typeof value === "bigint") throw new TypeError("JSON.stringify cannot serialize BigInt.");
+  if (typeof value !== "object") return SKIP;
+  if (stack.includes(value)) throw new TypeError("JSON.stringify cannot serialize cyclic structures.");
+  stack.push(value);
+  let out: unknown;
+  if (Array.isArray(value)) {
+    const array: unknown[] = [];
+    for (let i = 0; i < value.length; i++) {
+      const element = copyJsonProperty(String(i), value[i], stack);
+      array.push(element === SKIP ? null : element);
+    }
+    out = array;
+  } else {
+    const object: Record<string, unknown> = {};
+    const source = value as Record<string, unknown>;
+    for (const k of Object.keys(source)) {
+      const property = copyJsonProperty(k, source[k], stack);
+      if (property === SKIP) continue;
+      if (k === "__proto__") Object.defineProperty(object, k, { value: property, writable: true, enumerable: true, configurable: true });
+      else object[k] = property;
+    }
+    out = object;
+  }
+  stack.pop();
+  return out;
+}
+
+/**
  * The transformations of `transformRequestBody`, applied in place to a body
  * the caller has already parsed (ticket 20: one JSON parse per request body
  * instead of one per reader). Returns true when the object changed; the caller
