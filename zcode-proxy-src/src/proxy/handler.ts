@@ -200,9 +200,24 @@ export async function proxyRequest(
   // Passthrough transforms the parsed client body in place; a translated body
   // is new text and goes through the text form. Either way the bytes are
   // those of transformRequestBody(upstreamBody).
-  const transformedBody = upstreamBody === body && parsedBody
-    ? (applyRequestBodyTransforms(parsedBody, transformContext) ? JSON.stringify(parsedBody) : upstreamBody)
-    : transformRequestBody(upstreamBody, transformContext);
+  let transformedBody: string | undefined;
+  if (upstreamBody === body && parsedBody) {
+    if (applyRequestBodyTransforms(parsedBody, transformContext)) {
+      // The client's text is not sent: let it go before the new text is
+      // built (ticket 20). Debug output still compares the two.
+      if (!debug) body = upstreamBody = undefined;
+      transformedBody = JSON.stringify(parsedBody);
+    } else {
+      transformedBody = upstreamBody;
+    }
+  } else {
+    // A translated body: the client's text and object were read already.
+    if (!debug) body = undefined;
+    parsedBody = undefined;
+    transformedBody = transformRequestBody(upstreamBody, transformContext);
+  }
+  // From here on only the text sent upstream is held for retries.
+  parsedBody = undefined;
   if (debug && transformedBody !== upstreamBody) {
     debugLine(reqId, `body transformed (upstreamFormat=${upstreamFormat}, startPlan=${startPlan}, bytes=${transformedBody?.length ?? 0})`);
   }
