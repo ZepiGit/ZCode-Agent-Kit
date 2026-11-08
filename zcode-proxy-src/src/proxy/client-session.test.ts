@@ -208,4 +208,69 @@ describe("client session resolver", () => {
     expect(empty.source).toBe("none");
     expect(empty.sessionId).toBeUndefined();
   });
+  it("keeps a turn without `system` and a continuation with `system: null` apart (ticket 20: the streamed identity hash keeps the old text)", () => {
+    // The identity text writes an absent `system` as `undefined` and a null one
+    // as `null`, so these are two conversations, not a continuation.
+    const resolver = createClientSessionResolver();
+    const firstBody = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: "Hi" }] });
+    const nextBody = JSON.stringify({
+      model: "glm-4.6",
+      system: null,
+      messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }, { role: "user", content: "Next" }],
+    });
+    const first = resolver.resolve(makeReq(firstBody), firstBody, "anthropic", "glm-4.6", CFG);
+    const next = resolver.resolve(makeReq(nextBody), nextBody, "anthropic", "glm-4.6", CFG);
+    expect(first.source).toBe("lineage");
+    expect(next.source).toBe("lineage");
+    expect(next.sessionId).not.toBe(first.sessionId);
+  });
+
+  it("finds the continuation of a multi-megabyte, multi-byte conversation, with keys in any order (ticket 20)", () => {
+    const resolver = createClientSessionResolver();
+    const long = "ä€😀 lorem ".repeat(200_000);
+    const firstBody = JSON.stringify({ model: "glm-4.6", system: "s", tools: [{ name: "t", input_schema: { type: "object" } }], messages: [{ role: "user", content: long }] });
+    const nextBody = JSON.stringify({
+      messages: [{ content: long, role: "user" }, { role: "assistant", content: [{ type: "text", text: "ok 😀" }] }, { role: "user", content: "Next" }],
+      tools: [{ input_schema: { type: "object" }, name: "t" }],
+      system: "s",
+      model: "glm-4.6",
+    });
+    const otherBody = JSON.stringify({ model: "glm-4.6", system: "s", tools: [{ name: "t", input_schema: { type: "object" } }], messages: [{ role: "user", content: `${long}x` }, { role: "assistant", content: "ok" }, { role: "user", content: "Next" }] });
+    const first = resolver.resolve(makeReq(firstBody), firstBody, "anthropic", "glm-4.6", CFG);
+    const next = resolver.resolve(makeReq(nextBody), nextBody, "anthropic", "glm-4.6", CFG);
+    const other = resolver.resolve(makeReq(otherBody), otherBody, "anthropic", "glm-4.6", CFG);
+    expect(next.sessionId).toBe(first.sessionId);
+    expect(next.confidence).toBe(0.9);
+    expect(other.sessionId).not.toBe(first.sessionId);
+  });
+
+  it("reads a parsed body passed by the caller like the body text (ticket 20)", () => {
+    const resolver = createClientSessionResolver();
+    const firstBody = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: "Hi" }] });
+    const nextBody = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: "Hi" }, { role: "assistant", content: "Hello" }, { role: "user", content: "Next" }] });
+    const explicitBody = JSON.stringify({ model: "glm-4.6", metadata: { session_id: "sess_from_body" }, messages: [{ role: "user", content: "Hi" }] });
+    const first = resolver.resolve(makeReq(firstBody), firstBody, "anthropic", "glm-4.6", CFG, JSON.parse(firstBody));
+    const next = resolver.resolve(makeReq(nextBody), nextBody, "anthropic", "glm-4.6", CFG, JSON.parse(nextBody));
+    const explicit = resolver.resolve(makeReq(explicitBody), explicitBody, "anthropic", "glm-4.6", CFG, JSON.parse(explicitBody));
+    expect(next.sessionId).toBe(first.sessionId);
+    expect(explicit.source).toBe("explicit");
+    expect(explicit.sessionId).toBe("sess_from_body");
+  });
+  it("keeps a long text that spells another conversation's structure apart from it (ticket 20: long leaves still escaped)", () => {
+    // Unescaped, A's single message would read exactly like B's two messages.
+    const resolver = createClientSessionResolver();
+    const long = "L".repeat(40_000);
+    const tail = "M".repeat(20_000);
+    const bodyA = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: `${long}","role":"user"},{"content":"${tail}` }] });
+    const bodyB = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: long }, { role: "user", content: tail }] });
+    const bodyC = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: `${long}\\${tail}` }] });
+    const bodyD = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: `${long}\u0001\ud800${tail}` }] });
+    const a = resolver.resolve(makeReq(bodyA), bodyA, "anthropic", "glm-4.6", CFG);
+    const b = resolver.resolve(makeReq(bodyB), bodyB, "anthropic", "glm-4.6", CFG);
+    const c = resolver.resolve(makeReq(bodyC), bodyC, "anthropic", "glm-4.6", CFG);
+    const d = resolver.resolve(makeReq(bodyD), bodyD, "anthropic", "glm-4.6", CFG);
+    expect(new Set([a.sessionId, b.sessionId, c.sessionId, d.sessionId]).size).toBe(4);
+    const again = resolver.resolve(makeReq(bodyD), bodyD, "anthropic", "glm-4.6", CFG);
+    expect(again.sessionId).toBe(d.sessionId);
+  });
 });
