@@ -2,7 +2,7 @@
 
 **Blocked by:** 67 (A plain expected-RED listing of a single-run key accepts any RED)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: low
@@ -60,3 +60,77 @@ ADR: no
 ## Comments
 
 - 2026-11-08 (orchestrator, Round 21 Q1): signature (v), first occurrence: run 42446461464 (staging/19, tree 6f25f13), tui:adversarial-line-heap 20 MB (budget 16); D-records and end 22 MB heap against 2 MB in the other 9 staging/19 runs; not counted against ticket 19.
+- 2026-11-08 (implementer, round 1). Branch `ticket/71-measurement-rules`. Implementation head 9bd9f0d (the integration tip f322df8 is merged in); this Comments commit sits on top of it. Commits: 28f5c06 S7, 89331fc windows S1/short, 34d1865 S6/short, 5b863e7 OMP floor, 40f9487 records, 1b07d88 floor pin. Local Linux, Node 26.7.0, Bun 1.4.2, everything under `run-capped.sh`, ports 19710–19714. Logs: `reports/t71-*.log` in the integration worktree; run directories under `/home/AgentKit/overhaul-tools/t71-memloop/`.
+  - **Suites** (on 40f9487, which includes the round 22 merge; the later commits are one test pin and docs): `npm run test` 856 tests, 837 pass, 0 fail, 19 skipped (Windows-only and opt-in). `npm run test:proxy` 1,387 pass, 0 fail. `npm run test:proxy-typecheck` clean. `npm run test:mcp` 96 pass, 0 fail, 1 skipped. `tests/memory/verdict.test.mjs` 98 of 98 pass on 1b07d88.
+  - **S7 retained heap (Round 17 Q1).** `lib/retained-heap.mjs` holds `readHeapSeries` (30 `/health` readings, 1 s apart) and `storeHeapAtCap` (minimum minus h0). An incomplete series is a harness failure: fewer than 30 readings, a missing or non-numeric reading, or no h0. `s7-disk.mjs` uses both and builds the check after `session.stop()`, so a harness failure leaves no proxy running. The check detail records readings, intervalMs, h0, first, min, max, the one-reading value, RSS before, after and last, and the series. `summary.json` notes carry the series too. The job summary prints one "Responses store retained heap" line plus the series per run, and flags any minimum above 66 MB as a question (condition 3). No product code changed.
+    - RED first (`t71-red-s7`): 4 job-seam tests (fake run `s7-series`, the scenario's own reader and judge behind a fake `/health`) fail on the tip, then pass (`t71-green-s7`): [98, 97, 80, 64, …] GREEN at 63; never below 97 RED (an unowned RED that fails the job); a missing, `heapUsedMB`-less, string or NaN reading, or no h0, is a harness failure; 29 readings is a harness failure.
+    - Mutant from the committed 28f5c06 (the one-reading rule, `value = first − h0`): the GREEN and RED fixture tests fail (`t71-mut-s7-firstreading`). Restored with `git checkout 28f5c06 -- tests/memory/lib/retained-heap.mjs`; `git diff` empty.
+    - Store mutant (never committed; an out-of-repo copy of 28f5c06 at `/home/AgentKit/overhaul-tools/t71-mut/kit`, eviction loop disabled, so no count bound and no byte bound): long profile **RED, 252 MB** (first reading 262, min 260; one-reading value 254). Short profile 95 MB under both rules, GREEN: the short profile has no power here (correction 3). The shipped store: short 63 (series flat at 70), long 62. METRICS has the table.
+  - **Windows S1/short (Round 17 Q3).** One `REPEATED` entry with `legs: ["windows"]` and `kind: "majority"` (n 5, redAtLeast 3, check growth:proxy, budget 5, ceiling 10). `repetitionRule(key, repeated, os)` applies a `legs` rule only on its legs. job.mjs and the ratchet pass the leg. `majorityVerdict` is in `lib/repetitions.mjs`, and `runRepetitions` picks the verdict by kind. The set's own RED names are `growth:proxy` (≥ 3 of 5) and `ceiling:growth:proxy` (any repetition > 10 on commit, trend or not); every other RED check of any repetition is added by name. The windows all-WS view gives `redOnlyOnCommit`. `summary.json` (`S1-short/summary.json`) and the job summary table print the values, trends, RED repetitions, median, budget, "≥ 3 of 5", the ceiling and WS per repetition. S1/burst1's median rule and its pins are unchanged.
+    - RED first (`t71-red-s1short`): 6 job-seam tests (fake run `s1-reps`) fail, then pass (`t71-green-s1short`): 2 RED pass; 3 RED fail; three values over 5 with one missing trend pass; 10.1 fails with a GREEN median, trend or not, and 10.0 passes; a RED steady, procPeak, count, orphans or commit-backstop in one repetition fails; a killed repetition (the set stops at 3), an insufficient growth value, or 4 of 5 repetitions is a harness failure; linux S1/short is one run.
+    - Mutant from 89331fc (`legs: ["windows", "linux"]`): the linux test and the per-leg pin fail (`t71-mut-s1-legs`). Restored from 89331fc.
+    - Linux job run on this branch (`t71-s1-short-linux`): one run, growth:proxy 2.43 %/1k, GREEN.
+  - **Linux S6/short (Round 21 Q1).** Entry `"S6/short": { n: 5, check: "tui:adversarial-line-heap", budgetMB: MEMORY.S6.longLineHeapMB, ceilingMB: 32 }`, with `medianVerdict` unchanged. As information only, every S6 mark records `paneBytes`, and after `end` the body pushes 2,000 short lines and takes a `flushed` mark. `derived.flushedAboveCStartMB` is reported, and the checks' marks are unchanged.
+    - RED first (`t71-red-s6`): 4 job-seam tests (fake run `s6-reps`) fail, then pass: [8, 8, 20, 8, 8] GREEN; [20, 20, 20, 8, 8] RED on the median; [8, 8, 33, 8, 8] RED on the ceiling with median 8, while 32 passes; a RED long-line, log-pane, resize-storm or orphans check in one repetition fails; a killed repetition, 4 repetitions, or a string, null or "Infinity" value is a harness failure.
+    - Real job (`t71-s6-short-1`): 8, 8, 8, 8, 8, GREEN; paneBytes 287,780 at `end`; flushed 0 MB above C-start.
+    - Mutant from 34d1865 (`fitLine` stores the raw row when it fits, without the copy; `t71-mut-s6-nocopy`): 20, 20, 20, 20, 20, **RED** (median 20), flushed 0 above C-start. Restored with `git checkout 34d1865 -- zcode-proxy-src/src/tui/log-pane.ts`; `git diff` empty.
+  - **OMP no-op floor (Round 17 Q4).** `OMP_FLOOR = { n: 5, medianBelowMB: 2.5, everyBelowMB: 5 }` in budgets.mjs. The thresholds are unchanged, and n = 5 is provisional (below). Ticket 03's floor test now measures n fresh hosts, prints every value as an `OMP_FLOOR_VALUE {json}` diagnostic, and asserts `floorVerdict`: the median < 2.5, every value < 5, and fewer than n or a non-numeric value is a harness failure. The failure message lists every value.
+    - RED first (`t71-red-floor`): 3 tests for `floorVerdict` and `floorMeasurement` fail, then pass. One 2.55 among five passes; a median of 2.5 fails; a 5.0 fails with median 0.7, while 4.99 passes; the data-to-n reading behaves as specified.
+    - The live floor test on Linux: 0.5, 0.5, 0.75, 0.5, 0.5, pass.
+  - **Measurement mode for the windows floor (Q4 condition 1). Switch:** commit a file `tests/memory/measure-omp-floor` with content `20`, push, and let one CI run go. Every `test-kit` leg (ubuntu and windows × Node 24 and 26) runs the floor test as 20 fresh hosts, which gives 40 windows and 40 linux values from one run, and does not judge them.
+    - Each value prints as an `OMP_FLOOR_VALUE {…}` line in the "Kit tests (node:test)" step log. One `OMP_FLOOR_MEASURE_SUMMARY {…}` line per leg carries the values, WS values on windows, p at or above 2.5 MB, the false-fail rate for n = 3, 5, 7 and 9, the smallest n at ≤ 1 %, and anything that comes back. The same reading goes to the job's step summary.
+    - While the marker exists, the test "the OMP floor measurement mode is off by default" fails, so the Kit tests step fails and the proxy and MCP steps of that run do not run. That is by design. Delete the marker in a new commit before the pre-merge run.
+    - Read the values with `gh api repos/<repo>/actions/jobs/<job id>/logs | grep OMP_FLOOR_` (Round 21 found `gh run view --log` empty).
+    - Then set `OMP_FLOOR.n` (and its pin in verdict.test.mjs) to the larger leg's n. If any value is ≥ 5 MB, or no n reaches ≤ 1 %, it comes back with the numbers.
+    - Proven locally: the marker set to 25 inside a full `npm run test` (`t71-floor-measure-npmtest`) gives 25 Linux values, 0.5–0.75 (median 0.63, 0 at or above 2.5, n = 3), and exactly one failure, the marker guard.
+    - The provisional n = 5 comes from the windows record (1 of 16 legs at 2.55: n = 3 → 1.12 %, n = 5 → 0.22 %).
+    - Normal runs print five values per leg, so every later CI run adds to the windows distribution that ticket 35 reads.
+  - **Records:** spec §18 S1, S6 and S7 rows (and their source columns) and the METRICS section "Rare tails decided as measurement rules (ticket 71 …)": the 51/70-run heap-at-cap table, the S1/short tables, the floor table and the S6 33-run table.
+  - **Pre-existing test changes:**
+    - ticket 03's floor test (`loop.test.mjs`) is rewritten as Round 17 Q4 requires;
+    - `verdict.test.mjs` "S1/burst1 is the only run judged on a median" now exempts linux S6/short in its loop and has a new title. Round 21 Q1 adds that key, and its own pin test is new;
+    - no other existing test changed.
+  - **Decisions taken:**
+    - (a) The majority rule's set-level RED names are `growth:proxy` and `ceiling:growth:proxy`, and the ratchet's listed-repeated check uses `setCheckName(rule)` (`median:<check>` for the median kind, so S1/burst1 is unchanged).
+    - (b) The S1/short ceiling applies to the check's commit value whatever its trend.
+    - (c) "Fraction above 2.5 MB" is counted as **at or above** 2.5, because a value of exactly 2.5 fails the median clause.
+    - (d) The floor measurement lives in the test-kit legs, the context the floor test runs in, alongside the other test files. That needs no ci.yml change. The memory-budget job is not used for it.
+    - (e) The S7 store mutant ran in an out-of-repo copy, not in the worktree, because it ran in the background while other slices were being edited.
+    - (f) My recount of windows S1/short finds 51 distinct runs, where Round 17 counted 49. Min, max and both REDs are the same, and n does not move. Both are recorded in METRICS.
+  - **Pending CI (orchestrator verifies after merge and push):** the floor measurement run with the marker (≥ 20 windows and ≥ 20 linux values, then n); the pre-merge run confirming the four rules (S7 series recorded on both legs, with any minimum > 66 coming back; windows S1/short 5 repetitions; linux S6/short 5 repetitions; the floor test with 5 hosts on all four test-kit legs); the memory-budget job and fast suite green on ubuntu and windows.
+  - **Expected-red entries removed:** none (71 owns no entry).
+  - **Cost:** about +18 min on the windows memory job (S1/short × 5) and about +20 s on linux (S6/short × 5). The floor test adds about 6 s per test-kit leg.
+- 2026-11-08 (implementer, round 2: the OMP floor n from CI). Implementation commit ffdf4ef. The integration tip 92a58a2 (tickets 15, 19, 24 and others) is merged in; this Comments commit is the head.
+  - **Measurement:** CI run 42467078897 (staging/71 with the marker = 20). Values were read from the job logs (`gh api …/actions/jobs/<id>/logs`, copies in `/home/AgentKit/overhaul-tools/t71-floor-ci/`).
+    - test-kit (ubuntu-latest, Node 26.13.0), RSS: 20 values, min 0.31, median 0.44, max 0.69 MB; 0 at or above 2.5; n = 3.
+    - test-kit (windows-latest, Node 24.22.2), commit: 20 values, min 0, median 0.06, max 2.49 MB; two values at 2.43 and 2.49, within 0.07 MB of 2.5; 0 at or above 2.5; n = 3. Working set beside it 0.07–0.29 MB.
+    - test-kit (ubuntu-latest, 24) and test-kit (windows-latest, 26) produced **no values**. Both failed in `oven-sh/setup-bun` with `Unexpected HTTP response: 504` before any test ran. ux-before (windows) and both memory-budget legs failed the same way. That is infrastructure, not a test result.
+    - Each OS leg still has ≥ 20 values, as condition 1 requires.
+    - In both legs that ran, the only failing test is the intended marker guard (857 tests: linux 837 pass, windows 831 pass, 1 fail each; the rest skipped).
+  - **n = 5, unchanged.** It is the largest n over the estimates, as in Round 11 Q1:
+    - CI windows 0/20 → n = 3; CI linux 0/20 → n = 3;
+    - windows pooled with its record, 1/36 → n = 3 (n = 3: 0.23 %);
+    - the windows record alone, 1/16 at 2.55 MB (42436440284) → n = 3: 1.12 % > 1 %, so **n = 5** (0.22 %).
+    - The less favourable estimate is therefore the record alone, not the pooled one.
+    - Supporting reading: the windows commit floor is in two groups (0–0.13 MB, and 2.43–2.55 MB). 3 of 36 known windows values are ≥ 2.43 (8.3 %: n = 3 → 1.97 %, n = 5 → 0.51 %), so n = 5 also holds if the cut moved slightly.
+    - No value is ≥ 5 MB, and an n reaches ≤ 1 %, so nothing comes back under condition 1.
+    - For ticket 35: on about 1 windows run in 12 the floor sits about 2.5 MB below the 5 MB gate. Recorded in METRICS.
+  - **Code:**
+    - `OMP_FLOOR` in budgets.mjs keeps n = 5; its comment now carries the computation.
+    - The verdict.test.mjs pin now derives n from the 40 CI values and the record, all literals from the logs, and asserts every value < 5 MB.
+    - Mutant from ffdf4ef (`n: 3`): the pin fails (`t71-r2-mut-n3`). Restored with `git checkout ffdf4ef -- tests/memory/lib/budgets.mjs`; `git diff` empty.
+  - **Records:** the METRICS floor table now has the two CI legs, the pooled row and the reading for ticket 35; the "pending CI" rows are gone.
+  - **Suites** on the merged tree (after the 92a58a2 merge):
+    - `npm run test`: 873 tests, 854 pass, 0 fail, 19 skipped;
+    - `npm run test:proxy`: 1,420 pass, 0 fail;
+    - typecheck clean;
+    - `npm run test:mcp`: 96 pass, 0 fail, 1 skipped.
+  - **Local job on the tree that includes 19** (`t71-r2-s7-s6`, before the 24 merge, which touches only the solver): ratchet holds.
+    - S7/short heap-at-cap 61 MB (min 70 − h0 9; first reading 71, so the minimum came in below the first reading).
+    - S6/short 8, 8, 8, 8, 8, GREEN.
+  - **The marker:** not touched. It was never on this branch; the orchestrator removes it on staging/71.
+  - **Still pending CI:** the pre-merge run confirming the four rules, and the memory-budget job and fast suite green on ubuntu and windows. The memory-budget legs of 42467078897 never ran (504), so the windows S1/short 5-repetition rule has not yet run on CI.
+  - **Later merge of the tip 3ed5896** (ticket 25: bounded collections; its lift moves the responses store onto `runtime/bounded-collection.ts`):
+    - suites rerun: `npm run test` 873 tests, 854 pass, 0 fail, 19 skipped; `npm run test:proxy` 1,451 pass, 0 fail; typecheck clean; `npm run test:mcp` 96 pass, 0 fail, 1 skipped;
+    - S7/short on that tree (`t71-r2c-s7`): heap-at-cap 63 MB (min 71 − h0 8, series flat at 71), ratchet holds. The store's retained heap is unchanged by 25's lift.
+- Merged 2026-11-08 as a8e18f5ebbac14b595509591f07a63effc98ba99 (ticket/71-measurement-rules at e5d519a into eaa91b3; first merge, never reverted, so no revert-of-revert step). One conflict, `.scratch/kit-overhaul/spec.md` §18: kept the tip's S5 row (Round 24 Q1 amendment) and this ticket's S6 and S7 rows (Round 21 Q1, Round 17 Q1); no other file conflicted. Fast suite on Bun 1.4.2: kit 863/881 (18 skipped, 0 fail; the first run had 2 fails, both `listen EADDRINUSE 127.0.0.1:19159` in `tests/proxy-lifecycle.test.mjs:274` and `:301`, ticket 15's fixed port held by a transient process outside this run that had gone by the time I checked; ticket 71 does not touch that file; the single rerun was clean), proxy 1451/1451 (98 files), proxy typecheck clean, mcp 99/100 (1 skipped, 0 fail); `mcp/zcode-harness-mcp/dist/` unchanged after the build (B5); lockfiles unchanged (npm ci only). Memory loop `node tests/memory/job.mjs --os linux --only S1/short,S6/short,S7/short` (port 19710): ratchet holds; S1/short GREEN (growth:proxy 4.33 %/1k, trend false; linux single run); S6/short median 8 MB of [8, 8, 8, 8, 8] GREEN; S7/short responses-store:heap-at-cap 64 MB = min 71 − h0 7 over 30 readings (first 71, max 71, rss 86 → 161 … 156) ok, below 66 MB, so no question; S7/short RED only on proxy.log:bounded-while-running, owned by ticket 33; summary under `/home/AgentKit/overhaul-tools/merge-71-memloop/`. Pre-merge CI: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42481592284 (staging/71 with the marker removed, all 8 jobs green). OMP floor measurement run 42467078897, n = 5 (Round 17 Q4), recorded in METRICS (OMP no-op floor table). Sanity diff: staging/71's last commit (d6efa3b) merges the tip 0f405d9 into the staging line, so the `^1..` variant is empty outside .scratch and the `^2..` variant gives the ticket's 11 `tests/memory/` files, all byte-identical to staging/71 after the merge. The other 17 non-.scratch differences between staging/71 and HEAD equal `git diff 0f405d9 eaa91b3` exactly, all from ticket 36 (merge 7555b87). Logs: `reports/merge-71-{npm-ci,test,test-rerun,proxy,proxy-typecheck,mcp,memloop}.log`.

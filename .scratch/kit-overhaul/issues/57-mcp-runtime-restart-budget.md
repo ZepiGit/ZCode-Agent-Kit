@@ -1,6 +1,6 @@
 # 57: MCP runtime restart budget (architecture candidate 8)
 
-**Blocked by:** 30 (MCP task retention (500 / 7 days) and the idempotency window), 36 (MCP bridge lazy HTTP and the semi-space flag)
+**Blocked by:** 30 (MCP task retention (500 / 7 days) and the idempotency window), 36 (MCP bridge lazy HTTP and the semi-space flag), 74 (S5/short: judge MCP bridge growth after the retention bound)
 
 **Status:** ready-for-agent
 

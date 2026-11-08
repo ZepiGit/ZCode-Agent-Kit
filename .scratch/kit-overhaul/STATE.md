@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: restage 15 -> merge; then 24, 25, 36 (round 2 running), 71 (floor measurement run), 72 in order. Running: t20 (body copies), t30 (MCP retention), t36 r2. Ready next: 21 (health supervisor), then 16/17 after 15, 27 after 24/26. Interim rule (round 17 + round 21 signature (v)) active.
+- Next action: INTEGRATION RED (42484868282, windows proxy-lifecycle teardown EPERM) -> t15 round 3 decides revert (orphan) vs fix forward; then merge 30, 72; 21 needs round 2 (windows 5 s timeout) and round 25 (S5 30.23). Running: t15 r3, t16, t20, t29.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -23,6 +23,10 @@
 - Ticket 26 (captcha egress under Bun) merged 2026-11-08 as 87da391 (resolved a3962ad; pre-merge CI 42457120690).
 - Ticket 19 (admission control) merged 2026-11-08 as d68548c (resolved 0c7a184; final pre-merge CI 42464297212 with a round-17 signature (iii) exclusion).
 - Ticket 15 (proxy lifecycle module) merged 2026-11-08 as af5caa8 (resolved a3959cc; pre-merge CI 42469139184).
+- Ticket 24 (solver transport seam) merged 2026-11-08 as 92a58a2 (resolved 16bfaa2).
+- Ticket 25 (bounded collections, 32 MiB CDN bodies) merged 2026-11-08 as 3ed5896 (resolved eb4a8f7).
+- Ticket 36 (MCP bridge lazy HTTP, semi-space flag) merged 2026-11-08 as 7555b87 (resolved 7560b31).
+- Ticket 71 (measurement rules, four rare tails) merged 2026-11-08 as a8e18f5 (resolved deca006). Round 17 interim rule ended.
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul

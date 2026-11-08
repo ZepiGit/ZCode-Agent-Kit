@@ -5,10 +5,14 @@
  * stdio: nothing except MCP frames is written to stdout; logs go to stderr.
  * http: binds only the configured host (default 127.0.0.1) — never a public
  * interface; streamable HTTP with per-session transports.
+ *
+ * The HTTP stack (node:http, the SDK's streamable HTTP transport and hono)
+ * is imported lazily inside serveHttp: the stdio bridge, one per harness
+ * session, never loads it (about 7 MB RSS; spec §6 b).
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -19,7 +23,7 @@ import {
   type ListResourcesRequest,
   type ReadResourceRequest,
 } from "@modelcontextprotocol/sdk/types.js";
-import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { buildTools, type ToolContext, toolTextPayload } from "./tools.js";
 import { listResources, readResource, type ResourceContext } from "./resources.js";
@@ -34,6 +38,8 @@ export interface BridgeServerOptions {
   resourceCtx: ResourceContext;
   serverInfo: { name: string; version: string };
 }
+
+type HttpTransportClass = typeof StreamableHTTPServerTransport;
 
 function buildServer(opts: BridgeServerOptions): Server {
   const tools = buildTools(opts.toolCtx);
@@ -124,6 +130,13 @@ export async function serveHttp(
   if (!loopback) throw new Error(`refusing to bind HTTP transport to non-loopback host "${host}"`);
   if (!httpKey) throw new Error("HTTP transport requires an auth key — refusing to serve unauthenticated requests");
 
+  // Lazy HTTP: loaded once here, before listen, so a missing module still
+  // fails at start and no request pays for the import.
+  const [{ createServer: createHttpServer }, { StreamableHTTPServerTransport: HttpTransport }] = await Promise.all([
+    import("node:http"),
+    import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+  ]);
+
   const keyBuf = Buffer.from(httpKey, "utf8");
   const PORT = port;
   const allowedHosts = new Set([`${h === "::1" ? "[::1]" : h}:${PORT}`]);
@@ -202,7 +215,7 @@ export async function serveHttp(
     // moment the limit is crossed (413 + Connection: close, then socket
     // teardown) — draining until EOF would let a slow writer bind one of the
     // few request slots for the whole request timeout.
-    void handleMcpPostBounded(opts, req, res, MAX_BODY_BYTES);
+    void handleMcpPostBounded(opts, HttpTransport, req, res, MAX_BODY_BYTES);
   });
   // Header/timeout hardening (defaults are generous for a local bridge).
   httpServer.headersTimeout = 10_000;
@@ -222,6 +235,7 @@ export async function serveHttp(
 
 async function handleMcpPostBounded(
   opts: BridgeServerOptions,
+  HttpTransport: HttpTransportClass,
   req: IncomingMessage,
   res: ServerResponse,
   maxBodyBytes: number,
@@ -266,7 +280,7 @@ async function handleMcpPostBounded(
       res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null }));
       return;
     }
-    await handleMcpPost(opts, req, res, parsedBody);
+    await handleMcpPost(opts, HttpTransport, req, res, parsedBody);
   } catch (err) {
     log.error("http request read error", { error: String(err) });
     if (!res.headersSent) res.writeHead(400).end("bad request");
@@ -274,10 +288,10 @@ async function handleMcpPostBounded(
   }
 }
 
-async function handleMcpPost(opts: BridgeServerOptions, req: IncomingMessage, res: ServerResponse, parsedBody: unknown): Promise<void> {
+async function handleMcpPost(opts: BridgeServerOptions, HttpTransport: HttpTransportClass, req: IncomingMessage, res: ServerResponse, parsedBody: unknown): Promise<void> {
   try {
     // Stateless streamable HTTP: each POST creates a request-scoped transport.
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    const transport = new HttpTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     const server = buildServer(opts);
     await server.connect(transport);
     // parsedBody comes from our bounded pre-read (ZAK-010); the transport's
