@@ -73,3 +73,46 @@ Spec stories: 63, 64, 135
 - 2026-11-08 (implementer, after merging the integration tip again: a8e18f5 (ticket 71) in d91610f, deca006 (docs only) in 893abcb; the code tree at 893abcb equals d91610f's).
   - **Full suite at d91610f:** `npm run test` 881 tests, 863 pass, 0 fail, 18 skipped (`reports/t29-m2-test-rerun.log`; a first run failed 3 `proxy-lifecycle` tests with `EADDRINUSE` on 19152/19159 while another worktree's run of the same file, t15b, held those ports; the rerun after they were released passed; `reports/t29-m2-test.log`); `npm run test:proxy` 1475 pass, 0 fail, 100 files; typecheck clean; `npm run test:mcp` 100 tests, 99 pass, 0 fail, 1 skipped.
   - **S2/short again** (`/home/AgentKit/overhaul-tools/t29-memloop/after-merge2/`): ratchet holds; `cdn-cache:memory-growth` 57 MB; RED only on ticket 58's names (this run also growth:scenario 37.74, within ticket 25's recorded spread and owned by 58).
+- 2026-11-08 (implementer, round 2: pre-merge run 42494299680, staging/29, PR #41, ubuntu test-kit Node 24 and 26 RED on "does not delete an entry another installation published after the scan saw the old one"; fix 9e92602, tests c78360c; integration tip with tickets 71, 72, the ticket 15 teardown fix and docs up to 5922e59 merged in cd3ad0d and f4d48d3; the head SHA is in the final report).
+  - **Root cause of the RED.** The failing assertion (job 128773138835, test line 233) was `expect(replaced).toBe(true)`: the simulated replacement never happened, so the test failed on its own precondition. The comparison it was meant to exercise was never reached. The hook replaced the victim at "the next open of another file after the victim's header read". ext4 lists a directory in name-hash order with a per-filesystem hash seed. On this machine the victim was never last (0/20 temp directories, `t29-scripts/readdir-order.ts`). On the runner it was last, so no open followed it. Reproduced by forcing the victim last in round 1's test: the same `Expected: true / Received: false` (`reports/t29-r2-repro-ci.log`).
+  - **The product defect the test should have caught** (orchestrator's hypothesis, confirmed by new deterministic tests that fail on round 1's code, `reports/t29-r2-red.log`, 4 fail):
+    1. A window between the `lstat` re-check and the `unlink`: an envelope published in between was deleted (B1: a fresh entry becomes a network fetch).
+    2. The re-check compared only dev/ino/size/mtime, which an inode reused within one timestamp tick passes.
+  - **What changed (product).** `CdnDiskPruner.remove()` now deletes through a private tombstone:
+    - It renames `<name>` to `<name>.<time>.<uuid>.prune`, which is atomic and takes whatever the name holds at that instant. Nothing else ever writes that name.
+    - It then compares the tombstone with what the scan judged: the same file (dev, ino, size, mtime) holding the same envelope (fetchedAt, length, sha256 re-read). Raw legacy files have no envelope, so they rely on identity; they are only taken once unmodified for 60 s, and an in-place rewrite changes their mtime.
+    - A match is unlinked. Anything else is put back with `link(tombstone, name)`, which fails with `EEXIST` if an even newer envelope took the name meanwhile (that one stays), and the tombstone is dropped. Where hard links are unavailable it renames back if the name is still free.
+    - A rename that fails with `ENOENT` counts as freed (another pruner won). Any other failure (Windows: held open) skips to the next oldest.
+    - A scan removes tombstones whose name time is ≥ 60 s old (a pruner that crashed mid-delete). Newer ones are left alone, and tombstones are never counted.
+    - The only remaining effect of a race: while another installation's file sits in a tombstone for a few microseconds, a reader in a third process gets a miss.
+  - **What changed (tests, own round-1 tests only).**
+    - The order-dependent test is replaced by `raceTheOldest`. It changes the oldest entry at each filesystem call the delete makes on its name, whichever call that is (lstat/stat/rename/unlink/rm/link/open, counted in a dry run and asserted > 0 so no run passes vacuously). Every run lists the directory in both orders (victim first, victim last).
+    - Two properties use it: a new envelope renamed over the name, and a replacement keeping the same inode, size and mtime (in-place rewrite plus `utimes` back to the whole-millisecond mtime; the test asserts the four fields are equal).
+    - New tests: an even newer envelope arriving before the put-back stays; a crashed pruner's tombstone goes at 60 s, stays at 59 s and is never counted; a legacy raw file rewritten in place after the scan stays.
+    - "counts an entry another pruner removed first" and "skips an entry it cannot delete" race the rename as well as the unlink (both still pass; in the old form they no longer reached the delete).
+    - The replay harness recognises a prune deletion by the tombstone name. Its numbers are unchanged: 428/428, 393/393, 428/428 (372 pruned, 34 refetched), 428/428 (373, 35), above the cap 428/532.
+  - **Mutants** (applied to the committed code, restored with `git checkout <sha> --`, `git diff` empty after each; `reports/t29-r2-mutate.log` at 9e92602, `reports/t29-r2-mutate2.log` at c78360c): 26/27 killed. That includes round 1's 17 that still apply, plus:
+    - identity only, no envelope comparison (killed by the same-inode test);
+    - envelope only, no identity (survived at 9e92602, killed at c78360c by the legacy rewrite test);
+    - a mismatch deleted instead of put back;
+    - put back by rename (clobbers the newer one);
+    - round 1's design (lstat, then unlink in place: killed at the unlink position);
+    - no tombstone cleanup;
+    - tombstones removed at once;
+    - vanished not freed (survived at 9e92602, killed at c78360c);
+    - refused delete freed;
+    - refused delete throws.
+
+    Survivor: `stat` for `lstat` in the scan, still equivalent (the tombstone `lstat` sees a link, not a file, and puts it back).
+  - **Full suite at f4d48d3:**
+    - `npm run test`: 884 tests, 866 pass, 0 fail, 18 skipped.
+    - `npm run test:proxy`: 1479 pass, 0 fail, 100 files.
+    - Typecheck clean.
+    - `npm run test:mcp`: 100 tests, 99 pass, 0 fail, 1 skipped.
+    - Captcha suites: 182 pass, 0 fail, 18 files (+4 versus round 1).
+    - Linux compile: 662 modules. `verify-payload` OK.
+    - S2/short (`t29-memloop/round2`): ratchet holds, `cdn-cache:memory-growth` 57 MB, RED only on ticket 58's names.
+  - **Pending CI, additions to round 1's windows checklist:**
+    - (8) The `raceTheOldest` tests and the put-back test pass. On NTFS that needs: `renameSync` to the tombstone succeeding while no other handle is open; `linkSync` (CreateHardLinkW) for the put-back, failing with `EEXIST` when the name is taken; and the in-place rewrite with `utimesSync` keeping `lstat` ino/size/mtimeMs equal.
+    - (9) The 7-process test leaves no `*.prune` file. A tombstone held open by a reader could linger as delete-pending until the handle closes; the final listing runs after every child has exited.
+    - (10) ubuntu test-kit Node 24 and 26 green on the new tree.
