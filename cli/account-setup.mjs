@@ -172,22 +172,32 @@ export function configureAccountRotator(ctx, tx, enabled, runProxyCli) {
   return { changed: previous !== enabled, accountCount };
 }
 
+/**
+ * The account change through the lifecycle intents (read state, restart,
+ * ensure running); their narration lines are printed as the manager printed
+ * them. A start lock the intent may not take throws, as the manager did.
+ */
 export async function restartForAccountChange(ctx) {
-  const { createManager } = await import("../proxy/zcode-proxy-manager.mjs");
-  const manager = createManager({ root: ctx.root, home: ctx.home });
-  const health = await manager.healthIdentify();
-  if (health === "ours") {
-    if (await manager.restart() !== 0) throw new Error("Account Rotator setting saved, but proxy restart failed. Run zcode-kit doctor.");
-  } else if (health === "down" && manager.readPidFile() && manager.pidAlive(manager.readPidFile().pid)) {
-    // A live recorded proxy that does not answer may be hung. start()
+  const { createLifecycle } = await import("../lib/proxy-lifecycle.mjs");
+  const lifecycle = createLifecycle({ root: ctx.root, home: ctx.home });
+  const observe = (line) => console.log(line);
+  const exitOf = (record) => {
+    if (record.outcome === "start-lock-unavailable") throw new Error(record.error);
+    return record.code;
+  };
+  const { identity, pidRecord, alive } = await lifecycle.readState();
+  if (identity === "ours") {
+    if (exitOf(await lifecycle.restart({ observe })) !== 0) throw new Error("Account Rotator setting saved, but proxy restart failed. Run zcode-kit doctor.");
+  } else if (identity === "down" && pidRecord && alive) {
+    // A live recorded proxy that does not answer may be hung. Ensure running
     // replaces it only with the hung-own proof and refuses anything unproven,
     // so the new setting takes effect without touching unverified processes.
     // A dead record is not a running proxy: nothing to restart (the setting
     // applies on the next start), and a config command must not boot one.
-    if (await manager.start() !== 0) {
+    if (exitOf(await lifecycle.ensureRunning({ observe })) !== 0) {
       console.warn("Account Rotator setting saved. The recorded proxy could not be verified or restarted; run zcode-kit proxy restart, then zcode-kit doctor.");
     }
-  } else if (manager.readPidFile()) {
+  } else if (pidRecord) {
     console.warn("Account Rotator setting saved. A running proxy could not be verified; run zcode-kit doctor before restarting it.");
   }
 }

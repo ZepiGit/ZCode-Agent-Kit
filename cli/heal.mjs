@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // One-shot shared startup preflight. Never guess ownership, print provider
 // bodies, or schedule recurring provider checks. The only process it can end
-// is a proven hung own proxy, via the manager's hung-own proof in start().
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
+// is a proven hung own proxy, via the lifecycle's hung-own proof (ensure running).
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
@@ -14,29 +14,8 @@ export { diagnoseQuota, isQuotaSnapshot } from './quota-diagnostics.mjs';
 import { acquireLock, releaseLock, beginTransaction, rollbackTransaction } from '../lib/transaction.mjs';
 import { formatEventLine } from '../lib/event-line.mjs';
 import { NODE_FLOOR, nodeMajor } from '../lib/node-floor.mjs';
-
-const CAUSES = new Set(['healthy', 'auth3012', 'balance1113', 'balance3001', 'auth', 'balance', 'foreign', 'startup', 'quota-unavailable', 'smoke', 'skipped', 'repair', 'hung', 'respawn', 'unknown']);
-const ACTIONS = new Set(['safe-start', 'quota-check', 'smoke-check', 'reapply', 'recover', 'respawn', 'none']);
-const RESULTS = new Set(['ok', 'failed', 'refused', 'skipped', 'warning', 'unknown']);
-const LOG_LIMIT = 64 * 1024;
-export function logHeal(ctx, { cause, action, result }) {
-  // Allow-list, not redaction: provider text, paths and credentials can never
-  // become log fields. A bounded second file is the only retained rotation.
-  appendHealLine(ctx, `${new Date().toISOString()} cause=${CAUSES.has(cause) ? cause : 'unknown'} action=${ACTIONS.has(action) ? action : 'none'} result=${RESULTS.has(result) ? result : 'unknown'}`);
-}
-function appendHealLine(ctx, text) {
-  try {
-    const dir = ctx.logDir ?? join(ctx.root, 'logs'); mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const file = join(dir, 'heal.log');
-    const line = `${text}\n`;
-    if (existsSync(file) && statSync(file).size + Buffer.byteLength(line) > LOG_LIMIT) {
-      rmSync(file + '.1', { force: true });
-      if (statSync(file).size <= LOG_LIMIT) renameSync(file, file + '.1');
-      else { writeFileSync(file + '.1', 'previous oversized heal log discarded\n'); rmSync(file); }
-    }
-    appendFileSync(file, line, { mode: 0o600 });
-  } catch { /* logging must not break a launch */ }
-}
+import { CAUSES, appendHealLine, logHeal } from '../lib/heal-log.mjs';
+export { logHeal } from '../lib/heal-log.mjs';
 
 function outcome(ctx, code, cause, detail, action = 'quota-check') {
   logHeal(ctx, { cause, action, result: code ? 'failed' : cause === 'quota-unavailable' ? 'warning' : 'ok' });
@@ -132,11 +111,15 @@ export function startupPreflight(ctx, options = {}) {
 async function preflight(ctx, { timeoutMs = 8000 } = {}) {
   let code, recovered = false;
   try {
-    const { createManager } = await import('../proxy/zcode-proxy-manager.mjs');
-    const manager = createManager({ root: ctx.root, home: ctx.home });
-    code = await manager.start({ waitMs: 20000 });
-    // The manager already logged cause=hung action=recover to heal.log.
-    recovered = manager.lastRecovery() !== null;
+    // The lifecycle intent, not the manager CLI: the preflight imports no
+    // presentation code (spec §4). Its narration lines stream to stdout as
+    // the manager printed them.
+    const { createLifecycle } = await import('../lib/proxy-lifecycle.mjs');
+    const started = await createLifecycle({ root: ctx.root, home: ctx.home }).ensureRunning({ waitMs: 20000, observe: line => console.log(line) });
+    if (started.outcome === 'start-lock-unavailable') throw new Error(started.error);
+    code = started.code;
+    // The lifecycle already logged cause=hung action=recover to heal.log.
+    recovered = started.recovered !== null;
   }
   catch { return outcome(ctx, 4, 'startup', 'ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.', 'safe-start'); }
   if (code !== 0) return outcome(ctx, code, code === 3 ? 'foreign' : 'startup', code === 3 ? 'ZCode port occupied or key mismatched. Listener left untouched; run zcode-kit doctor --fix or inspect ownership manually.' : 'ZCode safe start failed. Run zcode-kit proxy restart, then zcode-kit doctor; inspect logs/proxy.log and manager lock ownership.', 'safe-start');
