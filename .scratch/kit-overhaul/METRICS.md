@@ -328,47 +328,82 @@ Every CI run since 42252896054 that ran the full short profile, from the `memory
 
 ### RED check sets per listed single run, owners and flips, both legs (ticket 67; Round 14 Q1 condition 3, Round 15 Q1 and Q2)
 
-Source: the `memory-budget` job logs of `ci.yml` runs up to 42429164758 (`gh api …/actions/jobs/<id>/logs`; the job summary table's "red checks" column per run key). Logs and the parsed table: `/home/AgentKit/overhaul-tools/ci-art/t67-logs/` (`logs/<run>-<leg>.log`, `parsed.json`); scripts `/home/AgentKit/overhaul-tools/t67-scripts/` (`parse.mjs`, `rates.mjs`, `replay.mjs`). A run counts when its job printed the summary table and the key's row is GREEN or RED (a harness failure is no valid run). Only CI runs of the leg's full short profile count (Round 15 Q2 condition 1).
+Source: the `memory-budget` job logs of `ci.yml` runs up to 42429164758, and the `memory-budget-<leg>` artefacts of the ten runs on the ticket-13 tree (`gh api …/actions/jobs/<id>/logs`; the job summary table's "red checks" column per run key). Logs and the parsed table: `/home/AgentKit/overhaul-tools/ci-art/t67-logs/` (`logs/<run>-<leg>.log`, `parsed.json`); scripts `/home/AgentKit/overhaul-tools/t67-scripts/` (`parse.mjs`, `rates.mjs`, `replay.mjs`). A run counts when its job printed the summary table and the key's row is GREEN or RED (a harness failure is no valid run). Only CI runs of the leg's full short profile count (Round 15 Q2 condition 1).
 
 **Matching code.** A run counts for a key when its tree matches the tree 67 merges onto in what that key executes:
 - `tests/memory/lib/verdict.mjs` and `tests/memory/lib/budgets.mjs` identical (from 42360554587 on), the job's Bun 1.4.2 (every run from 42360554587 on);
 - product code: ticket 10's preflight change (`cli/heal.mjs`) present, so windows starts at 42378479007; staging/12 runs before its merge (42391052837, 42398295810, 42415959288) excluded. Later product merges (08 CLI split, 59 Kilo sheet line, 11 installers, 12 proxy dependencies, 32 TUI log pane, 42 Account Rotator setup flow, 68 CRLF config writers, 69 deviceMid reader) touch no code path a listed key runs in a way that moves its RED set: 08's split is behaviour-preserving (08's own S3/short comparison), 12's only staging run on its final tree (42420564808) and every run after it fall inside the earlier sets, 69 keeps the template's `deviceMid: ""` path byte-identical (Round 15 correction 7);
 - linux only: ticket 64's sampler fix (`tests/memory/lib/sampler.mjs`), so linux starts at 42398294952; the windows sampler path is unchanged throughout;
 - S3/short and S3/hung only: ticket 65's `tests/memory/scenarios/s3-concurrency.mjs` (kill-holder adversary, stale-lock round), so only runs on a tree with 65.
-- **Ticket 13 (MCP dependencies: SDK 1.32.2, zod 4.6) merged before 67 (f383d6b).** It changes the bridge's runtime dependencies, which S3 (`procPeak:mcp-bridge`) and S5 run. Round 15 Q2 condition 2 names 13 among the tickets whose merge restarts the S3 count. Runs on the 13 tree: 42425069025 (staging/13, f26a8f7) and 42429164758 (integration f906014), **2 per leg for S3/short and S3/hung**. Their RED sets fall inside the sets of the 10 earlier post-65 runs on every key and leg.
+- **Ticket 13 (MCP dependencies) merged before 67 (f383d6b)** and restarts the count for every key that runs the bridge (Round 15 Q2 condition 2, Round 16 Q2 condition 1): see "Restart on the ticket-13 tree" below.
 
-Linux, 18 runs: 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292, 42424608767, 42425069025, 42425476318, 42427108509, 42429164758. Windows, 26 runs: 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, and the 18 linux run ids from 42398294952 on. S3/short and S3/hung, 10 runs per leg (with 65): 42404639968, 42415957165, 42420564808, 42421432504, 42421424292, 42424608767, 42425069025, 42425476318, 42427108509, 42429164758; 42425069025 and 42429164758 are the two on the ticket-13 tree.
+Round 2 window (both trees mixed; split by tree below): Linux, 18 runs: 42398294952, 42398299724, 42401136452, 42404639968, 42408170742, 42412266693, 42415953488, 42415957165, 42415961268, 42415962768, 42420564808, 42421432504, 42421424292, 42424608767, 42425069025, 42425476318, 42427108509, 42429164758. Windows, 26 runs: 42378479007, 42381135168, 42382114395, 42383999482, 42384925753, 42387910869, 42392375847, 42395651721, and the 18 linux run ids from 42398294952 on. S3/short and S3/hung, 10 runs per leg (with 65): 42404639968, 42415957165, 42420564808, 42421432504, 42421424292, 42424608767, 42425069025, 42425476318, 42427108509, 42429164758; 42425069025 and 42429164758 are the two on the ticket-13 tree.
 
-Per key and leg: matching runs n, then owner, name and RED count per run; † = marked `flips` in `expected-red.json` (RED in fewer than all matching runs, Round 15 Q1 condition 4; every mark below fits its count); last column: RED names no owner holds, with run ids.
+**Restart on the ticket-13 tree (Round 16 Q2 condition 1).** 13 changes the bridge's runtime dependencies (`@modelcontextprotocol/sdk` ^1.30.0 → ^1.32.2, `zod` added). So the matching runs restart on the 13 tree for every key whose executed code holds a bridge session: S3/short, S3/hung and S3/omp on both legs, and linux S5/short. Windows S5/short stays under Round 13's `unstable` bound. The S1, S2, S4 and S7 counts carry on. The floor on the 13 tree is ≥ 10 valid CI runs per leg: 42425069025 (staging/13), 42429164758 (integration f906014) and the eight staging/67 evidence runs 42435825059, 42435917288, 42436010878, 42436099293, 42436186573, 42436269194, 42436354758, 42436440284 (identical tree, empty commits). Rates are recorded on both trees separately (Round 16 Q2 condition 4): a `flips` name RED in every 13-tree run keeps its mark when the pre-13 runs show it GREEN at least once. None of the marks needed that: no `flips` name is RED in 10 of 10 on the 13 tree.
+
+Per key and leg: matching runs n, then owner, name and RED count per run; † = marked `flips` in `expected-red.json` (RED in fewer than all matching runs, Round 15 Q1 condition 4); last column: RED names no owner holds.
+
+**Before 13** (linux 16 runs, windows 24 runs; S3/short and S3/hung: the 8 runs with 65 and without 13: 42404639968, 42415957165, 42420564808, 42421432504, 42421424292, 42424608767, 42425476318, 42427108509). Source: the job logs (`ci-art/t67-logs/parsed.json`, `t67-scripts/rates.mjs`).
 
 | key | leg | n | owner name RED/n | not owned |
 |---|---|---|---|---|
-| S1/burst4 | linux | 18 | 19 procPeak:proxy 18/18 | — |
-| S1/burst16 | linux | 18 | 19 procPeak:proxy 18/18 | — |
-| S1/burst32 | linux | 18 | 19 procPeak:proxy 18/18 | — |
-| S1/bigbody | linux | 18 | 19 procPeak:proxy 18/18 | — |
-| S2/short | linux | 18 | 25 cdn-cache:memory-growth 18/18; 58 solver:cost-per-generation 18/18; 58 solver:retained-before-recycle 18/18; 58 procPeak:scenario 18/18; 58 growth:scenario 14/18 †; 58 procPeak:solver 0/18 † | — |
-| S3/short | linux | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 1/10 †; 37 peak:kit 10/10; 37 procPeak:launcher 10/10; 37 procPeak:mcp-bridge 10/10; 37 procPeak:preflight 2/10 †; 37 procPeak:proxy 3/10 † | — |
-| S3/hung | linux | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 0/10 †; 16 start-over-stale-lock 0/10 †; 37 peak:kit 10/10; 37 procPeak:launcher 10/10; 37 procPeak:mcp-bridge 10/10; 37 procPeak:preflight 8/10 †; 37 procPeak:proxy 3/10 † | — |
-| S3/omp | linux | 18 | 35 omp:concurrent-preflights 18/18; 37 procPeak:proxy 5/18 †; 37 procPeak:preflight 6/18 † | — |
-| S4/short | linux | 18 | 17 stale-lock-after-ctrl-c 18/18; 17 unstoppable-proxy-after-ctrl-c 2/18 †; 17 respawn-recovers-despite-stale-lock 18/18 | — |
-| S5/short | linux | 18 | 30 growth:mcp-bridge 18/18 | — |
-| S7/short | linux | 18 | 33 proxy.log:bounded-while-running 18/18 | — |
-| S1/burst4 | windows | 26 | 19 procPeak:proxy 26/26 | — |
-| S1/burst16 | windows | 26 | 19 procPeak:proxy 26/26 | — |
-| S1/burst32 | windows | 26 | 19 procPeak:proxy 26/26 | — |
-| S1/bigbody | windows | 26 | 19 procPeak:proxy 26/26 | — |
-| S1/stalled | windows | 26 | 61 procPeak:proxy 26/26 | — |
-| S2/short | windows | 26 | 25 cdn-cache:memory-growth 26/26; 58 solver:cost-per-generation 26/26; 58 solver:retained-before-recycle 26/26; 58 procPeak:scenario 26/26; 58 growth:scenario 13/26 †; 58 procPeak:solver 0/26 † | — |
-| S3/short | windows | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 4/10 †; 17 orphans 6/10 †; 37 peak:kit 10/10 | — |
-| S3/hung | windows | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 1/10 †; 16 start-over-stale-lock 1/10 †; 17 orphans 9/10 †; 37 peak:kit 1/10 † | — |
-| S3/omp | windows | 26 | 35 omp:concurrent-preflights 26/26; 37 peak:kit 2/26 † | — |
-| S4/short | windows | 26 | 17 proxy-left-after-stop 1/26 †; 17 failed-lifecycle-steps 1/26 †; 17 stale-lock-after-ctrl-c 26/26; 17 unstoppable-proxy-after-ctrl-c 26/26; 17 respawn-recovers-despite-stale-lock 26/26 | count:proxy 1/26 (42425476318) |
-| S7/short | windows | 26 | 33 proxy.log:bounded-while-running 26/26 | — |
+| S1/burst4 | linux | 16 | 19 procPeak:proxy 16/16 | — |
+| S1/burst16 | linux | 16 | 19 procPeak:proxy 16/16 | — |
+| S1/burst32 | linux | 16 | 19 procPeak:proxy 16/16 | — |
+| S1/bigbody | linux | 16 | 19 procPeak:proxy 16/16 | — |
+| S2/short | linux | 16 | 25 cdn-cache:memory-growth 16/16; 58 solver:cost-per-generation 16/16; 58 solver:retained-before-recycle 16/16; 58 procPeak:scenario 16/16; 58 growth:scenario 14/16 †; 58 procPeak:solver 0/16 † | — |
+| S3/short | linux | 8 | 16 failed-launches 8/8; 16 stale-lock-after-round 8/8; 16 exactly-one-proxy-after-round 1/8 †; 37 peak:kit 8/8; 37 procPeak:launcher 8/8; 37 procPeak:mcp-bridge 8/8; 37 procPeak:preflight 1/8 †; 37 procPeak:proxy 2/8 † | — |
+| S3/hung | linux | 8 | 16 failed-launches 8/8; 16 stale-lock-after-round 8/8; 16 exactly-one-proxy-after-round 0/8 †; 16 start-over-stale-lock 0/8 †; 37 peak:kit 8/8; 37 procPeak:launcher 8/8; 37 procPeak:mcp-bridge 8/8; 37 procPeak:preflight 7/8 †; 37 procPeak:proxy 2/8 † | — |
+| S3/omp | linux | 16 | 35 omp:concurrent-preflights 16/16; 37 procPeak:proxy 4/16 †; 37 procPeak:preflight 5/16 † | — |
+| S4/short | linux | 16 | 17 stale-lock-after-ctrl-c 16/16; 17 unstoppable-proxy-after-ctrl-c 1/16 †; 17 respawn-recovers-despite-stale-lock 16/16 | — |
+| S5/short | linux | 16 | 30 growth:mcp-bridge 16/16 | — |
+| S7/short | linux | 16 | 33 proxy.log:bounded-while-running 16/16 | — |
+| S1/burst4 | windows | 24 | 19 procPeak:proxy 24/24 | — |
+| S1/burst16 | windows | 24 | 19 procPeak:proxy 24/24 | — |
+| S1/burst32 | windows | 24 | 19 procPeak:proxy 24/24 | — |
+| S1/bigbody | windows | 24 | 19 procPeak:proxy 24/24 | — |
+| S1/stalled | windows | 24 | 61 procPeak:proxy 24/24 | — |
+| S2/short | windows | 24 | 25 cdn-cache:memory-growth 24/24; 58 solver:cost-per-generation 24/24; 58 solver:retained-before-recycle 24/24; 58 procPeak:scenario 24/24; 58 growth:scenario 13/24 †; 58 procPeak:solver 0/24 † | — |
+| S3/short | windows | 8 | 16 failed-launches 8/8; 16 stale-lock-after-round 8/8; 16 exactly-one-proxy-after-round 3/8 †; 17 orphans 5/8 †; 37 peak:kit 8/8 | — |
+| S3/hung | windows | 8 | 16 failed-launches 8/8; 16 stale-lock-after-round 8/8; 16 exactly-one-proxy-after-round 1/8 †; 16 start-over-stale-lock 1/8 †; 17 orphans 7/8 †; 37 peak:kit 1/8 † | — |
+| S3/omp | windows | 24 | 35 omp:concurrent-preflights 24/24; 37 peak:kit 2/24 † | — |
+| S4/short | windows | 24 | 17 proxy-left-after-stop 1/24 †; 17 failed-lifecycle-steps 1/24 †; 17 stale-lock-after-ctrl-c 24/24; 17 unstoppable-proxy-after-ctrl-c 24/24; 17 respawn-recovers-despite-stale-lock 24/24; 17 count:proxy 1/24 † | — |
+| S7/short | windows | 24 | 33 proxy.log:bounded-while-running 24/24 | — |
 
-The windows S4/short `count:proxy` RED (2 proxies at once, run 42425476318, integration 06aa96b; 1 of 26) is a name Round 15 Q1 does not assign: it comes back as a question with that run id (Round 15 Q2 condition 4), never folded in.
+Windows S4/short `count:proxy` is owned by 17 and marked `flips` (Round 16 Q1): 1 of 24 before 13 (run 42425476318, integration 06aa96b; Round 15's window counted it 1/26), 0 of 10 on the 13 tree. In 42425476318 the S4/short `summary.json` (`notes.sigintDuringStart`) shows the second proxy in the Ctrl-C-during-start phase (`childSurvived: true`, `pidRecordStartedMs: null`, `nextStart: 0`, `proxiesAfter: 2`), the adoption 17's What-to-build names. Linux S4/short `count:proxy` is 0 of 26 and stays unlisted.
 
-On the ticket-13 tree alone (2 runs per leg) the S3 sets are: linux S3/short and S3/hung RED on failed-launches, stale-lock-after-round, peak:kit, procPeak:launcher, procPeak:mcp-bridge in 2 of 2, procPeak:preflight and procPeak:proxy in 1 of 2; windows S3/short failed-launches, stale-lock-after-round, peak:kit 2 of 2, exactly-one-proxy-after-round and orphans 1 of 2; windows S3/hung failed-launches, stale-lock-after-round, orphans 2 of 2.
+**On the 13 tree** (10 runs per leg, every key). Source: the `memory-budget-<leg>` artefacts of each run (`/home/AgentKit/overhaul-tools/ci-art/t67-r3-art/<run>-<leg>/job-summary.json`, `t67-scripts/rates-artifacts.mjs`).
+
+| key | leg | n | owner name RED/n | not owned |
+|---|---|---|---|---|
+| S1/burst4 | linux | 10 | 19 procPeak:proxy 10/10 | — |
+| S1/burst16 | linux | 10 | 19 procPeak:proxy 10/10 | — |
+| S1/burst32 | linux | 10 | 19 procPeak:proxy 10/10 | — |
+| S1/bigbody | linux | 10 | 19 procPeak:proxy 10/10 | — |
+| S2/short | linux | 10 | 25 cdn-cache:memory-growth 10/10; 58 solver:cost-per-generation 10/10; 58 solver:retained-before-recycle 10/10; 58 procPeak:scenario 10/10; 58 growth:scenario 1/10 †; 58 procPeak:solver 0/10 † | — |
+| S3/short | linux | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 0/10 †; 37 peak:kit 10/10; 37 procPeak:launcher 10/10; 37 procPeak:mcp-bridge 10/10; 37 procPeak:preflight 5/10 †; 37 procPeak:proxy 3/10 † | — |
+| S3/hung | linux | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 0/10 †; 16 start-over-stale-lock 0/10 †; 37 peak:kit 10/10; 37 procPeak:launcher 10/10; 37 procPeak:mcp-bridge 10/10; 37 procPeak:preflight 7/10 †; 37 procPeak:proxy 3/10 † | — |
+| S3/omp | linux | 10 | 35 omp:concurrent-preflights 10/10; 37 procPeak:proxy 3/10 †; 37 procPeak:preflight 6/10 † | — |
+| S4/short | linux | 10 | 17 stale-lock-after-ctrl-c 10/10; 17 unstoppable-proxy-after-ctrl-c 4/10 †; 17 respawn-recovers-despite-stale-lock 10/10 | — |
+| S5/short | linux | 10 | 30 growth:mcp-bridge 9/10 | — |
+| S7/short | linux | 10 | 33 proxy.log:bounded-while-running 10/10 | — |
+| S1/burst4 | windows | 10 | 19 procPeak:proxy 10/10 | — |
+| S1/burst16 | windows | 10 | 19 procPeak:proxy 10/10 | — |
+| S1/burst32 | windows | 10 | 19 procPeak:proxy 10/10 | — |
+| S1/bigbody | windows | 10 | 19 procPeak:proxy 10/10 | — |
+| S1/stalled | windows | 10 | 61 procPeak:proxy 10/10 | — |
+| S2/short | windows | 10 | 25 cdn-cache:memory-growth 10/10; 58 solver:cost-per-generation 10/10; 58 solver:retained-before-recycle 10/10; 58 procPeak:scenario 10/10; 58 growth:scenario 5/10 †; 58 procPeak:solver 0/10 † | — |
+| S3/short | windows | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 1/10 †; 17 orphans 9/10 †; 37 peak:kit 10/10 | — |
+| S3/hung | windows | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 2/10 †; 16 start-over-stale-lock 1/10 †; 17 orphans 9/10 †; 37 peak:kit 2/10 † | — |
+| S3/omp | windows | 10 | 35 omp:concurrent-preflights 10/10; 37 peak:kit 0/10 † | — |
+| S4/short | windows | 10 | 17 proxy-left-after-stop 0/10 †; 17 failed-lifecycle-steps 0/10 †; 17 stale-lock-after-ctrl-c 10/10; 17 unstoppable-proxy-after-ctrl-c 10/10; 17 respawn-recovers-despite-stale-lock 10/10; 17 count:proxy 0/10 † | — |
+| S7/short | windows | 10 | 33 proxy.log:bounded-while-running 10/10 | responses-store:heap-at-cap 1/10 |
+
+**Merge-gate replay (Round 16 Q2 condition 2).** `t67-scripts/replay-artifacts.mjs` replays each run's `job-summary.json` results through 67's final `ratchet.mjs` and `expected-red.json`. It checks (a) a RED that no owner holds, (b) an invalid run or a harness failure, (c) an owned name not marked `flips` that is GREEN, and (d) a listed entry GREEN with no `flips` name. The two runs from before 67 (42425069025, 42429164758) carry no `checkNames`; the script rebuilds them from each run's own `summary.json`, as `job.mjs` now does. All 20 legs are valid: every key ran GREEN or RED, with no harness failure. 16 of 20 pass. Four results go to the Owner Proxy (round 17), with no owner or `flips` edit in between:
+- 42436010878 windows: S7/short `responses-store:heap-at-cap` 98 MB (budget 96; 64 MB in the other 9 runs on the 13 tree; never RED in the 26 earlier windows runs), not owned. (a)
+- 42436186573 linux: S5/short GREEN. `growth:mcp-bridge` is 39.53 %/1k (budget 5) with trend false: net rise 9.7 % (< 10), no rising run, window medians 88.7, 91.9, 95.6, 96.5, 97.3, 97.3 MB. The other 9 runs on the 13 tree are 39.76–45.83 with trend true. (c) and (d)
+- 42436354758 windows: S1/short RED only on commit, `growth:proxy` 5.25 %/1k commit (budget 5; WS 1.86). The key is unlisted; earlier RED in 42382114395, also on `growth:proxy` only on commit. On the 13 tree the commit values are 2.38–5.25. (a)
+- Not memory: windows `test-kit` failures in 42436186573 (Node 24, `tests/manager-safety.test.mjs:176` "the process must be gone") and 42436440284 (Node 26, `tests/memory/loop.test.mjs:470` "no-op hook charged 2.55 MB"), both in tests 67 does not touch.
 
 Local supplement (labelled, **never counted**, Round 15 Q2 condition 1; Linux, Node 26.7.0, Bun 1.4.2, `node tests/memory/job.mjs --only <key>`, ports 19671–19678, `/home/AgentKit/overhaul-tools/t67-memloop/`): S3/hung on 5c68c2f, 8 of 8 RED on failed-launches, stale-lock-after-round, peak:kit, procPeak:launcher, procPeak:mcp-bridge, plus procPeak:proxy in 6 of 8. S3/short on 58ad4c6, 8 of 8 RED on exactly peak:kit, procPeak:launcher, procPeak:mcp-bridge, failed-launches, stale-lock-after-round. Neither shows procPeak:preflight, which CI shows (Round 15 correction 6).
 

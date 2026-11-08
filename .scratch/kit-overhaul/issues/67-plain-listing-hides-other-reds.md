@@ -149,3 +149,36 @@ The union-only derivation is wrong for the same reason the plain listing is: it 
   **Suites** on 6961023: `npm run test` 835 tests, 816 pass, 19 skipped, 0 fail; `npm run test:proxy` 1384 pass, 0 fail; `npm run test:mcp` 97 tests, 96 pass, 1 skipped (`reports/t67-r2-{test,proxy,mcp}.log`).
 
   **Left for the orchestrator.** The CI runs for the S3 floor (H). Spec §18 and RUNLOG (round 15 condition 10). METRICS.md (section "RED check sets per listed single run, owners and flips") now carries the flip rates.
+
+- 2026-11-08 (implementer, round 3: Owner Proxy round 16). Branch `ticket/67-owned-checks`; integration tip merged at b2aa8ae (eec3f4a: tickets 17 and 37 updated); list change 3b414b2.
+
+  **G (Round 16 Q1).** Windows `S4/short` gains `count:proxy` under owner 17 and in its `flips` list. Trace: 17's What-to-build "The next start adopts an orphaned proxy through the identity proof and never spawns a second one", and 17's new acceptance line (integration eec3f4a) "Loop S4, both legs: exactly 1 proxy at every sample (`count:proxy` ≤ 1), including after a Ctrl-C during start that leaves a proxy without a start-time record (windows run 42425476318, Round 16 Q1). On windows, `count:proxy` is one of 17's names in `S4/short`." The measured link is run 42425476318 (windows): its S4/short `summary.json` `notes.sigintDuringStart` shows a Ctrl-C 150 ms into `proxy start` leaving a proxy with no start-time record (`childSurvived: true`, `pidRecordStartedMs: null`). The next start then spawned a second proxy (`nextStart: 0`, `proxiesAfter: 2`). Rate: 1 of 24 runs before 13, 0 of 10 on the 13 tree. Linux `count:proxy` stays unlisted (0 of 26). Attribution check (Round 16 Q1 condition 4): no S4/short `count:proxy` RED appears in the 10 runs on the 13 tree, so there is no phase to record.
+
+  **Test change (C2 justification).** The real-list test in `tests/memory/verdict.test.mjs` used `count:proxy` as the one unowned RED on every listed key and asserted that no entry owns it. Round 16 Q1 makes that false for windows S4/short. The test keeps its purpose: on every listed single run of both legs, one added RED the key's owners do not hold fails and names the owners. It now picks `count:proxy` where the key's owners don't hold it and `orphans` otherwise (windows S4/short), and it asserts `count:proxy` is owned only in windows S4/short. It failed on the list before 3b414b2 (`reports/t67-r3-red-verdict.log`: "windows S4/short") and passes after. Every other case is unchanged. The mutation script (`reports/t67-r3-mutation.log`) kills 10 of 10 on 3b414b2, with every restore from the committed sha.
+
+  **Traces re-checked on the merged tip.** Every owned name is still in its owner's text. 17's new S4 line adds `count:proxy`. 37's replaced windows line (≤ 514 MB commit, `peak:kit`) still names `peak:kit`, and its round-15 line ("remove 37's names …") is unchanged. No trace fails.
+
+  **H (Round 16 Q2): merge-gate replay.** `/home/AgentKit/overhaul-tools/t67-scripts/replay-artifacts.mjs` replays the `memory-budget-<leg>` artefacts (`ci-art/t67-r3-art/<run>-<leg>/job-summary.json`) through the final `ratchet.mjs` and `expected-red.json`. It checks (a) unowned REDs, (b) validity and harness failures, (c) owned non-`flips` names GREEN, and (d) entries GREEN with no `flips`. For 42425069025 and 42429164758 (from before 67, no `checkNames` in the job summary) it rebuilds the names from each run's `summary.json`. Result over the ten runs on the 13 tree, per run and leg:
+
+  | run | linux | windows |
+  |---|---|---|
+  | 42425069025 (staging/13) | PASS | PASS |
+  | 42429164758 (integration f906014) | PASS | PASS |
+  | 42435825059 | PASS | PASS |
+  | 42435917288 | PASS | PASS |
+  | 42436010878 | PASS | FAIL (a): S7/short `responses-store:heap-at-cap` 98 MB, budget 96, not owned — pending round 17 |
+  | 42436099293 | PASS | PASS |
+  | 42436186573 | FAIL (c)+(d): S5/short GREEN, `growth:mcp-bridge` 39.53 %/1k with trend false — pending round 17 | PASS |
+  | 42436269194 | PASS | PASS |
+  | 42436354758 | PASS | FAIL (a): S1/short (unlisted) RED only on commit, `growth:proxy` 5.25 %/1k commit, budget 5 — pending round 17 |
+  | 42436440284 | PASS | PASS |
+
+  All 20 legs are valid: every key GREEN or RED, with no harness failure. On every other key of every run, each listed entry passes (RED only on owned names, or GREEN through `flips` with its line). Every non-`flips` name is RED in all 10 runs, except linux S5/short `growth:mcp-bridge` at 9/10. No `flips` name is RED in all 10 runs, so Round 16 Q2 condition 4 is not needed for any mark. Not memory, pending ticket 70 / the orchestrator: windows `test-kit` failed in 42436186573 (Node 24, `tests/manager-safety.test.mjs:176`) and in 42436440284 (Node 26, `tests/memory/loop.test.mjs:470` "no-op hook charged 2.55 MB"), both in tests 67 does not change. Per round 16 Q2 condition 3 and the orchestrator's instruction, no owner list or `flips` mark was edited for the round-17 items.
+
+  **METRICS.md** ("RED check sets per listed single run, owners and flips") records:
+  - the restart scope (S3/short, S3/hung and S3/omp on both legs, plus linux S5/short);
+  - each name's rate before 13 and on the 13 tree, in two tables;
+  - `count:proxy` under 17 (1/24 †, 0/10 †) with its phase;
+  - the replay result.
+
+  **Suites** on the round-3 tree: `npm run test` 835 tests, 816 pass, 19 skipped, 0 fail; `npm run test:proxy` 1384 pass, 0 fail; `npm run test:mcp` 97 tests, 96 pass, 1 skipped (`reports/t67-r3-{test,proxy,mcp}.log`).
