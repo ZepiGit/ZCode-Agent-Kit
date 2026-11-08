@@ -277,6 +277,7 @@ async function identityServer(t, port, mode) {
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: "ok", provider: "zai" }));
   });
   await new Promise((r) => server.listen(port, "127.0.0.1", r));
+  server.unref(); // a failing fixture teardown skips the later after-hooks; this server must not keep the run alive
   t.after(() => { server.closeAllConnections(); server.close(); });
 }
 
