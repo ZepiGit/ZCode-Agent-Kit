@@ -100,3 +100,33 @@ ADR: no
   - **Pending CI (orchestrator verifies after merge and push):** the floor measurement run with the marker (≥ 20 windows and ≥ 20 linux values, then n); the pre-merge run confirming the four rules (S7 series recorded on both legs, with any minimum > 66 coming back; windows S1/short 5 repetitions; linux S6/short 5 repetitions; the floor test with 5 hosts on all four test-kit legs); the memory-budget job and fast suite green on ubuntu and windows.
   - **Expected-red entries removed:** none (71 owns no entry).
   - **Cost:** about +18 min on the windows memory job (S1/short × 5) and about +20 s on linux (S6/short × 5). The floor test adds about 6 s per test-kit leg.
+- 2026-11-08 (implementer, round 2: the OMP floor n from CI). Implementation commit ffdf4ef. The integration tip 92a58a2 (tickets 15, 19, 24 and others) is merged in; this Comments commit is the head.
+  - **Measurement:** CI run 42467078897 (staging/71 with the marker = 20). Values were read from the job logs (`gh api …/actions/jobs/<id>/logs`, copies in `/home/AgentKit/overhaul-tools/t71-floor-ci/`).
+    - test-kit (ubuntu-latest, Node 26.13.0), RSS: 20 values, min 0.31, median 0.44, max 0.69 MB; 0 at or above 2.5; n = 3.
+    - test-kit (windows-latest, Node 24.22.2), commit: 20 values, min 0, median 0.06, max 2.49 MB; two values at 2.43 and 2.49, within 0.07 MB of 2.5; 0 at or above 2.5; n = 3. Working set beside it 0.07–0.29 MB.
+    - test-kit (ubuntu-latest, 24) and test-kit (windows-latest, 26) produced **no values**. Both failed in `oven-sh/setup-bun` with `Unexpected HTTP response: 504` before any test ran. ux-before (windows) and both memory-budget legs failed the same way. That is infrastructure, not a test result.
+    - Each OS leg still has ≥ 20 values, as condition 1 requires.
+    - In both legs that ran, the only failing test is the intended marker guard (857 tests: linux 837 pass, windows 831 pass, 1 fail each; the rest skipped).
+  - **n = 5, unchanged.** It is the largest n over the estimates, as in Round 11 Q1:
+    - CI windows 0/20 → n = 3; CI linux 0/20 → n = 3;
+    - windows pooled with its record, 1/36 → n = 3 (n = 3: 0.23 %);
+    - the windows record alone, 1/16 at 2.55 MB (42436440284) → n = 3: 1.12 % > 1 %, so **n = 5** (0.22 %).
+    - The less favourable estimate is therefore the record alone, not the pooled one.
+    - Supporting reading: the windows commit floor is in two groups (0–0.13 MB, and 2.43–2.55 MB). 3 of 36 known windows values are ≥ 2.43 (8.3 %: n = 3 → 1.97 %, n = 5 → 0.51 %), so n = 5 also holds if the cut moved slightly.
+    - No value is ≥ 5 MB, and an n reaches ≤ 1 %, so nothing comes back under condition 1.
+    - For ticket 35: on about 1 windows run in 12 the floor sits about 2.5 MB below the 5 MB gate. Recorded in METRICS.
+  - **Code:**
+    - `OMP_FLOOR` in budgets.mjs keeps n = 5; its comment now carries the computation.
+    - The verdict.test.mjs pin now derives n from the 40 CI values and the record, all literals from the logs, and asserts every value < 5 MB.
+    - Mutant from ffdf4ef (`n: 3`): the pin fails (`t71-r2-mut-n3`). Restored with `git checkout ffdf4ef -- tests/memory/lib/budgets.mjs`; `git diff` empty.
+  - **Records:** the METRICS floor table now has the two CI legs, the pooled row and the reading for ticket 35; the "pending CI" rows are gone.
+  - **Suites** on the merged tree (after the 92a58a2 merge):
+    - `npm run test`: 873 tests, 854 pass, 0 fail, 19 skipped;
+    - `npm run test:proxy`: 1,420 pass, 0 fail;
+    - typecheck clean;
+    - `npm run test:mcp`: 96 pass, 0 fail, 1 skipped.
+  - **Local job on the tree that includes 19** (`t71-r2-s7-s6`, before the 24 merge, which touches only the solver): ratchet holds.
+    - S7/short heap-at-cap 61 MB (min 70 − h0 9; first reading 71, so the minimum came in below the first reading).
+    - S6/short 8, 8, 8, 8, 8, GREEN.
+  - **The marker:** not touched. It was never on this branch; the orchestrator removes it on staging/71.
+  - **Still pending CI:** the pre-merge run confirming the four rules, and the memory-budget job and fast suite green on ubuntu and windows. The memory-budget legs of 42467078897 never ran (504), so the windows S1/short 5-repetition rule has not yet run on CI.
