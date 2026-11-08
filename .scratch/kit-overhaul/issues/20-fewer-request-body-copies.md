@@ -158,3 +158,9 @@ Not changed: response paths, the ordered transport, upstream.ts (headers), retri
   - A connection still opened past the preload.
   - Real egress from the fast suite, outside B2's spirit.
 - `tests/proxy-lifecycle.test.mjs` binds fixed ports 19150–19159, so parallel agents' suites collide (EADDRINUSE).
+- 2026-11-08 (implementer, after the evidence commit a86c498): the integration tip moved to 9e98295 (ticket 72, Owner Proxy rounds 25–26). It is merged as 589d6ba with no conflicts. The merge changes no file under `zcode-proxy-src/`, `mcp/`, `lib/` or `cli/`, and none on the S1 request path, so the memory numbers above stand. Suites on 589d6ba:
+  - `npm run test` (`t20-full-kit3`): 884 tests, 866 pass, 0 fail, 18 skipped;
+  - `npm run test:proxy` + typecheck (`t20-full-proxy3`): 1524 pass, 0 fail, 101 files, typecheck clean;
+  - `npm run test:mcp` (`t20-full-mcp3`): 100 tests, 99 pass, 0 fail, 1 skipped, `dist/` unchanged.
+
+  Rounds 25–26 do not touch ticket 20.
