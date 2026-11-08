@@ -39,6 +39,14 @@ function largeEnvelope(dir: string, url: string, fetchedAt: number, length: numb
   fs.truncateSync(file, header.length + length);
 }
 
+/** A raw body under an entry name, as kits up to v0.2.31 wrote it in place, last modified at `mtime`. */
+function legacy(dir: string, name: string, size: number, mtime: number) {
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, "");
+  fs.truncateSync(file, size);
+  fs.utimesSync(file, mtime / 1000, mtime / 1000);
+}
+
 const listing = (dir: string) => fs.readdirSync(dir).sort();
 const totalBytes = (dir: string) => listing(dir).reduce((sum, name) => sum + fs.statSync(path.join(dir, name)).size, 0);
 
@@ -128,5 +136,66 @@ describe("CDN disk age prune (only entries expired at max(14 days, configured TT
     const before = listing(dir);
     new CaptchaCdnCache({ directory: dir, ttlMs: 0, now: () => T0 }).put(urlOf(9), bodyOf(9));
     expect(listing(dir)).toEqual(before);
+  });
+});
+
+describe("CDN disk prune skips temp files and files being written", () => {
+  it("never touches temp files, foreign names, directories or links, however old and however full the directory", () => {
+    const dir = directory();
+    for (let i = 0; i < 5; i++) largeEnvelope(dir, urlOf(i), T0 - 30 * DAY + i, 60 * MiB);
+    const hash = nameOf(urlOf(7));
+    const skipped = [
+      `${hash}.4242.${crypto.randomUUID()}.tmp`, // another process's publication in progress
+      `${hash}.crashed.tmp`,
+      "README",
+      `${hash.slice(0, 63)}`,
+      `${hash}x`,
+      hash.toUpperCase(),
+    ];
+    for (const name of skipped) legacy(dir, name, 70 * MiB, T0 - 40 * DAY);
+    fs.mkdirSync(path.join(dir, nameOf(urlOf(8))));
+    let link: string | undefined;
+    try {
+      fs.symlinkSync(path.join(dir, "README"), path.join(dir, nameOf(urlOf(6))));
+      link = nameOf(urlOf(6));
+    } catch {} // Windows runners without the symlink privilege
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    const expected = [...skipped, nameOf(urlOf(8)), ...(link ? [link] : [])];
+    expect(listing(dir)).toEqual(expected.sort());
+    for (const name of skipped) expect(fs.statSync(path.join(dir, name)).size).toBe(70 * MiB);
+  });
+
+  it("does not delete a legacy raw file modified within the last minute (a kit up to v0.2.31 may be writing it in place), but counts its bytes", () => {
+    const dir = directory();
+    for (let i = 0; i < 3; i++) largeEnvelope(dir, urlOf(i), T0 - (3 - i) * HOUR, 60 * MiB);
+    const writing = nameOf(urlOf(9));
+    legacy(dir, writing, 100 * MiB, T0 - 59_000);
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    // 280 MiB: the oldest envelope goes, the file being written stays.
+    expect(listing(dir)).toEqual([nameOf(urlOf(1)), nameOf(urlOf(2)), writing].sort());
+    expect(totalBytes(dir)).toBeLessThanOrEqual(256 * MiB);
+  });
+
+  it("does not delete a legacy file with a modification time ahead of the clock", () => {
+    const dir = directory();
+    const ahead = nameOf(urlOf(9));
+    legacy(dir, ahead, 300 * MiB, T0 + DAY);
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    expect(listing(dir)).toEqual([ahead]);
+  });
+
+  it("prunes legacy raw files (sha256 and the older sha1 names) by their modification time, and evicts them first by age", () => {
+    const dir = directory();
+    const sha1 = crypto.createHash("sha1").update(urlOf(1)).digest("hex");
+    legacy(dir, sha1, 1_000, T0 - 15 * DAY);
+    legacy(dir, nameOf(urlOf(2)), 1_000, T0 - 14 * DAY);
+    legacy(dir, nameOf(urlOf(3)), 1_000, T0 - 13 * DAY); // kept: not expired at 14 days
+    legacy(dir, crypto.createHash("sha1").update(urlOf(4)).digest("hex"), 1_000, T0 - 10 * DAY);
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    expect(listing(dir)).toEqual([nameOf(urlOf(3)), crypto.createHash("sha1").update(urlOf(4)).digest("hex")].sort());
+    // By age in the size prune: a 10-day-old legacy file goes before an envelope fetched an hour ago.
+    for (let i = 10; i < 15; i++) largeEnvelope(dir, urlOf(i), T0 - HOUR, 52 * MiB);
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    expect(listing(dir)).toEqual([11, 12, 13, 14].map((i) => nameOf(urlOf(i))).sort());
   });
 });

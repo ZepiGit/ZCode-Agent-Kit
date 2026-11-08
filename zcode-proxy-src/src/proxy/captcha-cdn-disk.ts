@@ -17,6 +17,12 @@ export const CDN_DISK_MIN_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 // other installations sharing the directory are counted too.
 export const CDN_DISK_RESCAN_MS = 60_000;
 
+// Kits up to v0.2.31 wrote raw bodies in place under the entry name (no temp
+// file, no envelope). Such a file modified this recently, or with a
+// modification time ahead of the clock, may be in the middle of that write:
+// it is counted but never deleted.
+export const CDN_DISK_WRITE_GRACE_MS = 60_000;
+
 export function cdnDiskAgeLimit(ttlMs: number): number {
   return Math.max(CDN_DISK_MIN_AGE_MS, ttlMs);
 }
@@ -41,14 +47,19 @@ export interface CdnDiskPruneReport {
 interface Entry {
   name: string;
   size: number;
-  /** Retrieval time from the envelope header. */
+  /** Retrieval time from the envelope header; the modification time for a legacy raw file. */
   time: number;
+  /** A legacy raw file that may be being written in place: never deleted. */
+  busy: boolean;
   dev: number;
   ino: number;
   mtimeMs: number;
 }
 
-const ENTRY_NAME = /^[0-9a-f]{64}$/;
+// Entry names: the hex sha256 of the URL (every kit since the sha1 names),
+// and the older hex sha1. Anything else (temp files `<name>.<pid>.<uuid>.tmp`,
+// other files, directories, links) is not an entry and is never touched.
+const ENTRY_NAME = /^(?:[0-9a-f]{64}|[0-9a-f]{40})$/;
 const HEADER_MAX = 513;
 
 function readHeader(file: string, size: number): { fetchedAt: number } | null {
@@ -120,13 +131,14 @@ export class CdnDiskPruner {
       let stat: fs.Stats;
       try { stat = fs.lstatSync(file); } catch { continue; }
       if (!stat.isFile()) continue;
-      const header = readHeader(file, stat.size);
-      if (!header) continue;
-      entries.push({ name, size: stat.size, time: header.fetchedAt, dev: stat.dev, ino: stat.ino, mtimeMs: stat.mtimeMs });
+      const header = name.length === 64 ? readHeader(file, stat.size) : null;
+      const time = header ? header.fetchedAt : stat.mtimeMs;
+      const busy = !header && !(now - stat.mtimeMs >= CDN_DISK_WRITE_GRACE_MS);
+      entries.push({ name, size: stat.size, time, busy, dev: stat.dev, ino: stat.ino, mtimeMs: stat.mtimeMs });
     }
     const kept = new Set<Entry>();
     for (const entry of entries) {
-      if (now - entry.time >= this.ageLimitMs && this.remove(entry)) {
+      if (!entry.busy && now - entry.time >= this.ageLimitMs && this.remove(entry)) {
         report.removed++;
         report.removedBytes += entry.size;
       } else kept.add(entry);
@@ -137,12 +149,12 @@ export class CdnDiskPruner {
       const oldestFirst = [...kept].sort((a, b) => a.time - b.time || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       for (const entry of oldestFirst) {
         if (total <= this.maxBytes) break;
-        if (this.remove(entry)) { total -= entry.size; kept.delete(entry); report.removed++; report.removedBytes += entry.size; }
+        if (!entry.busy && this.remove(entry)) { total -= entry.size; kept.delete(entry); report.removed++; report.removedBytes += entry.size; }
       }
     }
     for (const entry of kept) {
       this.sizes.set(entry.name, entry.size);
-      this.nextExpiry = Math.min(this.nextExpiry, entry.time + this.ageLimitMs);
+      if (!entry.busy) this.nextExpiry = Math.min(this.nextExpiry, entry.time + this.ageLimitMs);
     }
     this.bytes = total;
     report.entries = entries.length;
