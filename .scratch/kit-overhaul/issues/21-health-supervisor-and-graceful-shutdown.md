@@ -208,3 +208,40 @@ So 21 does not come back on the hard limit. The soft limit: windows commit peaks
   - proxy (`t21-full3-proxy`): 1442 pass, 0 fail, 97 files; typecheck clean;
   - mcp (`t21-full3-mcp`): 96/97, 1 skipped, 0 fail.
 - 24 touches only the captcha solver dispatcher. 21 does not call the solver: the soft limit never recycles it, and shutdown uses the existing `shutdownCaptchaRuntime`. The memory-loop numbers above stand.
+
+### 2026-11-08 — implementer, round 2 (pre-merge run 42480631098, Owner Proxy rounds 25/26)
+
+**Branch:** `ticket/21-health-supervisor`. Merged the integration tip `f79da34` (tickets 15, 24, 25, 36, 71) as `1e0e45b`, with no conflicts. Product code is unchanged since `9961d3b`; the head SHA is the commit that adds this comment.
+
+**The charged failure:** windows test-kit Node 26, `login-store.test.ts:181`, "kit setup, enable/disable … through the real wrapper", 5372 ms, Bun's 5 s default timeout, `accounts enable` status null. Job 128731568530; log at `/home/AgentKit/overhaul-tools/t21r2/win26.log`.
+
+**Root cause: not found in 21's diff, and the evidence shows 21's code does not run in that test.** No product or test change was made: there is nothing in 21 to fix, and raising the timeout is not justified, because no inherent new duration exists.
+
+1. **What the test executes.** I ran the test under `strace -f -e execve,openat` on this branch (linux; `/home/AgentKit/overhaul-tools/t21r2/strace.txt`). The complete process tree is:
+   - `node cli/zcode-kit.mjs` for setup, `accounts enable/disable` and `auth login`;
+   - `bun run src/index.ts auth …` subcommands (`auth accounts import-current`, `auth login`).
+   There is no `serve`, no manager, no proxy start and no signal anywhere, so the drain, the signal handlers (and their move before the listening line) and the supervisor start never run. 21's only contact is that each `bun src/index.ts` process loads two more small modules (`runtime/supervisor.ts`, `runtime/memory-thresholds.ts`), which define functions and constants and run no code at load time.
+2. **The extra module load costs nothing measurable.** `bun src/index.ts --cli version` over 25 runs: tip `16bfaa2` 80/78 ms median, this branch 77/78 ms (`t21r2-startup`).
+3. **Per call, the test is identical on both trees.** I timed each wrapper call (an instrumented copy of the test, removed afterwards, 3 runs per tree, `t21r2-probe-*`):
+   - tip: setup 161–179 ms, `accounts enable` 250–260 ms, whole test 1166–1191 ms;
+   - branch: setup 171 ms, `accounts enable` 262–266 ms, whole test 1186–1193 ms;
+   - the first branch run (419/365 ms, 1541 ms) paid the first transpile of the merged files.
+4. **The test runs before any of 21's tests in that process.** Bun ran the files in path order (`src\auth\login-store` before `src\config`, `src\runtime`, `src\server`), so no supervisor, drain or loader test had run in that process when it failed.
+5. **Windows CI history** (this test's duration, from the job logs; `/home/AgentKit/overhaul-tools/t21r2/j-*.log`):
+   - the same commit on windows Node 24 (job 128731568417): 1631.55 ms, pass;
+   - 24 windows jobs of runs 42448791937–42483787372: 1171–1722 ms, all pass;
+   - 6 later windows jobs without 21 (42493218404 integration 8126454, 42494299680 staging/29, 42495987510 staging/15b): 1109–1659 ms, all pass. That includes staging/29, whose proxy suite ran 117–127 s, so a slow runner alone did not produce it there.
+6. **The failing job itself.**
+   - The previous test passed at 12:33:14.557, and Bun's "killed 1 dangling process" came at 12:33:19.559, exactly at the 5 s budget. setup had returned 0 (line 176 passed), so the killed child was `node … accounts enable`. Normally setup + enable take ≈ 0.45 s.
+   - The same job was slow elsewhere too: proxy suite 64.09 s (the same commit on Node 24: 40.47 s; the other windows jobs 31–58 s); "15 consecutive CLI logins" 2528.79 ms and "corrupt pool …" 665.71 ms were the highest of all 25 windows jobs.
+
+**Conclusion:** one occurrence in one leg, in a test whose processes run none of 21's code, while the other leg passed on the same commit. A transient stall of that runner is the explanation the evidence supports. I cannot reproduce on windows (no windows host here; I cannot push). Round 26 asks for evidence that it also occurs without 21; I have none, because it has not recurred in any run, with or without 21. This needs the orchestrator's decision:
+- (a) re-run job 128731568530 of run 42480631098 on the same commit, or restage staging/21 on `1e0e45b`;
+- (b) for the next occurrence: the test gives each wrapper call 15 s (`spawnSync` timeout) but the whole test only Bun's default 5 s. That inconsistency is the test's, not 21's, and the only lever that would not touch 21's code.
+
+**Full suites on `1e0e45b`** (Bun 1.4.2, Node 26.7.0):
+- `npm run test` (`t21r2-full-kit`): 881 tests, 863 pass, 0 fail, 18 skipped;
+- `npm run test:proxy` (`t21r2-full-proxy`): 1473 pass, 0 fail, 101 files; `test:proxy-typecheck` clean;
+- `npm run test:mcp` (`t21r2-full-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped; `dist/` unchanged.
+
+The memory-loop and footprint evidence above stands: 21's product code is unchanged, and the merged tickets touch the solver, collections, MCP and measurement rules, none of 21's paths.
