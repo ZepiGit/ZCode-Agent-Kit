@@ -6,11 +6,27 @@ import path from "node:path";
 // becomes a network fetch once the memory tier no longer holds it, so the size
 // prune evicts the oldest entries and only when the directory is above the cap.
 export const CDN_DISK_MAX_BYTES = 256 * 1024 * 1024;
+// The age prune removes only entries already expired for this installation:
+// the limit is max(14 days, configured TTL), so an installation with a TTL of
+// up to ~24.8 days keeps serving its own entries (ADR-0009 correction 2). The
+// 14-day floor leaves expired entries to installations sharing the directory
+// with a longer TTL.
+export const CDN_DISK_MIN_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+// After a write, the pruner scans the directory again when its view (the last
+// scan plus this process's writes) is older than this, so entries written by
+// other installations sharing the directory are counted too.
+export const CDN_DISK_RESCAN_MS = 60_000;
+
+export function cdnDiskAgeLimit(ttlMs: number): number {
+  return Math.max(CDN_DISK_MIN_AGE_MS, ttlMs);
+}
 
 export interface CdnDiskPruneOptions {
   directory: string;
   now: () => number;
   maxBytes: number;
+  /** Entries at least this old are pruned: cdnDiskAgeLimit(ttl). */
+  ageLimitMs: number;
 }
 
 export interface CdnDiskPruneReport {
@@ -62,28 +78,39 @@ export class CdnDiskPruner {
   private readonly directory: string;
   private readonly now: () => number;
   private readonly maxBytes: number;
+  private readonly ageLimitMs: number;
+  // The view: entry sizes as last scanned plus this process's own writes.
   private readonly sizes = new Map<string, number>();
   private bytes = 0;
+  private scannedAt = -Infinity;
+  private nextExpiry = Infinity;
 
   constructor(options: CdnDiskPruneOptions) {
     this.directory = options.directory;
     this.now = options.now;
     this.maxBytes = options.maxBytes;
+    this.ageLimitMs = options.ageLimitMs;
   }
 
-  /** Called after this process published an envelope of `size` bytes under `name`. */
-  afterWrite(name: string, size: number): CdnDiskPruneReport | null {
+  /** Called after this process published an envelope of `size` bytes, fetched at `fetchedAt`, under `name`. */
+  afterWrite(name: string, size: number, fetchedAt: number): CdnDiskPruneReport | null {
     this.bytes += size - (this.sizes.get(name) ?? 0);
     this.sizes.set(name, size);
-    if (this.bytes <= this.maxBytes) return null;
+    this.nextExpiry = Math.min(this.nextExpiry, fetchedAt + this.ageLimitMs);
+    const now = this.now();
+    const stale = !(now >= this.scannedAt && now - this.scannedAt < CDN_DISK_RESCAN_MS);
+    if (this.bytes <= this.maxBytes && now < this.nextExpiry && !stale) return null;
     return this.prune();
   }
 
   /** A full scan and prune. Never throws: disk trouble must not fail a solve. */
   prune(): CdnDiskPruneReport {
     const report: CdnDiskPruneReport = { entries: 0, bytes: 0, removed: 0, removedBytes: 0 };
+    const now = this.now();
     this.sizes.clear();
     this.bytes = 0;
+    this.scannedAt = now;
+    this.nextExpiry = Infinity;
     let names: string[];
     try { names = fs.readdirSync(this.directory); } catch { return report; }
     const entries: Entry[] = [];
@@ -97,16 +124,26 @@ export class CdnDiskPruner {
       if (!header) continue;
       entries.push({ name, size: stat.size, time: header.fetchedAt, dev: stat.dev, ino: stat.ino, mtimeMs: stat.mtimeMs });
     }
-    let total = entries.reduce((sum, entry) => sum + entry.size, 0);
-    const kept = new Set(entries);
+    const kept = new Set<Entry>();
+    for (const entry of entries) {
+      if (now - entry.time >= this.ageLimitMs && this.remove(entry)) {
+        report.removed++;
+        report.removedBytes += entry.size;
+      } else kept.add(entry);
+    }
+    let total = 0;
+    for (const entry of kept) total += entry.size;
     if (total > this.maxBytes) {
-      const oldestFirst = [...entries].sort((a, b) => a.time - b.time || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+      const oldestFirst = [...kept].sort((a, b) => a.time - b.time || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       for (const entry of oldestFirst) {
         if (total <= this.maxBytes) break;
         if (this.remove(entry)) { total -= entry.size; kept.delete(entry); report.removed++; report.removedBytes += entry.size; }
       }
     }
-    for (const entry of kept) this.sizes.set(entry.name, entry.size);
+    for (const entry of kept) {
+      this.sizes.set(entry.name, entry.size);
+      this.nextExpiry = Math.min(this.nextExpiry, entry.time + this.ageLimitMs);
+    }
     this.bytes = total;
     report.entries = entries.length;
     report.bytes = total;

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BoundedCollection } from "../runtime/bounded-collection.js";
-import { CDN_DISK_MAX_BYTES, CdnDiskPruner } from "./captcha-cdn-disk.js";
+import { CDN_DISK_MAX_BYTES, CdnDiskPruner, cdnDiskAgeLimit } from "./captcha-cdn-disk.js";
 
 export const DEFAULT_CDN_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_CDN_TTL_MS = 2_147_483_647;
@@ -89,6 +89,7 @@ export class CaptchaCdnCache {
       directory: this.directory,
       now: this.now,
       maxBytes: options.diskMaxBytes ?? CDN_DISK_MAX_BYTES,
+      ageLimitMs: cdnDiskAgeLimit(this.ttlMs),
     });
     // Pruned at start and after each write (spec §7). A TTL of 0 disables the
     // disk tier, so such an installation leaves the directory alone.
@@ -206,7 +207,7 @@ export class CaptchaCdnCache {
       } catch {} finally {
         if (directoryFd !== undefined) fs.closeSync(directoryFd);
       }
-      this.disk.afterWrite(path.basename(target), header.length + entry.body.length);
+      this.disk.afterWrite(path.basename(target), header.length + entry.body.length, entry.fetchedAt);
     } catch {
       // Disk availability must not turn a valid CDN response into a solve error.
     } finally {
