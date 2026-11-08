@@ -12,6 +12,11 @@
  * One solve at a time (happy-dom aliases process-global state inside the
  * worker); callers queue FIFO. `bun build --compile` must list
  * src/proxy/captcha-solver-worker.ts as an extra entrypoint.
+ *
+ * Shape (ADR-0002): the dispatcher is an object built by createCaptchaSolver()
+ * over a SolverTransport, which starts solver generations and carries the
+ * message protocol below unchanged. threadTransport() is the Bun Worker; the
+ * module-level functions drive the proxy's own dispatcher over it.
  */
 import { CaptchaSdkError, type CaptchaFailureCategory } from "./captcha-token.js";
 
@@ -55,20 +60,14 @@ export interface CaptchaSolverOptions {
 // Defaults must stand on their own: the kit manager strips CAPTCHA_* and
 // ZCODE_CAPTCHA_* variables before spawning the proxy. The happy solver's own
 // budget is ~30 s wait + ~30 s solve; 90 s only catches a thread that is stuck.
-const options: Required<CaptchaSolverOptions> = {
+const DEFAULT_OPTIONS: Readonly<Required<CaptchaSolverOptions>> = Object.freeze({
   deadlineMs: 90_000,
   recycleAfterSolves: 200,
   recycleAfterFailures: 3,
   maxWorkerHeapMB: 768,
   idleMs: 10 * 60_000,
   backendModule: null,
-};
-
-export function configureCaptchaSolver(opts: CaptchaSolverOptions): void {
-  for (const [key, value] of Object.entries(opts)) {
-    if (value !== undefined) (options as Record<string, unknown>)[key] = value;
-  }
-}
+});
 
 interface Job {
   scene: string;
@@ -133,28 +132,34 @@ function parseWorkerMessage(raw: unknown): WorkerMessage | null {
   };
 }
 
-const queue: Job[] = [];
-let inFlight: { job: Job; id: number; deadline: Timer } | null = null;
-let worker: Worker | null = null;
-let idleTimer: Timer | null = null;
-let pendingRecycle: string | null = null;
-let shutdownRequested = false;
-let nextId = 0;
-// Consecutive failures of the current generation (the stat spans generations).
-let generationFailures = 0;
+/** Host → solver generation: the existing protocol (captcha-solver-worker.ts). */
+export type SolverHostMessage =
+  | { type: "init"; backendModule: string | null }
+  | { type: "solve"; id: number; scene: string; region: string; prefix: string };
 
-const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth"> = {
-  generation: 0,
-  solvesSinceSpawn: 0,
-  totalSolves: 0,
-  totalFailures: 0,
-  consecutiveFailures: 0,
-  deadlineKills: 0,
-  recycles: 0,
-  lastRecycleReason: null,
-  lastRecycleAt: null,
-  lastSdkScripts: null,
-};
+/** What one solver generation reports to the dispatcher. */
+export interface SolverChannelEvents {
+  /** A message from the generation; raw, the dispatcher validates it. */
+  message(raw: unknown): void;
+  /** The generation failed (thread transport: the Worker's "error" event). */
+  error(): void;
+  /** The generation ended without being terminated (thread transport: "close"). */
+  exit(): void;
+}
+
+/** One solver generation, as the dispatcher drives it. */
+export interface SolverChannel {
+  post(message: SolverHostMessage): void;
+  terminate(): void;
+}
+
+/**
+ * Starts solver generations. Events reach the dispatcher asynchronously, never
+ * from inside spawn() or post(); after terminate() they are ignored.
+ */
+export interface SolverTransport {
+  spawn(events: SolverChannelEvents): SolverChannel;
+}
 
 // From source the worker sits next to this module; in a compiled binary
 // import.meta.url is the executable inside the embedded root (the common
@@ -162,6 +167,25 @@ const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth"> 
 const WORKER_URL = import.meta.url.endsWith("captcha-solver.ts")
   ? new URL("./captcha-solver-worker.ts", import.meta.url)
   : new URL("./proxy/captcha-solver-worker.ts", import.meta.url);
+
+/** The thread transport: each solver generation is a Bun Worker of this process. */
+export function threadTransport(): SolverTransport {
+  return {
+    spawn(events) {
+      const w = new Worker(WORKER_URL, { env: { ...process.env } } as WorkerOptions);
+      // The host never stays alive for an idle solver; an in-flight solve is held
+      // by its ref'd deadline timer instead.
+      (w as Worker & { unref(): void }).unref(); // Bun runtime API missing from the Worker DOM type
+      w.addEventListener("message", (event: MessageEvent) => events.message(event.data));
+      w.addEventListener("error", () => events.error());
+      w.addEventListener("close", () => events.exit());
+      return {
+        post: (message) => w.postMessage(message),
+        terminate: () => w.terminate(),
+      };
+    },
+  };
+}
 
 function solverError(category: CaptchaFailureCategory, message?: string): CaptchaSdkError {
   const err = new CaptchaSdkError(category);
@@ -171,156 +195,247 @@ function solverError(category: CaptchaFailureCategory, message?: string): Captch
   return err;
 }
 
-function spawnWorker(): Worker {
-  const w = new Worker(WORKER_URL, { env: { ...process.env } } as WorkerOptions);
-  // The host never stays alive for an idle solver; an in-flight solve is held
-  // by its ref'd deadline timer instead.
-  (w as Worker & { unref(): void }).unref(); // Bun runtime API missing from the Worker DOM type
-  w.addEventListener("message", (event: MessageEvent) => {
-    if (w !== worker) return; // a terminated generation must not settle anything
-    const msg = parseWorkerMessage(event.data);
-    if (msg) onWorkerMessage(msg);
-  });
-  w.addEventListener("error", () => {
-    if (w !== worker) return;
-    console.error("[captcha-solver] worker error; recycling");
-    failInFlight(solverError("other", "captcha solver worker failed"));
-    recycle("fatal");
-  });
-  w.addEventListener("close", () => {
-    if (w !== worker) return; // terminated by us; already accounted
-    failInFlight(solverError("other", "captcha solver worker exited unexpectedly"));
-    recycle("exit");
-  });
-  w.postMessage({ type: "init", backendModule: options.backendModule });
-  worker = w;
-  stats.generation += 1;
-  stats.solvesSinceSpawn = 0;
-  generationFailures = 0;
-  return w;
+/** The dispatcher interface, as the token pool, the captcha module and the health supervisor consume it. */
+export interface CaptchaSolver {
+  configure(opts: CaptchaSolverOptions): void;
+  run(scene: string, region: string, prefix: string, beforeSolve?: () => void): Promise<string>;
+  stats(): CaptchaSolverStats;
+  /** Recycle: immediately when idle, otherwise right after the in-flight solve settles. */
+  requestRecycle(reason: string): void;
+  /** Never abandons a live or queued solve: the generation ends once the queue drains. */
+  shutdown(): void;
+  /** Fixed supported capacity, independent of historical daemon configuration. */
+  concurrency(): number;
 }
 
-function recycle(reason: string): void {
-  const w = worker;
-  worker = null;
-  pendingRecycle = null;
-  if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
-  if (!w) return;
-  try { w.terminate(); } catch {}
-  stats.recycles += 1;
-  stats.lastRecycleReason = reason;
-  stats.lastRecycleAt = Date.now();
+export interface CaptchaSolverDeps {
+  /** Default: the thread transport. */
+  transport?: SolverTransport;
 }
 
-function failInFlight(err: Error): void {
-  const current = inFlight;
-  if (!current) return;
-  inFlight = null;
-  clearTimeout(current.deadline);
-  stats.totalFailures += 1;
-  stats.consecutiveFailures += 1;
-  current.job.reject(err);
-  queueMicrotask(pump);
-}
+/** A solver dispatcher that owns all of its state: queue, in-flight solve, generation, timers, stats. */
+export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver {
+  const transport = deps.transport ?? threadTransport();
+  const options: Required<CaptchaSolverOptions> = { ...DEFAULT_OPTIONS };
 
-function onWorkerMessage(msg: WorkerMessage): void {
-  if (msg.type === "fatal") {
-    console.error(`[captcha-solver] worker fault (${msg.name}); recycling`);
-    failInFlight(solverError("other", "captcha solver worker fault"));
-    recycle("fatal");
-    return;
-  }
-  const current = inFlight;
-  if (!current || msg.id !== current.id) return;
-  inFlight = null;
-  clearTimeout(current.deadline);
-  stats.solvesSinceSpawn += 1;
-  if (msg.scripts) stats.lastSdkScripts = msg.scripts;
+  const queue: Job[] = [];
+  let inFlight: { job: Job; id: number; deadline: Timer } | null = null;
+  let worker: SolverChannel | null = null;
+  let idleTimer: Timer | null = null;
+  let pendingRecycle: string | null = null;
+  let shutdownRequested = false;
+  let nextId = 0;
+  // Consecutive failures of the current generation (the stat spans generations).
+  let generationFailures = 0;
 
-  let reason: string | null = pendingRecycle;
-  if (shutdownRequested && queue.length === 0) {
-    shutdownRequested = false;
-    reason = "shutdown";
-  }
-  if (msg.ok) {
-    stats.totalSolves += 1;
-    stats.consecutiveFailures = 0;
+  const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth"> = {
+    generation: 0,
+    solvesSinceSpawn: 0,
+    totalSolves: 0,
+    totalFailures: 0,
+    consecutiveFailures: 0,
+    deadlineKills: 0,
+    recycles: 0,
+    lastRecycleReason: null,
+    lastRecycleAt: null,
+    lastSdkScripts: null,
+  };
+
+  function spawnWorker(): SolverChannel {
+    let w: SolverChannel | null = null;
+    w = transport.spawn({
+      message(raw) {
+        if (w !== worker) return; // a terminated generation must not settle anything
+        const msg = parseWorkerMessage(raw);
+        if (msg) onWorkerMessage(msg);
+      },
+      error() {
+        if (w !== worker) return;
+        console.error("[captcha-solver] worker error; recycling");
+        failInFlight(solverError("other", "captcha solver worker failed"));
+        recycle("fatal");
+      },
+      exit() {
+        if (w !== worker) return; // terminated by us; already accounted
+        failInFlight(solverError("other", "captcha solver worker exited unexpectedly"));
+        recycle("exit");
+      },
+    });
+    w.post({ type: "init", backendModule: options.backendModule });
+    worker = w;
+    stats.generation += 1;
+    stats.solvesSinceSpawn = 0;
     generationFailures = 0;
-    current.job.resolve(msg.param);
-  } else {
+    return w;
+  }
+
+  function recycle(reason: string): void {
+    const w = worker;
+    worker = null;
+    pendingRecycle = null;
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (!w) return;
+    try { w.terminate(); } catch {}
+    stats.recycles += 1;
+    stats.lastRecycleReason = reason;
+    stats.lastRecycleAt = Date.now();
+  }
+
+  function failInFlight(err: Error): void {
+    const current = inFlight;
+    if (!current) return;
+    inFlight = null;
+    clearTimeout(current.deadline);
     stats.totalFailures += 1;
     stats.consecutiveFailures += 1;
-    generationFailures += 1;
-    // A failed DOM close quarantines that worker's runtime for good; a fresh
-    // generation is the only way back.
-    if (/cleanup failed/.test(msg.message)) reason ??= "cleanup";
-    if (msg.message === "captcha solver returned invalid token") reason ??= "invalid-result";
-    if (generationFailures >= options.recycleAfterFailures) reason ??= "failures";
-    current.job.reject(solverError(msg.category, msg.message));
+    current.job.reject(err);
+    queueMicrotask(pump);
   }
-  if (stats.solvesSinceSpawn >= options.recycleAfterSolves) reason ??= "solves";
-  // heapUsed inside a Bun worker is that worker's own JSC heap (verified: a
-  // 150 MB worker allocation leaves the host's figure unchanged).
-  if (msg.heapUsedMB !== null && msg.heapUsedMB > options.maxWorkerHeapMB) reason ??= "heap";
-  if (reason) recycle(reason);
-  // Let the caller record a provider cooldown before admitting queued work.
-  queueMicrotask(pump);
-}
 
-function onDeadline(id: number): void {
-  if (!inFlight || inFlight.id !== id) return;
-  stats.deadlineKills += 1;
-  // Terminate first: the stuck thread must not deliver a late result.
-  recycle("deadline");
-  failInFlight(solverError("other", "captcha solver deadline exceeded"));
-}
-
-function armIdle(): void {
-  if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = null;
-  if (inFlight || queue.length) return;
-  if (shutdownRequested) {
-    shutdownRequested = false;
-    recycle("shutdown");
-    return;
-  }
-  if (!worker) return;
-  idleTimer = setTimeout(() => {
-    idleTimer = null;
-    if (!inFlight && !queue.length) recycle("idle");
-  }, options.idleMs);
-  idleTimer.unref?.();
-}
-
-function pump(): void {
-  while (!inFlight && queue.length) {
-    const job = queue.shift()!;
-    try {
-      // A provider pause may have started while this request waited in the queue.
-      job.beforeSolve?.();
-    } catch (err) {
-      job.reject(err instanceof Error ? err : new Error(String(err)));
-      continue;
+  function onWorkerMessage(msg: WorkerMessage): void {
+    if (msg.type === "fatal") {
+      console.error(`[captcha-solver] worker fault (${msg.name}); recycling`);
+      failInFlight(solverError("other", "captcha solver worker fault"));
+      recycle("fatal");
+      return;
     }
-    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
-    const id = ++nextId;
-    try {
-      const w = worker ?? spawnWorker();
-      inFlight = { job, id, deadline: setTimeout(() => onDeadline(id), options.deadlineMs) };
-      w.postMessage({ type: "solve", id, scene: job.scene, region: job.region, prefix: job.prefix });
-    } catch {
-      // Spawn or dispatch failed: this job fails now, the next gets a fresh worker.
-      if (inFlight?.id === id) {
-        clearTimeout(inFlight.deadline);
-        inFlight = null;
-      }
+    const current = inFlight;
+    if (!current || msg.id !== current.id) return;
+    inFlight = null;
+    clearTimeout(current.deadline);
+    stats.solvesSinceSpawn += 1;
+    if (msg.scripts) stats.lastSdkScripts = msg.scripts;
+
+    let reason: string | null = pendingRecycle;
+    if (shutdownRequested && queue.length === 0) {
+      shutdownRequested = false;
+      reason = "shutdown";
+    }
+    if (msg.ok) {
+      stats.totalSolves += 1;
+      stats.consecutiveFailures = 0;
+      generationFailures = 0;
+      current.job.resolve(msg.param);
+    } else {
       stats.totalFailures += 1;
       stats.consecutiveFailures += 1;
-      recycle("spawn");
-      job.reject(solverError("other", "captcha solver worker unavailable"));
+      generationFailures += 1;
+      // A failed DOM close quarantines that worker's runtime for good; a fresh
+      // generation is the only way back.
+      if (/cleanup failed/.test(msg.message)) reason ??= "cleanup";
+      if (msg.message === "captcha solver returned invalid token") reason ??= "invalid-result";
+      if (generationFailures >= options.recycleAfterFailures) reason ??= "failures";
+      current.job.reject(solverError(msg.category, msg.message));
     }
+    if (stats.solvesSinceSpawn >= options.recycleAfterSolves) reason ??= "solves";
+    // heapUsed inside a Bun worker is that worker's own JSC heap (verified: a
+    // 150 MB worker allocation leaves the host's figure unchanged).
+    if (msg.heapUsedMB !== null && msg.heapUsedMB > options.maxWorkerHeapMB) reason ??= "heap";
+    if (reason) recycle(reason);
+    // Let the caller record a provider cooldown before admitting queued work.
+    queueMicrotask(pump);
   }
-  armIdle();
+
+  function onDeadline(id: number): void {
+    if (!inFlight || inFlight.id !== id) return;
+    stats.deadlineKills += 1;
+    // Terminate first: the stuck thread must not deliver a late result.
+    recycle("deadline");
+    failInFlight(solverError("other", "captcha solver deadline exceeded"));
+  }
+
+  function armIdle(): void {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = null;
+    if (inFlight || queue.length) return;
+    if (shutdownRequested) {
+      shutdownRequested = false;
+      recycle("shutdown");
+      return;
+    }
+    if (!worker) return;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (!inFlight && !queue.length) recycle("idle");
+    }, options.idleMs);
+    idleTimer.unref?.();
+  }
+
+  function pump(): void {
+    while (!inFlight && queue.length) {
+      const job = queue.shift()!;
+      try {
+        // A provider pause may have started while this request waited in the queue.
+        job.beforeSolve?.();
+      } catch (err) {
+        job.reject(err instanceof Error ? err : new Error(String(err)));
+        continue;
+      }
+      if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+      const id = ++nextId;
+      try {
+        const w = worker ?? spawnWorker();
+        inFlight = { job, id, deadline: setTimeout(() => onDeadline(id), options.deadlineMs) };
+        w.post({ type: "solve", id, scene: job.scene, region: job.region, prefix: job.prefix });
+      } catch {
+        // Spawn or dispatch failed: this job fails now, the next gets a fresh worker.
+        if (inFlight?.id === id) {
+          clearTimeout(inFlight.deadline);
+          inFlight = null;
+        }
+        stats.totalFailures += 1;
+        stats.consecutiveFailures += 1;
+        recycle("spawn");
+        job.reject(solverError("other", "captcha solver worker unavailable"));
+      }
+    }
+    armIdle();
+  }
+
+  return {
+    configure(opts) {
+      for (const [key, value] of Object.entries(opts)) {
+        if (value !== undefined) (options as Record<string, unknown>)[key] = value;
+      }
+    },
+    run(scene, region, prefix, beforeSolve) {
+      if (BACKEND !== "happy") {
+        return Promise.reject(new Error(`captcha backend "${BACKEND}" is not available; use ZCODE_CAPTCHA_BACKEND=happy`));
+      }
+      return new Promise<string>((resolve, reject) => {
+        queue.push({ scene, region, prefix, beforeSolve, resolve, reject });
+        pump();
+      });
+    },
+    stats() {
+      return {
+        mode: "worker",
+        alive: worker !== null,
+        busy: inFlight !== null,
+        queueDepth: queue.length,
+        ...stats,
+      };
+    },
+    requestRecycle(reason) {
+      if (!worker) return;
+      if (inFlight) pendingRecycle ??= reason;
+      else recycle(reason);
+    },
+    shutdown() {
+      shutdownRequested = true;
+      armIdle();
+    },
+    concurrency() {
+      return 1;
+    },
+  };
+}
+
+/** The proxy's solver dispatcher (thread transport). */
+export const defaultCaptchaSolver: CaptchaSolver = createCaptchaSolver();
+
+export function configureCaptchaSolver(opts: CaptchaSolverOptions): void {
+  defaultCaptchaSolver.configure(opts);
 }
 
 export function runCaptchaSolve(
@@ -329,39 +444,24 @@ export function runCaptchaSolve(
   prefix: string,
   beforeSolve?: () => void,
 ): Promise<string> {
-  if (BACKEND !== "happy") {
-    return Promise.reject(new Error(`captcha backend "${BACKEND}" is not available; use ZCODE_CAPTCHA_BACKEND=happy`));
-  }
-  return new Promise<string>((resolve, reject) => {
-    queue.push({ scene, region, prefix, beforeSolve, resolve, reject });
-    pump();
-  });
+  return defaultCaptchaSolver.run(scene, region, prefix, beforeSolve);
 }
 
 export function getCaptchaSolverStats(): CaptchaSolverStats {
-  return {
-    mode: "worker",
-    alive: worker !== null,
-    busy: inFlight !== null,
-    queueDepth: queue.length,
-    ...stats,
-  };
+  return defaultCaptchaSolver.stats();
 }
 
 /** Recycle the solver worker: immediately when idle, otherwise right after the in-flight solve settles. */
 export function requestCaptchaSolverRecycle(reason: string): void {
-  if (!worker) return;
-  if (inFlight) pendingRecycle ??= reason;
-  else recycle(reason);
+  defaultCaptchaSolver.requestRecycle(reason);
 }
 
 /** Never abandons a live or queued solve: the worker is terminated once the queue drains. */
 export function shutdownCaptchaSolver(): void {
-  shutdownRequested = true;
-  armIdle();
+  defaultCaptchaSolver.shutdown();
 }
 
 /** Fixed supported capacity, independent of historical daemon configuration. */
 export function captchaSolverConcurrency(): number {
-  return 1;
+  return defaultCaptchaSolver.concurrency();
 }

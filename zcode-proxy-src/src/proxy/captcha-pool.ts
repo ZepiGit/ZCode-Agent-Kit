@@ -4,11 +4,9 @@ import {
   type CpuGovernorSnapshot,
 } from "./captcha-cpu-governor.js";
 import {
-  captchaSolverConcurrency,
-  getCaptchaSolverStats,
-  requestCaptchaSolverRecycle,
-  runCaptchaSolve,
+  defaultCaptchaSolver,
   shutdownCaptchaSolver,
+  type CaptchaSolver,
   type CaptchaSolverStats,
 } from "./captcha-solver.js";
 import { classifyCaptchaError, parseCertifyId } from "./captcha-token.js";
@@ -175,7 +173,14 @@ export class CaptchaTokenPool {
   private mintOutcomes: Array<{ at: number; ok: boolean }> = [];
   private storm: StormState | null = null;
 
-  constructor(opts: CaptchaPoolOptions = {}) {
+  /** The solver dispatcher this pool mints through (default: the proxy's own). */
+  private readonly solver: Pick<CaptchaSolver, "run" | "stats" | "requestRecycle" | "concurrency">;
+
+  constructor(
+    opts: CaptchaPoolOptions = {},
+    solver: Pick<CaptchaSolver, "run" | "stats" | "requestRecycle" | "concurrency"> = defaultCaptchaSolver,
+  ) {
+    this.solver = solver;
     this.opts = resolvePoolOpts(opts);
     this.effectiveTarget = this.opts.poolSizeMin;
     // Seed idle clock at startup so a no-traffic proxy eventually stops mints.
@@ -214,10 +219,10 @@ export class CaptchaTokenPool {
       min: this.opts.poolSizeMin,
       max: this.opts.poolSizeMax,
       activeSolves: this.activeSolves,
-      solverWorkers: captchaSolverConcurrency(),
+      solverWorkers: this.solver.concurrency(),
       storm: this.storm !== null,
       mintSuccessRate10m: this.mintSuccessRate(),
-      solver: getCaptchaSolverStats(),
+      solver: this.solver.stats(),
       cpu: this.governor?.enabled ? this.governor.snapshot() : undefined,
     };
   }
@@ -595,7 +600,7 @@ export class CaptchaTokenPool {
     );
     // A poisoned solver runtime (sticky DOM failure, bloated heap) is the
     // cheapest cause to rule out; the worker restarts clean for the probe.
-    try { requestCaptchaSolverRecycle("storm"); } catch {}
+    try { this.solver.requestRecycle("storm"); } catch {}
   }
 
   /**
@@ -643,7 +648,7 @@ export class CaptchaTokenPool {
             lastErr = STORM_TAKE_ERROR;
             break;
           }
-          const param = await runCaptchaSolve(cfg.sceneId, cfg.region, cfg.prefix, () => {
+          const param = await this.solver.run(cfg.sceneId, cfg.region, cfg.prefix, () => {
             if (Date.now() < this.pausedUntil) throw new Error('captcha requests paused after provider rate limit');
             // Solves queued behind the one that tripped the storm must not
             // run: only the single probe mints while it lasts.
