@@ -3,7 +3,8 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
-import type { AccountsConfig, AdmissionConfig, ClientIdentityConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
+import type { AccountsConfig, AdmissionConfig, ClientIdentityConfig, HealthConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
+import { DEFAULT_MEMORY_THRESHOLDS } from "../runtime/memory-thresholds.js";
 
 /**
  * Environment variable keys that override YAML values.
@@ -151,6 +152,7 @@ export function loadConfig(path: string): ProxyConfig {
   const claimCfg = resolveClaimConfig(parsed?.claim);
   const endpointRouting = resolveEndpointRoutingConfig(parsed?.endpointRouting);
   const clientSigning = resolveClientSigningConfig(parsed?.clientSigning);
+  const health = resolveHealthConfig(parsed?.health);
 
   const config: ProxyConfig = {
     server: { port, host, ...(admission ? { admission } : {}) },
@@ -169,10 +171,68 @@ export function loadConfig(path: string): ProxyConfig {
     async: asyncCfg,
     claim: claimCfg,
     logging: { level: logLevel },
+    ...(health ? { health } : {}),
   };
 
   validate(config);
   return config;
+}
+
+/** Bounds of the `health.memory` keys (ADR-0008). */
+const HEALTH_MEMORY_BOUNDS = {
+  softLimitMB: { min: 64, max: 65536, unit: " MB" },
+  hardLimitMB: { min: 64, max: 65536, unit: " MB" },
+  samples: { min: 1, max: 20, unit: "" },
+  sampleIntervalSeconds: { min: 1, max: 600, unit: " s" },
+} as const;
+
+/**
+ * `health.memory` (ADR-0008): the health supervisor's soft and hard memory
+ * limits, how many samples each must be held for and the time between two
+ * samples. Every key is optional; a key left out keeps the default
+ * (512 / 1024 MB × 3 samples 15 s apart). No env override (ADR-0008 cond 6).
+ * An invalid value stops the load with what/why/next.
+ */
+function resolveHealthConfig(raw: unknown): HealthConfig | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const mem = obj.memory && typeof obj.memory === "object" ? obj.memory as Record<string, unknown> : {};
+  const read = (key: keyof typeof HEALTH_MEMORY_BOUNDS): number | undefined => {
+    const value = mem[key];
+    if (value === undefined || value === null) return undefined;
+    const { min, max, unit } = HEALTH_MEMORY_BOUNDS[key];
+    const text = typeof value === "string" ? value.trim() : value;
+    const n = typeof text === "number" ? text : typeof text === "string" && /^\d+$/.test(text) ? Number(text) : NaN;
+    if (!Number.isInteger(n) || n < min || n > max) {
+      throw new Error(
+        `health.memory.${key} must be a whole number from ${min} to ${max}${unit} (got ${JSON.stringify(value)}). ` +
+          "It sets when the health supervisor warns about the proxy's memory footprint or asks the kit manager for a respawn. " +
+          "Set a whole number in that range or remove the key to keep the default (soft 512 MB, hard 1024 MB, 3 samples 15 s apart).",
+      );
+    }
+    return n;
+  };
+  const softLimitMB = read("softLimitMB");
+  const hardLimitMB = read("hardLimitMB");
+  const samples = read("samples");
+  const intervalS = read("sampleIntervalSeconds");
+  const soft = softLimitMB ?? DEFAULT_MEMORY_THRESHOLDS.softLimitMB;
+  const hard = hardLimitMB ?? DEFAULT_MEMORY_THRESHOLDS.hardLimitMB;
+  if (hard <= soft) {
+    throw new Error(
+      `health.memory.hardLimitMB (${hard}) must be above health.memory.softLimitMB (${soft}). ` +
+        "The soft limit only warns; the hard limit asks for a respawn, so it has to be the higher one. " +
+        "Raise health.memory.hardLimitMB or lower health.memory.softLimitMB, or remove both keys to keep the defaults (512 / 1024 MB).",
+    );
+  }
+  return {
+    memory: {
+      ...(softLimitMB !== undefined ? { softLimitMB } : {}),
+      ...(hardLimitMB !== undefined ? { hardLimitMB } : {}),
+      ...(samples !== undefined ? { samples } : {}),
+      ...(intervalS !== undefined ? { sampleIntervalMs: intervalS * 1000 } : {}),
+    },
+  };
 }
 
 /** Resolve the optional encrypted account pool configuration. */

@@ -30,7 +30,7 @@ Source: Phase 1B memory loop (`diagnosis/memory` @ 2ccafe2, `tests/memory/`). Co
 |---|---|---|
 | S1 proxy, 30,000 mixed requests (long, 20 min) | plateau median 127 MB, HWM 182 MB, heap ≤ 49 MB, growth 0.07 %/1k, 113 MB after idle | GREEN |
 | S1 proxy, 3,000 requests (short) | growth 5.5 %/1k (warm-up, no trend), HWM 152 MB | GREEN |
-| S1 burst: N concurrent 10.8 MB bodies, 3 × N requests (burst1: 3 sequential requests) | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight (Phase 1B, unbounded bodies; history). On ticket 19's tree (linux, RSS, 64 MiB cap = six 10.8 MB bodies, 64.8 MB admitted; Round 18 Q3): (peak − 90) / MB admitted ≈ 6.2 at N = 16 (median 488.6 MB, 5 runs, range 5.2–6.7), 7.1 at N = 32 (median 549.7 MB, 20 runs, range 6.0–8.0; the ~61 MB above burst16 is the queue cost), 5.5 at N = 4 (43.2 MB, cap not binding), 8.6 at N = 1; the ratio is not constant, so no single linear factor predicts the peaks (ADR-0004 amendment Round 18) | RED (N ≥ 4) |
+| S1 burst: N concurrent 10.8 MB bodies, 3 × N requests (burst1: 3 sequential requests) | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight (Phase 1B, unbounded bodies; history). On ticket 19's tree (linux, RSS, 64 MiB cap = six 10.8 MB bodies, 64.8 MB admitted; Round 18 Q3): (peak − 90) / MB admitted ≈ 6.2 at N = 16 (median 488.6 MB, 5 runs, range 5.2–6.7), 7.1 at N = 32 (median 549.7 MB, 20 runs, range 6.0–8.0; the ~61 MB above burst16 is the queue cost), 5.5 at N = 4 (43.2 MB, cap not binding), 8.6 at N = 1; the ratio is not constant, so no single linear factor predicts the peaks (ADR-0004 amendment Round 18). On ticket 20's tree (2798d2e, linux, RSS, 10 runs; "Request-body copies removed one at a time" below): medians 225.8 / 313.8 / 351.1 MB at N = 4 / 16 / 32, bigbody 183.6, burst1 119.5 (20 runs); (peak − 90) / MB admitted ≈ 3.1 at N = 4, 3.5 at N = 16, 4.0 at N = 32 | RED (N ≥ 4) on ticket 19's tree; GREEN on ticket 20's tree (linux local; CI pending) |
 | S1 stalled readers, 3,000 | HWM 165 MB, heap 6 MB after idle | GREEN |
 | S2 captcha solver, heavy happy-dom solves (short 420 / long 2,000) | RSS 179 → 958 MB at the 200-solve recycle (+4.1 MB/solve); heap after GC +2.5 MB/solve; per-generation peak 0.9–1.0 GB; HWM 1,068 MB | RED |
 | S2 retained guest heap before recycle | 686 MB (long 619 MB); 687 MB returned on recycle | RED |
@@ -493,6 +493,157 @@ Run 42467078897 (staging/71 with the marker `tests/memory/measure-omp-floor` = 2
 
 From ticket 71 on, linux S6/short is the median of 5 fresh S6 body repetitions against 16 MB, every repetition ≤ 32 MB (`REPEATED`). n = 5 comes from 1 of 10 on the staging/19 tree (n = 3 → 2.80 %, n = 5 → 0.86 %; 1 of 33 → 0.027 %).
 
+### Request-body copies removed one at a time (ticket 20; Round 18 Q1–Q3)
+
+Linux x64, Node 26.7.0, Bun 1.4.2, local machine (AMD EPYC, 8 cores, shared with other agents' runs). Each run is `node tests/memory/job.mjs --only S1/burst4,S1/burst16,S1/burst32,S1/bigbody --cap systemd` from a detached snapshot worktree of the named commit (`/home/AgentKit/wt/t20-<step>`), port 19200. Logs: `reports/t20-red-base.log`, `t20-meas-s1.log` … `t20-meas-final.log`. Run directories: `/home/AgentKit/overhaul-tools/t20-memloop/<step>/`. The value is `procPeak:proxy` = max(sampled RSS, VmHWM) in MB: the median of the step's repetitions, with the range in brackets. Factor = (median − 90) / MB admitted, Round 18's formula: 64.8 MB at burst16 and burst32 (six 10.8 MB bodies under the 64 MiB cap), 43.2 MB at burst4 (the cap does not bind). Bigbody is paced and mixed, so it has no admitted-bytes figure. In every run the loop's own isolation proof is empty (`isolation.facts.externalConnections`, `isolation.externalConnectionsDuringRun`), so the proxy talked only to the loopback mock.
+
+| step | commit | copy removed | reps | burst4 | burst16 | burst32 | bigbody | factor 16 / 32 |
+|---|---|---|---|---|---|---|---|---|
+| base | e88821f | none (integration tip, ticket 19 merged) | 5 | 323.6 (300.2–339.5) | 480.6 (433.9–520) | 563.1 (560.2–569.5) | 366.5 (327.6–383.4) | 6.0 / 7.3 |
+| 1 | 21d747f | validation, request meta, translation and transforms read one `JSON.parse` (was 3) | 3 | 372.1 (350.1–386.1) | 565 (472.8–597) | 606.9 (539.9–645.7) | 382.3 (367.7–384.3) | 7.3 / 8.0 |
+| 2 | e2bbd28 | one buffer of the declared length, instead of every chunk plus their joined copy | 3 | 365.6 (340.9–373.1) | 519.1 (506.2–521) | 585.7 (545.1–621.9) | 388.9 (363.4–391.7) | 6.6 / 7.6 |
+| 3 | 25ff451 | the session resolver reads the parsed body (2 more parses gone) | 3 | 339.4 (293.5–342.5) | 464.8 (458.7–476.9) | 531.6 (480.1–550.1) | 315.7 (313.2–337.3) | 5.8 / 6.8 |
+| 4 | cc266d7 | the session identity is hashed piece by piece, not joined into one text at every nesting level (~4 copies) | 3 | 253.1 (243.4–296) | 399.6 (395.7–423) | 428.1 (418.2–461.9) | 244.4 (239.7–248.5) | 4.8 / 5.2 |
+| 4b | 8499b94 | long identity strings escaped in 16 Ki slices, not one `JSON.stringify` copy | 3 | 250.1 (244.1–274) | 389.1 (377.1–412.1) | 433 (428.5–436.1) | 240.4 (227.6–272.7) | 4.6 / 5.3 |
+| 5 | 375bea2 | the client text and object are released before the upstream text is built | 3 | 263.8 (234.3–268.1) | 397.8 (390.5–418.4) | 438.9 (415.1–445.5) | 227.9 (223.7–270.7) | 4.8 / 5.4 |
+| 6 | ec3ff73 | translated requests (chat, responses, both async routes) transformed as built: no stringify + parse round trip (2 copies) | 5 | 259.4 (235.8–282.2) | 393 (376.9–395.1) | 446.5 (404.1–461.7) | 214.9 (205.9–221) | 4.7 / 5.5 |
+| 7 | 147c87f | bodies ≥ 1 MiB parsed from their bytes (`Response.json()`), so no JS copy of the text | 5 | 247.9 (217–251.9) | 370.6 (342.9–398.7) | 406.7 (396.6–441.3) | 217.9 (207.6–220.6) | 4.3 / 4.9 |
+| 8 | e0de0e0 | identity slices with nothing to escape hashed as they are | 5 | 246.4 (227.6–259.1) | 350.7 (327.4–363.3) | 389.4 (362.5–404.2) | 193.8 (186.7–214.2) | 4.0 / 4.6 |
+| 9 (final) | 9ccf978, measured as the merge 2798d2e (the merge changes no file on the S1 request path) | identity pieces UTF-8 encoded into one reused buffer, not a new buffer per `hash.update` | 10 | **225.8 (193.3–241.2)** | **313.8 (297.4–342.2)** | **351.1 (330–375.8)** | **183.6 (173.6–198.6)** | **3.5 / 4.0** |
+| budget | | | | 250 | 400 | 600 | 250 | |
+
+Final against base: burst4 −30.2 %, burst16 −34.7 %, burst32 −37.6 %, bigbody −49.9 %. Every one of the 10 final repetitions is GREEN on every key. The burst4 factor goes from 5.4 to 3.1.
+
+Other S1 runs on the final tree (2798d2e, linux, `reports/t20-meas-final.log`):
+- S1/short: GREEN (growth 3.41 %/1k, no trend; peak 148.1 MB; steady 118 MB).
+- S1/stalled: GREEN (growth 0.61 %/1k; peak 165.8 MB).
+- **S1/burst1, ≥ 20 repetitions** (`node tests/memory/job.mjs --measure-burst1 20`, ticket 60's measurement mode; `/home/AgentKit/overhaul-tools/t20-memloop/final-burst1/out/measure-S1-burst1.{json,md}`): 20 of 20 valid, **0 of 20 above 250 MB**. Min / median / max are 116.2 / 119.5 / 128.6 MB. On the base tree e88821f the same 20-run measurement gave 177.6 / 186.4 / 199.9 MB, 0 of 20 above 250 (`red-base-burst1`). Linux already met the criterion after ticket 19's collection; ticket 20 adds 121 MB of margin. Windows has no measurement on this tree yet (pending CI, through the marker `tests/memory/measure-burst1`).
+
+What the steps show:
+- **Step 1 alone made the peaks worse.** The validation parse's object stayed reachable while the session resolver still parsed the body twice and joined the identity text. One more copy was therefore live at the moment of most allocation. Steps 3–4 removed what it overlapped with.
+- **The session resolver was the big lever** (`client-session.ts`; observe is the default mode). It parsed the body twice, joined the identity's stable text anew at every nesting level, and converted it to UTF-8 for the hash. That cost about 6 copies of a large body per request (steps 3, 4, 4b, 8 and 9).
+- **Steps 2 and 5 are within run-to-run noise on their own** (±30 MB at 3 repetitions on a shared machine). Their value shows once the overlapping copies are gone.
+- **Where the rest goes.** A phase probe measured an instrumented scratch copy that answers right after each phase, with 4 concurrent bodies (`/home/AgentKit/overhaul-tools/t20-scripts/probe.mjs`, never committed). At step 8 it placed the remaining peak in:
+  - receiving the bodies: the socket chunks plus the read buffer, about 2 copies, the same as `await request.arrayBuffer()`;
+  - the parsed tree;
+  - the upstream text;
+  - garbage not yet collected while the upstream reads the body.
+
+  Sending a string body to fetch costs nothing extra: Bun streams it.
+- **Measured with the probe and not adopted:**
+  - a collection right after the upstream text is built (eden or full): no change beyond noise;
+  - sending bytes or a Blob instead of the string: bytes +60 MB at 4 bodies, Blob no gain;
+  - Bun `--smol` (`BUN_OPTIONS=--smol`): no gain at 4 or 16 bodies.
+
 ## Current
 
 (pending)
+
+## Windows S1/short repetitions by position (Round 28 Q1)
+
+Raw job logs, commit growth:proxy %/1k per repetition (5 sequential repetitions since ticket 71; "no trend" marks a repetition whose trend flag was false). Generator: `/home/AgentKit/overhaul-tools/t78-scripts/s1short-table.mjs`. Owner: ticket 78 (needs-triage), which appends every later windows S1/short run.
+
+| run | branch, head | rep 1 | rep 2 | rep 3 | rep 4 | rep 5 | median | verdict |
+|---|---|---|---|---|---|---|---|---|
+| 42481592284 | staging/71 d6efa3b | 5.32 | 3.57 | 3.3 | 4.67 | 5.33 | 4.67 | GREEN |
+| 42493218404 | overhaul/stability-terminal-ux 8126454 | 3.02 | 3.9 | 5.06 | 2.79 | 3.36 | 3.36 | GREEN |
+| 42494299680 | staging/29 57c3db0 | 5.34 | 3.04 | 3.59 | 4.66 | 3.18 | 3.59 | GREEN |
+| 42495987510 | staging/15b a004477 | 2.51 (no trend) | 4.5 | 2.2 (no trend) | 4.54 | 3.45 (no trend) | 3.45 | GREEN |
+| 42500996594 | staging/21 57ebbc8 | 2.6 | 3.98 | 3.02 (no trend) | 3.71 | 4.05 | 3.71 | RED |
+| 42501852701 | overhaul/stability-terminal-ux 1b904a1 | 3.34 | 4.85 | 4.98 | 5 | 4.47 | 4.85 | GREEN |
+| 42502565823 | staging/20 1b4a706 | 3.58 | 5.12 | 3.15 | 3.81 | 2.85 | 3.58 | GREEN |
+| 42502646304 | staging/20 ce38cbc | 3.23 (no trend) | 2.17 | 3.68 | 5.38 | 3.85 | 3.68 | GREEN |
+| 42502739091 | staging/20 ce16fdf | 3.99 | 3.27 | 3.66 | 4.53 | 5.6 | 3.99 | GREEN |
+| 42502835975 | staging/20 93667ae | 3.61 | 6.22 | 4.44 (no trend) | 3.65 | 4.21 | 4.21 | GREEN |
+| 42502922415 | staging/20 c97d59e | 3.51 | 4.18 | 2.46 | 4.88 | 3.67 | 3.67 | GREEN |
+| 42503015768 | staging/20 8b88d97 | 1.79 (no trend) | 4.12 | 3.88 | 4.78 | 3.83 | 3.88 | GREEN |
+| 42503101039 | staging/20 39dd963 | 4.02 | 4.85 | 3.4 | 5.15 | 4.31 | 4.31 | GREEN |
+| 42503197608 | staging/20 25697bd | 3.6 (no trend) | 3.09 | 4.29 | 4.09 | 4.09 | 4.09 | GREEN |
+| 42503284096 | staging/20 1a78acb | 5.27 | 4.5 | 5.12 | 6.04 | 4.92 | 5.12 | RED |
+| 42503373851 | staging/20 17f1d36 | 1.8 (no trend) | 5.2 | 2.05 | 4.79 | 5.51 | 4.79 | GREEN |
+
+Per position (all runs):
+- position 1: n 16, mean 3.53, sd 1.10, max 5.34, above 5: 3
+- position 2: n 16, mean 4.16, sd 1.00, max 6.22, above 5: 3
+- position 3: n 16, mean 3.64, sd 0.96, max 5.12, above 5: 2
+- position 4: n 16, mean 4.53, sd 0.78, max 6.04, above 5: 3
+- position 5: n 16, mean 4.17, sd 0.83, max 5.6, above 5: 3
+- ticket 20's tree: n 50, mean 4.06, sd 1.03, max 6.22, above 5: 10
+- other trees: n 30, mean 3.91, sd 0.93, max 5.34, above 5: 4
+
+Single-run windows S1/short (before the 5-repetition rule): n 23, mean 3.47, sd 0.87, max 5.18, above 5: 1
+
+| run | branch, head | commit %/1k | trend | WS %/1k |
+|---|---|---|---|---|
+| 42446746036 | staging/19 e341ef1 | 1.92 | false | -2.15 |
+| 42448137342 | overhaul/stability-terminal-ux 1fc7473 | 2.53 | true | -2.86 |
+| 42448283566 | staging/67 4de913b | 3.54 | true | 0.24 |
+| 42448791937 | staging/24 ea4f040 | 3.61 | false | 1.29 |
+| 42453037136 | overhaul/stability-terminal-ux 5e99b52 | 3.67 | true | -2.09 |
+| 42454650683 | staging/36 0cb730d | 4.91 | true | 2.94 |
+| 42455986931 | staging/25 e7451c6 | 2.14 | true | -0.88 |
+| 42457112513 | staging/19 b3e8fe7 | 4.1 | true | -1.39 |
+| 42457120690 | staging/26 d44d187 | 4.27 | true | -1.18 |
+| 42461329252 | staging/25 5707c95 | 3.01 | false | -3.47 |
+| 42462167868 | overhaul/stability-terminal-ux dcc7615 | 4.21 | true | 1.85 |
+| 42464297212 | staging/19 8239cde | 3.98 | true | 1.25 |
+| 42465834202 | staging/25 a8fd203 | 2.46 | false | -2.92 |
+| 42469136344 | overhaul/stability-terminal-ux e88821f | 4.38 | true | -0.15 |
+| 42469139184 | staging/15 5c7cda7 | 3.84 | true | 0.3 |
+| 42469209389 | staging/36 b37393f | 3.68 | true | -2.77 |
+| 42475847194 | staging/30 0e99864 | 3.17 | true | -2.52 |
+| 42478422809 | overhaul/stability-terminal-ux e8b16ed | 3.19 | false | -3.2 |
+| 42480631098 | staging/21 0f87d20 | 3.72 | true | 0.18 |
+| 42481585464 | overhaul/stability-terminal-ux 0f405d9 | 3.05 | true | -3.26 |
+| 42483637377 | staging/30 a53152d | 5.18 | true | 2.46 |
+| 42483787372 | staging/72 ee48822 | 3.24 | true | -3.41 |
+| 42484868282 | overhaul/stability-terminal-ux eaa91b3 | 2.01 | false | -1.2 |
+
+## Round 25 Q1 condition 4: the first 20 windows S5/short values on trees with ticket 36 (Round 29 Q1 condition 4)
+
+Run-creation order, any branch; a tree "contains 36" when it contains ticket 36's first code commit e2990a2. Runs with no S5/short value (the burst1 measurement run 42502424683; cancelled runs) are skipped. Values: windows growth:mcp-bridge %/1k on commit (WS reported). Generator data: `/home/AgentKit/overhaul-tools/ci-art/r25-set/set.txt`.
+
+| # | run | branch, head | with 30 | commit %/1k | trend | WS %/1k |
+|---|---|---|---|---|---|---|
+| 1 | 42454650683 | staging/36 0cb730d | no | 15.43 | false | 35.21 |
+| 2 | 42469209389 | staging/36 b37393f | no | 18.14 | false | 29.31 |
+| 3 | 42483637377 | staging/30 a53152d | yes | 34.62 | true | 19.17 |
+| 4 | 42483787372 | staging/72 ee48822 | no | 19.82 | false | 25.2 |
+| 5 | 42484868282 | overhaul/stability-terminal-ux eaa91b3 | no | 24.83 | false | 33.77 |
+| 6 | 42493218404 | overhaul/stability-terminal-ux 8126454 | no | 20.69 | false | 19.79 |
+| 7 | 42494299680 | staging/29 57c3db0 | no | 16.39 | false | 22.17 |
+| 8 | 42495987510 | staging/15b a004477 | no | 21.29 | false | 24.33 |
+| 9 | 42500996594 | staging/21 57ebbc8 | no | 21.22 | false | 27.79 |
+| 10 | 42501852701 | overhaul/stability-terminal-ux 1b904a1 | no | 19.21 | false | 27.45 |
+| 11 | 42502565823 | staging/20 1b4a706 | no | 17.4 | false | 18.56 |
+| 12 | 42502646304 | staging/20 ce38cbc | no | 23.77 | false | 30.12 |
+| 13 | 42502739091 | staging/20 ce16fdf | no | 17.5 | false | 28.09 |
+| 14 | 42502835975 | staging/20 93667ae | no | 19.92 | false | 30.85 |
+| 15 | 42502922415 | staging/20 c97d59e | no | 25.39 | false | 31.94 |
+| 16 | 42503015768 | staging/20 8b88d97 | no | 23.17 | false | 33.58 |
+| 17 | 42503101039 | staging/20 39dd963 | no | 23.34 | false | 37.05 |
+| 18 | 42503197608 | staging/20 25697bd | no | 18.41 | false | 20.26 |
+| 19 | 42503284096 | staging/20 1a78acb | no | 19.84 | false | 27.46 |
+| 20 | 42503373851 | staging/20 17f1d36 | no | 22.2 | false | 31.4 |
+
+- all 20: n 20, mean 21.13, sd 4.22, max 34.62, above 30: 1, above 35: 0
+- with 30: n 1, mean 34.62 (one value)
+- without 30: n 19, mean 20.42, sd 2.85, max 25.39
+- Round 25 Q1 condition 4 triggers (>= 3 above 30, any above 35, mean above 23): none. The set is complete; 30's 10 staging runs are printed beside it as the "with 30" comparison (Round 29 Q1 condition 4).
+
+## S5/short after the retention bound: withdrawn rule (Round 29)
+
+Copied from ticket 74's branch (eab4ddf, METRICS lines 425-436). Round 29 Q1 withdrew the rule: MB/1k is %/1k rescaled by the mean (95.8-103.7 MB), so it is not a separate quantity; over tasks 900-1,199 M1 reads 3.79 / 16.79 / -15.03 and the tree 0.43 / -0.91 / 2.57; M1 removes only the in-run bound (3,600 files at reboot, 1,500 after restore), so reboot cost cannot see it.
+
+**Mutant proof, local linux (Round 24 Q1 condition 5): FAILED; the ticket comes back under the Fallback (condition 8).** Tree 8c5a947 (ticket/30 2c6720c + ticket 74's rule; contains ticket 36), Linux x64, Node 26.7.0, Bun 1.4.2. `job.mjs --os linux --only S5/short --cap none` under `run-capped.sh` (3G, no swap), 6 runs started 20 s apart and run side by side (load average < 1; ~1.77 s per task, the CI pace). The mutant is ticket 30's M1 (the count bound removed in `retentionExceeded`, src and a rebuilt `dist/`), in a scratch worktree, never committed, restored from 8c5a947 (clean). Data: `/home/AgentKit/overhaul-tools/t74-memloop/<arm>-<i>/`. In all six runs the job printed a harness failure: the evidence gate of 8c5a947 required the post-bound window to reach task 1,200, while the last sample inside the load is at task 1,199 (fixed in d6a17a0; no measured value changes). Replayed through the fixed job against the committed list (no S5/short entry), all six are GREEN, the three mutants included.
+
+| run | verdict | growth:mcp-bridge %/1k (trend) | slope MB/1k / mean MB | window medians MB (net rise, rising) | window tasks / samples | warm-up-growth:mcp-bridge %/1k (trend) | warm-up slope / mean, medians MB | procPeak MB | empty → 1,200 → reboot MB (cost) | failures / orphans | data dir | duration s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M1-1 | GREEN | 7.77 (false) | 7.96 / 102.4 | 98.5, 100.8, 102.7, 103.5, 102.2, 103.8 (5.4 %, 2) | 600–1,199 / samples 1059–2116, 1,058 of 2,125 | 38.11 (true) | 32.78 / 86; 80.7, 83.6, 85.8, 87.6, 88.5, 89.4 | 117.2 | 73 → 103 → 77 (4) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| M1-2 | GREEN | 17.01 (false) | 17.64 / 103.7 | 98.5, 101, 102.2, 104, 104.5, 106.1 (7.7 %, 2) | 600–1,199 / 1059–2116, 1,058 of 2,125 | 45.2 (true) | 38.72 / 85.7; 79.5, 82.7, 85.2, 87.2, 89.2, 88.8 | 120.9 | 73 → 104 → 77 (4) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| M1-3 | GREEN | 9.03 (false) | 9.33 / 103.4 | 99.9, 100.5, 103.6, 104.7, 103.4, 103.9 (4.0 %, 0) | 600–1,199 / 1059–2116, 1,058 of 2,125 | 40.9 (true) | 35.21 / 86.1; 80.3, 83.6, 85.8, 87.9, 89.3, 89.5 | 119.1 | 73 → 101 → 76 (3) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| tree-1 | GREEN | 2.85 (false) | 2.74 / 96.2 | 94.6, 96, 96.7, 96.3, 96, 96.4 (1.9 %, 0) | 600–1,199 / 1059–2114, 1,056 of 2,122 | 41.99 (true) | 36.09 / 86; 80.1, 83.2, 85.7, 87.5, 89.3, 89.5 | 99 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,125 |
+| tree-2 | GREEN | **5.75** (false) | 5.56 / 96.6 | 94.7, 95.7, 96.5, 97.2, 97.7, 96.8 (2.2 %, 0) | 600–1,199 / 1059–2114, 1,056 of 2,122 | 43.37 (true) | 37.29 / 86; 80.1, 83.4, 85.5, 87.3, 89.1, 90 | 100.3 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,124 |
+| tree-3 | GREEN | **5.62** (false) | 5.39 / 95.8 | 93.8, 95, 95.1, 96, 96.6, 96.6 (3.0 %, 0) | 600–1,199 / 1059–2113, 1,055 of 2,122 | 40.58 (true) | 34.65 / 85.4; 79.6, 82.6, 85.6, 87, 88.2, 88.9 | 99.5 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,125 |
+
+- **Mutant:** 0 of 3 RED. Every value is over 5 (7.77, 17.01, 9.03), and the trend flag is false in all three (net rise 4.0–7.7 % against 10 %, trailing rising run ≤ 2 against 3). Round 24's Shared understanding 2 named this risk (the tip's one run had a 13.8 % net rise). The window sees the slope of an unbounded store (7.96–17.64 MB/1k against 2.74–5.56 on the tree, 3,600 against 1,500 stored files) but not its trend.

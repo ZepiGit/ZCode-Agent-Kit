@@ -22,8 +22,8 @@ import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
 import { installGuestErrorBoundary } from "./runtime/guest-error.js";
-import { MemoryGuard, shutdownCaptchaRuntime, startEventLoopMonitor } from "./runtime/health-monitor.js";
-import { installWatchdog, respawnHookCommand, spawnRespawnHook } from "./runtime/watchdog.js";
+import { shutdownCaptchaRuntime } from "./runtime/health-monitor.js";
+import { createGracefulShutdown, createHealthSupervisor, handleShutdownSignals } from "./runtime/supervisor.js";
 import {
   addAccount,
   getAccountStorePath,
@@ -239,6 +239,21 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
 
   const server = await startServer(buildServerOptions(config, auth, debug));
   let claimScheduler: { stop(): void } | null = null;
+  // The single graceful shutdown sequence (signals, memory respawn). Signals
+  // are handled before the listening line is printed, so whoever waits for
+  // that line never meets a proxy that a SIGTERM would kill outright.
+  // Unsaved account metadata (a store write that lost a lock race) gets one
+  // last, bounded write before the process exits.
+  const shutdown = createGracefulShutdown({
+    server,
+    stopBackground: () => {
+      claimScheduler?.stop();
+      claimScheduler = null;
+      shutdownCaptchaRuntime();
+    },
+    flush: () => flushAccountMetadata(auth),
+  });
+  handleShutdownSignals(shutdown);
   const url = `http://${server.hostname}:${server.port}`;
   console.log(`zcode-proxy listening on ${url}`);
   const configuredCaptchaProxy = process.env.ZCODE_PROXY_UPSTREAM_PROXY?.trim();
@@ -252,30 +267,12 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     }
   }
   console.log(`  captcha egress: ${egress}`);
-  startEventLoopMonitor();
-  installWatchdog();
-  const memoryGuard = new MemoryGuard({
-    canRestart: () => respawnHookCommand(process.env, process.pid, "memory") !== null,
-    restart: async () => {
-      // Exit only once the manager is actually running: a proxy that stops
-      // without it stays down for good.
-      if (!(await spawnRespawnHook("memory"))) return false;
-      // The manager waits for this pid to exit before starting the
-      // replacement; give in-flight responses a bounded chance to finish.
-      claimScheduler?.stop();
-      claimScheduler = null;
-      shutdownCaptchaRuntime();
-      const forceExit = setTimeout(() => process.exit(0), 10_000);
-      forceExit.unref();
-      // Long streams may keep close() busy past the 10 s cap: give it 6 s,
-      // then the bounded (3 s) metadata write, then exit — all inside the cap.
-      void Promise.race([server.close(), new Promise<void>((resolve) => setTimeout(resolve, 6_000))])
-        .then(() => flushAccountMetadata(auth))
-        .then(() => process.exit(0));
-      return true;
-    },
-  });
-  memoryGuard.start();
+  // The health supervisor: heartbeat watcher, memory thresholds and the
+  // respawn handoff, whose confirmed respawn runs the same shutdown sequence.
+  createHealthSupervisor({
+    ...(config.health?.memory ? { thresholds: config.health.memory } : {}),
+    shutdown: (reason) => shutdown.run(reason),
+  }).start();
   if (config.plan === "start-plan") {
     // Pre-solve the captcha token pool in the background so first requests
     // don't pay the full solve latency (in-process happy-dom backend).
@@ -299,23 +296,6 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     console.log(config.plan === "coding-plan" ? `  /async/v1/*: ON` : `  /async/v1/*: OFF (requires plan "coding-plan")`);
   }
   if (debug) console.log(`  debug: ON`);
-
-  // Unsaved account metadata (a store write that lost a lock race) gets one
-  // last, bounded write before the process exits.
-  let stopping = false;
-  const stop = (): void => {
-    if (stopping) return;
-    stopping = true;
-    claimScheduler?.stop();
-    claimScheduler = null;
-    shutdownCaptchaRuntime();
-    void flushAccountMetadata(auth).finally(() => server.stop(true));
-  };
-  process.on("SIGINT", () => {
-    console.log("\nShutting down...");
-    stop();
-  });
-  process.on("SIGTERM", stop);
 }
 
 /** Bounded final write of unsaved account metadata (referenced timer: shutdown waits for it). */

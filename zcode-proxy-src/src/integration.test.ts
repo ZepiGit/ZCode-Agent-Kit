@@ -24,6 +24,8 @@ let mockUpstreamServer: ReturnType<typeof Bun.serve>;
 let proxyPort: number;
 let mockPort: number;
 let capturedUpstreamBodies: string[] = [];
+/** Endpoint-routing config fetches the proxy made against the mock (ticket 76). */
+const routingConfigFetches: string[] = [];
 
 function findFreePort(): number {
   return 0;
@@ -62,6 +64,11 @@ beforeAll(async () => {
     hostname: "127.0.0.1",
     async fetch(req) {
       const url = new URL(req.url);
+      // Endpoint routing reads its mapping here, not from zcode.z.ai (ticket 76).
+      if (url.pathname === "/api/v1/client/configs") {
+        routingConfigFetches.push(url.pathname);
+        return Response.json({ code: 0, data: { proxyEndpoint: { mapping: [] } } });
+      }
       const rawBody = await req.text();
       let parsed: { stream?: boolean; model?: string } = {};
       try { parsed = JSON.parse(rawBody); } catch {}
@@ -223,6 +230,8 @@ beforeAll(async () => {
   config.auth.proxyApiKey = PROXY_KEY;
   config.providers.zai.anthropicBase = `http://127.0.0.1:${mockPort}/anthropic`;
   config.providers.zai.openaiBase = `http://127.0.0.1:${mockPort}/coding`;
+  // Routing stays on (the production default) but reads the loopback mock.
+  config.endpointRouting.origin = `http://127.0.0.1:${mockPort}`;
 
   const auth = new AuthManager();
   auth.setOAuthCredential({ apiKey: UPSTREAM_KEY, secret: UPSTREAM_SECRET, provider: "zai" });
@@ -457,6 +466,17 @@ describe("integration: Anthropic clients (native passthrough)", () => {
     expect(upstreamReq.messages[1].content.some((b: any) => b.type === "tool_use" && b.name === "get_weather")).toBeTrue();
     expect(upstreamReq.messages[2].content.some((b: any) => b.type === "tool_result" && b.content === "62°F")).toBeTrue();
     expect(upstreamReq.tools[0].name).toBe("get_weather");
+  });
+});
+
+describe("integration: endpoint routing", () => {
+  it("reads the routing config from the loopback mock upstream", async () => {
+    const resp = await fetch(proxyUrl("/v1/chat/completions"), {
+      method: "POST",
+      headers: authHeader(),
+      body: JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: "Hello" }] }),
+    });
+    expect({ status: resp.status, routingConfigFetched: routingConfigFetches.length > 0 }).toEqual({ status: 200, routingConfigFetched: true });
   });
 });
 

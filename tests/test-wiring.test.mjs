@@ -47,3 +47,29 @@ test("every kit test file in this repository is wired into a test script", () =>
   assert.ok(testFiles.includes("tests/test-wiring.test.mjs"), "the guard must see the repository's test files");
   assert.deepEqual(unwired, [], `wire these into a test script in package.json: ${unwired.join(", ")}`);
 });
+
+// Ticket 76: the proxy test run loads the egress guard. `npm run test:proxy`
+// runs `bun test` inside zcode-proxy-src, where bunfig.toml preloads it, and
+// both CI workflows run that script.
+test("npm run test:proxy loads the egress guard preload, in CI too", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const repo = join(import.meta.dirname, "..");
+  const pkg = JSON.parse(readFileSync(join(repo, "package.json"), "utf8"));
+  const bunfig = readFileSync(join(repo, "zcode-proxy-src", "bunfig.toml"), "utf8").replace(/\r\n/g, "\n");
+  const testSection = /^\[test\]\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(bunfig)?.[1] ?? "";
+  const preload = /^preload\s*=\s*\[([^\]]*)\]/m.exec(testSection)?.[1] ?? "";
+  const preloads = [...preload.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  const workflowsRunIt = ["ci.yml", "release.yml"].map((name) =>
+    /^\s+run: npm run test:proxy$/m.test(readFileSync(join(repo, ".github", "workflows", name), "utf8")));
+  assert.deepEqual({
+    script: pkg.scripts["test:proxy"],
+    preloads,
+    preloadExists: preloads.every((p) => existsSync(join(repo, "zcode-proxy-src", p))),
+    workflowsRunIt,
+  }, {
+    script: "cd zcode-proxy-src && bun test",
+    preloads: ["./test-support/egress-guard-preload.ts"],
+    preloadExists: true,
+    workflowsRunIt: [true, true],
+  });
+});

@@ -47,6 +47,8 @@ interface ServerOptions {
   responseStore?: ResponseStore;
   /** Admission control for request bodies (ADR-0004). Defaults to one built from `config.server.admission`. */
   admission?: Admission;
+  /** The drain gate `startServer` shares with its handler (ADR-0008 cond 2). */
+  drain?: DrainGate;
 }
 
 /** Minimal server handle: what the caller needs to print URLs and shut down. */
@@ -59,6 +61,70 @@ export interface ProxyServer {
   close(): Promise<void>;
   /** Admission counters (`inFlightBytes`, `queued`, `shedTotal`, …), for observability (ticket 39). */
   admission(): AdmissionStats;
+  /**
+   * Start the drain (ADR-0008 cond 2): the listener stays open, every new
+   * request (and every request still waiting for admission) is shed with 503
+   * + `Retry-After` in its endpoint's shape; `/health` keeps answering.
+   * Requests already accepted run on. Irreversible.
+   */
+  beginDrain(opts: DrainOptions): void;
+  draining(): boolean;
+  /** Requests whose response is not finished yet. */
+  inFlight(): number;
+  /** Resolves once no request is in flight. */
+  whenIdle(): Promise<void>;
+  /** Destroy every response still in flight (the force point); returns how many were cut. */
+  cutInFlight(): number;
+  /** Requests shed because the proxy was draining. */
+  drainShed(): number;
+}
+
+export interface DrainOptions {
+  /** Why the proxy drains, in words for the shed message ("a memory respawn"). */
+  cause: string;
+  /** `Retry-After` of a drain shed, in seconds (read per request). */
+  retryAfterSeconds: () => number;
+}
+
+/** The drain state shared by the listener and the handler. */
+export interface DrainGate {
+  active: boolean;
+  /** Aborted when the drain begins: requests waiting for admission leave the queue. */
+  readonly signal: AbortSignal;
+  shed: number;
+  begin(opts: DrainOptions): void;
+  /** The 503 + Retry-After answer for `path` while draining. */
+  shedResponse(path: string): Response;
+}
+
+/** The endpoint's error shape: Anthropic for the messages routes, OpenAI for the rest. */
+function shapeOf(path: string): EndpointShape {
+  return path === "/v1/messages" || path === "/async/v1/messages" ? "anthropic" : "openai";
+}
+
+export function createDrainGate(): DrainGate {
+  const controller = new AbortController();
+  let opts: DrainOptions | null = null;
+  const gate: DrainGate = {
+    active: false,
+    signal: controller.signal,
+    shed: 0,
+    begin(next) {
+      if (gate.active) return;
+      opts = next;
+      gate.active = true;
+      controller.abort();
+    },
+    shedResponse(path) {
+      gate.shed++;
+      return shedResponse(shapeOf(path), {
+        why: `It is shutting down (${opts?.cause ?? "stop"}) and only finishes the requests it had already accepted.`,
+        retryAfterSeconds: opts?.retryAfterSeconds() ?? SHED_RETRY_AFTER_SECONDS,
+        next: "after a respawn a fresh proxy answers on the same port; if it was stopped, start it with: zcode-kit proxy start",
+      });
+    },
+  };
+  return gate;
 }
 
 /** Create a fetch-style handler that routes the request through the proxy. */
@@ -79,6 +145,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     debug: opts.debug === true,
   };
   const admission = opts.admission ?? admissionFor(config);
+  const drain = opts.drain;
 
   /**
    * Run a body-carrying route under admission: the handler (which reads the
@@ -90,7 +157,26 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
   const admitted = async (req: Request, shape: EndpointShape, run: () => Promise<Response>): Promise<Response> => {
     const cost = admissionCost(req);
     if (cost === null) return run();
-    const result = await admission.admit(cost, req.signal);
+    // A request still waiting for admission when the drain begins leaves the
+    // queue at once and is shed, instead of being admitted and cut later.
+    let waitSignal: AbortSignal = req.signal;
+    let detach = (): void => {};
+    if (drain) {
+      const waiting = new AbortController();
+      const leave = (): void => waiting.abort();
+      if (req.signal.aborted || drain.signal.aborted) waiting.abort();
+      req.signal.addEventListener("abort", leave, { once: true });
+      drain.signal.addEventListener("abort", leave, { once: true });
+      detach = () => {
+        req.signal.removeEventListener("abort", leave);
+        drain.signal.removeEventListener("abort", leave);
+      };
+      waitSignal = waiting.signal;
+    }
+    const result = await admission.admit(cost, waitSignal).finally(detach);
+    if (!result.ok && result.reason === "aborted" && drain?.active && !req.signal.aborted) {
+      return drain.shedResponse(new URL(req.url).pathname);
+    }
     if (!result.ok) {
       const why = result.reason === "aborted"
         ? "The client went away while the request waited for admission."
@@ -152,6 +238,12 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     }
     if (path.startsWith("/accounts/") && !config.auth.proxyApiKey) {
       return errorResponse(401, "authentication_error", "account status requires proxy API key authentication");
+    }
+
+    // Draining (ADR-0008 cond 2): shed every new request; /health keeps
+    // answering for the manager's hung-proxy detection.
+    if (drain?.active && path !== "/health" && path !== "/") {
+      return drain.shedResponse(path);
     }
 
     // --- Routing ---
@@ -277,11 +369,28 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
   }
 
   const admission = opts.admission ?? admissionFor(opts.config);
-  const handler = createFetchHandler({ ...opts, admission });
+  const drain = createDrainGate();
+  const handler = createFetchHandler({ ...opts, admission, drain });
   const requestedPort = opts.config.server.port;
   const bindHost = host === 'localhost' ? '127.0.0.1' : host === '[::1]' ? '::1' : host;
 
+  // Responses not finished yet: what the drain waits for and the force point cuts.
+  const active = new Set<import("node:http").ServerResponse>();
+  let idleWaiters: Array<() => void> = [];
+  const settleIdle = (): void => {
+    if (active.size > 0) return;
+    const waiters = idleWaiters;
+    idleWaiters = [];
+    for (const resolve of waiters) resolve();
+  };
+
   const server: Server = createServer(async (req, res) => {
+    active.add(res);
+    const done = (): void => {
+      if (active.delete(res)) settleIdle();
+    };
+    res.once("finish", done);
+    res.once("close", done);
     const abortController = new AbortController();
     const onClientClose = (): void => {
       if (!res.writableEnded) abortController.abort();
@@ -334,6 +443,23 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
         },
         close: () => new Promise<void>((r) => server.close(() => r())),
         admission: () => admission.stats(),
+        beginDrain: (drainOpts) => drain.begin(drainOpts),
+        draining: () => drain.active,
+        inFlight: () => active.size,
+        whenIdle: () => new Promise<void>((resolve) => {
+          idleWaiters.push(resolve);
+          settleIdle();
+        }),
+        cutInFlight: () => {
+          const cut = active.size;
+          for (const res of [...active]) {
+            try { res.destroy(); } catch {}
+          }
+          active.clear();
+          settleIdle();
+          return cut;
+        },
+        drainShed: () => drain.shed,
       });
     });
   });
