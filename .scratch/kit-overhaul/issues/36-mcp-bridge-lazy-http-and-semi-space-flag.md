@@ -122,3 +122,11 @@ Spec stories: 34, 135
   2. The HTTP stack is loaded once in `serveHttp` before listen, not per request.
   3. The bridge's own READMEs × 5 and `mcp/zcode-harness-mcp/examples/config/stdio.mcp.json` document standalone use (`node dist/index.js --stdio`) and are left to ticket 53. Only the kit's harness docs changed.
   4. The setup lines added ("claude: re-registered …", the WARN lines) are setup progress lines like their neighbours, not log events. No config key or env override was added.
+
+- 2026-11-08 (implementer, addendum): merged the integration tip again at 482eef5, which brings ticket 67's owners map; the merge is clean.
+  - `npm run test`: 843 tests, 824 pass, 0 fail, 19 skipped (`reports/t36-final-kit.log`). The merge touches no proxy or MCP file, so the `test:proxy`, `test:proxy-typecheck` and `test:mcp` results above stand.
+  - One job on the merged head (`job.mjs --os linux --only S3/short,S3/hung,S5/short`, `reports/t36-memloop-final.log`):
+    - procPeak:mcp-bridge is 73.6 MB in S3/short and 73.3 MB in S3/hung, both ok;
+    - S5/short growth is 40.98 %/1k (trend), procPeak 90.8 MB;
+    - "ratchet holds": S3/short and S3/hung are RED only on 16's and 37's owned checks, S5/short only on 30's.
+  - Under Round 16 Q2(c), linux `procPeak:mcp-bridge` (37's name, not marked `flips`) is now GREEN in S3/short and S3/hung on this tree. 67's ratchet accepts a GREEN owned check inside a RED run. The name stays under 37; removing it is 37's step (Round 15 Q1 condition 5).
