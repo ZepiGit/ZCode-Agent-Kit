@@ -298,6 +298,29 @@ test("stop counts its proxy as gone when its pid is reused after the kill, and n
   assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "the stopped proxy's record is removed");
 });
 
+test("stop never counts its proxy as gone on an unknown start time after the kill, and does not escalate", {
+  skip: process.platform === "win32" && "the stand-in survives SIGTERM; Windows stops through the handle-checked TerminateProcess",
+  timeout: 60_000,
+}, async (t) => {
+  const port = 19159;
+  const root = kitFixture(t, port);
+  await identityServer(t, port, "ours");
+  const recordedMs = Date.now() - 10 * 60_000;
+  const stand = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => process.stdout.write("term\\n")); setInterval(() => {}, 1e6); process.stdout.write("up\\n");'], { stdio: ["ignore", "pipe", "ignore"] });
+  defer(root, () => killChild(stand));
+  await new Promise((r) => stand.stdout.once("data", r));
+  let signalled = false;
+  stand.stdout.on("data", (b) => { if (String(b).includes("term")) signalled = true; });
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, startedIso: new Date(recordedMs).toISOString() }) + "\n");
+  const lifecycle = await lifecycleFor(root, { processStartMsImpl: () => (signalled ? null : recordedMs) });
+  const stopped = await lifecycle.stop();
+  assert.deepEqual({ code: stopped.code, outcome: stopped.outcome, lines: stopped.lines },
+    { code: 2, outcome: "kill-failed", lines: [`refusing to signal pid ${stand.pid}: its start time no longer matches the pid record`, `ERROR killing pid ${stand.pid}`] });
+  assert.equal(stand.signalCode, null, "no forced kill without proof");
+  assert.equal(stand.exitCode, null);
+  assert.equal(existsSync(join(root, "logs", "proxy.pid")), true, "the record stays");
+});
+
 // ------------------------------------------------------ frozen respawn contract
 test("the lifecycle module imports every child_process helper it calls (H2a moved with the start-time probe)", () => {
   const src = readFileSync(join(ROOT, "lib", "proxy-lifecycle.mjs"), "utf8");
