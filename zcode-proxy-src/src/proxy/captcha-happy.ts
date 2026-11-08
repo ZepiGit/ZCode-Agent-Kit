@@ -58,14 +58,18 @@ const SYNC_WORKER_SRC = `
       };
       try {
         // Bounded by the host's wait: a fetch that outlives it is abandoned.
-        let dispatcher;
-        if (m.proxyUrl) {
+        // Same routing as captchaFetch: Bun takes its own proxy option (it
+        // ignores undici's dispatcher), Node keeps the ProxyAgent dispatcher.
+        let route = {};
+        if (typeof Bun !== "undefined") {
+          route = { proxy: m.proxyUrl ?? false };
+        } else if (m.proxyUrl) {
           const { ProxyAgent } = require("undici");
-          dispatcher = new ProxyAgent(m.proxyUrl);
+          route = { dispatcher: new ProxyAgent(m.proxyUrl) };
         }
         const res = await fetch(m.url, {
           ...m.init,
-          ...(dispatcher ? { dispatcher } : {}),
+          ...route,
           signal: AbortSignal.timeout(m.timeoutMs),
         });
         const body = Buffer.from(await res.arrayBuffer());
@@ -178,9 +182,16 @@ const _DEBUG = /^(1|true|yes)$/i.test(
 // Captcha traffic may use an explicitly configured upstream proxy. Ambient
 // HTTP(S)_PROXY variables are intentionally ignored: this process is a long
 // lived daemon and must not inherit a proxy meant for an unrelated command.
+// Bun ignores undici's `dispatcher` (oven-sh/bun#38840) and, without a
+// `proxy` option, reads HTTP(S)_PROXY/ALL_PROXY on every fetch, so on Bun the
+// route is its own `proxy` option: the configured URL, or `false` for direct.
+// `proxy: false` takes effect from Bun 1.4.3; 1.4.2 still reads the ambient
+// variables when the setting is unset (ticket 62 moves the pin).
+// Node keeps the ProxyAgent dispatcher.
 const CAPTCHA_PROXY_URL = process.env.ZCODE_PROXY_UPSTREAM_PROXY?.trim() || undefined;
 let _captchaProxyAgent;
 function captchaFetch(input, init = {}) {
+  if (typeof Bun !== "undefined") return globalThis.fetch(input, { ...init, proxy: CAPTCHA_PROXY_URL ?? false });
   if (!CAPTCHA_PROXY_URL) return globalThis.fetch(input, init);
   _captchaProxyAgent ??= new ProxyAgent(CAPTCHA_PROXY_URL);
   return globalThis.fetch(input, { ...init, dispatcher: _captchaProxyAgent });
@@ -2468,4 +2479,6 @@ async function solveTraceless(opts, resources?: DomResources) {
   }
 }
 
-export { solveTraceless, createDom, destroyDom, lastCaptchaSdkScripts };
+// captchaFetch and syncFetchBlocking are exported as the egress-routing seam
+// (captcha-egress.test.ts); the solve path keeps using them internally.
+export { solveTraceless, createDom, destroyDom, lastCaptchaSdkScripts, captchaFetch, syncFetchBlocking };
