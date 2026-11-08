@@ -111,10 +111,17 @@ export const OMP_LEG = {
 // noise) and every repetition below the gate itself (the gate stays one
 // measurement per host). Thresholds unchanged. n: the smallest odd n in
 // {3, 5, 7, 9} whose predicted false-fail rate (binomial on the measured
-// fraction at or above 2.5 MB, less favourable leg) is ≤ 1 %. Provisional
-// n = 5 from the windows record, 1 of 16 legs at 2.55 MB (n = 3: 1.12 %,
-// n = 5: 0.22 %), until the ≥ 20-per-leg CI measurement
-// (tests/memory/measure-omp-floor, loop.test.mjs) sets it.
+// fraction at or above 2.5 MB, less favourable leg) is ≤ 1 %.
+// n = 5, measured (CI run 42467078897, the measurement mode
+// tests/memory/measure-omp-floor, 20 fresh hosts per OS leg): windows (Node 24,
+// commit) 0 of 20 at or above 2.5 (max 2.49, and 2.43), linux (Node 26, RSS)
+// 0 of 20 (max 0.69), so n = 3 on the CI values alone and on windows pooled with
+// its record (1 of 36: n = 3 → 0.23 %). The less favourable estimate is the
+// windows record alone, 1 of 16 legs at 2.55 MB (run 42436440284): n = 3 →
+// 1.12 % > 1 %, n = 5 → 0.22 %. As in Round 11 Q1, n is the largest over the
+// estimates. The windows values sit in two groups (0–0.13 and 2.43–2.55), and
+// 3 of 36 are ≥ 2.43, so a count at the 2.5 cut is fragile (3 of 36: n = 5 → 0.51 %).
+// The two other test-kit legs of that run never reached the tests (setup-bun HTTP 504).
 export const OMP_FLOOR = { n: 5, medianBelowMB: OMP_LEG.waiterCostMB / 2, everyBelowMB: OMP_LEG.waiterCostMB };
 
 /** S3's two-part verdict for one OS leg: (a) as `peaks.kit`, (b) as `procPeaks` per role. */
