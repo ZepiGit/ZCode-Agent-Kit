@@ -543,3 +543,42 @@ identity:
     expect(cfg.identity.appVersion).toBe("3.14.3");
   });
 });
+
+describe("server.admission.maxInFlightMB (ADR-0004)", () => {
+  const base = (admission: string) => writeYaml(`server:\n  port: 8080\n  host: "127.0.0.1"\n${admission}auth:\n  proxyApiKey: "${PROXY_KEY}"\n`);
+  afterEach(() => { delete process.env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB; });
+
+  it("is optional: without the key the proxy uses the 64 MB default", () => {
+    const cfg = loadConfig(base(""));
+    expect(cfg.server.admission?.maxInFlightBytes ?? 64 * 1024 * 1024).toBe(64 * 1024 * 1024);
+  });
+
+  it("reads the cap in MB from config.yaml", () => {
+    const cfg = loadConfig(base("  admission:\n    maxInFlightMB: 128\n"));
+    expect(cfg.server.admission?.maxInFlightBytes).toBe(128 * 1024 * 1024);
+  });
+
+  it("takes the ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB env override over config.yaml", () => {
+    process.env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB = "32";
+    const cfg = loadConfig(base("  admission:\n    maxInFlightMB: 128\n"));
+    expect(cfg.server.admission?.maxInFlightBytes).toBe(32 * 1024 * 1024);
+  });
+
+  for (const bad of ["0", "-5", "1.5", "lots", "4097", "\"\""]) {
+    it(`rejects ${bad} with what, why and next`, () => {
+      const path = base(`  admission:\n    maxInFlightMB: ${bad}\n`);
+      let message = "";
+      try { loadConfig(path); } catch (err) { message = (err as Error).message; }
+      expect(message).toMatch(/^server\.admission\.maxInFlightMB must be a whole number of MB from 1 to 4096 \(got /);
+      expect(message).toContain("caps the request-body bytes the proxy holds at once");
+      expect(message).toContain("Set it to a whole number such as 64 (the default) or remove the key");
+    });
+  }
+
+  it("rejects an invalid env override, naming the env var", () => {
+    process.env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB = "big";
+    let message = "";
+    try { loadConfig(base("")); } catch (err) { message = (err as Error).message; }
+    expect(message).toMatch(/^ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB must be a whole number of MB from 1 to 4096 \(got "big"\)/);
+  });
+});

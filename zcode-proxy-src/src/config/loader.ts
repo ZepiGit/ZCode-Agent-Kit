@@ -3,7 +3,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
-import type { AccountsConfig, ClientIdentityConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
+import type { AccountsConfig, AdmissionConfig, ClientIdentityConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
 
 /**
  * Environment variable keys that override YAML values.
@@ -31,6 +31,7 @@ const ENV = {
   CLIENT_SIGNING_ENABLED: "ZCODE_CLIENT_SIGNING",
   ACCOUNTS_ENABLED: "ZCODE_ACCOUNTS_ENABLED",
   ACCOUNTS_PATH: "ZCODE_PROXY_ACCOUNTS_PATH",
+  ADMISSION_MAX_INFLIGHT_MB: "ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB",
 } as const;
 
 const DEFAULTS = {
@@ -104,6 +105,7 @@ export function loadConfig(path: string): ProxyConfig {
   // --- server ---
   const port = resolvePort(process.env[ENV.PORT] ?? parsed?.server?.port);
   const host = typeof parsed?.server?.host === "string" ? parsed.server.host : DEFAULTS.HOST;
+  const admission = resolveAdmissionConfig(parsed?.server?.admission);
 
   // --- auth ---
   const proxyApiKey = process.env[ENV.PROXY_API_KEY] ?? parsed?.auth?.proxyApiKey;
@@ -151,7 +153,7 @@ export function loadConfig(path: string): ProxyConfig {
   const clientSigning = resolveClientSigningConfig(parsed?.clientSigning);
 
   const config: ProxyConfig = {
-    server: { port, host },
+    server: { port, host, ...(admission ? { admission } : {}) },
     auth: { proxyApiKey, oauthCredentialsPath, accounts },
     provider,
     plan,
@@ -219,6 +221,33 @@ function resolveAccountsConfig(raw: unknown): AccountsConfig {
       : {}),
     ...(allowedOrigins ? { allowedOrigins } : {}),
   };
+}
+
+/** Admission bounds for `server.admission.maxInFlightMB` (ADR-0004). */
+const ADMISSION_MAX_INFLIGHT_MB = { min: 1, max: 4096 };
+
+/**
+ * `server.admission` (ADR-0004): the cap on request-body bytes in flight, in
+ * MB, overridable by ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB. Absent = the
+ * proxy's default (64 MB). An invalid value stops the load with what/why/next.
+ */
+function resolveAdmissionConfig(raw: unknown): AdmissionConfig | undefined {
+  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const envValue = process.env[ENV.ADMISSION_MAX_INFLIGHT_MB];
+  const fromEnv = envValue !== undefined;
+  const value: unknown = fromEnv ? envValue : obj.maxInFlightMB;
+  if (value === undefined || value === null) return undefined;
+  const text = typeof value === "string" ? value.trim() : value;
+  const n = typeof text === "number" ? text : typeof text === "string" && /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isInteger(n) || n < ADMISSION_MAX_INFLIGHT_MB.min || n > ADMISSION_MAX_INFLIGHT_MB.max) {
+    const name = fromEnv ? ENV.ADMISSION_MAX_INFLIGHT_MB : "server.admission.maxInFlightMB";
+    throw new Error(
+      `${name} must be a whole number of MB from ${ADMISSION_MAX_INFLIGHT_MB.min} to ${ADMISSION_MAX_INFLIGHT_MB.max} (got ${JSON.stringify(value)}). ` +
+        "It caps the request-body bytes the proxy holds at once; requests beyond it wait, then get 503 + Retry-After. " +
+        `Set it to a whole number such as 64 (the default) or remove the key${fromEnv ? ` (unset ${ENV.ADMISSION_MAX_INFLIGHT_MB})` : ""}.`,
+    );
+  }
+  return { maxInFlightBytes: n * 1024 * 1024 };
 }
 
 function resolveClientIdentity(raw: unknown): ClientIdentityConfig {
