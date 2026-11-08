@@ -2,7 +2,7 @@
 
 **Blocked by:** 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 14 (Event-line format and redaction for new log events (prefactor))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -152,3 +152,5 @@ The 13-tree artefacts alone give 802.3 → −55.1 % and 1,397.3 → −71.9 %. 
 - The memory tests on the new list (`t19r2-memtests`, after `5d4a9e8`): 185 tests, 180 pass, 0 fail. They are in the kit suite above as well.
 
 - 2026-11-08 (orchestrator, Owner Proxy round 22 Q1): pre-merge run 42457112513 failed only on linux S3/short RED on orphans (unowned). The orphan is the kill-holder proxy left without a pid record; 19's diff touches no manager, lock, launcher, lifecycle or S3 scenario code. The name is assigned to 17 (flips) in a list-only orchestrator commit on staging/19; the run does not count against 19, is replayed through the amended list, and its S1 and S3 counts stand. 19 merges after one passing CI run on its final tip.
+
+- Merged 2026-11-08 as d68548ca0bdf6ff5b3814acdb583c69698fc40f6 (ticket/19-admission-control at c2c9d98 into bde2498; first merge, no revert-of-revert: 39a41ca on the branch reverts the branch's own ccd5d27; one conflict, this file only, both texts kept). Fast suite on Bun 1.4.2: kit 818/837 (19 skipped, 0 fail), proxy 1413/1413 (93 files), proxy typecheck clean, mcp 96/97 (1 skipped, 0 fail); `mcp/zcode-harness-mcp/dist/` unchanged. Memory loop (linux, `--only S1/burst4,S1/burst16,S1/burst32,S1/bigbody,S1/short`, port 19190, `/home/AgentKit/overhaul-tools/merge-19-memloop`): ratchet holds; `procPeak:proxy` S1/short 168.3 GREEN, S1/burst32 558.9 GREEN (listed, `flips`, owner 20), S1/burst4 352.5, S1/burst16 513, S1/bigbody 371.1 RED (owner 20). Pre-merge CI: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42464297212 (staging/19, PR #31): every job green except windows test-kit Node 26 on signature (iii) of Owner Proxy round 17's interim rule (OMP no-op floor 2.56 MB), which does not count against 19 (its diff touches no OMP host code) and is recorded in RUNLOG. Round 18 (owners -> 20, marks from the 10 evidence runs), round 22 (list commit c2c9d98; replay of 42457112513 ALL CLEAN), windows >= 30 %: burst16 -55 %, burst32 -71 %. Sanity diff `git diff staging/19 HEAD` over the ticket's 14 non-.scratch files (`git diff --name-only staging/19^2 staging/19`; staging/19's last commit merges the tip into the ticket, so `^1..` lists only ticket 26's two captcha files) is empty, and `git diff staging/19 HEAD -- . ':!.scratch'` is empty too; staging/19..HEAD differs only in .scratch (rounds 22-23, ticket 71 staging docs). Logs: `reports/merge-19-{npmci,kit,proxy,proxy-typecheck,mcp,memloop}.log`.
