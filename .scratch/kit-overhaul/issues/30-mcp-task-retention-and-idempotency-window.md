@@ -233,3 +233,34 @@ Spec stories: 66, 67, 68, 135
 - 2026-11-08 (orchestrator, Owner Proxy round 25): restaged run 42483637377 (a53152d, with 36) disagrees with 42475847194: windows S5/short growth:mcp-bridge 34.62 %/1k commit (WS 19.17), trend true, above the 30 bound; signature (vi) does not apply (diff touches mcp/**). Its S1/short line (growth:proxy 5.18 commit only) is Round 17 signature (ii). Under Round 24 Q1 condition 1 the ticket does not merge on this run; the numbers come back as their own question.
 - 2026-11-08 (orchestrator, Owner Proxy round 26, binding): 30 and 74 are staged together on one branch (integration tip, then ticket/30, then ticket/74, which is built on ticket/30). Restaged run 42483637377 (34.62 %/1k commit, trend true; z = 4.2 against the other 84 windows runs) is neither excused nor dropped: it stays value 3 of Round 25's 20-value set and in this ticket's "with 30" subset in METRICS. This ticket's S5/short verdict comes from the same 10 evidence runs per leg as 74's exit, read from warm-up-growth:mcp-bridge (Acceptance). Merge: 30 then 74 back to back in one push if both pass; 30 alone, after one confirming pre-merge run of its own tree, if only 30 passes; neither if 30 fails. Reverting 30 always reverts 74 first.
 - 2026-11-08 (orchestrator, Owner Proxy round 29, binding): 74's mutant proof failed, so Round 26 Q1 condition 6c applies: this ticket takes exactly 10 full-CI runs per leg on its own staging tree (integration tip, then ticket/30; tree hash in RUNLOG before the first run), judged under the Acceptance's S5/short bullet on the band value (windows 5 < v ≤ 30 commit; linux ≤ 55 judged from the printed value; every other S5 check GREEN; Round 25's set tabulated, complete and trigger-free; signatures (vi) and (vii) never apply). Then one confirming pre-merge run (the 10th run serves if the tip has not moved and every job is GREEN), and 30 merges alone. A value above 30 or 55, or any other S5 RED, comes back with all values; nothing is rerun.
+
+- 2026-11-08 (implementer, round 3, Owner Proxy round 29). The integration tip f56c46d (round 29, ticket 76's egress guard) is merged at 68ab061 with a merge commit, no rebase. No ticket-74 commit is in this branch: `git diff overhaul/stability-terminal-ux 68ab061` touches only 30's own 14 files, the same set as before.
+  - **Conflicts and how they were resolved.** No assertion from either side was dropped.
+    - `tests/memory/verdict.test.mjs`, the committed-list test: only the title line conflicted, and the body merged cleanly.
+      - From ticket 20: no windows S1/burst1 entry, and `unstable` equals `["windows S5/short"]`.
+      - From 30: both S5/short entries are owned by 74.
+      - Title: "the committed list has no S1/burst1 entry (ticket 20 removed it) and marks windows S5/short unstable for ticket 74, its only unstable entry".
+    - `tests/memory/loop.test.mjs`: the tip's new S7 retained-heap, windows S1/short and linux S6/short blocks are kept in full. The linux 42436186573 replay title that follows them keeps 30's "owned by ticket 74".
+    - This file: my round-2 comment, then the tip's round 25, 26 and 29 orchestrator lines, all verbatim.
+  - **List check (Round 29 condition 2).** The merged `expected-red.json` has:
+    - linux `"S5/short": { "owners": { "74": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] }`;
+    - windows `"S5/short": { "ticket": "74", "state": "unstable" }`;
+    - ticket 20's S1 deletions kept, and nothing else differs from the tip.
+    - `UNSTABLE` is the tip's version, which 30 does not touch: S1/burst1 `maxMedianMB` 300, and S5/short `growthBand` 5/30.
+  - **B5.** The tip changes nothing under `mcp/`. `npm run build` leaves `git status` clean, so `dist/` equals the sources and there is no rebuild commit.
+  - **Suites on 68ab061** (`reports/t30-r3-*.log`):
+    - `npm run test`: 886 tests, 868 pass, 0 fail, 18 skipped;
+    - `test:proxy` with the egress guard preload on: 1596 pass, 0 fail (107 files);
+    - `test:proxy-typecheck`: clean;
+    - `test:mcp`: 105 tests, 104 pass, 0 fail, 1 skipped;
+    - the memory files alone (`verdict`, `loop`, `win-sampler`): 209 tests, 204 pass, 0 fail, 5 skipped.
+  - **Local linux S5/short on 68ab061**, one run (`job.mjs --os linux --only S5/short`, cap systemd 6G; `reports/t30-r3-s5-short.log`, `/home/AgentKit/overhaul-tools/t30r3-memloop/`).
+    - growth:mcp-bridge: 44.16 %/1k, trend true, so RED.
+      - Slope 38.02 MB/1k, mean 86.1 MB, 703 samples.
+      - Window medians 80.1 / 83.2 / 85.7 / 87.2 / 90.3 / 89.4 MB, net rise 11.6 %, 0 rising windows.
+    - procPeak:mcp-bridge 91.7 MB (budget 150).
+    - empty → 400 → reboot: 73 → 88 → 74 MB, so the reboot cost is 1 MB (budget 20). The data directory holds 2 MB in 1,200 files.
+    - Task failures 0, orphans 0, duration 716 s.
+    - The ratchet holds: the job exits 0, with "S5/short: RED on growth:mcp-bridge, owned by ticket 74 (growth:mcp-bridge)".
+    - This is a local value only. It is not part of Round 29's 10-run verdict, which the orchestrator judges from CI (linux ≤ 55 from the printed value).
+  - Not pushed. Staging (10 full-CI runs per leg) is the orchestrator's job.
