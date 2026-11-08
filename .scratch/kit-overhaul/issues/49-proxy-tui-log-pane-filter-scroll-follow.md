@@ -33,3 +33,4 @@ Spec stories: 118
 ## Comments
 
 - 2026-11-07 (orchestrator, from ticket 32): with an 8 MB line on screen a frame takes 5.9 ms (recorded, not gated); a short pane scrolled by fewer rows than the viewport shows a '▼ 0 more' badge.
+- 2026-11-08 (Owner Proxy round 21 Q1): 49 touches zcode-proxy-src/src/tui/**, so it gets no interim exception for signature (v); its memory-budget evidence judges linux S6/short under ticket 71's 5-repetition rule. 49 owns no S6 check.
