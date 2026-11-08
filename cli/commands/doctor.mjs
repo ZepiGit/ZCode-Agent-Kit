@@ -91,8 +91,11 @@ async function doctor(flags, ctx, records) {
   if (flags.fix) {
     // A down or hung proxy is the most common reason to run doctor --fix; the
     // manager's safe start (with its hung-own proof) is the only repair path.
-    const { createManager } = await import(pathToFileURL(manager).href);
-    if (await createManager({ root: kit.root, home: kit.home }).healthIdentify() !== "ours") {
+    // The identity comes from the lifecycle's read-state intent; the start
+    // runs through the manager CLI, whose output (incl. the connection
+    // details) streams to the terminal under the start's own timeout.
+    const { createLifecycle } = await import(pathToFileURL(join(kit.root, "lib", "proxy-lifecycle.mjs")).href);
+    if ((await createLifecycle({ root: kit.root, home: kit.home }).readState()).identity !== "ours") {
       const started = ctx.spawnSync(ctx.execPath, [manager, "start"], {
         encoding: "utf8", timeout: 180000, stdio: flags.json ? ["ignore", "pipe", "pipe"] : "inherit",
       });
