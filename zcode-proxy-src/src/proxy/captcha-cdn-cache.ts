@@ -33,6 +33,12 @@ export interface CdnCacheOptions {
   directory?: string;
   ttlMs?: number;
   now?: () => number;
+  /**
+   * Body budget of the memory tier. Tests only (the seam-3 replay compares
+   * 32 and 64 MiB); production always uses CDN_MEMORY_MAX_BYTES. Deliberately
+   * not a config key or env override (Owner Proxy round 20 Q1).
+   */
+  memoryMaxBytes?: number;
 }
 
 const sha256 = (body: Buffer | string) => crypto.createHash("sha256").update(body).digest("hex");
@@ -43,7 +49,8 @@ const sha256 = (body: Buffer | string) => crypto.createHash("sha256").update(bod
 // from its disk envelope or fetched again.
 // Bodies are capped at half the memory bound because the runtime keeps the
 // memory of evicted bodies for a while: S2 measured a steady +26 MB over the
-// held bytes (64 MiB held → 90 MB, 32 MiB → 58 MB; ticket 25).
+// held bytes (64 MiB held → 90 MB, 32 MiB → 58 MB; ticket 25). Confirmed as a
+// code constant by Owner Proxy round 20 Q1.
 export const CDN_MEMORY_MAX_ENTRIES = 256;
 export const CDN_MEMORY_MAX_BYTES = 32 * 1024 * 1024;
 
@@ -51,11 +58,7 @@ export class CaptchaCdnCache {
   readonly directory: string;
   readonly ttlMs: number;
   private readonly now: () => number;
-  private readonly memory = new BoundedCollection<string, CdnEntry>({
-    maxEntries: CDN_MEMORY_MAX_ENTRIES,
-    maxBytes: CDN_MEMORY_MAX_BYTES,
-    sizeOf: (entry) => entry.body.length,
-  });
+  private readonly memory: BoundedCollection<string, CdnEntry>;
   private readonly pending = new Map<string, Promise<CdnEntry>>();
   // Only failed deletions need a tombstone. Do not read an invalidated disk
   // entry again merely because the filesystem temporarily refused unlink.
@@ -65,6 +68,11 @@ export class CaptchaCdnCache {
   private readonly generations = new Map<string, object>();
 
   constructor(options: CdnCacheOptions = {}) {
+    this.memory = new BoundedCollection<string, CdnEntry>({
+      maxEntries: CDN_MEMORY_MAX_ENTRIES,
+      maxBytes: options.memoryMaxBytes ?? CDN_MEMORY_MAX_BYTES,
+      sizeOf: (entry) => entry.body.length,
+    });
     this.directory = options.directory ?? process.env.CAPTCHA_CDN_CACHE_DIR ??
       path.join(os.homedir(), ".zcode-captcha-cdn-cache");
     if (!this.directory.trim()) throw new Error("CAPTCHA_CDN_CACHE_DIR must not be empty");
