@@ -37,11 +37,15 @@ export interface CdnCacheOptions {
 
 const sha256 = (body: Buffer | string) => crypto.createHash("sha256").update(body).digest("hex");
 
-// The memory tier's bound (ADR-0009, spec §7). It lives in the solver, so it
-// also resets with each solver generation. Eviction changes memory use only:
-// an evicted entry is read back from its disk envelope or fetched again.
+// The memory tier's bound (ADR-0009, spec §7): ≤ 64 MB of memory and ≤ 256
+// entries. It lives in the solver, so it also resets with each solver
+// generation. Eviction changes memory use only: an evicted entry is read back
+// from its disk envelope or fetched again.
+// Bodies are capped at half the memory bound because the runtime keeps the
+// memory of evicted bodies for a while: S2 measured a steady +26 MB over the
+// held bytes (64 MiB held → 90 MB, 32 MiB → 58 MB; ticket 25).
 export const CDN_MEMORY_MAX_ENTRIES = 256;
-export const CDN_MEMORY_MAX_BYTES = 64 * 1024 * 1024;
+export const CDN_MEMORY_MAX_BYTES = 32 * 1024 * 1024;
 
 export class CaptchaCdnCache {
   readonly directory: string;

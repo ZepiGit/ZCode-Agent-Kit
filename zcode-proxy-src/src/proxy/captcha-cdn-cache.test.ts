@@ -176,7 +176,8 @@ describe("CDN singleflight publication", () => {
 });
 
 // Ticket 25 (ADR-0009, spec §7): the memory tier holds at most 256 entries and
-// 64 MiB of bodies. Eviction changes memory use only: an evicted entry is read
+// 32 MiB of bodies, so its memory stays within 64 MB (the runtime keeps the
+// memory of evicted bodies for a while on top). Eviction changes memory use only: an evicted entry is read
 // back from its disk envelope (same bytes, same retrieval time) or, without
 // one, fetched again. The disk tier is not bounded here (ticket 29).
 const MiB = 1024 * 1024;
@@ -194,14 +195,14 @@ describe("CDN memory tier bound", () => {
     expect(cache.memoryUsage().entries).toBe(256);
   });
 
-  it("holds at most 64 MiB of bodies", () => {
+  it("holds at most 32 MiB of bodies", () => {
     const cache = new CaptchaCdnCache({ directory: directory(), ttlMs: 100_000, now: () => 1_000 });
-    for (let i = 0; i < 70; i++) cache.put(pe(i), Buffer.alloc(MiB, i));
+    for (let i = 0; i < 40; i++) cache.put(pe(i), Buffer.alloc(MiB, i));
     const { entries, bytes } = cache.memoryUsage();
-    expect(bytes).toBe(64 * MiB);
-    expect(entries).toBe(64);
+    expect(bytes).toBe(32 * MiB);
+    expect(entries).toBe(32);
     expect(cache.get(pe(5))).toMatchObject({ body: Buffer.alloc(MiB, 5), source: "disk" });
-    expect(cache.get(pe(69))?.source).toBe("memory");
+    expect(cache.get(pe(39))?.source).toBe("memory");
   });
 
   it("keeps a recently read entry in memory while older ones are evicted", () => {
@@ -228,9 +229,9 @@ describe("CDN memory tier bound", () => {
   it("serves a body larger than the whole budget without holding it in memory", async () => {
     const cache = new CaptchaCdnCache({ directory: directory(), ttlMs: 100_000, now: () => 1_000 });
     cache.put(pe(1), Buffer.from("var small = 1;"));
-    const huge = Buffer.alloc(64 * MiB + 1, 7);
+    const huge = Buffer.alloc(32 * MiB + 1, 7);
     const loaded = await cache.load(pe(0), async () => huge);
-    expect(loaded.body.length).toBe(64 * MiB + 1);
+    expect(loaded.body.length).toBe(32 * MiB + 1);
     expect(cache.memoryUsage()).toEqual({ entries: 1, bytes: Buffer.byteLength("var small = 1;") });
     // Its disk envelope still serves the same bytes; promotion is refused again.
     const again = cache.get(pe(0));
