@@ -58,7 +58,7 @@ writes are undone, the summary lists it as failed and setup exits with code
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` (Windows) or `~/.config/goose/custom_providers/zcode.json` (macOS/Linux) | credential via documented `auth.command` helper (kit key resolver, no shell) |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | the kit never touches VS Code state; enter the values once in the UI |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | custom provider (Anthropic messages) in the UI; the kit deliberately does not write kilo.jsonc |
-| MCP-capable harnesses | stdio server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entry in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (only if detected and consented); Codex: inside the isolated home. MCP alone does NOT count as model integration |
+| MCP-capable harnesses | stdio server `zcode-harness` (`node --max-semi-space-size=1 mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entry in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (only if detected and consented); Codex: inside the isolated home. MCP alone does NOT count as model integration |
 
 Paths under `generated/` refer to kit state: the kit directory for release
 installs/source checkouts, or the separate state directory for npm installs.
@@ -116,7 +116,7 @@ On Windows the isolated Codex profile enables the restricted-token sandbox (`win
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<absolute kit installation path>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["--max-semi-space-size=1", "<absolute kit installation path>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
