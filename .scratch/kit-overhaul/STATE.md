@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: t67 round 4 (final list + replay) -> final pre-merge run -> merge 67 FIRST; then 19 (restage on 67's schema, marks from the 10 staging/19 runs, revert ccd5d27, owners -> 20), then 15 (restage). Running: t24 (solver seam), t36 (bridge). Ready: 25, 26, 30, 71 (after 67), 72. Interim rule (round 17): failures matching only its four signatures do not count against a ticket that does not touch the measured code; log each.
+- Next action: t19 round 2 (revert ccd5d27, owners -> 20 in 67's schema, marks from the 10 staging/19 runs replayed through 67's ratchet) when a slot frees; restage 19 -> merge. Then 15 (round 2 running: windows start-time test), 24 (green), 26 (round 19 pending), 72. Running: t15, t25, t36. Ready: 30, 71, 73 (after 72). Interim rule (round 17) active.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -19,6 +19,8 @@
 - Ticket 69 (deviceMid reader) merged 2026-11-07 as 9441486 (resolved 4b594a1; no CI-only criteria).
 - Ticket 13 (MCP dependencies) merged 2026-11-08 as f383d6b (resolved 5eedae3; pre-merge CI 42425069025).
 - Ticket 70 (windows stop test, PID reuse) merged 2026-11-08 as 24f4621 (resolved 28e013c; tests only; windows confirmation accumulates, target 23 runs).
+- Ticket 67 (owners/flips schema) merged 2026-11-08 as 482eef5 (resolved ba5b2d4; final pre-merge CI 42448283566; gate 20/20 legs).
+- Ticket 26 (captcha egress under Bun) merged 2026-11-08 as 87da391 (resolved a3962ad; pre-merge CI 42457120690).
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul

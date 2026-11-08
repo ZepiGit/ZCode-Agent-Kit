@@ -34,3 +34,7 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 - **Units are UTF-8 bytes.** Cuts fall on code-point boundaries, and `N` is a byte count.
 - **The `truncated` field stays** (for example `truncated: { droppedBytes }`). The truncation explanation is combined with the terminal-state override, which runs last, so the override cannot erase it.
 - **The idempotency wording** is: "Idempotency keys are remembered for as long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after that the same key starts a new task." `docs/MCP_API.md`, the tool description and the release notes carry the cap, the marker and this sentence, and `dist/` is regenerated (B5).
+
+## Amended 2026-11-08 (Round 20, Q1)
+
+The CDN memory cache's 64 MB bound is the memory the tier costs, as measured by `cdn-cache:memory-growth`. To meet it, the tier holds at most 32 MiB of bodies (and 256 entries): with 64 MiB held, S2 measured 90 MB, because the runtime keeps the memory of evicted bodies for a while. An evicted entry is read back from its disk envelope with the same bytes and `fetchedAt`, so with the disk tier available the network fetches are those of an unbounded tier (seam 3 replay, ticket 25). The bound and the two-way-door consequence are unchanged.
