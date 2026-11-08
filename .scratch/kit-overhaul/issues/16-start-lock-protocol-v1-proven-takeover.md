@@ -438,3 +438,5 @@ The head is the commit that adds this report.
 **Decisions taken**
 1. **Ticks are compared exactly only where both identities carry them.** That covers `completeRecord`'s two reads, and `verifyOwnProcess`/`exited` against a ticked record (77). The CIM resume scan stays on the ms rule (DMTF microsecond resolution). Its resumed proxy is recorded only through the exact proof.
 2. **The start lock's v1 record does not gain Windows ticks.** That would mean a PowerShell call for the holder's own start on every acquisition (round 1 decision 2). The ticket asks for exact comparison "when both sides have them", and the lock's holder side has no ticks on Windows.
+
+**Addendum (round 3).** The tip merged in `88f07dc` is 91fa58f, not 8160c69 as written above (91fa58f contains 8160c69 and 78f51bd). The tip then moved to 788f2fb, a docs-only commit (`.scratch` only). It is merged in the commit after `5c92dc7`, with no conflicts and no code change, so the suites and loop above stand for the code at the head.
