@@ -253,17 +253,65 @@ function newSession(): StoredNode {
   };
 }
 
+/**
+ * SHA-256 of the identity's stable stringification: keys sorted, no
+ * whitespace, leaves as JSON.stringify writes them. The text is fed to the
+ * hash piece by piece instead of being built first (ticket 20): building it
+ * joined a full copy of the conversation at every nesting level. The digest is
+ * that of the whole text, including its quirks: an object property whose value
+ * JSON.stringify drops (undefined, e.g. an absent `system`) is written as the
+ * word `undefined`, such an array element as nothing. Called with objects only.
+ */
 function hashJson(value: unknown): string {
-  return hashString(stableStringify(value));
+  const hash = nodeCrypto.createHash("sha256");
+  let pending = "";
+  const write = (text: string): void => {
+    if (text.length >= STABLE_FLUSH_CHARS) {
+      if (pending) { hash.update(pending, "utf-8"); pending = ""; }
+      hash.update(text, "utf-8");
+      return;
+    }
+    pending += text;
+    if (pending.length >= STABLE_FLUSH_CHARS) { hash.update(pending, "utf-8"); pending = ""; }
+  };
+  writeStable(value, write, "undefined");
+  if (pending) hash.update(pending, "utf-8");
+  return hash.digest("hex");
 }
 
-function hashString(value: string): string {
-  return nodeCrypto.createHash("sha256").update(value, "utf-8").digest("hex");
-}
+/** Small pieces are batched into one hash update of up to this many UTF-16 units. */
+const STABLE_FLUSH_CHARS = 16 * 1024;
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+/**
+ * Write the stable stringification of `value` in pieces. Pieces are whole
+ * JSON tokens, so no surrogate pair is split between two hash updates.
+ * `dropped` is the text for a leaf JSON.stringify drops: "undefined" in an
+ * object property (template interpolation), "" in an array element
+ * (Array.prototype.join).
+ */
+function writeStable(value: unknown, write: (text: string) => void, dropped: string): void {
+  if (value === null || typeof value !== "object") {
+    const leaf = JSON.stringify(value) as string | undefined;
+    write(leaf === undefined ? dropped : leaf);
+    return;
+  }
+  if (Array.isArray(value)) {
+    write("[");
+    for (let i = 0; i < value.length; i++) {
+      if (i > 0) write(",");
+      writeStable(value[i], write, "");
+    }
+    write("]");
+    return;
+  }
   const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
+  const keys = Object.keys(obj).sort();
+  write("{");
+  for (let i = 0; i < keys.length; i++) {
+    if (i > 0) write(",");
+    write(JSON.stringify(keys[i]));
+    write(":");
+    writeStable(obj[keys[i]], write, "undefined");
+  }
+  write("}");
 }
