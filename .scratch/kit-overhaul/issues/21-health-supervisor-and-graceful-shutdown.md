@@ -251,3 +251,38 @@ The memory-loop and footprint evidence above stands: 21's product code is unchan
   - kit (`t21r2-full2-kit`): 866/884, 18 skipped, 0 fail;
   - proxy (`t21r2-full2-proxy`): 1473 pass, 0 fail, 101 files; typecheck clean;
   - mcp (`t21r2-full2-mcp`): 99/100, 1 skipped, 0 fail.
+
+### 2026-11-08 — implementer, round 3 (restaged pre-merge run 42500996594, windows S1/short rep 2 `orphans 1`)
+
+**Branch:** `ticket/21-health-supervisor`. Merged the integration tip `f21d3ac` as `5412490`, with no conflicts. Product code is unchanged since `9961d3b`; the head SHA is the commit that adds this comment.
+
+**Verdict: the orphan is not caused by ticket 21's code. No product change.** The kit's windows kill refused to terminate the proxy. The refusal comes from a float-precision defect in the kit's PID-reuse guard (`lib/proxy-lifecycle.mjs`). That code is byte-identical on the tip and dates from September, and ticket 21's shutdown code never runs in this path.
+
+1. **What the run itself records** (`/home/AgentKit/overhaul-tools/ci-art/t21-r3/win/S1-short/rep-2/…/summary.json`, `notes`):
+   - `stop.code: 2`;
+   - `stop.output`: twice `refusing to signal pid 5132: process handle identity could not be confirmed`, then `ERROR killing pid 5132`.
+   
+   The stop did not wait too short for an exiting proxy. The manager never terminated it: both `TerminateProcess` attempts were refused, and the proxy was still idle and alive (WS ~96 MB, stable) when the orphan check ran 13 s later. In the 4 GREEN reps the same command printed `stopped (pid …)`.
+2. **How the kit stops the proxy on win32** (`stopVerified` → `killOwnedIn`):
+   - the ownership guard runs;
+   - then one PowerShell script opens a handle, compares `GetProcessTimes` creation with `FromUnixTimeMilliseconds(Math.trunc(expected))` (`exit 4` if `|Δ| > 1 ms`) and calls `TerminateProcess`;
+   - after `waitForExit(5000)` the same steps repeat.
+   
+   No signal and no HTTP stop request reaches the proxy before that, so `createGracefulShutdown`, the drain and the supervisor never run on this path. The target process cannot delay or block `TerminateProcess`, whatever its timers or handlers are.
+3. **The mechanism.** The guard's `expected` comes from `processStartMs`: `Number(<.NET Ticks string>) / 10000 - 62135596800000`. The ticks are ~6.39e17, above 2^53, so a JS Number holds them only to the nearest 128 ticks. The division adds more error, and `expected` ends up as much as ~8 µs below the true start. When the true start lies within those few µs above a millisecond boundary, `Math.trunc` drops a whole millisecond. The script then sees `Δ = 1.000x ms > 1` and refuses on every attempt for that process. A deterministic refusal on both attempts is exactly what the run shows. Worked example: ticks `639297530400030001` (true …240003.0001 ms) give `processStartMs` …240002.9922 and trunc …240002, so Δ = 10001 × 100 ns > 1 ms and `exit 4`. A simulation of the exact expressions over 2 M uniformly drawn start ticks: 571 refusals, about 1 in 3 500 processes, max Δ 10009 (`/home/AgentKit/overhaul-tools/t21-scripts/tick-trunc-sim.mjs`). The script's other failure branches do not depend on the target's code either: `OpenProcess`/`GetProcessTimes` on an own-user live process, an `Add-Type` compile failure, or the 15 s timeout (the script ran ~1–2 s: `csc.exe` visible at t=259.5 s, gone at 260.5 s).
+4. **The same window on the tip.**
+   - `git diff staging/21 overhaul/stability-terminal-ux -- lib/proxy-lifecycle.mjs lib/process.mjs proxy/zcode-proxy-manager.mjs tests/memory/` is empty;
+   - 21's diff against the tip touches only `zcode-proxy-src/` and the two `config.example.yaml` files;
+   - both expressions (`.Ticks` → Number, `Math.trunc(expected)` against a 1 ms tolerance) come from `35a9c4a`/`b20d4ca` (2026-09) and moved unchanged into the lifecycle module (`931a219`).
+   
+   So every windows S1 stop in the history ran this window: 764 of 765 stops in `/home/AgentKit/overhaul-tools/ci-art/` returned code 0. At about 1 in 3 500, P(at least one in 765) ≈ 20 %, so a single occurrence is in line with the rate. The rate on a given runner can be higher if process creation times are quantised to clock ticks.
+5. **No test added in this ticket.** The defect is not 21's: fixing it changes the kill guard (ticket 15's module), and a RED test for it here would fail the integration suite.
+   - Suggested owner/new ticket: carry the exact tick value end to end, either as a BigInt/string from `.Ticks` or `ToFileTimeUtc()`, into the PowerShell comparison (integer ticks, no truncation). Alternatively compare at a tolerance that covers the float error. The seam is `processStartMs`/`sameStart` plus the PS script; a linux-provable unit can pin the arithmetic.
+   - `sameStart` (tolerance 1 ms on win32) has the same float exposure, but both of its sides go through the same conversion, so it does not refuse here.
+
+**Full suites on `5412490`** (Bun 1.4.2, Node 26.7.0):
+- `npm run test` (`t21r3-full-kit`): 885 tests, 867 pass, 0 fail, 18 skipped;
+- `npm run test:proxy` (`t21r3-full-proxy`): 1473 pass, 0 fail, 101 files; `test:proxy-typecheck` clean;
+- `npm run test:mcp` (`t21r3-full-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped.
+
+**Pending CI (orchestrator):** the windows `memory-budget` S1/short ×5 on a restaged staging/21. The orphan is unowned by 21 and needs an owner decision (a re-run, or the new kill-guard ticket above).
