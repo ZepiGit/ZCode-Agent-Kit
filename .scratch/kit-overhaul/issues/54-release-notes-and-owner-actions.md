@@ -42,3 +42,5 @@ Spec stories: 138, 144
 - 2026-11-07 (orchestrator, from ticket 42): the release notes describe the Account Rotator question asked once, with automatic migration of the old answer.
 
 - 2026-11-07 (orchestrator, from ticket 69): release-notes sentence (proposed by its implementer): "Proxy: an empty, unquoted `deviceMid:` under `identity:` in `config.yaml` is now read as empty, as `deviceMid: ""` already was, so on its first `serve`, `claim` or `auth login` after this update the proxy writes a generated device ID into that line and sends it from then on (such a config previously ran without one)."
+
+- 2026-11-08 (orchestrator, Owner Proxy round 19, binding): release-notes line: "On Bun, captcha egress now honours ZCODE_PROXY_UPSTREAM_PROXY; an invalid value now fails captcha requests, as the startup banner already stated and as Node already did." If ticket 27's record shows the thread transport reachable outside tests on Bun < 1.4.3, the Bun 1.4.2 stay-back text also names the ambient-proxy gap.
