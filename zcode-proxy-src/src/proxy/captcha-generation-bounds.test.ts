@@ -16,9 +16,15 @@ afterEach(() => { for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: 
 
 // Same isolation as captcha-solver.test.ts: a child process per scenario, so
 // another suite's module mocks cannot replace the worker or its backend.
+// The CDN directory is a regular file, so the generation's cache has no disk
+// tier: the bounds are memory properties, and hundreds of fsync'd envelope
+// writes made this test take seconds on Windows runners. Disk read-back and
+// invalidation of disk envelopes are proven in captcha-cdn-cache.test.ts.
 async function scenario(source: string): Promise<void> {
-  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "captcha-generation-"));
-  dirs.push(cacheDir);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "captcha-generation-"));
+  dirs.push(root);
+  const cacheDir = path.join(root, "not-a-directory");
+  fs.writeFileSync(cacheDir, "file");
   const child = Bun.spawn([process.execPath, "--eval", `
     import assert from 'node:assert/strict';
     import * as solver from ${JSON.stringify(solverPath)};
@@ -47,5 +53,5 @@ describe("solver generation resources", () => {
       assert.equal(await run('resources'), 'cdn:0:0:stalls:0');
       assert(solver.getCaptchaSolverStats().generation > generation);
     `);
-  }, 30_000);
+  }, 30_000); // A child process with a real worker: 3.0–3.4 s on windows-latest with the disk tier (run 42461329252), 0.4–0.5 s locally without it; the child's own watchdog is 25 s.
 });

@@ -11,7 +11,7 @@
 // All three must make the same fetches (URL, kind, order, count) and return
 // the same bytes, sha256 and fetchedAt for every call; only `source` may
 // differ. The network is a local fixture: nothing leaves the process.
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, spyOn } from "bun:test";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -45,7 +45,17 @@ function body(index: number, version: number): Buffer {
   return b;
 }
 
-async function replay(make: Make, { diskAvailable = true } = {}) {
+// The disk tier is real (temp files, atomic rename, read-back), but fsync is
+// a no-op during a replay: it only decides durability across a crash, never
+// what this process reads back, and the same stub applies to all three
+// caches. With real fsync the ~1,300 envelope commits took 18 s on Windows
+// runners (run 42461329252).
+async function replay(make: Make, options: { diskAvailable?: boolean } = {}) {
+  const fsync = spyOn(fs, "fsyncSync").mockImplementation(() => {});
+  try { return await replayWith(make, options); } finally { fsync.mockRestore(); }
+}
+
+async function replayWith(make: Make, { diskAvailable = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "captcha-cdn-replay-"));
   dirs.push(root);
   let directory = path.join(root, "cache");
@@ -88,6 +98,13 @@ async function replay(make: Make, { diskAvailable = true } = {}) {
   return { fetches, results, sources, fetchesAfterExpiry: fetches.length - fetchesAtExpiry };
 }
 
+// The work is fixed by the recording (2,527 calls, three replays, ~0.8 GiB
+// hashed per replay to compare the served bytes), so these tests carry an
+// explicit timeout. Measured before fsync was stubbed: 17.6–18.1 s on
+// windows-latest (run 42461329252, both Node legs), 4.2–7.8 s on ubuntu;
+// after: 3.6–4.0 s locally (was 16.5 s). Disk unavailable (CPU only):
+// 2.8 s windows, 2.4–2.7 s ubuntu, 2.6–2.9 s locally.
+const REPLAY_TIMEOUT_MS = 60_000;
 const ttlMs = recording.ttlMs;
 const preChange: Make = (directory, now) => new PreChangeCdnCache({ directory, ttlMs, now });
 const head32: Make = (directory, now) => new CaptchaCdnCache({ directory, ttlMs, now });
@@ -119,7 +136,7 @@ describe("CDN memory bound replay (B1, Round 20 Q1)", () => {
     expect(c.fetches).toEqual(a.fetches);
     expect(b.results).toEqual(a.results);
     expect(c.results).toEqual(a.results);
-  }, 120_000);
+  }, REPLAY_TIMEOUT_MS);
 
   it("records the fetch counts with the disk tier unavailable (a recorded number, not a gate)", async () => {
     const a = await replay(preChange, { diskAvailable: false });
@@ -127,5 +144,5 @@ describe("CDN memory bound replay (B1, Round 20 Q1)", () => {
     const c = await replay(head64, { diskAvailable: false });
     console.log(`replay (disk unavailable): fetches a=${a.fetches.length} b=${b.fetches.length} c=${c.fetches.length}`);
     for (const r of [a, b, c]) expect(r.fetches.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, REPLAY_TIMEOUT_MS);
 });

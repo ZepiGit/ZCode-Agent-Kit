@@ -20,6 +20,7 @@
 - Ticket 13 (MCP dependencies) merged 2026-11-08 as f383d6b (resolved 5eedae3; pre-merge CI 42425069025).
 - Ticket 70 (windows stop test, PID reuse) merged 2026-11-08 as 24f4621 (resolved 28e013c; tests only; windows confirmation accumulates, target 23 runs).
 - Ticket 67 (owners/flips schema) merged 2026-11-08 as 482eef5 (resolved ba5b2d4; final pre-merge CI 42448283566; gate 20/20 legs).
+- Ticket 26 (captcha egress under Bun) merged 2026-11-08 as 87da391 (resolved a3962ad; pre-merge CI 42457120690).
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul

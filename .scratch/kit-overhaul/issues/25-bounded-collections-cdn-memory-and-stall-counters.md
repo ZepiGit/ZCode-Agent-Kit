@@ -94,3 +94,36 @@ Spec stories: 62, 65
     - Linux compile: 659 modules. Pack + `verify-payload` OK (`__fixtures__` excluded).
     - Captcha suites last: 149 pass, 0 fail, 16 files (`reports/t25-r2-captcha-last.log`).
   - **Pending CI (orchestrator verifies after merge+push):** windows `memory-budget` S2/short `cdn-cache:memory-growth` ok at 32 MiB (Round 20 Q1 condition 3); the linux leg; `test-kit` on ubuntu/windows × Node 24/26.
+- 2026-11-08 (implementer, round 3: Windows test time; fix 754c254; integration tip with ticket 26 (87da391) merged in 102b0c1; the head SHA is in the final report). Ticket 24 has not landed, so it is not merged.
+  - **Cause.** Windows test-kit Node 24 in staging run 42455986931 failed "bounds promotion from disk and network loads as well as puts" at 5.98 s (bun's default is 5 s). The cause was fsync, not the bound. Every `put`/`load` commits a disk envelope with `fsyncSync`. Locally, 300 small puts take 833 ms with fsync, 29 ms with fsync stubbed and 4 ms with no disk tier. Windows runners flush more slowly. Run 42461329252 (round-2 tree), windows N24 / N26:
+    - replay, disk available: 18.1 / 17.6 s;
+    - promotion test: 3.9 / 3.4 s;
+    - generation bounds: 3.4 / 3.1 s;
+    - replay, disk unavailable: 2.8 / 2.8 s;
+    - 256-entry + read-back test: 2.1 / 1.7 s;
+    - LRU test: 1.7 / 1.5 s.
+
+    A second cost, local only: `toMatchObject` on a 1 MiB Buffer compares it element by element (882 ms; `Buffer.equals` < 1 ms).
+  - **Changes (tests only; no product code changed in this round):**
+    - `captcha-cdn-cache.test.ts`, the ticket's 7 bound tests, now 9:
+      - The count, byte, LRU, load and invalidation bounds run without a disk tier (the directory is a regular file); the bound is a memory property. They still use the production constants, 256 entries and 32 MiB.
+      - Disk read-back keeps a real disk tier with 3–8 small envelopes, using the test-only `memoryMaxBytes` to evict cheaply. It covers: an evicted entry served from disk with the same bytes, sha256 and `fetchedAt` while the clock has moved on; the read-back promoted under the same bound; promotion from 8 envelopes bounded to 4 KiB; a body above the budget served and kept on disk only.
+      - The 32 MiB refusal of an oversized body is a separate test without a disk tier, and `Buffer.equals` replaces `toMatchObject`.
+    - `captcha-generation-bounds.test.ts`: the worker's `CAPTCHA_CDN_CACHE_DIR` is a regular file, so the 340 fills cost no I/O. The disk side of invalidation stays proven in `captcha-cdn-cache.test.ts`. The stall → invalidate wiring stays proven here ("stall-no-invalidate" is killed). The 30 s timeout is unchanged, with the measured times in a comment.
+    - `captcha-cdn-replay.test.ts`: the disk tier stays real (temp files, atomic rename, read-back; b 312 and c 308 disk reads, asserted), but `fs.fsyncSync` is a no-op during each replay. fsync decides durability across a crash, never what the process reads back, and the stub applies to all three caches alike. Timeout 120 s → 60 s, with the measured times stated; the work is fixed by the recording. Replay results are unchanged: 428 / 428 / 428 fetches, identical bytes, sha256 and `fetchedAt`; disk unavailable 428 / 735 / 734.
+    - `bounded-collection.test.ts` and `captcha-stall-counts.test.ts`: no file I/O, ≤ 17 ms per test. Unchanged.
+  - **Local timings, 3 runs** (`reports/t25-r3-timing.log`; before = the same files at 9866ff0):
+    - replay, disk available: 3.4–3.6 s (was 16.5 s);
+    - replay, disk unavailable: 2.6–2.8 s (CPU: hashing ~0.8 GiB of served bodies and allocating fixture bodies per replay);
+    - generation bounds: 0.37–0.38 s (2.1 s);
+    - promotion: 71–78 ms (2.2 s);
+    - 32 MiB: 54–57 ms (2.1 s);
+    - 256 entries: 4–5 ms (1.0 s);
+    - LRU: 3 ms (0.9 s);
+    - every other new test ≤ 42 ms.
+  - **Still proving what they proved** (mutants applied to the committed code and restored from 754c254, `reports/t25-r3-mutate.log`):
+    - CDN budget at 64 MiB, no entry limit, no byte budget, `memoryMaxBytes` ignored, read-back resets `fetchedAt`, no promotion, no LRU refresh: 7/7 killed by the rewritten CDN and generation tests.
+    - Generation: unbounded count, stall without invalidate, unbounded stall counters: 3/3 killed. That script's byte-budget mutant no longer matches the round-2 constructor; "no byte budget" above covers it.
+    - Replay: read-back resets `fetchedAt`, read-back skips freshness, no disk envelope: 3/3 killed.
+  - **Full suite at 754c254:** `npm run test` 836 tests, 817 pass, 0 fail, 19 skipped; `npm run test:proxy` 1418 pass, 0 fail, 96 files; typecheck clean; `npm run test:mcp` 97 tests, 96 pass, 0 fail, 1 skipped. Captcha suites last: 154 pass, 0 fail, 16 files (+5 from ticket 26's egress tests and this round's split).
+  - **Pending CI:** the windows test-kit legs on the new tree. Expected: no new test near 5 s; the replay at an explicit 60 s.

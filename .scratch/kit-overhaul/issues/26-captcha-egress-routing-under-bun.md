@@ -2,7 +2,7 @@
 
 **Blocked by:** 12 (Batch 2 — proxy dependencies: happy-dom 21.0.4 (loading flags kept), undici 8.12.4, yaml 2.9.1)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -135,3 +135,4 @@ The three scenarios:
   - the immediate re-run is 1387/1387;
   - the test does not touch captcha code. It is left for whoever owns the auth/login-store suite.
 - The CI item (fast suite and `memory-budget` on ubuntu and windows) is still **pending CI (orchestrator verifies after merge+push)**.
+- Merged 2026-11-08 as 87da39154ac0adf33983711b01e9d9b32186e9f3 (ticket/26-captcha-egress-bun at 66c29c3 into 76edd8a, no conflicts); fast suite on Bun 1.4.2: kit 817/836 (19 skipped, 0 fail), proxy 1387/1387 (including 1 declared-failing case on 1.4.2: the unset-setting egress test, Owner Proxy round 19), proxy typecheck clean, mcp 96/97 (1 skipped, 0 fail); captcha suites alone (`bun test src/proxy/captcha-`): 136 pass, including 1 declared-failing case on 1.4.2; `mcp/zcode-harness-mcp/dist/` unchanged. Pre-merge CI: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42457120690 (staging/26, green on all 8 jobs). Sanity diff `git diff staging/26 HEAD -- zcode-proxy-src/src/proxy/captcha-egress.test.ts zcode-proxy-src/src/proxy/captcha-happy.ts` is empty; the rest of staging/26..HEAD is .scratch only (DECISIONS.md, RUNLOG.md, INDEX.md, issues 32, 49, 71, rounds/round-21*.md). Logs: `reports/merge-26-{npm-ci,captcha,test,proxy,proxy-typecheck,mcp}.log`.
