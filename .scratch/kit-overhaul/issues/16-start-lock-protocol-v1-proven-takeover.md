@@ -50,7 +50,7 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
 
 ### 2026-11-08 — implementer (ticket 16)
 
-**Branch:** `ticket/16-start-lock-v1` (worktree `/home/AgentKit/wt/t16`). Commits: `6157579` (implementation and seam tests), `313877c` (S3/S4 scenario fixes, adversarial tests), `80b231d` (a late start-time probe; names removed from `expected-red.json`), `836f83f` (ADR-0003 amendment). The integration tip `c457fd8` (tickets 36 and 71) is merged as `7cd8103` with no conflicts. The head SHA is the commit that adds this comment.
+**Branch:** `ticket/16-start-lock-v1` (worktree `/home/AgentKit/wt/t16`). Commits: `6157579` (implementation and seam tests), `313877c` (S3/S4 scenario fixes, adversarial tests), `80b231d` (a late start-time probe; names removed from `expected-red.json`), `836f83f` (ADR-0003 amendment). The integration tip `c457fd8` (tickets 36 and 71) is merged as `7cd8103` with no conflicts. Then `f21d3ac` (the ticket 15 Windows teardown fix) is merged as `e4b2c3c`, also with no conflicts; outside `.scratch` it changes only `tests/proxy-lifecycle.test.mjs`. After that merge the start-lock tests take free loopback ports instead of 19160–19169 (`faeaf02`; ticket 75's class of collision). The head SHA is the latest commit on the branch (the report correction after this one).
 
 **What landed**
 - `lib/start-lock.mjs`, protocol v1. The record is `{ pid, startedAt, nonce, v: 1, holderStartMs, holderStartId? }`.
@@ -84,7 +84,7 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
 - **New injection points** of `createLifecycle`: `stepHook(step)` (kill or pause injection at every lock and spawn step) and `pendingSpawnWaitMs`. New member: `acquireStartLock()`. Every spawn probe now goes through `processStartMsImpl` (before, the spawn probe ignored it).
 - **AUD-001 comments** in the lifecycle module now describe proven takeover. ADR-0003 is amended (Round 7 Q4's Reversibility: the takeover claim and the pid-record contract). README has no "never taken over" line any more. SECURITY.md:26 belongs to ticket 53.
 
-**Tests** (`tests/start-lock.test.mjs`, seam 2, wired into `npm run test`, 32 tests, ports 19160–19169 with 19161 left to the loop):
+**Tests** (`tests/start-lock.test.mjs`, seam 2, wired into `npm run test`, 32 tests, free loopback ports):
 - **Proofs.**
   - A dead v0 lock is taken over by ensure-running and by the manager CLI's stop, with one event line.
   - A v0 lock at a live pid that started after `startedAt` is taken over; one whose holder started before is left alone.
@@ -179,7 +179,7 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
   - Round 22's power caveat is met by the seam tests: kill at every protocol step, and the spawn-window kills on ubuntu and windows.
 
 **Full suites on the merged tree 7cd8103** (Bun 1.4.2, Node 26.7.0)
-- `npm run test` (`t16-final-test`): 917 tests, 899 pass, 0 fail, 18 skipped.
+- `npm run test` (`t16-final-test`): 917 tests, 899 pass, 0 fail, 18 skipped. After the second merge and the free-port change (`t16-final2-test`): 918 tests, 900 pass, 0 fail, 18 skipped.
 - `npm run test:proxy` (`t16-final-proxy`): 1451 pass, 0 fail, 98 files.
 - `npm run test:proxy-typecheck`: clean.
 - `npm run test:mcp` (`t16-final-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped. `dist/` unchanged.
