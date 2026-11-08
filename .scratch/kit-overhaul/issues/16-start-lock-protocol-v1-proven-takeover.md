@@ -84,7 +84,7 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
 - **New injection points** of `createLifecycle`: `stepHook(step)` (kill or pause injection at every lock and spawn step) and `pendingSpawnWaitMs`. New member: `acquireStartLock()`. Every spawn probe now goes through `processStartMsImpl` (before, the spawn probe ignored it).
 - **AUD-001 comments** in the lifecycle module now describe proven takeover. ADR-0003 is amended (Round 7 Q4's Reversibility: the takeover claim and the pid-record contract). README has no "never taken over" line any more. SECURITY.md:26 belongs to ticket 53.
 
-**Tests** (`tests/start-lock.test.mjs`, seam 2, wired into `npm run test`, 33 tests, ports 19160–19169 with 19161 left to the loop):
+**Tests** (`tests/start-lock.test.mjs`, seam 2, wired into `npm run test`, 32 tests, ports 19160–19169 with 19161 left to the loop):
 - **Proofs.**
   - A dead v0 lock is taken over by ensure-running and by the manager CLI's stop, with one event line.
   - A v0 lock at a live pid that started after `startedAt` is taken over; one whose holder started before is left alone.
@@ -120,7 +120,7 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
   - The racers are refused on the stale lock.
 - `t16-red3-probe-timeout-tip`: with the tip's spawn probe routed through `processStartMsImpl`, stop gives `code: 4, outcome: start-unknown`, "start time of pid N is not determinable … refusing to kill". This is exactly Round 7 Q4's defect.
 - `t16-red-loop-tip`: `launchOutcomes` fails on the tip (missing).
-- GREEN: `t16-green4-startlock` gives 32/32 (the file now has 33 tests, the last one added after). The final full suite is below.
+- GREEN: `t16-green4-startlock` gives 32/32. The final full suite is below.
 
 **Mutations** (implementation committed first; each mutant restored with `git checkout <sha> -- <file>`, `git diff` empty after each; `reports/t16-mut-*`; script `/home/AgentKit/overhaul-tools/t16-scripts/mutate.py`). All 15 were killed on 80b231d:
 - m1: no re-read before the delete.
