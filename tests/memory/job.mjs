@@ -56,7 +56,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, write
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { JOB, osLeg, parseRunKey } from "./lib/catalogue.mjs";
-import { checkRatchet, issueIdsIn, readExpectedRed } from "./lib/ratchet.mjs";
+import { checkRatchet, issueIdsIn, readExpectedRed, ticketsLabel } from "./lib/ratchet.mjs";
 import { assertSafeRun, bunPath } from "./lib/isolated-kit.mjs";
 import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
@@ -148,13 +148,14 @@ function markdown({ os, cap, ratchet, results, partial }) {
   const lines = [`## memory-budget (${os}, short profile): ${ratchet.ok ? "ratchet holds" : "ratchet FAILED"}`, "", `cap: ${cap} · node ${process.version}${partial ? " · partial run (--only)" : ""}`, "", "| run | outcome | expected-RED | red checks | s | samples | roles seen |", "|---|---|---|---|---|---|---|"];
   for (const row of ratchet.rows) {
     const r = results.find((x) => x.key === row.key);
-    lines.push(`| ${row.key} | ${row.outcome}${row.state === "unstable" ? " (unstable)" : ""}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} | ${r?.samples ?? "—"} | ${Object.entries(r?.rolesSeen ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "—"} |`);
+    lines.push(`| ${row.key} | ${row.outcome}${row.state === "unstable" ? " (unstable)" : ""}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.owners ? ticketsLabel(row.owners) : row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} | ${r?.samples ?? "—"} | ${Object.entries(r?.rolesSeen ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "—"} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
   // Round 9 Q1 condition 2, Round 13 Q1 condition 1: every passing run of an unstable entry says so.
-  // Round 14 Q1 condition 2: every tolerated RED of a listed single run, with the ticket that owns it.
+  // Round 14 Q1 condition 2, Round 15 Q1 condition 4: every tolerated RED of a listed single run with
+  // the tickets that own its checks, and every listed run passing GREEN on a flipping check.
   const owned = ratchet.rows.filter((row) => row.note && row.state !== "unstable");
-  if (owned.length) lines.push("", "Tolerated REDs (Round 14 Q1: each listed run RED only on checks its ticket owns; `owns` only shrinks, in the owner's own commit):", ...owned.map((row) => `- ${row.note}`));
+  if (owned.length) lines.push("", "Tolerated REDs and flipping GREENs (Round 14 Q1, Round 15 Q1: each listed run RED only on checks its owners own, GREEN only while a check is marked `flips`; each owner removes only its own names, in its own commit):", ...owned.map((row) => `- ${row.note}`));
   const notes = ratchet.rows.filter((row) => row.note && row.state === "unstable");
   if (notes.length) lines.push("", "Unstable entries (Round 9 Q1, Round 13 Q1; each leaves only through its owner's measured exit: ticket 20's ≥ 20 runs, ticket 30's ≥ 10 runs):", ...notes.map((row) => `- ${row.note}`));
   const repeated = results.filter((r) => r.median);

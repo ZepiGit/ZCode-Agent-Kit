@@ -1,30 +1,60 @@
 {
   "linux": {
-    "S1/burst4": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S1/burst16": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S1/burst32": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S1/bigbody": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S2/short": { "ticket": "58", "owns": ["solver:cost-per-generation", "solver:retained-before-recycle"] },
-    "S3/short": { "ticket": "37", "owns": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
-    "S3/hung": { "ticket": "16", "owns": ["exactly-one-proxy-after-round", "failed-launches", "start-over-stale-lock", "stale-lock-after-round"] },
-    "S3/omp": { "ticket": "35", "owns": ["omp:concurrent-preflights"] },
-    "S4/short": { "ticket": "17", "owns": ["stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
-    "S5/short": { "ticket": "30", "owns": ["growth:mcp-bridge"] },
-    "S7/short": { "ticket": "34", "owns": ["proxy.early.log:bounded"] }
+    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S2/short": {
+      "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
+      "flips": ["growth:scenario", "procPeak:solver"]
+    },
+    "S3/short": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+      "flips": ["exactly-one-proxy-after-round", "procPeak:preflight", "procPeak:proxy"]
+    },
+    "S3/hung": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round", "start-over-stale-lock"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+      "flips": ["exactly-one-proxy-after-round", "start-over-stale-lock", "procPeak:preflight", "procPeak:proxy"]
+    },
+    "S3/omp": {
+      "owners": { "35": ["omp:concurrent-preflights"], "37": ["procPeak:proxy", "procPeak:preflight"] },
+      "flips": ["procPeak:proxy", "procPeak:preflight"]
+    },
+    "S4/short": {
+      "owners": { "17": ["stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
+      "flips": ["unstoppable-proxy-after-ctrl-c"]
+    },
+    "S5/short": { "owners": { "30": ["growth:mcp-bridge"] } },
+    "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }
   },
   "windows": {
     "S1/burst1": { "ticket": "20", "state": "unstable" },
-    "S1/burst4": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S1/burst16": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S1/burst32": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S1/bigbody": { "ticket": "19", "owns": ["procPeak:proxy"] },
-    "S1/stalled": { "ticket": "61", "owns": ["procPeak:proxy"] },
-    "S2/short": { "ticket": "58", "owns": ["solver:cost-per-generation", "solver:retained-before-recycle"] },
-    "S3/short": { "ticket": "37", "owns": ["peak:kit"] },
-    "S3/hung": { "ticket": "16", "owns": ["orphans", "exactly-one-proxy-after-round", "failed-launches", "start-over-stale-lock", "stale-lock-after-round"] },
-    "S3/omp": { "ticket": "35", "owns": ["omp:concurrent-preflights"] },
-    "S4/short": { "ticket": "17", "owns": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
+    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/stalled": { "owners": { "61": ["procPeak:proxy"] } },
+    "S2/short": {
+      "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
+      "flips": ["growth:scenario", "procPeak:solver"]
+    },
+    "S3/short": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], "17": ["orphans"], "37": ["peak:kit"] },
+      "flips": ["exactly-one-proxy-after-round", "orphans"]
+    },
+    "S3/hung": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round", "start-over-stale-lock"], "17": ["orphans"], "37": ["peak:kit"] },
+      "flips": ["exactly-one-proxy-after-round", "start-over-stale-lock", "orphans", "peak:kit"]
+    },
+    "S3/omp": {
+      "owners": { "35": ["omp:concurrent-preflights"], "37": ["peak:kit"] },
+      "flips": ["peak:kit"]
+    },
+    "S4/short": {
+      "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
+      "flips": ["proxy-left-after-stop", "failed-lifecycle-steps"]
+    },
     "S5/short": { "ticket": "30", "state": "unstable" },
-    "S7/short": { "ticket": "34", "owns": ["proxy.early.log:bounded"] }
+    "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }
   }
 }
