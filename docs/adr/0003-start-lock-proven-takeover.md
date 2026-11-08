@@ -36,3 +36,11 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 - **Never deleted automatically:** an unparsable lock, or a lock of an unknown higher version. Its error gives what/why/next with the exact path.
 - **New locks are written atomically,** so "unreadable" can only mean foreign corruption, never a contender's partial write.
 - **The OMP single-flight token is a separate record** ([ADR-0013](0013-launcher-handover-and-single-flight-preflight.md)). It follows this ADR's lessons (proven takeover, release in `finally`) but does not change the start lock's protocol.
+
+## Amended 2026-11-08 (Round 7 Q4; ticket 16)
+
+Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scratch/kit-overhaul/DECISIONS.md`](../../.scratch/kit-overhaul/DECISIONS.md), Round 7, Q4 (its Reversibility puts the pid-record change under this ADR as an amendment line). The mechanism below is the one ticket 16 implemented.
+
+- **Takeover mechanism (condition 1).** A contender that judged a record stale must first create an exclusive claim for exactly those bytes (`manager.lock.claim-<hash>`, holding the claimant's own pid and start time). Only the claimant deletes the record, and only after re-reading the lock and finding the judged bytes unchanged. A claim whose claimant died is taken over the same way. Locks and claims are written atomically (temp file + hard link).
+- **No live proxy without a pid record.** `proxy.pid` is written before the spawn as a spawn intent (`pid: null`, `spawning: { by, at }`), with the pid right after the spawn, and with the start time once it is known. Every write is atomic (temp + rename). Old kits read the intent as "no record".
+- **Completing a record needs proof, never a port or a pid alone (Round 7 Q4 condition 3).** A record its spawner left unfinished (the spawner was killed, or its start-time probe timed out) is completed under the start lock only when the authenticated `/health` answer names the pid (`details.pid`), and that pid's start time read before and after a second answer is the same. A spawn intent adopts only a proxy that started after the intent. Only then can a stop verify and stop it.
