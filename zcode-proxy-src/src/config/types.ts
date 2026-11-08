@@ -235,6 +235,20 @@ export interface ProxyConfig {
   logging: {
     level: "debug" | "info" | "warn" | "error";
   };
+  /** Health supervisor settings (ADR-0008). Absent = the defaults. */
+  health?: HealthConfig;
+}
+
+/** `health` in config.yaml (ADR-0008). Every key is optional. */
+export interface HealthConfig {
+  /** Memory thresholds; keys left out keep the supervisor's defaults (512 / 1024 MB × 3 samples 15 s apart). */
+  memory: {
+    softLimitMB?: number;
+    hardLimitMB?: number;
+    samples?: number;
+    /** `sampleIntervalSeconds` × 1000. */
+    sampleIntervalMs?: number;
+  };
 }
 
 /** `server.admission` in config.yaml (ADR-0004). */
