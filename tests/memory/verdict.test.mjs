@@ -761,6 +761,13 @@ test("OMP floor n from data (Round 17 Q4 condition 1): the smallest odd n in {3,
   assert.equal(Math.max(one.n, floorMeasurement([2.55, ...Array(15).fill(0.7)], { thresholdMB: 2.5, gateMB: 5 }).n), 5);
 });
 
+test("OMP floor rule: thresholds are half the waiter gate and the gate itself, unchanged; n = 5 until the CI measurement sets it", async () => {
+  const { OMP_FLOOR } = await import("./lib/budgets.mjs");
+  // Provisional n from the windows record (1 of 16 legs at 2.55 MB); the
+  // ≥ 20-per-leg CI measurement replaces it (Round 17 Q4 condition 1).
+  assert.deepEqual(OMP_FLOOR, { n: 5, medianBelowMB: 2.5, everyBelowMB: OMP_LEG.waiterCostMB });
+});
+
 test("OMP leg: five hosts that each spawn their own preflight at once are red (today's extension)", () => {
   const today = ompRound("omp-5", [0, 1, 2, 3, 4].map((i) => host(i, { preflights: 1, causeLines: [QUOTA] })), 5);
   const c = ompCheck([today], "omp:concurrent-preflights");
