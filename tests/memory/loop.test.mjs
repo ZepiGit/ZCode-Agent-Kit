@@ -20,6 +20,7 @@ import { resolveBun } from "../../lib/process.mjs";
 import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { whileFrozen } from "./lib/freeze.mjs";
+import { identityOf, isSameProcess, linuxStart, parseWindowsStart, startOf } from "./lib/process-identity.mjs";
 import * as s3Scenario from "./scenarios/s3-concurrency.mjs";
 const { makeHungRound } = s3Scenario;
 const refusedStartCheck = (rounds) => s3Scenario.refusedStartCheck(rounds);
@@ -280,8 +281,53 @@ test("the Job Object wrapper's report says whether the cap was applied and how c
   assert.equal(parseJobReport("no report"), null);
 });
 
+// ── Process identity: pid + start time (ticket 72) ──────────────────────────
+// A check that holds no handle on a process asks for that process, not its pid:
+// Windows reuses a freed pid quickly (ticket 70), so a stranger at the same pid
+// must neither keep a dead process "alive" nor stand in for a live one.
+test("a process identity is its pid and start time: a stranger at the same pid is not it, a gone pid is not it", () => {
+  const proc = mkdtempSync(join(tmpdir(), "memloop-identity-"));
+  const stat = (start) => `4242 (node -e x) S 1 4242 4242 0 -1 4194304 ${Array(12).fill(0).join(" ")} ${start} 0 0\n`;
+  try {
+    mkdirSync(join(proc, "4242"));
+    writeFileSync(join(proc, "4242", "stat"), stat(1000));
+    const opts = { platform: "linux", procRoot: proc };
+    const id = identityOf(4242, opts);
+    assert.deepEqual(id, { pid: 4242, start: "1000" });
+    assert.equal(isSameProcess(id, opts), true);
+    writeFileSync(join(proc, "4242", "stat"), stat(5242)); // the pid now names a later process
+    assert.equal(isSameProcess(id, opts), false, "a reused pid is another process");
+    rmSync(join(proc, "4242"), { recursive: true });
+    assert.equal(startOf(4242, opts), null);
+    assert.equal(isSameProcess(id, opts), false, "a gone pid is not the process");
+    assert.throws(() => identityOf(4242, opts), /no process to identify/, "an identity is recorded only while the process runs");
+  } finally { rmSync(proc, { recursive: true, force: true }); }
+});
+
+test("an unknown start time is never taken for a gone process", () => {
+  assert.throws(() => linuxStart(4242, "4242 (x) S 1\n"), /start time of pid 4242 unknown/);
+  assert.equal(parseWindowsStart(4242, { status: 0, stdout: "NONE" }), null);
+  assert.equal(parseWindowsStart(4242, { status: 0, stdout: "START 134070000170000000" }), "134070000170000000");
+  // PowerShell that failed, timed out (status null) or printed nothing says nothing about the process.
+  for (const r of [{ status: 1, stdout: "", stderr: "Get-CimInstance : Access denied" }, { status: null, stdout: "" }, { status: 0, stdout: "" }]) {
+    assert.throws(() => parseWindowsStart(4242, r), /start time of pid 4242 unknown/, JSON.stringify(r));
+  }
+});
+
+test("a live child keeps its identity until it exits, then no process is it", async () => {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+  try {
+    await new Promise((r) => child.once("spawn", r));
+    const id = identityOf(child.pid);
+    assert.equal(isSameProcess(id), true);
+    const exited = new Promise((r) => child.once("exit", r));
+    child.kill("SIGKILL");
+    await exited; // reaped: from here on the pid is free for anyone
+    assert.equal(isSameProcess(id), false);
+  } finally { try { child.kill("SIGKILL"); } catch {} }
+});
+
 // ── Live Windows self-tests (spec §1; run on the windows-latest legs) ───────
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const waitFor = async (fn, ms = 15_000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await sleep(250); } };
 
 test("Windows: the units self-test against Get-Process PrivateMemorySize64 passes on the live process table", windowsOnly, async () => {
@@ -344,8 +390,7 @@ test("Windows: the sampler excludes its own poller by pid and records the poller
     assert.ok(!seen.includes(pollerPid) && rows.every((r) => r.procs.every((p) => p.pid !== pollerPid)), "the poller is never sampled");
     assert.equal(o.pid, pollerPid);
     assert.ok(o.polls >= 2 && o.peakCommitKb > 0 && o.peakRssKb > 0 && o.pollMsMax > 0, JSON.stringify(o));
-    await sleep(500);
-    assert.equal(alive(pollerPid), false, "the poller is reaped on stop");
+    assert.equal(sampler.pollerRunning(), false, "the poller is reaped on stop (asked of its handle, not its pid)");
   } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -370,10 +415,15 @@ test("Windows: the Job Object cap is applied and read back, and an allocation pa
 test("Windows: closing the Job Object kills a detached grandchild (nothing escapes the cap)", windowsOnly, async () => {
   const r = runCapped("1G", ["detach"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  const grandchild = Number((r.stdout.match(/GRANDCHILD (\d+)/) ?? [])[1]);
-  assert.ok(grandchild > 0, r.stdout);
-  const gone = await waitFor(() => !alive(grandchild), 10_000);
-  if (!gone) { try { process.kill(grandchild, "SIGKILL"); } catch {} }
+  // The probe prints the grandchild's identity (pid + start time), taken while
+  // it ran: the job kills it before this test could ask, and its freed pid may
+  // already name a stranger (ticket 72).
+  const m = r.stdout.match(/GRANDCHILD (\d+) (\d+)/);
+  assert.ok(m, r.stdout);
+  const grandchild = { pid: Number(m[1]), start: m[2] };
+  // Each ask is one PowerShell (~1-3 s cold on a runner): 20 s, not 10.
+  const gone = await waitFor(() => !isSameProcess(grandchild), 20_000);
+  if (!gone && isSameProcess(grandchild)) { try { process.kill(grandchild.pid, "SIGKILL"); } catch {} }
   assert.ok(gone, "the grandchild died with the job");
 });
 
@@ -381,7 +431,6 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
 const KIT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /** The promise's value, or `fallback` after `ms`; the timer never outlives the race. */
 const within = (promise, ms, fallback) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
-const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
 /** A kit root whose preflight is a fixture script; the extension is generated from the real template by the OMP adapter. */
 function ompFixture(healSource) {
   const dir = mkdtempSync(join(tmpdir(), "memloop-omp-host-"));
@@ -436,23 +485,26 @@ test("killing a starter host takes its running preflight with it (the killed-sta
     setTimeout(() => {}, 30_000);
   `);
   const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
-  let preflight = null;
+  let preflightPid = null;
+  let preflight = null; // its identity (pid + start time): this test holds no handle on the host's child
   try {
     assert.ok(await host.ready, host.stderr());
     host.go();
-    for (let i = 0; i < 200 && preflight === null; i++) {
-      try { preflight = Number(readFileSync(join(f.root, "preflight.pid"), "utf8")) || null; } catch {}
-      if (preflight === null) await sleep(50);
+    for (let i = 0; i < 200 && preflightPid === null; i++) {
+      try { preflightPid = Number(readFileSync(join(f.root, "preflight.pid"), "utf8")) || null; } catch {}
+      if (preflightPid === null) await sleep(50);
     }
-    assert.ok(preflight, "the host spawned its preflight");
+    assert.ok(preflightPid, "the host spawned its preflight");
+    preflight = identityOf(preflightPid); // it waits 30 s: surely running now
     host.killTree();
     await within(host.exited, 10_000);
-    const gone = await (async () => { for (let i = 0; i < 100; i++) { if (!isAlive(preflight)) return true; await sleep(100); } return false; })();
-    assert.equal(isAlive(host.pid), false, "the host is gone");
+    // Gone = no longer that process: a stranger given its freed pid is not it (ticket 72).
+    const gone = await waitFor(() => !isSameProcess(preflight), 10_000);
+    assert.equal(host.running(), false, "the host is gone");
     assert.equal(gone, true, "its preflight is gone too");
   } finally {
     host.killTree();
-    if (preflight && isAlive(preflight)) { try { process.kill(preflight, "SIGKILL"); } catch {} }
+    if (preflight && isSameProcess(preflight)) { try { process.kill(preflight.pid, "SIGKILL"); } catch {} }
     rmSync(f.dir, { recursive: true, force: true });
   }
 });

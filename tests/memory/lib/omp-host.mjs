@@ -59,16 +59,21 @@ export function startOmpHost({ bun, extension, env, cwd }) {
   try { child.stdin.write("arm\n"); } catch {}
   const exited = new Promise((r) => child.once("close", (code, signal) => { onReady(null); onDone(null); r({ code, signal }); }));
   child.once("error", () => { onReady(null); onDone(null); });
+  // Asked of the host's own handle, never by pid: once the exit is processed
+  // the pid is free and may name another process (Windows; tickets 70, 72).
+  const running = () => child.exitCode === null && child.signalCode === null;
   return {
     pid: child.pid,
-    ready, done, exited,
+    ready, done, exited, running,
     stderr: () => err,
     stdout: () => out,
     go() { try { child.stdin.write("go\n"); } catch {} },
     close() { try { child.stdin.end(); } catch {} },
     killTree() {
       if (posix) { try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} } }
-      else spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      // taskkill names the tree by pid: after the host's exit that pid may be a
+      // stranger's, and /T would take the stranger's tree (ticket 72).
+      else if (running()) spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     },
   };
 }
