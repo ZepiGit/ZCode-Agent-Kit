@@ -2,7 +2,7 @@
 
 **Blocked by:** 08 (CLI command-module split, part 2 (migrate remaining commands + contract)), 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 14 (Event-line format and redaction for new log events (prefactor))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -149,3 +149,5 @@ Root cause: the test asserted something the pre-15 code never guaranteed on Wind
 **Pending CI (orchestrator verifies after restage)**
 - windows test-kit Node 24/26: `proxy-lifecycle.test.mjs` green. Watch for the `t.diagnostic` "start-time probe did not answer" lines, which mark the ticket-16 window; their presence is not a failure.
 - The Windows stop path with the new exit check (PowerShell probe after `TerminateProcess` only while the pid still answers): manager-safety "stop cleanly kills a verified-own process" and the S4 windows leg.
+
+- Merged 2026-11-08 as af5caa8d07bbc5de5114d9bcf9a47cba298335cd (ticket/15-proxy-lifecycle-module at b11064a into e88821f; first merge, never reverted, so no revert-of-revert step; the branch's `Revert` commits are 02/06 history from the integration tip; no conflicts). Fast suite on Bun 1.4.2: kit 833/852 (19 skipped, 0 fail), proxy 1413/1413 (93 files), proxy typecheck clean, mcp 96/97 (1 skipped, 0 fail); `mcp/zcode-harness-mcp/dist/` unchanged; lockfiles unchanged (npm ci only). `npm run test:ux-before`: 1/1 pass (no visible change). Memory loop (linux, `--only S3/short,S3/hung,S4/short`, port 19150, `/home/AgentKit/overhaul-tools/merge-15-memloop`): ratchet holds; S3/short RED on checks owned by 16/37, S3/hung RED on checks owned by 16/37, S4/short RED on `stale-lock-after-ctrl-c` and `respawn-recovers-despite-stale-lock` (owner 17); `unstoppable-proxy-after-ctrl-c` 0 of 8 this run. Pre-merge CI: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42469139184 (staging/15 on the tip with ticket 19, all 8 jobs green; the earlier RED run 42444449351 on windows test-kit, proxy-lifecycle.test.mjs:266, was fixed in round 2). Sanity diff: staging/15's last commit merges the tip into the ticket, so the ticket's files are `git diff --name-only staging/15^2 staging/15 -- . ':!.scratch'` (13 files); `git diff staging/15 HEAD` over them is empty. The `^1..` variant lists ticket 19's 17 files, and that diff is empty too; `git diff staging/15 HEAD` is empty over the whole tree, .scratch included, so no ticket merged since staging/15 was cut. Logs: `reports/merge-15-{npm-ci,test,proxy,proxy-typecheck,mcp,ux-before,memloop}.log`.
