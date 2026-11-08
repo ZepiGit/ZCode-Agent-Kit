@@ -204,7 +204,7 @@ export async function run(ctx) {
     })();
     const launches = Array.from({ length: n }, (_, i) => {
       const useRun = kind === "run" || (kind === "mixed" && i % 2 === 0);
-      return (useRun ? kit.launch("opencode") : kit.preflight()).then((r) => ({ i, via: useRun ? "run" : "preflight", pid: r.pid, code: r.code, ms: r.ms, tail: (r.out + r.err).trim().split("\n").slice(-1)[0]?.slice(0, 200) }));
+      return (useRun ? kit.launch("opencode") : kit.preflight()).then((r) => ({ i, via: useRun ? "run" : "preflight", pid: r.pid, code: r.code, signal: r.signal ?? null, ms: r.ms, tail: (r.out + r.err).trim().split("\n").slice(-1)[0]?.slice(0, 200) }));
     });
     const adv = adversary ? adversary() : null;
     const results = await Promise.all(launches);
@@ -225,6 +225,9 @@ export async function run(ctx) {
       pidFileMatchesListener: !!rec && after.some((p) => p.pid === rec.pid && portsOf(p.pid).includes(kit.port)),
       failedLaunches: launched.failedLaunches,
       killedByAdversary: launched.killedByAdversary,
+      // Every launch's pid and exit: the evidence gate matches the adversary's
+      // kill against them (lib/completeness.mjs, kill-holder rounds).
+      launches: results.map((r) => ({ i: r.i, via: r.via, pid: r.pid ?? null, code: r.code, signal: r.signal })),
       launchMs: results.map((r) => r.ms).sort((a, b) => a - b),
       staleLockLeft: existsSync(lockFile) ? readFileSync(lockFile, "utf8").slice(0, 120) : null,
       adversary: advResult,
