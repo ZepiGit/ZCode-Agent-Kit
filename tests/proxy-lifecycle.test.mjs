@@ -312,6 +312,50 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
   assert.deepEqual({ node: spawned.node, manager: spawned.manager, argv: spawned.argv }, { node: process.execPath, manager, argv: ["serve"] });
 });
 
+/** Run fn with console.log/console.warn recorded per stream (not passed through). */
+async function consoleLines(fn) {
+  const lines = [];
+  const saved = { log: console.log, warn: console.warn };
+  console.log = (...args) => lines.push(`log:${args.join(" ")}`);
+  console.warn = (...args) => lines.push(`warn:${args.join(" ")}`);
+  try { await fn(); return lines; } finally { Object.assign(console, saved); }
+}
+
+test("the account change restarts a verified own proxy through the intents, with the manager's lines", { timeout: 120_000 }, async (t) => {
+  const port = 19157;
+  const root = kitFixture(t, port, { proxySrc: true });
+  const bun = bunOrFail();
+  const first = spawnSync(process.execPath, [join(root, "cli", "heal.mjs")], { env: childEnv(root, { ZCODE_KIT_BUN: bun }), encoding: "utf8", timeout: 90_000 });
+  const before = readJson(join(root, "logs", "proxy.pid"));
+  if (before) t.after(() => killQuietly(before.pid));
+  assert.equal(first.status, 0, first.stderr);
+  const { restartForAccountChange } = await import(pathToFileURL(join(root, "cli", "account-setup.mjs")).href);
+  const savedBun = process.env.ZCODE_KIT_BUN;
+  process.env.ZCODE_KIT_BUN = bun;
+  let lines;
+  try { lines = await consoleLines(() => restartForAccountChange({ root, home: join(root, "home") })); }
+  finally { if (savedBun === undefined) delete process.env.ZCODE_KIT_BUN; else process.env.ZCODE_KIT_BUN = savedBun; }
+  const after = readJson(join(root, "logs", "proxy.pid"));
+  if (after) t.after(() => killQuietly(after.pid));
+  assert.notEqual(after.pid, before.pid, "a fresh proxy replaced the verified one");
+  assert.deepEqual(lines, [`log:stopped (pid ${before.pid})`, "log:starting zcode-proxy ...", `log:started (pid ${after.pid}) — healthy on http://127.0.0.1:${port}`]);
+  assert.equal(await identity(port), "ours");
+
+  // A record whose pid is dead is not a running proxy: nothing starts, the change is reported.
+  killQuietly(after.pid);
+  // This process spawned it (in-process restart): wait until it is reaped, not only off the port.
+  const gone = (pid) => { try { process.kill(pid, 0); return false; } catch (err) { return err.code === "ESRCH"; } };
+  await until("the proxy to exit", async () => gone(after.pid) && await identity(port) === "down", 10_000);
+  let warned;
+  try { warned = await consoleLines(() => restartForAccountChange({ root, home: join(root, "home") })); }
+  finally {
+    const stray = readJson(join(root, "logs", "proxy.pid"));
+    if (stray && stray.pid !== after.pid) killQuietly(stray.pid); // never leak a proxy this test started
+  }
+  assert.deepEqual(warned, ["warn:Account Rotator setting saved. A running proxy could not be verified; run zcode-kit doctor before restarting it."]);
+  assert.equal(await identity(port), "down");
+});
+
 test("a proxy started through the preflight carries the frozen respawn hook, and the manager CLI stops it", { timeout: 120_000 }, async (t) => {
   const port = 19156;
   const root = kitFixture(t, port, { proxySrc: true });
