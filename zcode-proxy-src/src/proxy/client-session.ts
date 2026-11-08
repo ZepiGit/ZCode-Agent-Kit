@@ -265,23 +265,39 @@ function newSession(): StoredNode {
  */
 function hashJson(value: unknown): string {
   const hash = nodeCrypto.createHash("sha256");
+  // The pieces are UTF-8 encoded into one reused buffer rather than by
+  // update(text, "utf-8"), which allocates a new buffer per piece. The
+  // pieces are well formed (JSON.stringify escapes lone surrogates), so the
+  // bytes are the same; encodeInto never splits a surrogate pair.
+  const encoder = new TextEncoder();
+  const scratch = new Uint8Array(STABLE_SCRATCH_BYTES);
+  const feed = (text: string): void => {
+    for (let at = 0; at < text.length;) {
+      const { read, written } = encoder.encodeInto(at === 0 ? text : text.slice(at), scratch);
+      hash.update(scratch.subarray(0, written));
+      at += read;
+    }
+  };
   let pending = "";
   const write = (text: string): void => {
     if (text.length >= STABLE_FLUSH_CHARS) {
-      if (pending) { hash.update(pending, "utf-8"); pending = ""; }
-      hash.update(text, "utf-8");
+      if (pending) { feed(pending); pending = ""; }
+      feed(text);
       return;
     }
     pending += text;
-    if (pending.length >= STABLE_FLUSH_CHARS) { hash.update(pending, "utf-8"); pending = ""; }
+    if (pending.length >= STABLE_FLUSH_CHARS) { feed(pending); pending = ""; }
   };
   writeStable(value, write, "undefined");
-  if (pending) hash.update(pending, "utf-8");
+  if (pending) feed(pending);
   return hash.digest("hex");
 }
 
 /** Small pieces are batched into one hash update of up to this many UTF-16 units. */
 const STABLE_FLUSH_CHARS = 16 * 1024;
+
+/** The reused UTF-8 buffer: one flush of pieces at up to 3 bytes per unit, plus slack. */
+const STABLE_SCRATCH_BYTES = 64 * 1024;
 
 /**
  * JSON.stringify(text) written in slices, so a long leaf (a pasted file, an
