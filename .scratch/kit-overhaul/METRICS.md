@@ -356,7 +356,7 @@ Per key and leg: matching runs n, then owner, name and RED count per run; † = 
 | S3/hung | linux | 8 | 16 failed-launches 8/8; 16 stale-lock-after-round 8/8; 16 exactly-one-proxy-after-round 0/8 †; 16 start-over-stale-lock 0/8 †; 37 peak:kit 8/8; 37 procPeak:launcher 8/8; 37 procPeak:mcp-bridge 8/8; 37 procPeak:preflight 7/8 †; 37 procPeak:proxy 2/8 † | — |
 | S3/omp | linux | 16 | 35 omp:concurrent-preflights 16/16; 37 procPeak:proxy 4/16 †; 37 procPeak:preflight 5/16 † | — |
 | S4/short | linux | 16 | 17 stale-lock-after-ctrl-c 16/16; 17 unstoppable-proxy-after-ctrl-c 1/16 †; 17 respawn-recovers-despite-stale-lock 16/16 | — |
-| S5/short | linux | 16 | 30 growth:mcp-bridge 16/16 | — |
+| S5/short | linux | 16 | 30 growth:mcp-bridge 16/16 † (marked from the 13 tree, where the count restarts: 9/10; Round 17 Q2) | — |
 | S7/short | linux | 16 | 33 proxy.log:bounded-while-running 16/16 | — |
 | S1/burst4 | windows | 24 | 19 procPeak:proxy 24/24 | — |
 | S1/burst16 | windows | 24 | 19 procPeak:proxy 24/24 | — |
@@ -385,7 +385,7 @@ Windows S4/short `count:proxy` is owned by 17 and marked `flips` (Round 16 Q1): 
 | S3/hung | linux | 10 | 16 failed-launches 10/10; 16 stale-lock-after-round 10/10; 16 exactly-one-proxy-after-round 0/10 †; 16 start-over-stale-lock 0/10 †; 37 peak:kit 10/10; 37 procPeak:launcher 10/10; 37 procPeak:mcp-bridge 10/10; 37 procPeak:preflight 7/10 †; 37 procPeak:proxy 3/10 † | — |
 | S3/omp | linux | 10 | 35 omp:concurrent-preflights 10/10; 37 procPeak:proxy 3/10 †; 37 procPeak:preflight 6/10 † | — |
 | S4/short | linux | 10 | 17 stale-lock-after-ctrl-c 10/10; 17 unstoppable-proxy-after-ctrl-c 4/10 †; 17 respawn-recovers-despite-stale-lock 10/10 | — |
-| S5/short | linux | 10 | 30 growth:mcp-bridge 9/10 | — |
+| S5/short | linux | 10 | 30 growth:mcp-bridge 9/10 † | — |
 | S7/short | linux | 10 | 33 proxy.log:bounded-while-running 10/10 | — |
 | S1/burst4 | windows | 10 | 19 procPeak:proxy 10/10 | — |
 | S1/burst16 | windows | 10 | 19 procPeak:proxy 10/10 | — |
@@ -399,11 +399,18 @@ Windows S4/short `count:proxy` is owned by 17 and marked `flips` (Round 16 Q1): 
 | S4/short | windows | 10 | 17 proxy-left-after-stop 0/10 †; 17 failed-lifecycle-steps 0/10 †; 17 stale-lock-after-ctrl-c 10/10; 17 unstoppable-proxy-after-ctrl-c 10/10; 17 respawn-recovers-despite-stale-lock 10/10; 17 count:proxy 0/10 † | — |
 | S7/short | windows | 10 | 33 proxy.log:bounded-while-running 10/10 | responses-store:heap-at-cap 1/10 |
 
-**Merge-gate replay (Round 16 Q2 condition 2).** `t67-scripts/replay-artifacts.mjs` replays each run's `job-summary.json` results through 67's final `ratchet.mjs` and `expected-red.json`. It checks (a) a RED that no owner holds, (b) an invalid run or a harness failure, (c) an owned name not marked `flips` that is GREEN, and (d) a listed entry GREEN with no `flips` name. The two runs from before 67 (42425069025, 42429164758) carry no `checkNames`; the script rebuilds them from each run's own `summary.json`, as `job.mjs` now does. All 20 legs are valid: every key ran GREEN or RED, with no harness failure. 16 of 20 pass. Four results go to the Owner Proxy (round 17), with no owner or `flips` edit in between:
-- 42436010878 windows: S7/short `responses-store:heap-at-cap` 98 MB (budget 96; 64 MB in the other 9 runs on the 13 tree; never RED in the 26 earlier windows runs), not owned. (a)
-- 42436186573 linux: S5/short GREEN. `growth:mcp-bridge` is 39.53 %/1k (budget 5) with trend false: net rise 9.7 % (< 10), no rising run, window medians 88.7, 91.9, 95.6, 96.5, 97.3, 97.3 MB. The other 9 runs on the 13 tree are 39.76–45.83 with trend true. (c) and (d)
-- 42436354758 windows: S1/short RED only on commit, `growth:proxy` 5.25 %/1k commit (budget 5; WS 1.86). The key is unlisted; earlier RED in 42382114395, also on `growth:proxy` only on commit. On the 13 tree the commit values are 2.38–5.25. (a)
-- Not memory: windows `test-kit` failures in 42436186573 (Node 24, `tests/manager-safety.test.mjs:176` "the process must be gone") and 42436440284 (Node 26, `tests/memory/loop.test.mjs:470` "no-op hook charged 2.55 MB"), both in tests 67 does not touch.
+Linux S5/short `growth:mcp-bridge` is owned by 30 and marked `flips` (Round 17 Q2). Before 13 it was RED in 16 of 16 matching runs (Round 17's recount over every archived linux run: 0 GREEN of 37). On the 13 tree it was RED in 9 of 10: 42436186573 was GREEN at 39.53 %/1k with trend false (net rise 9.7 %, no rising run, window medians 88.7, 91.9, 95.6, 96.5, 97.3, 97.3 MB). The other nine were 39.76–45.99 with trend true.
+
+**Merge-gate replay (Round 16 Q2 condition 2, amended by Round 17 cross-question condition 3).** `t67-scripts/replay-artifacts.mjs` replays each run's `job-summary.json` results through 67's final `ratchet.mjs` and `expected-red.json`. It checks (a) a RED that no owner holds, (b) an invalid run or a harness failure, (c) an owned name not marked `flips` that is GREEN, and (d) a listed entry GREEN with no `flips` name. The two runs from before 67 (42425069025, 42429164758) carry no `checkNames`; the script rebuilds them from each run's own `summary.json`, as `job.mjs` now does. The script leaves Round 17 signatures (i) and (ii) out of the judgement when the run's values fit them, and reports them:
+- (i) S7/short `responses-store:heap-at-cap` ≤ 128 MB;
+- (ii) windows S1/short RED only on commit on `growth:proxy` alone, ≤ 10 %/1k.
+
+Result over the ten runs on the 13 tree: all 20 legs valid, all 20 pass.
+- 42436010878 windows: excluded as (i), 98 MB.
+- 42436354758 windows: excluded as (ii), 5.25 %/1k commit.
+- 42436186573 linux: S5/short passes GREEN on its flipping mark.
+
+The measurement tables for S7, windows S1/short and the OMP floor belong to ticket 71. Not memory: windows `test-kit` failures in 42436186573 (Node 24, `manager-safety.test.mjs`, ticket 70) and 42436440284 (Node 26, the OMP floor test, Round 17 Q4, ticket 71).
 
 Local supplement (labelled, **never counted**, Round 15 Q2 condition 1; Linux, Node 26.7.0, Bun 1.4.2, `node tests/memory/job.mjs --only <key>`, ports 19671–19678, `/home/AgentKit/overhaul-tools/t67-memloop/`): S3/hung on 5c68c2f, 8 of 8 RED on failed-launches, stale-lock-after-round, peak:kit, procPeak:launcher, procPeak:mcp-bridge, plus procPeak:proxy in 6 of 8. S3/short on 58ad4c6, 8 of 8 RED on exactly peak:kit, procPeak:launcher, procPeak:mcp-bridge, failed-launches, stale-lock-after-round. Neither shows procPeak:preflight, which CI shows (Round 15 correction 6).
 
