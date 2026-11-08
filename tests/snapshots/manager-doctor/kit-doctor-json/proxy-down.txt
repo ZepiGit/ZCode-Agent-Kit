@@ -1,0 +1,138 @@
+{
+  "ok": false,
+  "failed": 2,
+  "skipped": 9,
+  "checks": [
+    {
+      "name": "bun available",
+      "ok": true,
+      "detail": "<BUN> (<VERSION>)"
+    },
+    {
+      "name": "config exists",
+      "ok": true,
+      "detail": "<KIT>/proxy/config.yaml"
+    },
+    {
+      "name": "key file exists",
+      "ok": true,
+      "detail": "<KIT>/.proxykey"
+    },
+    {
+      "name": "proxy source installed",
+      "ok": true,
+      "detail": "<KIT>/zcode-proxy-src/node_modules"
+    },
+    {
+      "name": "proxy env overrides",
+      "ok": false,
+      "detail": "ignored by the kit-managed proxy (unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE"
+    },
+    {
+      "name": "credentials store",
+      "ok": true,
+      "detail": "ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine"
+    },
+    {
+      "name": "omp provider registered",
+      "ok": true,
+      "detail": "zcode block in ~/.omp/agent/models.yml"
+    },
+    {
+      "name": "extension installed",
+      "ok": true,
+      "detail": "~/.omp/agent/extensions/zcode-proxy-autostart.ts"
+    },
+    {
+      "name": "mcp bridge installed",
+      "ok": true,
+      "detail": "<KIT>/mcp/zcode-harness-mcp/dist/index.js"
+    },
+    {
+      "name": "mcp bridge deps",
+      "ok": true,
+      "detail": "<KIT>/mcp/zcode-harness-mcp/node_modules"
+    },
+    {
+      "name": "claude adapter artifact",
+      "ok": true,
+      "detail": "generated/claude-zcode-settings.json"
+    },
+    {
+      "name": "codex adapter artifact",
+      "ok": true,
+      "detail": "generated/codex-home/config.toml"
+    },
+    {
+      "name": "proxy reachable + identity",
+      "ok": false,
+      "detail": "health=down"
+    },
+    {
+      "name": "omp: omp provider registered",
+      "ok": true,
+      "detail": "providers.zcode in models.yml"
+    },
+    {
+      "name": "omp: omp key resolver",
+      "ok": true,
+      "detail": "key current"
+    },
+    {
+      "name": "omp: omp extension installed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pi: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "claude-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "codex: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "opencode: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "cline: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "kilo-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "aider: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "continue: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "goose: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "harness decisions",
+      "ok": true,
+      "detail": "1 stored decision(s) readable"
+    }
+  ]
+}
+[exit 1]

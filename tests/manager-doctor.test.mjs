@@ -4,7 +4,10 @@
 // `node proxy/zcode-proxy-manager.mjs doctor` in a kit copy and compares
 // stdout, the exit code and stderr with a snapshot captured on the code
 // before ticket 38 (tests/snapshots/manager-doctor/, written once with
-// UPDATE_SNAPSHOTS=1 at the integration tip 91fa58f).
+// UPDATE_SNAPSHOTS=1 at the integration tip 91fa58f). `zcode-kit doctor` and
+// `doctor --json` run over the same states against snapshots of the same
+// origin (seam 5 spawn tests): its output and exit codes stay as they were
+// when it consumes the manager's check records instead of its text.
 //
 // Fixtures: a temp kit root that is its own state directory, a temp HOME, a
 // fixture credential store read by a fixture `src/auth/store.ts` (no real
@@ -14,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";import http from "node:http";
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveBun } from "../lib/process.mjs";
@@ -56,7 +59,10 @@ function kitFixture(t, { port, configured = false, installed = false, artifacts 
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const member of ["cli", "lib"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "home"));
-  cpSync(join(ROOT, "proxy", "zcode-proxy-manager.mjs"), join(root, "proxy", "zcode-proxy-manager.mjs"));
+  // The kit CLI and its adapters read these members too (as in the UX capture).
+  for (const member of ["package.json", "proxy/zcode-proxy-manager.mjs", "proxy/zcode-proxy-autostart.ts", "proxy/resolve-zcode-proxy-key.mjs", "proxy/config.example.yaml"]) {
+    cpSync(join(ROOT, member), join(root, member));
+  }
   mkdirSync(join(root, "zcode-proxy-src", "src", "auth"), { recursive: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "auth", "store.ts"), FAKE_STORE);
   if (configured) {
@@ -64,7 +70,8 @@ function kitFixture(t, { port, configured = false, installed = false, artifacts 
     writeFileSync(join(root, ".proxykey"), KEY + "\n");
   }
   if (installed) {
-    mkdirSync(join(root, "zcode-proxy-src", "node_modules"));
+    // The checkout's proxy dependencies (the OMP adapter's check loads `yaml` from them), linked as the UX capture does.
+    symlinkSync(join(ROOT, "zcode-proxy-src", "node_modules"), join(root, "zcode-proxy-src", "node_modules"), process.platform === "win32" ? "junction" : "dir");
     mkdirSync(join(root, "mcp", "zcode-harness-mcp", "dist"), { recursive: true });
     writeFileSync(join(root, "mcp", "zcode-harness-mcp", "dist", "index.js"), "// fixture bridge\n");
     mkdirSync(join(root, "mcp", "zcode-harness-mcp", "node_modules"));
@@ -79,7 +86,7 @@ function kitFixture(t, { port, configured = false, installed = false, artifacts 
     mkdirSync(join(agent, "extensions"), { recursive: true });
     const managed = omp === "managed";
     writeFileSync(join(agent, "models.yml"), managed
-      ? "providers:\n  zcode:\n# >>> zcode-kit (managed block)\n    name: zcode\n# <<< zcode-kit (managed block)\n"
+      ? `providers:\n  zcode:\n# >>> zcode-kit (managed block)\n    name: zcode\n    apiKey: "${KEY}"\n# <<< zcode-kit (managed block)\n`
       : "providers:\n  openai:\n    name: OpenAI\n");
     if (managed) writeFileSync(join(agent, "extensions", "zcode-proxy-autostart.ts"), "// fixture\n");
     if (omp !== "unasked") {
@@ -91,25 +98,29 @@ function kitFixture(t, { port, configured = false, installed = false, artifacts 
   return root;
 }
 
-/** The manager CLI spawned asynchronously (the stand-in proxy answers from this process). */
-function managerDoctor(root, { bun = bunOrFail(), store = false, extraEnv = {} } = {}) {
+/** The fixture's environment: its HOME, its Bun (or none), its store; no ambient kit/proxy variable. */
+function fixtureEnv(root, { bun = bunOrFail(), store = false, extraEnv = {} } = {}) {
   const env = { ...process.env, HOME: join(root, "home"), USERPROFILE: join(root, "home") };
-  // Ambient kit/proxy variables would change the rows; the fixture sets its own.
   for (const name of Object.keys(env)) {
     if (/^ZCODE_(?:KIT_STATE_DIR|KIT_BUN|PROXY_|CLAIM_|ASYNC_|DUMP_)/.test(name)) delete env[name];
   }
   Object.assign(env, extraEnv);
   if (bun) env.ZCODE_KIT_BUN = bun;
-  else { env.PATH = join(root, "empty-path"); mkdirSync(env.PATH); }
+  else { env.PATH = join(root, "empty-path"); mkdirSync(env.PATH, { recursive: true }); }
   if (store) env.ZCODE_PROXY_CREDENTIALS_PATH = join(root, "credentials.json");
+  return env;
+}
+
+/** A kit entry spawned asynchronously (the stand-in proxy answers from this process). */
+function spawnKit(root, entry, args, env) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "doctor"], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(process.execPath, [join(root, entry), ...args], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.setEncoding("utf8").on("data", (c) => { stdout += c; });
     child.stderr.setEncoding("utf8").on("data", (c) => { stderr += c; });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+    const timer = setTimeout(() => child.kill("SIGKILL"), 90_000);
     child.once("error", reject);
-    child.once("close", (code, signal) => { clearTimeout(timer); resolveRun({ code, signal, stdout, stderr, bun }); });
+    child.once("close", (code, signal) => { clearTimeout(timer); resolveRun({ code, signal, stdout, stderr, bun: env.ZCODE_KIT_BUN ?? null }); });
   });
 }
 
@@ -123,7 +134,7 @@ function normalise(text, root, bun) {
 }
 
 function snapshotText(run, root) {
-  assert.equal(run.signal, null, "the manager doctor finished on its own");
+  assert.equal(run.signal, null, "the command finished on its own");
   return `${normalise(run.stdout, root, run.bun)}[exit ${run.code}]\n${run.stderr ? `[stderr]\n${normalise(run.stderr, root, run.bun)}` : ""}`;
 }
 
@@ -145,35 +156,50 @@ async function standIn(t, port, { health = "ours", quota = "healthy" } = {}) {
   t.after(() => new Promise((r) => server.close(r)));
 }
 
-test("manager doctor, fresh kit (no config, no key, nothing installed): legacy rows, exit 1", { timeout: 90_000 }, async (t) => {
-  const root = kitFixture(t);
-  matchSnapshot("manager-doctor/fresh.txt", snapshotText(await managerDoctor(root), root));
-});
+// The fixture states. `env` builds the run's environment; `proxy` the stand-in.
+const STATES = [
+  { id: "fresh", title: "fresh kit (no config, no key, nothing installed)", fixture: {}, env: {} },
+  {
+    id: "proxy-down", title: "configured with the proxy down, env overrides set and a decryptable store",
+    fixture: { configured: true, installed: true, artifacts: true, omp: "managed", store: "decryptable" },
+    env: { store: true, extraEnv: { ZCODE_PROXY_PORT: "1", ZCODE_CLAIM_FIXTURE: "1" } },
+  },
+  {
+    id: "proxy-running", title: "own proxy running and every manager check passing",
+    fixture: { configured: true, installed: true, artifacts: true, omp: "managed", store: "decryptable" },
+    env: { store: true }, proxy: {},
+  },
+  {
+    id: "proxy-running-auth-rejected", title: "own proxy running, rejected auth, an undecryptable store and OMP skipped",
+    fixture: { configured: true, omp: "skipped", store: "opaque" }, env: { store: true }, proxy: { quota: "rejected" },
+  },
+  {
+    id: "foreign-no-bun", title: "a foreign listener, no Bun and OMP never asked",
+    fixture: { configured: true, installed: true, omp: "unasked" }, env: { bun: null }, proxy: { health: "foreign" },
+  },
+];
 
-test("manager doctor, configured with the proxy down, env overrides set and a decryptable store: exit 1", { timeout: 90_000 }, async (t) => {
+async function stateFixture(t, state) {
   const port = await freePort();
-  const root = kitFixture(t, { port, configured: true, installed: true, artifacts: true, omp: "managed", store: "decryptable" });
-  const run = await managerDoctor(root, { store: true, extraEnv: { ZCODE_PROXY_PORT: "1", ZCODE_CLAIM_FIXTURE: "1" } });
-  matchSnapshot("manager-doctor/proxy-down.txt", snapshotText(run, root));
-});
+  const root = kitFixture(t, { port, ...state.fixture });
+  if (state.proxy) await standIn(t, port, state.proxy);
+  return { root, env: fixtureEnv(root, state.env) };
+}
 
-test("manager doctor, own proxy running and every check passing: exit 0", { timeout: 90_000 }, async (t) => {
-  const port = await freePort();
-  const root = kitFixture(t, { port, configured: true, installed: true, artifacts: true, omp: "managed", store: "decryptable" });
-  await standIn(t, port);
-  matchSnapshot("manager-doctor/proxy-running.txt", snapshotText(await managerDoctor(root, { store: true }), root));
-});
+for (const state of STATES) {
+  test(`manager CLI doctor, ${state.title}: the legacy rows and exit code, byte for byte`, { timeout: 120_000 }, async (t) => {
+    const { root, env } = await stateFixture(t, state);
+    const run = await spawnKit(root, join("proxy", "zcode-proxy-manager.mjs"), ["doctor"], env);
+    matchSnapshot(`manager-doctor/${state.id}.txt`, snapshotText(run, root));
+  });
 
-test("manager doctor, own proxy running, rejected auth, an undecryptable store and OMP skipped: exit 1", { timeout: 90_000 }, async (t) => {
-  const port = await freePort();
-  const root = kitFixture(t, { port, configured: true, omp: "skipped", store: "opaque" });
-  await standIn(t, port, { quota: "rejected" });
-  matchSnapshot("manager-doctor/proxy-running-auth-rejected.txt", snapshotText(await managerDoctor(root, { store: true }), root));
-});
-
-test("manager doctor, a foreign listener, no Bun and OMP never asked: exit 1", { timeout: 90_000 }, async (t) => {
-  const port = await freePort();
-  const root = kitFixture(t, { port, configured: true, installed: true, omp: "unasked" });
-  await standIn(t, port, { health: "foreign" });
-  matchSnapshot("manager-doctor/foreign-no-bun.txt", snapshotText(await managerDoctor(root, { bun: null }), root));
-});
+  // zcode-kit doctor over the same states: its text report, its --json and
+  // their exit codes as before ticket 38.
+  for (const [variant, args] of [["text", ["doctor"]], ["json", ["doctor", "--json"]]]) {
+    test(`zcode-kit doctor${variant === "json" ? " --json" : ""}, ${state.title}: output and exit code unchanged`, { timeout: 120_000 }, async (t) => {
+      const { root, env } = await stateFixture(t, state);
+      const run = await spawnKit(root, join("cli", "zcode-kit.mjs"), args, env);
+      matchSnapshot(`manager-doctor/kit-doctor-${variant}/${state.id}.txt`, snapshotText(run, root));
+    });
+  }
+}
