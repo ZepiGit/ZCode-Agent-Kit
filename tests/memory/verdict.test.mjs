@@ -139,42 +139,47 @@ test("observed process counts: a solver alive after the proxy was SIGKILLed is r
 
 // ── Expected-RED ratchet (seam 9) ─────────────────────────────────────────
 // A small job of three runs; ticket files 19 and 37 exist, nothing else does.
+// Each listed single run maps its owner tickets to the checks they own (Round 14 Q1, Round 15 Q1).
 const job = { linux: ["S1/short", "S1/burst16", "S3/short"] };
 const issueIds = new Set(["19", "37"]);
 const judge = (expected, results, os = "linux") => checkRatchet({ expected, os, results, job, issueIds });
 const outcome = (key, exitCode) => ({ key, exitCode });
+// A run as job.mjs hands it over: RED on `procPeak:proxy` (S1) or `peak:kit` (S3) when exit 1.
+const seen = (key, exitCode) => ({ ...outcome(key, exitCode), redChecks: exitCode === 1 ? [key.startsWith("S3/") ? "peak:kit" : "procPeak:proxy"] : [], checkNames: ["procPeak:proxy", "peak:kit", "orphans"] });
+const burst16 = { owners: { 19: ["procPeak:proxy"] } };
+const s3 = (ticket = "37") => ({ owners: { [ticket]: ["peak:kit"] } });
 
 test("ratchet: every RED run listed and every other run GREEN passes", () => {
-  const r = judge({ linux: { "S1/burst16": "19", "S3/short": "37" } }, [outcome("S1/short", 0), outcome("S1/burst16", 1), outcome("S3/short", 1)]);
+  const r = judge({ linux: { "S1/burst16": burst16, "S3/short": s3() } }, [seen("S1/short", 0), seen("S1/burst16", 1), seen("S3/short", 1)]);
   assert.deepEqual(r.failures, []);
   assert.equal(r.ok, true);
 });
 
 test("ratchet: a RED run that is not listed fails", () => {
-  const r = judge({ linux: { "S1/burst16": "19" } }, [outcome("S1/short", 0), outcome("S1/burst16", 1), outcome("S3/short", 1)]);
+  const r = judge({ linux: { "S1/burst16": burst16 } }, [seen("S1/short", 0), seen("S1/burst16", 1), seen("S3/short", 1)]);
   assert.equal(r.ok, false);
   assert.match(r.failures.join("\n"), /S3\/short.*RED.*not listed/);
 });
 
 test("ratchet: a listed run that is GREEN fails until its entry is deleted", () => {
-  const r = judge({ linux: { "S1/burst16": "19", "S3/short": "37" } }, [outcome("S1/short", 0), outcome("S1/burst16", 0), outcome("S3/short", 1)]);
+  const r = judge({ linux: { "S1/burst16": burst16, "S3/short": s3() } }, [seen("S1/short", 0), seen("S1/burst16", 0), seen("S3/short", 1)]);
   assert.equal(r.ok, false);
   assert.match(r.failures.join("\n"), /S1\/burst16.*GREEN.*delete/);
 });
 
 test("ratchet: a harness failure fails even when the run is listed", () => {
-  const r = judge({ linux: { "S1/burst16": "19", "S3/short": "37" } }, [outcome("S1/short", 0), outcome("S1/burst16", 2), outcome("S3/short", 1)]);
+  const r = judge({ linux: { "S1/burst16": burst16, "S3/short": s3() } }, [seen("S1/short", 0), seen("S1/burst16", 2), seen("S3/short", 1)]);
   assert.equal(r.ok, false);
   assert.match(r.failures.join("\n"), /S1\/burst16.*harness failure/);
 });
 
 test("ratchet: an unknown scenario, variant or OS leg fails", () => {
-  const all = [outcome("S1/short", 0), outcome("S1/burst16", 1), outcome("S3/short", 1)];
-  const base = { "S1/burst16": "19", "S3/short": "37" };
+  const all = [seen("S1/short", 0), seen("S1/burst16", 1), seen("S3/short", 1)];
+  const base = { "S1/burst16": burst16, "S3/short": s3() };
   for (const [doc, pattern] of [
-    [{ linux: { ...base, "S9/short": "19" } }, /S9\/short.*unknown scenario/],
-    [{ linux: { ...base, "S1/burst99": "19" } }, /S1\/burst99.*unknown variant/],
-    [{ linux: { ...base, "S1-burst16": "19" } }, /S1-burst16.*not a run key/],
+    [{ linux: { ...base, "S9/short": burst16 } }, /S9\/short.*unknown scenario/],
+    [{ linux: { ...base, "S1/burst99": burst16 } }, /S1\/burst99.*unknown variant/],
+    [{ linux: { ...base, "S1-burst16": burst16 } }, /S1-burst16.*not a run key/],
     [{ ...{ linux: base }, macos: {} }, /macos.*unknown OS leg/],
   ]) {
     const r = judge(doc, all);
@@ -184,16 +189,16 @@ test("ratchet: an unknown scenario, variant or OS leg fails", () => {
 });
 
 test("ratchet: a known variant that this leg's job never runs fails (it could never be checked)", () => {
-  const r = checkRatchet({ expected: { linux: { "S1/burst16": "19", "S3/short": "37" }, windows: { "S1/burst16": "19" } }, os: "linux", results: [outcome("S1/short", 0), outcome("S1/burst16", 1), outcome("S3/short", 1)], job: { ...job, windows: ["S1/short"] }, issueIds });
+  const r = checkRatchet({ expected: { linux: { "S1/burst16": burst16, "S3/short": s3() }, windows: { "S1/burst16": burst16 } }, os: "linux", results: [seen("S1/short", 0), seen("S1/burst16", 1), seen("S3/short", 1)], job: { ...job, windows: ["S1/short"] }, issueIds });
   assert.equal(r.ok, false);
   assert.match(r.failures.join("\n"), /windows.*S1\/burst16.*not run by the windows job/);
 });
 
 test("ratchet: a ticket id with no issue file fails", () => {
-  const r = judge({ linux: { "S1/burst16": "19", "S3/short": "99" } }, [outcome("S1/short", 0), outcome("S1/burst16", 1), outcome("S3/short", 1)]);
+  const r = judge({ linux: { "S1/burst16": burst16, "S3/short": s3("99") } }, [seen("S1/short", 0), seen("S1/burst16", 1), seen("S3/short", 1)]);
   assert.equal(r.ok, false);
   assert.match(r.failures.join("\n"), /S3\/short.*ticket 99.*no issue file/);
-  const malformed = judge({ linux: { "S1/burst16": "19", "S3/short": 37 } }, [outcome("S1/short", 0), outcome("S1/burst16", 1), outcome("S3/short", 1)]);
+  const malformed = judge({ linux: { "S1/burst16": burst16, "S3/short": s3("7") } }, [seen("S1/short", 0), seen("S1/burst16", 1), seen("S3/short", 1)]);
   assert.match(malformed.failures.join("\n"), /S3\/short.*ticket id/);
 });
 
@@ -205,7 +210,7 @@ test("the committed expected-red.json is valid: known runs of each leg's job, ti
 });
 
 test("ratchet: a listed run that did not run fails", () => {
-  const r = judge({ linux: { "S1/burst16": "19", "S3/short": "37" } }, [outcome("S1/short", 0), outcome("S1/burst16", 1)]);
+  const r = judge({ linux: { "S1/burst16": burst16, "S3/short": s3() } }, [seen("S1/short", 0), seen("S1/burst16", 1)]);
   assert.equal(r.ok, false);
   assert.match(r.failures.join("\n"), /S3\/short.*did not run/);
 });
@@ -497,16 +502,17 @@ test("unstable is rejected on any other key and on linux S1/burst1; a plain list
   assert.match(judgeBurst({ windows: { "S1/burst1": "20" } }, setResult("S1/burst1", wsFive(230, 220, 240, 235, 225))).failures.join("\n"), /GREEN but listed for ticket 20/);
 });
 
-test("the committed list marks windows S1/burst1 unstable for ticket 20 and windows S5/short unstable for ticket 30, its only non-plain entries", () => {
+test("the committed list marks windows S1/burst1 unstable for ticket 20 and windows S5/short unstable for ticket 30, its only unstable entries", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
   assert.deepEqual(expected.windows["S1/burst1"], { ticket: "20", state: "unstable" });
   assert.equal(Object.hasOwn(expected.linux, "S1/burst1"), false);
-  // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30); linux stays a plain entry.
+  // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30); linux stays
+  // a binary entry (since Round 14/15 Q1 one that names the check ticket 30 owns).
   assert.deepEqual(expected.windows["S5/short"], { ticket: "30", state: "unstable" });
-  assert.equal(expected.linux["S5/short"], "30");
-  const objects = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => typeof v !== "string").map(([k]) => `${os} ${k}`));
-  assert.deepEqual(objects, ["windows S1/burst1", "windows S5/short"]);
+  assert.deepEqual(expected.linux["S5/short"], { owners: { 30: ["growth:mcp-bridge"] } });
+  const unstable = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => v?.state === "unstable").map(([k]) => `${os} ${k}`));
+  assert.deepEqual(unstable, ["windows S1/burst1", "windows S5/short"]);
 });
 
 // ── The `unstable` entry: windows S5/short, a growth-value band (Round 13 Q1 conditions 1 and 3) ──
@@ -768,25 +774,31 @@ test("the S3 OMP leg runs on both legs and is expected RED until single-flight l
   assert.ok(JOB.linux.includes("S3/omp") && JOB.windows.includes("S3/omp"));
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
-  assert.equal(expected.linux["S3/omp"], "35");
-  assert.equal(expected.windows["S3/omp"], "35");
+  assert.deepEqual(expected.linux["S3/omp"].owners["35"], ["omp:concurrent-preflights"]);
+  assert.deepEqual(expected.windows["S3/omp"].owners["35"], ["omp:concurrent-preflights"]);
 });
 
-test("S3/omp → 35 is a plain entry on both legs: RED passes the ratchet, GREEN asks for its deletion, `unstable` is refused", () => {
+test("S3/omp is listed on both legs with 35 owning the concurrent preflights and 37 the flipping role peaks: RED passes, GREEN passes on the flips, `unstable` is refused", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
   const issueIds = issueIdsIn(join(here, "..", "..", ".scratch", "kit-overhaul", "issues"));
+  // Round 15 Q1 condition 3.
+  assert.deepEqual(expected.linux["S3/omp"], { owners: { 35: ["omp:concurrent-preflights"], 37: ["procPeak:proxy", "procPeak:preflight"] }, flips: ["procPeak:proxy", "procPeak:preflight"] });
+  assert.deepEqual(expected.windows["S3/omp"], { owners: { 35: ["omp:concurrent-preflights"], 37: ["peak:kit"] }, flips: ["peak:kit"] });
   for (const os of ["linux", "windows"]) {
     const results = JOB[os].map((key) => {
       const entry = expected[os][key];
       if (entry?.state === "unstable" && key === "S5/short") return { key, exitCode: 0, redChecks: [], growthChecks: [{ name: "growth:mcp-bridge", red: false, value: 15.55, commitValue: 15.55, gate: "commit", budget: 5, trend: false }] };
       if (entry?.state === "unstable") return { key, exitCode: 0, redChecks: [], median: { medianMB: 240, budgetMB: 250, check: "procPeak:proxy" } };
-      return { key, exitCode: entry ? 1 : 0, redChecks: entry ? [key === "S3/omp" ? "omp:concurrent-preflights" : "x"] : [] };
+      // Each listed single run RED on its first owner's first check, every other run GREEN.
+      const names = entry ? Object.values(entry.owners).flat() : [];
+      return { key, exitCode: entry ? 1 : 0, redChecks: entry ? [names[0]] : [], checkNames: names };
     });
     const red = checkRatchet({ expected, os, results, issueIds });
     assert.deepEqual(red.failures, [], os);
     const green = checkRatchet({ expected, os, results: results.map((r) => (r.key === "S3/omp" ? { ...r, exitCode: 0, redChecks: [] } : r)), issueIds });
-    assert.deepEqual(green.failures, [`S3/omp: GREEN but listed for ticket 35: delete the entry from expected-red.json (${os})`]);
+    assert.deepEqual(green.failures, [], os);
+    assert.equal(green.rows.find((x) => x.key === "S3/omp").note, `S3/omp: GREEN, listed for ticket 37 on flipping checks ${expected[os]["S3/omp"].flips.join(", ")} (Round 15 Q1)`);
     const unstable = { ...expected, [os]: { ...expected[os], "S3/omp": { ticket: "35", state: "unstable" } } };
     assert.match(validateExpectedRed(unstable, { issueIds }).join("\n"), new RegExp(`${os} S3/omp: \`unstable\` is allowed for windows S1/burst1, windows S5/short only`));
   }
@@ -805,4 +817,225 @@ test("OMP leg on Windows: the waiter cost is gated on commit and reported with i
   const linux = ompCheck([singleFlight()], "omp:waiter-cost");
   assert.equal(linux.gate, undefined);
   assert.match(linux.detail.join("\n"), /omp-5 host 1 waiter \+1\.2 MB$/m);
+});
+
+// ── A listed single-run key names the checks its tickets own (Round 14 Q1, Round 15 Q1) ──
+// A single-run entry that is not `unstable` maps owner ticket → check names,
+// one owner per check: { "owners": { "<NN>": [<check>, …] }, "flips": [<check>, …] }.
+// RED only on owned checks passes and prints "<key>: RED on <checks>, owned by
+// ticket <t> (<names>), …"; RED on any other check fails as an ownership
+// question naming every owner; RED with no check named, a harness failure and
+// an owned name the run does not produce (stale or mistyped, Round 3 Q8
+// condition 2) all fail. GREEN passes only while a name is marked `flips`
+// (Round 15 Q1 condition 4); otherwise GREEN while listed fails. Repeated keys
+// keep their median rule; the two `unstable` keys refuse owners and flips.
+// The Round 14 cases below are unchanged in input and outcome; their entries
+// use the Round 15 shape through `owned()` and their lines the Round 15 wording.
+const ownsJob = { linux: ["S1/short", "S1/burst1", "S1/burst16", "S3/short"], windows: ["S1/short", "S1/burst1", "S1/burst16", "S3/short", "S5/short"] };
+const ownsIds = new Set(["16", "17", "19", "20", "30", "37"]);
+const S3_NAMES = ["peak:kit", "procPeak:launcher", "procPeak:proxy", "count:proxy", "orphans", "exactly-one-proxy-after-round", "failed-launches", "stale-lock-after-round"];
+const S1_NAMES = ["procPeak:proxy", "count:proxy", "orphans", "steady:proxy"];
+/** A single run as job.mjs hands it to the ratchet: its RED checks and every check name it produced. */
+const run1 = (key, red = [], names = key.startsWith("S3/") ? S3_NAMES : S1_NAMES) => ({ key, exitCode: red.length ? 1 : 0, redChecks: red, checkNames: names });
+/** A single-owner entry in the Round 15 shape. */
+const owned = (ticket, ...owns) => ({ owners: { [ticket]: owns } });
+const ownsDoc = { linux: { "S1/burst16": owned("19", "procPeak:proxy"), "S3/short": owned("37", "peak:kit", "procPeak:launcher", "procPeak:proxy") } };
+const judgeOwns = (expected, results, os = "linux") => checkRatchet({ expected, os, results: [run1("S1/short"), run1("S1/burst1"), ...results], job: ownsJob, issueIds: ownsIds });
+const tickets = (t) => { const ts = [t].flat(); return `${ts.length > 1 ? "tickets" : "ticket"} ${ts.join(", ")}`; };
+const notOwned = (key, check, t, os = "linux") => `${key}: RED on ${check}, not owned by ${tickets(t)} (${os}, Round 14 Q1, Round 15 Q1); the RED comes back as an ownership question, do not edit owners`;
+const SHAPE_ERROR = /a listed single-run key maps owner ticket → check names: \{ "owners": \{ "<NN>": \["<check>", …\] \}, "flips": \["<check>", …\] \} \(Round 14 Q1 condition 1, Round 15 Q1 condition 1\)/;
+
+test("owns: a plain ticket id (string or number) for a listed single-run key is a schema error", () => {
+  for (const value of ["37", 37]) {
+    const errors = validateExpectedRed({ linux: { ...ownsDoc.linux, "S3/short": value } }, { job: ownsJob, issueIds: ownsIds }).join("\n");
+    assert.match(errors, new RegExp(`linux S3\\/short: ${SHAPE_ERROR.source}`), JSON.stringify(value));
+  }
+  assert.deepEqual(validateExpectedRed(ownsDoc, { job: ownsJob, issueIds: ownsIds }), []);
+  // A plainly listed single run never passes the ratchet, whatever it ran.
+  assert.equal(judgeOwns({ linux: { ...ownsDoc.linux, "S3/short": "37" } }, [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", ["peak:kit"])]).ok, false);
+  // Round 14's single-ticket shape is gone too (Round 15 Q1 condition 1: one shape).
+  assert.match(validateExpectedRed({ linux: { ...ownsDoc.linux, "S3/short": { ticket: "37", owns: ["peak:kit"] } } }, { job: ownsJob, issueIds: ownsIds }).join("\n"), /linux S3\/short: an entry is a ticket id or/);
+});
+
+test("owns: an empty list, a duplicate name, a non-string or empty name, or an extra field is a schema error", () => {
+  for (const [value, pattern] of [
+    [{ owners: { 37: [] } }, /linux S3\/short: owner 37 must name at least one check/],
+    [{ owners: { 37: ["peak:kit", "peak:kit"] } }, /linux S3\/short: owner 37 names peak:kit twice/],
+    [{ owners: { 37: ["peak:kit", 7] } }, /linux S3\/short: owner 37 holds check names \(non-empty strings\), got 7/],
+    [{ owners: { 37: ["peak:kit", ""] } }, /linux S3\/short: owner 37 holds check names \(non-empty strings\), got ""/],
+    [{ owners: { 37: "peak:kit" } }, /linux S3\/short: owner 37 must be a list of check names/],
+    [{ owners: { 37: ["peak:kit"] }, note: "x" }, /linux S3\/short: an entry is a ticket id or \{ "ticket", "state": "unstable" \}/],
+  ]) {
+    const errors = validateExpectedRed({ linux: { ...ownsDoc.linux, "S3/short": value } }, { job: ownsJob, issueIds: ownsIds });
+    assert.match(errors.join("\n"), pattern, JSON.stringify(value));
+  }
+});
+
+test("owners and flips are a schema error on a repeated key and on either unstable key (windows S1/burst1, windows S5/short)", () => {
+  for (const [os, key, value] of [
+    ["windows", "S1/burst1", { owners: { 20: ["median:procPeak:proxy"] } }],
+    ["windows", "S1/burst1", { ticket: "20", state: "unstable", owners: { 20: ["median:procPeak:proxy"] } }],
+    ["windows", "S1/burst1", { ticket: "20", state: "unstable", flips: ["median:procPeak:proxy"] }],
+    ["linux", "S1/burst1", { owners: { 20: ["median:procPeak:proxy"] } }],
+    ["windows", "S5/short", { owners: { 30: ["growth:mcp-bridge"] } }],
+    ["windows", "S5/short", { ticket: "30", state: "unstable", owners: { 30: ["growth:mcp-bridge"] } }],
+    ["windows", "S5/short", { owners: { 30: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] }],
+  ]) {
+    const errors = validateExpectedRed({ [os]: { [key]: value } }, { job: ownsJob, issueIds: ownsIds }).join("\n");
+    assert.match(errors, new RegExp(`${os} ${key.replace("/", "\\/")}: \`owners\` and \`flips\` are not allowed (on a repeated key|on an \`unstable\` key)`), `${os} ${key} ${JSON.stringify(value)}`);
+  }
+  // The unstable entries themselves still validate unchanged.
+  assert.deepEqual(validateExpectedRed({ windows: { "S1/burst1": { ticket: "20", state: "unstable" }, "S5/short": { ticket: "30", state: "unstable" } } }, { job: ownsJob, issueIds: ownsIds }), []);
+});
+
+test("owns: RED only on owned checks passes and prints its line; an owned check may be GREEN", () => {
+  const r = judgeOwns(ownsDoc, [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", ["peak:kit", "procPeak:launcher"])]);
+  assert.deepEqual(r.failures, []);
+  assert.equal(r.rows.find((x) => x.key === "S3/short").note, "S3/short: RED on peak:kit, procPeak:launcher, owned by ticket 37 (peak:kit, procPeak:launcher)");
+  assert.equal(r.rows.find((x) => x.key === "S1/burst16").note, "S1/burst16: RED on procPeak:proxy, owned by ticket 19 (procPeak:proxy)");
+});
+
+test("owns: RED on a check the ticket does not own fails, also next to an owned RED", () => {
+  for (const red of [["peak:kit", "orphans"], ["orphans", "failed-launches"]]) {
+    const r = judgeOwns(ownsDoc, [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", red)]);
+    assert.equal(r.ok, false, red.join());
+    const unowned = red.filter((c) => c !== "peak:kit");
+    assert.deepEqual(r.failures, unowned.map((c) => notOwned("S3/short", c, "37")), red.join());
+    assert.equal(r.rows.find((x) => x.key === "S3/short").note, undefined, "no tolerated line for a run that fails");
+  }
+});
+
+test("owns: an owned check GREEN while an unowned check is RED fails", () => {
+  const r = judgeOwns(ownsDoc, [run1("S1/burst16", ["orphans"]), run1("S3/short", ["peak:kit"])]);
+  assert.deepEqual(r.failures, [notOwned("S1/burst16", "orphans", "19")]);
+});
+
+test("owns: RED with no RED check named fails", () => {
+  const r = judgeOwns(ownsDoc, [run1("S1/burst16", ["procPeak:proxy"]), { ...run1("S3/short"), exitCode: 1 }]);
+  assert.deepEqual(r.failures, ["S3/short: RED with no RED check named, so nothing shows it belongs to ticket 37 (linux, Round 14 Q1)"]);
+});
+
+test("owns: GREEN while listed and a harness failure still fail", () => {
+  const green = judgeOwns(ownsDoc, [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short")]);
+  assert.deepEqual(green.failures, ["S3/short: GREEN but listed for ticket 37: delete the entry from expected-red.json (linux)"]);
+  const harness = judgeOwns(ownsDoc, [run1("S1/burst16", ["procPeak:proxy"]), { ...run1("S3/short", ["peak:kit"]), exitCode: 2 }]);
+  assert.deepEqual(harness.failures, ["S3/short: harness failure (exit 2); a harness failure is never expected"]);
+});
+
+test("owns: an owned name the run does not produce fails as stale or mistyped, and so does a run without its check names", () => {
+  const typo = { linux: { ...ownsDoc.linux, "S3/short": owned("37", "peak:kit", "procPeak:launcherr") } };
+  const r = judgeOwns(typo, [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", ["peak:kit"])]);
+  assert.deepEqual(r.failures, ["S3/short: ticket 37 owns procPeak:launcherr, which this run does not produce: a stale or mistyped name (linux, Round 14 Q1, Round 3 Q8 condition 2)"]);
+  assert.equal(r.rows.find((x) => x.key === "S3/short").note, undefined);
+  const noNames = judgeOwns(ownsDoc, [run1("S1/burst16", ["procPeak:proxy"]), { key: "S3/short", exitCode: 1, redChecks: ["peak:kit"] }]);
+  assert.deepEqual(noNames.failures, ["S3/short: the run reports no check names, so the checks of ticket 37 cannot be matched (linux, Round 14 Q1, Round 3 Q8 condition 2)"]);
+});
+
+test("owns leaves a listed repeated key on its median rule (Round 9 Q1 condition 1)", () => {
+  const doc = { linux: { ...ownsDoc.linux, "S1/burst1": "20" } };
+  const median = { key: "S1/burst1", exitCode: 1, redChecks: ["median:procPeak:proxy"], median: { medianMB: 255, budgetMB: 250 } };
+  const base = [run1("S1/short"), run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", ["peak:kit"])];
+  assert.deepEqual(checkRatchet({ expected: doc, os: "linux", results: [median, ...base], job: ownsJob, issueIds: ownsIds }).failures, []);
+  const ceiling = { ...median, redChecks: ["median:procPeak:proxy", "ceiling:procPeak:proxy"] };
+  assert.match(checkRatchet({ expected: doc, os: "linux", results: [ceiling, ...base], job: ownsJob, issueIds: ownsIds }).failures.join("\n"), /S1\/burst1: RED on ceiling:procPeak:proxy: a listed repeated run accepts only median:procPeak:proxy/);
+});
+
+// ── Round 15 Q1: several owners per entry, one owner per check, flipping names ──
+const twoOwners = (extra = {}) => ({ linux: { ...ownsDoc.linux, "S3/short": { owners: { 16: ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], 37: ["peak:kit", "procPeak:proxy"] }, ...extra } } });
+
+test("owners: a two-owner entry passes on each owner's RED and prints both, and an unowned RED fails naming both owners", () => {
+  for (const [red, line] of [
+    [["peak:kit", "failed-launches"], "S3/short: RED on peak:kit, failed-launches, owned by ticket 16 (failed-launches), ticket 37 (peak:kit)"],
+    [["failed-launches", "stale-lock-after-round"], "S3/short: RED on failed-launches, stale-lock-after-round, owned by ticket 16 (failed-launches, stale-lock-after-round)"],
+    [["procPeak:proxy"], "S3/short: RED on procPeak:proxy, owned by ticket 37 (procPeak:proxy)"],
+  ]) {
+    const r = judgeOwns(twoOwners(), [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", red)]);
+    assert.deepEqual(r.failures, [], red.join());
+    assert.equal(r.rows.find((x) => x.key === "S3/short").note, line);
+  }
+  const orphan = judgeOwns(twoOwners(), [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", ["peak:kit", "failed-launches", "orphans"])]);
+  assert.deepEqual(orphan.failures, [notOwned("S3/short", "orphans", ["16", "37"])]);
+  assert.equal(orphan.rows.find((x) => x.key === "S3/short").note, undefined);
+});
+
+test("owners: a check under two owners, an empty owners map or an owner id without an issue file is a schema error", () => {
+  const errorsOf = (entry) => validateExpectedRed({ linux: { ...ownsDoc.linux, "S3/short": entry } }, { job: ownsJob, issueIds: ownsIds }).join("\n");
+  assert.deepEqual(validateExpectedRed(twoOwners(), { job: ownsJob, issueIds: ownsIds }), []);
+  assert.match(errorsOf({ owners: { 16: ["failed-launches", "peak:kit"], 37: ["peak:kit"] } }), /linux S3\/short: peak:kit is listed under tickets 16 and 37: one owner per check \(Round 15 Q1 condition 1\)/);
+  assert.match(errorsOf({ owners: {} }), /linux S3\/short: `owners` must map at least one owner ticket to its checks \(Round 15 Q1 condition 1\)/);
+  assert.match(errorsOf({ owners: [] }), /linux S3\/short: `owners` must map owner tickets to check names/);
+  assert.match(errorsOf({ owners: { 99: ["peak:kit"] } }), /linux S3\/short: ticket 99 has no issue file/);
+  // Every owner is checked, not only the first.
+  assert.match(errorsOf({ owners: { 16: ["failed-launches"], 99: ["peak:kit"] } }), /linux S3\/short: ticket 99 has no issue file/);
+  assert.match(errorsOf({ owners: { 7: ["peak:kit"] } }), /linux S3\/short: ticket id must be a two-digit string, got "7"/);
+  assert.match(errorsOf({ owners: { 16: [] , 37: ["peak:kit"] } }), /linux S3\/short: owner 16 must name at least one check/);
+});
+
+test("flips: a flipping name that no owner of the entry lists, an empty or repeated flips list is a schema error", () => {
+  const errorsOf = (flips) => validateExpectedRed(twoOwners({ flips }), { job: ownsJob, issueIds: ownsIds }).join("\n");
+  assert.equal(errorsOf(["exactly-one-proxy-after-round", "procPeak:proxy"]), "");
+  assert.match(errorsOf(["orphans"]), /linux S3\/short: `flips` names orphans, which no owner of this entry lists \(Round 15 Q1 condition 1\)/);
+  assert.match(errorsOf([]), /linux S3\/short: `flips` must name at least one owned check; leave it out when nothing flips/);
+  assert.match(errorsOf(["procPeak:proxy", "procPeak:proxy"]), /linux S3\/short: `flips` names procPeak:proxy twice/);
+  assert.match(errorsOf("procPeak:proxy"), /linux S3\/short: `flips` must be a list of check names/);
+});
+
+test("flips: a GREEN run of an entry with a flipping name passes and prints its line; without one GREEN still fails", () => {
+  const one = judgeOwns(twoOwners({ flips: ["procPeak:proxy"] }), [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short")]);
+  assert.deepEqual(one.failures, []);
+  assert.equal(one.rows.find((x) => x.key === "S3/short").note, "S3/short: GREEN, listed for ticket 37 on flipping checks procPeak:proxy (Round 15 Q1)");
+  const both = judgeOwns(twoOwners({ flips: ["exactly-one-proxy-after-round", "procPeak:proxy"] }), [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short")]);
+  assert.equal(both.rows.find((x) => x.key === "S3/short").note, "S3/short: GREEN, listed for tickets 16, 37 on flipping checks exactly-one-proxy-after-round, procPeak:proxy (Round 15 Q1)");
+  const none = judgeOwns(twoOwners(), [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short")]);
+  assert.deepEqual(none.failures, ["S3/short: GREEN but listed for tickets 16, 37: delete the entry from expected-red.json (linux)"]);
+  assert.equal(none.rows.find((x) => x.key === "S3/short").note, undefined);
+  // A flipping entry is still RED-judged: an unowned RED fails, an owned one prints its owners.
+  const red = judgeOwns(twoOwners({ flips: ["procPeak:proxy"] }), [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", ["procPeak:proxy", "count:proxy"])]);
+  assert.deepEqual(red.failures, [notOwned("S3/short", "count:proxy", ["16", "37"])]);
+});
+
+test("flips: a GREEN pass needs every owned name produced by the run (a stale flipping name cannot keep an entry alive)", () => {
+  const stale = { linux: { ...ownsDoc.linux, "S3/short": { owners: { 37: ["peak:kit", "procPeak:gone"] }, flips: ["procPeak:gone"] } } };
+  const r = judgeOwns(stale, [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short")]);
+  assert.deepEqual(r.failures, ["S3/short: ticket 37 owns procPeak:gone, which this run does not produce: a stale or mistyped name (linux, Round 14 Q1, Round 3 Q8 condition 2)"]);
+  assert.equal(r.rows.find((x) => x.key === "S3/short").note, undefined);
+  const noNames = judgeOwns(twoOwners({ flips: ["procPeak:proxy"] }), [run1("S1/burst16", ["procPeak:proxy"]), { key: "S3/short", exitCode: 0, redChecks: [] }]);
+  assert.deepEqual(noNames.failures, ["S3/short: the run reports no check names, so the checks of tickets 16, 37 cannot be matched (linux, Round 14 Q1, Round 3 Q8 condition 2)"]);
+});
+
+// One case per leg against the committed list: every listed single run RED on
+// exactly the checks it owns passes; a second proxy (count:proxy, owned by no
+// entry) on any of them fails naming its owners; an entry with flipping names
+// passes GREEN with its line, one without fails GREEN.
+test("the committed expected-red.json: each leg passes with every listed run RED on its owned checks, and fails on one unowned RED", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const expected = readExpectedRed(join(here, "expected-red.json"));
+  const ids = issueIdsIn(join(here, "..", "..", ".scratch", "kit-overhaul", "issues"));
+  const namesOf = (v) => Object.values(v.owners).flat();
+  const ownersOf = (v) => Object.keys(v.owners).sort();
+  for (const os of ["linux", "windows"]) {
+    const entries = expected[os];
+    const singles = Object.entries(entries).filter(([key, v]) => typeof v === "object" && v?.owners && !repetitionRule(key));
+    // Every listed single run that is not unstable maps owners to names (Round 15 Q1 condition 1).
+    for (const [key, v] of Object.entries(entries)) if (!repetitionRule(key) && v?.state !== "unstable") assert.ok(v?.owners && Object.keys(v.owners).length > 0, `${os} ${key}`);
+    const results = JOB[os].map((key) => {
+      const v = entries[key];
+      const names = [...new Set([...(v?.owners ? namesOf(v) : []), "orphans", "count:proxy"])];
+      if (v?.state === "unstable" && key === "S5/short") return { key, exitCode: 0, redChecks: [], checkNames: names, growthChecks: [{ name: "growth:mcp-bridge", red: false, value: 15.55, commitValue: 15.55, gate: "commit", budget: 5, trend: false }] };
+      if (v?.state === "unstable") return { key, exitCode: 0, redChecks: [], median: { medianMB: 240, budgetMB: 250, check: "procPeak:proxy" } };
+      return { key, exitCode: v ? 1 : 0, redChecks: v ? namesOf(v) : [], checkNames: names };
+    });
+    const r = checkRatchet({ expected, os, results, issueIds: ids });
+    assert.deepEqual(r.failures, [], os);
+    for (const [key, v] of singles) assert.match(r.rows.find((x) => x.key === key).note, new RegExp(`^${key.replace("/", "\\/")}: RED on .+, owned by ticket \\d\\d \\(`), `${os} ${key}`);
+    for (const [key, v] of singles) {
+      assert.ok(!namesOf(v).includes("count:proxy"), `${os} ${key}`);
+      const twoProxies = results.map((x) => (x.key === key ? { ...x, redChecks: [...x.redChecks, "count:proxy"] } : x));
+      const bad = checkRatchet({ expected, os, results: twoProxies, issueIds: ids });
+      assert.deepEqual(bad.failures, [notOwned(key, "count:proxy", ownersOf(v), os)], `${os} ${key}`);
+      const green = checkRatchet({ expected, os, results: results.map((x) => (x.key === key ? { ...x, exitCode: 0, redChecks: [] } : x)), issueIds: ids });
+      if (v.flips) assert.deepEqual(green.failures, [], `${os} ${key} flips`);
+      else assert.deepEqual(green.failures, [`${key}: GREEN but listed for ${tickets(ownersOf(v))}: delete the entry from expected-red.json (${os})`], `${os} ${key}`);
+    }
+  }
 });
