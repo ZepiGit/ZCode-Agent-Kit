@@ -417,3 +417,33 @@ Local supplement (labelled, **never counted**, Round 15 Q2 condition 1; Linux, N
 ## Current
 
 (pending)
+
+### S5/short after the retention bound (ticket 74; Round 24 Q1, Round 26 Q1)
+
+Rule (pre-registered in Round 24 Q1, `tests/memory/lib/budgets.mjs` `S5_SHORT`): S5/short runs 1,200 tasks; `growth:mcp-bridge` over tasks 600–1,200 with no warm-up inside, budget 5 %/1k AND the unchanged trend rule; `warm-up-growth:mcp-bridge` (the old quantity: load cut at the sample where progress reaches 400, default 25 % warm-up) RED above 55 %/1k linux RSS and 30 %/1k windows commit regardless of trend. Values in the tables below are pending CI where marked; nothing here changes a budget, ceiling, window or task count.
+
+**Mutant proof, local linux (Round 24 Q1 condition 5): FAILED; the ticket comes back under the Fallback (condition 8).** Tree 8c5a947 (ticket/30 2c6720c + ticket 74's rule; contains ticket 36), Linux x64, Node 26.7.0, Bun 1.4.2. `job.mjs --os linux --only S5/short --cap none` under `run-capped.sh` (3G, no swap), 6 runs started 20 s apart and run side by side (load average < 1; ~1.77 s per task, the CI pace). The mutant is ticket 30's M1 (the count bound removed in `retentionExceeded`, src and a rebuilt `dist/`), in a scratch worktree, never committed, restored from 8c5a947 (clean). Data: `/home/AgentKit/overhaul-tools/t74-memloop/<arm>-<i>/`. In all six runs the job printed a harness failure: the evidence gate of 8c5a947 required the post-bound window to reach task 1,200, while the last sample inside the load is at task 1,199 (fixed in d6a17a0; no measured value changes). Replayed through the fixed job against the committed list (no S5/short entry), all six are GREEN, the three mutants included.
+
+| run | verdict | growth:mcp-bridge %/1k (trend) | slope MB/1k / mean MB | window medians MB (net rise, rising) | window tasks / samples | warm-up-growth:mcp-bridge %/1k (trend) | warm-up slope / mean, medians MB | procPeak MB | empty → 1,200 → reboot MB (cost) | failures / orphans | data dir | duration s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M1-1 | GREEN | 7.77 (false) | 7.96 / 102.4 | 98.5, 100.8, 102.7, 103.5, 102.2, 103.8 (5.4 %, 2) | 600–1,199 / samples 1059–2116, 1,058 of 2,125 | 38.11 (true) | 32.78 / 86; 80.7, 83.6, 85.8, 87.6, 88.5, 89.4 | 117.2 | 73 → 103 → 77 (4) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| M1-2 | GREEN | 17.01 (false) | 17.64 / 103.7 | 98.5, 101, 102.2, 104, 104.5, 106.1 (7.7 %, 2) | 600–1,199 / 1059–2116, 1,058 of 2,125 | 45.2 (true) | 38.72 / 85.7; 79.5, 82.7, 85.2, 87.2, 89.2, 88.8 | 120.9 | 73 → 104 → 77 (4) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| M1-3 | GREEN | 9.03 (false) | 9.33 / 103.4 | 99.9, 100.5, 103.6, 104.7, 103.4, 103.9 (4.0 %, 0) | 600–1,199 / 1059–2116, 1,058 of 2,125 | 40.9 (true) | 35.21 / 86.1; 80.3, 83.6, 85.8, 87.9, 89.3, 89.5 | 119.1 | 73 → 101 → 76 (3) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| tree-1 | GREEN | 2.85 (false) | 2.74 / 96.2 | 94.6, 96, 96.7, 96.3, 96, 96.4 (1.9 %, 0) | 600–1,199 / 1059–2114, 1,056 of 2,122 | 41.99 (true) | 36.09 / 86; 80.1, 83.2, 85.7, 87.5, 89.3, 89.5 | 99 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,125 |
+| tree-2 | GREEN | **5.75** (false) | 5.56 / 96.6 | 94.7, 95.7, 96.5, 97.2, 97.7, 96.8 (2.2 %, 0) | 600–1,199 / 1059–2114, 1,056 of 2,122 | 43.37 (true) | 37.29 / 86; 80.1, 83.4, 85.5, 87.3, 89.1, 90 | 100.3 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,124 |
+| tree-3 | GREEN | **5.62** (false) | 5.39 / 95.8 | 93.8, 95, 95.1, 96, 96.6, 96.6 (3.0 %, 0) | 600–1,199 / 1059–2113, 1,055 of 2,122 | 40.58 (true) | 34.65 / 85.4; 79.6, 82.6, 85.6, 87, 88.2, 88.9 | 99.5 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,125 |
+
+- **Mutant:** 0 of 3 RED. Every value is over 5 (7.77, 17.01, 9.03), and the trend flag is false in all three (net rise 4.0–7.7 % against 10 %, trailing rising run ≤ 2 against 3). Round 24's Shared understanding 2 named this risk (the tip's one run had a 13.8 % net rise). The window sees the slope of an unbounded store (7.96–17.64 MB/1k against 2.74–5.56 on the tree, 3,600 against 1,500 stored files) but not its trend.
+- **Tree:** 1 of 3 ≤ 5 (2.85); 5.75 and 5.62 are above the budget with trend false (GREEN under the rule, but not ≤ 5 as condition 5 requires). Round 24's branch value for this window (1.37, one S5/long run before ticket 36) is not reproduced on a tree with ticket 36.
+- **Warm-up:** under the 55 linux ceiling in all six (38.11–45.2).
+- Every other S5 check is GREEN in all six runs: procPeak ≤ 120.9 of 150 MB, reboot cost 2–4 of 20 MB, 0 failures, 0 orphans.
+- Windows: no local leg. EVIDENCE MISSING (Round 24): a windows post-bound value.
+
+**Joint-tree evidence runs (Round 26 Q1 conditions 2–3): pending CI (orchestrator verifies).** 10 runs per leg of the joint tree (integration tip, then ticket/30, then ticket/74), hash and count recorded in RUNLOG before the first run; each with growth:mcp-bridge (commit and WS on windows), trend, window medians, sample counts, warm-up-growth:mcp-bridge (commit and WS on windows) with its slope MB/1k, mean MB and window medians, procPeak, reboot cost, failures, orphans and duration. Not started: the mutant proof precedes any staging (Round 26 Q1 condition 1) and failed.
+
+| leg | # | run | tree | growth:mcp-bridge (trend) | warm-up-growth:mcp-bridge | other S5 checks | duration |
+|---|---|---|---|---|---|---|---|
+| linux | 1–10 | pending CI | — | — | — | — | — |
+| windows | 1–10 | pending CI | — | — | — | — | — |
+
+Round 25 Q1 condition 4's set ("with 30" / "without 30" subsets, n, mean, sd, max per subset; Round 26 Q1 condition 5): pending (orchestrator).
