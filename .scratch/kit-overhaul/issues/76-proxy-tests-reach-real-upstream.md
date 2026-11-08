@@ -81,3 +81,8 @@ ADR: no
     - Guard paths containing spaces in BUN_OPTIONS/NODE_OPTIONS (repo and CI paths have none).
 - **Existing tests changed.** Only `integration.test.ts` (the fix itself) and `tests/test-wiring.test.mjs` (+1 wiring guard).
 - **Real connections after step 1:** none from tests. Every suite run after 3bebf5b was guarded, and the watcher saw no socket from a bun or test process. The guard-test probes and mutants reached only this host's interface address. The only external sockets in the process tree were npm's own update-notifier check to registry.npmjs.org (104.16.1.34:443) during `t76-guarded1` (npm process, not a test). Later runs set `npm_config_update_notifier=false`. Before step 1, only `npm ci`/`bun install` used the network.
+- 2026-11-08 (implementer, after merging integration tip 5f754b8, ticket 29). Suites on 2d8d561 with the guard active. The watcher saw 0 non-loopback sockets (`t76-full2.log`, `t76-kit-rerun.log`).
+  - `npm run test:proxy`: 1501 pass, 0 fail, 101 files, 0 BLOCKED. Ticket 29's new CDN disk tests are loopback-only.
+  - `npm run test:proxy-typecheck`: pass.
+  - `npm run test:mcp`: 99 pass, 1 skipped.
+  - `npm run test`: 886 tests, 868 pass, 0 fail, 18 skipped, on rerun. The first run had 1 failure: `tests/json-superset.test.mjs` "port 18458 is in use; another capture may be running". That is a fixed port shared with another agent's concurrent capture, unrelated to this ticket. The port was free 20 s later and the rerun passed.
