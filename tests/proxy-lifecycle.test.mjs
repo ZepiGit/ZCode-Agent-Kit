@@ -8,7 +8,8 @@
 //   - frozen contracts: an old proxy (origin/main) calling the new manager's
 //     `respawn <pid> --reason <r>` CLI gets a fresh proxy, and every proxy
 //     the kit spawns carries the `ZCODE_KIT_RESPAWN_NODE`/`_MANAGER` hook.
-// Ports 19150-19159 (ticket 15's range).
+// Ports: every test takes a free loopback port of its own (freePort), so
+// parallel runs of this file in several worktrees never collide.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -61,6 +62,15 @@ test("the closure walk follows dynamic imports into presentation code (the walk 
 });
 
 // ---------------------------------------------------------------- fixtures
+/** A loopback port no listener holds right now (bind port 0, read it back, release it). */
+function freePort() {
+  return new Promise((resolvePort, reject) => {
+    const probe = http.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => { const { port } = probe.address(); probe.close(() => resolvePort(port)); });
+  });
+}
+
 const cleanups = new Map();
 /** Run fn when the fixture is torn down, before its directory is removed (t.after hooks run in order). */
 const defer = (root, fn) => cleanups.get(root).push(fn);
@@ -219,7 +229,7 @@ const NEVER_ALLOCATED_PID = 2147483644;
 const startTimeMissing = (record) => process.platform === "win32" && record?.startedMs === null;
 
 test("the teardown's process scan sees a process naming the fixture, and loses it once it exited", { timeout: 60_000 }, async (t) => {
-  const root = kitFixture(t, 19150);
+  const root = kitFixture(t, await freePort());
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", join(root, "marker")], { stdio: "ignore" });
   defer(root, () => killChild(child));
   await new Promise((r) => child.once("spawn", r));
@@ -233,7 +243,7 @@ test("the teardown's process scan sees a process naming the fixture, and loses i
 
 // --------------------------------------------------------- spawned preflight
 test("a spawned preflight loads the lifecycle module and no presentation module, with today's output", async (t) => {
-  const root = kitFixture(t, 19150); // nothing listens on 19150; no proxy dependencies: start refuses
+  const root = kitFixture(t, await freePort()); // nothing listens there; no proxy dependencies: start refuses
   const seen = join(root, "loaded.json");
   const hooks = join(root, "record-loads.mjs");
   writeFileSync(hooks, `
@@ -287,21 +297,23 @@ async function lifecycleFor(root, options = {}) {
 }
 
 test("ensure running prints nothing and returns an outcome record per identity outcome", async (t) => {
-  const ours = kitFixture(t, 19152);
-  await identityServer(t, 19152, "ours");
+  const oursPort = await freePort();
+  const ours = kitFixture(t, oursPort);
+  await identityServer(t, oursPort, "ours");
   const running = await printed(async () => (await lifecycleFor(ours)).ensureRunning());
   assert.deepEqual(running.out, []);
   assert.deepEqual(running.value, { intent: "ensure-running", code: 0, outcome: "already-running", recovered: null, lines: ["already running"] });
 
-  const foreign = kitFixture(t, 19153);
-  await identityServer(t, 19153, "foreign");
+  const foreignPort = await freePort();
+  const foreign = kitFixture(t, foreignPort);
+  await identityServer(t, foreignPort, "foreign");
   const refused = await printed(async () => (await lifecycleFor(foreign)).ensureRunning());
   assert.deepEqual(refused.out, []);
   assert.equal(refused.value.code, 3);
   assert.equal(refused.value.outcome, "foreign");
-  assert.deepEqual(refused.value.lines, ["ERROR: port 19153 is occupied by a foreign service (auth failed). Not touching it."]);
+  assert.deepEqual(refused.value.lines, [`ERROR: port ${foreignPort} is occupied by a foreign service (auth failed). Not touching it.`]);
 
-  const noKey = kitFixture(t, 19152);
+  const noKey = kitFixture(t, oursPort);
   rmSync(join(noKey, ".proxykey"));
   const keyless = await printed(async () => (await lifecycleFor(noKey)).ensureRunning());
   assert.deepEqual(keyless.out, []);
@@ -312,7 +324,7 @@ test("ensure running prints nothing and returns an outcome record per identity o
 });
 
 test("ensure running reports a lock it may not take as an outcome, leaves the lock untouched and prints nothing", async (t) => {
-  const root = kitFixture(t, 19154);
+  const root = kitFixture(t, await freePort());
   const lock = join(root, "logs", "manager.lock");
   writeFileSync(lock, '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale"}');
   const { value, out } = await printed(async () => (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 }));
@@ -324,7 +336,7 @@ test("ensure running reports a lock it may not take as an outcome, leaves the lo
 });
 
 test("stop, restart, the respawn request and read state print nothing and return records", async (t) => {
-  const root = kitFixture(t, 19155); // nothing on 19155
+  const root = kitFixture(t, await freePort()); // nothing listens there
   const lifecycle = await lifecycleFor(root);
   const { value: stopped, out: stopOut } = await printed(() => lifecycle.stop());
   assert.deepEqual(stopOut, []);
@@ -360,7 +372,7 @@ test("stop counts its proxy as gone when its pid is reused after the kill, and n
   // successful stop refuse and report 2. The stand-in keeps running after
   // SIGTERM (it is "the new process at that pid"); the injected probe reports
   // its new start time once the signal arrived.
-  const port = 19159;
+  const port = await freePort();
   const root = kitFixture(t, port);
   await identityServer(t, port, "ours");
   const recordedMs = Date.now() - 10 * 60_000;
@@ -383,7 +395,7 @@ test("stop never counts its proxy as gone on an unknown start time after the kil
   skip: process.platform === "win32" && "the stand-in survives SIGTERM; Windows stops through the handle-checked TerminateProcess",
   timeout: 60_000,
 }, async (t) => {
-  const port = 19159;
+  const port = await freePort();
   const root = kitFixture(t, port);
   await identityServer(t, port, "ours");
   const recordedMs = Date.now() - 10 * 60_000;
@@ -420,7 +432,7 @@ test("the vendored origin/main respawn hook is byte-identical to origin/main (wh
 });
 
 test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fresh proxy (spawned)", { timeout: 120_000 }, async (t) => {
-  const port = 19151;
+  const port = await freePort();
   const root = kitFixture(t, port, { proxySrc: true });
   const bun = bunOrFail();
   const manager = join(root, "proxy", "zcode-proxy-manager.mjs");
@@ -497,7 +509,7 @@ async function consoleLines(fn) {
 }
 
 test("the account change restarts a verified own proxy through the intents, with the manager's lines", { timeout: 120_000 }, async (t) => {
-  const port = 19157;
+  const port = await freePort();
   const root = kitFixture(t, port, { proxySrc: true });
   const bun = bunOrFail();
   const first = spawnSync(process.execPath, [join(root, "cli", "heal.mjs")], { env: childEnv(root, { ZCODE_KIT_BUN: bun }), encoding: "utf8", timeout: 90_000 });
@@ -539,7 +551,7 @@ test("the account change restarts a verified own proxy through the intents, with
 });
 
 test("a proxy started through the preflight carries the frozen respawn hook, and the manager CLI stops it", { timeout: 120_000 }, async (t) => {
-  const port = 19156;
+  const port = await freePort();
   const root = kitFixture(t, port, { proxySrc: true });
   const envOut = join(root, "spawned-env.json");
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PROXY_ENV_OUT: envOut });
