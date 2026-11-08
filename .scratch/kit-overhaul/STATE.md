@@ -23,6 +23,8 @@
 - Ticket 26 (captcha egress under Bun) merged 2026-11-08 as 87da391 (resolved a3962ad; pre-merge CI 42457120690).
 - Ticket 19 (admission control) merged 2026-11-08 as d68548c (resolved 0c7a184; final pre-merge CI 42464297212 with a round-17 signature (iii) exclusion).
 - Ticket 15 (proxy lifecycle module) merged 2026-11-08 as af5caa8 (resolved a3959cc; pre-merge CI 42469139184).
+- Ticket 24 (solver transport seam) merged 2026-11-08 as 92a58a2 (resolved 16bfaa2).
+- Ticket 25 (bounded collections, 32 MiB CDN bodies) merged 2026-11-08 as 3ed5896 (resolved eb4a8f7).
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul
