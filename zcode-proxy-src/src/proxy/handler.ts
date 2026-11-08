@@ -174,7 +174,7 @@ export async function proxyRequest(
   const translateAnthropicToOpenAI = false;
   const translateOpenAIToAnthropic = format === "openai";
   const upstreamFormat: Format = "anthropic";
-  const clientSession = resolveSessionContext({ clientReq, body, upstreamFormat, model: meta.model, config });
+  const clientSession = resolveSessionContext({ clientReq, body, parsedBody, upstreamFormat, model: meta.model, config });
   if (debug && clientSession) {
     const shortSession = clientSession.sessionId ? clientSession.sessionId.slice(0, 10) : "-";
     debugLine(reqId, `clientIdentity source=${clientSession.source} action=${clientSession.action} confidence=${clientSession.confidence.toFixed(2)} session=${shortSession}`);

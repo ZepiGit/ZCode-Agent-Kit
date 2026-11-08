@@ -43,7 +43,12 @@ interface ExplicitTraceContext {
 }
 
 export interface ClientSessionResolver {
-  resolve(req: Request, body: string | undefined, format: Format, model: string, config: ClientIdentityConfig): ClientSessionResult;
+  /**
+   * `parsedBody`, when given, is `JSON.parse(body)` done by the caller, so the
+   * resolver reads it instead of parsing the body text again (ticket 20). It
+   * is only read, never changed.
+   */
+  resolve(req: Request, body: string | undefined, format: Format, model: string, config: ClientIdentityConfig, parsedBody?: unknown): ClientSessionResult;
 }
 
 export function createClientSessionResolver(now: () => number = () => Date.now()): ClientSessionResolver {
@@ -87,14 +92,14 @@ export function createClientSessionResolver(now: () => number = () => Date.now()
   }
 
   return {
-    resolve(req, body, format, model, config) {
+    resolve(req, body, format, model, config, parsedBody) {
       if (config.mode === "off") return { source: "none", action: "off", confidence: 0 };
 
       prune(config);
-      const explicitTrace = requestTraceContext(req, body);
+      const explicitTrace = requestTraceContext(req, body, parsedBody);
       if (explicitTrace.sessionId) return explicitResult(explicitTrace, config);
 
-      const canonical = canonicalize(body, format, model);
+      const canonical = canonicalize(body, format, model, parsedBody);
       if (!canonical) {
         if (hasTraceContext(explicitTrace)) return explicitResult(explicitTrace, config);
         return { source: "none", action: action(config), confidence: 0 };
@@ -132,8 +137,8 @@ function result(source: ClientSessionSource, action: ClientSessionAction, node: 
   };
 }
 
-function requestTraceContext(req: Request, body: string | undefined): ExplicitTraceContext {
-  const bodyTrace = bodyMetadataTrace(body);
+function requestTraceContext(req: Request, body: string | undefined, parsedBody?: unknown): ExplicitTraceContext {
+  const bodyTrace = bodyMetadataTrace(body, parsedBody);
   return {
     requestId: firstHeader(req.headers, ["x-request-id"]) ?? bodyTrace.requestId,
     traceId: firstHeader(req.headers, ["x-zcode-trace-id"]) ?? bodyTrace.traceId,
@@ -177,10 +182,10 @@ function firstHeader(headers: Headers, names: string[]): string | null {
   return null;
 }
 
-function bodyMetadataTrace(body: string | undefined): ExplicitTraceContext {
+function bodyMetadataTrace(body: string | undefined, parsedBody?: unknown): ExplicitTraceContext {
   if (!body) return {};
   try {
-    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body)) as Record<string, unknown>;
     const metadata = parsed?.metadata as Record<string, unknown> | undefined;
     if (!metadata || typeof metadata !== "object") return {};
     return {
@@ -202,11 +207,11 @@ function stringProperty(obj: Record<string, unknown>, names: string[]): string |
   return undefined;
 }
 
-function canonicalize(body: string | undefined, format: Format, fallbackModel: string): CanonicalRequest | null {
+function canonicalize(body: string | undefined, format: Format, fallbackModel: string, parsedBody?: unknown): CanonicalRequest | null {
   if (!body) return null;
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(body);
+    parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body)) as Record<string, unknown>;
   } catch {
     return null;
   }
