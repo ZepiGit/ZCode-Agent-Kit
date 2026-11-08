@@ -414,6 +414,60 @@ The measurement tables for S7, windows S1/short and the OMP floor belong to tick
 
 Local supplement (labelled, **never counted**, Round 15 Q2 condition 1; Linux, Node 26.7.0, Bun 1.4.2, `node tests/memory/job.mjs --only <key>`, ports 19671–19678, `/home/AgentKit/overhaul-tools/t67-memloop/`): S3/hung on 5c68c2f, 8 of 8 RED on failed-launches, stale-lock-after-round, peak:kit, procPeak:launcher, procPeak:mcp-bridge, plus procPeak:proxy in 6 of 8. S3/short on 58ad4c6, 8 of 8 RED on exactly peak:kit, procPeak:launcher, procPeak:mcp-bridge, failed-launches, stale-lock-after-round. Neither shows procPeak:preflight, which CI shows (Round 15 correction 6).
 
+### Rare tails decided as measurement rules (ticket 71; Round 17 Q1, Q3, Q4 and Round 21 Q1)
+
+Sources: the archived memory-job logs `/home/AgentKit/overhaul-tools/ci-art/t67-logs/logs/*.log` (every CI run up to 42429164758) plus the memory-job logs of the eight staging/67 evidence runs 42435825059 … 42436440284 (job-log API, `/home/AgentKit/overhaul-tools/t71-ci/`), one value per run and leg, read from the run's own check line. Tabulation script: `/home/AgentKit/overhaul-tools/t71-scripts/tab.py`.
+
+**S7/short `responses-store:heap-at-cap` under the one-reading rule (Round 17 correction 2).** Heap growth, one `/health` reading 5 s after the load, no GC; budget 96 MB.
+
+| leg | runs | min | cluster | tail above 66 MB (run) | RED |
+|---|---|---|---|---|---|
+| windows | 51 | 60 | 46 of 51 in 60–65 (64 in 31) | 71 (42378479007), 71 (42415959288), 86 (42421424292), 87 (42281646419), **98** (42436010878) | 1 (42436010878) |
+| linux | 70 | 59 | 69 of 70 in 59–65 (63 in 49) | 77 (42367395231) | 0 |
+
+From ticket 71 on, the value is the store's retained heap: the minimum of ≥ 30 `/health` readings 1 s apart after the 5 s wait, minus h0 (Round 17 Q1). Local runs, Linux, Bun 1.4.2, Node 26.7.0 (ticket 71 branch, ports 19710–19713, `/home/AgentKit/overhaul-tools/t71-memloop/`):
+
+| run | store | profile | h0 | first reading | min / max of 30 | value, one-reading rule | value, retained rule (≤ 96) | RSS before → after … last |
+|---|---|---|---|---|---|---|---|---|
+| s7-short-1 | shipped (1,000 / 64 MB) | short (1,500 × 64 KB) | 7 | 70 | 70 / 70 | 63 | 63 GREEN | 85 → 159 … 156 |
+| bounded-long | shipped | long (4,000 × 64 KB) | 8 | 70 | 70 / 70 | 62 | 62 GREEN | 89 → 170 … 164 |
+| mut-long | **both bounds removed** (local mutant, never committed) | long | 8 | 262 | 260 / 262 | 254 | **252 RED** | 90 → 387 … 379 |
+| mut-short | **both bounds removed** | short | 7 | 102 | 102 / 102 | 95 | 95 GREEN | 85 → 196 … 190 |
+
+The short profile cannot tell an unbounded store from a bounded one: 95 under both rules, below 96 (Round 17 correction 3). The long profile can: 252 against 62. Every later run prints the series in the job summary ("Responses store retained heap"). A minimum above 66 MB comes back as a question (Round 17 Q1 condition 3).
+
+**S1/short `growth:proxy` (Round 17 correction 1, Q3).** Commit growth on windows, RSS on Linux, %/1k; the budget is 5 with the trend.
+
+| leg | runs | min | median | mean | sd | max | RED (> 5 AND trend) | histogram (0.5 %/1k bins from 1.0) |
+|---|---|---|---|---|---|---|---|---|
+| windows (Round 17 recount) | 49 | 1.43 | 3.56 | 3.41 | 0.93 | 5.27 | 2 (42382114395 5.27, 42436354758 5.25) | — |
+| windows (ticket 71 recount, same sources) | 51 | 1.43 | 3.50 | 3.39 | 0.93 | 5.27 | 2 (same two) | 1, 2, 9, 7, 6, 12, 9, 3, 2 |
+| linux | 70 | 1.02 | 2.90 | 2.88 | 0.69 | 4.43 | 0 | 1, 4, 20, 15, 17, 6, 7 |
+
+The ticket 71 recount finds 51 distinct windows runs with an S1/short line, where Round 17 counted 49. Min, max and both REDs are the same, and the decision does not move (2 of 51: 0.05 % at n = 5). The fits (Round 17): normal P(> 5) = 4.3 %, log-normal 7.8 %. n = 5 comes from the log-normal fit at ≤ 1 % (n = 3 → 1.73 %, n = 5 → 0.42 %; 2/49 → 0.06 %; p = 0.14, the 95 % upper bound → 2.2 %). Windows WS growth in the two RED runs: 1.47 and 1.86. From ticket 71 on, windows S1/short runs 5 fresh repetitions: RED when ≥ 3 are RED, every repetition ≤ 10 %/1k on commit (`REPEATED`). Linux stays a single run.
+
+**OMP no-op floor (ticket 03's floor test; Round 17 Q4).** The stub host's cost for a hook that does nothing (commit on Windows, RSS on Linux). The test is now: the median of n fresh hosts < 2.5 MB, every one < 5 MB.
+
+| leg | source | values | min / median / max (MB) | at or above 2.5 MB | n at ≤ 1 % |
+|---|---|---|---|---|---|
+| windows | CI, before ticket 71 (a passing run printed no value) | one value on record: 2.55 (42436440284, Node 26); 15 of 16 legs passed | — | 1 of 16 legs | 5 (n = 3: 1.12 %, n = 5: 0.22 %) |
+| windows | CI measurement mode, ≥ 20 per leg | **pending CI** (switch: `tests/memory/measure-omp-floor`, ticket 71 Comments) | | | |
+| linux | ticket 03 (local) | +0.63 to +0.75 | | 0 | |
+| linux | ticket 71, local, measurement mode inside a full `npm run test` (Node 26.7.0, Bun 1.4.2), 25 fresh hosts | 0.5, 0.63, 0.63, 0.63, 0.63, 0.5, 0.5, 0.63, 0.63, 0.63, 0.5, 0.5, 0.63, 0.5, 0.63, 0.5, 0.75, 0.63, 0.63, 0.63, 0.5, 0.75, 0.63, 0.63, 0.63 | 0.5 / 0.63 / 0.75 | 0 of 25 | 3 |
+| linux | CI measurement mode, ≥ 20 per leg | **pending CI** | | | |
+
+n = 5 is provisional. It comes from the less favourable leg on record (windows, 1 of 16). The CI measurement sets it: n is the smallest odd n in {3, 5, 7, 9} at ≤ 1 % on the less favourable leg's fraction at or above 2.5 MB. Any measurement ≥ 5 MB, or no such n, comes back with the numbers (Round 17 Q4 condition 1). Ticket 35's waiter-gate criterion reads the windows floor distribution recorded here (Round 17 Q4 condition 2).
+
+**S6/short `tui:adversarial-line-heap` (Round 21 corrections 1 and 3).** The worst of `D-mixed`, `D-huge`, `D-cjk`, `D-records`, `end` minus `C-start`, each after `Bun.gc(true)`; budget 16 MB.
+
+| source | runs | values | `tui:long-line-heap` |
+|---|---|---|---|
+| linux CI, 42415961268 … 42454650683 on the same S6 and pane code (Round 21) | 33 | 32 × 8 MB, 1 × 20 MB (42446461464: `D-records` and `end` 22 MB heap against 2 MB in the other 9 staging/19 runs) | 7–8 MB in all 33 |
+| ticket 71, local, `job.mjs --only S6/short` (5 repetitions) | 5 | 8, 8, 8, 8, 8 (median 8); `end` paneBytes 287,780; `flushed` 0 MB above `C-start` | 7, 7, 7, 7, 8 |
+| ticket 71, local mutant (never committed): `fitLine` stores the raw row without the copy | 5 | 20, 20, 20, 20, 20 (median 20, RED); `flushed` 0 MB above `C-start` | 7 in all 5 |
+
+From ticket 71 on, linux S6/short is the median of 5 fresh S6 body repetitions against 16 MB, every repetition ≤ 32 MB (`REPEATED`). n = 5 comes from 1 of 10 on the staging/19 tree (n = 3 → 2.80 %, n = 5 → 0.86 %; 1 of 33 → 0.027 %).
+
 ## Current
 
 (pending)

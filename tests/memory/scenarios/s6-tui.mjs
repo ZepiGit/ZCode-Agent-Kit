@@ -37,16 +37,20 @@ export async function run(ctx) {
   const adversarialHeap = dMarks.every(Boolean)
     ? Math.max(...dMarks.map((m) => m.heapMB)) - (by["C-start"]?.heapMB ?? 0)
     : Infinity;
-  ctx.note("marks", marks.map(({ name, rssMB, heapMB, lines }) => ({ name, rssMB, heapMB, ...(lines ? { lines } : {}) })));
+  ctx.note("marks", marks.map(({ name, rssMB, heapMB, lines, paneBytes }) => ({ name, rssMB, heapMB, ...(lines ? { lines } : {}), ...(paneBytes !== undefined ? { paneBytes } : {}) })));
+  // Round 21 Q1 condition 3 (information, not gated): after the pane's rows are
+  // evicted, how far the heap sits above C-start. A repetition above 16 MB whose
+  // flushed reading is within 2 MB of C-start means the pane's rows held the excess.
+  const flushedAboveCStartMB = by.flushed && by["C-start"] ? by.flushed.heapMB - by["C-start"].heapMB : null;
   // Frame time is recorded, not gated: the §18 "no frame-time regression from
   // the width core" compares this number before and after ticket 05.
   const resizeFrames = (by["C-start"]?.progress ?? 0) - (by["B-start"]?.progress ?? 0);
   const frameMs = resizeFrames ? Number((((by["C-start"]?.ms ?? 0) - (by["B-start"]?.ms ?? 0)) / resizeFrames).toFixed(3)) : null;
   ctx.note("derived", {
     linesHeapMB: linesHeap, resizeHeapMB: resizeHeap, longLineHeapMB: longLineHeap, adversarialHeapMB: adversarialHeap,
-    resizeFrameMs: frameMs, hugeLineFrameMs: by["D-huge"]?.hugeFrameMs ?? null,
+    resizeFrameMs: frameMs, hugeLineFrameMs: by["D-huge"]?.hugeFrameMs ?? null, flushedAboveCStartMB,
   });
-  ctx.log(`heap delta: 100k lines ${linesHeap} MB, resize storm ${resizeHeap} MB, long lines ${longLineHeap} MB (pane ${by["C-end"]?.lines} lines), adversarial ${adversarialHeap} MB (pane ${by.end?.lines} lines)`);
+  ctx.log(`heap delta: 100k lines ${linesHeap} MB, resize storm ${resizeHeap} MB, long lines ${longLineHeap} MB (pane ${by["C-end"]?.lines} lines), adversarial ${adversarialHeap} MB (pane ${by.end?.lines} lines, ${by.end?.paneBytes} bytes; flushed ${flushedAboveCStartMB} MB above C-start)`);
   return {
     budgets: {
       orphans: PROCESSES.orphans,
