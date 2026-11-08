@@ -16,7 +16,7 @@ ADR: 0009, 0015
 
 - [ ] Seam 4: rotation at 5 MB with kit readers and appenders open; foreign-handle case (windows-latest: rename with an open reader, build-time gate 5); one WARN; no line lost.
 - [ ] Seam 2: manager rotation only under the lock and with no live proxy; file modes on every created file (POSIX); `proxy logs N` across `proxy.log.1` and `proxy.log`.
-- [ ] Loop S7: `proxy.log` ≤ 6 MB while running. The `S7/short` entry stays until 34.
+- [ ] Loop S7: `proxy.log` ≤ 6 MB while running (`proxy.log:bounded-while-running`). **Remove `proxy.log:bounded-while-running` from `S7/short` (linux, windows) in `expected-red.json`, with the evidence Round 15 Q1 condition 5 requires.**
 - [ ] Seam 4: after the writer opens, a line written to `process.stdout` and one written to `process.stderr` appear unchanged in `proxy.log`.
 
 **Common acceptance (every ticket):**
@@ -35,3 +35,5 @@ Spec stories: 74, 75, 77, 78, 79
 ## Comments
 
 - 2026-11-06 (orchestrator, from ticket 14): pass every line the proxy writes through redactLine() from lib/event-line.mjs / zcode-proxy-src/src/log/event-line.mjs in the size-capped writer (ticket 14 left existing proxy stdout lines unredacted at write time).
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 condition 7 — "The `S7/short` entry stays until 34" became "remove `proxy.log:bounded-while-running` from `S7/short`". 33 is the entry's only owner (34 owns no name, Q1 E), so under Q1 condition 5 the commit that removes this name deletes the entry.

@@ -17,6 +17,7 @@ ADR: 0009
 - [ ] Seam 6: eviction by count, bytes and TTL with a fake clock; responses-store suite unchanged.
 - [ ] Seam 3: CDN memory and stall bounds hold inside one generation.
 - [ ] Loop S2: CDN memory ≤ 64 MB (baseline +151 MB / 600 URLs). The `S2/short` entry stays until 58 (solver part still RED).
+- [ ] Loop S2 (linux, windows): `cdn-cache:memory-growth` GREEN (CDN memory ≤ 64 MB); **remove `cdn-cache:memory-growth` from `S2/short` in `expected-red.json`, with the evidence Round 15 Q1 condition 5 requires.**
 - [ ] Seam 3 (B1): for a recorded sequence of stalls and solves below 1,024 URLs, the CDN invalidation decisions (which pe URLs are evicted, and when) are identical to the pre-change code.
 
 **Common acceptance (every ticket):**
@@ -33,3 +34,5 @@ ADR: 0009
 Spec stories: 62, 65
 
 ## Comments
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 conditions 3 and 7 — added "remove `cdn-cache:memory-growth` from `S2/short`"; 25 owns that one S2 check on both legs (its "CDN memory ≤ 64 MB" criterion), and 58 owns the solver names in the same entry.

@@ -1054,7 +1054,10 @@ function ensureConfigWithDeviceMid(): string {
  * the boot-time `serve` path.
  */
 export function ensureDeviceMidInConfig(path: string): string {
-  const deviceMidLine = /^(\s*)deviceMid:\s*(.*)$/m;
+  // The value is the rest of the `deviceMid:` line only: the separator never
+  // crosses a line break (LF or CRLF), so an empty unquoted `deviceMid:` reads
+  // as empty, as `loadConfig` reads it, not as the next line's text (ticket 69).
+  const deviceMidLine = /^(\s*)deviceMid:[^\S\r\n]*(.*)$/m;
   const identityBlockLine = /^identity:\s*$/m;
   const raw = readFileSync(path, "utf-8");
 

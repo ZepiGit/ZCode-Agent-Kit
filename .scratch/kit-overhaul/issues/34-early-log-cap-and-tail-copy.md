@@ -16,7 +16,7 @@ ADR: 0009
 
 - [ ] Seam 4: cap enforcement with bounded overshoot; marker event.
 - [ ] Seam 2: tail copy before every truncation path; the golden-path classifier finds a crash cause through the tail-copy marker (Round 4 Q1 add. 5).
-- [ ] Loop S7: early log ≤ 1 MB + bounded overshoot. **Delete `S7/short` (linux, windows).**
+- [ ] Loop S7: early log ≤ 1 MB + bounded overshoot.
 - [ ] Seam 2/4 (POSIX): a watchdog by-path append that creates `proxy.log` creates it with mode `0o600`.
 
 **Common acceptance (every ticket):**
@@ -35,3 +35,5 @@ Spec stories: 76, 78
 ## Comments
 
 - 2026-11-07 (orchestrator, from ticket 32): in Bun 1.4.2 a substring keeps its whole parent string alive (probe in ticket 32 Comments: 2,000 short rows split from one 20 MB record kept all 20 MB). A bound that counts the bytes of slices, split parts or tail copies is beaten unless it makes a fresh copy of what it keeps. Check your truncation/tail copy for this and pin it with an adversarial test.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 E and condition 7 — struck "**Delete `S7/short` (linux, windows).**" from the Loop S7 criterion. 34 owns no `expected-red.json` name: its early-log check was never RED in 34 runs, and `S7/short`'s only name, `proxy.log:bounded-while-running`, is ticket 33's, whose removal deletes the entry. The early-log bound itself still binds 34.

@@ -16,6 +16,7 @@ ADR: 0003
 
 - [ ] Seam 2 tests per signal (POSIX) and SIGBREAK/console-close paths (windows-latest); orphan adoption → exactly 1 proxy.
 - [ ] Loop S4: 0 stale locks after Ctrl-C during start (baseline 5/8); respawn with a stale lock → proxy up; 50 cycles → 0 orphans, log-dir files ≤ 8. **Delete `S4/short` (linux, windows).**
+- [ ] Loop S3 (windows): 0 orphans (`orphans`) after the scenario's stop in `S3/short` and `S3/hung`; **remove 17's names (`orphans`) from the windows `S3/short` and `S3/hung` entries in `expected-red.json`, with the evidence Round 15 Q1 condition 5 requires.**
 - [ ] A2 (real PowerShell/conhost Ctrl-C) listed as an owner action, marked unverified.
 - [ ] Adversarial: a holder whose lock was taken over (the on-disk record is no longer its own) leaves the new holder's lock untouched on SIGINT and SIGTERM.
 
@@ -41,3 +42,5 @@ Spec stories: 44, 45, 60
 - 2026-11-06 (orchestrator, from ticket 02 round 7 Linux evidence): orphan adoption must also cover a healthy proxy on the installation's port with no `proxy.pid` at all (start killed between spawn and the record write; see ticket 16 Comments of the same date). Adoption needs the same proof strength as Round 7 Q4 condition 3: never on a port or pid alone.
 
 - 2026-11-07 (orchestrator, from ticket 65): Windows suspended-proxy orphan (see ticket 16 Comments of the same date) is a legacy/orphan state this ticket's adoption or stop must handle: a process with the proxy's command line that was never resumed, no pid record, not serving the port.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 conditions 3 and 7 — added the Loop S3 (windows) criterion "0 orphans after the scenario's stop in `S3/short` and `S3/hung`; remove 17's names". The windows S3 `orphans` check had two claimants (16 via Round 7 Q4 condition 1, 17 via What-to-build "Every child is reaped …"); 17 descends from 16, so 17 owns it (Q1 condition 2), which also avoids holding 16 on a reap only 17 delivers. "Delete `S4/short`" stays. The 2026-11-06 "0 orphans in S3" line above is a measured finding, not the source of this criterion (Q1 condition 6).
