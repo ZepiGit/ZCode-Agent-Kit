@@ -232,6 +232,33 @@ describe("CDN disk prune with several installations sharing the directory", () =
     expect(totalBytes(dir)).toBeLessThanOrEqual(256 * MiB);
   });
 
+  it("counts an entry another pruner removed first as freed, so nothing else is deleted in its place", () => {
+    const dir = directory();
+    for (let i = 0; i < 5; i++) largeEnvelope(dir, urlOf(i), T0 - (5 - i) * HOUR, 60 * MiB);
+    const unlink = fs.unlinkSync.bind(fs);
+    let raced = false;
+    const hook = spyOn(fs, "unlinkSync").mockImplementation(((file: fs.PathLike) => {
+      if (!raced) { raced = true; unlink(file); } // the other pruner wins the race for the oldest entry
+      return unlink(file);
+    }) as typeof fs.unlinkSync);
+    try { new CaptchaCdnCache({ directory: dir, now: () => T0 }); } finally { hook.mockRestore(); }
+    expect(raced).toBe(true);
+    expect(listing(dir)).toEqual([1, 2, 3, 4].map((i) => nameOf(urlOf(i))).sort());
+  });
+
+  it("skips an entry it cannot delete (on Windows: held open by another process) and removes the next oldest instead", () => {
+    const dir = directory();
+    for (let i = 0; i < 5; i++) largeEnvelope(dir, urlOf(i), T0 - (5 - i) * HOUR, 60 * MiB);
+    const held = path.join(dir, nameOf(urlOf(0)));
+    const unlink = fs.unlinkSync.bind(fs);
+    const hook = spyOn(fs, "unlinkSync").mockImplementation(((file: fs.PathLike) => {
+      if (String(file) === held) throw Object.assign(new Error(`EPERM: operation not permitted, unlink '${held}'`), { code: "EPERM" });
+      return unlink(file);
+    }) as typeof fs.unlinkSync);
+    try { new CaptchaCdnCache({ directory: dir, now: () => T0 }); } finally { hook.mockRestore(); }
+    expect(listing(dir)).toEqual([0, 2, 3, 4].map((i) => nameOf(urlOf(i))).sort());
+  });
+
   it("never throws when entries vanish at any step of a prune", () => {
     const fns = ["readdirSync", "lstatSync", "statSync", "openSync", "readSync", "fstatSync", "unlinkSync", "readFileSync"] as const;
     // Count the filesystem calls one prune makes, then rerun it once per call

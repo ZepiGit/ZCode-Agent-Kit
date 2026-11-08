@@ -81,9 +81,11 @@ function readHeader(file: string, size: number): { fetchedAt: number } | null {
 }
 
 /**
- * Keeps one CDN cache directory bounded. A full scan runs at start; after a
- * write the pruner first checks the directory as it last saw it plus its own
- * writes, and scans again only when that view exceeds the bound.
+ * Keeps one CDN cache directory bounded. A full scan runs at start. After a
+ * write the pruner checks its view (the last scan plus its own writes) and
+ * scans again when that view is above the byte cap, holds an entry that has
+ * reached the age limit, or is CDN_DISK_RESCAN_MS old. A scan costs one
+ * stat and one header read per entry, so it does not run on every write.
  */
 export class CdnDiskPruner {
   private readonly directory: string;
