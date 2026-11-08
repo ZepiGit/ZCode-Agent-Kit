@@ -3,7 +3,10 @@
 //     the 5 MB rotation can trigger while the proxy runs (the manager rotates
 //     only in `start`; the proxy writes to the inherited fd for its lifetime);
 //   B the in-memory responses store (shipped config: 1,000 entries, 64 MB
-//     byte budget): heap and RSS when it is driven to its byte cap.
+//     byte budget): heap and RSS when it is driven to its byte cap, judged on
+//     the store's retained heap: the minimum of ≥ 30 /health readings 1 s
+//     apart after a 5 s wait, minus the reading before the load (Round 17 Q1,
+//     lib/retained-heap.mjs).
 // (install.log is truncated per setup run; heal.log is capped at 2 x 64 KB;
 // dump.ts is opt-in and stripped from the managed proxy's environment — all
 // three are bounded by code, see the report.)
@@ -11,6 +14,7 @@ import { appendFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { MEMORY, PROCESSES, PROXY_COMMIT_BACKSTOP } from "../lib/budgets.mjs";
+import { heapAtCapLine, readHeapSeries, storeHeapAtCap } from "../lib/retained-heap.mjs";
 
 export async function run(ctx) {
   const session = await startProxySession(ctx);
@@ -50,16 +54,20 @@ export async function run(ctx) {
     ctx.setProgress(nA + i + 4);
   }
   await new Promise((r) => setTimeout(r, 5000));
-  const h1 = (await kit.health())?.details ?? {};
-  ctx.note("responsesStore", { entriesSent: nB, inputKB: 64, heapBeforeMB: h0.heapUsedMB, heapAfterMB: h1.heapUsedMB, rssBeforeMB: h0.rssMB, rssAfterMB: h1.rssMB, configuredByteBudgetMB: 64 });
-  ctx.log(`proxy.log ${bytesPerRequest.toFixed(0)} B/request, ${(whileRunning / 1048576).toFixed(1)} MB while running (rotated: ${whileRunning < beforeMore}); responses store heap ${h0.heapUsedMB} -> ${h1.heapUsedMB} MB, rss ${h0.rssMB} -> ${h1.rssMB} MB`);
+  // The store's retained heap (Round 17 Q1): ≥ 30 /health readings 1 s apart, judged on their minimum.
+  const series = await readHeapSeries(() => kit.health());
+  const h1 = series[0] ?? {};
+  ctx.note("responsesStore", { entriesSent: nB, inputKB: 64, heapBeforeMB: h0.heapUsedMB, heapAfterMB: h1.heapUsedMB, rssBeforeMB: h0.rssMB, rssAfterMB: h1.rssMB, heapSeriesMB: series.map((x) => x?.heapUsedMB ?? null), rssLastMB: series.at(-1)?.rssMB ?? null, configuredByteBudgetMB: 64 });
+  ctx.log(`proxy.log ${bytesPerRequest.toFixed(0)} B/request, ${(whileRunning / 1048576).toFixed(1)} MB while running (rotated: ${whileRunning < beforeMore}); responses store heap ${h0.heapUsedMB} -> ${h1.heapUsedMB} MB (series of ${series.length}: ${series.map((x) => x?.heapUsedMB ?? "—").join(" ")}), rss ${h0.rssMB} -> ${h1.rssMB} … ${series.at(-1)?.rssMB} MB`);
   // The proxy's early output (ticket 34): ≤ 1 MB plus a bounded overshoot,
   // taken here as one 64 KB write. Absent today, which is within budget.
   const earlyLog = join(kit.logDir, "proxy.early.log");
   const earlyBytes = existsSync(earlyLog) ? statSync(earlyLog).size : 0;
   ctx.note("earlyLog", { exists: existsSync(earlyLog), bytes: earlyBytes });
   await session.stop();
-  const heapGrowth = (h1.heapUsedMB ?? 0) - (h0.heapUsedMB ?? 0);
+  // After the stop: an incomplete series is a harness failure (thrown), with no proxy left running.
+  const heapAtCap = storeHeapAtCap({ before: h0, series, budgetMB: MEMORY.S7.responsesStoreHeapMB });
+  ctx.log(heapAtCapLine(heapAtCap));
   const MiB = 1048576;
   return {
     budgets: {
@@ -69,7 +77,7 @@ export async function run(ctx) {
       extra: [
         { name: "proxy.log:bounded-while-running", red: whileRunning > MEMORY.S7.proxyLogMB * MiB, value: Number((whileRunning / MiB).toFixed(2)), budget: MEMORY.S7.proxyLogMB, unit: "MB" },
         { name: "proxy.early.log:bounded", red: earlyBytes > MEMORY.S7.earlyLogMB * MiB + 64 * 1024, value: Number((earlyBytes / MiB).toFixed(2)), budget: MEMORY.S7.earlyLogMB, unit: "MB (+64 KB overshoot)" },
-        { name: "responses-store:heap-at-cap", red: heapGrowth > MEMORY.S7.responsesStoreHeapMB, value: heapGrowth, budget: MEMORY.S7.responsesStoreHeapMB, unit: "MB" },
+        heapAtCap,
       ],
     },
   };
