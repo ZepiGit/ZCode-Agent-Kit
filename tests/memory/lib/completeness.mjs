@@ -77,25 +77,31 @@ function refusedStartProblems(key, rounds, checks, staleLockRounds) {
 }
 
 // The growth windows a run must have measured in full (Owner Proxy Round 24
-// Q1, ticket 74): each check present, with its window bounds recorded
-// (lib/verdict.mjs detail.window), its window reaching its last task, and
-// enough samples for growth() (≥ 6). S5/short's post-bound window must reach
-// task 1,200 and its warm-up window task 400. A run without them (a load that
-// ended early, a stalled sampler, a summary from the 400-task rule) measured
-// nothing, so its GREEN or RED is a harness failure, never a verdict.
+// Q1, ticket 74): the load ran all its tasks (the scenario's `bridge` note),
+// and each check is present, with its window bounds recorded (lib/verdict.mjs
+// detail.window) and enough samples for growth() (≥ 6). The window's last
+// sample is not held to the last task: the load ends right after its last
+// task, so the last sample inside it is usually at task 1,199 (ticket 74's
+// local runs). A run without them (a load that ended early, a stalled
+// sampler, a summary from the 400-task rule) measured nothing, so its GREEN
+// or RED is a harness failure, never a verdict.
 export const GROWTH_WINDOWS = {
-  "S5/short": { "growth:mcp-bridge": { lastTask: S5_SHORT.tasks }, "warm-up-growth:mcp-bridge": { lastTask: S5_SHORT.warmUpUntilTask } },
+  "S5/short": { loadTasks: S5_SHORT.tasks, checks: ["growth:mcp-bridge", "warm-up-growth:mcp-bridge"] },
 };
 
-function growthWindowProblems(key, checks, growthWindows) {
+function growthWindowProblems(key, summary, growthWindows) {
+  const rule = growthWindows[key];
+  if (!rule) return [];
   const problems = [];
-  for (const [name, need] of Object.entries(growthWindows[key] ?? {})) {
+  const tasks = summary.notes?.bridge?.tasks;
+  if (!(tasks >= rule.loadTasks)) problems.push(`the load ended at task ${tasks ?? "none"}, before task ${rule.loadTasks}`);
+  const checks = Array.isArray(summary.checks) ? summary.checks : [];
+  for (const name of rule.checks) {
     const c = checks.find((x) => x?.name === name);
     const w = c?.detail?.window;
     if (!c) problems.push(`${name}: missing`);
     else if (!w) problems.push(`${name}: no window bounds recorded`);
-    else if (!(w.lastTask >= need.lastTask)) problems.push(`${name}: the load ended at task ${w.lastTask ?? "none"}, before task ${need.lastTask}`);
-    else if (c.detail.insufficient === true || typeof c.value !== "number") problems.push(`${name}: insufficient: ${w.samples ?? 0} samples in tasks ${w.fromTask ?? 0}–${w.untilTask ?? need.lastTask} (need ≥ 6)`);
+    else if (c.detail.insufficient === true || typeof c.value !== "number") problems.push(`${name}: insufficient: ${w.samples ?? 0} samples in tasks ${w.fromTask ?? 0}–${w.untilTask ?? rule.loadTasks} (need ≥ 6)`);
   }
   return problems;
 }
@@ -131,7 +137,7 @@ export function runEvidence(summary, { key, exitCode, evidence = EVIDENCE, round
   const ran = new Set(roundList.map((r) => r?.name));
   for (const name of rounds[key] ?? []) if (!ran.has(name)) problems.push(`round ${name} never ran`);
   problems.push(...refusedStartProblems(key, roundList, Array.isArray(summary.checks) ? summary.checks : [], staleLockRounds));
-  problems.push(...growthWindowProblems(key, Array.isArray(summary.checks) ? summary.checks : [], growthWindows));
+  problems.push(...growthWindowProblems(key, summary, growthWindows));
   if (summary.platform === "win32" && summary.metric !== "commit") problems.push(`windows run with metric ${summary.metric ?? "none"}: no commit_kb was sampled`);
   if (summary.metric === "commit" && summary.notes?.sampler?.units?.ok !== true) problems.push("the units self-test did not pass");
   return { ok: problems.length === 0, problems };

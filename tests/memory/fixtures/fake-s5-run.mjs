@@ -2,8 +2,10 @@
 // Stand-in for run.mjs for S5 at the job seam (loop.test.mjs; ticket 74,
 // Owner Proxy Round 24 Q1 condition 6): same arguments, writes into --out like
 // run.mjs, starts nothing. FAKE_S5_SERIES names a JSON fixture series:
-//   { shape: "linux" | "win32", loadStartMs, loadEndMs, emptyMB, rebootMB,
-//     failures, samples: [{ t, progress, mb, commitMB? }] }
+//   { shape: "linux" | "win32", tasks, loadStartMs, loadEndMs, emptyMB,
+//     rebootMB, failures, samples: [{ t, progress, mb, commitMB? }] }
+// `tasks` is the load's task count the scenario notes (default: the last
+// sample's progress).
 // `mb` is the bridge's RSS (linux) or working set (win32); `commitMB` its
 // commit (win32 only). The series is judged with the scenario's own budgets
 // (scenarios/s5-mcp.mjs s5Budgets) by the real osVerdict, as run.mjs does,
@@ -42,7 +44,7 @@ const summary = {
   id: "fake-s5", key, scenario: argv[0], profile, variant: null, platform: win ? "win32" : "linux", outcome: v.red ? "RED" : "GREEN", metric: v.metric,
   ...(v.workingSet ? { workingSet: v.workingSet, redOnlyOnCommit: v.redOnlyOnCommit } : {}),
   durationS, red: v.red, checks: v.checks, summary: v.summary, budgets, orphans: [], observations: [],
-  notes: { sampler: { units: win ? { ok: true, compared: 40 } : null, overhead: null } }, samples: f.samples.length,
+  notes: { sampler: { units: win ? { ok: true, compared: 40 } : null, overhead: null }, bridge: { tasks: f.tasks ?? f.samples.at(-1).progress, failures: f.failures ?? 0, emptyRssMB: f.emptyMB, rebootWithHistoryRssMB: f.rebootMB } }, samples: f.samples.length,
 };
 writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
 process.exit(v.red ? 1 : 0);

@@ -1268,11 +1268,11 @@ const onward = (p) => toSixHundred(p) + (20 * Math.max(0, p - 600)) / 1000;
  */
 const warmUpAt = (pct, a) => { const b = (pct * a) / (100 - 0.25 * pct); return (p) => a + (b * Math.min(p, 400)) / 1000; };
 
-function s5Series({ shape = "linux", mb, commitMB = null, until = 1200, at = null }) {
+function s5Series({ shape = "linux", mb, commitMB = null, until = 1200, at = null, tasks = null }) {
   const progress = at ?? Array.from({ length: Math.floor(until / S5_STEP) + 1 }, (_, i) => i * S5_STEP);
   const loadStartMs = 4000;
   const samples = progress.map((p) => ({ t: loadStartMs + p * 1800, progress: p, mb: mb(p), ...(shape === "win32" ? { commitMB: commitMB(p) } : {}) }));
-  return { shape, loadStartMs, loadEndMs: samples.at(-1).t, emptyMB: 86, rebootMB: 90, failures: 0, samples };
+  return { shape, tasks: tasks ?? progress.at(-1), loadStartMs, loadEndMs: samples.at(-1).t, emptyMB: 86, rebootMB: 90, failures: 0, samples };
 }
 
 function s5SeriesJob(series) {
@@ -1354,8 +1354,8 @@ test("job: a warm-up value of 55.1 (linux) or 30.1 (windows commit) is RED on wa
 test("job: an S5/short load that ends before task 1,200, or fewer than 6 samples after task 600, is a harness failure, never GREEN", () => {
   const head = Array.from({ length: 121 }, (_, i) => i * S5_STEP); // tasks 0–600
   const cases = [
-    [s5Series({ mb: toSixHundred, until: 900 }), /growth:mcp-bridge: the load ended at task 900, before task 1200/],
-    [s5Series({ shape: "win32", mb: toSixHundred, commitMB: toSixHundred, until: 1195 }), /growth:mcp-bridge: the load ended at task 1195, before task 1200/],
+    [s5Series({ mb: toSixHundred, until: 900 }), /the load ended at task 900, before task 1200/],
+    [s5Series({ shape: "win32", mb: toSixHundred, commitMB: toSixHundred, until: 1195 }), /the load ended at task 1195, before task 1200/],
     [s5Series({ mb: toSixHundred, at: [...head, 750, 900, 1050, 1200] }), /growth:mcp-bridge: insufficient: 5 samples in tasks 600–1200 \(need ≥ 6\)/],
   ];
   for (const [series, pattern] of cases) {
@@ -1369,6 +1369,18 @@ test("job: an S5/short load that ends before task 1,200, or fewer than 6 samples
   const six = s5SeriesJob(s5Series({ mb: toSixHundred, at: [...head.slice(0, -1), 600, 720, 840, 960, 1080, 1200] }));
   assert.equal(six.r.status, 0, six.r.stdout + six.r.stderr);
   assert.equal(six.post.detail.samples, 6);
+});
+
+test("job: a full S5/short load whose last sample is at task 1,199 is judged, not a harness failure (the load ends right after its last task)", () => {
+  // Ticket 74's local runs: the end of the load is taken right after the 1,200th
+  // task, so the last sample inside the window is at task 1,199 (samples 1059–2116 of 2125).
+  const at = [...Array.from({ length: 240 }, (_, i) => i * S5_STEP), 1199];
+  for (const series of [s5Series({ mb: toSixHundred, at, tasks: 1200 }), s5Series({ shape: "win32", mb: toSixHundred, commitMB: toSixHundred, at, tasks: 1200 })]) {
+    const { r, row, post } = s5SeriesJob(series);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal(row.outcome, "GREEN");
+    assert.deepEqual([post.detail.window.firstTask, post.detail.window.lastTask], [600, 1199]);
+  }
 });
 
 test("job: a 400-task S5/short summary of the old rule (CI 42404639968 windows, 42436186573 linux) is a harness failure: it has no post-bound window", () => {
