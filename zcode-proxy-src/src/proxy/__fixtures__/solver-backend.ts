@@ -21,6 +21,9 @@ export async function solveTraceless({ scene }: { scene: string }): Promise<stri
     switch (kind) {
       case "token":
         return param(`token:${arg}:${concurrency}`);
+      case "env":
+        // Environment parity: what the solver generation sees of one variable.
+        return param(`env:${process.env[arg!] ?? "unset"}`);
       case "slow":
         await Bun.sleep(Number(arg));
         return param(`token:slow:${concurrency}`);
