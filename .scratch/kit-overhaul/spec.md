@@ -273,6 +273,7 @@ The order follows PROMPT §7 Phase 3, with two recorded deviations (RUNLOG + ADR
 - **Environment parity (B1):**
   - the child receives `ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA`, the CDN cache variables and the egress setting (§13), and the guest error boundary is installed in the child as well;
   - the solver process and the respawn hook environments exclude `ZCODE_KIT_STOP_TOKEN`, and the solver process environment also excludes `ZCODE_KIT_RESPAWN_*` (§4);
+  - the solver process environment also excludes the ambient proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, any case, and the npm/yarn/pnpm proxy variables, the set `lib/proxy-env.mjs` strips), whether or not the egress setting is set; `ZCODE_PROXY_UPSTREAM_PROXY` passes (Round 19, §13);
   - the child never runs the watchdog or the respawn hook.
 - The child's stdout and stderr are piped to the parent and written through the parent's log writer (§8), with line content unchanged.
 - The cold start (spawn + handshake + module load) is measured on Linux and Windows and recorded in METRICS. If it exceeds 4.5 s, it comes back as a finding. The deadline is not moved silently.
@@ -532,7 +533,7 @@ The order follows PROMPT §7 Phase 3, with two recorded deviations (RUNLOG + ADR
 
 ### 13. Captcha egress routing (Round 1 Q17)
 
-On Bun, captcha fetches use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`, and Node keeps the dispatcher. This is a routing fix only, covering `captchaFetch` and the sync-XHR worker path; what is fetched and how challenges are solved do not change.
+On Bun, captcha fetches use `proxy: <ZCODE_PROXY_UPSTREAM_PROXY> ?? false`, and Node keeps the dispatcher. This is a routing fix only, covering `captchaFetch` and the sync-XHR worker path; what is fetched and how challenges are solved do not change. On Bun < 1.4.3 `proxy: false` is ignored when ambient proxy variables are set. The unset case is then guaranteed by the solver child's environment (§2, ticket 27).
 
 ### 14. Harness adapters (Round 1 Q18)
 
