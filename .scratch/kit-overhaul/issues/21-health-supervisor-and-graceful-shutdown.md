@@ -203,3 +203,8 @@ So 21 does not come back on the hard limit. The soft limit: windows commit peaks
   - S1/burst32: 622.3 MB, RED; it is listed with `flips` for 20. Footprint: Pss peak 559.8, VmHWM 622.3, hold3 n/a (30 s run). Under 1024 by 400 MB; this is the highest linux bound seen in this ticket.
   - S4/short: identical to the tip except `unstoppable-proxy-after-ctrl-c` 1/8. It was 0/8 in the earlier after-run and 1/8 on the tip, which confirms it flips and is not attributable to 21.
   - 85 graceful shutdowns, all `cut=0`; no supervisor line.
+- Then ticket 24 landed as well (tip `16bfaa2`). I merged it (`c4aa995`, clean). Suites on `c4aa995`:
+  - kit (`t21-full3-kit`): 833/852, 19 skipped, 0 fail;
+  - proxy (`t21-full3-proxy`): 1442 pass, 0 fail, 97 files; typecheck clean;
+  - mcp (`t21-full3-mcp`): 96/97, 1 skipped, 0 fail.
+- 24 touches only the captcha solver dispatcher. 21 does not call the solver: the soft limit never recycles it, and shutdown uses the existing `shutdownCaptchaRuntime`. The memory-loop numbers above stand.
