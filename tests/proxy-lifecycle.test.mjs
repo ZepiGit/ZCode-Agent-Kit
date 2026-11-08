@@ -469,9 +469,15 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
 
   const asked = await fetch(`http://127.0.0.1:${port}/__test/respawn`).then((r) => r.text());
   assert.equal(asked, "true", "the old hook started the new manager");
+  // The port first, then the record: since ticket 16 the spawner records a
+  // spawn intent (pid null) before the spawn, so a record read before a slow
+  // port check may be that intent while the proxy it spawned already answers
+  // (CI run 42507303528, ubuntu Node 24). Only a record naming a pid is the
+  // respawned proxy's.
   const fresh = await until("the respawned proxy", async () => {
+    if (await identity(port) !== "ours") return null;
     const record = readJson(join(root, "logs", "proxy.pid"));
-    return record && record.pid !== old.pid && await identity(port) === "ours" ? record : null;
+    return record && Number.isInteger(record.pid) && record.pid !== old.pid ? record : null;
   }, 90_000);
   defer(root, () => killFixtureProxy(root, fresh.pid));
   await until("the respawn to finish", () => /respawn: start finished with exit code 0/.test(readFileSync(join(root, "logs", "proxy.log"), "utf8")), 30_000);

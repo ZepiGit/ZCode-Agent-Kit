@@ -18,6 +18,7 @@ ADR: 0003, 0012
 - [ ] v0 lock recovery; unreadable/unknown-version lock untouched with the error block; old-manager interop test against the origin/main manager.
 - [ ] Lock-version migration replayed twice is a no-op the second time.
 - [ ] Loop: S3 killed-holder round → 0 failed launches (`failed-launches`), 0 stale locks (`stale-lock-after-round`), exactly 1 proxy (`exactly-one-proxy-after-round`); S3/hung's stale-lock round: a start over a dead holder's lock is taken over by proof (`start-over-stale-lock` GREEN). **Remove 16's names from `S3/short` (`failed-launches`, `stale-lock-after-round`, `exactly-one-proxy-after-round`) and `S3/hung` (the same three plus `start-over-stale-lock`) in `expected-red.json`, both legs (linux, windows), with the evidence Round 15 Q1 condition 5 requires.**
+- [ ] Measurement (Round 27 Q1): S3 reports the kill-holder adversary's victim (pid = adversary.killed, non-zero exit) as killedByAdversary, never as a failed launch; the evidence gate makes kill-holder-10 a harness failure unless exactly one launch matches (tests for no kill, no match, a matched launch that exited 0, and two matches), RED first. Spec §18 PROCESSES, METRICS.md and ADR-0003 condition 5 state the rule; budgets.mjs is unchanged. Windows removal of failed-launches and stale-lock-after-round needs the pre-merge windows memory leg GREEN on both names in S3/short and S3/hung, one killedByAdversary and 0 failedLaunches in both kill-holder rounds, and tests/start-lock.test.mjs green on the windows test-kit legs of the same run.
 - [ ] A kill injected during the lock write leaves either no lock file or a complete, parsable record, never a partial one, on both legs (Story 48).
 - [ ] windows-latest (Round 7 Q4 condition 1): a kill injected at each point between spawn and the complete record, and a forced start-time probe timeout with no kill, each end with the proxy stoppable or adopted.
 
@@ -47,6 +48,8 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
 - 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 condition 7 — "Delete `S3/hung` (linux, windows)" became "remove 16's names from `S3/short` and `S3/hung` (both legs)", naming the checks 16 owns there under Q1 condition 3 (`failed-launches`, `stale-lock-after-round`, `exactly-one-proxy-after-round`, plus `start-over-stale-lock` in S3/hung). Q1 condition 6 — Round 7 Q4 condition 1's windows-latest seam proofs (kill at each point between spawn and the complete record; forced probe timeout) moved from these Comments into Acceptance, as Round 7 Q4 ordered. Round 7 Q4 condition 1's loop part ("S3/hung windows shows 0 orphans before 16 deletes S3/hung") is no longer 16's: the windows S3 `orphans` check moved to ticket 17 (Round 15 Q1, explicit contradiction of Round 7 Q4 condition 1, loop part only). The 2026-11-06 "0 orphans in S3" line above is a measured finding and assigns nothing (Q1 condition 6).
 
 - 2026-11-08 (orchestrator, Owner Proxy round 22 Q1): linux S3/short `orphans` goes to 17 (descendant rule, as windows in Round 15); 16's `exactly-one-proxy-after-round` RED in run 42457112513 is the same event (pid file does not match the listener). If 16 closes the spawn → record window first, 17 removes a GREEN name. 16's own names and Acceptance are unchanged.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 27 Q1): the victim-apart counting and the S4 staleLockLeft record are accepted as measurement corrections (budget 0 unchanged). Under the new counting, archived pre-16 runs stay RED on failed-launches in S3/hung 62/62 linux and 43/43 windows, and in linux S3/short 61/62, but in windows S3/short only 34/43 (the victim alone in 9), so the windows removal also rests on the seam tests (Acceptance). staleLockLeft is recorded only; a judged check on it is a separate question. 16's tree restarts the matching count for S3/short, S3/hung, S3/omp and S4/short on both legs.
 
 ### 2026-11-08 — implementer (ticket 16)
 
@@ -220,3 +223,148 @@ Spec stories: 41, 42, 43, 46, 47, 48, 135
   - The S3 `orphans` names (windows; linux S3/short), which the closed spawn → record window should turn GREEN. 17 removes them.
 - **53:** SECURITY.md:26 "never taken over".
 - **ticket 70's note** (the stop path's exit poll by pid) is untouched here.
+
+### 2026-11-08 — implementer (ticket 16), round 2 (Owner Proxy round 27; pre-merge CI run 42507303528)
+
+**Branch:** `ticket/16-start-lock-v1`, round 2 starting from 4dbee25. Commits:
+- `06781d8`: `launchOutcomes` leaves out a launch only when exactly one launch carries the killed pid.
+- `74a8bfc`: the S3 rounds record `launches[]`, and the kill-holder evidence gate is added.
+- `ae39833`: the rule text in spec §18, METRICS.md, ADR-0003, plus Round 27's Acceptance and Comments lines.
+- `cac3221`: merge of the integration tip 5f754b8 (ticket 29, rounds 27–28, ticket 77), with no conflicts.
+- `6bcbb35`: the respawn test's wait never takes a spawn intent.
+- `6e99192`: a dead spawner's never-started proxy is resumed, not doubled.
+
+The head is the commit that adds this report.
+
+**Round 27 Q1, condition by condition**
+- **(2) Fail-closed gate, RED first.**
+  - `tests/memory/scenarios/s3-concurrency.mjs`: `launchOutcomes` stays a pure helper with its existing cases. A killed pid carried by two launches now names no victim, and both count as failed.
+    - RED on 4dbee25: `t16-r2-red1-launchoutcomes`. The current code put both launches in `killedByAdversary` and hid the `code=4` failure.
+    - GREEN: `t16-r2-green1-launchoutcomes`.
+  - Every S3 round records `launches[]` (`i`, `via`, `pid`, `code`, `signal`; additive).
+  - `tests/memory/lib/completeness.mjs` `KILL_HOLDER_ROUNDS` (`kill-holder-10` in S3/short, S3/long, S3/hung) makes the run a harness failure in five cases. The failure names the round and prints the adversary record:
+    - no kill (`killed: null`, or no adversary record);
+    - a killed pid that matches no launch (including a round without `launches[]`);
+    - a matched launch that exited 0;
+    - two or more launches on the killed pid;
+    - fewer launch records than launches.
+  - Job-seam tests replay a real S3/short run of this tree (`tests/memory/fixtures/local-20261108-s3-short-linux-summary.json`: victim preflight#6, pid 31679, SIGKILL; 9 launches exit 0). There is one test per state, the good case keeps its verdict, and S3/hung is gated the same way.
+    - RED on the current gate: `t16-r2-red2-killholder-gate` (6 fail: each state gave RED, never HARNESS FAILURE).
+    - GREEN: `t16-r2-green3-loop` (loop.test.mjs 98 pass, 0 fail, 5 skipped).
+- **(1) Rule text.** In spec §18 PROCESSES (first bullet), METRICS.md (new section "S3 kill-holder round …") and ADR-0003 (inside 16's amendment).
+  - METRICS also carries the power figures (S3/hung 62/62 and 43/43; linux S3/short 61/62; windows S3/short 34/43, with the victim alone in 9 of 43 and in 4 of the latest 20).
+  - It also notes that every earlier `failed-launches` value includes the victim, the baseline "7/10 failed (killed holder)" too.
+  - `budgets.mjs` is unchanged (`git diff origin/overhaul/stability-terminal-ux...HEAD -- tests/memory/lib/budgets.mjs` is empty).
+- **(5) S4 `staleLockLeft`** is recorded in `notes.respawnWithStaleLock` only. Nothing reads it: `grep -rn staleLockLeft tests lib cli proxy` finds only the S4 assignment, and S3's own `stale-lock-after-round` round field, which is a different name. On this tree it was `false` in 7 of 7 (branch4–10), with the proxy healthy and respawn exit 0 (METRICS).
+- **(3) Visibility, pre-merge run 42507303528 (windows memory leg, code 4dbee25).**
+  - S3/short kill-holder: `killedByAdversary` `["preflight#3 code=1 starting zcode-proxy ..."]`, `failedLaunches` `[]`, adversary `{"killed":4104,"afterMs":284,"proxiesAtKill":0,"pidRecordAfterKill":{"pid":null,…,"spawning":{"by":4104,…}}}`.
+  - S3/hung kill-holder: `["preflight#9 code=1 starting zcode-proxy ..."]`, `[]`, adversary `{"killed":8140,"afterMs":305,"proxiesAtKill":0,"pidRecordAfterKill":{"pid":7280,"startedMs":null,…}}`.
+  - `failed-launches` 0 and `stale-lock-after-round` 0 in both keys. Windows S3/hung was RED only on 37's `peak:kit`.
+  - The windows ratchet still FAILED, on S3/short unowned names (below). So this run does not satisfy condition 4, and a new pre-merge run is needed on this head.
+- **(4) Extra windows merge conditions, all pending CI (orchestrator verifies after merge+push), on the pre-merge run of THIS head:**
+  - The windows memory leg is GREEN on `failed-launches` and `stale-lock-after-round` in S3/short and S3/hung.
+  - Both kill-holder rounds are clean there: S3/short and S3/hung each have exactly one `killedByAdversary` entry and 0 `failedLaunches`, and the gate does not fire.
+  - In the same run, `tests/start-lock.test.mjs` is green on the windows `test-kit` legs (Node 24 and 26), in particular:
+    - the kill at every protocol step;
+    - "a start waiting on a live holder takes the lock over once that holder dies mid-start, and ends with one proxy";
+    - the spawn-window kills;
+    - the new "a start killed while its proxy never ran …" (default CIM scan and NtResumeProcess, no injection on Windows).
+  - If any of this fails, the names do not leave the windows list, and 16 does not merge.
+- **(6) Matching-count restart:** the count restarts on 16's tree for S3/short, S3/hung, S3/omp and S4/short, both legs (METRICS states the scope). 16's `flips` names need ≥ 10 GREEN matching CI runs per leg on that tree. Pending CI.
+
+**CI run 42507303528, the two RED jobs**
+1. **windows memory-budget, S3/short unowned `count:proxy` 2, `simultaneous-proxies` 2, `proxy-generations/round` 2. This is 16's, and it is fixed in `6e99192`.**
+   - The adversary killed the holder (pid 4104) at 284 ms, inside its `spawn()` call: 0 proxies, record = intent with no pid.
+   - libuv creates a detached Windows child with `CREATE_SUSPENDED` and calls `ResumeThread` only after `CreateProcessW` returns (`deps/uv/src/win/process.c`, `uv_spawn`; source: https://raw.githubusercontent.com/libuv/libuv/v1.x/src/win/process.c). So the proxy, pid 5728, never ran. Its ParentProcessId is 4104, and it sat at 1 thread, 1.7 MB WS and 4.7 MB commit, unchanged for 20 s (`samples.csv`).
+   - 16's takeover then let the waiters wait the 10 s pending-spawn bound (launches 12–14 s) and spawn a real proxy. The sampler counted both as `proxy`. Pre-16 the lock stayed stuck, so nothing was ever spawned beside it, which is why these names were never RED before.
+   - **Fix:** under the start lock, an intent without a pid whose spawner is dead has the spawner's children listed. On Windows that is CIM `ParentProcessId`, which keeps naming a dead creator. On POSIX the list is `[]`: fork+exec never leaves an unstarted child, and it is re-parented. The kit resumes the child (NtResumeProcess; SIGCONT), never kills it, and only when:
+     - it is the only child that is this installation's kit proxy (`isKitProxyCommand`);
+     - it started after the intent (−2 s);
+     - its start time is unchanged just before the resume.
+   - After the resume, the existing bounded wait and the `completeRecord` proof adopt it. One event line: `INFO manager never-started proxy resumed pid=… spawner=…`. The new injection points `spawnedChildrenImpl` and `resumeProcessImpl` are tests only, with no config key and no env override.
+   - **Seam 2, RED first.** "a start killed while its proxy never ran (intent without a pid, proxy frozen before it listens) …": the start is killed at `spawn:spawned` and its proxy is frozen before it listens (SIGSTOP; NtSuspendProcess on Windows). On Linux the scan is injected with what Windows reports.
+     - RED: `t16-r2-red3-never-started`, `no second proxy was spawned (spawned: 318266, 318335)`, which is the CI symptom.
+     - GREEN: `t16-r2-green5-never-started`. One proxy, the resumed one, serves with a complete, verified record. No lock is left, one event line, and stop leaves 0.
+   - **Adversarial guard test:** "only a dead spawner's single child that is the kit proxy and started after the intent is ever resumed". Nothing is resumed for:
+     - a foreign child;
+     - a kit proxy older than the intent;
+     - two kit proxies;
+     - an unknown start time;
+     - a pid reused after the scan.
+     A live spawner is never scanned.
+   - **Mutations** on 6e99192 (`/home/AgentKit/overhaul-tools/t16-scripts/r2-mutate.py`; logs `t16-r2-mut-n*`). Each mutant was restored with `git checkout 6e99192 -- lib/proxy-lifecycle.mjs`, and the diff was empty after each. All 5 were killed:
+     - n1: no command-line check;
+     - n2: no after-intent check;
+     - n3: the first of many;
+     - n4: a live spawner;
+     - n5: no re-check before the resume.
+   - Linux behaviour is unchanged: the POSIX scan is `[]`, and the loop below is the same as before.
+   - The S3 `orphans` RED in this run (windows, 17's) is the same pid 5728. On 16's tree it should go GREEN in this case, and 17 removes a GREEN name (Round 22 Q1).
+2. **test-kit ubuntu Node 24, "an old proxy (origin/main) calling the new manager's respawn CLI gets a fresh proxy (spawned)" (`8511 !== null`). This is a test race that 16's spawn intent made reachable; no product defect. Fixed in `6bcbb35`.**
+   - The wait read `proxy.pid`, then awaited the port check (up to 1.5 s), and returned the record it had read before.
+   - Under load, the read landed on 16's spawn intent (`pid: null`, written before `spawn()`) while the fresh proxy answered by the time the delayed check connected. So `fresh.pid` was null, and the final record named 8511.
+   - Before 16, every record with another pid already named the fresh proxy.
+   - **Fix (pre-existing test change, justified):** check the port first, then read the record, and accept only a record that names a pid.
+   - **Proof by mutation:**
+     - scratch: a 2 s synchronous pause between `spawn()` and the pid write in `lib/proxy-lifecycle.mjs`, the way a loaded runner stalls;
+     - old predicate: RED, `the respawned proxy is the recorded one 312814 !== null`, 23.3 s, matching CI's 21.4 s (`t16-r2-mut-respawn-oldtest`);
+     - fixed predicate: GREEN in 3.5 s (`t16-r2-mut-respawn-newtest`);
+     - the mutant was restored with `git checkout 6bcbb35 -- lib/proxy-lifecycle.mjs`, and the diff was empty.
+   - Unmodified, it passed 4 of 4 locally (`t16-r2-respawn-trace1–4`; the scratch trace showed no intent ever read when not under load).
+
+**Pre-existing test changes this round (justified)**
+- `tests/memory/loop.test.mjs`: the synthetic S3 builders' bare `{ name: "kill-holder-10" }` became `KILL_HOLDER_ROUND` (the kill and one matched launch), because a bare name is no evidence under condition 2. This applies in `S3_HUNG_ROUNDS` and in the stale-lock refused-start good case.
+- `tests/memory/loop.test.mjs`, the replay of `local-20261107-s3-hung-refused-linux-summary.json`:
+  - as archived, it is now a harness failure (no launch pids), and the test pins that;
+  - its ticket-65 refused-start checks (RED with the two unowned names, and the cut and unchecked variants) run on a copy whose kill-holder launches are in the new shape: the victim is preflight#0 (its own failedLaunches line) under the adversary's pid, and the other pids are not recorded (null).
+- `tests/proxy-lifecycle.test.mjs`: the respawn test's wait (item 2 above).
+
+**Suites on the final tree (6e99192, Bun 1.4.2, Node 26.7.0)**
+- `npm run test` (`t16-r2-final3-test`): 928 tests, 910 pass, 0 fail, 18 skipped.
+  - On cac3221 before the CI fixes (`t16-r2-final-test`): 926 tests, 908 pass, 0 fail, 18 skipped.
+  - One intermediate run (`t16-r2-final2-test`) collided with another worktree's concurrent runs on fixed ports:
+    - `ux-before-capture` said "port 18460 is in use; another capture may be running";
+    - `json-superset`'s captures on the same port diverged;
+    - `manager-audit` uses ports 18795–18805 and hung without a timeout until I ended its worker.
+  - All three files passed on their own (`t16-r2-recheck3`: 38/38), then in the full run above. This is ticket 75's class; I changed no file there.
+- `npm run test:proxy` (`t16-r2-final3-proxy`): 1479 pass, 0 fail, 100 files. `test:proxy-typecheck`: clean.
+- `npm run test:mcp` (`t16-r2-final3-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped. `dist/` unchanged, git clean.
+
+**Linux S3 loop** (`job.mjs --os linux --only S3/short,S3/hung`, free loopback ports, `/home/AgentKit/overhaul-tools/t16-memloop/r2-merged1–3` on cac3221 and `r2-final4` on 6e99192; logs `t16-r2-mem1–4`):
+
+| run | S3/short failed-launches / stale / exactly-one | S3/hung failed-launches / stale / exactly-one | kill-holder rounds (killedByAdversary, launches on the killed pid) | ratchet |
+|---|---|---|---|---|
+| r2-merged1 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 1 and 1, 1 (141, 182 ms) | holds |
+| r2-merged2 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 1 and 1, 1 (169, 215 ms) | holds |
+| r2-merged3 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 1 and 1, 1 (179, 242 ms) | holds |
+| r2-final4 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 1 and 1, 1 (144, 199 ms) | holds |
+
+- The gate never fired: 8 of 8 kill-holder rounds have exactly one matched launch.
+- `failed-launches` is 0 in all 8 keys.
+- REDs are 37's only: `peak:kit` and `procPeak:launcher`, plus `procPeak:proxy` once in r2-merged2 S3/hung.
+
+**Decisions taken (spec/ADRs silent)**
+1. **The gate checks `launches[]` independently of `launchOutcomes`.** It recomputes the match from raw pids and exits, so a later edit of the helper cannot weaken it.
+   - It also covers S3/long's `kill-holder-10`.
+   - "Fewer launch records than launches" is a harness failure: a missing record could hide a second launch on the pid.
+2. **Round 27's Acceptance line and orchestrator Comments line are added verbatim** in this branch's ticket copy (`ae39833`); the orchestrator should not add them again.
+3. **The never-started proxy is fixed in 16, not left to 17,** for three reasons:
+   - 16's windows Acceptance line ("a kill injected at each point between spawn and the complete record … ends with the proxy stoppable or adopted") is not met while it stays suspended;
+   - the unowned REDs block the merge, and adding owners is not allowed;
+   - Round 22 Q1 foresees 16 closing the window first.
+   The path never kills; it resumes only, and only a proven candidate. 17 keeps signal release, adoption without any record, and its `orphans` names.
+4. **POSIX `spawnedChildren` returns `[]`** rather than scanning `/proc` by command line. The state cannot occur there, and a wider scan could resume a process a user stopped on purpose.
+
+**Left for other tickets**
+- **77:** the stop path's millisecond kill guard is untouched. The resume path compares start times with `sameStart`, from CIM `CreationDate` against `Get-Process` `StartTime`, which come from the same FILETIME.
+- **17:** removes its windows S3 `orphans` names once they are GREEN on this tree.
+
+**Addendum, the same day: two more tip merges**
+- `3395c0c` merges the tip 9256a33 (tickets 20, 21 and 76). The only conflict was METRICS.md, where both sides added a section at the same place; I kept both, ticket 20's first. `expected-red.json` merged on its own; 16's S3 entries are unchanged.
+- `de4dec2` merges the tip f56c46d (round 29). It touches only `.scratch`, so no code changes after 3395c0c.
+- Suites on 3395c0c:
+  - `npm run test` (`t16-r2-merged9256-test`): 929 tests, 911 pass, 0 fail, 18 skipped.
+  - `test:proxy` (`t16-r2-merged9256-proxy`, with 76's egress guard): 1596 pass, 0 fail, 107 files. Typecheck clean.
+  - `test:mcp`: 100 tests, 99 pass, 0 fail, 1 skipped. `dist/` unchanged.
+- Linux S3 loop on 3395c0c (`r2-merged9256-1–3`, logs `t16-r2-merged9256-mem1–3`): in 3 of 3 runs, S3/short and S3/hung have `failed-launches` 0, `stale-lock-after-round` 0 and `exactly-one-proxy-after-round` 0. Every kill-holder round has 1 `killedByAdversary` and 1 launch on the killed pid (145–220 ms), so the gate never fires. REDs are 37's only, and the ratchet holds 3/3. Over the whole of round 2, that makes 14 of 14 kill-holder rounds clean.
+- **Ticket 18 (orchestrator note):** it is not on the tip at de4dec2, so nothing changes here. If 18 merges before 16, the merge into this branch must keep 18's `stopToken` and the 0600 mode wherever 16 rewrites `proxy.pid`. That means `writePidJson` (temp + rename, already `mode: 0o600` on the temp file and the fallback), `writePidFile`, and `completeRecord`, which must copy the token from the existing record for the same pid. The merge also needs a test that `completeRecord` keeps the token and the mode, and must never print the token (B2).

@@ -111,12 +111,17 @@ export function refusedOverStaleLock({ start, lock, proxies, port, portsOf }) {
  * launch was ended by the scenario, so it is reported apart and never counts
  * as failed. Every other launch that did not exit 0 is a failed launch
  * (`failed-launches`, budget 0 "incl. a killed lock holder": the killed
- * holder must not make any OTHER launch fail). Matched by pid only.
+ * holder must not make any OTHER launch fail). Matched by pid only, and only
+ * when exactly one launch carries the killed pid: a pid on two launches (a
+ * reused pid) names no single victim, so neither is left out (Owner Proxy
+ * round 27 Q1 condition 2; the evidence gate, lib/completeness.mjs, makes
+ * such a round a harness failure).
  */
 export function launchOutcomes(results, adversary = null) {
   const victim = Number.isInteger(adversary?.killed) ? adversary.killed : null;
   const line = (r) => `${r.via}#${r.i} code=${r.code} ${r.tail ?? ""}`;
-  const killed = results.filter((r) => victim !== null && r.pid === victim && r.code !== 0);
+  const carriers = victim === null ? [] : results.filter((r) => r.pid === victim);
+  const killed = carriers.length === 1 && carriers[0].code !== 0 ? carriers : [];
   return {
     failedLaunches: results.filter((r) => r.code !== 0 && !killed.includes(r)).map(line),
     killedByAdversary: killed.map(line),
@@ -199,7 +204,7 @@ export async function run(ctx) {
     })();
     const launches = Array.from({ length: n }, (_, i) => {
       const useRun = kind === "run" || (kind === "mixed" && i % 2 === 0);
-      return (useRun ? kit.launch("opencode") : kit.preflight()).then((r) => ({ i, via: useRun ? "run" : "preflight", pid: r.pid, code: r.code, ms: r.ms, tail: (r.out + r.err).trim().split("\n").slice(-1)[0]?.slice(0, 200) }));
+      return (useRun ? kit.launch("opencode") : kit.preflight()).then((r) => ({ i, via: useRun ? "run" : "preflight", pid: r.pid, code: r.code, signal: r.signal ?? null, ms: r.ms, tail: (r.out + r.err).trim().split("\n").slice(-1)[0]?.slice(0, 200) }));
     });
     const adv = adversary ? adversary() : null;
     const results = await Promise.all(launches);
@@ -220,6 +225,9 @@ export async function run(ctx) {
       pidFileMatchesListener: !!rec && after.some((p) => p.pid === rec.pid && portsOf(p.pid).includes(kit.port)),
       failedLaunches: launched.failedLaunches,
       killedByAdversary: launched.killedByAdversary,
+      // Every launch's pid and exit: the evidence gate matches the adversary's
+      // kill against them (lib/completeness.mjs, kill-holder rounds).
+      launches: results.map((r) => ({ i: r.i, via: r.via, pid: r.pid ?? null, code: r.code, signal: r.signal })),
       launchMs: results.map((r) => r.ms).sort((a, b) => a - b),
       staleLockLeft: existsSync(lockFile) ? readFileSync(lockFile, "utf8").slice(0, 120) : null,
       adversary: advResult,

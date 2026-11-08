@@ -25,6 +25,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { processCommandLine, resolveBun } from "../lib/process.mjs";
+import { suspendProcess } from "./memory/lib/win-process.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const KEY = "synthetic-start-lock-key";
@@ -489,6 +490,98 @@ for (const [i, killAt] of ["spawn:spawned", "spawn:pid-recorded", "spawn:start-r
     assert.deepEqual(liveProxies(root), []);
   });
 }
+
+// A spawner killed inside CreateProcess on Windows leaves a proxy that never
+// runs: libuv creates a detached child suspended and resumes it only after
+// CreateProcessW returns (deps/uv/src/win/process.c). Its record is only the
+// intent (no pid) and it never serves the port: CI run 42507303528, windows
+// S3/short, pid 5728, its parent the killed holder, 1 thread and 1.7 MB of
+// working set for 20 s, beside the second proxy the next start spawned.
+// Reproduced on both legs: the start is killed right after spawn() (its
+// intent names no pid) and its proxy is frozen before it listens (SIGSTOP;
+// NtSuspendProcess on Windows). Windows lists the dead spawner's children
+// through CIM (ParentProcessId keeps naming a dead creator); elsewhere a
+// killed spawner never leaves an unstarted child (fork + exec), so the scan
+// is injected with what Windows reports.
+const freezeProcess = (pid) => (process.platform === "win32" ? suspendProcess(pid) : process.kill(pid, "SIGSTOP"));
+async function pollFor(what, fn, ms) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const value = await fn();
+    if (value) return value;
+    if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
+    await sleep(100);
+  }
+}
+
+test("a start killed while its proxy never ran (intent without a pid, proxy frozen before it listens): the next start resumes and adopts that proxy, never a second", { timeout: 180_000 }, async (t) => {
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  defer(root, () => killFixtureProxies(root));
+  writeFileSync(join(root, "listen-delay-ms"), process.platform === "win32" ? "8000" : "3000");
+  const bun = bunOrFail();
+  const env = childEnv(root, { ZCODE_KIT_BUN: bun });
+  const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt: "spawn:spawned" })], { env, encoding: "utf8", timeout: 120_000 });
+  assert.equal(killed.stdout, "", `the start was killed at spawn:spawned (${killed.stdout}${killed.stderr})`);
+  const intent = readJson(join(root, "logs", "proxy.pid"));
+  assert.deepEqual({ pid: intent?.pid, by: intent?.spawning?.by }, { pid: null, by: killed.pid }, "test premise: the killed spawner's intent names no pid");
+  const child = Number(await pollFor("the killed start's proxy", () => readdirSync(join(root, "spawned"))[0], 30_000));
+  freezeProcess(child);
+  assert.equal((await health(port)).state, "down", "test premise: the frozen proxy does not serve");
+
+  const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
+  const real = createLifecycle({ root, home: join(root, "home") });
+  const childStart = real.processStartMs(child);
+  const scan = process.platform === "win32" ? {} : { spawnedChildrenImpl: (by) => (by === killed.pid ? [{ pid: child, startMs: childStart, ...processCommandLine(child) }] : []) };
+  const next = createLifecycle({ root, home: join(root, "home"), bunResolver: () => bun, ...scan });
+  const started = await next.ensureRunning({ waitMs: 30_000 });
+  assert.equal(started.code, 0, started.lines.join("\n"));
+  const spawned = readdirSync(join(root, "spawned"));
+  assert.deepEqual(spawned, [String(child)], `no second proxy was spawned (spawned: ${spawned.join(", ")})`);
+  assert.equal((await health(port)).pid, child, "the never-started proxy runs and serves");
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  assert.equal(record?.pid, child, JSON.stringify(record));
+  assert.ok(Number.isFinite(record.startedMs), "with its start time");
+  assert.equal(real.verifyOwnProcess(record), "match");
+  assert.deepEqual(lockFiles(root), [], "no stale lock after the start");
+  const resumed = readFileSync(join(root, "logs", "proxy.log"), "utf8").split("\n").filter((l) => / INFO manager never-started proxy resumed /.test(l));
+  assert.equal(resumed.length, 1, "one event line");
+  assert.match(resumed[0], new RegExp(`pid=${child} spawner=${killed.pid}`));
+
+  assert.deepEqual({ code: (await next.stop()).code }, { code: 0 });
+  assert.deepEqual(liveProxies(root), [], "0 orphans");
+});
+
+test("only a dead spawner's single child that is the kit proxy and started after the intent is ever resumed", async (t) => {
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  const at = Date.now();
+  const kitProxy = (pid, startMs) => ({ pid, startMs, commandLine: `"bun" "run" "${join(root, "zcode-proxy-src", "src", "index.ts")}" "serve"`, executablePath: "bun" });
+  const foreign = (pid, startMs) => ({ pid, startMs, commandLine: `"node" "-e" "setInterval(() => {}, 1e6)"`, executablePath: process.execPath });
+  const cases = {
+    "a child that is not the kit proxy": [foreign(4101, at + 50)],
+    "a kit proxy that started before the intent": [kitProxy(4102, at - 60_000)],
+    "two kit proxies (no single one is proven)": [kitProxy(4103, at + 50), kitProxy(4104, at + 60)],
+    "a child whose start time is unknown": [kitProxy(4105, null)],
+    // The scan named it, but its pid changed hands before the resume.
+    "a child whose pid was reused after the scan": [{ ...kitProxy(4107, at + 50), liveStartMs: at + 5000 }],
+  };
+  for (const [label, children] of Object.entries(cases)) {
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: null, startedMs: null, startedIso: null, spawning: { by: DEAD_PID, at } }) + "\n");
+    const resumed = [];
+    const lifecycle = await lifecycleFor(root, { pendingSpawnWaitMs: 300, spawnedChildrenImpl: (by) => (by === DEAD_PID ? children : []), resumeProcessImpl: (pid) => { resumed.push(pid); return true; }, processStartMsImpl: (pid) => { const c = children.find((x) => x.pid === pid); return c ? c.liveStartMs ?? c.startMs : null; } });
+    const started = await lifecycle.ensureRunning({ waitMs: 2000 });
+    assert.deepEqual(resumed, [], `${label}: nothing is resumed`);
+    assert.equal(started.outcome, "bun-unavailable", `${label}: the start goes on to spawn its own (${started.lines.join(" | ")})`);
+  }
+  // A spawner that is still alive is never scanned: its child is its own business.
+  const alive = harmless(t);
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: null, startedMs: null, startedIso: null, spawning: { by: alive.pid, at } }) + "\n");
+  const scanned = [];
+  const lifecycle = await lifecycleFor(root, { pendingSpawnWaitMs: 300, spawnedChildrenImpl: (by) => { scanned.push(by); return [kitProxy(4106, at + 50)]; }, resumeProcessImpl: () => assert.fail("resumed a live spawner's child") });
+  await lifecycle.ensureRunning({ waitMs: 2000 });
+  assert.deepEqual(scanned, []);
+});
 
 test("the spawner itself completes the record when its start-time probe answers only during the health wait", { timeout: 180_000 }, async (t) => {
   const port = await freePort();
