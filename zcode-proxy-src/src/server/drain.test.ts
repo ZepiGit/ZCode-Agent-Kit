@@ -150,6 +150,11 @@ describe("graceful shutdown drain over the loopback listener", () => {
     const oBody = await openai.json() as { error: { type: string; code: string } };
     expect(oBody.error.code).toBe("overloaded");
     expect(openai.status).not.toBe(429);
+    // Routes without a body never wait for admission; they are shed too.
+    const models = await fetch(`${p.base}/v1/models`, { headers });
+    expect(models.status).toBe(503);
+    expect(models.headers.get("retry-after")).not.toBeNull();
+    expect(((await models.json()) as { error: { code: string } }).error.code).toBe("overloaded");
     expect(up.arrived).toBe(1); // nothing new reached upstream
 
     // The listener is still open: health answers, an unauthenticated call is still a 401.
@@ -169,7 +174,7 @@ describe("graceful shutdown drain over the loopback listener", () => {
     expect(drainLines).toHaveLength(1);
     expect(drainLines[0]).toMatch(EVENT_LINE);
     expect(drainLines[0]).toMatch(/ cut=0( |$)/);
-    expect(drainLines[0]).toMatch(/ shed=2( |$)/);
+    expect(drainLines[0]).toMatch(/ shed=3( |$)/);
   });
 
   it("cuts the streams still open at the force point and counts them in one log line", async () => {
