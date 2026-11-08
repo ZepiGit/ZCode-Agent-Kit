@@ -1,14 +1,28 @@
-// Runs judged on the median of n fresh repetitions (Round 6 Q1, ticket 60).
+// Runs judged on n fresh repetitions (Round 6 Q1, ticket 60; Round 17 Q3, ticket 71).
 //
-// A rule is { n, check, budgetMB, ceilingMB } (lib/budgets.mjs REPEATED, the
-// one place n lives): the named check's value from each repetition's summary
-// is judged as a median against budgetMB, and every single value must also
-// stay ≤ ceilingMB. Every other check is judged in every repetition as usual.
+// Two rule kinds live in lib/budgets.mjs REPEATED, the one place n lives:
+//   - the median rule { n, check, budgetMB, ceilingMB } (S1/burst1): the named
+//     check's value from each repetition's summary is judged as a median
+//     against budgetMB, and every single value must also stay ≤ ceilingMB;
+//   - the majority rule { kind: "majority", n, redAtLeast, check, budget,
+//     ceiling } (windows S1/short): the check is RED when at least redAtLeast
+//     repetitions are RED on it under their own unchanged verdict, every
+//     single value must stay ≤ ceiling, and the reported value is the median.
+// Every other check is judged in every repetition as usual. A rule with
+// `legs` applies on those OS legs only.
 import { REPEATED } from "./budgets.mjs";
 
-/** The repetition rule of a run key, or null for a run judged on one run. */
-export function repetitionRule(key, repeated = REPEATED) {
-  return Object.hasOwn(repeated, key) ? repeated[key] : null;
+/** The repetition rule of a run key on an OS leg, or null for a run judged on one run. */
+export function repetitionRule(key, repeated = REPEATED, os = null) {
+  if (!Object.hasOwn(repeated, key)) return null;
+  const rule = repeated[key];
+  if (rule.legs && !rule.legs.includes(os)) return null;
+  return rule;
+}
+
+/** The set-level name of the rule's own check: `median:<check>` (median rule) or `<check>` (majority rule). */
+export function setCheckName(rule) {
+  return rule.kind === "majority" ? rule.check : `median:${rule.check}`;
 }
 
 /**
@@ -82,10 +96,101 @@ export function medianVerdict(reps, rule) {
 }
 
 /**
+ * The majority rule (Round 17 Q3): reps as for medianVerdict. The rule's check
+ * is RED when at least `redAtLeast` repetitions have it RED under their own
+ * verdict (growth(): commit > budget AND trend, unchanged); every value must
+ * stay ≤ `ceiling` whatever its trend; every other check is judged in every
+ * repetition. The value judged is the check's gated one (commit on Windows).
+ * Returns { exitCode, red, redChecks, values, trends, redRepetitions (1-based),
+ * median, budget, redAtLeast, ceiling, overCeiling, gate, commitValues,
+ * wsValues, workingSetRedChecks, redOnlyOnCommit, error? }.
+ * An incomplete set is a harness failure, as for the median rule.
+ */
+export function majorityVerdict(reps, rule) {
+  const base = { budget: rule.budget, redAtLeast: rule.redAtLeast, ceiling: rule.ceiling };
+  const ofCheck = (r) => r.checks?.find((c) => c.name === rule.check);
+  const harness = (error) => ({ exitCode: 2, red: false, redChecks: [], values: reps.map((r) => ofCheck(r)?.value ?? null), trends: reps.map((r) => ofCheck(r)?.trend ?? null), redRepetitions: [], median: null, overCeiling: [], ...base, error });
+  for (const [i, r] of reps.entries()) {
+    if (r.exitCode !== 0 && r.exitCode !== 1) return harness(`repetition ${i + 1}: ${r.error ?? `exit ${r.exitCode}`}`);
+    const c = ofCheck(r);
+    if (typeof c?.value !== "number" || !Number.isFinite(c.value) || c.detail?.insufficient === true) return harness(`repetition ${i + 1}: no ${rule.check} value${c?.detail?.insufficient ? ` (insufficient: ${c.detail.samples ?? 0} samples)` : ""}`);
+  }
+  if (reps.length !== rule.n) return harness(`ran ${reps.length} of ${rule.n} repetitions`);
+  const checks = reps.map(ofCheck);
+  const values = checks.map((c) => c.value);
+  const trends = checks.map((c) => c.trend === true);
+  const redRepetitions = checks.flatMap((c, i) => (c.red ? [i + 1] : []));
+  // The ceiling is on commit (the check's commit value on Windows, its value elsewhere).
+  const ceilingValue = (c) => (typeof c.commitValue === "number" ? c.commitValue : c.value);
+  const overCeiling = checks.flatMap((c, i) => (ceilingValue(c) > rule.ceiling ? [i + 1] : []));
+  const redChecks = [];
+  if (redRepetitions.length >= rule.redAtLeast) redChecks.push(setCheckName(rule));
+  if (overCeiling.length) redChecks.push(`ceiling:${rule.check}`);
+  for (const r of reps) for (const c of r.checks) if (c.red && c.name !== rule.check && !redChecks.includes(c.name)) redChecks.push(c.name);
+  const red = redChecks.length > 0;
+  // Windows: the all-WS view (the same rule on each repetition's WS verdict) says
+  // whether the set is RED only on commit (build-time gate 3); the ceiling is commit's.
+  const gate = checks[0].gate ?? null;
+  const commitValues = checks.every((c) => typeof c.commitValue === "number") ? checks.map((c) => c.commitValue) : null;
+  const wsValues = checks.every((c) => typeof c.wsValue === "number") ? checks.map((c) => c.wsValue) : null;
+  let workingSetRedChecks = [];
+  if (gate) {
+    if (reps.filter((r) => (r.workingSetRedChecks ?? []).includes(rule.check)).length >= rule.redAtLeast) workingSetRedChecks.push(setCheckName(rule));
+    for (const r of reps) for (const name of r.workingSetRedChecks ?? []) if (name !== rule.check && !workingSetRedChecks.includes(name)) workingSetRedChecks.push(name);
+  }
+  return { exitCode: red ? 1 : 0, red, redChecks, values, trends, redRepetitions, median: median(values), overCeiling, ...base, gate, commitValues, wsValues, workingSetRedChecks, redOnlyOnCommit: gate ? red && workingSetRedChecks.length === 0 : false };
+}
+
+/**
+ * The OMP no-op floor (Round 17 Q4; budgets.mjs OMP_FLOOR): `values` are the
+ * no-op costs (MB) of n fresh stub hosts. The median must be < medianBelowMB
+ * and every value < everyBelowMB. Fewer than n values or a non-numeric one is
+ * a harness failure (`error`), never a pass. Returns { ok, error, values,
+ * medianMB, atOrAboveGate (1-based repetitions), failures }.
+ */
+export function floorVerdict(values, rule) {
+  const out = (o) => ({ ok: false, error: null, values, medianMB: null, atOrAboveGate: [], failures: [], ...o });
+  for (const [i, v] of values.entries()) if (typeof v !== "number" || !Number.isFinite(v)) return out({ error: `repetition ${i + 1}: no numeric no-op cost (${JSON.stringify(v)})` });
+  if (values.length !== rule.n) return out({ error: `${values.length} of ${rule.n} repetitions measured` });
+  const medianMB = median(values);
+  const atOrAboveGate = values.flatMap((v, i) => (v >= rule.everyBelowMB ? [i + 1] : []));
+  const failures = [];
+  if (!(medianMB < rule.medianBelowMB)) failures.push(`median no-op cost ${medianMB} MB is not below ${rule.medianBelowMB} MB`);
+  for (const i of atOrAboveGate) failures.push(`repetition ${i} charged ${values[i - 1]} MB, not below the ${rule.everyBelowMB} MB waiter gate`);
+  return out({ ok: failures.length === 0, medianMB, atOrAboveGate, failures });
+}
+
+/**
+ * The floor measurement's reading (Round 17 Q4 condition 1, Round 6 Q1
+ * condition 2's method): p = the fraction of no-op costs at or above
+ * thresholdMB (each would fail a single-sample test), the predicted false-fail
+ * rate of the median clause per odd n (binomial), and n, the smallest odd n in
+ * {3, 5, 7, 9} at ≤ target. `comesBack` lists what Round 17 Q4 sends back: a
+ * measurement ≥ gateMB, or no n reaching the target.
+ */
+export function floorMeasurement(values, { thresholdMB, gateMB, target = 0.01, candidates = [3, 5, 7, 9] }) {
+  const nums = values.filter((v) => typeof v === "number" && Number.isFinite(v));
+  const atOrAbove = nums.filter((v) => v >= thresholdMB).length;
+  const p = nums.length ? atOrAbove / nums.length : null;
+  const falseFailRate = p === null ? null : Object.fromEntries(candidates.map((n) => [String(n), Number(medianFalseRedRate(p, n).toFixed(4))]));
+  const n = p === null ? null : chooseRepetitions(p, { target, candidates });
+  const atGate = nums.filter((v) => v >= gateMB).length;
+  const comesBack = [];
+  if (atGate) comesBack.push(`${atGate} measurement${atGate > 1 ? "s" : ""} ≥ ${gateMB} MB (Round 17 Q4 condition 1)`);
+  if (p !== null && n === null) comesBack.push(`no n in ${candidates.join(", ")} reaches ≤ ${target * 100} % at p = ${Number(p.toFixed(4))} (Round 17 Q4 condition 1)`);
+  return { count: nums.length, invalid: values.length - nums.length, atOrAbove, p: p === null ? null : Number(p.toFixed(4)), falseFailRate, n, minMB: nums.length ? Math.min(...nums) : null, medianMB: nums.length ? median(nums) : null, maxMB: nums.length ? Math.max(...nums) : null, comesBack };
+}
+
+/** The set verdict under its rule's kind. */
+export function judgeRepetitions(reps, rule) {
+  return rule.kind === "majority" ? majorityVerdict(reps, rule) : medianVerdict(reps, rule);
+}
+
+/**
  * Runs `runOnce(i)` for i = 1 … rule.n, strictly one after another (each a
- * fresh, isolated run; never two at once), and judges the set with
- * medianVerdict. A harness failure ends the set: it decides the outcome.
- * Returns { reps, ...medianVerdict }.
+ * fresh, isolated run; never two at once), and judges the set under its rule
+ * (medianVerdict or majorityVerdict). A harness failure ends the set: it
+ * decides the outcome. Returns { reps, ...verdict }.
  */
 export async function runRepetitions(rule, runOnce) {
   const reps = [];
@@ -94,5 +199,5 @@ export async function runRepetitions(rule, runOnce) {
     reps.push(r);
     if (r.exitCode !== 0 && r.exitCode !== 1) break;
   }
-  return { reps, ...medianVerdict(reps, rule) };
+  return { reps, ...judgeRepetitions(reps, rule) };
 }

@@ -3,7 +3,7 @@
  * solver worker via configureCaptchaSolver({ backendModule }); the scene name
  * selects the behavior. Never touches the network.
  */
-import { solveTraceless as realSolveTraceless } from "../captcha-happy.js";
+import { captchaGenerationResources, solveTraceless as realSolveTraceless } from "../captcha-happy.js";
 import { CaptchaSdkIncompatibleError, normalizeCaptchaError } from "../captcha-token.js";
 
 let active = 0;
@@ -12,6 +12,13 @@ let retained: unknown[] = [];
 const param = (label: string) => Buffer.from(JSON.stringify({
   certifyId: label, sceneId: "fixture", isSign: true, securityToken: "fixture-".repeat(40),
 })).toString("base64");
+
+/** The generation's CDN memory tier and stall counters, as `cdn:<entries>:<bytes>:stalls:<urls>`. */
+function resources(): string {
+  const { cdnCache, stallCounts } = captchaGenerationResources();
+  const { entries, bytes } = cdnCache.memoryUsage();
+  return `cdn:${entries}:${bytes}:stalls:${stallCounts.size}`;
+}
 
 export async function solveTraceless({ scene }: { scene: string }): Promise<string> {
   active += 1;
@@ -72,6 +79,32 @@ export async function solveTraceless({ scene }: { scene: string }): Promise<stri
               } });
             };</script></body></html>`,
         });
+      case "cdn-fill": {
+        // cdn-fill:<count>/<bytes each>: the generation's real CDN cache.
+        const [count, bytes] = arg.split("/").map(Number);
+        const { cdnCache } = captchaGenerationResources();
+        for (let i = 0; i < count; i++) {
+          cdnCache.put(`https://g.alicdn.com/captcha-frontend/dynamicJS/fill/${bytes}/${i}/pe.js`, Buffer.alloc(bytes, i % 251));
+        }
+        return param(resources());
+      }
+      case "stall-fill": {
+        const { stallCounts } = captchaGenerationResources();
+        for (let i = 0; i < Number(arg); i++) stallCounts.stalled(`https://g.alicdn.com/captcha-frontend/dynamicJS/stall/${i}/pe.js`);
+        return param(resources());
+      }
+      case "stall-evict": {
+        // Two stalls of a cached pe URL evict it from the generation's cache.
+        const { cdnCache, stallCounts } = captchaGenerationResources();
+        const url = "https://g.alicdn.com/captcha-frontend/dynamicJS/evict/pe.js";
+        cdnCache.put(url, Buffer.from("var pe = 1;"));
+        const before = cdnCache.get(url)?.source ?? "none";
+        stallCounts.stalled(url);
+        stallCounts.stalled(url);
+        return param(`evict:${before}:${cdnCache.get(url)?.source ?? "none"}`);
+      }
+      case "resources":
+        return param(resources());
       default:
         throw new Error(`unknown fixture scene ${scene}`);
     }

@@ -14,14 +14,15 @@
 //
 // The command ctx is `cmd`; `ctx` below is the kit context (cmd.kit), the
 // object the adapters, bootstrap and the consent records work on.
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, join, normalize } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { acquireLock, beginTransaction, releaseLock } from "../../lib/transaction.mjs";
 import { detectHarnesses } from "../../lib/detect.mjs";
 import { ensureState } from "../../lib/state.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 import { withLineEndingsOf } from "../../lib/line-endings.mjs";
+import { BRIDGE_NODE_FLAGS, bridgeArgs, bridgeScriptOf, claudeRegistrationState, sameInstallationPath } from "../../lib/mcp-bridge.mjs";
 import { bootstrap } from "../context.mjs";
 import { decideAccountRotator, restartForAccountChange, rotatorChoice } from "../account-setup.mjs";
 import { setupOutput } from "../setup-output.mjs";
@@ -289,24 +290,17 @@ export async function run({ flags }, cmd) {
   return { exitCode: outcome.failed.length ? EXIT_HARNESS_FAILED : 0, records: [] };
 }
 
-function sameInstallationPath(candidate, expected) {
-  if (typeof candidate !== "string" || !isAbsolute(candidate)) return false;
-  const canonical = value => {
-    let resolved = normalize(value);
-    try { resolved = realpathSync(resolved); } catch { /* lexical identity still handles missing artifacts */ }
-    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-  };
-  return canonical(candidate) === canonical(expected);
+// `claude mcp get` is a human-readable display, not a shell command:
+// claudeRegistrationState (lib/mcp-bridge.mjs) matches the entire argument
+// field (leading Node flags, then a script path that may be quoted with
+// spaces) and compares the script with sameInstallationPath; substring checks
+// would incorrectly adopt `index.js.foreign`.
+function claudeMcpAdd(cmd, args) {
+  return cmd.runCommandSync("claude", ["mcp", "add", "zcode-harness", "--scope", "user", "--", "node", ...args], { stdio: "pipe", encoding: "utf8" });
 }
 
-function claudeMcpEntryPath(output) {
-  // `claude mcp get` is a human-readable display, not a shell command. Match
-  // the entire argument field, allowing a quoted script path with spaces;
-  // substring checks would incorrectly adopt `index.js.foreign`.
-  const text = String(output ?? "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "");
-  const field = text.match(/^\s*Args:\s*(.+?)\s+--stdio\s*$/m)?.[1];
-  if (!field) return null;
-  return field.startsWith('"') && field.endsWith('"') ? field.slice(1, -1) : field;
+function commandFailure(res) {
+  return (res.error?.message || res.stderr || `exit ${res.status}`).trim().slice(0, 200);
 }
 
 /** MCP bridge registration (OMP mcp.json / claude mcp add) — additive, namespaced. */
@@ -321,7 +315,9 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
   log("== mcp: zcode-harness bridge ==");
   if (targets.includes("omp") && detected.omp) {
     const ompMcp = join(ctx.home, ".omp", "agent", "mcp.json");
-    const entry = { type: "stdio", command: "node", args: [serverJs, "--stdio"] };
+    // The bridge flags (ticket 36) go on the command line; an older entry of
+    // this installation is refreshed to this form through the transaction.
+    const entry = { type: "stdio", command: "node", args: bridgeArgs(serverJs) };
     if (existsSync(ompMcp)) {
       try {
         const text = readFileSync(ompMcp, "utf8");
@@ -329,14 +325,14 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
         const current = j.mcpServers?.["zcode-harness"];
         // F-09: an entry pointing at ANOTHER kit copy is not "ours" — replace
         // only when it is absent or already points at this installation.
-        const ours = !current || (Array.isArray(current.args) && sameInstallationPath(current.args[0], serverJs));
+        const ours = !current || sameInstallationPath(bridgeScriptOf(current.args), serverJs);
         if (!current || (ours && JSON.stringify(current) !== JSON.stringify(entry))) {
           j.mcpServers = j.mcpServers ?? {};
           j.mcpServers["zcode-harness"] = entry;
           commitFile(ctx, tx, ompMcp, withLineEndingsOf(text, JSON.stringify(j, null, 2) + "\n"));
           log("  omp: mcp.json updated (zcode-harness → stdio bridge)");
         } else if (!ours) {
-          log(`  WARN: omp mcp.json "zcode-harness" points at another kit copy (${current.args?.[0] ?? "?"}) — left untouched`);
+          log(`  WARN: omp mcp.json "zcode-harness" points at another kit copy (${bridgeScriptOf(current.args) ?? "?"}) — left untouched`);
         } else {
           log('  omp: "zcode-harness" already registered');
         }
@@ -350,18 +346,36 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
   }
   if (targets.includes("claude-code") && detected["claude-code"]) {
     const get = cmd.runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
-    if (get.status === 0 && !sameInstallationPath(claudeMcpEntryPath(get.stdout), serverJs)) {
+    const { state, registered } = get.status === 0 ? claudeRegistrationState(get.stdout, serverJs) : { state: "absent", registered: null };
+    if (state === "foreign") {
       // F-09: registered by another kit copy — never silently adopt it.
       log('  WARN: claude "zcode-harness" is registered by another kit copy — left untouched');
-    } else if (get.status === 0) {
+    } else if (state === "current") {
       log('  claude: "zcode-harness" already registered');
+    } else if (state === "outdated") {
+      // This installation's older registration (ticket 36): `claude mcp add`
+      // refuses an existing name, so re-register. A failed add puts the
+      // previous registration back, so the bridge is never left unregistered.
+      const remove = cmd.runCommandSync("claude", ["mcp", "remove", "zcode-harness", "--scope", "user"], { stdio: "pipe", encoding: "utf8" });
+      if (remove.status !== 0) {
+        log(`  WARN: claude mcp remove failed: ${commandFailure(remove)} — "zcode-harness" left as registered`);
+      } else {
+        const add = claudeMcpAdd(cmd, bridgeArgs(serverJs));
+        if (add.status === 0) {
+          log(`  claude: re-registered "zcode-harness" with ${BRIDGE_NODE_FLAGS.join(" ")} (user scope)`);
+          tx.external(`claude MCP server "zcode-harness" re-registered with ${BRIDGE_NODE_FLAGS.join(" ")} (user scope)`, "claude mcp remove zcode-harness --scope user");
+        } else {
+          const back = claudeMcpAdd(cmd, [...registered.flags, registered.script, "--stdio"]);
+          log(`  WARN: claude mcp add failed: ${commandFailure(add)} — ${back.status === 0 ? "previous registration restored" : `previous registration NOT restored (${commandFailure(back)}); run setup again`}`);
+        }
+      }
     } else {
-      const add = cmd.runCommandSync("claude", ["mcp", "add", "zcode-harness", "--scope", "user", "--", "node", serverJs, "--stdio"], { stdio: "pipe", encoding: "utf8" });
+      const add = claudeMcpAdd(cmd, bridgeArgs(serverJs));
       if (add.status === 0) {
         log('  claude: registered "zcode-harness" (user scope)');
         tx.external('claude MCP server "zcode-harness" registered (user scope)', "claude mcp remove zcode-harness --scope user");
       } else {
-        log(`  WARN: claude mcp add failed: ${(add.error?.message || add.stderr || `exit ${add.status}`).trim().slice(0, 200)}`);
+        log(`  WARN: claude mcp add failed: ${commandFailure(add)}`);
       }
     }
   }

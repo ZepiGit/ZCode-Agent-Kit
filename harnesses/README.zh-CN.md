@@ -33,7 +33,7 @@ kit 的核心与具体 harness 无关：一个提供三种标准格式的本地 
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json`（Windows）或 `~/.config/goose/custom_providers/zcode.json`（macOS/Linux） | 凭据通过文档化的 `auth.command` 助手（kit 密钥解析器，无 shell） |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | kit 绝不触碰 VS Code 状态；在 UI 中手动录入一次即可 |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | 在 UI 中配置自定义 provider（Anthropic messages）；kit 有意不写 kilo.jsonc |
-| 支持 MCP 的 harness | stdio 服务器 `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：写入 `~/.omp/agent/mcp.json`；Claude Code：`claude mcp add`（仅在检测到且已同意时）；Codex：隔离 home 内。仅 MCP 不算作模型集成 |
+| 支持 MCP 的 harness | stdio 服务器 `zcode-harness`（`node --max-semi-space-size=1 mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：写入 `~/.omp/agent/mcp.json`；Claude Code：`claude mcp add`（仅在检测到且已同意时）；Codex：隔离 home 内。仅 MCP 不算作模型集成 |
 
 `generated/` 下的路径指向 Kit 状态：正式版/源码安装位于 Kit
 目录中；npm 安装位于单独的状态目录中。
@@ -84,7 +84,7 @@ model: glm-5.3
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<Kit 安装的绝对路径>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["--max-semi-space-size=1", "<Kit 安装的绝对路径>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }

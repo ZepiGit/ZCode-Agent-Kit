@@ -9,6 +9,14 @@ import os from "node:os";
 
 const projectRoot = path.resolve(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]):/, "$1:"));
 
+/**
+ * The Node flags the kit's generated harness MCP entries put on the bridge
+ * command line (`node <flags> dist/index.js --stdio`; the kit's copy is
+ * lib/mcp-bridge.mjs, held equal by tests/adapter-audit.test.mjs). Never
+ * NODE_OPTIONS: that would leak to the harness the bridge spawns.
+ */
+export const BRIDGE_NODE_FLAGS = Object.freeze(["--max-semi-space-size=1"]);
+
 export function isolatedTestEnv(rootDir, overrides = {}) {
   const home = path.join(rootDir, "home");
   const temp = path.join(rootDir, "temp");
@@ -72,7 +80,9 @@ export async function startBridge(overrides = {}) {
   if (overrides.readOnly) args.push("--read-only");
   if (overrides.extraArgs) args.push(...overrides.extraArgs);
 
-  const child = spawn(process.execPath, args, {
+  // Started as the generated harness entries start it (BRIDGE_NODE_FLAGS);
+  // `nodeArgs` replaces the flags (tests add a preload, measurements drop them).
+  const child = spawn(process.execPath, [...(overrides.nodeArgs ?? BRIDGE_NODE_FLAGS), ...args], {
     stdio: ["pipe", "pipe", "pipe"],
     env: isolatedTestEnv(dataDir, {
       ZCODE_HARNESS_RUNTIME_PATH: overrides.useRealRuntime
