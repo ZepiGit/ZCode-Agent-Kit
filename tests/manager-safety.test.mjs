@@ -172,8 +172,12 @@ test("stop cleanly kills a verified-own process (identity + pid + start time mat
     const m = createManager({ root, home: TMP });
     const code = await m.stop();
     assert.equal(code, 0, "verified-own process must be stopped");
-    await new Promise((r) => setTimeout(r, 500));
-    assert.equal(m.pidAlive(dummy.pid), false, "the process must be gone");
+    // stop() returns 0 only after it saw the process exit, so no wait belongs
+    // here. Probe the child's own handle, never its PID: once the process is
+    // gone and its handles are closed, Windows may hand that PID to an
+    // unrelated new process at once, and a PID probe then sees a stranger
+    // (ticket 70, CI run 42436186573). The handle cannot be reused.
+    assert.equal(dummy.kill(0), false, "the process must be gone");
     assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "pid file cleaned up");
   } finally {
     try { dummy.kill(); } catch {}
