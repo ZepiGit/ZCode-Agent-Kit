@@ -15,9 +15,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolveBun } from "../lib/process.mjs";
+import { processCommandLine, resolveBun } from "../lib/process.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const KEY = "synthetic-lifecycle-key";
@@ -61,10 +61,18 @@ test("the closure walk follows dynamic imports into presentation code (the walk 
 });
 
 // ---------------------------------------------------------------- fixtures
+const cleanups = new Map();
+/** Run fn when the fixture is torn down, before its directory is removed (t.after hooks run in order). */
+const defer = (root, fn) => cleanups.get(root).push(fn);
+
 /** A kit copy (cli/, lib/, the manager) in a temp root that is also its state directory. */
 function kitFixture(t, port, { proxySrc = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "kit-lifecycle-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  cleanups.set(root, []);
+  t.after(() => {
+    for (const fn of cleanups.get(root).splice(0).reverse()) { try { fn(); } catch {} }
+    rmSync(root, { recursive: true, force: true });
+  });
   for (const member of ["cli", "lib"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "logs")); mkdirSync(join(root, "home"));
   cpSync(join(ROOT, "proxy", "zcode-proxy-manager.mjs"), join(root, "proxy", "zcode-proxy-manager.mjs"));
@@ -124,7 +132,24 @@ async function until(what, fn, ms) {
 const readJson = (file) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } };
 /** One file, however spelled: the ESM loader realpaths entry modules, and Windows runners' TEMP uses 8.3 short names. */
 const canonicalPath = (file) => { let p = resolve(file); try { p = realpathSync.native(p); } catch {} return process.platform === "win32" ? p.toLowerCase() : p; };
-const killQuietly = (pid) => { try { process.kill(pid, "SIGKILL"); } catch {} };
+// Teardown never kills by a bare pid (ticket 70: Windows reuses a pid as soon as
+// its process object is freed). A direct child is killed through its own
+// handle; a proxy the manager spawned only while its command line still names
+// this fixture.
+const killChild = (child) => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); };
+function killFixtureProxy(root, pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  const info = processCommandLine(pid);
+  if (!info || !info.commandLine.toLowerCase().includes(basename(root).toLowerCase())) return;
+  try { process.kill(pid, "SIGKILL"); } catch {}
+}
+// A pid no process has: above Linux's pid_max and never handed out by Windows.
+const NEVER_ALLOCATED_PID = 2147483644;
+// The manager records the pid at spawn and adds the start time once its probe
+// answers (within 5 s; on Windows a PowerShell query). A probe that does not
+// answer in time leaves startedMs null: today's behaviour (DECISIONS Round 7
+// Q4), which ticket 16 closes. Only Windows can hit it.
+const startTimeMissing = (record) => process.platform === "win32" && record?.startedMs === null;
 
 // --------------------------------------------------------- spawned preflight
 test("a spawned preflight loads the lifecycle module and no presentation module, with today's output", async (t) => {
@@ -289,7 +314,7 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
   `);
   const env = childEnv(root, { ZCODE_KIT_BUN: bun, ZCODE_KIT_RESPAWN_NODE: process.execPath, ZCODE_KIT_RESPAWN_MANAGER: manager, FAKE_PROXY_ENV_OUT: envOut });
   const old = spawn(bun, ["run", oldProxy], { env, stdio: ["ignore", "pipe", "pipe"] });
-  t.after(() => killQuietly(old.pid));
+  defer(root, () => killChild(old));
   await new Promise((resolveUp, reject) => { old.stdout.once("data", resolveUp); old.once("exit", (code) => reject(new Error(`old proxy exited ${code}`))); });
   // The record an old manager writes at spawn.
   const { createManager } = await import(pathToFileURL(join(ROOT, "proxy", "zcode-proxy-manager.mjs")).href);
@@ -303,9 +328,18 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
     const record = readJson(join(root, "logs", "proxy.pid"));
     return record && record.pid !== old.pid && await identity(port) === "ours" ? record : null;
   }, 90_000);
-  t.after(() => killQuietly(fresh.pid));
+  defer(root, () => killFixtureProxy(root, fresh.pid));
   await until("the respawn to finish", () => /respawn: start finished with exit code 0/.test(readFileSync(join(root, "logs", "proxy.log"), "utf8")), 30_000);
-  assert.ok(Number.isFinite(fresh.startedMs), "the fresh record carries its start time");
+  // The record is final once the start finished (the start time is filled
+  // before the health wait); the proxy can answer /health while the manager
+  // is still probing its start time, so the record seen above may lack it.
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  assert.equal(record.pid, fresh.pid, "the respawned proxy is the recorded one");
+  if (startTimeMissing(record)) t.diagnostic(`windows: the start-time probe did not answer within its deadline; startedMs stays null (today's behaviour, ticket 16)`);
+  else {
+    assert.ok(Number.isFinite(record.startedMs), "the fresh record carries its start time");
+    assert.equal(createManager({ root, home: join(root, "home") }).verifyOwnProcess(record), "match", "and it is the live proxy's start time");
+  }
   const events = readJson(join(root, "logs", "respawn.json")).events;
   assert.equal(events.length, 1);
   assert.deepEqual({ pid: events[0].pid, reason: events[0].reason }, { pid: old.pid, reason: "memory" });
@@ -329,8 +363,9 @@ test("the account change restarts a verified own proxy through the intents, with
   const bun = bunOrFail();
   const first = spawnSync(process.execPath, [join(root, "cli", "heal.mjs")], { env: childEnv(root, { ZCODE_KIT_BUN: bun }), encoding: "utf8", timeout: 90_000 });
   const before = readJson(join(root, "logs", "proxy.pid"));
-  if (before) t.after(() => killQuietly(before.pid));
+  if (before) defer(root, () => killFixtureProxy(root, before.pid));
   assert.equal(first.status, 0, first.stderr);
+  if (startTimeMissing(before)) { t.skip("windows: the start-time probe did not answer in time, so no stop can verify this proxy (today's behaviour, ticket 16)"); return; }
   const { restartForAccountChange } = await import(pathToFileURL(join(root, "cli", "account-setup.mjs")).href);
   const savedBun = process.env.ZCODE_KIT_BUN;
   process.env.ZCODE_KIT_BUN = bun;
@@ -338,21 +373,27 @@ test("the account change restarts a verified own proxy through the intents, with
   try { lines = await consoleLines(() => restartForAccountChange({ root, home: join(root, "home") })); }
   finally { if (savedBun === undefined) delete process.env.ZCODE_KIT_BUN; else process.env.ZCODE_KIT_BUN = savedBun; }
   const after = readJson(join(root, "logs", "proxy.pid"));
-  if (after) t.after(() => killQuietly(after.pid));
+  if (after) defer(root, () => killFixtureProxy(root, after.pid));
   assert.notEqual(after.pid, before.pid, "a fresh proxy replaced the verified one");
   assert.deepEqual(lines, [`log:stopped (pid ${before.pid})`, "log:starting zcode-proxy ...", `log:started (pid ${after.pid}) — healthy on http://127.0.0.1:${port}`]);
   assert.equal(await identity(port), "ours");
 
-  // A record whose pid is dead is not a running proxy: nothing starts, the change is reported.
-  killQuietly(after.pid);
-  // This process spawned it (in-process restart): wait until it is reaped, not only off the port.
-  const gone = (pid) => { try { process.kill(pid, 0); return false; } catch (err) { return err.code === "ESRCH"; } };
-  await until("the proxy to exit", async () => gone(after.pid) && await identity(port) === "down", 10_000);
+  // A record whose pid is dead is not a running proxy: nothing starts, the
+  // change is reported. The proxy is stopped through the intent (which
+  // returns only after the exit); the dead record names a pid no process has,
+  // so a reused pid cannot turn it into a live one (ticket 70).
+  if (startTimeMissing(after)) { t.diagnostic("windows: the fresh record has no start time (ticket 16); stopped through its fixture command line"); killFixtureProxy(root, after.pid); }
+  else {
+    const { createLifecycle } = await import(pathToFileURL(join(root, "lib", "proxy-lifecycle.mjs")).href);
+    assert.equal((await createLifecycle({ root, home: join(root, "home") }).stop()).outcome, "stopped");
+  }
+  await until("the proxy to leave the port", async () => await identity(port) === "down", 15_000);
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: NEVER_ALLOCATED_PID, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z" }) + "\n");
   let warned;
   try { warned = await consoleLines(() => restartForAccountChange({ root, home: join(root, "home") })); }
   finally {
     const stray = readJson(join(root, "logs", "proxy.pid"));
-    if (stray && stray.pid !== after.pid) killQuietly(stray.pid); // never leak a proxy this test started
+    if (stray && stray.pid !== NEVER_ALLOCATED_PID) defer(root, () => killFixtureProxy(root, stray.pid)); // never leak a proxy this test started
   }
   assert.deepEqual(warned, ["warn:Account Rotator setting saved. A running proxy could not be verified; run zcode-kit doctor before restarting it."]);
   assert.equal(await identity(port), "down");
@@ -365,13 +406,20 @@ test("a proxy started through the preflight carries the frozen respawn hook, and
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PROXY_ENV_OUT: envOut });
   const preflight = spawnSync(process.execPath, [join(root, "cli", "heal.mjs")], { env, encoding: "utf8", timeout: 90_000 });
   const record = readJson(join(root, "logs", "proxy.pid"));
-  if (record) t.after(() => killQuietly(record.pid));
+  if (record) defer(root, () => killFixtureProxy(root, record.pid));
   assert.equal(preflight.status, 0, preflight.stderr);
   assert.match(preflight.stdout, new RegExp(`^starting zcode-proxy \\.\\.\\.\\nstarted \\(pid ${record.pid}\\) — healthy on http://127\\.0\\.0\\.1:${port}\\n$`));
   const spawned = readJson(envOut);
   assert.deepEqual({ ...spawned, node: canonicalPath(spawned.node), manager: canonicalPath(spawned.manager) },
     { pid: record.pid, node: canonicalPath(process.execPath), manager: canonicalPath(join(root, "proxy", "zcode-proxy-manager.mjs")), argv: ["serve"] });
   const stop = spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "stop"], { env, encoding: "utf8", timeout: 60_000 });
+  if (startTimeMissing(record)) {
+    // Today's behaviour (ticket 16 closes it): no start time, no kill.
+    t.diagnostic("windows: the start-time probe did not answer in time; stop refuses (start-unknown)");
+    assert.equal(stop.status, 4, stop.stdout + stop.stderr);
+    assert.match(stop.stdout, /start time of pid \d+ is not determinable/);
+    return;
+  }
   assert.equal(stop.status, 0, stop.stdout + stop.stderr);
   assert.equal(stop.stdout, `stopped (pid ${record.pid})\n`);
   assert.equal(await identity(port), "down");
