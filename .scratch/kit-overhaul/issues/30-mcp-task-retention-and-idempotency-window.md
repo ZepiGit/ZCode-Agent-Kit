@@ -178,3 +178,10 @@ Spec stories: 66, 67, 68, 135
   - the S5/short ownership question above (Owner Proxy);
   - `docs/MCP_API.md` and the release-notes sentence (31/53/54);
   - ticket 31 builds on this file's `TASK_RETENTION` and the seam 7 tests.
+
+- 2026-11-08 (implementer, addendum): merged the integration tip again at a59f48e (e88821f, ticket 19). The merge is clean and touches neither `mcp/**` nor the S5 entries of `expected-red.json`. Full suite on a59f48e (`reports/t30-final-{test,proxy,proxy-typecheck,mcp}.log`):
+  - `npm run test`: 837 tests, 818 pass, 0 fail, 19 skipped;
+  - `test:proxy`: 1413 pass, 0 fail (93 files);
+  - `test:proxy-typecheck`: clean;
+  - `test:mcp`: 102 tests, 101 pass, 0 fail, 1 skipped;
+  - `git status` is clean after the build.
