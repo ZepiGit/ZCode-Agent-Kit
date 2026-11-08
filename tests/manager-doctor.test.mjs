@@ -20,6 +20,7 @@ import { spawn } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { resolveBun } from "../lib/process.mjs";
 import { matchSnapshot } from "./snapshot-harness.mjs";
 
@@ -185,6 +186,85 @@ async function stateFixture(t, state) {
   if (state.proxy) await standIn(t, port, state.proxy);
   return { root, env: fixtureEnv(root, state.env) };
 }
+
+const managerDoctorModule = (root) => import(pathToFileURL(join(root, "lib", "proxy-doctor.mjs")).href);
+
+// The record intent in a process of its own, so everything it writes is seen
+// (this test runner's own reporter shares this process's stdout). The child's
+// environment has none of the fixture's overrides or its store: the checks
+// must read the env passed in.
+const RECORD_PROBE = `
+const [moduleUrl, root, home, envJson] = process.argv.slice(1);
+const { managerDoctor } = await import(moduleUrl);
+const record = await managerDoctor({ root, home, env: JSON.parse(envJson) });
+process.stdout.write("\\n@@record@@" + JSON.stringify(record));
+`;
+
+test("the manager's doctor returns its checks as records, reads the injected environment and prints nothing", { timeout: 120_000 }, async (t) => {
+  const state = STATES.find((s) => s.id === "proxy-down");
+  const { root, env } = await stateFixture(t, state);
+  const childEnv = { ...env };
+  for (const name of ["ZCODE_PROXY_PORT", "ZCODE_CLAIM_FIXTURE", "ZCODE_PROXY_CREDENTIALS_PATH"]) delete childEnv[name];
+  const run = await new Promise((resolveRun, reject) => {
+    const child = spawn(process.execPath, ["--input-type=module", "-e", RECORD_PROBE, pathToFileURL(join(root, "lib", "proxy-doctor.mjs")).href, root, join(root, "home"), JSON.stringify(env)], { cwd: root, env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (c) => { stdout += c; });
+    child.stderr.setEncoding("utf8").on("data", (c) => { stderr += c; });
+    child.once("error", reject);
+    child.once("close", (code) => resolveRun({ code, stdout, stderr }));
+  });
+  assert.equal(run.code, 0, run.stderr);
+  const at = run.stdout.indexOf("\n@@record@@");
+  assert.ok(at >= 0, `no record printed: ${run.stdout}`);
+  assert.deepEqual([run.stdout.slice(0, at), run.stderr], ["", ""], "the doctor intent prints nothing");
+  const record = JSON.parse(run.stdout.slice(at + "\n@@record@@".length));
+  assert.deepEqual([record.intent, record.code, record.outcome], ["doctor", 1, "failed"]);
+  assert.deepEqual(record.checks.map((c) => [c.name, c.ok]), [
+    ["bun available", true],
+    ["config exists", true],
+    ["key file exists", true],
+    ["proxy source installed", true],
+    ["proxy env overrides", false],
+    ["credentials store", true],
+    ["omp provider registered", true],
+    ["extension installed", true],
+    ["mcp bridge installed", true],
+    ["mcp bridge deps", true],
+    ["claude adapter artifact", true],
+    ["codex adapter artifact", true],
+    ["proxy reachable + identity", false],
+  ]);
+  const byName = Object.fromEntries(record.checks.map((c) => [c.name, c.detail]));
+  // The overrides and the explicit store come from the injected env, not this process's.
+  assert.equal(byName["proxy env overrides"], "ignored by the kit-managed proxy (unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE");
+  assert.equal(byName["credentials store"], "ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine");
+  assert.equal(byName["proxy reachable + identity"], "health=down");
+});
+
+test("the manager's doctor record for a passing installation is code 0, outcome ok, with the JWT age as an info check", { timeout: 120_000 }, async (t) => {
+  const { root, env } = await stateFixture(t, STATES.find((s) => s.id === "proxy-running"));
+  const { managerDoctor } = await managerDoctorModule(root);
+  const record = await managerDoctor({ root, home: join(root, "home"), env });
+  assert.deepEqual([record.code, record.outcome], [0, "ok"]);
+  assert.equal(record.checks.filter((c) => c.ok !== true).length, 0);
+  assert.deepEqual(record.checks.at(-1), { name: "start-plan JWT age (info)", ok: true, detail: "5.0h since issue — age is informational, validity is the auth check above" });
+});
+
+test("zcode-kit doctor --json counts checks, not lines: a Bun version string with a FAIL-looking line stays one passing check", {
+  timeout: 120_000,
+  skip: process.platform === "win32" ? "the fake Bun is a POSIX shell script (resolveBun accepts only .exe on Windows)" : false,
+}, async (t) => {
+  // The passing installation, with a Bun that prints a second, row-shaped
+  // line for --version and runs the real Bun for everything else.
+  const { root, env } = await stateFixture(t, STATES.find((s) => s.id === "proxy-running"));
+  const fakeBun = join(root, "fake-bun");
+  writeFileSync(fakeBun, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '1.4.2\\nFAIL  injected — from a version string\\n'; exit 0; fi\nexec "${env.ZCODE_KIT_BUN}" "$@"\n`, { mode: 0o755 });
+  const run = await spawnKit(root, join("cli", "zcode-kit.mjs"), ["doctor", "--json"], { ...env, ZCODE_KIT_BUN: fakeBun });
+  const report = JSON.parse(run.stdout);
+  assert.deepEqual(report.checks[0], { name: "bun available", ok: true, detail: `${fakeBun} (1.4.2\nFAIL  injected — from a version string)` });
+  assert.deepEqual(report.checks.filter((c) => /injected/.test(c.name)), [], "no check is made up from a line inside a detail");
+  assert.deepEqual([run.code, report.ok, report.failed], [0, true, 0]);
+});
 
 for (const state of STATES) {
   test(`manager CLI doctor, ${state.title}: the legacy rows and exit code, byte for byte`, { timeout: 120_000 }, async (t) => {
