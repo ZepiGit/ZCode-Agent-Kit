@@ -29,7 +29,7 @@ const SOURCE = /\.(?:mjs|cjs|js|ts)$/;
 /** Committed data trees, generated fixture homes and dependencies: not test code. */
 const SKIP_DIRS = new Set([
   "tests/snapshots", "tests/ux-before/linux", "tests/ux-before/windows", "tests/ux-before/json-extra",
-  "tests/fixtures", "tests/memory/fixtures", "tests/fakehome",
+  "tests/fixtures/origin-main-9e45d05", "tests/fakehome",
 ]);
 /**
  * Manual tools against the owner's own running proxy or a hand-started mock;
