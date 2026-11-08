@@ -2,7 +2,7 @@
 
 **Blocked by:** 70 (Windows: "stop cleanly kills a verified-own process" finds the process still alive)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: low
@@ -84,3 +84,5 @@ ADR: no
 - `lib/sampler.mjs` `scanWindows` filters the latest poll with a pid-only `alive`, so a reused pid keeps a dead process in `scan()` until the next poll.
 - `loop.test.mjs` orphan test `finally`: it kills its orphans by pid. They sleep 30 s, longer than the test runs, so the risk is low.
 - Ticket 70's kit-side note (stop path `waitForExit` by pid) stands.
+
+- Merged 2026-11-08 as 9e982959396383a1dd22118e0d17e631fc226665 (ticket/72-memory-tests-pid-identity at 271bdf7 into 3a796b4; first merge, never reverted, so no revert-of-revert step). No conflict; git auto-merged `tests/memory/loop.test.mjs` (shared with ticket 71). Fast suite on Bun 1.4.2: kit 866/884 (18 skipped, 0 fail; the first run had 1 fail, `tests/json-superset.test.mjs` "every --json output ... superset": `accounts health --json (down): exit 0, baseline 1`, the capture's "down" state seeing a listener on the shared fixture port 18458; ticket 72 does not touch that test or the capture; `node --test tests/json-superset.test.mjs` alone passed 3/3 and the full rerun was clean), proxy 1451/1451 (98 files), mcp 99/100 (1 skipped, 0 fail); `mcp/zcode-harness-mcp/dist/` unchanged after the build (B5); lockfiles unchanged (npm ci only). Memory-loop tests (`verdict`, `loop`, `win-sampler`): 204/209 (5 skipped, 0 fail). Memory loop `node tests/memory/job.mjs --os linux --only S3/omp,S3/hung` (port 19720): ratchet holds, exit 0; S3/hung RED only on tolerated checks (failed-launches, stale-lock-after-round: ticket 16; peak:kit, procPeak:launcher, procPeak:proxy: ticket 37); S3/omp RED only on omp:concurrent-preflights (ticket 35); summary under `/home/AgentKit/overhaul-tools/merge-72-memloop/`. Pre-merge CI: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42483787372 (staging/72 on the tip with 67 and 36, all 8 jobs green). Sanity diff: staging/72's last commit (ee48822) merges the ticket into the tip 7555b87, so the `^1..` variant gives the ticket's 6 `tests/memory/` files; 5 are byte-identical to staging/72 after the merge; `loop.test.mjs` differs only by ticket 71's change (the staging/72..HEAD diff equals `git diff 7555b87 3a796b4` for that file, and this ticket's diff on the tip equals its diff on 7555b87, so 72's hunks are intact). The `^2..` variant lists the tip's files since the ticket forked (cli, lib, proxy, mcp, tests); of those, only ticket 71's `job.mjs`, `ratchet.mjs`, `loop.test.mjs`, `verdict.test.mjs` differ from HEAD. All 11 non-.scratch differences between staging/72 and HEAD equal `git diff 7555b87 3a796b4` exactly, all from ticket 71 (merge a8e18f5). Logs: `reports/merge-72-{npmci,kit,kit-jsonsuperset-rerun,kit-rerun,proxy,mcp,memtests,memloop}.log`.
