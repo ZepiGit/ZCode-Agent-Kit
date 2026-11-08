@@ -105,6 +105,24 @@ export function refusedOverStaleLock({ start, lock, proxies, port, portsOf }) {
   return { startCode: start.code, stderr: stderr.split("\n").slice(-3).join("\n").slice(0, 600), lock: { path: lock.path, holderPid: lock.holderPid, holderAlive: false }, proxiesOfRun: proxies.length, serving };
 }
 
+/**
+ * A round's failed launches. The kill-holder adversary SIGKILLs one of the
+ * round's own launches (the lock holder: a harness closed mid-start); that
+ * launch was ended by the scenario, so it is reported apart and never counts
+ * as failed. Every other launch that did not exit 0 is a failed launch
+ * (`failed-launches`, budget 0 "incl. a killed lock holder": the killed
+ * holder must not make any OTHER launch fail). Matched by pid only.
+ */
+export function launchOutcomes(results, adversary = null) {
+  const victim = Number.isInteger(adversary?.killed) ? adversary.killed : null;
+  const line = (r) => `${r.via}#${r.i} code=${r.code} ${r.tail ?? ""}`;
+  const killed = results.filter((r) => victim !== null && r.pid === victim && r.code !== 0);
+  return {
+    failedLaunches: results.filter((r) => r.code !== 0 && !killed.includes(r)).map(line),
+    killedByAdversary: killed.map(line),
+  };
+}
+
 /** The S3 check a refused start in the stale-lock round turns RED (owned with S3/hung by ticket 16). */
 export function refusedStartCheck(rounds) {
   const refused = rounds.filter((r) => r.startRefused);
@@ -181,7 +199,7 @@ export async function run(ctx) {
     })();
     const launches = Array.from({ length: n }, (_, i) => {
       const useRun = kind === "run" || (kind === "mixed" && i % 2 === 0);
-      return (useRun ? kit.launch("opencode") : kit.preflight()).then((r) => ({ i, via: useRun ? "run" : "preflight", code: r.code, ms: r.ms, tail: (r.out + r.err).trim().split("\n").slice(-1)[0]?.slice(0, 200) }));
+      return (useRun ? kit.launch("opencode") : kit.preflight()).then((r) => ({ i, via: useRun ? "run" : "preflight", pid: r.pid, code: r.code, ms: r.ms, tail: (r.out + r.err).trim().split("\n").slice(-1)[0]?.slice(0, 200) }));
     });
     const adv = adversary ? adversary() : null;
     const results = await Promise.all(launches);
@@ -191,6 +209,7 @@ export async function run(ctx) {
     await poll;
     const after = proxies();
     const rec = kit.pidRecord();
+    const launched = launchOutcomes(results, advResult);
     const result = {
       name, n, kind, tFrom, tTo: ctx.elapsed(),
       proxiesBefore: before,
@@ -199,7 +218,8 @@ export async function run(ctx) {
       distinctProxyProcesses: seen.size,
       proxiesAfter: after.length,
       pidFileMatchesListener: !!rec && after.some((p) => p.pid === rec.pid && portsOf(p.pid).includes(kit.port)),
-      failedLaunches: results.filter((r) => r.code !== 0).map((r) => `${r.via}#${r.i} code=${r.code} ${r.tail ?? ""}`),
+      failedLaunches: launched.failedLaunches,
+      killedByAdversary: launched.killedByAdversary,
       launchMs: results.map((r) => r.ms).sort((a, b) => a - b),
       staleLockLeft: existsSync(lockFile) ? readFileSync(lockFile, "utf8").slice(0, 120) : null,
       adversary: advResult,

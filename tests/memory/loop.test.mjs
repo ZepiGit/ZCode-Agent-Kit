@@ -924,12 +924,19 @@ const CI_REFUSED = {
 // stale-lock round, it is a harness failure.
 const S3_HUNG_REFUSED_RUN = join(dirname(CI_S3_HUNG), "local-20261107-s3-hung-refused-linux-summary.json");
 
-test("job: a real S3/hung run whose stale-lock start was refused passes the gate as ticket 16's RED; cut or unchecked it is a harness failure", () => {
+test("job: a real S3/hung run whose stale-lock start was refused passes the evidence gate as RED; the lock checks ticket 16 removed now fail it; cut or unchecked it is a harness failure", () => {
   const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: S3_HUNG_REFUSED_RUN });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Round 15 Q1: the refusal and the lock checks are ticket 16's, the memory peaks ticket 37's.
-  assert.deepEqual(row, { key: "S3/hung", outcome: "RED", ticket: "16, 37", owners: ["16", "37"], note: "S3/hung: RED on peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:proxy, exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round, owned by ticket 16 (exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round), ticket 37 (peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:proxy)" });
+  // The gate: a measured RED, not a harness failure.
+  assert.equal(row?.outcome, "RED", r.stdout + r.stderr);
   assert.ok(result.redChecks.includes("start-over-stale-lock"), result.redChecks.join());
+  // Ticket 16 removed failed-launches and stale-lock-after-round from S3/hung
+  // (Round 15 Q1 condition 5): this pre-fix run's REDs on them are unowned now.
+  assert.equal(r.status, 1, "the ratchet fails on the removed names");
+  const unowned = r.stdout.split("\n").filter((l) => / not owned by /.test(l)).map((l) => l.trim());
+  assert.deepEqual(unowned, [
+    "- S3/hung: RED on failed-launches, not owned by tickets 16, 37 (linux, Round 14 Q1, Round 15 Q1); the RED comes back as an ownership question, do not edit owners",
+    "- S3/hung: RED on stale-lock-after-round, not owned by tickets 16, 37 (linux, Round 14 Q1, Round 15 Q1); the RED comes back as an ownership question, do not edit owners",
+  ]);
   const dir = mkdtempSync(join(tmpdir(), "memloop-s3hung-"));
   try {
     const run = JSON.parse(readFileSync(S3_HUNG_REFUSED_RUN, "utf8"));
@@ -1726,4 +1733,27 @@ test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 
   const orphan = s5LinuxReplay((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 }));
   assert.equal(orphan.r.status, 1, orphan.r.stdout);
   assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 30 \(linux, Round 14 Q1, Round 15 Q1\)/);
+});
+
+// Ticket 16: the kill-holder adversary SIGKILLs one of the round's own
+// launches (the lock holder). That launch was ended by the scenario and is
+// reported apart; every OTHER launch that did not exit 0 is a failed launch,
+// so `failed-launches` (budget 0, "incl. a killed lock holder") can be met.
+test("S3 failed launches leave out only the launch the kill-holder adversary killed, matched by pid", () => {
+  const results = [
+    { i: 0, via: "preflight", pid: 101, code: null, tail: "starting zcode-proxy ..." },
+    { i: 1, via: "preflight", pid: 102, code: 0, tail: "ok" },
+    { i: 2, via: "preflight", pid: 103, code: 4, tail: "safe start refused" },
+    { i: 3, via: "preflight", pid: 104, code: null, tail: "killed by something else" },
+  ];
+  assert.deepEqual(s3Scenario.launchOutcomes(results, { killed: 101, afterMs: 150 }), {
+    failedLaunches: ["preflight#2 code=4 safe start refused", "preflight#3 code=null killed by something else"],
+    killedByAdversary: ["preflight#0 code=null starting zcode-proxy ..."],
+  });
+  // No adversary, or one that killed nobody: every non-zero launch counts.
+  for (const adversary of [null, { killed: null, reason: "no holder observed" }]) {
+    assert.equal(s3Scenario.launchOutcomes(results, adversary).failedLaunches.length, 3);
+  }
+  // A victim pid that exited 0 (the kill came too late) is neither.
+  assert.deepEqual(s3Scenario.launchOutcomes([{ i: 0, via: "preflight", pid: 101, code: 0 }], { killed: 101 }), { failedLaunches: [], killedByAdversary: [] });
 });
