@@ -247,3 +247,7 @@ So 21 does not come back on the hard limit. The soft limit: windows commit peaks
 - `npm run test:mcp` (`t21r2-full-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped; `dist/` unchanged.
 
 The memory-loop and footprint evidence above stands: 21's product code is unchanged, and the merged tickets touch the solver, collections, MCP and measurement rules, none of 21's paths.
+- Ticket 72 landed while round 2 ran (tip `9e98295`). I merged it as `2414c44`; the one conflict was this file, and I kept both texts, the orchestrator's round 25 line before the implementer sections. Suites on the merged tree:
+  - kit (`t21r2-full2-kit`): 866/884, 18 skipped, 0 fail;
+  - proxy (`t21r2-full2-proxy`): 1473 pass, 0 fail, 101 files; typecheck clean;
+  - mcp (`t21r2-full2-mcp`): 99/100, 1 skipped, 0 fail.
