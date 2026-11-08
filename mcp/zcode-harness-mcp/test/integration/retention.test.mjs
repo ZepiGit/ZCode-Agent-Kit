@@ -11,10 +11,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { startBridge } from './client.mjs';
+import { BRIDGE_NODE_FLAGS, startBridge } from './client.mjs';
 
 const DAY = 24 * 60 * 60 * 1000;
 const clockPreload = pathToFileURL(path.join(import.meta.dirname, '..', 'fixture', 'clock-offset.mjs')).href;
+const scanPreload = pathToFileURL(path.join(import.meta.dirname, '..', 'fixture', 'scan-count.mjs')).href;
 
 function freshDataDir(t) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-retention-'));
@@ -168,6 +169,72 @@ test('the task start tool states the idempotency window', async () => {
     const { tools } = await c.result('tools/list', {});
     const start = tools.find((tool) => tool.name === 'zcode_task_start');
     assert.ok(start.description.includes('Idempotency keys are remembered for as long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after that the same key starts a new task.'));
+  } finally { await c.stop(); }
+});
+
+// Per-request retention work (the ticket 30 round 4 regression): checking the
+// retention on every lookup must not visit every retained task. A full scan per
+// request is quadratic garbage over a bridge's life; on windows it raised the
+// bridge's commit growth in S5/short (400 tasks, no eviction) by ~7 %/1k.
+async function lookupWork(t, retained) {
+  const dataDir = freshDataDir(t);
+  seedCompleted(dataDir, retained);
+  const countFile = path.join(dataDir, 'scan-count.json');
+  const c = await startBridge({ reuseDataDir: dataDir, nodeArgs: [...BRIDGE_NODE_FLAGS, '--import', scanPreload], env: { ZCODE_TEST_SCAN_COUNT: countFile } });
+  const read = async () => { await new Promise((r) => setTimeout(r, 120)); return JSON.parse(fs.readFileSync(countFile, 'utf8')); };
+  try {
+    await c.tool('zcode_health', {});
+    const before = await read();
+    let lookups = 0;
+    for (let k = 0; k < 10; k++) {
+      const taskId = seedId(k);
+      assert.equal((await c.tool('zcode_task_get', { taskId })).taskId, taskId);
+      assert.equal((await c.tool('zcode_task_result', { taskId })).responseText, `stored ${taskId}`);
+      await c.tool('zcode_task_events', { taskId });
+      assert.equal((await c.tool('zcode_task_wait', { taskId, timeoutMs: 0 })).state, 'completed');
+      lookups += 4;
+    }
+    const after = await read();
+    return { mapVisits: (after.mapVisits - before.mapVisits) / lookups, dateParses: (after.dateParses - before.dateParses) / lookups };
+  } finally { await c.stop(); }
+}
+
+test('a lookup does not visit the retained tasks: per-request work is the same with 10 and with 400 of them', async (t) => {
+  const few = await lookupWork(t, 10);
+  const many = await lookupWork(t, 400);
+  assert.ok(many.mapVisits - few.mapVisits <= 1, `Map elements visited per lookup: ${few.mapVisits} with 10 tasks, ${many.mapVisits} with 400`);
+  assert.ok(many.dateParses - few.dateParses <= 1, `Date.parse calls per lookup: ${few.dateParses} with 10 tasks, ${many.dateParses} with 400`);
+});
+
+// Adversarial for the O(1) check: the index must see every record change, not
+// only what restore loaded. With nothing restored, a task finished at run time
+// still ages out, and a follow-up turn restarts its age from its new finish.
+test('a task finished at run time ages out with nothing restored, and a follow-up restarts its age', async (t) => {
+  const dataDir = freshDataDir(t);
+  const clockFile = path.join(dataDir, 'clock-offset');
+  fs.writeFileSync(clockFile, '0');
+  const c = await startBridge({ reuseDataDir: dataDir, env: { NODE_OPTIONS: `--import=${clockPreload}`, FAKE_CLOCK_FILE: clockFile } });
+  const setOffset = async (ms) => { fs.writeFileSync(clockFile, String(ms)); await new Promise((r) => setTimeout(r, 200)); };
+  const run = async (prompt) => {
+    const started = await c.tool('zcode_task_start', { workspacePath: c.workspaceDir, prompt, readOnly: true, idempotencyKey: `${prompt}-key` });
+    assert.equal((await c.tool('zcode_task_wait', { taskId: started.taskId, timeoutMs: 15_000 })).state, 'completed');
+    return started.taskId;
+  };
+  try {
+    const reopened = await run('reopened');
+    const aged = await run('aged');
+    await setOffset(6 * DAY);
+    await c.tool('zcode_task_input', { taskId: reopened, content: 'follow-up' });
+    assert.equal((await c.tool('zcode_task_wait', { taskId: reopened, timeoutMs: 15_000 })).state, 'completed');
+
+    await setOffset(7 * DAY + 60_000);
+    await assertNotFound(c, aged);
+    assert.deepEqual(taskFiles(dataDir, aged), []);
+    assert.notEqual((await c.tool('zcode_task_start', { workspacePath: c.workspaceDir, prompt: 'x', readOnly: true, idempotencyKey: 'aged-key' })).taskId, aged, 'the aged key starts a new task');
+    assert.equal((await c.tool('zcode_task_get', { taskId: reopened })).state, 'completed', 'the follow-up finished 1 day ago');
+
+    await setOffset(13 * DAY + 2 * 60_000);
+    await assertNotFound(c, reopened);
   } finally { await c.stop(); }
 });
 
