@@ -136,22 +136,27 @@ export class CdnDiskPruner {
       const busy = !header && !(now - stat.mtimeMs >= CDN_DISK_WRITE_GRACE_MS);
       entries.push({ name, size: stat.size, time, busy, dev: stat.dev, ino: stat.ino, mtimeMs: stat.mtimeMs });
     }
-    const kept = new Set<Entry>();
-    for (const entry of entries) {
-      if (!entry.busy && now - entry.time >= this.ageLimitMs && this.remove(entry)) {
-        report.removed++;
-        report.removedBytes += entry.size;
-      } else kept.add(entry);
-    }
     let total = 0;
-    for (const entry of kept) total += entry.size;
+    for (const entry of entries) total += entry.size;
+    const kept = new Set<Entry>(entries);
+    const replaced = new Map<string, number>();
+    const removeEntry = (entry: Entry) => {
+      const result = this.remove(entry);
+      total += result.size - entry.size;
+      if (result.gone) { kept.delete(entry); report.removed++; report.removedBytes += entry.size; }
+      else if (result.replaced) { kept.delete(entry); replaced.set(entry.name, result.size); } // newer: not a candidate
+    };
+    for (const entry of entries) {
+      if (!entry.busy && now - entry.time >= this.ageLimitMs) removeEntry(entry);
+    }
     if (total > this.maxBytes) {
       const oldestFirst = [...kept].sort((a, b) => a.time - b.time || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
       for (const entry of oldestFirst) {
         if (total <= this.maxBytes) break;
-        if (!entry.busy && this.remove(entry)) { total -= entry.size; kept.delete(entry); report.removed++; report.removedBytes += entry.size; }
+        if (!entry.busy && kept.has(entry)) removeEntry(entry);
       }
     }
+    for (const [name, size] of replaced) this.sizes.set(name, size);
     for (const entry of kept) {
       this.sizes.set(entry.name, entry.size);
       if (!entry.busy) this.nextExpiry = Math.min(this.nextExpiry, entry.time + this.ageLimitMs);
@@ -162,14 +167,26 @@ export class CdnDiskPruner {
     return report;
   }
 
-  /** True when the entry is gone afterwards (removed here or already vanished). */
-  private remove(entry: Entry): boolean {
+  /**
+   * Removes one entry. `gone`: it no longer exists (removed here, or already
+   * vanished because another pruner won the race). `size`: what the name
+   * holds afterwards. Another installation may have published a new envelope
+   * under the same name since the scan: that is a different, newer file and
+   * is left alone. Any other failure (Windows refuses to delete a file another
+   * process holds open without delete sharing) leaves the entry as it was.
+   */
+  private remove(entry: Entry): { gone: boolean; size: number; replaced: boolean } {
     const file = path.join(this.directory, entry.name);
     try {
+      const now = fs.lstatSync(file);
+      if (now.dev !== entry.dev || now.ino !== entry.ino || now.size !== entry.size || now.mtimeMs !== entry.mtimeMs) {
+        return { gone: false, size: now.isFile() ? now.size : 0, replaced: true };
+      }
       fs.unlinkSync(file);
-      return true;
+      return { gone: true, size: 0, replaced: false };
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "ENOENT";
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { gone: true, size: 0, replaced: false };
+      return { gone: false, size: entry.size, replaced: false };
     }
   }
 }

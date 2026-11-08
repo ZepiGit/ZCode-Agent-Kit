@@ -199,3 +199,101 @@ describe("CDN disk prune skips temp files and files being written", () => {
     expect(listing(dir)).toEqual([11, 12, 13, 14].map((i) => nameOf(urlOf(i))).sort());
   });
 });
+
+describe("CDN disk prune with several installations sharing the directory", () => {
+  it("does not delete an entry another installation published after the scan saw the old one", () => {
+    const dir = directory();
+    let t = T0;
+    for (let i = 0; i < 5; i++) largeEnvelope(dir, urlOf(i), T0 - (5 - i) * HOUR, 60 * MiB);
+    const victim = path.join(dir, nameOf(urlOf(0)));
+    const fresh = bodyOf(0);
+    const open = fs.openSync.bind(fs);
+    let examined = false;
+    let replaced = false;
+    // Another installation renames a fresh envelope over the oldest entry
+    // while this one is still examining the directory.
+    const hook = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, ...rest: unknown[]) => {
+      if (String(file) === victim) examined = true;
+      else if (examined && !replaced && path.dirname(String(file)) === dir) {
+        replaced = true;
+        const header = Buffer.from(JSON.stringify({ version: 1, fetchedAt: T0, length: fresh.length, sha256: sha(fresh) }) + "\n");
+        fs.writeFileSync(victim + ".other.tmp", Buffer.concat([header, fresh]));
+        fs.renameSync(victim + ".other.tmp", victim);
+      }
+      return (open as (...args: unknown[]) => number)(file, ...rest);
+    }) as typeof fs.openSync);
+    try { new CaptchaCdnCache({ directory: dir, now: () => t }); } finally { hook.mockRestore(); }
+    expect(replaced).toBe(true);
+    const served = new CaptchaCdnCache({ directory: dir, now: () => t }).get(urlOf(0));
+    expect(served?.source).toBe("disk");
+    expect(served?.body.equals(fresh)).toBe(true);
+    // Counted at its new size, so no other entry is removed in its place.
+    expect(listing(dir)).toEqual([0, 1, 2, 3, 4].map((i) => nameOf(urlOf(i))).sort());
+    expect(totalBytes(dir)).toBeLessThanOrEqual(256 * MiB);
+  });
+
+  it("never throws when entries vanish at any step of a prune", () => {
+    const fns = ["readdirSync", "lstatSync", "statSync", "openSync", "readSync", "fstatSync", "unlinkSync", "readFileSync"] as const;
+    // Count the filesystem calls one prune makes, then rerun it once per call
+    // with every entry deleted just before that call (another pruner won the race).
+    const run = (vanishAt: number) => {
+      const dir = directory();
+      for (let i = 0; i < 4; i++) largeEnvelope(dir, urlOf(i), T0 - (40 - i) * DAY, 100 * MiB);
+      legacy(dir, nameOf(urlOf(9)), 100 * MiB, T0 - 40 * DAY);
+      let calls = 0;
+      const spies = fns.map((fn) => {
+        const real = (fs[fn] as (...args: unknown[]) => unknown).bind(fs);
+        return spyOn(fs, fn).mockImplementation(((...args: unknown[]) => {
+          if (calls++ === vanishAt) for (const name of fs.readdirSync(dir)) fs.rmSync(path.join(dir, name), { force: true });
+          return real(...args);
+        }) as never);
+      });
+      let cache: CaptchaCdnCache | undefined;
+      try {
+        cache = new CaptchaCdnCache({ directory: dir, now: () => T0 });
+        cache.put(urlOf(20), bodyOf(20));
+      } finally { for (const spy of spies) spy.mockRestore(); }
+      expect(cache.get(urlOf(20))?.body.equals(bodyOf(20))).toBe(true);
+      for (const name of listing(dir)) expect(name).toMatch(/^[0-9a-f]{64}$/);
+      return calls;
+    };
+    const total = run(-1);
+    expect(total).toBeGreaterThan(5);
+    for (let k = 0; k < total; k++) run(k);
+  });
+
+  it("concurrent caches, pruners, deleters and slow writers in separate processes never throw, lose a file being written or serve corrupt bytes", async () => {
+    const dir = directory();
+    const sharer = path.join(import.meta.dir, "__fixtures__", "cdn-disk-sharer.ts");
+    const roles = ["cache", "cache", "cache", "pruner", "deleter", "temp", "legacy"];
+    const children = roles.map((role, id) => Bun.spawn([process.execPath, sharer, role, dir, String(id), "1500"], { stdout: "pipe", stderr: "pipe" }));
+    const results = await Promise.all(children.map(async (child) => ({
+      code: await child.exited,
+      out: await new Response(child.stdout).text(),
+      err: await new Response(child.stderr).text(),
+    })));
+    for (const r of results) expect({ code: r.code, err: r.err }).toEqual({ code: 0, err: "" });
+    const reports = results.map((r) => JSON.parse(r.out));
+    console.log(`sharers: ${reports.map((r) => `${r.role}#${r.id} ${JSON.stringify(r.counts)}`).join("; ")}`);
+    // The workload exercised what it must: writes, disk reads, publications through temp files, in-place writes.
+    const sum = (key: string) => reports.reduce((n, r) => n + (r.counts[key] ?? 0), 0);
+    expect(sum("put")).toBeGreaterThan(10);
+    expect(sum("hit:disk")).toBeGreaterThan(0);
+    expect(sum("published")).toBeGreaterThan(0);
+    expect(sum("written")).toBeGreaterThan(0);
+    // What is left is intact: complete envelopes whose bytes match their URL, and the legacy files.
+    const byName = new Map(Array.from({ length: 24 }, (_, i) => [nameOf(urlOf(i)), i]));
+    for (const name of listing(dir)) {
+      expect(name).toMatch(/^[0-9a-f]{64}$/);
+      const bytes = fs.readFileSync(path.join(dir, name));
+      const i = byName.get(name);
+      if (i === undefined) { expect(bytes.every((b) => b === 120)).toBe(true); continue; }
+      const end = bytes.indexOf(10);
+      const header = JSON.parse(bytes.subarray(0, end).toString("utf8"));
+      const body = bytes.subarray(end + 1);
+      expect(header.length).toBe(body.length);
+      expect(header.sha256).toBe(sha(body));
+      expect(body.subarray(0, 64).toString("latin1").startsWith(`/*url ${i} `)).toBe(true);
+    }
+  }, 30_000);
+});
