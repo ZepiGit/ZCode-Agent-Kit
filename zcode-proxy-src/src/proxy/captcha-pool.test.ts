@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { CaptchaTokenPool as SolverBackedPool, type CaptchaPoolOptions } from "./captcha-pool.js";
 
 const solveMock = mock(async (_scene: string, _region: string, _prefix: string, _beforeSolve?: () => void) => {
   return "x".repeat(64);
@@ -6,12 +7,13 @@ const solveMock = mock(async (_scene: string, _region: string, _prefix: string, 
 
 const recycleMock = mock((_reason: string) => {});
 
-mock.module("./captcha-solver.js", () => ({
-  runCaptchaSolve: solveMock,
-  shutdownCaptchaSolver: () => {},
-  captchaSolverConcurrency: () => 2,
-  getCaptchaSolverStats: () => ({
-    mode: "worker",
+// The pool's solver dispatcher, injected at the dispatcher interface (seam 3)
+// instead of replacing the captcha-solver module process-wide.
+const fakeSolver = {
+  run: solveMock,
+  concurrency: () => 2,
+  stats: () => ({
+    mode: "worker" as const,
     alive: false,
     busy: false,
     queueDepth: 0,
@@ -26,11 +28,15 @@ mock.module("./captcha-solver.js", () => ({
     lastRecycleAt: null,
     lastSdkScripts: null,
   }),
-  requestCaptchaSolverRecycle: recycleMock,
-  CAPTCHA_NODE_DIR: "/tmp",
-}));
+  requestRecycle: recycleMock,
+};
 
-const { CaptchaTokenPool } = await import("./captcha-pool.js");
+/** Every pool in this file runs over the fake dispatcher. */
+class CaptchaTokenPool extends SolverBackedPool {
+  constructor(opts: CaptchaPoolOptions = {}) {
+    super(opts, fakeSolver);
+  }
+}
 
 const CFG = {
   enabled: true,
