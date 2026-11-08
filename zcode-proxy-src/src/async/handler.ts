@@ -27,6 +27,7 @@ import { errorResponse } from "../proxy/handler.js";
 import { transformRequestBody } from "../proxy/body-transformer.js";
 import { buildAnthropicMetadataUserId } from "../proxy/trace-headers.js";
 import { inflateWithCap } from "../proxy/inflate.js";
+import { settleBodyBytes } from "../server/admission.js";
 import { translateRequestOpenAIToAnthropic, translateResponseAnthropicToOpenAI } from "../translator/openai-to-anthropic.js";
 import { anthropicSseToOpenaiSseWithKeepalive } from "./openai-stream-adapter.js";
 import type { AnthropicMessagesRequest, OpenAIChatRequest, AnthropicMessagesResponse } from "../translator/types.js";
@@ -103,6 +104,8 @@ async function readBody(req: Request): Promise<{ ok: true; body: string } | { ok
   }
   // Inflate `content-encoding: gzip` request bodies with the cap enforced on
   // the DECOMPRESSED size — a small gzip bomb must not bypass the byte cap.
+  // Admission (ADR-0004): charge the bytes really held from now on.
+  settleBodyBytes(req, total);
   const encoding = req.headers.get("content-encoding")?.toLowerCase().trim() ?? "";
   let bytes: Uint8Array = Buffer.concat(chunks);
   if (encoding === "gzip" || encoding === "x-gzip") {
@@ -114,6 +117,7 @@ async function readBody(req: Request): Promise<{ ok: true; body: string } | { ok
       return { ok: false, response: errorResponse(400, "invalid_request_error", "could not decompress gzip request body") };
     }
     bytes = inflated.bytes;
+    settleBodyBytes(req, Math.max(total, bytes.byteLength));
   }
   const body = new TextDecoder().decode(bytes);
   if (!body || body.length === 0) {
