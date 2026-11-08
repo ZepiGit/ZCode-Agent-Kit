@@ -2,7 +2,6 @@
   "linux": {
     "S1/burst4": "19",
     "S1/burst16": "19",
-    "S1/burst32": "19",
     "S1/bigbody": "19",
     "S2/short": "58",
     "S3/short": "37",
@@ -16,7 +15,6 @@
     "S1/burst1": { "ticket": "20", "state": "unstable" },
     "S1/burst4": "19",
     "S1/burst16": "19",
-    "S1/burst32": "19",
     "S1/bigbody": "19",
     "S1/stalled": "61",
     "S2/short": "58",
