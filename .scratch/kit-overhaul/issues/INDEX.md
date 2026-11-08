@@ -76,6 +76,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 70 | [Windows: "stop cleanly kills a verified-own process" finds the process still alive](70-windows-stop-verified-own-process-flake.md) | sol | high | — | ready-for-agent |
 | 71 | [Measurement rules for three rare tails: S7 retained heap, windows S1/short repetitions, the OMP no-op floor](71-measurement-rules-rare-tails.md) | sol | low | 67 | ready-for-agent |
 | 72 | [Memory-loop tests check a PID after the process died (Windows PID reuse)](72-memory-tests-pid-after-death.md) | sol | low | 70 | ready-for-agent |
+| 73 | [Memory loop: `whileFrozen` resume and `scanWindows` filter by PID only](73-freeze-and-scanwindows-pid-identity.md) | sol | medium | 72 | ready-for-agent |
 
 ## Initial frontier
 
