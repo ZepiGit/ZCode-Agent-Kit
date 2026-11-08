@@ -38,19 +38,6 @@ function finishedMs(rec) {
     const created = Date.parse(rec.createdAt);
     return Number.isFinite(created) ? created : -Infinity;
 }
-/** Cheap check without allocation: does any record exceed the retention at `now`? */
-function retentionExceeded(records, now) {
-    const cutoff = now - TASK_RETENTION.maxAgeMs;
-    let count = 0;
-    for (const rec of records) {
-        if (!EVICTABLE_STATES.includes(rec.state))
-            continue;
-        count += 1;
-        if (count > TASK_RETENTION.maxTerminalTasks || finishedMs(rec) < cutoff)
-            return true;
-    }
-    return false;
-}
 /** Ids to evict at `now`: the oldest terminal tasks beyond the count, plus every terminal task past the age limit. */
 function retentionVictims(records, now) {
     const cutoff = now - TASK_RETENTION.maxAgeMs;
@@ -83,6 +70,17 @@ export class TaskManager {
     bySession = new Map();
     startQueue = new Map();
     clock;
+    /**
+     * Retention index, so that the check on every request is O(1) instead of a
+     * scan of every retained task (a scan per request is garbage that grows with
+     * the retained set). `evictableCount` is the exact number of retained tasks
+     * in an evictable state; `oldestEvictableMs` is a lower bound of their finish
+     * times. Every change of a record goes through `persist()`, which updates
+     * both; a task leaving an evictable state can leave the bound too low, which
+     * costs one scan that recomputes it, never a missed eviction.
+     */
+    evictableCount = 0;
+    oldestEvictableMs = Infinity;
     constructor(runtime, interactions, store, config, clock = () => Date.now()) {
         this.runtime = runtime;
         this.interactions = interactions;
@@ -144,8 +142,33 @@ export class TaskManager {
         }
         if (n > 0)
             log.info("restored tasks from store", victims.size > 0 ? { count: n, evicted: victims.size } : { count: n });
+        this.reindexRetention();
         this.syncIngress();
         return n;
+    }
+    /** Recount the retention index from the retained tasks (restore, and after a scan). */
+    reindexRetention() {
+        let count = 0;
+        let oldest = Infinity;
+        for (const t of this.tasks.values()) {
+            t.retentionCounted = EVICTABLE_STATES.includes(t.record.state);
+            if (!t.retentionCounted)
+                continue;
+            count += 1;
+            oldest = Math.min(oldest, finishedMs(t.record));
+        }
+        this.evictableCount = count;
+        this.oldestEvictableMs = oldest;
+    }
+    /** Update the retention index for one task after its record changed. */
+    noteRetention(t) {
+        const evictable = EVICTABLE_STATES.includes(t.record.state);
+        if (evictable !== t.retentionCounted) {
+            this.evictableCount += evictable ? 1 : -1;
+            t.retentionCounted = evictable;
+        }
+        if (evictable)
+            this.oldestEvictableMs = Math.min(this.oldestEvictableMs, finishedMs(t.record));
     }
     deleteTaskFiles(taskId) {
         // Only ids the bridge mints; a hand-edited record cannot aim the prune elsewhere.
@@ -157,9 +180,8 @@ export class TaskManager {
     /** Evict the terminal tasks beyond the retention (memory, files, idempotency key). */
     enforceRetention() {
         const now = this.clock();
-        const records = (function* (tasks) { for (const t of tasks.values())
-            yield t.record; })(this.tasks);
-        if (!retentionExceeded(records, now))
+        // O(1) on every request: nothing can be beyond the retention unless the index says so.
+        if (this.evictableCount <= TASK_RETENTION.maxTerminalTasks && this.oldestEvictableMs >= now - TASK_RETENTION.maxAgeMs)
             return;
         const victims = retentionVictims([...this.tasks.values()].map((t) => t.record), now);
         for (const taskId of victims) {
@@ -175,6 +197,7 @@ export class TaskManager {
                 this.bySession.delete(rec.sessionId);
             this.deleteTaskFiles(taskId);
         }
+        this.reindexRetention();
         if (victims.length > 0)
             this.syncIngress();
     }
@@ -191,7 +214,11 @@ export class TaskManager {
             interactionIds: new Set(),
             warnings: [],
             errors: rec.error ? [rec.error] : [],
-            persist: () => this.store.writeJson(`tasks/${rec.taskId}.json`, rec),
+            retentionCounted: false,
+            persist: () => {
+                this.store.writeJson(`tasks/${rec.taskId}.json`, rec);
+                this.noteRetention(t);
+            },
             onTerminal: () => {
                 this.drainQueue();
                 // Persist the structured result eagerly so it survives restarts.
