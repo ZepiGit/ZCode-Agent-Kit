@@ -21,6 +21,7 @@ import crypto from "node:crypto";
 import vm from "node:vm";
 import { Worker } from "node:worker_threads";
 import { CaptchaCdnCache } from "./captcha-cdn-cache.js";
+import { isPeBundleUrl, StallCounts } from "./captcha-stall-counts.js";
 import { normalizeCaptchaError } from "./captcha-token.js";
 import { beginCaptchaAttempt, recordCaptchaRequest, recordCaptchaLoad, recordCaptchaEvaluation,
   lastCaptchaActivity, lastCaptchaPeUrl, captchaResourceId, captchaFailureSummary,
@@ -159,6 +160,15 @@ function shutdownSyncFetchWorker(): void {
 // Lazy construction validates environment settings on first use, not import.
 let _cdnCache: CaptchaCdnCache | undefined;
 function defaultCdnCache() { return _cdnCache ??= new CaptchaCdnCache(); }
+
+/**
+ * The solver generation's own bounded resources: this module is loaded once
+ * per solver generation (worker), so a new generation starts with an empty
+ * CDN memory tier and no stall counts. Diagnostics and seam-3 tests only.
+ */
+export function captchaGenerationResources() {
+  return { cdnCache: defaultCdnCache(), stallCounts: _stallCounts };
+}
 let _cookieCache = { cookies: [], ts: 0 };
 const COOKIE_CACHE_TTL_MS = 5 * 60 * 1000;
 const _DEBUG = /^(1|true|yes)$/i.test(
@@ -178,29 +188,27 @@ function captchaFetch(input, init = {}) {
 
 // ── Globals shared across solves ────────────────────────────────────────────
 // Request history lives in a WeakMap keyed by its actual window.
-const solveTimes = [];
 // Consecutive-stall tracker per pe bundle URL: the same cached pe version
 // can stall every attempt (bad rotated VM variant / stale cache). After two
 // stalls on one URL, evict its memory + disk cache entry so the next init
-// fetches fresh bytes from the CDN instead of re-stalling on them.
-const _stallCounts = new Map();
+// fetches fresh bytes from the CDN instead of re-stalling on them. Bounded to
+// 1,024 URLs (captcha-stall-counts.ts); like the CDN cache it lives in the
+// solver, so each solver generation starts with none.
+const _stallCounts = new StallCounts((peUrl, n) => {
+  if (!_DEBUG) {
+    process.stderr.write(`[pe-cache-evict] ${captchaResourceId(peUrl)} stalled ${n}x — evicting cache\n`);
+  }
+  defaultCdnCache().invalidate(peUrl);
+});
 // Set after a stall: the next solve in this process fetches dynamicJS fresh
 // (bypassing mem+disk cache) instead of re-using the bytes that just stalled.
 let _bypassPeCacheOnce = false;
 
 function noteStallAndMaybeEvict(peUrl) {
   try {
-    if (!peUrl || !/dynamicJS\//.test(peUrl)) return;
+    if (!isPeBundleUrl(peUrl)) return;
     _bypassPeCacheOnce = true;
-    const n = (_stallCounts.get(peUrl) || 0) + 1;
-    _stallCounts.set(peUrl, n);
-    if (n >= 2 && !_DEBUG) {
-      process.stderr.write(`[pe-cache-evict] ${captchaResourceId(peUrl)} stalled ${n}x — evicting cache\n`);
-    }
-    if (n >= 2) {
-      defaultCdnCache().invalidate(peUrl);
-      _stallCounts.delete(peUrl);
-    }
+    _stallCounts.stalled(peUrl);
   } catch (_) {}
 }
 
@@ -2412,7 +2420,7 @@ async function solveTraceless(opts, resources?: DomResources) {
     // only report errors from solves after this success.
     try {
       const okPe = w.__lastPeUrl;
-      if (okPe) _stallCounts.delete(okPe);
+      if (okPe) _stallCounts.solved(okPe);
       w.__capErrs = [];
     } catch (_) {}
 

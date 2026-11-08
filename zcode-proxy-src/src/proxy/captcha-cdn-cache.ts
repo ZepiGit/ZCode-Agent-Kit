@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { BoundedCollection } from "../runtime/bounded-collection.js";
 
 export const DEFAULT_CDN_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_CDN_TTL_MS = 2_147_483_647;
@@ -36,11 +37,25 @@ export interface CdnCacheOptions {
 
 const sha256 = (body: Buffer | string) => crypto.createHash("sha256").update(body).digest("hex");
 
+// The memory tier's bound (ADR-0009, spec §7): ≤ 64 MB of memory and ≤ 256
+// entries. It lives in the solver, so it also resets with each solver
+// generation. Eviction changes memory use only: an evicted entry is read back
+// from its disk envelope or fetched again.
+// Bodies are capped at half the memory bound because the runtime keeps the
+// memory of evicted bodies for a while: S2 measured a steady +26 MB over the
+// held bytes (64 MiB held → 90 MB, 32 MiB → 58 MB; ticket 25).
+export const CDN_MEMORY_MAX_ENTRIES = 256;
+export const CDN_MEMORY_MAX_BYTES = 32 * 1024 * 1024;
+
 export class CaptchaCdnCache {
   readonly directory: string;
   readonly ttlMs: number;
   private readonly now: () => number;
-  private readonly memory = new Map<string, CdnEntry>();
+  private readonly memory = new BoundedCollection<string, CdnEntry>({
+    maxEntries: CDN_MEMORY_MAX_ENTRIES,
+    maxBytes: CDN_MEMORY_MAX_BYTES,
+    sizeOf: (entry) => entry.body.length,
+  });
   private readonly pending = new Map<string, Promise<CdnEntry>>();
   // Only failed deletions need a tombstone. Do not read an invalidated disk
   // entry again merely because the filesystem temporarily refused unlink.
@@ -55,6 +70,11 @@ export class CaptchaCdnCache {
     if (!this.directory.trim()) throw new Error("CAPTCHA_CDN_CACHE_DIR must not be empty");
     this.ttlMs = parseCdnTtl(options.ttlMs);
     this.now = options.now ?? Date.now;
+  }
+
+  /** What the memory tier holds now: entries and body bytes (diagnostics and tests). */
+  memoryUsage(): { entries: number; bytes: number } {
+    return { entries: this.memory.size, bytes: this.memory.bytes };
   }
 
   private file(url: string): string {
