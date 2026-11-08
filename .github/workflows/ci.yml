@@ -118,10 +118,12 @@ jobs:
   # windows runs S1, S2 (offline fixture), S3, S4, S5 and S7 with the Windows
   # sampler (commit charge), each run in a Job Object with a job memory limit
   # and kill-on-close (read back before the run), plus a timeout
-  # (tests/memory/job.mjs, lib/caps.mjs).
+  # (tests/memory/job.mjs, lib/caps.mjs). S5/short runs 1,200 tasks since
+  # ticket 74 (~36 min per leg), so ubuntu's wall-time guard is 100 min (Owner
+  # Proxy Round 24 Q1 condition 9; a timeout, not a memory budget).
   memory-budget:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 150 || 75 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 150 || 100 }}
     strategy:
       fail-fast: false
       matrix:

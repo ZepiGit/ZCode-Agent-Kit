@@ -96,3 +96,34 @@ export function s3Budgets(os) {
 export function growthBudget(role, { fromT = 0, untilT = Infinity, warmupFraction = 0.25 } = {}) {
   return { role, axis: "progress", maxPctPer1k: MEMORY.growth.maxPctPer1k, risingWindows: MEMORY.growth.risingWindows, netRisePct: MEMORY.growth.netRisePct, warmupFraction, fromT, untilT };
 }
+
+/**
+ * S5/short after the retention bound (Owner Proxy Round 24 Q1, ticket 74;
+ * pre-registered there, never fitted to a run). 1,200 tasks with the per-task
+ * workload unchanged. growth:mcp-bridge is judged over the load from the first
+ * sample at task ≥ 600 (ADR-0009's 500-task bound plus 100 settling tasks) to
+ * the end, with no warm-up inside, under the unchanged budget and trend rule.
+ * warm-up-growth:mcp-bridge is the quantity S5/short judged before: the load
+ * cut at the sample where progress reaches task 400, the default 25 % warm-up.
+ * It is RED above its ceiling whatever the trend says: 55 %/1k on linux (RSS;
+ * 8.67 above the highest of 36 tip runs) and 30 %/1k on windows (commit;
+ * Round 13's bound, kept so that deleting the windows entry keeps a windows
+ * regression bound). The ceilings are regression bounds, not budgets.
+ */
+export const S5_SHORT = {
+  tasks: 1200,
+  judgedFromTask: 600,
+  warmUpUntilTask: 400,
+  warmUpCeilingPctPer1k: { linux: 55, windows: 30 },
+};
+
+/** S5's growth checks over the load window [fromT, untilT]: the long profile's one, or S5/short's two. */
+export function s5GrowthBudgets({ long = false, os, fromT, untilT }) {
+  if (long) return growthBudget("mcp-bridge", { fromT, untilT });
+  const ceiling = S5_SHORT.warmUpCeilingPctPer1k[os];
+  if (typeof ceiling !== "number") throw new Error(`S5/short: no warm-up ceiling for OS leg ${os}`);
+  return [
+    { ...growthBudget("mcp-bridge", { fromT, untilT, warmupFraction: 0 }), fromProgress: S5_SHORT.judgedFromTask },
+    { ...growthBudget("mcp-bridge", { fromT, untilT }), name: "warm-up-growth:mcp-bridge", untilProgress: S5_SHORT.warmUpUntilTask, ceiling },
+  ];
+}

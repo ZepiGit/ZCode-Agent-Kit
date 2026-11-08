@@ -1244,70 +1244,160 @@ test("job: windows S1/burst1 against the committed unstable entry prints its lin
   assert.doesNotMatch(high.stepSummary, /owned by ticket 20/);
 });
 
-// ── windows S5/short at the job seam (Round 13 Q1, ticket 66) ──────────────────
-// The real windows S5/short summary.json of CI run 42404639968 (staging/65, the
-// RED run: growth:mcp-bridge 23.71 %/1k commit, trend true) and of run
-// 42401136452 (staging/42, GREEN: 15.55, trend false), replayed through the job
-// against the committed list. Variants of the RED one are the adversaries.
-const CI_S5_RED = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ci-42404639968-s5-short-windows-summary.json");
-const CI_S5_GREEN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ci-42401136452-s5-short-windows-summary.json");
+// ── S5/short after the retention bound, at the job seam (Round 24 Q1, ticket 74) ──
+// Fixture series of one bridge (one sample every 5 tasks, 1.8 s per task, the
+// CI pace) judged by the scenario's own budgets (scenarios/s5-mcp.mjs
+// s5Budgets) and the real osVerdict through fixtures/fake-s5-run.mjs, then by
+// the job, its evidence gate and the committed list, which has no S5/short
+// entry on either leg. growth:mcp-bridge is judged over tasks 600–1,200 with
+// no warm-up inside, on the unchanged rule (over 5 %/1k AND a trend);
+// warm-up-growth:mcp-bridge is today's quantity (the load cut at the sample
+// where progress reaches 400, default 25 % warm-up) against 55 %/1k (linux,
+// RSS) and 30 %/1k (windows, commit), regardless of trend.
+const FAKE_S5_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-s5-run.mjs");
+const S5_STEP = 5; // tasks between samples
+const wiggle = (p) => ((p / S5_STEP) % 2 ? 0.15 : -0.15); // ±0.15 MB sample noise
+/** Growth of 14 MB until task 600 (the bound plus settling), then flat. */
+const toSixHundred = (p) => 86 + (14 * Math.min(p, 600)) / 600 + wiggle(p);
+/** The same, plus 20 MB per 1,000 tasks after task 600 (a bound that does not hold). */
+const onward = (p) => toSixHundred(p) + (20 * Math.max(0, p - 600)) / 1000;
+/**
+ * Linear growth to task 400, flat after it, whose warm-up value is exactly `pct`
+ * %/1k: over the samples at tasks 0, 5, …, 400 (81), the default 25 % warm-up
+ * drops 20, so tasks 100–400 are judged (mean task 250): pct = 100·b / (a + 0.25·b).
+ */
+const warmUpAt = (pct, a) => { const b = (pct * a) / (100 - 0.25 * pct); return (p) => a + (b * Math.min(p, 400)) / 1000; };
 
-function s5ReplayJob(summary) {
-  const home = mkdtempSync(join(tmpdir(), "memloop-s5-"));
-  const stepSummary = join(home, "step-summary.md");
-  writeFileSync(stepSummary, "");
-  let path = summary;
-  if (typeof summary !== "string") { path = join(home, "summary.json"); writeFileSync(path, JSON.stringify(summary)); }
-  const r = runJob(["--os", "windows", "--only", "S5/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "replay", FAKE_RUN_SUMMARY: path, GITHUB_STEP_SUMMARY: stepSummary });
-  let job = null;
-  try { job = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8")); } catch {}
-  const out = { r, job, row: job?.rows?.[0], result: job?.results?.[0], stepSummary: readFileSync(stepSummary, "utf8") };
-  rmSync(home, { recursive: true, force: true });
-  return out;
+function s5Series({ shape = "linux", mb, commitMB = null, until = 1200, at = null }) {
+  const progress = at ?? Array.from({ length: Math.floor(until / S5_STEP) + 1 }, (_, i) => i * S5_STEP);
+  const loadStartMs = 4000;
+  const samples = progress.map((p) => ({ t: loadStartMs + p * 1800, progress: p, mb: mb(p), ...(shape === "win32" ? { commitMB: commitMB(p) } : {}) }));
+  return { shape, loadStartMs, loadEndMs: samples.at(-1).t, emptyMB: 86, rebootMB: 90, failures: 0, samples };
 }
 
-/** The RED CI summary with its growth:mcp-bridge check (and outcome) changed. */
-function s5Variant(change) {
-  const s = JSON.parse(readFileSync(CI_S5_RED, "utf8"));
-  change(s, s.checks.find((c) => c.name === "growth:mcp-bridge"));
-  s.red = s.checks.some((c) => c.red);
-  s.outcome = s.red ? "RED" : "GREEN";
-  return s;
+function s5SeriesJob(series) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s5w-"));
+  try {
+    const seriesPath = join(home, "series.json");
+    writeFileSync(seriesPath, JSON.stringify(series));
+    const stepSummary = join(home, "step-summary.md");
+    writeFileSync(stepSummary, "");
+    const os = series.shape === "win32" ? "windows" : "linux";
+    const r = runJob(["--os", os, "--only", "S5/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_S5_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_S5_SERIES: seriesPath, GITHUB_STEP_SUMMARY: stepSummary });
+    let job = null;
+    let run = null;
+    try { job = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8")); } catch {}
+    try { run = JSON.parse(readFileSync(join(home, "job", "S5-short", "S5-short-fake", "summary.json"), "utf8")); } catch {}
+    const check = (name) => run?.checks?.find((c) => c.name === name);
+    return { r, job, row: job?.rows?.[0], result: job?.results?.[0], run, post: check("growth:mcp-bridge"), warm: check("warm-up-growth:mcp-bridge"), stepSummary: readFileSync(stepSummary, "utf8") };
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 }
 
-test("job: the windows S5/short runs of CI 42404639968 (RED) and 42401136452 (GREEN) pass as unstable, owned by ticket 74", () => {
-  for (const [fixture, outcome, line] of [
-    [CI_S5_RED, "RED", "S5/short: unstable (growth:mcp-bridge 23.71 %/1k commit, budget 5, bound 30, trend true), owned by ticket 74"],
-    [CI_S5_GREEN, "GREEN", "S5/short: unstable (growth:mcp-bridge 15.55 %/1k commit, budget 5, bound 30, trend false), owned by ticket 74"],
-  ]) {
-    const { r, row, result, stepSummary } = s5ReplayJob(fixture);
+test("job: S5/short with growth until task 600, then flat, is GREEN on both legs with no entry, and the warm-up value is under its ceiling", () => {
+  for (const series of [s5Series({ mb: toSixHundred }), s5Series({ shape: "win32", mb: (p) => toSixHundred(p) - 12, commitMB: toSixHundred })]) {
+    const { r, row, post, warm } = s5SeriesJob(series);
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.deepEqual([row.outcome, row.ticket, row.state, row.note], [outcome, "74", "unstable", line]);
-    assert.deepEqual(result.growthChecks.map((g) => [g.name, g.commitValue, g.gate, g.trend, g.insufficient]), [["growth:mcp-bridge", outcome === "RED" ? 23.71 : 15.55, "commit", outcome === "RED", false]]);
-    for (const text of [r.stdout, stepSummary]) {
-      assert.ok(text.includes(`- ${line}`), text);
-      assert.ok(text.includes(`| S5/short | ${outcome} (unstable) | ticket 74 |`), text);
+    assert.deepEqual([row.outcome, row.ticket], ["GREEN", null]);
+    assert.equal(post.red, false);
+    assert.ok(Math.abs(post.value) <= 0.5, `post-bound value ${post.value}`);
+    // 14 MB over tasks 0–600 is 23.3 MB/1k on a mean of ~92 MB over tasks 100–400: ~25.4 %/1k.
+    assert.equal(warm.red, false);
+    assert.ok(warm.value > 24 && warm.value < 27, `warm-up value ${warm.value}`);
+    if (series.shape === "win32") assert.deepEqual([post.gate, warm.gate], ["commit", "commit"]);
+  }
+});
+
+test("job: S5/short growth continuing after task 600 with a trend is RED on growth:mcp-bridge and fails the job (no entry lists it)", () => {
+  for (const series of [s5Series({ mb: onward }), s5Series({ shape: "win32", mb: toSixHundred, commitMB: onward })]) {
+    const { r, row, result, post, warm } = s5SeriesJob(series);
+    const os = series.shape === "win32" ? "windows" : "linux";
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.equal(row.outcome, "RED");
+    assert.deepEqual(result.redChecks, ["growth:mcp-bridge"]);
+    // 20 MB/1k on ~106 MB: ~18.8 %/1k, three trailing rising windows.
+    assert.ok(post.value > 17 && post.value < 20, `post-bound value ${post.value}`);
+    assert.equal(post.trend, true);
+    assert.equal(warm.red, false);
+    assert.match(r.stdout, new RegExp(`S5/short: RED but not listed in expected-red\\.json \\(${os}\\)`));
+  }
+});
+
+test("job: a warm-up value of 55.1 (linux) or 30.1 (windows commit) is RED on warm-up-growth:mcp-bridge alone while the post-bound window is GREEN; 55 and 30 pass", () => {
+  const cases = [
+    [s5Series({ mb: warmUpAt(55.1, 86) }), 55.1, true],
+    [s5Series({ mb: warmUpAt(55, 86) }), 55, false],
+    // windows: judged on commit; the working set is reported only (WS 10 beside commit 30.1, WS 45 beside commit 30).
+    [s5Series({ shape: "win32", mb: warmUpAt(10, 70), commitMB: warmUpAt(30.1, 79) }), 30.1, true],
+    [s5Series({ shape: "win32", mb: warmUpAt(45, 70), commitMB: warmUpAt(30, 79) }), 30, false],
+  ];
+  for (const [series, value, red] of cases) {
+    const label = `${series.shape} ${value}`;
+    const { r, row, result, post, warm } = s5SeriesJob(series);
+    assert.equal(warm.value, value, label);
+    assert.equal(warm.red, red, label);
+    assert.equal(warm.budget, series.shape === "win32" ? 30 : 55, label);
+    assert.equal(post.red, false, label);
+    assert.ok(Math.abs(post.value) <= 0.5, `${label}: post-bound ${post.value}`);
+    assert.equal(r.status, red ? 1 : 0, `${label}: ${r.stdout}${r.stderr}`);
+    assert.equal(row.outcome, red ? "RED" : "GREEN", label);
+    assert.deepEqual(result.redChecks, red ? ["warm-up-growth:mcp-bridge"] : [], label);
+    if (series.shape === "win32") {
+      assert.equal(warm.gate, "commit", label);
+      assert.equal(warm.commitValue, value, label);
+      assert.equal(warm.wsValue, value === 30.1 ? 10 : 45, label);
     }
   }
 });
 
-test("job: the replayed windows S5/short fails above 30, at 5, with another RED check, or without a growth value", () => {
-  const cases = {
-    "30.01": [s5Variant((s, g) => Object.assign(g, { value: 30.01, commitValue: 30.01 })), /S5\/short: unstable growth:mcp-bridge 30\.01 %\/1k \(commit\) is above the 30 %\/1k bound/],
-    "5, no trend": [s5Variant((s, g) => Object.assign(g, { value: 5, commitValue: 5, red: false, trend: false })), /S5\/short: growth:mcp-bridge 5 %\/1k \(commit\) is at budget \(≤ 5\) but listed for ticket 74/],
-    orphans: [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 })), /S5\/short: RED on orphans: the unstable entry accepts only growth:mcp-bridge/],
-    "task failures": [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "bridge:task-failures"), { red: true, value: 1 })), /S5\/short: RED on bridge:task-failures/],
-    "reboot cost 21": [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "bridge:reboot-cost-of-history"), { red: true, value: 21 })), /S5\/short: RED on bridge:reboot-cost-of-history/],
-    "procPeak 151 WS": [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "procPeak:mcp-bridge"), { red: true, value: 151, wsValue: 151 })), /S5\/short: RED on procPeak:mcp-bridge/],
-    insufficient: [s5Variant((s, g) => { for (const k of ["value", "commitValue", "wsValue"]) delete g[k]; Object.assign(g, { red: false, trend: false, detail: { samples: 3, insufficient: true } }); }), /S5\/short: unstable entry without a commit value of growth:mcp-bridge \(insufficient: 3 samples\): a measurement gap/],
-    "no growth check": [s5Variant((s) => { s.checks = s.checks.filter((c) => c.name !== "growth:mcp-bridge"); }), /S5\/short: unstable entry without a commit value of growth:mcp-bridge \(no growth:mcp-bridge check\): a measurement gap/],
-  };
-  for (const [label, [summary, pattern]] of Object.entries(cases)) {
-    const { r, row, stepSummary } = s5ReplayJob(summary);
-    assert.equal(r.status, 1, `${label}: ${r.stdout}${r.stderr}`);
-    assert.match(stepSummary, pattern, label);
-    assert.equal(row.note, undefined, label);
-    assert.doesNotMatch(stepSummary, /owned by ticket 74/, label);
+test("job: an S5/short load that ends before task 1,200, or fewer than 6 samples after task 600, is a harness failure, never GREEN", () => {
+  const head = Array.from({ length: 121 }, (_, i) => i * S5_STEP); // tasks 0–600
+  const cases = [
+    [s5Series({ mb: toSixHundred, until: 900 }), /growth:mcp-bridge: the load ended at task 900, before task 1200/],
+    [s5Series({ shape: "win32", mb: toSixHundred, commitMB: toSixHundred, until: 1195 }), /growth:mcp-bridge: the load ended at task 1195, before task 1200/],
+    [s5Series({ mb: toSixHundred, at: [...head, 750, 900, 1050, 1200] }), /growth:mcp-bridge: insufficient: 5 samples in tasks 600–1200 \(need ≥ 6\)/],
+  ];
+  for (const [series, pattern] of cases) {
+    const { r, row, result } = s5SeriesJob(series);
+    assert.equal(row.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+    assert.match(result.error, pattern);
+    assert.equal(r.status, 1);
+    assert.match(r.stdout, /S5\/short: harness failure \(exit 2\); a harness failure is never expected/);
+  }
+  // Six samples after task 600 are enough.
+  const six = s5SeriesJob(s5Series({ mb: toSixHundred, at: [...head.slice(0, -1), 600, 720, 840, 960, 1080, 1200] }));
+  assert.equal(six.r.status, 0, six.r.stdout + six.r.stderr);
+  assert.equal(six.post.detail.samples, 6);
+});
+
+test("job: a 400-task S5/short summary of the old rule (CI 42404639968 windows, 42436186573 linux) is a harness failure: it has no post-bound window", () => {
+  for (const [os, fixture] of [["windows", "ci-42404639968-s5-short-windows-summary.json"], ["linux", "ci-42436186573-s5-short-linux-summary.json"]]) {
+    const home = mkdtempSync(join(tmpdir(), "memloop-s5old-"));
+    try {
+      const r = runJob(["--os", os, "--only", "S5/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "replay", FAKE_RUN_SUMMARY: join(dirname(fileURLToPath(import.meta.url)), "fixtures", fixture) });
+      const job = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8"));
+      assert.equal(job.rows[0].outcome, "HARNESS FAILURE", `${os}: ${r.stdout}`);
+      assert.match(job.results[0].error, /growth:mcp-bridge: no window bounds recorded/);
+      assert.match(job.results[0].error, /warm-up-growth:mcp-bridge: missing/);
+      assert.equal(r.status, 1);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+});
+
+test("job: S5/short prints both windows' bounds in tasks and samples in summary.json and in the job summary", () => {
+  const { r, post, warm, result, stepSummary } = s5SeriesJob(s5Series({ shape: "win32", mb: (p) => toSixHundred(p) - 12, commitMB: toSixHundred }));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // 241 samples (tasks 0, 5, …, 1,200): the post-bound window is samples 120–240, the warm-up window samples 0–80.
+  assert.deepEqual(post.detail.window, { fromTask: 600, untilTask: null, firstTask: 600, lastTask: 1200, firstSample: 120, lastSample: 240, ofSamples: 241, samples: 121, warmupSamples: 0 });
+  assert.deepEqual(warm.detail.window, { fromTask: null, untilTask: 400, firstTask: 0, lastTask: 400, firstSample: 0, lastSample: 80, ofSamples: 241, samples: 81, warmupSamples: 20 });
+  assert.deepEqual(result.growthChecks.map((g) => [g.name, g.window.firstTask, g.window.lastTask, g.window.samples]), [["growth:mcp-bridge", 600, 1200, 121], ["warm-up-growth:mcp-bridge", 0, 400, 81]]);
+  for (const text of [r.stdout, stepSummary]) {
+    assert.match(text, /Growth windows \(Round 24 Q1[^\n]*\):/);
+    assert.match(text, new RegExp(`- S5/short growth:mcp-bridge: tasks 600–1200 \\(samples 120–240 of 241, 121 samples, warm-up 0\\): ${post.value} %/1k \\[commit ${post.commitValue} / WS ${post.wsValue}, gate commit\\], budget 5, trend false, slope ${post.detail.slopeMBPer1k} MB/1k on a mean of ${post.detail.meanMB} MB, window medians ${post.detail.windowMediansMB.join(", ")} MB: ok`));
+    assert.match(text, new RegExp(`- S5/short warm-up-growth:mcp-bridge: tasks 0–400 \\(samples 0–80 of 241, 81 samples, warm-up 20\\): ${warm.value} %/1k \\[commit ${warm.commitValue} / WS ${warm.wsValue}, gate commit\\], ceiling 30 regardless of trend, trend true, slope ${warm.detail.slopeMBPer1k} MB/1k on a mean of ${warm.detail.meanMB} MB, window medians ${warm.detail.windowMediansMB.join(", ")} MB: ok`));
   }
 });
 
@@ -1372,43 +1462,4 @@ test("job: a GREEN run of a listed entry with flipping checks passes and the sum
   });
   assert.equal(greenOrphan.r.status, 1, greenOrphan.r.stdout);
   assert.equal(greenOrphan.row.note, undefined);
-});
-
-// ── linux S5/short GREEN on the trend flag (Round 17 Q2) ───────────────────────
-// The real linux S5/short summary of CI run 42436186573 (staging/67, ticket 13's
-// tree): growth:mcp-bridge 39.53 %/1k RSS, eight times the 5 %/1k budget, GREEN
-// only because the net rise (9.7 %) missed the 10 % trend branch. Replayed through
-// the job against the committed list, it passes on the flipping mark and says so;
-// the same run with an orphan fails.
-const CI_S5_LINUX_GREEN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ci-42436186573-s5-short-linux-summary.json");
-
-function s5LinuxReplay(change = null) {
-  const home = mkdtempSync(join(tmpdir(), "memloop-s5l-"));
-  try {
-    let path = CI_S5_LINUX_GREEN;
-    if (change) {
-      const s = JSON.parse(readFileSync(CI_S5_LINUX_GREEN, "utf8"));
-      change(s);
-      s.red = s.checks.some((c) => c.red);
-      s.outcome = s.red ? "RED" : "GREEN";
-      path = join(home, "summary.json");
-      writeFileSync(path, JSON.stringify(s));
-    }
-    return fakeJob("replay", "S5/short", { FAKE_RUN_SUMMARY: path });
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-}
-
-test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 74", () => {
-  const { r, row, result } = s5LinuxReplay();
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(row.outcome, "GREEN");
-  assert.deepEqual(result.growthChecks.map((g) => [g.name, g.value, g.trend]), [["growth:mcp-bridge", 39.53, false]]);
-  const line = "S5/short: GREEN, listed for ticket 74 on flipping checks growth:mcp-bridge (Round 15 Q1)";
-  assert.equal(row.note, line);
-  assert.ok(r.stdout.includes(`- ${line}`), r.stdout);
-  const orphan = s5LinuxReplay((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 }));
-  assert.equal(orphan.r.status, 1, orphan.r.stdout);
-  assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 74 \(linux, Round 14 Q1, Round 15 Q1\)/);
 });

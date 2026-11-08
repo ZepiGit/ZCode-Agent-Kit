@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { osVerdict, verdict } from "./lib/verdict.mjs";
-import { MEMORY, OMP_LEG, PROCESSES, s3Budgets } from "./lib/budgets.mjs";
+import { MEMORY, OMP_LEG, PROCESSES, S5_SHORT, s3Budgets, s5GrowthBudgets } from "./lib/budgets.mjs";
 import { ompLegChecks } from "./lib/omp-leg.mjs";
 import { roleOf } from "./lib/sampler.mjs";
 import { dirname, join } from "node:path";
@@ -489,8 +489,8 @@ test("unstable is rejected on any other key and on linux S1/burst1; a plain list
   const ok = { ...unstableDoc };
   assert.deepEqual(validateExpectedRed(ok, { job: burstJob, issueIds: burstIds }), []);
   for (const [doc, pattern] of [
-    [{ linux: { "S1/burst1": UNSTABLE_ENTRY } }, /linux S1\/burst1: `unstable` is allowed for windows S1\/burst1, windows S5\/short only/],
-    [{ windows: { "S1/short": UNSTABLE_ENTRY } }, /windows S1\/short: `unstable` is allowed for windows S1\/burst1, windows S5\/short only/],
+    [{ linux: { "S1/burst1": UNSTABLE_ENTRY } }, /linux S1\/burst1: `unstable` is allowed for windows S1\/burst1 only/],
+    [{ windows: { "S1/short": UNSTABLE_ENTRY } }, /windows S1\/short: `unstable` is allowed for windows S1\/burst1 only/],
     [{ windows: { "S1/burst1": { ticket: "20", state: "flaky" } } }, /windows S1\/burst1: an entry is a ticket id or \{ "ticket", "state": "unstable" \}/],
     [{ windows: { "S1/burst1": { ticket: "20", state: "unstable", maxMedianMB: 400 } } }, /windows S1\/burst1: an entry is a ticket id or/],
     [{ windows: { "S1/burst1": { ticket: "99", state: "unstable" } } }, /windows S1\/burst1: ticket 99 has no issue file/],
@@ -502,132 +502,82 @@ test("unstable is rejected on any other key and on linux S1/burst1; a plain list
   assert.match(judgeBurst({ windows: { "S1/burst1": "20" } }, setResult("S1/burst1", wsFive(230, 220, 240, 235, 225))).failures.join("\n"), /GREEN but listed for ticket 20/);
 });
 
-test("the committed list marks windows S1/burst1 unstable for ticket 20 and windows S5/short unstable for ticket 74, its only unstable entries", () => {
+test("the committed list marks windows S1/burst1 unstable for ticket 20, its only unstable entry, and lists S5/short on neither leg (ticket 74)", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
   assert.deepEqual(expected.windows["S1/burst1"], { ticket: "20", state: "unstable" });
   assert.equal(Object.hasOwn(expected.linux, "S1/burst1"), false);
-  // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30, re-owned to
-  // ticket 74 by Round 24 Q1); linux stays a binary entry (since Round 14/15 Q1 one that names the check its owner owns).
-  assert.deepEqual(expected.windows["S5/short"], { ticket: "74", state: "unstable" });
-  // Round 17 Q2: its one name flips (RED in 9 of 10 runs on ticket 13's tree, run 42436186573 GREEN on the trend flag).
-  assert.deepEqual(expected.linux["S5/short"], { owners: { 74: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] });
+  // Round 24 Q1 condition 7: ticket 74 deletes both S5/short entries (re-owned from ticket 30) in one commit.
+  assert.equal(Object.hasOwn(expected.linux, "S5/short"), false);
+  assert.equal(Object.hasOwn(expected.windows, "S5/short"), false);
   const unstable = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => v?.state === "unstable").map(([k]) => `${os} ${k}`));
-  assert.deepEqual(unstable, ["windows S1/burst1", "windows S5/short"]);
+  assert.deepEqual(unstable, ["windows S1/burst1"]);
 });
 
-// ── The `unstable` entry: windows S5/short, a growth-value band (Round 13 Q1 conditions 1 and 3) ──
-// Judged on the commit value of growth:mcp-bridge, not on RED/GREEN: 5 < v ≤ 30
-// passes with either trend flag and prints its line; > 30 fails; ≤ 5 fails as
-// "at budget but listed"; any other RED fails; no value is a measurement gap.
-// The result as job.mjs hands it to the ratchet (`growthChecks` from summary.json).
-const S5_ENTRY = { ticket: "30", state: "unstable" };
-const s5Doc = { windows: { "S5/short": S5_ENTRY } };
+// ── S5/short after the retention bound (Round 24 Q1, ticket 74) ────────────────
+// The windows growth-value band of Round 13 Q1 (5 < v ≤ 30 on commit, ticket 66)
+// left the allow-list with ticket 74: S5/short is judged on tasks 600–1,200 under
+// the unchanged growth rule, plus the warm-up ceiling below. Its band tests are
+// replaced by the schema tests here (the band has no key left to judge).
+const S5_ENTRY = { ticket: "74", state: "unstable" };
 const s5Job = { linux: ["S5/short", "S1/short"], windows: ["S5/short", "S1/short", "S3/short"] };
-const s5Ids = new Set(["30", "37"]);
-const bridgeGrowth = (value, trend, extra = {}) => ({ name: "growth:mcp-bridge", red: value > 5 && trend, value, commitValue: value, wsValue: 25.03, gate: "commit", budget: 5, trend, insufficient: false, samples: 704, ...extra });
-const s5Result = ({ growth = bridgeGrowth(23.71, true), red = [], exitCode } = {}) => {
-  const redChecks = [...(growth?.red ? [growth.name] : []), ...red];
-  return { key: "S5/short", exitCode: exitCode ?? (redChecks.length ? 1 : 0), redChecks, growthChecks: growth ? [growth] : [] };
-};
-const judgeS5 = (expected, result, { os = "windows", unstable } = {}) => checkRatchet({ expected, os, results: [result, outcome("S1/short", 0), outcome("S3/short", 0)], job: s5Job, issueIds: s5Ids, ...(unstable ? { unstable } : {}) });
-const s5Line = (value, trend) => `S5/short: unstable (growth:mcp-bridge ${value} %/1k commit, budget 5, bound 30, trend ${trend}), owned by ticket 30`;
+const s5Ids = new Set(["74", "37"]);
+const s5Green = { key: "S5/short", exitCode: 0, redChecks: [] };
+const judgeS5 = (expected, os) => checkRatchet({ expected, os, results: [s5Green, outcome("S1/short", 0), outcome("S3/short", 0)], job: s5Job, issueIds: s5Ids });
 
-test("UNSTABLE holds two keys, each with its own bound kind: S1/burst1 a median bound, S5/short a growth-value band", () => {
-  assert.deepEqual(UNSTABLE, { windows: { "S1/burst1": { maxMedianMB: 300 }, "S5/short": { growthBand: { check: "growth:mcp-bridge", budget: 5, max: 30 } } } });
-  assert.equal(UNSTABLE.windows["S5/short"].growthBand.budget, MEMORY.growth.maxPctPer1k, "the band's floor is the growth budget itself");
-});
-
-test("unstable S5/short: 6, 15.55, 23.71, 26.24 and 30 pass with either trend flag, each with its line", () => {
-  for (const [value, trend] of [[6, true], [6, false], [15.55, false], [23.71, true], [26.24, false], [30, true], [30, false]]) {
-    const r = judgeS5(s5Doc, s5Result({ growth: bridgeGrowth(value, trend) }));
-    assert.deepEqual(r.failures, [], `${value} trend ${trend}`);
-    const row = r.rows.find((x) => x.key === "S5/short");
-    assert.equal(row.state, "unstable");
-    assert.equal(row.outcome, trend ? "RED" : "GREEN");
-    assert.equal(row.note, s5Line(value, trend));
+test("S5/short's rule is Round 24 Q1's: 1,200 tasks, growth judged from task 600 with no warm-up, the warm-up value to task 400 against 55 (linux) and 30 (windows)", () => {
+  assert.deepEqual(S5_SHORT, { tasks: 1200, judgedFromTask: 600, warmUpUntilTask: 400, warmUpCeilingPctPer1k: { linux: 55, windows: 30 } });
+  for (const [os, ceiling] of [["linux", 55], ["windows", 30]]) {
+    const [post, warm] = s5GrowthBudgets({ os, fromT: 1000, untilT: 9000 });
+    // The budget and the trend rule are MEMORY.growth's, unchanged.
+    assert.deepEqual(post, { role: "mcp-bridge", axis: "progress", maxPctPer1k: 5, risingWindows: 3, netRisePct: 10, warmupFraction: 0, fromT: 1000, untilT: 9000, fromProgress: 600 });
+    assert.deepEqual(warm, { role: "mcp-bridge", axis: "progress", maxPctPer1k: 5, risingWindows: 3, netRisePct: 10, warmupFraction: 0.25, fromT: 1000, untilT: 9000, name: "warm-up-growth:mcp-bridge", untilProgress: 400, ceiling });
   }
+  // S5/long keeps its one growth check with the default warm-up.
+  assert.deepEqual(s5GrowthBudgets({ long: true, os: "linux", fromT: 1000, untilT: 9000 }), { role: "mcp-bridge", axis: "progress", maxPctPer1k: 5, risingWindows: 3, netRisePct: 10, warmupFraction: 0.25, fromT: 1000, untilT: 9000 });
+  assert.throws(() => s5GrowthBudgets({ os: "darwin", fromT: 0, untilT: 1 }), /no warm-up ceiling for OS leg darwin/);
 });
 
-test("unstable S5/short: 30.01 fails as a step change, 5 and 4.9 fail as at budget but listed (either trend)", () => {
-  for (const trend of [true, false]) {
-    const high = judgeS5(s5Doc, s5Result({ growth: bridgeGrowth(30.01, trend) }));
-    assert.equal(high.ok, false);
-    assert.deepEqual(high.failures, ["S5/short: unstable growth:mcp-bridge 30.01 %/1k (commit) is above the 30 %/1k bound (windows, Round 13 Q1 condition 1)"]);
-    for (const value of [5, 4.9]) {
-      const low = judgeS5(s5Doc, s5Result({ growth: bridgeGrowth(value, trend) }));
-      assert.equal(low.ok, false, `${value}`);
-      assert.deepEqual(low.failures, [`S5/short: growth:mcp-bridge ${value} %/1k (commit) is at budget (≤ 5) but listed for ticket 30: the ownership comes back as a question (windows, Round 13 Q1 condition 1)`]);
-      assert.equal(low.rows.find((x) => x.key === "S5/short").note, undefined);
-    }
+test("a growth ceiling is RED above its value whatever the trend says, and the same series under the budget rule is GREEN on the trend flag", () => {
+  // Windows of 10 samples (progress 10 per sample): 100, 100, 100, 108, 109.5, 109 MB.
+  // The last window falls (no rising run) and the net rise is 9 % (< 10 %): no trend.
+  const level = [100, 100, 100, 108, 109.5, 109];
+  const rows = series(60, (i) => level[Math.floor(i / 10)]);
+  const base = { role: "proxy", axis: "progress", maxPctPer1k: 5, risingWindows: 3, netRisePct: 10, warmupFraction: 0 };
+  const capped = verdict(rows, { growth: { ...base, name: "warm-up-growth:proxy", ceiling: 10 } }).checks[0];
+  assert.equal(capped.name, "warm-up-growth:proxy");
+  assert.equal(capped.trend, false);
+  assert.ok(capped.value > 10, `value ${capped.value}`);
+  assert.deepEqual([capped.red, capped.budget, capped.ceiling], [true, 10, 10]);
+  const budget = verdict(rows, { growth: base }).checks[0];
+  assert.deepEqual([budget.name, budget.red, budget.value, budget.ceiling], ["growth:proxy", false, capped.value, undefined]);
+});
+
+test("unstable on S5/short is a schema error on both legs, and a listed S5/short marked unstable never passes", () => {
+  for (const os of ["windows", "linux"]) {
+    const doc = { [os]: { "S5/short": S5_ENTRY } };
+    assert.match(validateExpectedRed(doc, { job: s5Job, issueIds: s5Ids }).join("\n"), new RegExp(`${os} S5/short: \`unstable\` is allowed for windows S1/burst1 only \\(Round 9 Q1 condition 3, Round 13 Q1 condition 3\\)`), os);
+    assert.equal(judgeS5(doc, os).ok, false, os);
   }
-});
-
-test("unstable S5/short: a growth value in the band with any other RED check fails (procPeak WS, orphans, reboot cost, task failures)", () => {
-  for (const other of ["procPeak:mcp-bridge", "orphans", "bridge:reboot-cost-of-history", "bridge:task-failures"]) {
-    for (const growth of [bridgeGrowth(23.71, true), bridgeGrowth(15.55, false)]) {
-      const r = judgeS5(s5Doc, s5Result({ growth, red: [other] }));
-      assert.equal(r.ok, false, other);
-      assert.match(r.failures.join("\n"), new RegExp(`^S5/short: RED on ${other}: the unstable entry accepts only growth:mcp-bridge within its band`), other);
-      assert.equal(r.rows.find((x) => x.key === "S5/short").note, undefined, `${other}: no unstable pass line`);
-    }
-  }
-  // RED with no red check at all is no growth-only RED either.
-  assert.match(judgeS5(s5Doc, { ...s5Result({ growth: bridgeGrowth(15.55, false) }), exitCode: 1 }).failures.join("\n"), /S5\/short: RED on no red check: the unstable entry accepts only growth:mcp-bridge/);
-});
-
-test("unstable S5/short: an insufficient growth check, no value, no growth check or no commit value fails as a measurement gap", () => {
-  const cases = {
-    insufficient: bridgeGrowth(undefined, false, { insufficient: true, samples: 3, value: undefined, commitValue: undefined, wsValue: undefined }),
-    "no value": bridgeGrowth(null, false, { value: null, commitValue: null }),
-    "no commit value (not judged on commit)": bridgeGrowth(23.71, true, { commitValue: undefined, gate: undefined }),
-    "WS gate": bridgeGrowth(23.71, true, { gate: "ws" }),
-    "no growth check": null,
-  };
-  for (const [label, growth] of Object.entries(cases)) {
-    const r = judgeS5(s5Doc, s5Result({ growth }));
-    assert.equal(r.ok, false, label);
-    assert.match(r.failures.join("\n"), /^S5\/short: unstable entry without a commit value of growth:mcp-bridge \(.+\): a measurement gap \(windows, Round 13 Q1 condition 1, Round 6 Q2 condition 2\)$/m, label);
-    assert.equal(r.rows.find((x) => x.key === "S5/short").note, undefined, label);
-  }
-});
-
-test("unstable S5/short: a harness failure (no Job Object, failed units self-test, timeout) fails", () => {
-  const r = judgeS5(s5Doc, { ...s5Result({ growth: bridgeGrowth(15.55, false) }), exitCode: 2, error: "Job Object cap not applied: no @@JOB report" });
-  assert.equal(r.ok, false);
-  assert.match(r.failures.join("\n"), /S5\/short: harness failure \(exit 2\); a harness failure is never expected/);
-});
-
-test("unstable is a schema error on linux S5/short and on any third key; the S1/burst1 entry still validates", () => {
-  assert.deepEqual(validateExpectedRed(s5Doc, { job: s5Job, issueIds: s5Ids }), []);
+  // The S1/burst1 entry still validates, and S5/short unlisted and GREEN passes.
   assert.deepEqual(validateExpectedRed(unstableDoc, { job: burstJob, issueIds: burstIds }), []);
-  const allowed = /`unstable` is allowed for windows S1\/burst1, windows S5\/short only \(Round 9 Q1 condition 3, Round 13 Q1 condition 3\)/;
-  for (const [doc, key] of [[{ linux: { "S5/short": S5_ENTRY } }, "linux S5/short"], [{ windows: { "S3/short": { ticket: "37", state: "unstable" } } }, "windows S3/short"]]) {
-    const errors = validateExpectedRed(doc, { job: s5Job, issueIds: s5Ids }).join("\n");
-    assert.match(errors, new RegExp(`${key.replace("/", "\\/")}: ${allowed.source}`), key);
-  }
-  // A linux S5/short marked unstable never passes, whatever its value.
-  assert.equal(judgeS5({ linux: { "S5/short": S5_ENTRY } }, s5Result({ growth: bridgeGrowth(23.71, true) }), { os: "linux" }).ok, false);
-  // An entry carrying its own bound is refused: the bounds live in code.
-  for (const extra of [{ maxMedianMB: 300 }, { max: 40 }]) assert.match(validateExpectedRed({ windows: { "S5/short": { ...S5_ENTRY, ...extra } } }, { job: s5Job, issueIds: s5Ids }).join("\n"), /windows S5\/short: an entry is a ticket id or/);
+  assert.deepEqual(judgeS5({ windows: {} }, "windows").failures, []);
 });
 
-test("the allow-list's bound kind must fit its key: a median bound only on a repeated key, a growth band only on a single run", () => {
-  const band = { growthBand: { check: "growth:mcp-bridge", budget: 5, max: 30 } };
-  const kind = /: the `unstable` allow-list gives it .+; a repeated key takes \{ maxMedianMB \}, a single run \{ growthBand: \{ check, budget, max \} \} \(Round 13 Q1 condition 3\)/;
+test("UNSTABLE holds S1/burst1 alone; no single run takes a bound, so a re-added growth band is refused as the wrong bound kind", () => {
+  assert.deepEqual(UNSTABLE, { windows: { "S1/burst1": { maxMedianMB: 300 } } });
+  const kind = /: the `unstable` allow-list gives it .+; only a repeated key takes a bound, \{ maxMedianMB \}/;
   for (const [unstable, doc, job] of [
-    [{ windows: { "S5/short": { maxMedianMB: 300 } } }, s5Doc, s5Job],
-    [{ windows: { "S1/burst1": band } }, unstableDoc, burstJob],
-    [{ windows: { "S5/short": { ...band, maxMedianMB: 300 } } }, s5Doc, s5Job],
-    [{ windows: { "S5/short": { growthBand: { check: "procPeak:mcp-bridge", budget: 5, max: 30 } } } }, s5Doc, s5Job],
-    [{ windows: { "S5/short": { growthBand: { check: "growth:mcp-bridge", budget: 30, max: 5 } } } }, s5Doc, s5Job],
+    [{ windows: { "S5/short": { growthBand: { check: "growth:mcp-bridge", budget: 5, max: 30 } } } }, { windows: { "S5/short": S5_ENTRY } }, s5Job],
+    [{ windows: { "S5/short": { maxMedianMB: 300 } } }, { windows: { "S5/short": S5_ENTRY } }, s5Job],
+    [{ windows: { "S1/burst1": { growthBand: { check: "growth:proxy", budget: 5, max: 30 } } } }, unstableDoc, burstJob],
   ]) {
     const key = Object.keys(doc.windows)[0];
-    const errors = validateExpectedRed(doc, { job, issueIds: new Set(["20", "30"]), unstable }).join("\n");
+    const errors = validateExpectedRed(doc, { job, issueIds: new Set(["20", "74"]), unstable }).join("\n");
     assert.match(errors, new RegExp(`windows ${key.replace("/", "\\/")}${kind.source}`), JSON.stringify(unstable));
   }
   // A mis-shaped bound never judges a run.
-  const r = judgeS5(s5Doc, s5Result({ growth: bridgeGrowth(23.71, true) }), { unstable: { windows: { "S5/short": { maxMedianMB: 300 } } } });
+  const r = checkRatchet({ expected: { windows: { "S5/short": S5_ENTRY } }, os: "windows", results: [s5Green, outcome("S1/short", 0), outcome("S3/short", 0)], job: s5Job, issueIds: s5Ids, unstable: { windows: { "S5/short": { growthBand: { check: "growth:mcp-bridge", budget: 5, max: 30 } } } } });
   assert.equal(r.ok, false);
   assert.equal(r.rows.find((x) => x.key === "S5/short").note, undefined);
 });
@@ -789,7 +739,6 @@ test("S3/omp is listed on both legs with 35 owning the concurrent preflights and
   for (const os of ["linux", "windows"]) {
     const results = JOB[os].map((key) => {
       const entry = expected[os][key];
-      if (entry?.state === "unstable" && key === "S5/short") return { key, exitCode: 0, redChecks: [], growthChecks: [{ name: "growth:mcp-bridge", red: false, value: 15.55, commitValue: 15.55, gate: "commit", budget: 5, trend: false }] };
       if (entry?.state === "unstable") return { key, exitCode: 0, redChecks: [], median: { medianMB: 240, budgetMB: 250, check: "procPeak:proxy" } };
       // Each listed single run RED on its first owner's first check, every other run GREEN.
       const names = entry ? Object.values(entry.owners).flat() : [];
@@ -801,7 +750,7 @@ test("S3/omp is listed on both legs with 35 owning the concurrent preflights and
     assert.deepEqual(green.failures, [], os);
     assert.equal(green.rows.find((x) => x.key === "S3/omp").note, `S3/omp: GREEN, listed for ticket 37 on flipping checks ${expected[os]["S3/omp"].flips.join(", ")} (Round 15 Q1)`);
     const unstable = { ...expected, [os]: { ...expected[os], "S3/omp": { ticket: "35", state: "unstable" } } };
-    assert.match(validateExpectedRed(unstable, { issueIds }).join("\n"), new RegExp(`${os} S3/omp: \`unstable\` is allowed for windows S1/burst1, windows S5/short only`));
+    assert.match(validateExpectedRed(unstable, { issueIds }).join("\n"), new RegExp(`${os} S3/omp: \`unstable\` is allowed for windows S1/burst1 only`));
   }
 });
 
@@ -872,21 +821,18 @@ test("owns: an empty list, a duplicate name, a non-string or empty name, or an e
   }
 });
 
-test("owners and flips are a schema error on a repeated key and on either unstable key (windows S1/burst1, windows S5/short)", () => {
+test("owners and flips are a schema error on a repeated key and on the unstable key (windows S1/burst1)", () => {
   for (const [os, key, value] of [
     ["windows", "S1/burst1", { owners: { 20: ["median:procPeak:proxy"] } }],
     ["windows", "S1/burst1", { ticket: "20", state: "unstable", owners: { 20: ["median:procPeak:proxy"] } }],
     ["windows", "S1/burst1", { ticket: "20", state: "unstable", flips: ["median:procPeak:proxy"] }],
     ["linux", "S1/burst1", { owners: { 20: ["median:procPeak:proxy"] } }],
-    ["windows", "S5/short", { owners: { 30: ["growth:mcp-bridge"] } }],
-    ["windows", "S5/short", { ticket: "30", state: "unstable", owners: { 30: ["growth:mcp-bridge"] } }],
-    ["windows", "S5/short", { owners: { 30: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] }],
   ]) {
     const errors = validateExpectedRed({ [os]: { [key]: value } }, { job: ownsJob, issueIds: ownsIds }).join("\n");
     assert.match(errors, new RegExp(`${os} ${key.replace("/", "\\/")}: \`owners\` and \`flips\` are not allowed (on a repeated key|on an \`unstable\` key)`), `${os} ${key} ${JSON.stringify(value)}`);
   }
-  // The unstable entries themselves still validate unchanged.
-  assert.deepEqual(validateExpectedRed({ windows: { "S1/burst1": { ticket: "20", state: "unstable" }, "S5/short": { ticket: "30", state: "unstable" } } }, { job: ownsJob, issueIds: ownsIds }), []);
+  // The unstable entry itself still validates unchanged (windows S5/short left the allow-list with ticket 74).
+  assert.deepEqual(validateExpectedRed({ windows: { "S1/burst1": { ticket: "20", state: "unstable" } } }, { job: ownsJob, issueIds: ownsIds }), []);
 });
 
 test("owns: RED only on owned checks passes and prints its line; an owned check may be GREEN", () => {
@@ -1023,7 +969,6 @@ test("the committed expected-red.json: each leg passes with every listed run RED
     const results = JOB[os].map((key) => {
       const v = entries[key];
       const names = [...new Set([...(v?.owners ? namesOf(v) : []), "orphans", "count:proxy"])];
-      if (v?.state === "unstable" && key === "S5/short") return { key, exitCode: 0, redChecks: [], checkNames: names, growthChecks: [{ name: "growth:mcp-bridge", red: false, value: 15.55, commitValue: 15.55, gate: "commit", budget: 5, trend: false }] };
       if (v?.state === "unstable") return { key, exitCode: 0, redChecks: [], median: { medianMB: 240, budgetMB: 250, check: "procPeak:proxy" } };
       return { key, exitCode: v ? 1 : 0, redChecks: v ? namesOf(v) : [], checkNames: names };
     });

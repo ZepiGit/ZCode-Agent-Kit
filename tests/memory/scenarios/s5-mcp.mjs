@@ -3,12 +3,19 @@
 // runtime (test/fixture/fake-harness.mjs): many tasks in a row (task manager,
 // relay, store, interactions), then a restart on the same data dir, which
 // reloads every stored task.
+//
+// S5/short runs 1,200 tasks (Owner Proxy Round 24 Q1, ticket 74;
+// lib/budgets.mjs S5_SHORT): growth:mcp-bridge is judged after the retention
+// bound (tasks 600–1,200), warm-up-growth:mcp-bridge on tasks to 400 against a
+// ceiling. procPeak, reboot cost, task failures and orphans cover the whole run.
+// S5/long runs 3,000 tasks with the default warm-up, unchanged.
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan } from "../lib/sampler.mjs";
-import { MEMORY, PROCESSES, growthBudget } from "../lib/budgets.mjs";
+import { osLeg } from "../lib/catalogue.mjs";
+import { MEMORY, PROCESSES, S5_SHORT, s5GrowthBudgets } from "../lib/budgets.mjs";
 
 function dirBytes(dir) {
   let total = 0, files = 0;
@@ -18,6 +25,19 @@ function dirBytes(dir) {
     else { total += statSync(p).size; files += 1; }
   }
   return { total, files };
+}
+
+/** S5's verdict budgets for one run (also used by the job-seam tests' stand-in, fixtures/fake-s5-run.mjs). */
+export function s5Budgets({ long, os, loadStart, loadEnd, emptyRss, rebootRss, failures }) {
+  return {
+    growth: s5GrowthBudgets({ long, os, fromT: loadStart, untilT: loadEnd }),
+    procPeaks: { "mcp-bridge": MEMORY.S5.procPeakMB },
+    orphans: PROCESSES.orphans,
+    extra: [
+      { name: "bridge:reboot-cost-of-history", red: rebootRss - emptyRss > MEMORY.S5.rebootCostMB, value: rebootRss - emptyRss, budget: MEMORY.S5.rebootCostMB, unit: "MB" },
+      { name: "bridge:task-failures", red: failures > MEMORY.S5.taskFailures, value: failures, budget: MEMORY.S5.taskFailures, unit: "tasks" },
+    ],
+  };
 }
 
 export async function run(ctx) {
@@ -30,7 +50,7 @@ export async function run(ctx) {
 
   let c = await startBridge({ reuseDataDir: dataDir, maxConcurrentTasks: "2", interactionTimeoutSec: "2" });
   const emptyRss = await settle();
-  const n = ctx.long ? 3000 : 400;
+  const n = ctx.long ? 3000 : S5_SHORT.tasks;
   const loadStart = ctx.elapsed();
   let failures = 0;
   const big = "x".repeat(16 * 1024);
@@ -54,15 +74,5 @@ export async function run(ctx) {
   await c.stop();
   ctx.note("bridge", { tasks: n, failures, emptyRssMB: emptyRss, afterTasksRssMB: afterRss, rebootWithHistoryRssMB: rebootRss, dataDirMB: Number((disk.total / 1048576).toFixed(1)), dataDirFiles: disk.files });
   ctx.log(`bridge rss: empty ${emptyRss} MB, after ${n} tasks ${afterRss} MB, reboot with history ${rebootRss} MB, data ${(disk.total / 1048576).toFixed(1)} MB in ${disk.files} files`);
-  return {
-    budgets: {
-      growth: growthBudget("mcp-bridge", { fromT: loadStart, untilT: loadEnd }),
-      procPeaks: { "mcp-bridge": MEMORY.S5.procPeakMB },
-      orphans: PROCESSES.orphans,
-      extra: [
-        { name: "bridge:reboot-cost-of-history", red: rebootRss - emptyRss > MEMORY.S5.rebootCostMB, value: rebootRss - emptyRss, budget: MEMORY.S5.rebootCostMB, unit: "MB" },
-        { name: "bridge:task-failures", red: failures > MEMORY.S5.taskFailures, value: failures, budget: MEMORY.S5.taskFailures, unit: "tasks" },
-      ],
-    },
-  };
+  return { budgets: s5Budgets({ long: ctx.long, os: osLeg(), loadStart, loadEnd, emptyRss, rebootRss, failures }) };
 }

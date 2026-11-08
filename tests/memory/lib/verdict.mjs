@@ -6,6 +6,9 @@
 //     windows each rise (> 1 % apart) or the last window sits >= 10 % above the
 //     first post-warm-up window (a slow leak rises less than 1 % per window).
 //     Both must hold, so a GC sawtooth or an allocator plateau is not a leak;
+//   - growth ceiling (S5/short's warm-up-growth, Round 24 Q1): the growth
+//     value above a ceiling, with or without a trend (a regression bound on a
+//     warm-up phase, not a budget);
 //   - peak: role peak RSS above budget;
 //   - steady: median RSS of a role after warm-up above budget;
 //   - peak: summed role RSS at any sample above budget (S3 part a: kit total);
@@ -123,8 +126,48 @@ export function summarize(rows, roles) {
 }
 
 /**
+ * The rows of a growth window bounded by the work counter as well as by time
+ * (S5/short, Round 24 Q1): from the first sample whose progress is ≥
+ * `fromProgress`, up to and including the first sample whose progress is ≥
+ * `untilProgress` (the sample where progress reaches it). An unbounded side
+ * keeps every row.
+ */
+function progressWindow(rows, { fromProgress, untilProgress }) {
+  let out = rows;
+  if (fromProgress !== undefined) {
+    const i = out.findIndex((r) => r.progress >= fromProgress);
+    out = i < 0 ? [] : out.slice(i);
+  }
+  if (untilProgress !== undefined) {
+    const i = out.findIndex((r) => r.progress >= untilProgress);
+    if (i >= 0) out = out.slice(0, i + 1);
+  }
+  return out;
+}
+
+/** A progress-bounded window's bounds in tasks and in samples of the run (0-based sample indices). */
+function windowBounds(rows, window, g, res) {
+  const index = new Map(rows.map((r, i) => [r, i]));
+  const live = window.filter((r) => r.procs.some((p) => inRole(p, g.role)));
+  return {
+    fromTask: g.fromProgress ?? null,
+    untilTask: g.untilProgress ?? null,
+    firstTask: live[0]?.progress ?? null,
+    lastTask: live.at(-1)?.progress ?? null,
+    firstSample: live.length ? index.get(live[0]) : null,
+    lastSample: live.length ? index.get(live.at(-1)) : null,
+    ofSamples: rows.length,
+    samples: live.length,
+    warmupSamples: res.warmupSamples ?? null,
+  };
+}
+
+/**
  * budgets: {
- *   growth?: { role, maxPctPer1k?, maxMBPerMin?, risingWindows: 3, axis, warmupFraction },
+ *   growth?: { role, maxPctPer1k?, maxMBPerMin?, risingWindows: 3, axis, warmupFraction,
+ *              name? (default growth:<role>), fromProgress?, untilProgress? (a window in work
+ *              units as well, its bounds recorded as detail.window), ceiling? (RED above this
+ *              value whatever the trend says, instead of over budget AND trend) } (one or a list),
  *   steady?: { role, maxMB, fromT?, untilT?, warmupFraction? },
  *   peaks?: { [role]: MB } (summed per sample), procPeaks?: { [role]: MB } (per process, incl. VmHWM),
  *   windowPeaks?: [{ name, roles, fromT, untilT, baseMB, maxMB }] (summed roles above a base, in a window),
@@ -139,13 +182,16 @@ export function verdict(rows, budgets, { orphans = [], observations = [] } = {})
   const checks = [];
   if (budgets.growth) {
     for (const g of [].concat(budgets.growth)) {
-      const window = rows.filter((r) => r.t >= (g.fromT ?? 0) && r.t <= (g.untilT ?? Infinity));
+      const window = progressWindow(rows.filter((r) => r.t >= (g.fromT ?? 0) && r.t <= (g.untilT ?? Infinity)), g);
       const res = growth(roleSeries(window, g.role), g);
       const metric = g.axis === "time" ? res.slopeMBPerMin : res.growthPctPer1k;
       const limit = g.axis === "time" ? g.maxMBPerMin : g.maxPctPer1k;
       const trend = (res.risingWindows ?? 0) >= (g.risingWindows ?? 3) || (res.netRisePct ?? 0) >= (g.netRisePct ?? 10);
-      const red = !res.insufficient && metric > limit && trend;
-      checks.push({ name: `growth:${g.role}`, red, value: metric, budget: limit, unit: g.axis === "time" ? "MB/min" : "%/1k", trend, detail: res });
+      // A ceiling is a value bound, not a budget: RED above it whatever the trend says.
+      const ceiling = typeof g.ceiling === "number";
+      const red = !res.insufficient && (ceiling ? metric > g.ceiling : metric > limit && trend);
+      const bounds = g.fromProgress !== undefined || g.untilProgress !== undefined ? windowBounds(rows, window, g, res) : null;
+      checks.push({ name: g.name ?? `growth:${g.role}`, red, value: metric, budget: ceiling ? g.ceiling : limit, ...(ceiling ? { ceiling: g.ceiling } : {}), unit: g.axis === "time" ? "MB/min" : "%/1k", trend, detail: bounds ? { ...res, window: bounds } : res });
     }
   }
   for (const [role, limit] of Object.entries(budgets.peaks ?? {})) {
@@ -248,7 +294,7 @@ export function osVerdict(rows, budgets, opts = {}) {
   const rowMemoryNames = new Set((budgets.windowPeaks ?? []).map((w) => w.name));
   const checks = vc.checks.map((c, i) => {
     const w = vw.checks[i];
-    if (!(/^(growth|peak|procPeak|steady):/.test(c.name) || rowMemoryNames.has(c.name))) return c; // counts, orphans, observed, extra: metric-free
+    if (!(/^(growth|warm-up-growth|peak|procPeak|steady):/.test(c.name) || rowMemoryNames.has(c.name))) return c; // counts, orphans, observed, extra: metric-free
     const gate = windowsGate(c.name);
     return { ...(gate === "ws" ? w : c), gate, commitValue: c.value, wsValue: w.value };
   });

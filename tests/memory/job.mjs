@@ -68,9 +68,11 @@ const ROOT = resolve(HERE, "..", "..");
 // Per-run (or per-scenario) cap and timeout: the caps protect the runner and
 // sit far above every budget, so a cap kill is a harness failure, never a
 // verdict. Today's worst: S1/burst32 (proxy 1.6 GB + 32 bodies in the
-// client), S2's hang phase (5 × 256 MB parked). S5 is the longest run.
+// client), S2's hang phase (5 × 256 MB parked). S5 is the longest run: 1,200
+// tasks since ticket 74, ~36 min on either CI leg (12 min per 400 tasks, run
+// 42475847194), so its timeout is 60 min (120 on windows), a wall-time guard.
 const CAP = { "S1/burst16": "4G", "S1/burst32": "6G", S2: "4G" };
-const TIMEOUT_S = { S5: 1800 };
+const TIMEOUT_S = { S5: 3600 };
 const DEFAULT_CAP = "3G";
 const DEFAULT_TIMEOUT_S = 1200;
 // Windows runs are slower (PowerShell polls, process start-up): twice the timeout.
@@ -157,7 +159,19 @@ function markdown({ os, cap, ratchet, results, partial }) {
   const owned = ratchet.rows.filter((row) => row.note && row.state !== "unstable");
   if (owned.length) lines.push("", "Tolerated REDs and flipping GREENs (Round 14 Q1, Round 15 Q1: each listed run RED only on checks its owners own, GREEN only while a check is marked `flips`; each owner removes only its own names, in its own commit):", ...owned.map((row) => `- ${row.note}`));
   const notes = ratchet.rows.filter((row) => row.note && row.state === "unstable");
-  if (notes.length) lines.push("", "Unstable entries (Round 9 Q1, Round 13 Q1; each leaves only through its owner's measured exit: ticket 20's ≥ 20 runs, ticket 74's ≥ 10 runs):", ...notes.map((row) => `- ${row.note}`));
+  if (notes.length) lines.push("", "Unstable entries (Round 9 Q1; it leaves only through its owner's measured exit: ticket 20's ≥ 20 runs):", ...notes.map((row) => `- ${row.note}`));
+  // Round 24 Q1 (ticket 74): every growth window bounded in tasks, with its bounds and values.
+  const windows = results.flatMap((r) => (r.growthChecks ?? []).filter((g) => g.window).map((g) => [r.key, g]));
+  if (windows.length) {
+    lines.push("", "Growth windows (Round 24 Q1, ticket 74: S5/short judged after the retention bound; bounds in tasks and in samples of the run, 0-based):");
+    for (const [key, g] of windows) {
+      const w = g.window;
+      const values = g.gate ? ` [commit ${g.commitValue} / WS ${g.wsValue}, gate ${g.gate}]` : "";
+      const rule = g.ceiling !== null ? `ceiling ${g.ceiling} regardless of trend` : `budget ${g.budget}`;
+      const outcome = g.insufficient ? "insufficient" : g.red ? "RED" : "ok";
+      lines.push(`- ${key} ${g.name}: tasks ${w.firstTask ?? "—"}–${w.lastTask ?? "—"} (samples ${w.firstSample ?? "—"}–${w.lastSample ?? "—"} of ${w.ofSamples}, ${w.samples} samples, warm-up ${w.warmupSamples ?? "—"}): ${g.value ?? "—"} %/1k${values}, ${rule}, trend ${g.trend}, slope ${g.slopeMBPer1k ?? "—"} MB/1k on a mean of ${g.meanMB ?? "—"} MB, window medians ${(g.windowMediansMB ?? []).join(", ") || "—"} MB: ${outcome}`);
+    }
+  }
   const repeated = results.filter((r) => r.median);
   if (repeated.length) {
     lines.push("", "Judged on the median of n fresh repetitions (one verdict per run key; every repetition must also stay within the per-run ceiling; Windows: the WS gate, commit reported):", "", "| run | n | gate | repetitions (MB) | median | budget | ceiling | over ceiling | commit per repetition (MB) |", "|---|---|---|---|---|---|---|---|---|");
@@ -226,9 +240,9 @@ async function main() {
       checkNames: (summary?.checks ?? []).map((c) => c.name),
       // Windows (Round 7 Q1): every memory check with both values and the metric that gates it.
       memoryChecks: (summary?.checks ?? []).filter((c) => c.commitValue !== undefined).map((c) => ({ name: c.name, red: c.red, gate: c.gate, commitMB: c.commitValue, wsMB: c.wsValue, budget: c.budget })),
-      // Every growth check with its value, trend and sample count, insufficient ones included:
-      // the ratchet judges an unstable growth band on it (lib/ratchet.mjs, Round 13 Q1).
-      growthChecks: (summary?.checks ?? []).filter((c) => /^growth:/.test(c.name)).map((c) => ({ name: c.name, red: c.red, value: c.value ?? null, commitValue: c.commitValue ?? null, wsValue: c.wsValue ?? null, gate: c.gate ?? null, budget: c.budget, trend: c.trend === true, insufficient: c.detail?.insufficient === true, samples: c.detail?.samples ?? null, windowMediansMB: c.detail?.windowMediansMB ?? null, risingWindows: c.detail?.risingWindows ?? null, netRisePct: c.detail?.netRisePct ?? null })),
+      // Every growth check (warm-up ceilings included) with its value, trend and sample count,
+      // insufficient ones included, and the window bounds of S5/short's two windows (Round 24 Q1).
+      growthChecks: (summary?.checks ?? []).filter((c) => /^(warm-up-)?growth:/.test(c.name)).map((c) => ({ name: c.name, red: c.red, value: c.value ?? null, commitValue: c.commitValue ?? null, wsValue: c.wsValue ?? null, gate: c.gate ?? null, budget: c.budget, ceiling: c.ceiling ?? null, trend: c.trend === true, insufficient: c.detail?.insufficient === true, samples: c.detail?.samples ?? null, slopeMBPer1k: c.detail?.slopeMBPer1k ?? null, meanMB: c.detail?.meanMB ?? null, windowMediansMB: c.detail?.windowMediansMB ?? null, risingWindows: c.detail?.risingWindows ?? null, netRisePct: c.detail?.netRisePct ?? null, window: c.detail?.window ?? null })),
       error: why ?? summary?.error ?? r.error ?? null };
     return { result, summary };
   }
