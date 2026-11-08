@@ -181,3 +181,4 @@ Spec stories: 34, 135
     - S5/short: growth:mcp-bridge 15.43 %/1k commit (WS 35.21), trend false, inside the band 5 < v ≤ 30, so "unstable … owned by ticket 30". procPeak 82.1 commit / 59.7 WS. The run is GREEN.
   - linux (job 128650978580): S3/short and S3/hung procPeak:mcp-bridge 74.1 / 73.4 (ok); S5/short growth 40.87 %/1k, trend true, RED, owned by 30.
   - The round-1 projection for windows S5 (≈ 28.6–31) did not show in this single run: 15.43 is below the 28-run mean of 19.04. It is one run, not conclusive.
+  - Addendum: merged the tip again at 0c7a184, which brings ticket 19 (proxy admission, `lib/proxy-env.mjs`; no MCP or setup files). Kit: 845 tests, 827 pass, 0 fail, 18 skipped. `test:proxy`: 1413 pass, 0 fail. `test:proxy-typecheck`: clean (`reports/t36-r2b-*.log`). `test:mcp` was not rerun; that merge changes no MCP file.
