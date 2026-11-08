@@ -1,6 +1,6 @@
 # 57: MCP runtime restart budget (architecture candidate 8)
 
-**Blocked by:** 30 (MCP task retention (500 / 7 days) and the idempotency window), 36 (MCP bridge lazy HTTP and the semi-space flag), 74 (S5/short: judge MCP bridge growth after the retention bound)
+**Blocked by:** 30 (MCP task retention (500 / 7 days) and the idempotency window), 36 (MCP bridge lazy HTTP and the semi-space flag)
 
 **Status:** ready-for-agent
 
@@ -60,3 +60,4 @@ Spec stories: none
 **REVERSIBILITY:** Two-way door (a test variant and, if needed, a defaulted policy in one module). ADR: no.
 
 ---
+- 2026-11-08 (Owner Proxy round 29): edge to 74 removed; this ticket's S5 values and their base are measured under one S5/short rule; if a re-decided ticket-74 rule merges while this ticket is in flight, its base is re-measured under that rule.

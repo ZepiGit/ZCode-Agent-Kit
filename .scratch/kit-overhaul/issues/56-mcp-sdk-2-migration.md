@@ -1,6 +1,6 @@
 # 56: MCP SDK 2.x and protocol revision 2026-07-28 migration
 
-**Blocked by:** 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 30 (MCP task retention (500 / 7 days) and the idempotency window), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 36 (MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries), 57 (MCP runtime restart budget), 74 (S5/short: judge MCP bridge growth after the retention bound)
+**Blocked by:** 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 30 (MCP task retention (500 / 7 days) and the idempotency window), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 36 (MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries), 57 (MCP runtime restart budget)
 
 **Status:** ready-for-agent
 
@@ -39,3 +39,4 @@ Spec stories: none (follow-up to 129)
 ## Comments
 
 - 2026-11-08 (orchestrator, Owner Proxy round 23, binding): triaged ready-for-agent. 2.x is the stable line (npm latest 2.4.0, 2026-10-23; 2.0.0 2026-07-27). 2027-01-27 is the guaranteed floor for 1.x fixes, not an announced end date. Edges 56 ← 30, 31, 36, 57 and 53 ← 56; acyclic. Tripwire: the orchestrator re-reads the v1.x README/ROADMAP at each merge of 30, 31, 36 and 57 and on 2027-01-27. The question comes back to the owner if a v1.x end date before 56 can land is announced, if an unfixed v1.x advisory affects the bridge, or if 56 is not merged by 2027-01-27.
+- 2026-11-08 (Owner Proxy round 29): edge to 74 removed; this ticket's S5 values and their base are measured under one S5/short rule; if a re-decided ticket-74 rule merges while this ticket is in flight, its base is re-measured under that rule.
