@@ -17,7 +17,7 @@ ADR: 0002, 0004
 - [ ] Seam 3: each recycle trigger fires at its threshold and not below it (footprint 239 vs 241 MB at cap 300; count 99 vs 100); planned recycles never increment the abnormal-exit count; once the 5-per-10-min budget is used up, the next abnormal exit enters fail-fast, and the shed has the endpoint's error shape and `Retry-After` = seconds until the window reopens; after the window a solve succeeds (injected clock).
 - [ ] Seam 3 (adversarial, "fail only the solve in flight"): a crash with one solve in flight and one queued fails only the in-flight solve, with the existing error and category; the queued solve completes on the next generation; the backend's call count shows that no solve was resubmitted.
 - [ ] Seam 3: the queue-bound test.
-- [ ] Loop S2: per-generation cost ≤ 300 MB, retained before recycle ≤ 300 MB, hung-solve reclaim ≤ 64 MB, one generation at a time. **Delete `S2/short` (linux, windows).**
+- [ ] Loop S2: per-generation cost ≤ 300 MB (`solver:cost-per-generation`), retained before recycle ≤ 300 MB (`solver:retained-before-recycle`), hung-solve reclaim ≤ 64 MB, one generation at a time; `procPeak:scenario` ≤ 600 MB (ticket 01 note 10); `growth:scenario` ≤ 5 %/1k (§18 S1–S5 growth row); `procPeak:solver` ≤ 300 MB (§18 S2 row, the cap). **Remove 58's names (`solver:cost-per-generation`, `solver:retained-before-recycle`, `procPeak:scenario`, `growth:scenario`, `procPeak:solver`) from `S2/short` (linux, windows) in `expected-red.json`, with the evidence Round 15 Q1 condition 5 requires.**
 
 **Common acceptance (every ticket):**
 
@@ -35,3 +35,5 @@ Spec stories: 6, 11, 12, 13, 14
 ## Comments
 
 - 2026-11-07 (orchestrator, from ticket 12): S2's growth:scenario check flips between ok and RED on unchanged code from run to run (both happy-dom 20 and 21); one run cannot settle it, use repeated runs for this ticket's evidence. S2 cost per generation median 1034 (happy-dom 20) -> 1091 MB (21), ranges 1004-1115 vs 1019-1133.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 condition 3 (A, decided) and condition 7 — "Loop S2" gained three bounds: `procPeak:scenario` ≤ 600 MB, `growth:scenario` ≤ 5 %/1k and `procPeak:solver` ≤ 300 MB (the last listed now at 0 RED, because ticket 27 turns it RED until 28 and 58). The S2 host peak and growth measure the same solver defect, so 58 owns them. "Delete `S2/short` (linux, windows)" became "remove 58's names"; `cdn-cache:memory-growth` in the same entry is ticket 25's. `growth:scenario` and `procPeak:solver` are recorded as flipping, so removing them needs ≥ 10 GREEN matching CI runs per leg (Q1 condition 5).

@@ -33,3 +33,5 @@ ADR: 0003, 0012
 Spec stories: 61
 
 ## Comments
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): the "S3 starter-preflight role peak ≤ 76 MB (loop)" criterion binds 15 on its own evidence, while ticket 37 holds the `procPeak:preflight` names in `expected-red.json` (Q1 condition 2, several claimants: 37 is the descendant). 15 removes no names; if 15 lands with the preflight peak still RED, it comes back with the numbers (Round 15 Shared understanding).

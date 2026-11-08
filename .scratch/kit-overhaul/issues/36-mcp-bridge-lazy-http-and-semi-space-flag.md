@@ -32,3 +32,5 @@ ADR: 0013 (consequences)
 Spec stories: 34, 135
 
 ## Comments
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): the "Loop: S3 bridge role peak ≤ 75 MB" criterion binds 36 on its own evidence, while ticket 37 holds the `procPeak:mcp-bridge` names in `expected-red.json` (Q1 condition 2, several claimants: 37 is the descendant). 36 removes no names; if 36 lands with the bridge peak still RED, it comes back with the numbers (Round 15 Shared understanding).

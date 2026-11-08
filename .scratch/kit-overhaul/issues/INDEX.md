@@ -40,7 +40,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 34 | [Early log (`proxy.early.log`): 1 MB cap and the tail copy into `proxy.log`](34-early-log-cap-and-tail-copy.md) | sol | medium | 33 | ready-for-agent |
 | 35 | [OMP in-host single-flight preflight with the cause-line result record](35-omp-single-flight-preflight.md) | sol | high | 03, 15, 33 | ready-for-agent |
 | 36 | [MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries](36-mcp-bridge-lazy-http-and-semi-space-flag.md) | glm | medium | 13 | ready-for-agent |
-| 37 | [`process.execve` handover in `zcode-kit run` and the `ZCODE_KIT_RESIDENT_LAUNCHER=1` opt-out](37-execve-handover-and-resident-launcher-opt-out.md) | sol | high | 15, 35, 36 | ready-for-agent |
+| 37 | [`process.execve` handover in `zcode-kit run` and the `ZCODE_KIT_RESIDENT_LAUNCHER=1` opt-out](37-execve-handover-and-resident-launcher-opt-out.md) | sol | high | 15, 35, 36, 17 | ready-for-agent |
 | 38 | [Manager `doctor` returns check records; `zcode-kit doctor` stops parsing text](38-manager-doctor-check-records.md) | glm | medium | 15 | ready-for-agent |
 | 39 | [Observability fields in `/health` details, `proxy status` and `--json`](39-observability-fields.md) | glm | medium | 19, 21, 23, 40, 58 | ready-for-agent |
 | 40 | [UX batch (a): `doctor`, `proxy start/status/stop/restart/logs`, connection details](40-ux-batch-a-doctor-and-proxy-commands.md) | glm | medium | 38, 06 | ready-for-agent |
@@ -68,7 +68,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 62 | [Bun ≥ 1.4.3 raises the S1/burst1 proxy peak on the CI runners (re-entry gate for a newer Bun)](62-bun-1-4-3-plus-s1-burst1-peak.md) | sol | medium | 20 | needs-triage |
 | 63 | [Proxy-side effort normalisation for native `/v1/messages` (Claude Code effort for `glm-*`)](63-claude-code-effort-normalisation-live-probe.md) | sol | medium | — | needs-info |
 | 64 | [Sampler re-attribution after exec fails under CI load (test or sampler defect)](64-sampler-exec-reattribution-flake.md) | sol | medium | — | ready-for-agent |
-| 65 | [S3/hung's stale-lock round is skipped when `manager start` exits 1](65-s3-hung-stale-lock-round-start-refused.md) | sol | high | — | ready-for-agent |
+| 65 | [S3/hung's stale-lock round is skipped when `manager start` exits 1](65-s3-hung-stale-lock-round-start-refused.md) | sol | high | — | resolved |
 | 66 | [Windows S5/short re-listed under ticket 30 with a bounded unstable growth band](66-windows-s5-short-unstable-growth-band.md) | glm | low | — | ready-for-agent |
 | 67 | [A plain expected-RED listing of a single-run key accepts any RED](67-plain-listing-hides-other-reds.md) | sol | medium | — | ready-for-agent |
 | 68 | [Every writer of proxy/config.yaml and harness configs keeps the file's line endings (CRLF audit)](68-crlf-config-writers-audit.md) | sol | medium | 42 | ready-for-agent |

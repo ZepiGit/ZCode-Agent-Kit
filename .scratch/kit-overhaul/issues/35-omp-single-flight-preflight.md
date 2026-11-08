@@ -15,7 +15,7 @@ ADR: 0013 (Round 4 amendment)
 **Acceptance criteria:**
 
 - [ ] Seam 8 (generated-logic fixtures): write-before-release; identity match; stale record from an earlier start never printed; corrupt and oversized records → takeover; vocabulary validation; file mode.
-- [ ] Seam 1 (S3 omp leg): ≤ 1 concurrent preflight with 5 hosts and with the starter killed; every waiter printed the starter's cause lines; waiter cost ≤ 5 MB per host; log-dir files ≤ 8 in S4. The S3 omp leg runs on both legs. **Delete `S3/omp` (linux, windows).**
+- [ ] Seam 1 (S3 omp leg): ≤ 1 concurrent preflight (`omp:concurrent-preflights`) with 5 hosts and with the starter killed; every waiter printed the starter's cause lines; waiter cost ≤ 5 MB per host; log-dir files ≤ 8 in S4. The S3 omp leg runs on both legs. **Remove `omp:concurrent-preflights` from `S3/omp` (linux, windows) in `expected-red.json`, with the evidence Round 15 Q1 condition 5 requires.**
 - [ ] Extension refresh replayed twice through the transaction is a no-op.
 - [ ] Seam 8 (adversarial): a live starter's token is never taken over; a token whose holder is dead, or that is older than `START_TIMEOUT_MS`, is taken over by proof; a waiter never waits longer than `START_TIMEOUT_MS` (injected clock); the token and the record are created with mode `0o600` (Story 33).
 
@@ -35,3 +35,5 @@ Spec stories: 31, 32, 33, 135
 ## Comments
 
 - 2026-11-07 (orchestrator, from ticket 03's pre-merge CI run 42335478907): ubuntu S3/omp is RED on two more checks besides `omp:concurrent-preflights`, both just over budget: `procPeak:preflight` 77.4 MB (budget 76) and `procPeak:proxy` 62.9 MB (budget 62). Windows S3/omp was RED on `omp:concurrent-preflights` only (`peak:kit` 350 MB commit / 400 MB WS, budget 514). Single-flight may not by itself turn ubuntu S3/omp GREEN; if these two stay RED after the fix, ticket 35 cannot delete `S3/omp (linux)` and comes back with the numbers (budgets are never loosened). Artefact: /home/AgentKit/overhaul-tools/ci-art/t03-premerge-a2v0.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 condition 7 — "Delete `S3/omp` (linux, windows)" became "remove `omp:concurrent-preflights`". The 2026-11-07 line above ("ticket 35 cannot delete `S3/omp (linux)` and comes back with the numbers") is superseded: the S3/omp role peaks (`procPeak:proxy`, `procPeak:preflight` on linux, `peak:kit` on windows) are ticket 37's names, and 35 removes only its own.
