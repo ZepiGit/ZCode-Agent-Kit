@@ -15,6 +15,7 @@ ADR: 0003
 **Acceptance criteria:**
 
 - [ ] Seam 2 tests per signal (POSIX) and SIGBREAK/console-close paths (windows-latest); orphan adoption → exactly 1 proxy.
+- [ ] Loop S4, both legs: exactly 1 proxy at every sample (`count:proxy` ≤ 1), including after a Ctrl-C during start that leaves a proxy without a start-time record (windows run 42425476318, Round 16 Q1). On windows, `count:proxy` is one of 17's names in `S4/short`.
 - [ ] Loop S4: 0 stale locks after Ctrl-C during start (baseline 5/8); respawn with a stale lock → proxy up; 50 cycles → 0 orphans, log-dir files ≤ 8. **Delete `S4/short` (linux, windows).**
 - [ ] Loop S3 (windows): 0 orphans (`orphans`) after the scenario's stop in `S3/short` and `S3/hung`; **remove 17's names (`orphans`) from the windows `S3/short` and `S3/hung` entries in `expected-red.json`, with the evidence Round 15 Q1 condition 5 requires.**
 - [ ] A2 (real PowerShell/conhost Ctrl-C) listed as an owner action, marked unverified.
@@ -44,3 +45,5 @@ Spec stories: 44, 45, 60
 - 2026-11-07 (orchestrator, from ticket 65): Windows suspended-proxy orphan (see ticket 16 Comments of the same date) is a legacy/orphan state this ticket's adoption or stop must handle: a process with the proxy's command line that was never resumed, no pid record, not serving the port.
 
 - 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 conditions 3 and 7 — added the Loop S3 (windows) criterion "0 orphans after the scenario's stop in `S3/short` and `S3/hung`; remove 17's names". The windows S3 `orphans` check had two claimants (16 via Round 7 Q4 condition 1, 17 via What-to-build "Every child is reaped …"); 17 descends from 16, so 17 owns it (Q1 condition 2), which also avoids holding 16 on a reap only 17 delivers. "Delete `S4/short`" stays. The 2026-11-06 "0 orphans in S3" line above is a measured finding, not the source of this criterion (Q1 condition 6).
+
+- 2026-11-08 (orchestrator, Owner Proxy round 16 Q1): new acceptance line for `count:proxy` in S4/short; windows `count:proxy` is owned by 17 and marked flips (1/26) in expected-red.json (ticket 67).
