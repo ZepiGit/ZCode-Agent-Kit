@@ -733,6 +733,22 @@ test("a reused pid is still refused: a live start one tick or 1 ms + 1 tick from
   }
 });
 
+test("a pid record whose start ticks are present but unreadable proves nothing: stop refuses and never signals", { ...fakeWindows, timeout: 60_000 }, async (t) => {
+  // Its startedMs alone would pass the legacy 1 ms rule; a damaged identity
+  // must not fall back to it (B4: never signal on an unproven identity).
+  const damaged = ["6392975304000300O1", "", "-639297530400030001", "1e18"];
+  const results = await stopAsWindows(t, damaged.map((startTicks) => ({
+    record: (pid) => ({ ...newKitRecord(pid, WORKED_TICKS, WORKED_MS), startTicks }),
+    process: () => ({ ticks: String(WORKED_TICKS) }),
+  })));
+  for (const [i, { proxy, root, record, stopped, calls }] of results.entries()) {
+    assert.deepEqual({ startTicks: damaged[i], code: stopped.code, outcome: stopped.outcome }, { startTicks: damaged[i], code: 4, outcome: "start-unknown" });
+    assert.deepEqual(calls.filter((c) => c.kind === "guard"), []);
+    assert.equal(proxy.exitCode, null);
+    assert.deepEqual(readJson(join(root, "logs", "proxy.pid")), record);
+  }
+});
+
 test("a pid record from an older kit (millisecond startedMs, no ticks) still verifies within 1 ms; one more than 1 ms away is refused", { ...fakeWindows, timeout: 60_000 }, async (t) => {
   // Legacy tolerance: |live − recorded| ≤ 1 ms (the rule older kits applied).
   // An older kit's value for this process is …240002.9922 (float error < 0.01 ms).
