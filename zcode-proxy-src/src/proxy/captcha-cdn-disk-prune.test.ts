@@ -167,13 +167,20 @@ describe("CDN disk prune skips temp files and files being written", () => {
 
   it("does not delete a legacy raw file modified within the last minute (a kit up to v0.2.31 may be writing it in place), but counts its bytes", () => {
     const dir = directory();
-    for (let i = 0; i < 3; i++) largeEnvelope(dir, urlOf(i), T0 - (3 - i) * HOUR, 60 * MiB);
+    largeEnvelope(dir, urlOf(1), T0 - HOUR, 10 * MiB);
     const writing = nameOf(urlOf(9));
-    legacy(dir, writing, 100 * MiB, T0 - 59_000);
+    legacy(dir, writing, 300 * MiB, T0 - 59_000);
     new CaptchaCdnCache({ directory: dir, now: () => T0 });
-    // 280 MiB: the oldest envelope goes, the file being written stays.
-    expect(listing(dir)).toEqual([nameOf(urlOf(1)), nameOf(urlOf(2)), writing].sort());
-    expect(totalBytes(dir)).toBeLessThanOrEqual(256 * MiB);
+    // 310 MiB: the envelope goes (older), the file being written stays although the directory is still above the cap.
+    expect(listing(dir)).toEqual([writing]);
+  });
+
+  it("prunes a legacy raw file once it has not been modified for a minute", () => {
+    const dir = directory();
+    const written = nameOf(urlOf(9));
+    legacy(dir, written, 300 * MiB, T0 - 60_000);
+    new CaptchaCdnCache({ directory: dir, now: () => T0 });
+    expect(listing(dir)).toEqual([]);
   });
 
   it("does not delete a legacy file with a modification time ahead of the clock", () => {

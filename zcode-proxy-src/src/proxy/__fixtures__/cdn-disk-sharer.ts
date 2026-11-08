@@ -93,14 +93,16 @@ try {
     while (Date.now() < until) {
       // A few files only: each stays "being written" for a minute and counts
       // toward the cap, which would otherwise crowd every envelope out.
-      if (n >= 4) { sleep(20); continue; }
+      if (n >= 3) { sleep(20); continue; }
       const name = crypto.createHash("sha256").update(`legacy ${id} ${n++}`).digest("hex");
       const file = path.join(dir, name);
       const fd = fs.openSync(file, "w");
       const identity = fs.fstatSync(fd).ino;
+      // Slow enough that the caches write more than the cap between two
+      // chunks, so the file becomes the oldest entry while it is being written.
       for (let k = 0; k < 8; k++) {
         fs.writeSync(fd, Buffer.alloc(KiB, 120));
-        sleep(10);
+        sleep(60);
         let seen: fs.Stats;
         try { seen = fs.statSync(file); } catch { fail(`${name} was deleted while it was being written`); }
         if (seen.ino !== identity) fail(`${name} was replaced while it was being written`);
