@@ -160,6 +160,15 @@ function shutdownSyncFetchWorker(): void {
 // Lazy construction validates environment settings on first use, not import.
 let _cdnCache: CaptchaCdnCache | undefined;
 function defaultCdnCache() { return _cdnCache ??= new CaptchaCdnCache(); }
+
+/**
+ * The solver generation's own bounded resources: this module is loaded once
+ * per solver generation (worker), so a new generation starts with an empty
+ * CDN memory tier and no stall counts. Diagnostics and seam-3 tests only.
+ */
+export function captchaGenerationResources() {
+  return { cdnCache: defaultCdnCache(), stallCounts: _stallCounts };
+}
 let _cookieCache = { cookies: [], ts: 0 };
 const COOKIE_CACHE_TTL_MS = 5 * 60 * 1000;
 const _DEBUG = /^(1|true|yes)$/i.test(
