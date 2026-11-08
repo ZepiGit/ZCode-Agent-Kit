@@ -66,19 +66,59 @@ test('setup smoke failure reports configured state without failing successful se
   assert.match(res.stdout + res.stderr, /1113|smoke|model access/i);
 });
 
-test('Claude MCP registration recognizes equivalent Windows paths without changing ownership', { skip: process.platform !== 'win32' }, async t => {
+// Ticket 36 round 2: since the bridge flag, an equivalent registration is left
+// alone only when it already carries the flag; a flagless one of this
+// installation is migrated exactly once (remove + add with the flag), and the
+// next setup is a no-op. Ownership never changes. Windows checks its own path
+// equivalence (separators, case); other hosts a `/./` spelling.
+test('Claude MCP registration recognizes equivalent Windows paths without changing ownership', async t => {
+  const SEMI = '--max-semi-space-size=1';
   const f = fixture(t);
   mkdirSync(join(f.home, '.claude'));
   const server = join(f.root, 'mcp', 'zcode-harness-mcp', 'dist', 'index.js');
   mkdirSync(dirname(server), { recursive: true }); writeFileSync(server, '');
-  const configured = server.replaceAll('\\', '/').toUpperCase();
+  const configured = process.platform === 'win32' ? server.replaceAll('\\', '/').toUpperCase() : server.replace('/mcp/', '/mcp/./');
+  const state = join(f.root, 'claude-registration');
   const attempts = join(f.root, 'mcp-add.json');
-  writeFileSync(join(f.bin, 'entry.cjs'), `const fs=require('node:fs'); if(process.argv[3]==='get'){console.log('Command: node\\nArgs: '+${JSON.stringify(configured)}+' --stdio');}else{fs.writeFileSync(${JSON.stringify(attempts)},JSON.stringify(process.argv));process.exitCode=1;}`);
-  writeFileSync(join(f.bin, 'claude.cmd'), '@ECHO off\r\nSET dp0=%~dp0\r\n"' + process.execPath + '" "%dp0%\\entry.cjs" %*\r\n');
-  const result = await run(f, ['setup', '--harness', 'claude-code']);
+  // A stateful `claude`: `get` shows the stored Args line; every other call is
+  // logged as an attempt; `remove` drops the registration, `add` stores its args.
+  writeFileSync(join(f.bin, 'entry.cjs'), `const fs=require('node:fs'); const [,, , verb, ...rest]=process.argv;
+if(verb==='get'){ if(!fs.existsSync(${JSON.stringify(state)})){process.exitCode=1;} else console.log('Command: node\\nArgs: '+fs.readFileSync(${JSON.stringify(state)},'utf8')); }
+else { fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.argv.slice(2))+'\\n');
+  if(verb==='remove') fs.rmSync(${JSON.stringify(state)},{force:true});
+  else if(verb==='add') fs.writeFileSync(${JSON.stringify(state)}, rest.slice(rest.indexOf('node')+1).join(' ')); }`);
+  if (process.platform === 'win32') writeFileSync(join(f.bin, 'claude.cmd'), '@ECHO off\r\nSET dp0=%~dp0\r\n"' + process.execPath + '" "%dp0%\\entry.cjs" %*\r\n');
+  else writeFileSync(join(f.bin, 'claude'), '#!/bin/sh\nexec "' + process.execPath + '" "' + join(f.bin, 'entry.cjs') + '" "$@"\n', { mode: 0o755 });
+  const calls = () => existsSync(attempts) ? readFileSync(attempts, 'utf8').trim().split('\n').map(l => JSON.parse(l)) : [];
+
+  // An equivalent spelling that already carries the flag: recognised, left alone.
+  writeFileSync(state, `${SEMI} ${configured} --stdio`);
+  let result = await run(f, ['setup', '--harness', 'claude-code']);
   assert.equal(result.code, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /registered by another kit copy/);
+  assert.match(result.stdout, /claude: "zcode-harness" already registered/);
   assert.equal(existsSync(attempts), false, 'equivalent registration is not replaced');
+
+  // The same equivalent spelling without the flag: this installation's own
+  // registration, migrated exactly once to the flagged form.
+  writeFileSync(state, `${configured} --stdio`);
+  result = await run(f, ['setup', '--harness', 'claude-code']);
+  assert.equal(result.code, 0, result.stderr);
+  assert.doesNotMatch(result.stdout, /registered by another kit copy/);
+  assert.match(result.stdout, /claude: re-registered "zcode-harness" with --max-semi-space-size=1/);
+  assert.deepEqual(calls(), [
+    ['mcp', 'remove', 'zcode-harness', '--scope', 'user'],
+    ['mcp', 'add', 'zcode-harness', '--scope', 'user', '--', 'node', SEMI, server, '--stdio'],
+  ], 'a flagless equivalent registration is migrated once: remove, then add with the flag');
+  assert.equal(readFileSync(state, 'utf8'), `${SEMI} ${server} --stdio`);
+
+  // Replayed: no further attempt.
+  for (let i = 0; i < 2; i++) {
+    result = await run(f, ['setup', '--harness', 'claude-code']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /claude: "zcode-harness" already registered/);
+    assert.equal(calls().length, 2, 'the migrated registration is not replaced again');
+  }
 });
 
 test('Claude MCP registration refuses a foreign path containing the managed path as a prefix', { skip: process.platform !== 'win32' }, async t => {
