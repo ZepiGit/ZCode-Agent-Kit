@@ -118,3 +118,20 @@ The three scenarios:
 - Ticket 62: the move to Bun ≥ 1.4.3 makes the unset case effective, and the semver gate flips the test to plain.
 - The child-process solver transport (after 24) could strip the ambient variables from the solver's environment as an alternative fix on 1.4.2.
 - Unchanged and not in scope (B1): the per-request `ProxyAgent` on Node's sync-XHR path, which is never closed (research/undici-yaml.md §5 #2).
+
+### 2026-11-08: implementer, round 2 (Owner Proxy round 19)
+
+- **Merged** the integration tip `c9c4062`, which includes the docs commit `09af58e`, as `215d9e9`. The only conflict was this file's `## Comments`. It was resolved by keeping the integration's ticket text (the round-19 acceptance criterion) and its round-19 Comment, then appending the implementer Comments after them. Tickets 24 and 25 have not landed (neither is an ancestor of the tip), so nothing of either was merged.
+- **Test name** (`9316fd9`): the unset case is now `goes direct when the setting is unset, even with ambient HTTP(S)_PROXY (declared failing on Bun < 1.4.3: proxy:false ignored, ticket 62)`. The gate is unchanged: `Bun.semver.satisfies(Bun.version, ">=1.4.3") ? it : it.failing`. The comment above it now points to ticket 27 for the 1.4.2 guarantee and says the gate never moves. It is the only `it.failing` in the repo (grep over `zcode-proxy-src/src`, `tests`, `mcp/zcode-harness-mcp/src`).
+- **Suites** (Bun 1.4.2, after the merge):
+  - captcha, all 13 `captcha-*.test.ts` files: **136 pass, including 1 declared-failing case on Bun 1.4.2**, 0 fail (`reports/t26-r2-captcha.log`);
+  - `npm run test:proxy`: **1387 pass, including 1 declared-failing case on Bun 1.4.2**, 0 fail, 92 files (`t26-r2-proxy-b.log`);
+  - `npm run test:proxy-typecheck`: 0 errors (`t26-r2-typecheck.log`);
+  - `npm run test`: 836 tests, 817 pass, 0 fail, 19 skipped (`t26-r2-kit.log`);
+  - `npm run test:mcp`: 97 tests, 96 pass, 0 fail, 1 skipped (`t26-r2-mcp.log`). `git status` was clean afterwards, so `dist/` is unchanged.
+- **Flake, not attributable to this ticket.** The first `test:proxy` run (`t26-r2-proxy.log`) failed one test and then ended with rc=143 after 36 s:
+  - the failed test is `src/auth/login-store.test.ts`, "15 consecutive CLI logins retain every distinct account…", which hit the 5000 ms timeout while spawning CLI logins (`login(3).status` was `null`);
+  - RAM was at 76 % available (`ram.log`) and the load average was about 1, so the sentinel did not kill it. The source of the SIGTERM is unknown;
+  - the immediate re-run is 1387/1387;
+  - the test does not touch captcha code. It is left for whoever owns the auth/login-store suite.
+- The CI item (fast suite and `memory-budget` on ubuntu and windows) is still **pending CI (orchestrator verifies after merge+push)**.
