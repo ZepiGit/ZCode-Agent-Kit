@@ -146,10 +146,13 @@ describe("captcha egress routing (captchaFetch and the sync-XHR worker)", () => 
   }, 30_000);
 
   // Bun 1.4.2 (the pinned runtime) ignores `proxy: false` and still reads the
-  // ambient variables; 1.4.3 honours it. Until ticket 62 moves the pin, this
-  // case is declared failing there, so it turns into a plain test on the move.
+  // ambient variables; 1.4.3 honours it. On Bun < 1.4.3 this case is a declared
+  // known gap (Owner Proxy round 19): ticket 27 delivers the unset guarantee
+  // there through the solver child's environment, and ticket 62 records it.
+  // The `>=1.4.3` gate is never moved to admit a runtime. This is the only
+  // allowed it.failing; the runner prints it as (pass), hence the name.
   const unsetCase = Bun.semver.satisfies(Bun.version, ">=1.4.3") ? it : it.failing;
-  unsetCase("goes direct when the setting is unset, even with ambient HTTP(S)_PROXY", async () => {
+  unsetCase("goes direct when the setting is unset, even with ambient HTTP(S)_PROXY (declared failing on Bun < 1.4.3: proxy:false ignored, ticket 62)", async () => {
     const run = await egress(ambient());
     expect(run.arrivals).toEqual([
       "target GET /fetch",
