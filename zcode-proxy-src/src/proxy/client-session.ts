@@ -289,6 +289,8 @@ const STABLE_FLUSH_CHARS = 16 * 1024;
  * code unit except that a surrogate pair is kept and a lone surrogate is
  * escaped; a slice therefore never ends on a high surrogate, which keeps every
  * pair inside one slice and gives each slice the escapes of the whole text.
+ * A slice with nothing to escape is written as it is (it is its own JSON
+ * text), so most of a long leaf is hashed without any copy.
  */
 function writeLongString(text: string, write: (text: string) => void): void {
   write("\"");
@@ -298,11 +300,18 @@ function writeLongString(text: string, write: (text: string) => void): void {
       const last = text.charCodeAt(end - 1);
       if (last >= 0xd800 && last <= 0xdbff) end -= 1;
     }
-    write(JSON.stringify(text.slice(start, end)).slice(1, -1));
+    const slice = text.slice(start, end);
+    write(JSON_ESCAPED.test(slice) ? JSON.stringify(slice).slice(1, -1) : slice);
     start = end;
   }
   write("\"");
 }
+
+/**
+ * The code units JSON.stringify escapes in a string: `"`, `\`, U+0000–U+001F
+ * and a lone surrogate (a pair is kept). Nothing else is escaped.
+ */
+const JSON_ESCAPED = /["\\\u0000-\u001f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
 /**
  * Write the stable stringification of `value` in pieces. Pieces are whole

@@ -256,4 +256,21 @@ describe("client session resolver", () => {
     expect(explicit.source).toBe("explicit");
     expect(explicit.sessionId).toBe("sess_from_body");
   });
+  it("keeps a long text that spells another conversation's structure apart from it (ticket 20: long leaves still escaped)", () => {
+    // Unescaped, A's single message would read exactly like B's two messages.
+    const resolver = createClientSessionResolver();
+    const long = "L".repeat(40_000);
+    const tail = "M".repeat(20_000);
+    const bodyA = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: `${long}","role":"user"},{"content":"${tail}` }] });
+    const bodyB = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: long }, { role: "user", content: tail }] });
+    const bodyC = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: `${long}\\${tail}` }] });
+    const bodyD = JSON.stringify({ model: "glm-4.6", messages: [{ role: "user", content: `${long}\u0001\ud800${tail}` }] });
+    const a = resolver.resolve(makeReq(bodyA), bodyA, "anthropic", "glm-4.6", CFG);
+    const b = resolver.resolve(makeReq(bodyB), bodyB, "anthropic", "glm-4.6", CFG);
+    const c = resolver.resolve(makeReq(bodyC), bodyC, "anthropic", "glm-4.6", CFG);
+    const d = resolver.resolve(makeReq(bodyD), bodyD, "anthropic", "glm-4.6", CFG);
+    expect(new Set([a.sessionId, b.sessionId, c.sessionId, d.sessionId]).size).toBe(4);
+    const again = resolver.resolve(makeReq(bodyD), bodyD, "anthropic", "glm-4.6", CFG);
+    expect(again.sessionId).toBe(d.sessionId);
+  });
 });
