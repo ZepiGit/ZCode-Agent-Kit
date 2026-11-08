@@ -1,0 +1,31 @@
+FAIL  bun available — Bun native executable not found; install Bun or set ZCODE_KIT_BUN to its executable path
+PASS  config exists — <KIT>/proxy/config.yaml
+PASS  key file exists — <KIT>/.proxykey
+PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+FAIL  credentials store — ~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login
+SKIP  omp integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp
+PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
+PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
+FAIL  proxy reachable + identity — health=foreign
+doctor: 3 check(s) failed
+FAIL  bun available — Bun native executable not found; install Bun or set ZCODE_KIT_BUN to its executable path
+PASS  config exists — <KIT>/proxy/config.yaml
+PASS  key file exists — <KIT>/.proxykey
+PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+FAIL  credentials store — ~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login
+SKIP  omp integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp
+PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
+PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
+FAIL  proxy reachable + identity — health=foreign
+SKIP  omp: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp
+SKIP  pi: integration — not detected — skipped
+SKIP  claude-code: integration — not detected — skipped
+SKIP  codex: integration — not detected — skipped
+SKIP  opencode: integration — not detected — skipped
+SKIP  cline: integration — not detected — skipped
+SKIP  kilo-code: integration — not detected — skipped
+SKIP  aider: integration — not detected — skipped
+SKIP  continue: integration — not detected — skipped
+SKIP  goose: integration — not detected — skipped
+doctor: 3 check(s) failed
+[exit 1]

@@ -121,6 +121,19 @@ test("payload verification rejects a payload without the proxy lifecycle module 
   }
 });
 
+test("payload verification rejects a payload without the manager's doctor module (ticket 38)", (t) => {
+  // The manager CLI and zcode-kit doctor both load lib/proxy-doctor.mjs.
+  const { root, build } = packageFixture(t);
+  const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
+  build();
+  const good = verify();
+  assert.equal(good.status, 0, good.stderr);
+  rmSync(join(root, "pack/dist/lib/proxy-doctor.mjs"));
+  const bad = verify();
+  assert.equal(bad.status, 1, "a package missing the doctor module must fail closed");
+  assert.match(bad.stderr, /required file missing: lib\/proxy-doctor\.mjs/);
+});
+
 test("payload verification rejects a payload without the shared width core, token set or their type declarations", (t) => {
   const { root, build } = packageFixture(t);
   const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });

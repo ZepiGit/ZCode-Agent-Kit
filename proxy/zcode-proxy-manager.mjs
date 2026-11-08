@@ -11,18 +11,15 @@
 // whose intents print nothing and return outcome records. This file renders
 // them: `createManager` keeps its members (start/stop/restart/respawn return
 // the exit code and print the narration lines as they happen), and status,
-// doctor, logs and the connection details are the manager's own reports.
-//   - No component is a hard requirement: doctor checks only what is
-//     installed on this machine and separates auth validity from token age.
-import { spawnSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, statSync, openSync, closeSync, readSync } from "node:fs";
-import { resolve, join } from "node:path";
+// doctor, logs and the connection details are the manager's own reports. The
+// doctor's checks are a record from lib/proxy-doctor.mjs (which zcode-kit
+// doctor reads too); `doctor` here renders it in the legacy grammar.
+import { existsSync, statSync, openSync, closeSync, readSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { diagnoseQuota, quotaAuthValid } from "../cli/quota-diagnostics.mjs";
-import { proxyEnv } from "../lib/proxy-env.mjs";
+import { managerDoctor } from "../lib/proxy-doctor.mjs";
 import { createLifecycle } from "../lib/proxy-lifecycle.mjs";
 import { configuredModelIds, configuredServer, connectionDetailsLines, connectionDetailsObject, shouldRevealKey } from "../cli/connection-details.mjs";
-import { readHarnessChoices } from "../cli/harness-consent.mjs";
 
 // ------------------------------------------------------------------ factory
 const MANAGER_PATH = fileURLToPath(import.meta.url);
@@ -37,11 +34,8 @@ export function createManager({
     root, home, processStartMsImpl, processCommandLineImpl, bunResolver, managerPath: MANAGER_PATH,
     startupGraceMs, hungProbeCount, hungProbeIntervalMs, hungProbeTimeoutMs, respawnWaitMs,
   });
-  const { ctx, HOME, PROXY_SRC, CONFIG, KEY_FILE, LOG_FILE, PID_FILE, LOG_DIR, RESPAWN_FILE } = lifecycle;
-  const { healthIdentify, readPidFile, pidAlive, readKey, loadPort, redact, findBun } = lifecycle;
-  const OMP_AGENT = HOME ? HOME + "/.omp/agent" : null;
-  const MCP_DIR = join(lifecycle.ROOT, "mcp", "zcode-harness-mcp");
-  const GENERATED = ctx.generated;
+  const { CONFIG, KEY_FILE, LOG_FILE, PID_FILE, LOG_DIR, RESPAWN_FILE } = lifecycle;
+  const { healthIdentify, readPidFile, pidAlive, readKey, loadPort, redact } = lifecycle;
   const base = () => `http://127.0.0.1:${loadPort()}`;
 
   // The manager prints each narration line the moment the intent produces it
@@ -249,126 +243,10 @@ export function createManager({
   }
 
   // ----------------------------------------------------------------- doctor
-  function commandOnPath(cmd) {
-    try {
-      execSync(`${process.platform === "win32" ? "where" : "which"} ${cmd}`, { stdio: "pipe" });
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function ompHasZcode() {
-    try {
-      const yml = readFileSync(OMP_AGENT + "/models.yml", "utf8");
-      return /^  zcode:\s*$/m.test(yml);
-    } catch {
-      return false;
-    }
-  }
-
-  /** Proves Bun can actually be started (a PATH hit alone is not startable). */
-  function bunStartable() {
-    let bun;
-    try {
-      bun = findBun();
-    } catch (err) {
-      return { ok: false, detail: err.message };
-    }
-    const r = spawnSync(bun, ["--version"], { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", timeout: 10000, windowsHide: true });
-    if (r.error || r.status !== 0) return { ok: false, detail: `${bun} cannot be started (${r.error?.message ?? `exit ${r.status}`})` };
-    return { ok: true, detail: `${bun} (${(r.stdout ?? "").trim()})` };
-  }
-
-  /**
-   * Proves the credential store is decryptable by THIS runtime, offline: the
-   * proxy's own store module is loaded in a child that prints only a boolean.
-   */
-  function credentialStoreState(credentials) {
-    if (!existsSync(credentials)) return { ok: false, detail: "no credential store — run: zcode-kit auth login" };
-    let bun;
-    try {
-      bun = findBun();
-    } catch {
-      return { ok: null, detail: "store present; decryptability not checked (Bun unavailable)" };
-    }
-    const probe = 'import { loadCredential } from "./src/auth/store.ts"; const c = await loadCredential({ migrate: false }); console.log(c && typeof c.apiKey === "string" && c.apiKey.length > 0 ? "DECRYPTABLE" : "UNREADABLE");';
-    const r = spawnSync(bun, ["-e", probe], {
-      cwd: PROXY_SRC,
-      env: { ...proxyEnv(ctx), ZCODE_PROXY_CREDENTIALS_PATH: credentials },
-      stdio: ["ignore", "pipe", "pipe"],
-      encoding: "utf8",
-      timeout: 20000,
-      windowsHide: true,
-    });
-    if (r.error || r.status !== 0) return { ok: null, detail: "store present; decryptability probe failed to run" };
-    const decryptable = (r.stdout ?? "").trim().split("\n").pop() === "DECRYPTABLE";
-    return { ok: decryptable, detail: decryptable ? "present and decryptable on this machine" : "present but NOT decryptable here — re-run: zcode-kit auth login" };
-  }
-
+  // The checks are lib/proxy-doctor.mjs's record; this renders it in the
+  // legacy off-TTY grammar (ADR-0001 rule 1), which the manager CLI keeps.
   async function doctor() {
-    const checks = [];
-    // ok: true|false|null (null = skip, not counted as failure)
-    const add = (name, ok, detail) => checks.push({ name, ok, detail });
-    const bunState = bunStartable();
-    add("bun available", bunState.ok, bunState.detail);
-    add("config exists", existsSync(CONFIG), CONFIG);
-    add("key file exists", existsSync(KEY_FILE), KEY_FILE);
-    add("proxy source installed", existsSync(join(PROXY_SRC, "node_modules")), join(PROXY_SRC, "node_modules"));
-    const overrides = Object.keys(process.env).filter((k) => /^ZCODE_(?:PROXY_PORT|PROXY_API_KEY|CLAIM_|ASYNC_|DUMP_)/.test(k));
-    if (overrides.length) add("proxy env overrides", false, `ignored by the kit-managed proxy (unset them): ${overrides.join(", ")}`);
-    if (process.env.ZCODE_PROXY_CREDENTIALS_PATH || HOME) {
-      const credentials = process.env.ZCODE_PROXY_CREDENTIALS_PATH || join(HOME, ".zcode-proxy", "credentials.json");
-      const cred = credentialStoreState(credentials);
-      add("credentials store", cred.ok, `${process.env.ZCODE_PROXY_CREDENTIALS_PATH ? "ZCODE_PROXY_CREDENTIALS_PATH (explicit store)" : "~/.zcode-proxy/credentials.json"}: ${cred.detail}`);
-    } else {
-      add("credentials store", null, "USERPROFILE/HOME not set — skipped");
-    }
-
-    // OMP checks only apply when OMP is actually installed here; a Codex-only
-    // user must not get FAIL lines about OMP.
-    const ompInstalled = !!OMP_AGENT && existsSync(join(OMP_AGENT, "models.yml"));
-    // Only a consented or kit-managed OMP integration is checked: a declined
-    // or never-answered harness is a choice, not a failed check.
-    const ompChoice = readHarnessChoices({ generated: GENERATED }).harnesses.omp?.decision;
-    const ompManaged = (() => {
-      try { return readFileSync(join(OMP_AGENT, "models.yml"), "utf8").includes("# >>> zcode-kit (managed block)"); } catch { return false; }
-    })();
-    if (ompInstalled && (ompChoice === "configured" || (ompChoice !== "skipped" && ompManaged))) {
-      add("omp provider registered", ompHasZcode(), "zcode block in ~/.omp/agent/models.yml");
-      add("extension installed", existsSync(OMP_AGENT + "/extensions/zcode-proxy-autostart.ts"), "~/.omp/agent/extensions/zcode-proxy-autostart.ts");
-    } else if (ompInstalled) {
-      add("omp integration", null, ompChoice === "skipped" ? "not configured (your choice) — zcode-kit integrate omp to change" : "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp");
-    } else {
-      add("omp integration", null, "OMP not installed — skipped");
-    }
-    if (existsSync(MCP_DIR)) {
-      add("mcp bridge installed", existsSync(join(MCP_DIR, "dist", "index.js")), join(MCP_DIR, "dist", "index.js"));
-      add("mcp bridge deps", existsSync(join(MCP_DIR, "node_modules")), join(MCP_DIR, "node_modules"));
-    }
-    if (existsSync(join(GENERATED, "claude-zcode-settings.json"))) {
-      add("claude adapter artifact", true, "generated/claude-zcode-settings.json");
-    }
-    if (existsSync(join(GENERATED, "codex-home", "config.toml"))) {
-      add("codex adapter artifact", true, "generated/codex-home/config.toml");
-    }
-
-    let state = "down";
-    let configOk = existsSync(CONFIG);
-    if (configOk) {
-      state = await healthIdentify();
-      add("proxy reachable + identity", state === "ours", `health=${state}`);
-      if (state === "ours") {
-        const q = await authState();
-        add("account auth valid", q.valid, q.detail);
-        if (q.ageHours !== null && q.ageHours !== undefined) {
-          add("start-plan JWT age (info)", true, `${q.ageHours.toFixed(1)}h since issue — age is informational, validity is the auth check above`);
-        }
-      }
-    } else {
-      add("proxy reachable + identity", null, "no config — skipped");
-    }
-
+    const { checks, code } = await managerDoctor({ lifecycle });
     let failed = 0, skipped = 0;
     for (const c of checks) {
       const tag = c.ok === null ? "SKIP" : c.ok ? "PASS" : "FAIL";
@@ -377,30 +255,7 @@ export function createManager({
       console.log(`${tag}  ${c.name}${c.detail ? ` — ${c.detail}` : ""}`);
     }
     console.log(failed === 0 ? `doctor: ${skipped} skipped, ${failed} failed — OK` : `doctor: ${failed} check(s) failed`);
-    return failed === 0 ? 0 : 1;
-  }
-
-  /**
-   * Real auth validity from the account endpoint, separated from token age:
-   * HTTP 200 → valid; 401/403 → invalid; quota-exhausted envelope → valid
-   * account, exhausted quota (reported, not a failure).
-   */
-  async function authState() {
-    try {
-      const key = readKey();
-      const q = await fetch(`${base()}/quota`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
-      const j = await q.json().catch(() => null);
-      const diagnostic = diagnoseQuota(q.status, j);
-      const valid = quotaAuthValid(q.status, j, diagnostic);
-      const issuedAt = j?.jwt?.issuedAt;
-      return {
-        valid,
-        detail: diagnostic.cause === "healthy" ? "valid" : diagnostic.detail,
-        ageHours: Number.isFinite(issuedAt) ? (Date.now() / 1000 - issuedAt) / 3600 : null,
-      };
-    } catch {
-      return { valid: false, detail: "auth check unreachable; quota authentication not proven", ageHours: null };
-    }
+    return code;
   }
 
   // ------------------------------------------------------------------- logs

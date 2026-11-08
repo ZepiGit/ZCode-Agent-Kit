@@ -72,17 +72,24 @@ test("manager imports every child_process helper it calls (H2a: darwin spawnSync
   // The darwin branch of the process-start-time probe calls spawnSync; a
   // missing import throws a ReferenceError that the surrounding catch swallows,
   // so stop/restart would silently refuse on macOS. Enforce import coverage.
-  const src = readFileSync(join(import.meta.dirname, "..", "proxy", "zcode-proxy-manager.mjs"), "utf8");
-  const imported = new Set(
-    [...src.matchAll(/import\s*\{([^}]+)\}\s*from\s*"node:child_process"/g)]
-      .flatMap((m) => m[1].split(",").map((s) => s.trim()))
-      .filter(Boolean),
-  );
-  const used = new Set([...src.matchAll(/\b(spawnSync|spawn|execSync|execFile|exec)\s*\(/g)].map((m) => m[1]));
-  assert.ok(used.has("spawnSync"), "expected the darwin spawnSync call to exist in the manager");
-  for (const fn of used) {
-    assert.ok(imported.has(fn), `${fn} is called but not imported from node:child_process`);
+  // The darwin probe moved to lib/proxy-lifecycle.mjs (ticket 15, guarded in
+  // proxy-lifecycle.test.mjs) and the doctor's Bun probes to
+  // lib/proxy-doctor.mjs (ticket 38): every module the manager CLI runs them from is checked.
+  const usedAnywhere = new Set();
+  for (const rel of [["proxy", "zcode-proxy-manager.mjs"], ["lib", "proxy-doctor.mjs"]]) {
+    const src = readFileSync(join(import.meta.dirname, "..", ...rel), "utf8");
+    const imported = new Set(
+      [...src.matchAll(/import\s*\{([^}]+)\}\s*from\s*"node:child_process"/g)]
+        .flatMap((m) => m[1].split(",").map((s) => s.trim()))
+        .filter(Boolean),
+    );
+    const used = new Set([...src.matchAll(/\b(spawnSync|spawn|execSync|execFile|exec)\s*\(/g)].map((m) => m[1]));
+    for (const fn of used) {
+      usedAnywhere.add(fn);
+      assert.ok(imported.has(fn), `${rel.join("/")}: ${fn} is called but not imported from node:child_process`);
+    }
   }
+  assert.ok(usedAnywhere.has("spawnSync"), "expected the doctor's spawnSync probes in the manager's modules");
 });
 
 test("stop refuses to kill a foreign service on the port", async () => {
