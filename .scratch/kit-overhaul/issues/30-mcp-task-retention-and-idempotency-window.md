@@ -15,8 +15,8 @@ ADR: 0009
 **Acceptance criteria:**
 
 - [ ] Seam 7 (MCP client + fake harness): eviction by count and age with an injected clock, non-terminal kept, files pruned, restore loads only retained, not-found and new-task-on-reused-key after eviction.
-- [ ] Loop S5: growth ≤ 5 %/1k, reboot cost of history ≤ 20 MB, 0 task failures. **Delete `S5/short` (linux, windows).**
-- [ ] Linux exit (Round 17 Q2 condition 2; explicitly contradicts Round 13 Q1 condition 4, third bullet): `growth:mcp-bridge`, and with it the linux `S5/short` entry, is removed only when every one of ≥ 10 fresh matching linux CI runs on this ticket's tree has `growth:mcp-bridge` ≤ 5 %/1k, whatever the trend flag says, and every other S5 check is GREEN. A GREEN at 39 %/1k is a missed trend, not a fix. Windows keeps the Round 13 exit (Comments, 2026-11-07).
+- [ ] Loop S5/long (3,000 tasks): GREEN on every check (growth ≤ 5 %/1k, procPeak ≤ 150 MB, reboot cost of history ≤ 20 MB, 0 task failures), tip RED → branch GREEN recorded.
+- [ ] Loop S5/short: no new RED on either leg (linux listed, growth:mcp-bridge only; windows inside the 5–30 %/1k commit band; every other S5 check GREEN); values recorded. Both S5/short entries are re-owned to ticket 74, which holds their only exit (Round 24 Q1; explicitly contradicts Round 13 Q1 condition 4 and moves Round 17 Q2 condition 2's exit to 74).
 - [ ] Retention migration replayed twice.
 
 **Common acceptance (every ticket):**
@@ -185,3 +185,5 @@ Spec stories: 66, 67, 68, 135
   - `test:proxy-typecheck`: clean;
   - `test:mcp`: 102 tests, 101 pass, 0 fail, 1 skipped;
   - `git status` is clean after the build.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 24, binding): merges on retention and S5/long. Staged run 42475847194: windows S5/short 14.5 %/1k commit (WS −4.24, trend false, in band); linux 31.82 %/1k (trend false, flip GREEN; window medians from the run's summary.json to be recorded here, Round 17 Q2 condition 3); all other S5 checks GREEN on both legs. The S5/short entries are re-owned to 74 in this tree, followed by one restaged run. The per-task footprint (~4.6 KB heap / ~28 KB RSS per retained task) is bounded by the 500 bound and gets no ticket (C9).

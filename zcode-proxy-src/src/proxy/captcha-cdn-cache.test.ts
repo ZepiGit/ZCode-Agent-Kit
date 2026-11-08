@@ -174,3 +174,126 @@ describe("CDN singleflight publication", () => {
     expect(new CaptchaCdnCache(options).get(URL)?.body).toEqual(fresh);
   });
 });
+
+// Ticket 25 (ADR-0009, spec §7, Round 20 Q1): the memory tier holds at most
+// 256 entries and 32 MiB of bodies, so its memory stays within 64 MB (the
+// runtime keeps the memory of evicted bodies for a while on top). Eviction
+// changes memory use only: an evicted entry is read back from its disk
+// envelope (same bytes, same retrieval time) or, without one, fetched again.
+// The disk tier is not bounded here (ticket 29).
+// The bound tests run without a disk tier: the bound is a memory property,
+// and hundreds of fsync'd envelope writes made them take seconds on Windows
+// runners. The read-back tests use a real disk tier with a few entries.
+const MiB = 1024 * 1024;
+const pe = (i: number) => `https://o.alicdn.com/captcha-frontend/dynamicJS/${i}/pe.js`;
+function noDisk() {
+  const blocker = path.join(directory(), "not-a-directory");
+  fs.writeFileSync(blocker, "file");
+  return blocker;
+}
+
+describe("CDN memory tier bound", () => {
+  it("holds at most 256 entries, the oldest evicted first", () => {
+    const cache = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    for (let i = 0; i < 300; i++) cache.put(pe(i), Buffer.from(`var pe = ${i};`));
+    expect(cache.memoryUsage().entries).toBe(256);
+    for (let i = 0; i < 44; i++) expect(cache.get(pe(i))).toBeNull();
+    for (let i = 44; i < 300; i++) expect(cache.get(pe(i))?.source).toBe("memory");
+    expect(cache.memoryUsage().entries).toBe(256);
+  });
+
+  it("serves an evicted entry from its disk envelope with the same bytes, sha256 and retrieval time", () => {
+    let now = 1_000;
+    const cache = new CaptchaCdnCache({ directory: directory(), ttlMs: 100_000, now: () => now, memoryMaxBytes: 24 });
+    for (let i = 0; i < 3; i++) cache.put(pe(i), Buffer.from(`var pe = ${i};`)); // 11 bytes each: pe(0) is evicted
+    expect(cache.memoryUsage().entries).toBe(2);
+    now = 1_050;
+    const evicted = cache.get(pe(0));
+    expect(evicted).toMatchObject({ body: Buffer.from("var pe = 0;"), fetchedAt: 1_000, source: "disk" });
+    expect(evicted?.sha256).toBe(crypto.createHash("sha256").update("var pe = 0;").digest("hex"));
+    // The read-back is promoted under the same bound.
+    expect(cache.memoryUsage().entries).toBe(2);
+    expect(cache.get(pe(0))?.source).toBe("memory");
+  });
+
+  it("holds at most 32 MiB of bodies", () => {
+    const cache = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    for (let i = 0; i < 40; i++) cache.put(pe(i), Buffer.alloc(MiB, i));
+    const { entries, bytes } = cache.memoryUsage();
+    expect(bytes).toBe(32 * MiB);
+    expect(entries).toBe(32);
+    expect(cache.get(pe(7))).toBeNull();
+    // Buffer.equals, not toMatchObject: bun's matcher compares a 1 MiB Buffer element by element (~0.9 s).
+    const kept = cache.get(pe(8));
+    expect(kept?.source).toBe("memory");
+    expect(kept?.body.equals(Buffer.alloc(MiB, 8))).toBe(true);
+    expect(cache.get(pe(39))?.source).toBe("memory");
+  });
+
+  it("keeps a recently read entry in memory while older ones are evicted", () => {
+    const cache = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    for (let i = 0; i < 256; i++) cache.put(pe(i), Buffer.from(`var pe = ${i};`));
+    expect(cache.get(pe(0))?.source).toBe("memory");
+    cache.put(pe(256), Buffer.from("var pe = 256;"));
+    expect(cache.get(pe(0))?.source).toBe("memory");
+    expect(cache.get(pe(1))).toBeNull();
+  });
+
+  it("bounds promotion from disk and network loads as well as puts", async () => {
+    // Promotion from disk: 8 envelopes of 1 KiB read into a 4 KiB tier.
+    const dir = directory();
+    const writer = new CaptchaCdnCache({ directory: dir, ttlMs: 100_000, now: () => 1_000 });
+    for (let i = 0; i < 8; i++) writer.put(pe(i), Buffer.alloc(1024, i));
+    const reader = new CaptchaCdnCache({ directory: dir, ttlMs: 100_000, now: () => 1_000, memoryMaxBytes: 4096 });
+    for (let i = 0; i < 8; i++) expect(reader.get(pe(i))).toMatchObject({ body: Buffer.alloc(1024, i), source: "disk" });
+    expect(reader.memoryUsage()).toEqual({ entries: 4, bytes: 4096 });
+    // Network loads at the production bounds: count, then bytes.
+    const loader = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    for (let i = 0; i < 300; i++) await loader.load(pe(i), async () => Buffer.from(`var pe = ${i};`));
+    expect(loader.memoryUsage().entries).toBe(256);
+    const bulk = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    for (let i = 0; i < 40; i++) await bulk.load(pe(i), async () => Buffer.alloc(MiB, i));
+    expect(bulk.memoryUsage()).toEqual({ entries: 32, bytes: 32 * MiB });
+  });
+
+  it("serves a body larger than the whole budget without holding it in memory", async () => {
+    const cache = new CaptchaCdnCache({ directory: directory(), ttlMs: 100_000, now: () => 1_000, memoryMaxBytes: 1024 });
+    cache.put(pe(1), Buffer.from("var small = 1;"));
+    const huge = Buffer.alloc(1024 + 1, 7);
+    const loaded = await cache.load(pe(0), async () => huge);
+    expect(loaded.body.length).toBe(1024 + 1);
+    expect(cache.memoryUsage()).toEqual({ entries: 1, bytes: Buffer.byteLength("var small = 1;") });
+    // Its disk envelope still serves the same bytes; promotion is refused again.
+    const again = cache.get(pe(0));
+    expect(again?.source).toBe("disk");
+    expect(again?.sha256).toBe(loaded.sha256);
+    expect(cache.memoryUsage().entries).toBe(1);
+    expect(cache.get(pe(1))?.source).toBe("memory");
+  });
+
+  it("refuses a body above the production budget of 32 MiB", async () => {
+    const cache = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    cache.put(pe(1), Buffer.from("var small = 1;"));
+    const loaded = await cache.load(pe(0), async () => Buffer.alloc(32 * MiB + 1, 7));
+    expect(loaded.body.length).toBe(32 * MiB + 1);
+    expect(cache.memoryUsage()).toEqual({ entries: 1, bytes: Buffer.byteLength("var small = 1;") });
+  });
+
+  it("stays bounded when the disk tier is unavailable, so an evicted entry is fetched again", async () => {
+    const cache = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    for (let i = 0; i < 257; i++) cache.put(pe(i), Buffer.from(`var pe = ${i};`));
+    expect(cache.memoryUsage().entries).toBe(256);
+    expect(cache.get(pe(0))).toBeNull();
+    let fetches = 0;
+    const refetched = await cache.load(pe(0), async () => { fetches++; return Buffer.from("var pe = 0;"); });
+    expect({ fetches, body: refetched.body.toString(), source: refetched.source }).toEqual({ fetches: 1, body: "var pe = 0;", source: "network" });
+  });
+
+  it("invalidation releases the memory an entry held", () => {
+    const cache = new CaptchaCdnCache({ directory: noDisk(), ttlMs: 100_000, now: () => 1_000 });
+    cache.put(pe(0), Buffer.alloc(1024));
+    cache.put(pe(1), Buffer.alloc(2048));
+    cache.invalidate(pe(0));
+    expect(cache.memoryUsage()).toEqual({ entries: 1, bytes: 2048 });
+  });
+});
