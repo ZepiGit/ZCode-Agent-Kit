@@ -1,0 +1,9 @@
+PASS  bun available — <BUN> (<VERSION>)
+FAIL  config exists — <KIT>/proxy/config.yaml
+FAIL  key file exists — <KIT>/.proxykey
+FAIL  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+FAIL  credentials store — ~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login
+SKIP  omp integration — OMP not installed — skipped
+SKIP  proxy reachable + identity — no config — skipped
+doctor: 4 check(s) failed
+[exit 1]
