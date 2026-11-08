@@ -1,9 +1,9 @@
 {
   "linux": {
-    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst4": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/burst32": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/bigbody": { "owners": { "20": ["procPeak:proxy"] } },
     "S2/short": {
       "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
       "flips": ["growth:scenario", "procPeak:solver"]
@@ -29,10 +29,10 @@
   },
   "windows": {
     "S1/burst1": { "ticket": "20", "state": "unstable" },
-    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst4": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/burst32": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/bigbody": { "owners": { "20": ["procPeak:proxy"] } },
     "S1/stalled": { "owners": { "61": ["procPeak:proxy"] } },
     "S2/short": {
       "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
