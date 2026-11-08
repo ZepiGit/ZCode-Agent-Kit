@@ -304,6 +304,9 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
       t0,
       ready,
       pollerPid: poller.child.pid,
+      // Asked of the poller's own handle, never by pid: a freed pid may already
+      // name another process (Windows reuses pids quickly; tickets 70, 72).
+      pollerRunning: () => poller.child.exitCode === null && poller.child.signalCode === null,
       overhead: () => poller.overhead(),
       async stop() {
         await poller.stop();
@@ -323,6 +326,7 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
     t0,
     ready: Promise.resolve({ units: null }),
     pollerPid: null,
+    pollerRunning: () => false,
     overhead: () => null,
     async stop() {
       clearInterval(timer);

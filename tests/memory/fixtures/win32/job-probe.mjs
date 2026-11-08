@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Probe for the Job Object cap self-test (loop.test.mjs, Windows only):
 //   alloc <MB>   commit <MB> of memory in 64 MB steps and hold it; exit 0 if all of it was granted
-//   detach       start a detached grandchild that sleeps 60 s, print its pid, exit 0
+//   detach       start a detached grandchild that sleeps 60 s, print its pid and start time, exit 0
 import { spawn } from "node:child_process";
+import { identityOf } from "../../lib/process-identity.mjs";
 
 const [mode, arg] = process.argv.slice(2);
 if (mode === "alloc") {
@@ -18,7 +19,10 @@ if (mode === "alloc") {
 } else if (mode === "detach") {
   const c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" });
   c.unref();
-  console.log(`GRANDCHILD ${c.pid}`);
+  // Its identity (pid + start time) while it surely runs: once the job kills
+  // it, its pid may name a stranger (ticket 72).
+  const { start } = identityOf(c.pid);
+  console.log(`GRANDCHILD ${c.pid} ${start}`);
   process.exit(0);
 } else {
   console.error("usage: job-probe.mjs alloc <MB> | detach");
