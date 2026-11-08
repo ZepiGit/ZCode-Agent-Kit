@@ -2,7 +2,7 @@
 
 **Blocked by:** 25 (Bounded-collection module; CDN memory cache and stall counters bounded)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -117,3 +117,5 @@ Spec stories: 63, 64, 135
     - (9) The 7-process test leaves no `*.prune` file. A tombstone held open by a reader could linger as delete-pending until the handle closes; the final listing runs after every child has exited.
     - (10) ubuntu test-kit Node 24 and 26 green on the new tree.
   - **After merging 3efcaf2 (ticket 15 teardown fix, `tests/proxy-lifecycle.test.mjs` only) in 065d8ae:** `npm run test` 885 tests, 867 pass, 0 fail, 18 skipped (`reports/t29-r2-test2.log`). The proxy, mcp and captcha trees are unchanged since f4d48d3.
+
+Merged 2026-11-08 as 5f754b8 (`5f754b80a8f06cbf4552fd9eb6f81c256c28bdd8`; ticket/29-cdn-disk-cache-pruning at d5bbab2; first merge, no revert-of-revert step, since `git log --grep 'ticket 29'` shows only docs commits c457fd8/e056af6 and no earlier merge or revert) onto 603475c; clean merge (no conflicts). Fast suite: kit 867/885 (0 fail, 18 skipped), proxy 1479/1479 (includes captcha-cdn-disk-prune.test.ts and captcha-cdn-disk-replay.test.ts), mcp 99/100 (0 fail, 1 skipped); mcp `dist/` unchanged after the build; no lockfile changes, so only the root `npm ci` ran. `npm run test:proxy` ran without credentials (isolated HOME); per open ticket 76 it can reach the real zcode.z.ai:443 on this tip, and the log does not name that host. Pre-merge CI (staging/29 f294460), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42506095577. Sanity: `git diff --name-only staging/29^1 staging/29 -- . ':!.scratch'` gives 3 files (captcha-cdn-disk.ts, captcha-cdn-disk-prune.test.ts, captcha-cdn-disk-replay.test.ts), and `git diff staging/29 HEAD` over them is empty. staging/29^1 (de60e00) already held the round-1 ticket work (57c3db0) and was not the bare tip, so I also checked all 6 non-.scratch ticket files (adds the two `__fixtures__` files and captcha-cdn-cache.ts): `git diff staging/29 HEAD -- . ':!.scratch'` is empty. The only other differences come from the tip's docs commit 603475c (round 27: DECISIONS, RUNLOG, issue 77, INDEX, rounds/round-27*, round-28). Logs: `.scratch/kit-overhaul/reports/merge-29-{npmci,kit,proxy,mcp}.log`.
