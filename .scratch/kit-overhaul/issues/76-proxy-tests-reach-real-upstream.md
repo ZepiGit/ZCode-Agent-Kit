@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: high
@@ -86,3 +86,5 @@ ADR: no
   - `npm run test:proxy-typecheck`: pass.
   - `npm run test:mcp`: 99 pass, 1 skipped.
   - `npm run test`: 886 tests, 868 pass, 0 fail, 18 skipped, on rerun. The first run had 1 failure: `tests/json-superset.test.mjs` "port 18458 is in use; another capture may be running". That is a fixed port shared with another agent's concurrent capture, unrelated to this ticket. The port was free 20 s later and the rerun passed.
+
+Merged 2026-11-08 as 9601392 (`9601392ed1f54f03e77fad0138aff96b716b8f2f`; ticket/76-proxy-test-egress-guard at ea11dd7) onto aed28ee. Clean merge with no conflicts. Plain merge with no revert-of-revert step: `git log --grep 'ticket 76'` on the integration branch shows only the docs commit 5922e59 that added the ticket, `ticket/76` was not an ancestor of the tip, and `git log --grep 'Revert'` shows only the 02/06 reverts. Fast suite: kit 868/886 (0 fail, 18 skipped), proxy 1596/1596 (107 files, 0 fail), mcp 99/100 (0 fail, 1 skipped). The mcp `dist/` was unchanged after the build. There were no lockfile changes, so only the root `npm ci` ran. This is the first integration run of `npm run test:proxy` with the egress guard active (`zcode-proxy-src/bunfig.toml` preload): 0 blocked attempts. The log has no `BLOCKED` line and no `non-loopback connection attempt` report, and the guard's own 14 transport/worker/child tests pass. Tickets 20 and 21 add no test that reaches a non-loopback host. The only connection errors are the 7 mock-upstream ECONNREFUSED retries seen in earlier merges. Pre-merge CI (staging/76 5ec56f0 = 4d1543d + ticket/76 at ea11dd7), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42513423687. Staged-ticket sanity check: `git diff --name-only staging/76^1 staging/76 -- . ':!.scratch'` gives 8 files (tests/test-wiring.test.mjs, zcode-proxy-src/{bunfig.toml, tsconfig.json, src/integration.test.ts, test-support/egress-guard{-preload.ts,.d.mts,.mjs,.test.ts}}). The same list comes from the merge-base f2795a1, and `git diff staging/76 HEAD` over it is empty. Whole tree: `git diff staging/76 HEAD -- . ':!.scratch'` touches 30 files, and its patch is byte-identical to `git diff 4d1543d aed28ee -- . ':!.scratch'`. Of those files, 16 config/runtime/server/index files come from ticket 21's merge 2aab7db (including `src/runtime/__fixtures__/egress-guard.ts`), and 14 files (11 proxy body-path files and 3 `tests/memory/` files) come from ticket 20's merge 42ceccd. The docs commits 74f8e9f, 66f7784, 2db5088 and aed28ee touch only `.scratch`. Nothing else differs. Logs: `.scratch/kit-overhaul/reports/merge-76-{npm-ci,test,test-proxy,test-mcp}.log`.
