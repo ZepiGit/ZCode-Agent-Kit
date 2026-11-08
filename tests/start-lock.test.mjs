@@ -14,7 +14,8 @@
 //     record, and a start whose start-time probe times out (no kill), each
 //     end with exactly one proxy that the next start adopts and stop stops;
 //     a reused pid is never signalled.
-// Ports 19160-19169 (ticket 16's range); 19161 is left to the memory loop runs.
+// Ports: every test takes a free loopback port of its own (freePort), as ticket
+// 15's tests do since its Windows fix (ticket 75: parallel test files collide).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -36,8 +37,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const cleanups = new Map();
 const defer = (root, fn) => cleanups.get(root).push(fn);
 
+/** A loopback port no listener holds right now (bind port 0, read it back, release it). */
+function freePort() {
+  return new Promise((resolvePort, reject) => {
+    const probe = http.createServer();
+    probe.once("error", reject);
+    probe.listen(0, "127.0.0.1", () => { const { port } = probe.address(); probe.close(() => resolvePort(port)); });
+  });
+}
+
 /** A temp root that is its own state directory (config, key, logs). */
-function stateFixture(t, port = 19160, { kit = false } = {}) {
+async function stateFixture(t, port = null, { kit = false } = {}) {
+  port ??= await freePort();
   const root = mkdtempSync(join(tmpdir(), "kit-start-lock-"));
   cleanups.set(root, []);
   t.after(() => {
@@ -75,7 +86,7 @@ async function lifecycleFor(root, options = {}) {
 
 // ------------------------------------------------- proof: stale vs live locks
 test("a stale v0 lock whose holder is dead is taken over by the next start, with one takeover event line", async (t) => {
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   writeFileSync(lockPath(root), JSON.stringify({ pid: DEAD_PID, startedAt: "2026-01-01T00:00:00.000Z", nonce: "0123456789abcdef" }));
   const started = await (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 });
   // Past the lock: no proxy dependencies in this fixture, so it stops right after.
@@ -87,7 +98,7 @@ test("a stale v0 lock whose holder is dead is taken over by the next start, with
 });
 
 test("the manager CLI's start and stop take a dead holder's lock over (no more 'refusing automatic takeover')", async (t) => {
-  const root = stateFixture(t, 19160, { kit: true });
+  const root = await stateFixture(t, null, { kit: true });
   writeFileSync(lockPath(root), JSON.stringify({ pid: DEAD_PID, startedAt: "2026-01-01T00:00:00.000Z", nonce: "fedcba9876543210" }));
   const stop = spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "stop"], { env: childEnv(root), encoding: "utf8", timeout: 60_000 });
   assert.equal(stop.status, 0, stop.stdout + stop.stderr);
@@ -96,7 +107,7 @@ test("the manager CLI's start and stop take a dead holder's lock over (no more '
 });
 
 test("a v0 lock is stale when the live process at its pid started after the lock's startedAt (pid reused)", async (t) => {
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   writeFileSync(lockPath(root), JSON.stringify({ pid: process.pid, startedAt: "2000-01-01T00:00:00.000Z", nonce: "aaaaaaaaaaaaaaaa" }));
   const lock = (await lifecycleFor(root)).acquireStartLock();
   assert.equal(lock.status, "acquired", lock.message);
@@ -105,7 +116,7 @@ test("a v0 lock is stale when the live process at its pid started after the lock
 });
 
 test("a v0 lock whose live holder started before startedAt is never touched", async (t) => {
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   const text = JSON.stringify({ pid: process.pid, startedAt: new Date(Date.now() + 60_000).toISOString(), nonce: "bbbbbbbbbbbbbbbb" });
   writeFileSync(lockPath(root), text);
   const lock = (await lifecycleFor(root)).acquireStartLock();
@@ -117,7 +128,7 @@ test("a v0 lock whose live holder started before startedAt is never touched", as
 
 test("v1: a live holder's lock is never touched; a reused pid (later start, other start id) is taken over; an unknown start time is no proof", async (t) => {
   // Live: our own acquisition, met by a second contender in this process.
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   const lifecycle = await lifecycleFor(root);
   const held = lifecycle.acquireStartLock();
   assert.equal(held.status, "acquired");
@@ -128,7 +139,7 @@ test("v1: a live holder's lock is never touched; a reused pid (later start, othe
   assert.deepEqual(lockFiles(root), []);
 
   // Reused, by start time: the process now at the pid started after the holder's start bound.
-  const reused = stateFixture(t);
+  const reused = await stateFixture(t);
   writeFileSync(lockPath(reused), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce: "c".repeat(32), v: 1, holderStartMs: Date.now() - 60_000 }));
   const later = await lifecycleFor(reused, { processStartMsImpl: () => Date.now() });
   const taken = later.acquireStartLock();
@@ -137,7 +148,7 @@ test("v1: a live holder's lock is never touched; a reused pid (later start, othe
   assert.match(takeoverLines(reused)[0] ?? "", / reason="pid reused" version=1 /);
 
   // Unknown: the live start time cannot be read → no proof, untouched.
-  const unknown = stateFixture(t);
+  const unknown = await stateFixture(t);
   const text = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce: "d".repeat(32), v: 1, holderStartMs: 0 });
   writeFileSync(lockPath(unknown), text);
   assert.equal((await lifecycleFor(unknown, { processStartMsImpl: () => null })).acquireStartLock().status, "contended");
@@ -145,7 +156,7 @@ test("v1: a live holder's lock is never touched; a reused pid (later start, othe
 });
 
 test("v1 on Linux: a different start id at the holder's pid proves reuse, whatever the clock says", { skip: process.platform !== "linux" && "the start id is Linux's /proc boot id + start ticks" }, async (t) => {
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   // holderStartMs far in the future: by time alone this would be the live holder.
   writeFileSync(lockPath(root), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce: "e".repeat(32), v: 1, holderStartMs: Date.now() + 3_600_000, holderStartId: "another-boot:1" }));
   const lock = (await lifecycleFor(root)).acquireStartLock();
@@ -154,7 +165,7 @@ test("v1 on Linux: a different start id at the holder's pid proves reuse, whatev
 });
 
 test("new locks are v1 records an old kit reads as pid/startedAt", async (t) => {
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   const lock = (await lifecycleFor(root)).acquireStartLock();
   const record = JSON.parse(readFileSync(lockPath(root), "utf8"));
   lock.release();
@@ -174,7 +185,7 @@ for (const [name, text] of [
   ["a v1 record without its start time", `{"pid":${DEAD_PID},"startedAt":"x","nonce":"n","v":1}`],
 ]) {
   test(`an unparsable lock (${name}) is never deleted and is reported with what/why/next and its path`, async (t) => {
-    const root = stateFixture(t, 19162, { kit: true });
+    const root = await stateFixture(t, null, { kit: true });
     writeFileSync(lockPath(root), text);
     const started = await (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 });
     assert.equal(started.outcome, "start-lock-unavailable");
@@ -195,7 +206,7 @@ for (const [name, text] of [
 }
 
 test("a lock of an unknown higher protocol version is never deleted and is reported with what/why/next and its path", async (t) => {
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   const text = JSON.stringify({ pid: DEAD_PID, startedAt: "2026-01-01T00:00:00.000Z", nonce: "f".repeat(32), v: 7, holderStartMs: 0 });
   writeFileSync(lockPath(root), text);
   const started = await (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 });
@@ -221,7 +232,7 @@ test("the vendored origin/main start-lock code is verbatim origin/main (when the
 
 test("origin/main's lock code reads a new lock as pid/startedAt and never deletes it", async (t) => {
   const { originMainStartLock } = await import(pathToFileURL(ORIGIN_MAIN_LOCK).href);
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   const LOG_DIR = join(root, "logs");
   const old = originMainStartLock({ LOG_DIR, LOCK_FILE: lockPath(root) });
 
@@ -250,7 +261,7 @@ test("origin/main's lock code reads a new lock as pid/startedAt and never delete
 });
 
 test("the lock-version migration (a stale v0 lock replaced through takeover) replayed twice is a no-op the second time", async (t) => {
-  const root = stateFixture(t);
+  const root = await stateFixture(t);
   writeFileSync(lockPath(root), JSON.stringify({ pid: DEAD_PID, startedAt: "2026-01-01T00:00:00.000Z", nonce: "2222222222222222" }));
   const lifecycle = await lifecycleFor(root);
   for (const pass of [1, 2]) {
@@ -300,7 +311,7 @@ const RACERS = 5;
 
 test("judge-then-delete race (ADR-0003 condition 1): a contender that judged a lock stale never deletes the fresh lock another contender wrote meanwhile", { timeout: 120_000 }, async (t) => {
   for (const pauseAt of ["judged-stale", "claim:linked"]) {
-    const root = stateFixture(t);
+    const root = await stateFixture(t);
     writeFileSync(lockPath(root), STALE_V1());
     // A judges the dead holder's lock stale, then stalls right there.
     let resolvePaused;
@@ -324,7 +335,7 @@ test("judge-then-delete race (ADR-0003 condition 1): a contender that judged a l
 test(`takeover race: ${RACERS} contenders after a kill injected at every protocol step → never two holders, never a deleted live lock, never a partial lock`, { timeout: 600_000 }, async (t) => {
   for (const { prep, kills } of RACE) {
     const label = `${prep ? "stale lock, " : ""}kill at ${kills.join(" then ")}`;
-    const root = stateFixture(t);
+    const root = await stateFixture(t);
     if (prep) writeFileSync(lockPath(root), prep());
     for (const killAt of kills) {
       const victim = await runContender(root, { killAt });
@@ -348,7 +359,7 @@ test(`takeover race: ${RACERS} contenders after a kill injected at every protoco
 
 test("takeover race with the victim among the racers: a holder killed while holding never blocks the rest", { timeout: 300_000 }, async (t) => {
   for (const killAt of ["acquired", "lock:linked", "claim:linked", "target-removed"]) {
-    const root = stateFixture(t);
+    const root = await stateFixture(t);
     writeFileSync(lockPath(root), STALE_V1());
     const all = await Promise.all([runContender(root, { killAt }), ...Array.from({ length: RACERS }, () => runContender(root))]);
     const [victim, ...racers] = all;
@@ -416,8 +427,8 @@ const manager = (root, args, env) => spawnSync(process.execPath, [join(root, "pr
 
 for (const [i, killAt] of ["spawn:intent-recorded", "spawn:spawned", "spawn:pid-recorded", "spawn:start-recorded"].entries()) {
   test(`a start killed at ${killAt} ends with exactly one proxy, adopted by the next start and stopped by stop`, { timeout: 180_000 }, async (t) => {
-    const port = 19163 + i;
-    const root = stateFixture(t, port, { kit: true });
+    const port = await freePort();
+    const root = await stateFixture(t, port, { kit: true });
     defer(root, () => killFixtureProxies(root));
     const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
     const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt })], { env, encoding: "utf8", timeout: 120_000 });
@@ -451,8 +462,8 @@ for (const [i, killAt] of ["spawn:intent-recorded", "spawn:spawned", "spawn:pid-
 
 for (const [i, killAt] of ["spawn:spawned", "spawn:pid-recorded", "spawn:start-recorded"].entries()) {
   test(`a start killed at ${killAt} while its proxy is still coming up: the next start waits for that proxy instead of spawning a second`, { timeout: 180_000 }, async (t) => {
-    const port = 19163 + i;
-    const root = stateFixture(t, port, { kit: true });
+    const port = await freePort();
+    const root = await stateFixture(t, port, { kit: true });
     defer(root, () => killFixtureProxies(root));
     // Windows: the killed start's own PowerShell probe can take seconds before the kill.
     writeFileSync(join(root, "listen-delay-ms"), process.platform === "win32" ? "6000" : "4000");
@@ -480,8 +491,8 @@ for (const [i, killAt] of ["spawn:spawned", "spawn:pid-recorded", "spawn:start-r
 }
 
 test("the spawner itself completes the record when its start-time probe answers only during the health wait", { timeout: 180_000 }, async (t) => {
-  const port = 19167;
-  const root = stateFixture(t, port, { kit: true });
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
   defer(root, () => killFixtureProxies(root));
   const bun = bunOrFail();
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
@@ -498,8 +509,8 @@ test("the spawner itself completes the record when its start-time probe answers 
 });
 
 test("a start whose start-time probe times out (no kill) leaves a proxy the next start completes and stop stops", { timeout: 180_000 }, async (t) => {
-  const port = 19167;
-  const root = stateFixture(t, port, { kit: true });
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
   defer(root, () => killFixtureProxies(root));
   const bun = bunOrFail();
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
@@ -526,8 +537,8 @@ test("a start whose start-time probe times out (no kill) leaves a proxy the next
 });
 
 test("stop completes a record left without a start time and stops its proxy (the probe answers at stop time)", { timeout: 180_000 }, async (t) => {
-  const port = 19168;
-  const root = stateFixture(t, port, { kit: true });
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
   defer(root, () => killFixtureProxies(root));
   const bun = bunOrFail();
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
@@ -558,8 +569,8 @@ function harmless(t) {
 const untouched = (child) => child.exitCode === null && child.signalCode === null;
 
 test("a reused pid is never signalled: a record without a start time whose pid is not the listener's stays unproven", async (t) => {
-  const port = 19169;
-  const root = stateFixture(t, port);
+  const port = await freePort();
+  const root = await stateFixture(t, port);
   const stranger = harmless(t); // now holds the recorded pid
   const decoy = harmless(t);    // the pid the listener names
   await identityListener(t, port, decoy.pid);
@@ -574,8 +585,8 @@ test("a reused pid is never signalled: a record without a start time whose pid i
 });
 
 test("a record is completed only when the listener's start time is the same before and after its second answer", async (t) => {
-  const port = 19169;
-  const root = stateFixture(t, port);
+  const port = await freePort();
+  const root = await stateFixture(t, port);
   const proxy = harmless(t);
   await identityListener(t, port, proxy.pid);
   const recordText = JSON.stringify({ pid: proxy.pid, startedMs: null, startedIso: null }) + "\n";
@@ -595,8 +606,8 @@ test("a record is completed only when the listener's start time is the same befo
 });
 
 test("a spawn intent adopts only a proxy that started after it: an older listener is never recorded", async (t) => {
-  const port = 19169;
-  const root = stateFixture(t, port);
+  const port = await freePort();
+  const root = await stateFixture(t, port);
   const older = harmless(t);
   await identityListener(t, port, older.pid);
   const at = Date.now();
@@ -613,8 +624,8 @@ test("a spawn intent adopts only a proxy that started after it: an older listene
 });
 
 test("a start waiting on a live holder takes the lock over once that holder dies mid-start, and ends with one proxy", { timeout: 180_000 }, async (t) => {
-  const port = 19166;
-  const root = stateFixture(t, port, { kit: true });
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
   defer(root, () => killFixtureProxies(root));
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
   // The holder hangs before its spawn, then dies (a harness closed mid-start).
