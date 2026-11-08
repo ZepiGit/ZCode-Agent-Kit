@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: merge 20 when 42511390524 (b31d010) is green (round 28: no signature for it; a windows S1/short RED comes back); merge 21 when 42509546483 (089c917) is green; stage 76 (ea11dd7); 16 round 2 running (round 27 gate), then restage. Running: t16 r2, t74. Next slots: 77 (kill guard rounding), 73, 75, 31 (after 30), 17 (after 16), 18 (after 21), 38. 78 is needs-triage (records windows S1/short values; signature (vii) interim).
+- Next action: merge 20 when 42511390524 (b31d010) is green (round 28: no signature; a windows S1/short RED comes back); merge 76 when 42513423687 is green; 16 round 2 running (round 27 gate + windows two-proxy RED + ubuntu respawn test), then restage. Running: t16 r2, t74, t77. Next slots: 18 (after 21, now free), 73, 75, 31 (after 30), 17 (after 16), 38. 78 needs-triage (signature (vii) interim).
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -39,3 +39,4 @@
 - Last green SHA: 9e45d05 (baseline); integration tip before Phase 4 = this commit
 - Ticket 15 teardown fix (staging/15b) merged 2026-11-08 as cbe2abb (record 3efcaf2; pre-merge CI 42495987510, 8/8 green).
 - Ticket 29 merged 2026-11-08 as 5f754b8 (resolved f2795a1; pre-merge CI 42506095577, 8/8 green).
+- Ticket 21 merged 2026-11-08 as 2aab7db (resolved 74f8e9f; pre-merge CI 42509546483, 8/8 green).
