@@ -79,6 +79,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 73 | [Memory loop: `whileFrozen` resume and `scanWindows` filter by PID only](73-freeze-and-scanwindows-pid-identity.md) | sol | medium | 72 | ready-for-agent |
 | 74 | [S5/short: judge MCP bridge growth after the retention bound (1,200 tasks, window 600–1,200)](74-s5-short-growth-after-retention-bound.md) | sol | medium | 30 | ready-for-agent |
 | 75 | [Kit tests share fixed fixture ports (18458 and others): parallel test files collide](75-shared-fixture-ports-in-kit-tests.md) | sol | low | — | ready-for-agent |
+| 76 | [The proxy test suite reaches the real upstream (zcode.z.ai:443)](76-proxy-tests-reach-real-upstream.md) | sol | high | — | ready-for-agent |
 
 ## Initial frontier
 
