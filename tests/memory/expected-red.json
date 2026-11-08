@@ -51,8 +51,8 @@
       "flips": ["peak:kit"]
     },
     "S4/short": {
-      "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
-      "flips": ["proxy-left-after-stop", "failed-lifecycle-steps"]
+      "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock", "count:proxy"] },
+      "flips": ["proxy-left-after-stop", "failed-lifecycle-steps", "count:proxy"]
     },
     "S5/short": { "ticket": "30", "state": "unstable" },
     "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }

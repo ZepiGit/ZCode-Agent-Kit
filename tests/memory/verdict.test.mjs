@@ -1004,8 +1004,9 @@ test("flips: a GREEN pass needs every owned name produced by the run (a stale fl
 });
 
 // One case per leg against the committed list: every listed single run RED on
-// exactly the checks it owns passes; a second proxy (count:proxy, owned by no
-// entry) on any of them fails naming its owners; an entry with flipping names
+// exactly the checks it owns passes; one added RED its owners do not hold fails
+// naming its owners (a second proxy, count:proxy, which only windows S4/short
+// owns since Round 16 Q1; there an orphan instead); an entry with flipping names
 // passes GREEN with its line, one without fails GREEN.
 test("the committed expected-red.json: each leg passes with every listed run RED on its owned checks, and fails on one unowned RED", () => {
   const here = dirname(fileURLToPath(import.meta.url));
@@ -1029,10 +1030,12 @@ test("the committed expected-red.json: each leg passes with every listed run RED
     assert.deepEqual(r.failures, [], os);
     for (const [key, v] of singles) assert.match(r.rows.find((x) => x.key === key).note, new RegExp(`^${key.replace("/", "\\/")}: RED on .+, owned by ticket \\d\\d \\(`), `${os} ${key}`);
     for (const [key, v] of singles) {
-      assert.ok(!namesOf(v).includes("count:proxy"), `${os} ${key}`);
-      const twoProxies = results.map((x) => (x.key === key ? { ...x, redChecks: [...x.redChecks, "count:proxy"] } : x));
-      const bad = checkRatchet({ expected, os, results: twoProxies, issueIds: ids });
-      assert.deepEqual(bad.failures, [notOwned(key, "count:proxy", ownersOf(v), os)], `${os} ${key}`);
+      // Round 16 Q1: count:proxy is owned only in windows S4/short (ticket 17).
+      assert.equal(namesOf(v).includes("count:proxy"), os === "windows" && key === "S4/short", `${os} ${key}`);
+      const extra = ["count:proxy", "orphans"].find((c) => !namesOf(v).includes(c));
+      const withExtra = results.map((x) => (x.key === key ? { ...x, redChecks: [...x.redChecks, extra] } : x));
+      const bad = checkRatchet({ expected, os, results: withExtra, issueIds: ids });
+      assert.deepEqual(bad.failures, [notOwned(key, extra, ownersOf(v), os)], `${os} ${key}`);
       const green = checkRatchet({ expected, os, results: results.map((x) => (x.key === key ? { ...x, exitCode: 0, redChecks: [] } : x)), issueIds: ids });
       if (v.flips) assert.deepEqual(green.failures, [], `${os} ${key} flips`);
       else assert.deepEqual(green.failures, [`${key}: GREEN but listed for ${tickets(ownersOf(v))}: delete the entry from expected-red.json (${os})`], `${os} ${key}`);
