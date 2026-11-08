@@ -48,7 +48,18 @@ export const MEMORY = {
  * Bun 1.4.2 arm of the paired CI run 42352122623, 5 of 24 above 250 MB:
  * 6.45 % at n = 5, 3.83 % at n = 7. Earlier estimates gave 3 (5 of 48 on the
  * ticket-60 tip) and 5 (8 of 59 with the earlier runs; Round 6 Q1, ticket 60).
- * One n for both legs; Round 6 Q1 allows n ≤ 9.
+ * One n for both legs of S1/burst1; Round 6 Q1 allows n ≤ 9. The entries
+ * below have their own n each (Round 17 Q3, Round 21 Q1).
+ *
+ * S6/short (linux only: S6 is ubuntu-only; Round 21 Q1, ticket 71): the
+ * median of n = 5 fresh repetitions, each a fresh S6 body process, of
+ * tui:adversarial-line-heap (the worst of D-mixed, D-huge, D-cjk, D-records
+ * and end minus C-start, each after Bun.gc(true), unchanged) against 16 MB,
+ * every repetition ≤ 32 MB (2× the budget: the pane's 8 MB plus one stray
+ * 20 MB object clears it; an uncapped pane, ~125 MB, or two retained parents,
+ * ≥ 40 MB, fail it). n = 5: the smallest odd n with a predicted false-RED rate
+ * ≤ 1 % on the less favourable estimate (1 of 10 on the staging/19 tree:
+ * n = 3 → 2.80 %, n = 5 → 0.86 %; 1 of 33 CI runs: 0.027 %).
  *
  * S1/short, windows only (Round 17 Q3, ticket 71; a departure from "one n for
  * both legs": Linux S1/short has no tail, 70 runs, max 4.43 %/1k, and stays a
@@ -65,6 +76,7 @@ export const MEMORY = {
 export const REPEATED = {
   "S1/burst1": { n: 7, check: "procPeak:proxy", budgetMB: MEMORY.S1.peakMB, ceilingMB: MEMORY.S1.burstPeakMB.burst16 },
   "S1/short": { legs: ["windows"], kind: "majority", n: 5, redAtLeast: 3, check: "growth:proxy", budget: MEMORY.growth.maxPctPer1k, ceiling: 10, unit: "%/1k" },
+  "S6/short": { n: 5, check: "tui:adversarial-line-heap", budgetMB: MEMORY.S6.longLineHeapMB, ceilingMB: 32 },
 };
 
 // Windows only: in paced runs no proxy sample may exceed ADR-0008's 512 MB

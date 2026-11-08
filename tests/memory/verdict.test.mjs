@@ -641,7 +641,7 @@ const BURST1_TIP = [
 // The earlier samples on unchanged code Round 6 Q1 lists (plus one CI GREEN without a recorded value).
 const BURST1_EARLIER = { values: [219.1, 231.8, 234, 236.6, 236.7, 237.5, 237.7, 256.7, 264.6, 299.2], greenWithoutValue: 1 };
 
-test("S1/burst1 is the only run judged on a median: n from the measured distribution, the 250 MB peak budget, the 400 MB ceiling", () => {
+test("S1/burst1 is judged on a median (with linux S6/short since Round 21): n from the measured distribution, the 250 MB peak budget, the 400 MB ceiling", () => {
   const above = (xs) => xs.filter((v) => v > 250).length;
   const tipP = above(BURST1_TIP) / BURST1_TIP.length; // 5 / 48
   const pooledP = (above(BURST1_TIP) + above(BURST1_EARLIER.values)) / (BURST1_TIP.length + BURST1_EARLIER.values.length + BURST1_EARLIER.greenWithoutValue); // 8 / 59
@@ -660,7 +660,8 @@ test("S1/burst1 is the only run judged on a median: n from the measured distribu
   assert.equal(Math.max(chooseRepetitions(tipP), chooseRepetitions(pooledP), chooseRepetitions(5 / 24), chooseRepetitions(6 / 48)), 7);
   assert.deepEqual(repetitionRule("S1/burst1"), { n: 7, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 });
   assert.ok(Math.max(...BURST1_TIP, ...BURST1_EARLIER.values) <= 400, "the ceiling sits above every measured run");
-  for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1") assert.equal(repetitionRule(key), null, `${os} ${key}`);
+  // Round 21 Q1 (ticket 71): linux S6/short is judged on a median of 5 too, with its own n (pinned below).
+  for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1" && key !== "S6/short") assert.equal(repetitionRule(key), null, `${os} ${key}`);
 });
 
 // Round 17 Q3 (ticket 71): windows S1/short commit growth over 49 CI runs, min
@@ -678,7 +679,20 @@ test("windows S1/short is judged on 5 fresh repetitions, RED at ≥ 3 RED, ceili
   assert.ok(10 - 5.27 > 4.7, "the ceiling sits 4.73 above the observed maximum");
   // The keys judged on repetitions, per leg: every other run of either job is judged on one run.
   const repeatedKeys = Object.fromEntries(Object.keys(JOB).map((os) => [os, JOB[os].filter((k) => repetitionRule(k, REPEATED, os))]));
-  assert.deepEqual(repeatedKeys, { linux: ["S1/burst1"], windows: ["S1/short", "S1/burst1"] });
+  assert.deepEqual(repeatedKeys, { linux: ["S1/burst1", "S6/short"], windows: ["S1/short", "S1/burst1"] });
+});
+
+// Round 21 Q1 (ticket 71): tui:adversarial-line-heap read exactly 8 MB in 32 of 33
+// CI runs on the same S6 code and 20 MB once (42446461464); 1 of 10 on the staging/19 tree.
+test("linux S6/short is judged on the median of 5 fresh repetitions against 16 MB, every repetition ≤ 32 MB; n from 1 of 10 at ≤ 1 %", async () => {
+  const { REPEATED } = await import("./lib/budgets.mjs");
+  assert.deepEqual(repetitionRule("S6/short", REPEATED, "linux"), { n: 5, check: "tui:adversarial-line-heap", budgetMB: MEMORY.S6.longLineHeapMB, ceilingMB: 32 });
+  assert.equal(MEMORY.S6.longLineHeapMB, 16);
+  assert.equal(JOB.windows.includes("S6/short"), false, "S6 is ubuntu-only: windows is unaffected");
+  assert.equal(chooseRepetitions(1 / 10, { target: 0.01 }), 5);
+  assert.ok(Math.abs(medianFalseRedRate(1 / 10, 3) - 0.028) < 5e-4 && Math.abs(medianFalseRedRate(1 / 10, 5) - 0.0086) < 5e-4);
+  assert.ok(Math.abs(medianFalseRedRate(1 / 33, 5) - 0.00027) < 5e-5, "1 of 33: 0.027 %");
+  assert.ok(8 + 20 < 32 && 32 < 40, "the ceiling clears the pane's 8 MB plus one stray 20 MB object and fails two retained parents");
 });
 
 test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6", () => {

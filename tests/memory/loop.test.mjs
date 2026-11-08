@@ -1546,6 +1546,63 @@ test("linux S1/short stays a single run under the unchanged growth() verdict", (
   assert.equal(dirs.some((d) => d.startsWith("rep-")), false, dirs.join());
 });
 
+// ── linux S6/short: the median of 5 fresh S6 body repetitions (Round 21 Q1, ticket 71) ──
+// tui:adversarial-line-heap is judged on the median against 16 MB, every
+// repetition ≤ 32 MB; orphans and the other tui checks in each repetition. The
+// fake run's s6-reps mode writes one S6/short summary per repetition from
+// FAKE_RUN_REPS: { adversarial (MB, or a non-number), red: [names], harness }.
+function s6Job(reps) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s6-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const r = runJob(["--os", "linux", "--only", "S6/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "s6-reps", FAKE_RUN_REPS: JSON.stringify(reps), GITHUB_STEP_SUMMARY: stepSummary });
+  const read = (p) => { try { return JSON.parse(readFileSync(join(home, "job", p), "utf8")); } catch { return null; } };
+  const out = { r, job: read("job-summary.json"), set: read(join("S6-short", "summary.json")), stepSummary: readFileSync(stepSummary, "utf8"), dirs: (() => { try { return readdirSync(join(home, "job", "S6-short")).sort(); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return { ...out, row: out.job?.rows?.[0], result: out.job?.results?.[0] };
+}
+const s6 = (...values) => values.map((v) => (typeof v === "object" && v !== null ? v : { adversarial: v }));
+
+test("linux S6/short: [8, 8, 20, 8, 8] is GREEN on the median; summary.json and the job summary print all five values and the median", () => {
+  const { r, row, set, dirs, stepSummary } = s6Job(s6(8, 8, 20, 8, 8));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(row.outcome, "GREEN");
+  assert.deepEqual(dirs, ["rep-1", "rep-2", "rep-3", "rep-4", "rep-5", "summary.json"]);
+  assert.deepEqual([set.n, set.check, set.values, set.medianMB, set.budgetMB, set.ceilingMB], [5, "tui:adversarial-line-heap", [8, 8, 20, 8, 8], 8, 16, 32]);
+  for (const text of [r.stdout, stepSummary]) assert.match(text, /\| S6\/short \| 5 \| RSS \| 8, 8, 20, 8, 8 \| 8 \| ≤ 16 \| ≤ 32 \| none \|/);
+});
+
+test("linux S6/short: [20, 20, 20, 8, 8] is RED on the median; [8, 8, 33, 8, 8] is RED on the ceiling with a GREEN median", () => {
+  const median = s6Job(s6(20, 20, 20, 8, 8));
+  assert.equal(median.r.status, 1, median.r.stdout + median.r.stderr);
+  assert.deepEqual([median.row.outcome, median.result.redChecks, median.set.medianMB], ["RED", ["median:tui:adversarial-line-heap"], 20]);
+  assert.match(median.r.stdout, /- S6\/short: RED but not listed in expected-red\.json \(linux\)/);
+  const ceiling = s6Job(s6(8, 8, 33, 8, 8));
+  assert.equal(ceiling.r.status, 1, ceiling.r.stdout);
+  assert.deepEqual([ceiling.result.redChecks, ceiling.set.medianMB, ceiling.set.overCeiling], [["ceiling:tui:adversarial-line-heap"], 8, [3]]);
+  assert.equal(s6Job(s6(8, 8, 32, 8, 8)).r.status, 0, "32 MB is within the ceiling");
+});
+
+test("linux S6/short: a repetition with tui:long-line-heap, tui:log-pane-heap, tui:resize-storm-heap or orphans RED fails", () => {
+  for (const name of ["tui:long-line-heap", "tui:log-pane-heap", "tui:resize-storm-heap", "orphans"]) {
+    const { r, result } = s6Job(s6(8, 8, { adversarial: 8, red: [name] }, 8, 8));
+    assert.equal(r.status, 1, `${name}: ${r.stdout}${r.stderr}`);
+    assert.deepEqual(result.redChecks, [name], name);
+  }
+});
+
+test("linux S6/short: a missing repetition or a non-numeric value is a harness failure, never GREEN", () => {
+  const killed = s6Job(s6(8, 8, { harness: "s6 body exited 1" }, 8, 8));
+  assert.equal(killed.row.outcome, "HARNESS FAILURE", killed.r.stdout + killed.r.stderr);
+  assert.match(killed.result.error, /repetition 3: s6 body exited 1/);
+  assert.equal(s6Job(s6(8, 8, 8, 8)).row.outcome, "HARNESS FAILURE");
+  for (const bad of ["8", null, "Infinity"]) {
+    const { row, result, r } = s6Job(s6(8, 8, 8, { adversarial: bad }, 8));
+    assert.equal(row.outcome, "HARNESS FAILURE", `${bad}: ${r.stdout}`);
+    assert.match(result.error, /repetition 4: no tui:adversarial-line-heap value/, String(bad));
+  }
+});
+
 test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 30", () => {
   const { r, row, result } = s5LinuxReplay();
   assert.equal(r.status, 0, r.stdout + r.stderr);

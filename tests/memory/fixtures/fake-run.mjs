@@ -21,6 +21,7 @@
 //                                 ("" = none recorded), plus a fixed runtime environment.
 //   FAKE_RUN_MODE=s1-reps         an S1/short run per repetition, windows-shaped by
 //                                 default, from FAKE_RUN_REPS (see the mode below)
+//   FAKE_RUN_MODE=s6-reps         an S6/short run per repetition from FAKE_RUN_REPS
 //   FAKE_RUN_MODE=s7-series       an S7/short run whose responses-store check is read
 //                                 and judged by the scenario's own code
 //                                 (lib/retained-heap.mjs) from a fake /health:
@@ -113,6 +114,28 @@ if (mode === "s1-reps") {
     ...(win ? { workingSet: { red: wsRed.length > 0, redChecks: wsRed }, redOnlyOnCommit: red && wsRed.length === 0 } : {}),
     notes: { sampler: { units: win ? { ok: true, compared: 40 } : null, overhead: null } } };
   writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
+  process.exit(red ? 1 : 0);
+}
+if (mode === "s6-reps") {
+  // FAKE_RUN_REPS: one entry per repetition (rep-<i> in --out): { adversarial
+  // (tui:adversarial-line-heap in MB, RED above 16 as the scenario judges it; any
+  // non-number is written as is), red: [other check names RED], harness: "why" }.
+  const rep = Number(opt("--out").match(/rep-(\d+)/)?.[1] ?? 1);
+  const p = JSON.parse(process.env.FAKE_RUN_REPS)[rep - 1];
+  const base = { id: "fake", key, scenario, profile: "short", variant, platform: "linux", metric: "rss", durationS: 4, samples: 4, observations: [], orphans: [] };
+  if (!p || p.harness) {
+    writeFileSync(join(dir, "summary.json"), JSON.stringify({ ...base, outcome: "HARNESS FAILURE", error: p?.harness ?? `no fixture for repetition ${rep}`, notes: {} }, null, 2));
+    process.exit(2);
+  }
+  const reds = new Set(p.red ?? []);
+  const tui = (name, value, budget) => ({ name, red: reds.has(name), value: reds.has(name) ? budget + 1 : value, budget, unit: "MB" });
+  const checks = [
+    { name: "orphans", red: reds.has("orphans"), value: reds.has("orphans") ? 1 : 0, budget: 0, unit: "procs", detail: [] },
+    tui("tui:log-pane-heap", 3, 16), tui("tui:resize-storm-heap", 1, 8), tui("tui:long-line-heap", 8, 16),
+    { name: "tui:adversarial-line-heap", red: typeof p.adversarial === "number" && p.adversarial > 16, value: p.adversarial, budget: 16, unit: "MB" },
+  ];
+  const red = checks.some((c) => c.red);
+  writeFileSync(join(dir, "summary.json"), JSON.stringify({ ...base, outcome: red ? "RED" : "GREEN", red, checks, summary: { "*": role(1), kit: role(0) }, notes: { sampler: { units: null, overhead: null } } }, null, 2));
   process.exit(red ? 1 : 0);
 }
 if (mode === "s7-series") {
