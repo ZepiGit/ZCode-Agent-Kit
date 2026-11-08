@@ -17,6 +17,8 @@ import {
 export interface ResolveSessionContextInput {
   clientReq: Request;
   body: string | undefined;
+  /** `JSON.parse(body)` when the caller already has it (ticket 20: no second parse). */
+  parsedBody?: unknown;
   upstreamFormat: Format;
   model: string;
   config: ProxyConfig;
@@ -36,7 +38,7 @@ export interface SessionHeaderContext {
 export function resolveSessionContext(input: ResolveSessionContextInput): ClientSessionResult | undefined {
   if (input.config.clientIdentity.mode === "off") return undefined;
   const resolver = input.resolver ?? defaultClientSessionResolver;
-  return resolver.resolve(input.clientReq, input.body, input.upstreamFormat, input.model, input.config.clientIdentity);
+  return resolver.resolve(input.clientReq, input.body, input.upstreamFormat, input.model, input.config.clientIdentity, input.parsedBody);
 }
 
 export function shouldUseExactTraceHeaders(

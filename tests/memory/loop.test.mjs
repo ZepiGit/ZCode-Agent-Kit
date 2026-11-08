@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,12 +13,14 @@ import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sa
 import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { generateOmpExtension, startOmpHost } from "./lib/omp-host.mjs";
 import { causeLinesOf } from "./lib/omp-leg.mjs";
-import { OMP_LEG } from "./lib/budgets.mjs";
+import { OMP_FLOOR } from "./lib/budgets.mjs";
+import { floorMeasurement, floorVerdict } from "./lib/repetitions.mjs";
 import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
 import { resolveBun } from "../../lib/process.mjs";
 import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { whileFrozen } from "./lib/freeze.mjs";
+import { identityOf, isSameProcess, linuxStart, parseWindowsStart, startOf } from "./lib/process-identity.mjs";
 import * as s3Scenario from "./scenarios/s3-concurrency.mjs";
 const { makeHungRound } = s3Scenario;
 const refusedStartCheck = (rounds) => s3Scenario.refusedStartCheck(rounds);
@@ -279,8 +281,53 @@ test("the Job Object wrapper's report says whether the cap was applied and how c
   assert.equal(parseJobReport("no report"), null);
 });
 
+// ── Process identity: pid + start time (ticket 72) ──────────────────────────
+// A check that holds no handle on a process asks for that process, not its pid:
+// Windows reuses a freed pid quickly (ticket 70), so a stranger at the same pid
+// must neither keep a dead process "alive" nor stand in for a live one.
+test("a process identity is its pid and start time: a stranger at the same pid is not it, a gone pid is not it", () => {
+  const proc = mkdtempSync(join(tmpdir(), "memloop-identity-"));
+  const stat = (start) => `4242 (node -e x) S 1 4242 4242 0 -1 4194304 ${Array(12).fill(0).join(" ")} ${start} 0 0\n`;
+  try {
+    mkdirSync(join(proc, "4242"));
+    writeFileSync(join(proc, "4242", "stat"), stat(1000));
+    const opts = { platform: "linux", procRoot: proc };
+    const id = identityOf(4242, opts);
+    assert.deepEqual(id, { pid: 4242, start: "1000" });
+    assert.equal(isSameProcess(id, opts), true);
+    writeFileSync(join(proc, "4242", "stat"), stat(5242)); // the pid now names a later process
+    assert.equal(isSameProcess(id, opts), false, "a reused pid is another process");
+    rmSync(join(proc, "4242"), { recursive: true });
+    assert.equal(startOf(4242, opts), null);
+    assert.equal(isSameProcess(id, opts), false, "a gone pid is not the process");
+    assert.throws(() => identityOf(4242, opts), /no process to identify/, "an identity is recorded only while the process runs");
+  } finally { rmSync(proc, { recursive: true, force: true }); }
+});
+
+test("an unknown start time is never taken for a gone process", () => {
+  assert.throws(() => linuxStart(4242, "4242 (x) S 1\n"), /start time of pid 4242 unknown/);
+  assert.equal(parseWindowsStart(4242, { status: 0, stdout: "NONE" }), null);
+  assert.equal(parseWindowsStart(4242, { status: 0, stdout: "START 134070000170000000" }), "134070000170000000");
+  // PowerShell that failed, timed out (status null) or printed nothing says nothing about the process.
+  for (const r of [{ status: 1, stdout: "", stderr: "Get-CimInstance : Access denied" }, { status: null, stdout: "" }, { status: 0, stdout: "" }]) {
+    assert.throws(() => parseWindowsStart(4242, r), /start time of pid 4242 unknown/, JSON.stringify(r));
+  }
+});
+
+test("a live child keeps its identity until it exits, then no process is it", async () => {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+  try {
+    await new Promise((r) => child.once("spawn", r));
+    const id = identityOf(child.pid);
+    assert.equal(isSameProcess(id), true);
+    const exited = new Promise((r) => child.once("exit", r));
+    child.kill("SIGKILL");
+    await exited; // reaped: from here on the pid is free for anyone
+    assert.equal(isSameProcess(id), false);
+  } finally { try { child.kill("SIGKILL"); } catch {} }
+});
+
 // ── Live Windows self-tests (spec §1; run on the windows-latest legs) ───────
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const waitFor = async (fn, ms = 15_000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await sleep(250); } };
 
 test("Windows: the units self-test against Get-Process PrivateMemorySize64 passes on the live process table", windowsOnly, async () => {
@@ -343,8 +390,7 @@ test("Windows: the sampler excludes its own poller by pid and records the poller
     assert.ok(!seen.includes(pollerPid) && rows.every((r) => r.procs.every((p) => p.pid !== pollerPid)), "the poller is never sampled");
     assert.equal(o.pid, pollerPid);
     assert.ok(o.polls >= 2 && o.peakCommitKb > 0 && o.peakRssKb > 0 && o.pollMsMax > 0, JSON.stringify(o));
-    await sleep(500);
-    assert.equal(alive(pollerPid), false, "the poller is reaped on stop");
+    assert.equal(sampler.pollerRunning(), false, "the poller is reaped on stop (asked of its handle, not its pid)");
   } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -369,10 +415,15 @@ test("Windows: the Job Object cap is applied and read back, and an allocation pa
 test("Windows: closing the Job Object kills a detached grandchild (nothing escapes the cap)", windowsOnly, async () => {
   const r = runCapped("1G", ["detach"]);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  const grandchild = Number((r.stdout.match(/GRANDCHILD (\d+)/) ?? [])[1]);
-  assert.ok(grandchild > 0, r.stdout);
-  const gone = await waitFor(() => !alive(grandchild), 10_000);
-  if (!gone) { try { process.kill(grandchild, "SIGKILL"); } catch {} }
+  // The probe prints the grandchild's identity (pid + start time), taken while
+  // it ran: the job kills it before this test could ask, and its freed pid may
+  // already name a stranger (ticket 72).
+  const m = r.stdout.match(/GRANDCHILD (\d+) (\d+)/);
+  assert.ok(m, r.stdout);
+  const grandchild = { pid: Number(m[1]), start: m[2] };
+  // Each ask is one PowerShell (~1-3 s cold on a runner): 20 s, not 10.
+  const gone = await waitFor(() => !isSameProcess(grandchild), 20_000);
+  if (!gone && isSameProcess(grandchild)) { try { process.kill(grandchild.pid, "SIGKILL"); } catch {} }
   assert.ok(gone, "the grandchild died with the job");
 });
 
@@ -380,7 +431,6 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
 const KIT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /** The promise's value, or `fallback` after `ms`; the timer never outlives the race. */
 const within = (promise, ms, fallback) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
-const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
 /** A kit root whose preflight is a fixture script; the extension is generated from the real template by the OMP adapter. */
 function ompFixture(healSource) {
   const dir = mkdtempSync(join(tmpdir(), "memloop-omp-host-"));
@@ -435,44 +485,106 @@ test("killing a starter host takes its running preflight with it (the killed-sta
     setTimeout(() => {}, 30_000);
   `);
   const host = startOmpHost({ bun: resolveBun(KIT), extension: f.extension, env: { ...process.env } });
-  let preflight = null;
+  let preflightPid = null;
+  let preflight = null; // its identity (pid + start time): this test holds no handle on the host's child
   try {
     assert.ok(await host.ready, host.stderr());
     host.go();
-    for (let i = 0; i < 200 && preflight === null; i++) {
-      try { preflight = Number(readFileSync(join(f.root, "preflight.pid"), "utf8")) || null; } catch {}
-      if (preflight === null) await sleep(50);
+    for (let i = 0; i < 200 && preflightPid === null; i++) {
+      try { preflightPid = Number(readFileSync(join(f.root, "preflight.pid"), "utf8")) || null; } catch {}
+      if (preflightPid === null) await sleep(50);
     }
-    assert.ok(preflight, "the host spawned its preflight");
+    assert.ok(preflightPid, "the host spawned its preflight");
+    preflight = identityOf(preflightPid); // it waits 30 s: surely running now
     host.killTree();
     await within(host.exited, 10_000);
-    const gone = await (async () => { for (let i = 0; i < 100; i++) { if (!isAlive(preflight)) return true; await sleep(100); } return false; })();
-    assert.equal(isAlive(host.pid), false, "the host is gone");
+    // Gone = no longer that process: a stranger given its freed pid is not it (ticket 72).
+    const gone = await waitFor(() => !isSameProcess(preflight), 10_000);
+    assert.equal(host.running(), false, "the host is gone");
     assert.equal(gone, true, "its preflight is gone too");
   } finally {
     host.killTree();
-    if (preflight && isAlive(preflight)) { try { process.kill(preflight, "SIGKILL"); } catch {} }
+    if (preflight && isSameProcess(preflight)) { try { process.kill(preflight.pid, "SIGKILL"); } catch {} }
     rmSync(f.dir, { recursive: true, force: true });
   }
 });
 
-test("the stub OMP host charges a hook that does nothing well under the 5 MB waiter gate (its own churn is in the baseline)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-floor-"));
-  const extension = join(dir, "noop-extension.ts");
-  writeFileSync(extension, `export default function (pi) { pi.on("before_provider_request", async () => {}); }\n`);
+/** One fresh stub host charged for a hook that does nothing: its OMP_HOST_DONE line ({ costMB, … }). */
+async function noopHostCost(extension) {
   const host = startOmpHost({ bun: resolveBun(KIT), extension, env: { ...process.env } });
   try {
     assert.ok(await host.ready, host.stderr());
     host.go();
     const done = await host.done;
     assert.ok(done, host.stderr());
-    // Half the gate: a measurement whose floor reached the gate could not tell a waiter from noise.
-    assert.ok(done.costMB < OMP_LEG.waiterCostMB / 2, `no-op hook charged ${done.costMB} MB`);
+    return done;
   } finally {
     host.close();
     if ((await within(host.exited, 10_000, "running")) === "running") host.killTree();
+  }
+}
+
+// The floor measurement mode (Round 17 Q4 condition 1), off by default: while
+// the one-run marker tests/memory/measure-omp-floor exists (content: N, 1–50),
+// the floor test below measures N fresh hosts instead of judging n, prints each
+// value as an OMP_FLOOR_VALUE line (as every run does), adds an
+// OMP_FLOOR_MEASURE_SUMMARY line and writes the reading to
+// $GITHUB_STEP_SUMMARY. It runs in every `npm run test` leg (test-kit: ubuntu
+// and windows × Node 24 and 26). The marker test fails while it exists, so it never merges.
+const OMP_FLOOR_MARKER = join(KIT_ROOT, "tests", "memory", "measure-omp-floor");
+function ompFloorMarker() {
+  let text;
+  try { text = readFileSync(OMP_FLOOR_MARKER, "utf8"); } catch { return null; }
+  const count = Number(text.trim());
+  if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error(`tests/memory/measure-omp-floor must hold a whole number from 1 to 50, got ${JSON.stringify(text.trim())}`);
+  return count;
+}
+
+// Ticket 03's floor test, as Round 17 Q4 decided it: n fresh hosts (budgets.mjs
+// OMP_FLOOR), the median no-op cost < 2.5 MB, every repetition < 5 MB, every value printed, pass or fail.
+test("the stub OMP host charges a hook that does nothing well under the 5 MB waiter gate: median of n fresh hosts < 2.5 MB, every one < 5 MB (its own churn is in the baseline)", async (t) => {
+  const measure = ompFloorMarker();
+  const count = measure ?? OMP_FLOOR.n;
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-floor-"));
+  const extension = join(dir, "noop-extension.ts");
+  writeFileSync(extension, `export default function (pi) { pi.on("before_provider_request", async () => {}); }\n`);
+  const os = process.platform === "win32" ? "windows" : "linux";
+  const runs = [];
+  try {
+    for (let i = 1; i <= count; i++) {
+      const done = await noopHostCost(extension);
+      runs.push(done);
+      t.diagnostic(`OMP_FLOOR_VALUE ${JSON.stringify({ os, node: process.version, rep: i, of: count, metric: done.metric, costMB: done.costMB, ...(done.wsCostMB !== undefined ? { wsCostMB: done.wsCostMB } : {}), baselineMB: done.baselineMB, peakMB: done.peakMB })}`);
+    }
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  const values = runs.map((d) => d.costMB);
+  if (measure) {
+    // Measurement only: the distribution, no verdict (a tail is what it records).
+    const m = floorMeasurement(values, { thresholdMB: OMP_FLOOR.medianBelowMB, gateMB: OMP_FLOOR.everyBelowMB });
+    const reading = { os, node: process.version, metric: runs[0]?.metric, requested: count, ...m, values, ...(runs.every((d) => d.wsCostMB !== undefined) ? { wsValues: runs.map((d) => d.wsCostMB) } : {}) };
+    t.diagnostic(`OMP_FLOOR_MEASURE_SUMMARY ${JSON.stringify(reading)}`);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`## OMP no-op floor measurement (${os}, Node ${process.version}, ${count} fresh hosts, metric ${reading.metric})`, "",
+        `Not a verdict (Round 17 Q4 condition 1). Value: the stub host's no-op cost (commit on Windows, RSS on Linux)${reading.wsValues ? "; working set beside it" : ""}.`, "",
+        `- values (MB): ${values.join(", ")}`, ...(reading.wsValues ? [`- working set (MB): ${reading.wsValues.join(", ")}`] : []),
+        `- min / median / max: ${m.minMB} / ${m.medianMB} / ${m.maxMB} MB; at or above ${OMP_FLOOR.medianBelowMB} MB: ${m.atOrAbove} of ${m.count} (p = ${m.p})`,
+        `- predicted false-fail rate of the median clause: ${Object.entries(m.falseFailRate).map(([n, r]) => `n = ${n}: ${r}`).join(", ")}; smallest odd n at ≤ 1 %: ${m.n ?? "none"}`,
+        ...(m.comesBack.length ? [`- comes back: ${m.comesBack.join("; ")}`] : []), "", ""].join("\n"));
+    }
+    assert.equal(m.count, count, "every host produced a numeric cost");
+    return;
+  }
+  const v = floorVerdict(values, OMP_FLOOR);
+  t.diagnostic(`OMP no-op floor (${os}, ${runs[0]?.metric}): ${values.join(", ")} MB; median ${v.medianMB} (< ${OMP_FLOOR.medianBelowMB}), every one < ${OMP_FLOOR.everyBelowMB}: ${v.ok ? "pass" : "FAIL"}`);
+  assert.equal(v.error, null, v.error);
+  // Half the gate for the median: a floor at the gate could not tell a waiter from noise.
+  assert.ok(v.ok, `no-op hook charged ${values.join(", ")} MB over ${count} fresh hosts: ${v.failures.join("; ")}`);
+});
+
+test("the OMP floor measurement mode is off by default: the marker tests/memory/measure-omp-floor is not committed", () => {
+  assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-omp-floor"), false, "tests/memory/measure-omp-floor is a one-run switch: delete it before the pre-merge run");
 });
 
 // ── A run that never ran its scenario is a harness failure, never GREEN ──────
@@ -1224,24 +1336,18 @@ test("runtime environment: cgroup type from the filesystem magic, the scope's Me
   assert.deepEqual([v1.type, v1.memoryMax], ["v1-only", null]);
 });
 
-test("job: windows S1/burst1 against the committed unstable entry prints its line for a median of 251–300 and of ≤ 250, and fails above 300", () => {
+test("job: windows S1/burst1 against the committed list (no entry since ticket 20) is GREEN at a median of 230 and fails the ratchet at a median of 251", () => {
   const ws = (...xs) => xs.map((w) => ({ ws: w, wsPeak: w, commit: 410 }));
   // Seven repetitions: the job's n since Round 11 Q1 condition 2 (budgets.mjs REPEATED).
-  for (const [peaks, medianMB] of [[ws(255, 251, 240, 262, 230, 280, 245), 251], [ws(230, 220, 240, 235, 225, 260, 228), 230]]) {
-    const { r, job, stepSummary } = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks });
-    assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.equal(job.results[0].repetitions.length, 7);
-    const line = `S1/burst1: unstable (median ${medianMB} MB, budget 250), owned by ticket 20`;
-    assert.equal(job.rows[0].note, line);
-    for (const text of [r.stdout, stepSummary]) {
-      assert.ok(text.includes(`- ${line}`), `${medianMB}: ${text}`);
-      assert.match(text, /\| S1\/burst1 \| (GREEN|RED) \(unstable\) \| ticket 20 \|/);
-    }
-  }
-  const high = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(301, 305, 290, 310, 280, 320, 295) });
-  assert.equal(high.r.status, 1, high.r.stdout + high.r.stderr);
-  assert.match(high.stepSummary, /S1\/burst1: unstable median 301 MB is above the 300 MB bound/);
-  assert.doesNotMatch(high.stepSummary, /owned by ticket 20/);
+  const green = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(230, 220, 240, 235, 225, 260, 228) });
+  assert.equal(green.r.status, 0, green.r.stdout + green.r.stderr);
+  assert.equal(green.job.results[0].repetitions.length, 7);
+  assert.doesNotMatch(green.stepSummary, /unstable|owned by ticket 20/);
+  // The band that tolerated a median of 251-300 left with the entry: 251 is now an unlisted RED.
+  const red = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(255, 251, 240, 262, 230, 280, 245) });
+  assert.equal(red.r.status, 1, red.r.stdout + red.r.stderr);
+  assert.match(red.stepSummary, /S1\/burst1: RED but not listed in expected-red\.json \(windows\)/);
+  assert.doesNotMatch(red.stepSummary, /owned by ticket 20/);
 });
 
 // ── windows S5/short at the job seam (Round 13 Q1, ticket 66) ──────────────────
@@ -1399,6 +1505,209 @@ function s5LinuxReplay(change = null) {
     rmSync(home, { recursive: true, force: true });
   }
 }
+
+// ── S7 responses store: retained heap (Round 17 Q1, ticket 71) ───────────────
+// heap-at-cap is the minimum of ≥ 30 /health heapUsedMB readings 1 s apart
+// after the existing 5 s wait, minus the reading before the load (h0). The fake
+// run reads its fixture series through the scenario's own reader and judge
+// (lib/retained-heap.mjs) from a fake /health, then the job and the ratchet
+// judge it against the committed list (S7/short: 33 owns proxy.log, RED as on CI).
+function s7Job({ before = { heapUsedMB: 20, rssMB: 140 }, readings }) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s7-"));
+  const r = runJob(["--os", "linux", "--only", "S7/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "s7-series", FAKE_RUN_HEAP: JSON.stringify({ before, readings }) });
+  let report = null, summary = null;
+  try { report = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8")); } catch {}
+  try { const d = join(home, "job", "S7-short"); summary = JSON.parse(readFileSync(join(d, readdirSync(d).find((n) => n.endsWith("-fake")), "summary.json"), "utf8")); } catch {}
+  rmSync(home, { recursive: true, force: true });
+  const heap = summary?.checks?.find((c) => c.name === "responses-store:heap-at-cap") ?? null;
+  return { r, report, summary, heap, row: report?.rows?.[0], result: report?.results?.[0] };
+}
+// Absolute heapUsedMB readings: h0 (20) plus the heap growth the round names.
+const above = (...growth) => growth.map((g) => 20 + g);
+const padTo = (xs, n, last = xs.at(-1)) => [...xs, ...Array.from({ length: n - xs.length }, () => last)];
+
+test("S7 retained heap: a series [98, 97, 80, 64, …] is GREEN on its minimum, and the check records first, minimum, maximum and RSS before and after", () => {
+  const { r, heap, row, summary } = s7Job({ readings: padTo(above(98, 97, 80, 64, 63, 65), 30).map((h, i) => ({ heapUsedMB: h, rssMB: 300 - i })) });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(row.outcome, "RED", "RED only on 33's proxy.log check");
+  assert.equal(row.note, "S7/short: RED on proxy.log:bounded-while-running, owned by ticket 33 (proxy.log:bounded-while-running)");
+  assert.deepEqual([heap.red, heap.value, heap.budget], [false, 63, 96]);
+  assert.deepEqual(
+    { readings: heap.detail.readings, intervalMs: heap.detail.intervalMs, h0MB: heap.detail.h0MB, firstMB: heap.detail.firstMB, minMB: heap.detail.minMB, maxMB: heap.detail.maxMB, firstReadingGrowthMB: heap.detail.firstReadingGrowthMB, rssBeforeMB: heap.detail.rssBeforeMB, rssAfterMB: heap.detail.rssAfterMB, rssLastMB: heap.detail.rssLastMB },
+    { readings: 30, intervalMs: 1000, h0MB: 20, firstMB: 118, minMB: 83, maxMB: 118, firstReadingGrowthMB: 98, rssBeforeMB: 140, rssAfterMB: 300, rssLastMB: 271 },
+  );
+  assert.equal(heap.detail.seriesMB.length, 30);
+  assert.deepEqual(summary.notes.responsesStore.heapSeriesMB, heap.detail.seriesMB, "summary.json records the series too");
+  assert.match(r.stdout, /S7\/short responses-store:heap-at-cap: 63 MB = min 83 − h0 20 over 30 readings 1 s apart \(first 118, max 118; rss 140 → 300 … 271\) ok/);
+});
+
+test("S7 retained heap: a series that never drops below 97 is RED, an unowned RED that fails the job", () => {
+  const { r, heap, row } = s7Job({ readings: padTo(above(99, 98, 97, 101), 30, 117).map((h) => ({ heapUsedMB: h, rssMB: 300 })) });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual([heap.red, heap.value, heap.detail.minMB, heap.detail.firstMB], [true, 97, 117, 119]);
+  assert.match(r.stdout, /- S7\/short: RED on responses-store:heap-at-cap, not owned by ticket 33/);
+  assert.equal(row.note, undefined);
+});
+
+test("S7 retained heap: a missing or non-numeric reading is a harness failure, never GREEN", () => {
+  const good = padTo(above(70, 64), 30).map((h) => ({ heapUsedMB: h, rssMB: 300 }));
+  for (const [label, bad] of [["no /health answer", null], ["no heapUsedMB", { rssMB: 300 }], ["non-numeric", { heapUsedMB: "64", rssMB: 300 }], ["NaN", { heapUsedMB: Number.NaN, rssMB: 300 }]]) {
+    const readings = good.map((x, i) => (i === 7 ? bad : x));
+    const { r, row, result, heap } = s7Job({ readings });
+    assert.equal(row?.outcome, "HARNESS FAILURE", `${label}: ${r.stdout}${r.stderr}`);
+    assert.equal(heap, null, label);
+    assert.match(result.error, /reading 8 of 30/, label);
+    assert.equal(r.status, 1, label);
+  }
+  const noH0 = s7Job({ before: { rssMB: 140 }, readings: good });
+  assert.equal(noH0.row?.outcome, "HARNESS FAILURE", noH0.r.stdout);
+  assert.match(noH0.result.error, /no heapUsedMB before the load/);
+});
+
+test("S7 retained heap: a series shorter than 30 readings is a harness failure", () => {
+  const { r, row, result } = s7Job({ readings: padTo(above(70, 64), 29).map((h) => ({ heapUsedMB: h, rssMB: 300 })) });
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /29 readings, need ≥ 30/);
+});
+
+// ── windows S1/short: 5 fresh repetitions (Round 17 Q3, ticket 71) ──────────
+// growth:proxy is RED when ≥ 3 of 5 repetitions are RED under the unchanged
+// growth() (commit > 5 AND trend), the reported value is the median, every
+// repetition must stay ≤ 10 %/1k on commit, and every other check is judged in
+// each repetition. The fake run's s1-reps mode writes one windows-shaped
+// S1/short summary per repetition (rep-<i> in --out) from FAKE_RUN_REPS.
+// Linux S1/short stays a single run.
+function s1ShortJob(reps, { os = "windows" } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s1short-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const r = runJob(["--os", os, "--only", "S1/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "s1-reps", FAKE_RUN_REPS: JSON.stringify(reps), FAKE_RUN_SHAPE: os === "windows" ? "win32" : "linux", GITHUB_STEP_SUMMARY: stepSummary });
+  const read = (p) => { try { return JSON.parse(readFileSync(join(home, "job", p), "utf8")); } catch { return null; } };
+  const out = { r, job: read("job-summary.json"), set: read(join("S1-short", "summary.json")), stepSummary: readFileSync(stepSummary, "utf8"), dirs: (() => { try { return readdirSync(join(home, "job", "S1-short")).sort(); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return { ...out, row: out.job?.rows?.[0], result: out.job?.results?.[0] };
+}
+// One repetition: commit growth %/1k and its trend flag (RED under growth() only with both).
+const g = (growth, trend = growth > 5, extra = {}) => ({ growth, trend, ...extra });
+
+test("windows S1/short: five fresh repetitions with 2 RED pass; summary.json and the job summary print all five values, trends and the median", () => {
+  const { r, row, result, set, dirs, stepSummary } = s1ShortJob([g(5.27), g(3.1, false), g(5.4), g(3.6, true), g(2.9, false)]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(dirs, ["rep-1", "rep-2", "rep-3", "rep-4", "rep-5", "summary.json"]);
+  assert.equal(row.outcome, "GREEN");
+  assert.deepEqual(result.redChecks, []);
+  assert.deepEqual([set.outcome, set.n, set.check, set.values, set.trends, set.redRepetitions, set.median, set.budget, set.redAtLeast, set.ceiling], ["GREEN", 5, "growth:proxy", [5.27, 3.1, 5.4, 3.6, 2.9], [true, false, true, true, false], [1, 3], 3.6, 5, 3, 10]);
+  assert.equal(set.repetitions.length, 5);
+  for (const text of [r.stdout, stepSummary]) {
+    assert.match(text, /\| S1\/short \| 5 \| commit \| 5\.27, 3\.1, 5\.4, 3\.6, 2\.9 \| true, false, true, true, false \| #1, #3 \(2 of 5\) \| 3\.6 \| ≤ 5 \| ≥ 3 of 5 \| ≤ 10 \| none \|/);
+  }
+});
+
+test("windows S1/short: 3 RED repetitions fail on growth:proxy; three values over 5 with one trend missing are 2 RED and pass", () => {
+  const red = s1ShortJob([g(5.27), g(5.1), g(3.6, true), g(5.4), g(2.9, false)]);
+  assert.equal(red.r.status, 1, red.r.stdout + red.r.stderr);
+  assert.equal(red.row.outcome, "RED");
+  assert.deepEqual([red.result.redChecks, red.set.median, red.set.redRepetitions], [["growth:proxy"], 5.1, [1, 2, 4]]);
+  assert.match(red.r.stdout, /- S1\/short: RED but not listed in expected-red\.json \(windows\)/);
+  const noTrend = s1ShortJob([g(5.27), g(5.1, false), g(3.6, true), g(5.4), g(2.9, false)]);
+  assert.equal(noTrend.r.status, 0, noTrend.r.stdout);
+  assert.deepEqual(noTrend.set.redRepetitions, [1, 4]);
+});
+
+test("windows S1/short: one repetition above 10 %/1k on commit fails with a GREEN median, trend or not; 10.0 is within the ceiling", () => {
+  for (const trend of [true, false]) {
+    const { r, result, set } = s1ShortJob([g(3.1, false), g(10.1, trend), g(3.4, false), g(3.6, true), g(2.9, false)]);
+    assert.equal(r.status, 1, `${trend}: ${r.stdout}${r.stderr}`);
+    assert.equal(set.median, 3.4);
+    assert.deepEqual([result.redChecks, set.overCeiling], [["ceiling:growth:proxy"], [2]]);
+  }
+  assert.equal(s1ShortJob([g(3.1, false), g(10, true), g(3.4, false), g(3.6, true), g(2.9, false)]).r.status, 0);
+});
+
+test("windows S1/short: a RED steady, procPeak, count, orphans or commit-backstop in any one repetition fails the set", () => {
+  for (const name of ["steady:proxy", "procPeak:proxy", "count:proxy", "orphans", "commit-backstop:proxy"]) {
+    const { r, result } = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false, { red: [name] }), g(3.6, true), g(2.9, false)]);
+    assert.equal(r.status, 1, `${name}: ${r.stdout}${r.stderr}`);
+    assert.deepEqual(result.redChecks, [name], name);
+  }
+});
+
+test("windows S1/short: a missing repetition or one without a growth value is a harness failure, and the set stops there", () => {
+  const killed = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false, { harness: "killed (memory cap 3G?)" }), g(3.6, true), g(2.9, false)]);
+  assert.equal(killed.row.outcome, "HARNESS FAILURE", killed.r.stdout + killed.r.stderr);
+  assert.match(killed.result.error, /repetition 3: /);
+  assert.deepEqual(killed.dirs, ["rep-1", "rep-2", "rep-3", "summary.json"]);
+  assert.equal(killed.r.status, 1);
+  const insufficient = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false), g(null, false), g(2.9, false)]);
+  assert.equal(insufficient.row.outcome, "HARNESS FAILURE", insufficient.r.stdout);
+  assert.match(insufficient.result.error, /repetition 4: no growth:proxy value/);
+  const four = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false), g(3.6, true)]);
+  assert.equal(four.row.outcome, "HARNESS FAILURE", four.r.stdout);
+});
+
+test("linux S1/short stays a single run under the unchanged growth() verdict", () => {
+  const { r, row, dirs, set } = s1ShortJob([g(5.27)], { os: "linux" });
+  assert.equal(row.outcome, "RED", r.stdout + r.stderr);
+  assert.equal(set, null, "no repetition set");
+  assert.equal(dirs.some((d) => d.startsWith("rep-")), false, dirs.join());
+});
+
+// ── linux S6/short: the median of 5 fresh S6 body repetitions (Round 21 Q1, ticket 71) ──
+// tui:adversarial-line-heap is judged on the median against 16 MB, every
+// repetition ≤ 32 MB; orphans and the other tui checks in each repetition. The
+// fake run's s6-reps mode writes one S6/short summary per repetition from
+// FAKE_RUN_REPS: { adversarial (MB, or a non-number), red: [names], harness }.
+function s6Job(reps) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s6-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const r = runJob(["--os", "linux", "--only", "S6/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "s6-reps", FAKE_RUN_REPS: JSON.stringify(reps), GITHUB_STEP_SUMMARY: stepSummary });
+  const read = (p) => { try { return JSON.parse(readFileSync(join(home, "job", p), "utf8")); } catch { return null; } };
+  const out = { r, job: read("job-summary.json"), set: read(join("S6-short", "summary.json")), stepSummary: readFileSync(stepSummary, "utf8"), dirs: (() => { try { return readdirSync(join(home, "job", "S6-short")).sort(); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return { ...out, row: out.job?.rows?.[0], result: out.job?.results?.[0] };
+}
+const s6 = (...values) => values.map((v) => (typeof v === "object" && v !== null ? v : { adversarial: v }));
+
+test("linux S6/short: [8, 8, 20, 8, 8] is GREEN on the median; summary.json and the job summary print all five values and the median", () => {
+  const { r, row, set, dirs, stepSummary } = s6Job(s6(8, 8, 20, 8, 8));
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(row.outcome, "GREEN");
+  assert.deepEqual(dirs, ["rep-1", "rep-2", "rep-3", "rep-4", "rep-5", "summary.json"]);
+  assert.deepEqual([set.n, set.check, set.values, set.medianMB, set.budgetMB, set.ceilingMB], [5, "tui:adversarial-line-heap", [8, 8, 20, 8, 8], 8, 16, 32]);
+  for (const text of [r.stdout, stepSummary]) assert.match(text, /\| S6\/short \| 5 \| RSS \| 8, 8, 20, 8, 8 \| 8 \| ≤ 16 \| ≤ 32 \| none \|/);
+});
+
+test("linux S6/short: [20, 20, 20, 8, 8] is RED on the median; [8, 8, 33, 8, 8] is RED on the ceiling with a GREEN median", () => {
+  const median = s6Job(s6(20, 20, 20, 8, 8));
+  assert.equal(median.r.status, 1, median.r.stdout + median.r.stderr);
+  assert.deepEqual([median.row.outcome, median.result.redChecks, median.set.medianMB], ["RED", ["median:tui:adversarial-line-heap"], 20]);
+  assert.match(median.r.stdout, /- S6\/short: RED but not listed in expected-red\.json \(linux\)/);
+  const ceiling = s6Job(s6(8, 8, 33, 8, 8));
+  assert.equal(ceiling.r.status, 1, ceiling.r.stdout);
+  assert.deepEqual([ceiling.result.redChecks, ceiling.set.medianMB, ceiling.set.overCeiling], [["ceiling:tui:adversarial-line-heap"], 8, [3]]);
+  assert.equal(s6Job(s6(8, 8, 32, 8, 8)).r.status, 0, "32 MB is within the ceiling");
+});
+
+test("linux S6/short: a repetition with tui:long-line-heap, tui:log-pane-heap, tui:resize-storm-heap or orphans RED fails", () => {
+  for (const name of ["tui:long-line-heap", "tui:log-pane-heap", "tui:resize-storm-heap", "orphans"]) {
+    const { r, result } = s6Job(s6(8, 8, { adversarial: 8, red: [name] }, 8, 8));
+    assert.equal(r.status, 1, `${name}: ${r.stdout}${r.stderr}`);
+    assert.deepEqual(result.redChecks, [name], name);
+  }
+});
+
+test("linux S6/short: a missing repetition or a non-numeric value is a harness failure, never GREEN", () => {
+  const killed = s6Job(s6(8, 8, { harness: "s6 body exited 1" }, 8, 8));
+  assert.equal(killed.row.outcome, "HARNESS FAILURE", killed.r.stdout + killed.r.stderr);
+  assert.match(killed.result.error, /repetition 3: s6 body exited 1/);
+  assert.equal(s6Job(s6(8, 8, 8, 8)).row.outcome, "HARNESS FAILURE");
+  for (const bad of ["8", null, "Infinity"]) {
+    const { row, result, r } = s6Job(s6(8, 8, 8, { adversarial: bad }, 8));
+    assert.equal(row.outcome, "HARNESS FAILURE", `${bad}: ${r.stdout}`);
+    assert.match(result.error, /repetition 4: no tui:adversarial-line-heap value/, String(bad));
+  }
+});
 
 test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 74", () => {
   const { r, row, result } = s5LinuxReplay();

@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: restage 15 -> merge; then 24, 25, 36 (round 2 running), 71 (floor measurement run), 72 in order. Running: t20 (body copies), t30 (MCP retention), t36 r2. Ready next: 21 (health supervisor), then 16/17 after 15, 27 after 24/26. Interim rule (round 17 + round 21 signature (v)) active.
+- Next action: ticket 30 needs the integration tip merged (conflicts in tests/memory/loop.test.mjs, verdict.test.mjs and its issue file) by an implementer at the next free slot, then staging/30r = tip + ticket/30, tree hash in RUNLOG, exactly 10 full-CI runs per leg (Round 29 Q1 condition 2); merge 77 when its pre-merge run is green; 16 round 2 running, then restage. Running: t16 r2, t18, t75. Next slots: 30 (merge tip), 73, 17 (after 16), 38, 31 (after 30), 22/23 (after 18). 74 and 78 needs-triage.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -25,6 +25,9 @@
 - Ticket 15 (proxy lifecycle module) merged 2026-11-08 as af5caa8 (resolved a3959cc; pre-merge CI 42469139184).
 - Ticket 24 (solver transport seam) merged 2026-11-08 as 92a58a2 (resolved 16bfaa2).
 - Ticket 25 (bounded collections, 32 MiB CDN bodies) merged 2026-11-08 as 3ed5896 (resolved eb4a8f7).
+- Ticket 36 (MCP bridge lazy HTTP, semi-space flag) merged 2026-11-08 as 7555b87 (resolved 7560b31).
+- Ticket 71 (measurement rules, four rare tails) merged 2026-11-08 as a8e18f5 (resolved deca006). Round 17 interim rule ended.
+- Ticket 72 (memory tests by identity) merged 2026-11-08 as 9e98295 (resolved 8eacdc7).
 - Ticket 10 merged 2026-11-07 as 1e8f652 (resolved a8da251/e21bbde; pre-merge CI 42374566358, 8/8 green).
 - Integration branch: overhaul/stability-terminal-ux (pushed; draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/13)
 - Integration worktree: /home/AgentKit/wt/overhaul
@@ -34,3 +37,8 @@
 - Model routing in Phase 4: glm tickets, mergers, explorers -> worker-glm (GLM-5.3-Flash; loads after restart but dispatch fails with provider-not-found for account:zai-start-plan/GLM-5.3-Flash as of 2026-11-06T21:05Z -> fallback general-purpose/opus until the owner fixes the provider); sol tickets -> general-purpose (opus); Standards review = reviewer-grok; Spec review = reviewer-sol; red team = reviewer-grok
 - Running subagents: see RUNLOG.md (latest "Spawned" lines)
 - Last green SHA: 9e45d05 (baseline); integration tip before Phase 4 = this commit
+- Ticket 15 teardown fix (staging/15b) merged 2026-11-08 as cbe2abb (record 3efcaf2; pre-merge CI 42495987510, 8/8 green).
+- Ticket 29 merged 2026-11-08 as 5f754b8 (resolved f2795a1; pre-merge CI 42506095577, 8/8 green).
+- Ticket 21 merged 2026-11-08 as 2aab7db (resolved 74f8e9f; pre-merge CI 42509546483, 8/8 green).
+- Ticket 20 merged 2026-11-08 as 42ceccd (resolved 2db5088; pre-merge CI 42511390524, 8/8 green).
+- Ticket 76 merged 2026-11-08 as 9601392 (resolved 9256a33; pre-merge CI 42513423687, 8/8 green).

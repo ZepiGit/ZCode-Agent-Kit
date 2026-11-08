@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { createKitTracker, createPollParser, parseCimCsv, parseGetProcessCsv, powershellPoller, unitsSelfTest } from "./lib/win-sampler.mjs";
 import { commandFor, parseJobReport } from "./lib/caps.mjs";
 import { suspendScript } from "./lib/win-process.mjs";
+import { windowsStartCommand } from "./lib/process-identity.mjs";
 import { parseSamplesCsv, rowsFromSamples, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
 import { osVerdict, rowsForMetric, verdict } from "./lib/verdict.mjs";
@@ -126,7 +127,6 @@ test("the units self-test fails when the commit charge arrives in another unit",
 // The sampler with its Windows backend, the poller replaced by fake-poller.mjs
 // (the recorded output, framed as the PowerShell poller frames it).
 const fakePoller = (extra = {}) => (opts) => ({ command: process.execPath, args: [join(FIXTURES, "fake-poller.mjs"), JSON.stringify({ ...opts, selfPid: 2200, ...extra })] });
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test("the Windows sampler writes commit_kb, excludes its poller, records its overhead and reaps the poller", async () => {
@@ -139,7 +139,6 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
     assert.equal(ready.units.ok, true, ready.units.reason);
     await sleep(450);
     assert.deepEqual(scan(marker).map((s) => s.pid).sort(), [2100, 2300, 2400, 2500], "scan() reads the live poll");
-    const pollerPid = sampler.pollerPid;
     const rows = await sampler.stop();
     const csv = parseSamplesCsv(readFileSync(join(dir, "samples.csv"), "utf8"));
     assert.equal(readFileSync(join(dir, "samples.csv"), "utf8").split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb");
@@ -153,8 +152,9 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
     assert.ok(rows.length >= 3 && rows.every((r) => r.procs.length === 4));
     const o = sampler.overhead();
     assert.deepEqual({ pid: o.pid, polls: o.polls >= 3, peakCommitKb: o.peakCommitKb, peakRssKb: o.peakRssKb, pollMsMax: o.pollMsMax >= 180 }, { pid: 2200, polls: true, peakCommitKb: 65536, peakRssKb: 81920, pollMsMax: true });
-    await sleep(200);
-    assert.equal(alive(pollerPid), false, "the poller child is reaped on stop");
+    // The sampler's own handle on its poller, never the pid: stop() resolves on
+    // the poller's exit, and a freed pid may already name a stranger (ticket 72).
+    assert.equal(sampler.pollerRunning(), false, "the poller child is reaped on stop");
   } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -199,10 +199,8 @@ test("a units self-test failure stops the Windows sampler before it samples anyt
   try {
     sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=${RUN.token}`, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ unitsCim: "cim-poll-commit-in-kb.csv" }), alive: () => true } });
     await assert.rejects(sampler.ready, /units self-test failed: commit_kb/);
-    const pollerPid = sampler.pollerPid;
     await sampler.stop();
-    await sleep(200);
-    assert.equal(alive(pollerPid), false);
+    assert.equal(sampler.pollerRunning(), false, "the poller is reaped");
     assert.equal(readFileSync(join(dir, "samples.csv"), "utf8").split("\n").filter(Boolean).length, 1, "header only");
   } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
@@ -242,6 +240,7 @@ test("every PowerShell we start silences progress before it loads a module, and 
   const scripts = {
     poller: { argv: powershellPoller({ intervalMs: 1000 }).args },
     jobObject: { argv: commandFor("jobobject", "1G", 60, ["x"], { node: "node.exe", runScript: "run.mjs" }).argv.slice(1) },
+    processStart: { argv: windowsStartCommand(4242).args },
   };
   for (const [name, { argv }] of Object.entries(scripts)) {
     assert.ok(argv.includes("-OutputFormat") && argv[argv.indexOf("-OutputFormat") + 1] === "Text", `${name}: -OutputFormat Text`);

@@ -48,3 +48,11 @@ Decided by Owner Proxy under Charter v1 on behalf of the owner. Source: [`.scrat
 - **Point 7's "the byte cap alone meets both" is superseded.** On today's code the cap alone meets neither budget at 16 bodies, and meets 32 only at the median, with ticket 19's one deferred collection after a ≥ 4 MiB release (cap only: 678–734 MB). The budgets stand unchanged. They are met by points 1 and 6 together, and ticket 20 owns them (≤ 250 / 400 / 600 / 250 MB for S1/burst4 / burst16 / burst32 / bigbody). If 20 cannot reach them, the question comes back with numbers. The levers outside 20 are a lower cap default, a body-processing concurrency limit (point 5) and Bun `--smol`.
 - **The 64 MB default stays.** No lower value has been measured, and a lower one would queue and shed parallel sessions sooner (point 5's reasoning). It is a two-way door through the config key.
 - **Ticket 20 re-measures** (peak − 90) / MB admitted at S1/burst16 and burst32 per copy removed. The result is recorded here as a further amendment naming the ticket.
+
+## Amended 2026-11-08 (ticket 20, Round 18 Q3 condition 5, Round 28 Q1)
+
+Measured by ticket 20 (fewer request-body copies), linux, RSS, (peak − 90) / MB admitted; every step and repetition is in [METRICS.md](../../.scratch/kit-overhaul/METRICS.md) "Request-body copies removed one at a time".
+
+- **The factor after ticket 20:** S1/burst4 5.4 → 3.1, S1/burst16 6.0 → 3.5, S1/burst32 7.3 → 4.0, S1/burst1 8.9 → 2.7 MB per MB admitted (base e88821f, 5 runs, against the final tree, 10 runs). Peaks on the final tree: burst4 225.8, burst16 313.8, burst32 351.1, bigbody 183.6 MB (medians), all within 250 / 400 / 600 / 250.
+- **Windows (WS gate) on the same tree, 10 CI runs** (42502565823..42503373851): burst4 213.2–239.7, burst16 252.3–342, bigbody 152.4–156.9 MB; S1/burst1 24-run measurement 42502424683 min/median/max 110.5/116.8/131.7 MB.
+- **Point 7 and the Round 18 amendment:** the budgets are now met by points 1 and 6 with the 64 MiB default cap unchanged; the levers outside 20 (lower cap default, body-processing concurrency limit, Bun `--smol`) stay unmeasured and unused. The ratio is still not constant across burst sizes, so the linear formula in point 7 still does not predict peaks.

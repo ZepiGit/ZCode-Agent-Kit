@@ -73,7 +73,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { CATALOGUE, JOB, OS_LEGS, parseRunKey } from "./catalogue.mjs";
 import { MEMORY, REPEATED } from "./budgets.mjs";
-import { repetitionRule } from "./repetitions.mjs";
+import { repetitionRule, setCheckName } from "./repetitions.mjs";
 
 const OUTCOME = { 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" };
 
@@ -94,9 +94,9 @@ export const UNSTABLE = {
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 
 /** Why an allow-list bound does not fit its key (Round 13 Q1 condition 3), or null. */
-function boundKindError(key, bound, repeated) {
+function boundKindError(key, bound, repeated, os) {
   const kinds = bound && typeof bound === "object" ? Object.keys(bound).sort().join() : "";
-  const isRepeated = !!repetitionRule(key, repeated);
+  const isRepeated = !!repetitionRule(key, repeated, os);
   const band = bound?.growthBand;
   const okMedian = isRepeated && kinds === "maxMedianMB" && isNum(bound.maxMedianMB);
   const okBand = !isRepeated && kinds === "growthBand" && band && typeof band === "object" && Object.keys(band).sort().join() === "budget,check,max"
@@ -172,7 +172,7 @@ function ownedEntry(value) {
 
 /** Why an entry's kind does not fit its key (Round 14 Q1 condition 1, Round 15 Q1 condition 1): a list of errors. */
 function kindErrors(os, key, entry, { repeated, unstable }) {
-  const isRepeated = !!repetitionRule(key, repeated);
+  const isRepeated = !!repetitionRule(key, repeated, os);
   const isUnstableKey = Object.hasOwn(unstable[os] ?? {}, key);
   const hasOwners = entry.state === "owned" || entry.extrasWithState;
   if (hasOwners && isRepeated) return ["`owners` and `flips` are not allowed on a repeated key: it keeps its median rule (Round 9 Q1 condition 1, Round 15 Q1 condition 1)"];
@@ -207,7 +207,7 @@ export function validateExpectedRed(expected, { job = JOB, issueIds, catalogue =
       if (entry.state === "unstable" && !entry.extrasWithState) {
         if (!Object.hasOwn(unstable[os] ?? {}, key)) errors.push(`${os} ${key}: \`unstable\` is allowed for ${Object.entries(unstable).flatMap(([o, keys]) => Object.keys(keys).map((k) => `${o} ${k}`)).join(", ")} only (Round 9 Q1 condition 3, Round 13 Q1 condition 3)`);
         else {
-          const kindError = boundKindError(key, unstable[os][key], repeated);
+          const kindError = boundKindError(key, unstable[os][key], repeated, os);
           if (kindError) errors.push(`${os} ${key}: ${kindError}`);
         }
       }
@@ -251,14 +251,14 @@ export function checkRatchet({ expected, os, results, job = JOB, issueIds, catal
     // A listed repeated key tolerates only its median check (Round 9 Q1
     // condition 1): a ceiling breach or any other RED check of any repetition
     // fails, so the listing cannot mask Round 6 Q1 condition 3.
-    const rule = repetitionRule(key, repeated);
+    const rule = repetitionRule(key, repeated, os);
     if (rule && ticket !== null && outcome === "RED") {
-      const median = `median:${rule.check}`;
+      const median = setCheckName(rule);
       const other = (result.redChecks ?? []).filter((c) => c !== median);
       if (other.length || !(result.redChecks ?? []).includes(median)) { failures.push(`${key}: RED on ${other.join(", ") || "no median check"}: a listed repeated run accepts only ${median} (${os}, Round 9 Q1 condition 1)`); continue; }
     }
     // A bound that does not fit its key is already a schema error: it judges nothing.
-    if (isUnstable && boundKindError(key, unstable[os][key], repeated)) continue;
+    if (isUnstable && boundKindError(key, unstable[os][key], repeated, os)) continue;
     const band = isUnstable ? unstable[os][key].growthBand : undefined;
     if (band && (outcome === "RED" || outcome === "GREEN")) {
       // Round 13 Q1 condition 1: judged on the check's commit value, either trend flag.

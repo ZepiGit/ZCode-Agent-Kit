@@ -1,0 +1,4 @@
+[test]
+# Egress guard (ticket 76): the proxy test run fails on any connection attempt
+# outside loopback, from the test process, its workers or its child processes.
+preload = ["./test-support/egress-guard-preload.ts"]

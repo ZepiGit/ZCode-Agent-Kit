@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkRatchet, issueIdsIn, readExpectedRed, UNSTABLE, validateExpectedRed } from "./lib/ratchet.mjs";
 import { JOB } from "./lib/catalogue.mjs";
-import { chooseRepetitions, medianFalseRedRate, medianVerdict, repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
+import { chooseRepetitions, floorMeasurement as floorMeasurementOf, medianFalseRedRate, medianVerdict, repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
 
 /** One proxy sample per second; `mb(i)` gives its RSS, progress = 10 units/s. */
 function series(n, mb, role = "proxy") {
@@ -502,10 +502,11 @@ test("unstable is rejected on any other key and on linux S1/burst1; a plain list
   assert.match(judgeBurst({ windows: { "S1/burst1": "20" } }, setResult("S1/burst1", wsFive(230, 220, 240, 235, 225))).failures.join("\n"), /GREEN but listed for ticket 20/);
 });
 
-test("the committed list marks windows S1/burst1 unstable for ticket 20 and windows S5/short unstable for ticket 74, its only unstable entries", () => {
+test("the committed list has no S1/burst1 entry (ticket 20 removed it) and marks windows S5/short unstable for ticket 74, its only unstable entry", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
-  assert.deepEqual(expected.windows["S1/burst1"], { ticket: "20", state: "unstable" });
+  // Ticket 20 deleted the windows entry, citing the 24-run measurement 42502424683 (WS gate max 131.7 MB, 0 above 250).
+  assert.equal(Object.hasOwn(expected.windows, "S1/burst1"), false);
   assert.equal(Object.hasOwn(expected.linux, "S1/burst1"), false);
   // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30, re-owned to
   // ticket 74 by Round 24 Q1); linux stays a binary entry (since Round 14/15 Q1 one that names the check its owner owns).
@@ -513,7 +514,7 @@ test("the committed list marks windows S1/burst1 unstable for ticket 20 and wind
   // Round 17 Q2: its one name flips (RED in 9 of 10 runs on ticket 13's tree, run 42436186573 GREEN on the trend flag).
   assert.deepEqual(expected.linux["S5/short"], { owners: { 74: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] });
   const unstable = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => v?.state === "unstable").map(([k]) => `${os} ${k}`));
-  assert.deepEqual(unstable, ["windows S1/burst1", "windows S5/short"]);
+  assert.deepEqual(unstable, ["windows S5/short"]);
 });
 
 // ── The `unstable` entry: windows S5/short, a growth-value band (Round 13 Q1 conditions 1 and 3) ──
@@ -641,7 +642,7 @@ const BURST1_TIP = [
 // The earlier samples on unchanged code Round 6 Q1 lists (plus one CI GREEN without a recorded value).
 const BURST1_EARLIER = { values: [219.1, 231.8, 234, 236.6, 236.7, 237.5, 237.7, 256.7, 264.6, 299.2], greenWithoutValue: 1 };
 
-test("S1/burst1 is the only run judged on a median: n from the measured distribution, the 250 MB peak budget, the 400 MB ceiling", () => {
+test("S1/burst1 is judged on a median (with linux S6/short since Round 21): n from the measured distribution, the 250 MB peak budget, the 400 MB ceiling", () => {
   const above = (xs) => xs.filter((v) => v > 250).length;
   const tipP = above(BURST1_TIP) / BURST1_TIP.length; // 5 / 48
   const pooledP = (above(BURST1_TIP) + above(BURST1_EARLIER.values)) / (BURST1_TIP.length + BURST1_EARLIER.values.length + BURST1_EARLIER.greenWithoutValue); // 8 / 59
@@ -660,7 +661,39 @@ test("S1/burst1 is the only run judged on a median: n from the measured distribu
   assert.equal(Math.max(chooseRepetitions(tipP), chooseRepetitions(pooledP), chooseRepetitions(5 / 24), chooseRepetitions(6 / 48)), 7);
   assert.deepEqual(repetitionRule("S1/burst1"), { n: 7, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 });
   assert.ok(Math.max(...BURST1_TIP, ...BURST1_EARLIER.values) <= 400, "the ceiling sits above every measured run");
-  for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1") assert.equal(repetitionRule(key), null, `${os} ${key}`);
+  // Round 21 Q1 (ticket 71): linux S6/short is judged on a median of 5 too, with its own n (pinned below).
+  for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1" && key !== "S6/short") assert.equal(repetitionRule(key), null, `${os} ${key}`);
+});
+
+// Round 17 Q3 (ticket 71): windows S1/short commit growth over 49 CI runs, min
+// 1.43, median 3.56, max 5.27 %/1k, RED in 2 of 49; normal fit P(> 5) = 4.3 %,
+// log-normal 7.8 %. Linux S1/short: 70 runs, max 4.43, never RED.
+test("windows S1/short is judged on 5 fresh repetitions, RED at ≥ 3 RED, ceiling 10 %/1k; n from the 49-run distribution at ≤ 1 %; linux stays a single run", async () => {
+  const { REPEATED } = await import("./lib/budgets.mjs");
+  assert.deepEqual(repetitionRule("S1/short", REPEATED, "windows"), { legs: ["windows"], kind: "majority", n: 5, redAtLeast: 3, check: "growth:proxy", budget: MEMORY.growth.maxPctPer1k, ceiling: 10, unit: "%/1k" });
+  assert.equal(repetitionRule("S1/short", REPEATED, "linux"), null);
+  // ≥ 3 of 5 RED is the binomial tail the median rule uses: the less favourable (log-normal) fit decides.
+  assert.equal(chooseRepetitions(0.078, { target: 0.01 }), 5);
+  assert.ok(Math.abs(medianFalseRedRate(0.078, 3) - 0.0173) < 5e-4 && Math.abs(medianFalseRedRate(0.078, 5) - 0.0042) < 5e-4);
+  assert.ok(Math.abs(medianFalseRedRate(2 / 49, 5) - 0.0006) < 1e-4, "empirical 2 of 49: 0.06 %");
+  assert.ok(Math.abs(medianFalseRedRate(0.14, 5) - 0.022) < 1e-3, "at the 95 % upper bound p = 0.14: 2.2 %");
+  assert.ok(10 - 5.27 > 4.7, "the ceiling sits 4.73 above the observed maximum");
+  // The keys judged on repetitions, per leg: every other run of either job is judged on one run.
+  const repeatedKeys = Object.fromEntries(Object.keys(JOB).map((os) => [os, JOB[os].filter((k) => repetitionRule(k, REPEATED, os))]));
+  assert.deepEqual(repeatedKeys, { linux: ["S1/burst1", "S6/short"], windows: ["S1/short", "S1/burst1"] });
+});
+
+// Round 21 Q1 (ticket 71): tui:adversarial-line-heap read exactly 8 MB in 32 of 33
+// CI runs on the same S6 code and 20 MB once (42446461464); 1 of 10 on the staging/19 tree.
+test("linux S6/short is judged on the median of 5 fresh repetitions against 16 MB, every repetition ≤ 32 MB; n from 1 of 10 at ≤ 1 %", async () => {
+  const { REPEATED } = await import("./lib/budgets.mjs");
+  assert.deepEqual(repetitionRule("S6/short", REPEATED, "linux"), { n: 5, check: "tui:adversarial-line-heap", budgetMB: MEMORY.S6.longLineHeapMB, ceilingMB: 32 });
+  assert.equal(MEMORY.S6.longLineHeapMB, 16);
+  assert.equal(JOB.windows.includes("S6/short"), false, "S6 is ubuntu-only: windows is unaffected");
+  assert.equal(chooseRepetitions(1 / 10, { target: 0.01 }), 5);
+  assert.ok(Math.abs(medianFalseRedRate(1 / 10, 3) - 0.028) < 5e-4 && Math.abs(medianFalseRedRate(1 / 10, 5) - 0.0086) < 5e-4);
+  assert.ok(Math.abs(medianFalseRedRate(1 / 33, 5) - 0.00027) < 5e-5, "1 of 33: 0.027 %");
+  assert.ok(8 + 20 < 32 && 32 < 40, "the ceiling clears the pane's 8 MB plus one stray 20 MB object and fails two retained parents");
 });
 
 test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6", () => {
@@ -682,6 +715,75 @@ const singleFlight = (name = "omp-5") => ompRound(name, [host(0, { preflights: 1
 
 test("OMP leg budgets are the spec §18 numbers: 5 hosts, ≤ 1 concurrent preflight, ≤ 5 MB waiter cost", () => {
   assert.deepEqual(OMP_LEG, { hosts: 5, concurrentPreflights: 1, waiterCostMB: 5 });
+});
+
+// ── The OMP no-op floor (ticket 03's floor test; Round 17 Q4, ticket 71) ────
+// n fresh stub hosts, each charged for a hook that does nothing: the median
+// cost < 2.5 MB (half the waiter gate), every repetition < 5 MB (the gate),
+// every value printed. The windows commit floor reached 2.55 once in 16 legs.
+test("OMP floor: one 2.55 MB repetition among five passes on the median; a median at 2.5 fails; one repetition at 5 MB fails with a GREEN median", async () => {
+  const { floorVerdict } = await import("./lib/repetitions.mjs");
+  const rule = { n: 5, medianBelowMB: 2.5, everyBelowMB: 5 };
+  assert.deepEqual(floorVerdict([0.7, 0.6, 2.55, 0.8, 0.7], rule), { ok: true, error: null, values: [0.7, 0.6, 2.55, 0.8, 0.7], medianMB: 0.7, atOrAboveGate: [], failures: [] });
+  const median = floorVerdict([2.6, 2.55, 2.5, 0.7, 0.6], rule);
+  assert.deepEqual([median.ok, median.medianMB, median.failures], [false, 2.5, ["median no-op cost 2.5 MB is not below 2.5 MB"]]);
+  const gate = floorVerdict([0.7, 0.6, 5, 0.8, 0.7], rule);
+  assert.deepEqual([gate.ok, gate.medianMB, gate.atOrAboveGate, gate.failures], [false, 0.7, [3], ["repetition 3 charged 5 MB, not below the 5 MB waiter gate"]]);
+  assert.equal(floorVerdict([0.7, 0.6, 4.99, 0.8, 0.7], rule).ok, true);
+});
+
+test("OMP floor: fewer repetitions than n or a repetition without a numeric cost is a harness failure, never a pass", async () => {
+  const { floorVerdict } = await import("./lib/repetitions.mjs");
+  const rule = { n: 5, medianBelowMB: 2.5, everyBelowMB: 5 };
+  const four = floorVerdict([0.7, 0.6, 0.8, 0.7], rule);
+  assert.deepEqual([four.ok, four.error], [false, "4 of 5 repetitions measured"]);
+  for (const bad of [null, "0.7", Number.NaN]) {
+    const v = floorVerdict([0.7, 0.6, bad, 0.8, 0.7], rule);
+    assert.equal(v.ok, false, String(bad));
+    assert.match(v.error, /repetition 3: no numeric no-op cost/, String(bad));
+  }
+});
+
+test("OMP floor n from data (Round 17 Q4 condition 1): the smallest odd n in {3, 5, 7, 9} at ≤ 1 % predicted false fails on the fraction at or above 2.5 MB; ≥ 5 MB or no n comes back", async () => {
+  const { floorMeasurement } = await import("./lib/repetitions.mjs");
+  const twenty = (high) => Array.from({ length: 20 }, (_, i) => (i < high.length ? high[i] : 0.7));
+  const one = floorMeasurement(twenty([2.55]), { thresholdMB: 2.5, gateMB: 5 });
+  assert.deepEqual([one.count, one.atOrAbove, one.p, one.n, one.comesBack], [20, 1, 0.05, 3, []]);
+  assert.equal(one.falseFailRate["3"], 0.0073);
+  // The windows record so far: 1 of 16 legs above 2.5 (2.55 MB, run 42436440284) → n = 5 (n = 3: 1.12 %).
+  assert.equal(floorMeasurement([2.55, ...Array(15).fill(0.7)], { thresholdMB: 2.5, gateMB: 5 }).n, 5);
+  assert.equal(floorMeasurement(twenty([]), { thresholdMB: 2.5, gateMB: 5 }).n, 3);
+  const gate = floorMeasurement(twenty([5.1]), { thresholdMB: 2.5, gateMB: 5 });
+  assert.match(gate.comesBack.join(), /1 measurement ≥ 5 MB/);
+  const none = floorMeasurement(twenty([3, 3, 3, 3, 3, 3, 3, 3]), { thresholdMB: 2.5, gateMB: 5 });
+  assert.equal(none.n, null);
+  assert.match(none.comesBack.join(), /no n in 3, 5, 7, 9 reaches ≤ 1 %/);
+  // n is the larger of the two legs' n (the less favourable leg decides).
+  assert.equal(Math.max(one.n, floorMeasurement([2.55, ...Array(15).fill(0.7)], { thresholdMB: 2.5, gateMB: 5 }).n), 5);
+});
+
+// The floor measurement, CI run 42467078897 (marker tests/memory/measure-omp-floor = 20):
+// one test-kit leg per OS reached the tests (the other two failed in setup-bun, HTTP 504).
+const FLOOR_WINDOWS_COMMIT = [0.06, 0.06, 2.49, 0, 0, 2.43, 0.06, 0.06, 0.13, 0, 0.06, 0.06, 0.06, 0, 0, 0.06, 0.13, 0, 0.13, 0.13]; // Node 24.22.2
+const FLOOR_LINUX_RSS = [0.44, 0.44, 0.5, 0.31, 0.5, 0.31, 0.53, 0.44, 0.56, 0.69, 0.56, 0.59, 0.31, 0.31, 0.56, 0.44, 0.31, 0.44, 0.31, 0.31]; // Node 26.13.0
+// The windows record before the measurement: 1 of 16 legs failed at 2.55 MB (42436440284); a passing leg printed no value.
+const FLOOR_WINDOWS_RECORD = { atOrAbove: 1, legs: 16 };
+
+test("OMP floor rule: thresholds are half the waiter gate and the gate itself, unchanged; n = 5, the largest n over the measured estimates (Round 17 Q4 condition 1)", async () => {
+  const { OMP_FLOOR } = await import("./lib/budgets.mjs");
+  const opts = { thresholdMB: OMP_FLOOR.medianBelowMB, gateMB: OMP_FLOOR.everyBelowMB };
+  const win = floorMeasurementOf(FLOOR_WINDOWS_COMMIT, opts);
+  const linux = floorMeasurementOf(FLOOR_LINUX_RSS, opts);
+  assert.deepEqual([win.count, win.atOrAbove, win.maxMB, win.n, win.comesBack], [20, 0, 2.49, 3, []]);
+  assert.deepEqual([linux.count, linux.atOrAbove, linux.maxMB, linux.n, linux.comesBack], [20, 0, 0.69, 3, []]);
+  // Windows pooled with its record: 1 of 36 → n = 3 (0.23 %); the record alone: 1 of 16 → n = 5 (n = 3: 1.12 %).
+  const pooled = (FLOOR_WINDOWS_RECORD.atOrAbove + win.atOrAbove) / (FLOOR_WINDOWS_RECORD.legs + win.count);
+  assert.equal(chooseRepetitions(pooled, { target: 0.01 }), 3);
+  assert.equal(chooseRepetitions(FLOOR_WINDOWS_RECORD.atOrAbove / FLOOR_WINDOWS_RECORD.legs, { target: 0.01 }), 5);
+  // No measurement reaches the gate; the less favourable estimate decides n.
+  assert.ok(Math.max(...FLOOR_WINDOWS_COMMIT, ...FLOOR_LINUX_RSS) < 5);
+  assert.equal(Math.max(win.n, linux.n, chooseRepetitions(pooled, { target: 0.01 }), chooseRepetitions(1 / 16, { target: 0.01 })), 5);
+  assert.deepEqual(OMP_FLOOR, { n: 5, medianBelowMB: 2.5, everyBelowMB: OMP_LEG.waiterCostMB });
 });
 
 test("OMP leg: five hosts that each spawn their own preflight at once are red (today's extension)", () => {

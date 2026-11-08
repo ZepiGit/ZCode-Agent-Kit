@@ -59,8 +59,8 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 53 | [Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST](53-docs-security-harness-bridge-and-manifests.md) | glm | medium | 11, 13, 16, 22, 31, 51, 58, 57, 56 | ready-for-agent |
 | 54 | [Release notes vNEXT and owner actions](54-release-notes-and-owner-actions.md) | glm | low | 29, 44, 45, 46, 48, 52, 53, 59, 69 | ready-for-agent |
 | 55 | [CI guardrails: snapshot-update refusal and an empty expected-RED list](55-ci-guardrails-snapshot-refusal-and-empty-expected-red.md) | glm | low | 06, 16, 17, 19, 20, 30, 32, 34, 35, 37, 58, 61, 74, and every typecheck-baseline ticket filed by 11, 67 | ready-for-agent |
-| 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol | high | 13, 30, 31, 36, 57, 74 | ready-for-agent |
-| 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol | medium | 30, 36, 74 | ready-for-agent |
+| 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol | high | 13, 30, 31, 36, 57 | ready-for-agent |
+| 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol | medium | 30, 36 | ready-for-agent |
 | 58 | [Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)](58-solver-recycle-and-failure-semantics.md) | sol | high | 19, 25, 28 | ready-for-agent |
 | 59 | [Kilo `/v1/models` sheet line (part (b); effort normalisation moved to 63)](59-proxy-effort-normalisation-and-kilo-models-line.md) | glm | low | — | ready-for-agent |
 | 60 | [S1/burst1 judged on the median of n fresh runs, every run ≤ 400 MB](60-s1-burst1-median-rule.md) | sol | medium | 01, 02 | ready-for-agent |
@@ -77,7 +77,11 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 71 | [Measurement rules for four rare tails: S7 retained heap, windows S1/short repetitions, the OMP no-op floor, linux S6/short repetitions](71-measurement-rules-rare-tails.md) | sol | low | 67 | ready-for-agent |
 | 72 | [Memory-loop tests check a PID after the process died (Windows PID reuse)](72-memory-tests-pid-after-death.md) | sol | low | 70 | ready-for-agent |
 | 73 | [Memory loop: `whileFrozen` resume and `scanWindows` filter by PID only](73-freeze-and-scanwindows-pid-identity.md) | sol | medium | 72 | ready-for-agent |
-| 74 | [S5/short: judge MCP bridge growth after the retention bound (1,200 tasks, window 600–1,200)](74-s5-short-growth-after-retention-bound.md) | sol | medium | 30 | ready-for-agent |
+| 74 | [S5/short: which measurement separates a working retention bound from its mutant (needs triage)](74-s5-short-growth-after-retention-bound.md) | sol | medium | 30 | needs-triage |
+| 75 | [Kit tests share fixed fixture ports (18458 and others): parallel test files collide](75-shared-fixture-ports-in-kit-tests.md) | sol | low | — | ready-for-agent |
+| 76 | [The proxy test suite reaches the real upstream (zcode.z.ai:443)](76-proxy-tests-reach-real-upstream.md) | sol | high | — | ready-for-agent |
+| 77 | [Windows kill guard refuses ~1 in 3,500 proxies (start-time ticks rounded through a JS Number)](77-windows-kill-guard-start-time-rounding.md) | sol | medium | — | ready-for-agent |
+| 78 | [windows S1/short commit growth: repetition-position and tree effects](78-windows-s1-short-repetition-position-and-tree-effects.md) | sol | medium | — | needs-triage |
 
 ## Initial frontier
 
