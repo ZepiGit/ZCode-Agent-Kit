@@ -14,7 +14,7 @@
 //     record, and a start whose start-time probe times out (no kill), each
 //     end with exactly one proxy that the next start adopts and stop stops;
 //     a reused pid is never signalled.
-// Ports 19160-19169 (ticket 16's range).
+// Ports 19160-19169 (ticket 16's range); 19161 is left to the memory loop runs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -87,7 +87,7 @@ test("a stale v0 lock whose holder is dead is taken over by the next start, with
 });
 
 test("the manager CLI's start and stop take a dead holder's lock over (no more 'refusing automatic takeover')", async (t) => {
-  const root = stateFixture(t, 19161, { kit: true });
+  const root = stateFixture(t, 19160, { kit: true });
   writeFileSync(lockPath(root), JSON.stringify({ pid: DEAD_PID, startedAt: "2026-01-01T00:00:00.000Z", nonce: "fedcba9876543210" }));
   const stop = spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "stop"], { env: childEnv(root), encoding: "utf8", timeout: 60_000 });
   assert.equal(stop.status, 0, stop.stdout + stop.stderr);
@@ -264,12 +264,12 @@ test("the lock-version migration (a stale v0 lock replaced through takeover) rep
 });
 
 // ------------------------------------------------------- the takeover race
-function runContender(root, { killAt = null, holdMs = 20, deadlineMs = 60_000 } = {}) {
-  const cfg = { kitRoot: ROOT, root, killAt, holdMs, deadlineMs, flag: join(root, "holder.flag") };
+function runContender(root, { killAt = null, pauseAt = null, pauseMs = 0, holdMs = 20, deadlineMs = 60_000, onPaused = null } = {}) {
+  const cfg = { kitRoot: ROOT, root, killAt, pauseAt, pauseMs, holdMs, deadlineMs, flag: join(root, "holder.flag") };
   const child = spawn(process.execPath, [CONTENDER, JSON.stringify(cfg)], { env: childEnv(root), stdio: ["ignore", "pipe", "pipe"] });
   let out = "", err = "";
   child.stdout.on("data", (b) => { out += b; });
-  child.stderr.on("data", (b) => { err += b; });
+  child.stderr.on("data", (b) => { err += b; if (onPaused && err.includes("paused ")) { const fn = onPaused; onPaused = null; fn(); } });
   return new Promise((resolveRun) => child.on("close", (code, signal) => {
     let result = null;
     try { result = JSON.parse(out.trim().split("\n").pop()); } catch {}
@@ -297,6 +297,29 @@ const RACE = [
   ...["judged-stale", "claim:linked", "target-rechecked", "target-removed"].map((step) => ({ prep: STALE_V1, kills: ["claim:linked", step] })),
 ];
 const RACERS = 5;
+
+test("judge-then-delete race (ADR-0003 condition 1): a contender that judged a lock stale never deletes the fresh lock another contender wrote meanwhile", { timeout: 120_000 }, async (t) => {
+  for (const pauseAt of ["judged-stale", "claim:linked"]) {
+    const root = stateFixture(t);
+    writeFileSync(lockPath(root), STALE_V1());
+    // A judges the dead holder's lock stale, then stalls right there.
+    let resolvePaused;
+    const paused = new Promise((r) => { resolvePaused = r; });
+    const a = runContender(root, { pauseAt, pauseMs: 2500, onPaused: () => resolvePaused() });
+    await paused;
+    // Meanwhile B takes the stale lock over (or waits on A's claim) and holds a fresh lock while A resumes.
+    const b = runContender(root, { holdMs: 4000 });
+    const [ra, rb] = await Promise.all([a, b]);
+    for (const [name, r] of [["A", ra], ["B", rb]]) {
+      assert.equal(r.code, 0, `${pauseAt}: ${name} ${r.err}`);
+      assert.equal(r.result?.acquired, true, `${pauseAt}: ${name} acquired (${r.result?.error})`);
+      assert.equal(r.result.overlap, false, `${pauseAt}: ${name} overlapped a live holder (two holders)`);
+      assert.equal(r.result.intact, true, `${pauseAt}: ${name}'s live lock was deleted while it held it`);
+    }
+    assert.deepEqual(lockFiles(root), []);
+    assert.equal(takeoverLines(root).length, 1, `${pauseAt}: the stale record was taken over exactly once`);
+  }
+});
 
 test(`takeover race: ${RACERS} contenders after a kill injected at every protocol step → never two holders, never a deleted live lock, never a partial lock`, { timeout: 600_000 }, async (t) => {
   for (const { prep, kills } of RACE) {
@@ -464,26 +487,98 @@ test("stop completes a record left without a start time and stops its proxy (the
   assert.deepEqual(liveProxies(root), []);
 });
 
-test("a reused pid is never signalled: a record without a start time whose pid is not the listener's stays unproven", async (t) => {
-  const port = 19169;
-  const root = stateFixture(t, port);
-  // Our proxy answers, naming its own pid (a different process from the recorded one).
+// An in-process listener that answers the identity proof naming `pid` as its own.
+async function identityListener(t, port, pid) {
   const server = http.createServer((req, res) => {
     if (req.headers.authorization !== `Bearer ${KEY}`) return res.writeHead(401).end();
-    res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pid: process.pid } }));
+    res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pid } }));
   });
   await new Promise((r) => server.listen(port, "127.0.0.1", r));
   t.after(() => { server.closeAllConnections(); server.close(); });
-  // The recorded pid now belongs to a stranger.
-  const stranger = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)"], { stdio: "ignore" });
-  t.after(() => { if (stranger.exitCode === null) stranger.kill("SIGKILL"); });
+}
+/** A harmless child the test owns (killed through its own handle at the end). */
+function harmless(t) {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)"], { stdio: "ignore" });
+  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  return child;
+}
+const untouched = (child) => child.exitCode === null && child.signalCode === null;
+
+test("a reused pid is never signalled: a record without a start time whose pid is not the listener's stays unproven", async (t) => {
+  const port = 19169;
+  const root = stateFixture(t, port);
+  const stranger = harmless(t); // now holds the recorded pid
+  const decoy = harmless(t);    // the pid the listener names
+  await identityListener(t, port, decoy.pid);
   const recordText = JSON.stringify({ pid: stranger.pid, startedMs: null, startedIso: null }) + "\n";
   writeFileSync(join(root, "logs", "proxy.pid"), recordText);
   const lifecycle = await lifecycleFor(root);
   assert.equal((await lifecycle.ensureRunning()).outcome, "already-running");
   const stopped = await lifecycle.stop();
   assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 4, outcome: "start-unknown" });
-  assert.equal(stranger.exitCode, null, "the stranger is never signalled");
-  assert.equal(stranger.signalCode, null);
+  assert.ok(untouched(stranger) && untouched(decoy), "nothing is signalled");
   assert.equal(readFileSync(join(root, "logs", "proxy.pid"), "utf8"), recordText, "the record is not completed from a port or a pid alone");
+});
+
+test("a record is completed only when the listener's start time is the same before and after its second answer", async (t) => {
+  const port = 19169;
+  const root = stateFixture(t, port);
+  const proxy = harmless(t);
+  await identityListener(t, port, proxy.pid);
+  const recordText = JSON.stringify({ pid: proxy.pid, startedMs: null, startedIso: null }) + "\n";
+  writeFileSync(join(root, "logs", "proxy.pid"), recordText);
+  // Every read gives another start time: the pid changed hands between the reads.
+  let n = 0;
+  const lifecycle = await lifecycleFor(root, { processStartMsImpl: () => Date.now() - 60_000 + (n++) * 1000 });
+  assert.equal((await lifecycle.ensureRunning()).outcome, "already-running");
+  assert.equal(readFileSync(join(root, "logs", "proxy.pid"), "utf8"), recordText, "not completed");
+  assert.equal((await lifecycle.stop()).code, 4);
+  assert.ok(untouched(proxy));
+  // A stable start time: the same record is completed and the proxy is the verified one.
+  const steady = Date.now() - 60_000;
+  const proven = await lifecycleFor(root, { processStartMsImpl: () => steady });
+  assert.equal((await proven.ensureRunning()).outcome, "already-running");
+  assert.deepEqual(readJson(join(root, "logs", "proxy.pid")), { pid: proxy.pid, startedMs: steady, startedIso: new Date(steady).toISOString() });
+});
+
+test("a spawn intent adopts only a proxy that started after it: an older listener is never recorded", async (t) => {
+  const port = 19169;
+  const root = stateFixture(t, port);
+  const older = harmless(t);
+  await identityListener(t, port, older.pid);
+  const at = Date.now();
+  const intent = JSON.stringify({ pid: null, startedMs: null, startedIso: null, spawning: { by: DEAD_PID, at } }) + "\n";
+  writeFileSync(join(root, "logs", "proxy.pid"), intent);
+  const lifecycle = await lifecycleFor(root, { processStartMsImpl: () => at - 60_000 });
+  assert.equal((await lifecycle.ensureRunning()).outcome, "already-running");
+  assert.equal(readFileSync(join(root, "logs", "proxy.pid"), "utf8"), intent, "an older listener is not adopted by the intent");
+  // One that started after the intent is adopted.
+  const adopted = await lifecycleFor(root, { processStartMsImpl: () => at + 50 });
+  assert.equal((await adopted.ensureRunning()).outcome, "already-running");
+  assert.equal(readJson(join(root, "logs", "proxy.pid")).pid, older.pid);
+  assert.ok(untouched(older));
+});
+
+test("a start waiting on a live holder takes the lock over once that holder dies mid-start, and ends with one proxy", { timeout: 180_000 }, async (t) => {
+  const port = 19166;
+  const root = stateFixture(t, port, { kit: true });
+  defer(root, () => killFixtureProxies(root));
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+  // The holder hangs before its spawn, then dies (a harness closed mid-start).
+  const holder = spawn(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt: "spawn:intent-recorded", pauseMs: 3000 })], { env, stdio: ["ignore", "pipe", "pipe"] });
+  let holderErr = "";
+  await new Promise((resolveUp) => holder.stderr.on("data", (b) => { holderErr += b; if (holderErr.includes("paused ")) resolveUp(); }));
+  // A second start meets the live holder's lock and waits.
+  const { createLifecycle } = await import(pathToFileURL(join(root, "lib", "proxy-lifecycle.mjs")).href);
+  const savedBun = process.env.ZCODE_KIT_BUN;
+  process.env.ZCODE_KIT_BUN = env.ZCODE_KIT_BUN;
+  let waiter;
+  try { waiter = await createLifecycle({ root, home: join(root, "home"), pendingSpawnWaitMs: 1000 }).ensureRunning({ waitMs: 30_000 }); }
+  finally { if (savedBun === undefined) delete process.env.ZCODE_KIT_BUN; else process.env.ZCODE_KIT_BUN = savedBun; }
+  await new Promise((r) => (holder.exitCode !== null || holder.signalCode !== null ? r() : holder.once("exit", r)));
+  assert.equal(waiter.lines[0], "another start is in progress — waiting for it to finish");
+  assert.deepEqual({ code: waiter.code, outcome: waiter.outcome }, { code: 0, outcome: "started" }, waiter.lines.join("\n"));
+  assert.equal(liveProxies(root).length, 1);
+  assert.equal(readJson(join(root, "logs", "proxy.pid")).pid, liveProxies(root)[0]);
+  assert.deepEqual(lockFiles(root), []);
 });

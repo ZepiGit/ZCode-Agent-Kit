@@ -1412,3 +1412,26 @@ test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 
   assert.equal(orphan.r.status, 1, orphan.r.stdout);
   assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 30 \(linux, Round 14 Q1, Round 15 Q1\)/);
 });
+
+// Ticket 16: the kill-holder adversary SIGKILLs one of the round's own
+// launches (the lock holder). That launch was ended by the scenario and is
+// reported apart; every OTHER launch that did not exit 0 is a failed launch,
+// so `failed-launches` (budget 0, "incl. a killed lock holder") can be met.
+test("S3 failed launches leave out only the launch the kill-holder adversary killed, matched by pid", () => {
+  const results = [
+    { i: 0, via: "preflight", pid: 101, code: null, tail: "starting zcode-proxy ..." },
+    { i: 1, via: "preflight", pid: 102, code: 0, tail: "ok" },
+    { i: 2, via: "preflight", pid: 103, code: 4, tail: "safe start refused" },
+    { i: 3, via: "preflight", pid: 104, code: null, tail: "killed by something else" },
+  ];
+  assert.deepEqual(s3Scenario.launchOutcomes(results, { killed: 101, afterMs: 150 }), {
+    failedLaunches: ["preflight#2 code=4 safe start refused", "preflight#3 code=null killed by something else"],
+    killedByAdversary: ["preflight#0 code=null starting zcode-proxy ..."],
+  });
+  // No adversary, or one that killed nobody: every non-zero launch counts.
+  for (const adversary of [null, { killed: null, reason: "no holder observed" }]) {
+    assert.equal(s3Scenario.launchOutcomes(results, adversary).failedLaunches.length, 3);
+  }
+  // A victim pid that exited 0 (the kill came too late) is neither.
+  assert.deepEqual(s3Scenario.launchOutcomes([{ i: 0, via: "preflight", pid: 101, code: 0 }], { killed: 101 }), { failedLaunches: [], killedByAdversary: [] });
+});

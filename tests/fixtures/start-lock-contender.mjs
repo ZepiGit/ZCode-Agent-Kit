@@ -1,7 +1,7 @@
 // A start-lock contender for tests/start-lock.test.mjs (seam 2, real
 // processes, real time). It acquires the installation's start lock through
 // the lifecycle module, holds it briefly, and releases it.
-//   argv[2]  JSON { root, killAt, holdMs, deadlineMs, flag }
+//   argv[2]  JSON { kitRoot, root, killAt, pauseAt, pauseMs, holdMs, deadlineMs, flag }
 //   killAt   a protocol step name: the process SIGKILLs itself there (an
 //            interrupted start), so it never prints a result
 // It prints one JSON line: { pid, acquired, overlap, intact, contended, error }
@@ -13,9 +13,13 @@ import { pathToFileURL } from "node:url";
 
 const cfg = JSON.parse(process.argv[2]);
 const { createLifecycle } = await import(pathToFileURL(join(cfg.kitRoot, "lib", "proxy-lifecycle.mjs")).href);
+// pauseAt/pauseMs: block at that step (the judge-then-delete interleaving, made exact).
 const lifecycle = createLifecycle({
   root: cfg.root, home: join(cfg.root, "home"),
-  stepHook: (step) => { if (step === cfg.killAt) process.kill(process.pid, "SIGKILL"); },
+  stepHook: (step) => {
+    if (step === cfg.pauseAt) { process.stderr.write(`paused ${step}\n`); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, cfg.pauseMs); }
+    if (step === cfg.killAt) process.kill(process.pid, "SIGKILL");
+  },
 });
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err?.code !== "ESRCH"; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
