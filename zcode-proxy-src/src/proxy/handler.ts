@@ -51,6 +51,7 @@ import { gateStreamPrelude, isGatedStream, type PreludeVerdict } from "./stream-
 import { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 export { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 import { inflateWithCap, decodeContentStream } from "./inflate.js";
+import { settleBodyBytes } from "../server/admission.js";
 import { buildAnthropicMetadataUserId } from "./trace-headers.js";
 
 /** Options for the proxy handler. */
@@ -877,13 +878,19 @@ export async function readBody(req: Request): Promise<string | undefined> {
       chunks.push(value);
     }
   } finally { reader.releaseLock(); }
+  // Admission (ADR-0004): from now on the request is charged the bytes it
+  // really holds, not its reservation (a body without Content-Length).
+  settleBodyBytes(req, size);
   if (size === 0) return undefined;
   const bytes = new Uint8Array(size);
   let position = 0;
   for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength; }
   const encoding = req.headers.get("content-encoding")?.toLowerCase().trim() ?? "";
   if (encoding === "gzip" || encoding === "x-gzip") {
-    return new TextDecoder().decode(await inflateGzipBody(bytes));
+    const inflated = await inflateGzipBody(bytes);
+    // A gzip body is charged its inflated size once it is inflated.
+    settleBodyBytes(req, Math.max(size, inflated.byteLength));
+    return new TextDecoder().decode(inflated);
   }
   return new TextDecoder().decode(bytes);
 }

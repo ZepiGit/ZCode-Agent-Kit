@@ -704,6 +704,46 @@ exit 0
   };
 }
 
+// Cross-platform unit test of the Claude Code ownership + flag decision
+// (round 2: the windows-only cli-audit test met the migration). Every
+// spelling of this installation's script is "ours"; with the kit's flags it
+// is current (left alone), without them outdated (migrated once); any other
+// script is foreign (never touched).
+test('Claude Code registration: equivalent path spellings with and without the bridge flag, per platform', async () => {
+  const { claudeRegistrationState, sameInstallationPath } = await import('../lib/mcp-bridge.mjs');
+  const shown = (args) => `zcode-harness:\n  Scope: User config (available in all your projects)\n  Type: stdio\n  Command: node\n  Args: ${args}\n`;
+  const cases = {
+    win32: {
+      server: 'C:\\Users\\Runner Admin\\kit\\mcp\\zcode-harness-mcp\\dist\\index.js',
+      same: (s) => [s, s.toUpperCase(), s.toLowerCase(), s.replaceAll('\\', '/'), s.replaceAll('\\', '/').toUpperCase(),
+        s.replace('\\mcp\\', '\\mcp\\.\\'), s.replace('\\dist\\', '\\dist\\..\\dist\\'), s.replace('\\kit\\', '\\kit\\\\'), `"${s}"`, `"${s.replaceAll('\\', '/').toUpperCase()}"`],
+      foreign: (s) => [`${s}.foreign`, s.replace('\\kit\\', '\\kit2\\'), s.replace('C:', 'D:'), 'mcp\\zcode-harness-mcp\\dist\\index.js', 'mcp/zcode-harness-mcp/dist/index.js'],
+    },
+    linux: {
+      server: '/home/runner admin/kit/mcp/zcode-harness-mcp/dist/index.js',
+      same: (s) => [s, s.replace('/mcp/', '/mcp/./'), s.replace('/kit/', '/kit//'), s.replace('/dist/', '/dist/../dist/'), `"${s}"`],
+      foreign: (s) => [s.toUpperCase(), `${s}.foreign`, s.replace('/kit/', '/kit2/'), s.replaceAll('/', '\\'), 'mcp/zcode-harness-mcp/dist/index.js'],
+    },
+  };
+  for (const [platform, { server, same, foreign }] of Object.entries(cases)) {
+    for (const spelling of same(server)) {
+      assert.equal(sameInstallationPath(spelling.replace(/^"|"$/g, ''), server, { platform }), true, `${platform}: ${spelling} is this installation`);
+      assert.equal(claudeRegistrationState(shown(`${SEMI} ${spelling} --stdio`), server, { platform }).state, 'current', `${platform}, flagged: ${spelling}`);
+      assert.equal(claudeRegistrationState(`\x1b[1m${shown(`${SEMI} ${spelling} --stdio`)}\x1b[0m`, server, { platform }).state, 'current', `${platform}, coloured: ${spelling}`);
+      assert.equal(claudeRegistrationState(shown(`${spelling} --stdio`), server, { platform }).state, 'outdated', `${platform}, no flag: ${spelling}`);
+      assert.equal(claudeRegistrationState(shown(`--max-semi-space-size=2 ${spelling} --stdio`), server, { platform }).state, 'outdated', `${platform}, another flag value: ${spelling}`);
+    }
+    for (const spelling of foreign(server)) {
+      for (const args of [`${spelling} --stdio`, `${SEMI} ${spelling} --stdio`]) {
+        assert.equal(claudeRegistrationState(shown(args), server, { platform }).state, 'foreign', `${platform}: ${args}`);
+      }
+    }
+    for (const output of ['', 'zcode-harness:\n  Command: node\n', shown(`${SEMI} ${server}`)]) {
+      assert.equal(claudeRegistrationState(output, server, { platform }).state, 'foreign', `${platform}: an unreadable display is never adopted`);
+    }
+  }
+});
+
 test('the kit and the bridge test client agree on the bridge Node flags', async () => {
   const { BRIDGE_NODE_FLAGS, bridgeArgs } = await import('../lib/mcp-bridge.mjs');
   const client = await import(pathToFileURL(path.join(KIT, 'mcp', 'zcode-harness-mcp', 'test', 'integration', 'client.mjs')).href);
