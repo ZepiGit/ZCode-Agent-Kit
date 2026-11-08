@@ -69,3 +69,11 @@ test('managed env passes the quota retry schedule knob through to the proxy', ()
   const env = proxyEnv({ config: 'C:/kit/proxy/config.yaml' }, source);
   assert.equal(env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS, 'off');
 });
+
+test('managed env passes the admission byte-cap override through to the proxy (ADR-0004)', () => {
+  const source = { ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB: '128', ZCODE_PROXY_ADMISSION_MAX_QUEUED: '9' };
+  const env = proxyEnv({ config: 'C:/kit/proxy/config.yaml' }, source);
+  assert.equal(env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB, '128');
+  // Only the documented key is an exception; other ZCODE_PROXY_* names stay stripped.
+  assert.equal(env.ZCODE_PROXY_ADMISSION_MAX_QUEUED, undefined);
+});

@@ -196,6 +196,8 @@ export interface ProxyConfig {
   server: {
     port: number;
     host: string;
+    /** Admission control (ADR-0004). Absent = the defaults (64 MB). */
+    admission?: AdmissionConfig;
   };
   auth: AuthConfig;
   /** Active upstream provider. */
@@ -233,4 +235,10 @@ export interface ProxyConfig {
   logging: {
     level: "debug" | "info" | "warn" | "error";
   };
+}
+
+/** `server.admission` in config.yaml (ADR-0004). */
+export interface AdmissionConfig {
+  /** Cap on request-body bytes in flight (`maxInFlightMB` × 1 MiB). */
+  maxInFlightBytes: number;
 }

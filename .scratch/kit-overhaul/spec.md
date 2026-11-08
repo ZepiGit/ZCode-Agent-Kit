@@ -805,8 +805,8 @@ Windows-only proofs run inside seams 1, 2, 3, 4, 5 and 8 on the windows-latest l
 
 - **Anything that changes how anti-abuse code behaves (B1).** This covers solve pass rates, client fingerprints, rotation strategies and quota or rate-limit workarounds. Inside the captcha, signing, identity, trace-header, session-context and rotator modules, only lifecycle, isolation, bounds, error handling, observability, UX and tests change.
 - Dropping either happy-dom loading flag. It needs a live solve (owner action).
-- **MCP SDK 2.x and protocol revision 2026-07-28.** They become a `needs-triage` ticket.
-- **An MCP runtime restart budget** (architecture candidate 8). It becomes a `needs-triage` ticket, because S5 never exercised runtime restarts.
+- **MCP SDK 2.x and protocol revision 2026-07-28.** Triaged in Round 23 as ticket 56 (in scope, staged; the stay-back stays documented until it lands).
+- **An MCP runtime restart budget** (architecture candidate 8). Triaged in Round 12 as ticket 57.
 - **Observing response streams in the client's path instead of `tee()`** (architecture candidate 6). Decided "do nothing": the burst peak was attributed to body copies, and stalled readers retained 6 MB.
 - A default concurrency limit on upstream streams.
 - **Windows footprint levers** (the lean resident launcher, the MCP bridge on Bun). They are decided later, with numbers, and only if Windows misses its gate.

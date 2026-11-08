@@ -1,16 +1,16 @@
 {
   "linux": {
-    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst4": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/burst32": { "owners": { "20": ["procPeak:proxy"] }, "flips": ["procPeak:proxy"] },
+    "S1/bigbody": { "owners": { "20": ["procPeak:proxy"] } },
     "S2/short": {
       "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
       "flips": ["growth:scenario", "procPeak:solver"]
     },
     "S3/short": {
-      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
-      "flips": ["exactly-one-proxy-after-round", "procPeak:preflight", "procPeak:proxy"]
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], "17": ["orphans"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+      "flips": ["exactly-one-proxy-after-round", "orphans", "procPeak:preflight", "procPeak:proxy"]
     },
     "S3/hung": {
       "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round", "start-over-stale-lock"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
@@ -29,10 +29,9 @@
   },
   "windows": {
     "S1/burst1": { "ticket": "20", "state": "unstable" },
-    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
-    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst4": { "owners": { "20": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "20": ["procPeak:proxy"] }, "flips": ["procPeak:proxy"] },
+    "S1/bigbody": { "owners": { "20": ["procPeak:proxy"] } },
     "S1/stalled": { "owners": { "61": ["procPeak:proxy"] } },
     "S2/short": {
       "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
