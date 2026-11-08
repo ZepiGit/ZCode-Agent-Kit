@@ -1115,6 +1115,782 @@
    }
   ]
  },
+ "messages, past 1 MiB: unmodified body forwarded verbatim": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "1650224"
+     ]
+    ],
+    "length": 1650224,
+    "sha256": "bedcc1ed8409d90f45e4a8bb4ced44a356d63b2a3c87839d6f885d0d93bc4eea"
+   }
+  ]
+ },
+ "messages, past 1 MiB: invalid UTF-8 and a byte order mark": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "1560272"
+     ]
+    ],
+    "length": 1560272,
+    "sha256": "42542e8393adbd7c097628595c1439405836db60dc7f65950ffc57ea4f601a80"
+   }
+  ]
+ },
+ "messages, past 1 MiB: gzip request body": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "1920277"
+     ]
+    ],
+    "length": 1920277,
+    "sha256": "dba3be0065d2671e789a3645f949ff45a5c3b65cbf1ea09e343372297e5a2bc4"
+   }
+  ]
+ },
+ "messages: refused bodies, below and past 1 MiB (not JSON, not an object)": {
+  "status": [
+   400,
+   400,
+   400,
+   400,
+   400,
+   400
+  ],
+  "errors": [
+   "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Request body is not valid JSON\"}}",
+   "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Request body is not valid JSON\"}}",
+   "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Request body must be a JSON object\"}}",
+   "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Request body must be a JSON object\"}}",
+   "{\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Request body must be a JSON object\"}}",
+   "{\"error\":{\"type\":\"translation_failed\",\"message\":\"Request body is not valid JSON\"}}"
+  ],
+  "upstream": []
+ },
+ "chat, past 1 MiB: image_url data URI with tools": {
+  "status": [
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "1600614"
+     ]
+    ],
+    "length": 1600614,
+    "sha256": "2bc660ef16812a65c258ad80904f45a9db59280b4b56440fe87d96fdb96d57f8"
+   }
+  ]
+ },
+ "observe, past 1 MiB: inferred lineage and body metadata session": {
+  "status": [
+   200,
+   200,
+   200
+  ],
+  "upstream": [
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-1>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-2>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-3>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-4>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "1350302"
+     ]
+    ],
+    "length": 1350302,
+    "sha256": "bc5d8b48039c1eb48dacf093ba4d6530e8a65198c7c3bc570bcbbfa88878bc20"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "x-query-id",
+      "<uuid-5>"
+     ],
+     [
+      "x-request-id",
+      "<uuid-6>"
+     ],
+     [
+      "x-session-id",
+      "<uuid-7>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-8>"
+     ],
+     [
+      "connection",
+      "keep-alive"
+     ],
+     [
+      "accept",
+      "*/*"
+     ],
+     [
+      "content-length",
+      "1350375"
+     ]
+    ],
+    "length": 1350375,
+    "sha256": "6a397b0646a5c1f151b09ebd1b25b23de8f39851c604b67ff51ee160ed42a56d"
+   },
+   {
+    "method": "POST",
+    "path": "/api/anthropic/v1/messages",
+    "headers": [
+     [
+      "content-type",
+      "application/json"
+     ],
+     [
+      "accept-encoding",
+      "identity"
+     ],
+     [
+      "http-referer",
+      "https://zcode.z.ai"
+     ],
+     [
+      "user-agent",
+      "ZCode/test-1.0.0 ai-sdk/anthropic/3.0.81"
+     ],
+     [
+      "x-zcode-app-version",
+      "test-1.0.0"
+     ],
+     [
+      "x-title",
+      "Z Code@cli"
+     ],
+     [
+      "x-release-channel",
+      "production"
+     ],
+     [
+      "x-client-language",
+      "<host>"
+     ],
+     [
+      "x-client-timezone",
+      "<host>"
+     ],
+     [
+      "x-platform",
+      "<host>"
+     ],
+     [
+      "x-os-category",
+      "<host>"
+     ],
+     [
+      "x-os-version",
+      "<host>"
+     ],
+     [
+      "x-zcode-agent",
+      "glm"
+     ],
+     [
+      "x-request-id",
+      "<uuid-9>"
+     ],
+     [
+      "x-zcode-session-type",
+      "main"
+     ],
+     [
+      "x-zcode-trace-id",
+      "<uuid-10>"
+     ],
+     [
+      "x-session-id",
+      "ses-big-body"
+     ],
+     [
+      "x-api-key",
+      "capturekey.capturesecret"
+     ],
+     [
+      "authorization",
+      "Bearer capturekey.capturesecret"
+     ],
+     [
+      "anthropic-version",
+      "2023-06-01"
+     ],
+     [
+      "content-length",
+      "1350303"
+     ],
+     [
+      "connection",
+      "close"
+     ]
+    ],
+    "length": 1350303,
+    "sha256": "4a9d806ae5ac3cde0a6e3c7bda3e1a2a4082811fdc03c8e1882b5e4e2b06b47e"
+   }
+  ]
+ },
  "chat: text, non-streaming": {
   "status": [
    200

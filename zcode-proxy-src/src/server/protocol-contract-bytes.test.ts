@@ -50,6 +50,8 @@ interface Captured {
 
 interface CaseRecord {
   status: number[];
+  /** The client's answer, for sends the proxy refuses (status other than 200). */
+  errors?: string[];
   upstream: { method: string; path: string; headers: [string, string][]; length: number; sha256: string; body?: string }[];
 }
 
@@ -180,6 +182,8 @@ async function proxyBase(profile: Profile): Promise<string> {
 // ── client requests ─────────────────────────────────────────────────────────
 
 interface Send {
+  /** The status the proxy answers with (default 200). */
+  status?: number;
   profile?: Profile;
   path: string;
   body: string | Uint8Array | (() => ReadableStream<Uint8Array>);
@@ -218,10 +222,11 @@ function normaliser(): (value: string) => string {
     .replace(/ses_[0-9a-f]{12}/g, (m) => tag("ses", m));
 }
 
-function record(statuses: number[], from: number): CaseRecord {
+function record(statuses: number[], errors: string[], from: number): CaseRecord {
   const norm = normaliser();
   return {
     status: statuses,
+    ...(errors.length ? { errors } : {}),
     upstream: captured.slice(from).map((c) => {
       const text = c.bodyBytes.toString("latin1");
       const normalisedBody = norm(text);
@@ -297,6 +302,23 @@ function bigMultibyte(): string {
   return JSON.stringify({ model: "glm-5.3", max_tokens: 64, messages: [{ role: "user", content: text }] });
 }
 
+/** VERBATIM_JSON padded past 1 MiB with multi-byte text (parsed from bytes, sent as written). */
+function bigVerbatim(): string {
+  return VERBATIM_JSON.replace(`"max_tokens" : 16,`, `"max_tokens" : 16,\n    "pad" : ${JSON.stringify("é😀 pad ".repeat(150_000))},`);
+}
+
+/** Past 1 MiB: a BOM, an invalid byte and a truncated sequence inside a long string. */
+function bigInvalidUtf8WithBom(): Uint8Array {
+  const json = Buffer.from(JSON.stringify({ model: "glm-5.3", max_tokens: 8, messages: [{ role: "user", content: `X${"ascii and ü ".repeat(120_000)}YY end` }] }));
+  const x = json.indexOf("X");
+  json[x] = 0xff;
+  const y = json.indexOf("YY");
+  json[y] = 0xf0; json[y + 1] = 0x9f;
+  return Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), json]);
+}
+
+const BIG_PNG_B64 = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(1_200_000, 9)]).toString("base64");
+
 function chunkedSplitBody(): () => ReadableStream<Uint8Array> {
   const bytes = Buffer.from(JSON.stringify({ model: "glm-5.3", max_tokens: 64, stream: true, messages: [{ role: "user", content: "split €€€ 😀😀 across chunks ".repeat(2000) }] }));
   return () => {
@@ -346,6 +368,30 @@ const CASES: Record<string, Send[]> = {
   "messages: 3 MB multi-byte body": [{ path: "/v1/messages", body: bigMultibyte() }],
   "messages: chunked body without content-length, multi-byte characters split across chunks": [{ path: "/v1/messages", body: chunkedSplitBody() }],
   "messages: invalid UTF-8 and a byte order mark": [{ path: "/v1/messages", body: invalidUtf8WithBom() }],
+  "messages, past 1 MiB: unmodified body forwarded verbatim": [{ path: "/v1/messages", body: bigVerbatim() }],
+  "messages, past 1 MiB: invalid UTF-8 and a byte order mark": [{ path: "/v1/messages", body: bigInvalidUtf8WithBom() }],
+  "messages, past 1 MiB: gzip request body": [{
+    path: "/v1/messages",
+    headers: { "content-encoding": "gzip" },
+    body: new Uint8Array(gzipSync(Buffer.from(JSON.stringify({ model: "glm-5.3", max_tokens: 64, stream: true, messages: [{ role: "user", content: "gzipped ✓ big ".repeat(120_000) }] })))),
+  }],
+  "messages: refused bodies, below and past 1 MiB (not JSON, not an object)": [
+    { path: "/v1/messages", status: 400, body: "{ not json" },
+    { path: "/v1/messages", status: 400, body: `{"model":"glm-5.3","messages":[{"role":"user","content":"${"x".repeat(1_200_000)}"}` },
+    { path: "/v1/messages", status: 400, body: "[1,2,3]" },
+    { path: "/v1/messages", status: 400, body: JSON.stringify(["x".repeat(1_200_000)]) },
+    { path: "/v1/messages", status: 400, body: "null" },
+    { path: "/v1/chat/completions", status: 400, body: `{"model":"glm-5.3","messages":[${"1,".repeat(600_000)}` },
+  ],
+  "chat, past 1 MiB: image_url data URI with tools": [{
+    path: "/v1/chat/completions",
+    body: JSON.stringify({ model: "glm-5.3-flash", tools: openaiTools, messages: [{ role: "user", content: [{ type: "text", text: "What is this?" }, { type: "image_url", image_url: { url: `data:image/png;base64,${BIG_PNG_B64}` } }] }] }),
+  }],
+  "observe, past 1 MiB: inferred lineage and body metadata session": [
+    { profile: "observe", path: "/v1/messages", body: JSON.stringify({ model: "glm-5.3", max_tokens: 64, system: "lineage-big", messages: [{ role: "user", content: "big turn ".repeat(150_000) }] }) },
+    { profile: "observe", path: "/v1/messages", body: JSON.stringify({ model: "glm-5.3", max_tokens: 64, system: "lineage-big", messages: [{ role: "user", content: "big turn ".repeat(150_000) }, { role: "assistant", content: "ok" }, { role: "user", content: "turn two" }] }) },
+    { profile: "observe", path: "/v1/messages", body: JSON.stringify({ model: "glm-5.3", max_tokens: 64, metadata: { session_id: "ses-big-body" }, messages: [{ role: "user", content: "big meta ".repeat(150_000) }] }) },
+  ],
   "chat: text, non-streaming": [{ path: "/v1/chat/completions", body: JSON.stringify({ model: "glm-5.3", messages: [{ role: "user", content: "hello" }] }) }],
   "chat: streaming with tools, tool calls and tool results": [{
     path: "/v1/chat/completions",
@@ -421,6 +467,7 @@ describe("protocol contract: bytes sent upstream are unchanged (ticket 20)", () 
     it(name, async () => {
       const from = captured.length;
       const statuses: number[] = [];
+      const errors: string[] = [];
       let previousId = "";
       for (const s of sends) {
         const body = s.body === "<previous>"
@@ -428,13 +475,15 @@ describe("protocol contract: bytes sent upstream are unchanged (ticket 20)", () 
           : s.body;
         const { status, text } = await send({ ...s, body });
         statuses.push(status);
+        if (status !== 200) errors.push(text);
         try { previousId = JSON.parse(text).id ?? ""; } catch { previousId = ""; }
       }
-      const rec = record(statuses, from);
+      const rec = record(statuses, errors, from);
       results[name] = rec;
-      // Every send reached the upstream exactly once and was answered 200.
-      expect(rec.status).toEqual(sends.map(() => 200));
-      expect(rec.upstream.length).toBe(sends.length);
+      // Every send was answered as expected and each accepted one reached the
+      // upstream exactly once.
+      expect(rec.status).toEqual(sends.map((x) => x.status ?? 200));
+      expect(rec.upstream.length).toBe(sends.filter((x) => (x.status ?? 200) === 200).length);
       if (update) return;
       expect(rec).toEqual(expected![name]);
     }, 30_000);
