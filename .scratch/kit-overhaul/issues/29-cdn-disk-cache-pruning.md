@@ -116,3 +116,4 @@ Spec stories: 63, 64, 135
     - (8) The `raceTheOldest` tests and the put-back test pass. On NTFS that needs: `renameSync` to the tombstone succeeding while no other handle is open; `linkSync` (CreateHardLinkW) for the put-back, failing with `EEXIST` when the name is taken; and the in-place rewrite with `utimesSync` keeping `lstat` ino/size/mtimeMs equal.
     - (9) The 7-process test leaves no `*.prune` file. A tombstone held open by a reader could linger as delete-pending until the handle closes; the final listing runs after every child has exited.
     - (10) ubuntu test-kit Node 24 and 26 green on the new tree.
+  - **After merging 3efcaf2 (ticket 15 teardown fix, `tests/proxy-lifecycle.test.mjs` only) in 065d8ae:** `npm run test` 885 tests, 867 pass, 0 fail, 18 skipped (`reports/t29-r2-test2.log`). The proxy, mcp and captcha trees are unchanged since f4d48d3.
