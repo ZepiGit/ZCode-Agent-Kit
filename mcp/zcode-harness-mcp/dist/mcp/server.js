@@ -5,12 +5,14 @@
  * stdio: nothing except MCP frames is written to stdout; logs go to stderr.
  * http: binds only the configured host (default 127.0.0.1) — never a public
  * interface; streamable HTTP with per-session transports.
+ *
+ * The HTTP stack (node:http, the SDK's streamable HTTP transport and hono)
+ * is imported lazily inside serveHttp: the stdio bridge, one per harness
+ * session, never loads it (about 7 MB RSS; spec §6 b).
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
-import { createServer as createHttpServer } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { buildTools, toolTextPayload } from "./tools.js";
 import { listResources, readResource } from "./resources.js";
@@ -99,6 +101,12 @@ export async function serveHttp(opts, host, port, httpKey) {
         throw new Error(`refusing to bind HTTP transport to non-loopback host "${host}"`);
     if (!httpKey)
         throw new Error("HTTP transport requires an auth key — refusing to serve unauthenticated requests");
+    // Lazy HTTP: loaded once here, before listen, so a missing module still
+    // fails at start and no request pays for the import.
+    const [{ createServer: createHttpServer }, { StreamableHTTPServerTransport: HttpTransport }] = await Promise.all([
+        import("node:http"),
+        import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+    ]);
     const keyBuf = Buffer.from(httpKey, "utf8");
     const PORT = port;
     const allowedHosts = new Set([`${h === "::1" ? "[::1]" : h}:${PORT}`]);
@@ -176,7 +184,7 @@ export async function serveHttp(opts, host, port, httpKey) {
         // moment the limit is crossed (413 + Connection: close, then socket
         // teardown) — draining until EOF would let a slow writer bind one of the
         // few request slots for the whole request timeout.
-        void handleMcpPostBounded(opts, req, res, MAX_BODY_BYTES);
+        void handleMcpPostBounded(opts, HttpTransport, req, res, MAX_BODY_BYTES);
     });
     // Header/timeout hardening (defaults are generous for a local bridge).
     httpServer.headersTimeout = 10_000;
@@ -192,7 +200,7 @@ export async function serveHttp(opts, host, port, httpKey) {
         httpServer.close(() => resolve());
     });
 }
-async function handleMcpPostBounded(opts, req, res, maxBodyBytes) {
+async function handleMcpPostBounded(opts, HttpTransport, req, res, maxBodyBytes) {
     try {
         // Declared-size fast path (AUD-006): refuse before reading any bytes when
         // a truthful Content-Length already exceeds the bound. (Conflicting or
@@ -234,7 +242,7 @@ async function handleMcpPostBounded(opts, req, res, maxBodyBytes) {
             res.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null }));
             return;
         }
-        await handleMcpPost(opts, req, res, parsedBody);
+        await handleMcpPost(opts, HttpTransport, req, res, parsedBody);
     }
     catch (err) {
         log.error("http request read error", { error: String(err) });
@@ -247,10 +255,10 @@ async function handleMcpPostBounded(opts, req, res, maxBodyBytes) {
             catch { /* already gone */ }
     }
 }
-async function handleMcpPost(opts, req, res, parsedBody) {
+async function handleMcpPost(opts, HttpTransport, req, res, parsedBody) {
     try {
         // Stateless streamable HTTP: each POST creates a request-scoped transport.
-        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+        const transport = new HttpTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
         const server = buildServer(opts);
         await server.connect(transport);
         // parsedBody comes from our bounded pre-read (ZAK-010); the transport's

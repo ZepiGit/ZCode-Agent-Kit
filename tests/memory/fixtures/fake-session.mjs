@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stand-in for one harness session (S3): what a real session costs the kit
-// besides the proxy is its own MCP bridge (node dist/index.js --stdio) with
+// besides the proxy is its own MCP bridge (node <flags> dist/index.js --stdio) with
 // the bridge's runtime. Starts the real bridge against the fixture runtime
 // (mcp/zcode-harness-mcp/test/fixture/fake-harness.mjs), initializes it, asks
 // for health, holds for S3_HOLD_MS, then closes stdin and exits.
@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { BRIDGE_NODE_FLAGS } from "../../../lib/mcp-bridge.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const mcp = join(root, "mcp", "zcode-harness-mcp");
@@ -18,7 +19,8 @@ mkdirSync(join(data, "workspaces"), { recursive: true });
 mkdirSync(ws, { recursive: true });
 const hold = Number(process.env.S3_HOLD_MS ?? 8000);
 
-const bridge = spawn(process.execPath, [join(mcp, "dist", "index.js"), "--stdio", "--data-dir", data, "--allow-workspace", ws, "--runtime-path", fixture], {
+// Started as the kit's generated harness MCP entries start it (ticket 36).
+const bridge = spawn(process.execPath, [...BRIDGE_NODE_FLAGS, join(mcp, "dist", "index.js"), "--stdio", "--data-dir", data, "--allow-workspace", ws, "--runtime-path", fixture], {
   stdio: ["pipe", "pipe", "ignore"],
   env: { ...process.env, ZCODE_HARNESS_RUNTIME_PATH: fixture, ZCODE_HARNESS_LOG_LEVEL: "warn" },
 });

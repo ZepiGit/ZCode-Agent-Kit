@@ -34,7 +34,7 @@
 | Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json`（Windows）または `~/.config/goose/custom_providers/zcode.json`（macOS/Linux） | 認証情報は文書化された `auth.command` ヘルパー経由（kit のキーリゾルバ、シェルなし） |
 | Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | kit は VS Code の状態に一切触れない。UI で一度だけ値を入力する |
 | Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | UI でカスタム provider（Anthropic messages）を設定。kilo.jsonc は意図的に書かない |
-| MCP 対応ハーネス | stdio サーバー `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：`~/.omp/agent/mcp.json` にエントリー。Claude Code：`claude mcp add`（検出され同意した場合のみ）。Codex：隔離 home 内。MCP 単体はモデル統合としてカウントされない |
+| MCP 対応ハーネス | stdio サーバー `zcode-harness`（`node --max-semi-space-size=1 mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：`~/.omp/agent/mcp.json` にエントリー。Claude Code：`claude mcp add`（検出され同意した場合のみ）。Codex：隔離 home 内。MCP 単体はモデル統合としてカウントされない |
 
 `generated/` 以下のパスは kit の状態を指します。リリース版/ソースでは
 kit ディレクトリ内、npm では別の状態ディレクトリ内です。
@@ -85,7 +85,7 @@ Windows の独立した Codex プロファイルでは制限付きトークン�
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<kit の絶対インストールパス>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["--max-semi-space-size=1", "<kit の絶対インストールパス>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
