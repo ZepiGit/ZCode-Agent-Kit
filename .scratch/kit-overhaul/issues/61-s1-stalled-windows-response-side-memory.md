@@ -58,3 +58,5 @@ Spec stories: none yet (outside spec.md; recorded in Round 7).
 **REVERSIBILITY:** Two-way door (an internal response-pipeline module behind unchanged contracts). ADR: no. The conditional amendment of Round 1 Q2 / spec line 809 is recorded in DECISIONS and RUNLOG.
 
 ---
+
+- 2026-11-08 (orchestrator, Owner Proxy round 17): Q3 condition 4 — criterion 3's "S1/short … do not regress on either leg" is judged on windows under ticket 71's `S1/short` rule: 5 fresh sequential repetitions, `growth:proxy` RED when ≥ 3 of 5 are RED under the unchanged `growth()`, every repetition ≤ 10 %/1k on commit, every other S1/short check judged in each repetition. Linux `S1/short` stays a single run.
