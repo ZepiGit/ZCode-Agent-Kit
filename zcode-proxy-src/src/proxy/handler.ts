@@ -874,27 +874,45 @@ export async function readBody(req: Request): Promise<string | undefined> {
   }
   if (!req.body) return undefined;
   const reader = req.body.getReader();
+  // A body with a Content-Length is read straight into one buffer of that
+  // size, so each chunk can be dropped once copied (ticket 20) instead of
+  // holding every chunk plus their joined copy. Bytes beyond the declared
+  // length (a Request built in-process can declare anything) fall back to the
+  // chunk list.
+  const declared = Number(req.headers.get("content-length"));
+  let buffer: Uint8Array | null = Number.isSafeInteger(declared) && declared > 0 ? new Uint8Array(declared) : null;
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      size += value.byteLength;
-      if (size > maxWireBytes) {
+      if (size + value.byteLength > maxWireBytes) {
         void reader.cancel().catch(() => {});
         throw new InflatedBodyTooLargeError(maxWireBytes);
       }
-      chunks.push(value);
+      if (buffer && size + value.byteLength <= buffer.byteLength) {
+        buffer.set(value, size);
+      } else {
+        if (buffer) { chunks.push(buffer.subarray(0, size)); buffer = null; }
+        chunks.push(value);
+      }
+      size += value.byteLength;
     }
   } finally { reader.releaseLock(); }
   // Admission (ADR-0004): from now on the request is charged the bytes it
   // really holds, not its reservation (a body without Content-Length).
   settleBodyBytes(req, size);
   if (size === 0) return undefined;
-  const bytes = new Uint8Array(size);
-  let position = 0;
-  for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength; }
+  let bytes: Uint8Array;
+  if (buffer) {
+    bytes = size === buffer.byteLength ? buffer : buffer.subarray(0, size);
+  } else {
+    bytes = new Uint8Array(size);
+    let position = 0;
+    for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength; }
+  }
+  chunks.length = 0;
   const encoding = req.headers.get("content-encoding")?.toLowerCase().trim() ?? "";
   if (encoding === "gzip" || encoding === "x-gzip") {
     const inflated = await inflateGzipBody(bytes);
