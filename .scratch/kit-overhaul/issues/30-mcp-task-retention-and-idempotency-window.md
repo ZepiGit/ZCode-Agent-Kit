@@ -15,8 +15,8 @@ ADR: 0009
 **Acceptance criteria:**
 
 - [ ] Seam 7 (MCP client + fake harness): eviction by count and age with an injected clock, non-terminal kept, files pruned, restore loads only retained, not-found and new-task-on-reused-key after eviction.
-- [ ] Loop S5: growth ≤ 5 %/1k, reboot cost of history ≤ 20 MB, 0 task failures. **Delete `S5/short` (linux, windows).**
-- [ ] Linux exit (Round 17 Q2 condition 2; explicitly contradicts Round 13 Q1 condition 4, third bullet): `growth:mcp-bridge`, and with it the linux `S5/short` entry, is removed only when every one of ≥ 10 fresh matching linux CI runs on this ticket's tree has `growth:mcp-bridge` ≤ 5 %/1k, whatever the trend flag says, and every other S5 check is GREEN. A GREEN at 39 %/1k is a missed trend, not a fix. Windows keeps the Round 13 exit (Comments, 2026-11-07).
+- [ ] Loop S5/long (3,000 tasks): GREEN on every check (growth ≤ 5 %/1k, procPeak ≤ 150 MB, reboot cost of history ≤ 20 MB, 0 task failures), tip RED → branch GREEN recorded.
+- [ ] Loop S5/short: no new RED on either leg (linux listed, growth:mcp-bridge only; windows inside the 5–30 %/1k commit band; every other S5 check GREEN); values recorded. Both S5/short entries are re-owned to ticket 74, which holds their only exit (Round 24 Q1; explicitly contradicts Round 13 Q1 condition 4 and moves Round 17 Q2 condition 2's exit to 74).
 - [ ] Retention migration replayed twice.
 
 **Common acceptance (every ticket):**
@@ -185,3 +185,47 @@ Spec stories: 66, 67, 68, 135
   - `test:proxy-typecheck`: clean;
   - `test:mcp`: 102 tests, 101 pass, 0 fail, 1 skipped;
   - `git status` is clean after the build.
+
+- 2026-11-08 (orchestrator, Owner Proxy round 24, binding): merges on retention and S5/long. Staged run 42475847194: windows S5/short 14.5 %/1k commit (WS −4.24, trend false, in band); linux 31.82 %/1k (trend false, flip GREEN; window medians from the run's summary.json to be recorded here, Round 17 Q2 condition 3); all other S5 checks GREEN on both legs. The S5/short entries are re-owned to 74 in this tree, followed by one restaged run. The per-task footprint (~4.6 KB heap / ~28 KB RSS per retained task) is bounded by the 500 bound and gets no ticket (C9).
+
+- 2026-11-08 (implementer, round 2, Owner Proxy round 24).
+
+  **CI values of staged run 42475847194** (staging/30, head 0e99864; 8 of 8 jobs green). The values come from the run's `memory-budget-{linux,windows}` artefacts, `S5-short/*/summary.json`, saved locally under `/home/AgentKit/overhaul-tools/ci-art/t30-42475847194/`.
+
+  | leg | outcome | growth:mcp-bridge %/1k (trend) | slope MB/1k | mean MB | window medians MB | net rise % | rising windows | samples (growth / run) | procPeak MB | empty → 400 → reboot MB | orphans / failures | duration s |
+  |---|---|---|---|---|---|---|---|---|---|---|---|---|
+  | linux (RSS) | GREEN (flip, listed) | 31.82 (false) | 30.04 | 94.4 | 88.3 / 92.2 / 95.2 / 95 / 97.1 / 95.7 | 8.4 | 0 | 701 / 713 | 101.6 | 87 → 96 → 91 (reboot cost 4) | 0 / 0 | 714 |
+  | windows (commit; WS −4.24) | GREEN (unstable, in band) | 14.5 (false) | 11.61 | 80.1 | 77.8 / 79 / 79.9 / 81.1 / 81.2 / 78.9 | 1.4 | 0 | 705 / 716 | 89.3 commit (75.4 WS) | 79 → 79 → 82 (reboot cost 3) | 0 / 0 | 722 |
+
+  - These are the linux window medians that Round 17 Q2 condition 3 asks for (Round 24 correction 5).
+  - 31.82 > 5, so no ownership question arises.
+
+  **List and label edit (Round 24 Q1 condition 2),** 0a256f9:
+  - `tests/memory/expected-red.json`: linux `"S5/short": { "owners": { "74": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] }`, windows `"S5/short": { "ticket": "74", "state": "unstable" }`. No other entry changed.
+  - Label-only test changes (justified by Round 24 Q1 condition 2). Each one reads the committed list:
+    - `verdict.test.mjs`, the committed-list test;
+    - `loop.test.mjs`, the windows CI replays (pass lines, row ticket, table row, "listed for ticket", "owned by ticket");
+    - `loop.test.mjs`, the linux 42436186573 replay (flip line, "not owned by ticket").
+  - Also renamed from 30 to 74:
+    - the `ratchet.mjs` allow-list comment (exit owner);
+    - the `job.mjs` unstable-entries heading ("ticket 74's ≥ 10 runs").
+  - Unchanged:
+    - the synthetic band tests in `verdict.test.mjs`, which build their own `{ ticket: "30" }` entry and do not read the list;
+    - the band, the `UNSTABLE` key and every rule.
+  - **Label mutation.** After the commit, both list labels were set back to 30. Four tests fail: the committed-list test, both windows replays and the linux replay (`reports/t30-r2-labelmut.log`). The list was restored with `git checkout 512c559 -- tests/memory/expected-red.json`, and the tree is clean.
+
+  **Merge.** The integration tip 7555b87 is merged at 512c559. It brings the round-24 docs (issue 74 exists, so the ratchet's ticket-id rule holds), ticket 36 (lazy HTTP and the semi-space flag) and tickets 15, 24 and 25.
+  - Conflicts resolved, keeping both sides:
+    - `mcp/zcode-harness-mcp/package.json`: the test script lists `startup-footprint` and `retention`;
+    - this file's Comments: my comments, then the orchestrator's round-24 comment.
+  - After `npm run build`, `dist/` equals the merge result.
+
+  **Full suite on 512c559** (`reports/t30-r2-*.log`):
+  - `npm run test`: 860 tests, 842 pass, 0 fail, 18 skipped;
+  - `test:proxy`: 1451 pass, 0 fail (98 files);
+  - `test:proxy-typecheck`: clean;
+  - `test:mcp`: 105 tests, 104 pass, 0 fail, 1 skipped;
+  - memory ratchet tests (`verdict`, `loop`, `win-sampler`): 185 tests, 180 pass, 0 fail, 5 skipped;
+  - `git status` is clean after the builds.
+
+  **Pending CI (orchestrator):** one restaged run (Round 24 Q1 condition 1) must show the same outcomes. Linux S5/short is listed under ticket 74 on `growth:mcp-bridge` only (RED, or GREEN on the flip mark). Windows S5/short prints `unstable (… commit, budget 5, bound 30, …), owned by ticket 74` inside the band. The ratchet holds on both legs and every other job is green.

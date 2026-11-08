@@ -1,6 +1,6 @@
 # 56: MCP SDK 2.x and protocol revision 2026-07-28 migration
 
-**Blocked by:** 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 30 (MCP task retention (500 / 7 days) and the idempotency window), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 36 (MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries), 57 (MCP runtime restart budget)
+**Blocked by:** 13 (Batch 3 — MCP dependencies: SDK 1.32.2, zod 4.6.6, TypeScript 7, `@types/node` 24), 30 (MCP task retention (500 / 7 days) and the idempotency window), 31 (Per-task caps and 4 MiB head/tail truncation of task text), 36 (MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries), 57 (MCP runtime restart budget), 74 (S5/short: judge MCP bridge growth after the retention bound)
 
 **Status:** ready-for-agent
 
