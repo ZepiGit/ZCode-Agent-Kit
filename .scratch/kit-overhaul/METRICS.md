@@ -30,7 +30,7 @@ Source: Phase 1B memory loop (`diagnosis/memory` @ 2ccafe2, `tests/memory/`). Co
 |---|---|---|
 | S1 proxy, 30,000 mixed requests (long, 20 min) | plateau median 127 MB, HWM 182 MB, heap ≤ 49 MB, growth 0.07 %/1k, 113 MB after idle | GREEN |
 | S1 proxy, 3,000 requests (short) | growth 5.5 %/1k (warm-up, no trend), HWM 152 MB | GREEN |
-| S1 burst: N concurrent 10.8 MB bodies, 3 × N requests (burst1: 3 sequential requests) | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight | RED (N ≥ 4) |
+| S1 burst: N concurrent 10.8 MB bodies, 3 × N requests (burst1: 3 sequential requests) | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight (Phase 1B, unbounded bodies; history). On ticket 19's tree (linux, RSS, 64 MiB cap = six 10.8 MB bodies, 64.8 MB admitted; Round 18 Q3): (peak − 90) / MB admitted ≈ 6.2 at N = 16 (median 488.6 MB, 5 runs, range 5.2–6.7), 7.1 at N = 32 (median 549.7 MB, 20 runs, range 6.0–8.0; the ~61 MB above burst16 is the queue cost), 5.5 at N = 4 (43.2 MB, cap not binding), 8.6 at N = 1; the ratio is not constant, so no single linear factor predicts the peaks (ADR-0004 amendment Round 18) | RED (N ≥ 4) |
 | S1 stalled readers, 3,000 | HWM 165 MB, heap 6 MB after idle | GREEN |
 | S2 captcha solver, heavy happy-dom solves (short 420 / long 2,000) | RSS 179 → 958 MB at the 200-solve recycle (+4.1 MB/solve); heap after GC +2.5 MB/solve; per-generation peak 0.9–1.0 GB; HWM 1,068 MB | RED |
 | S2 retained guest heap before recycle | 686 MB (long 619 MB); 687 MB returned on recycle | RED |

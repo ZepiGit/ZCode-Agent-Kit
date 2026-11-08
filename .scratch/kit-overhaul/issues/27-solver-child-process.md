@@ -34,3 +34,5 @@ ADR: 0002
 Spec stories: 1, 7, 8, 9, 17, 18, 19, 20
 
 ## Comments
+
+- 2026-11-08 (orchestrator, from ticket 24): the existing captcha-solver suite alone does not catch a deadline kill that never terminates the generation; only ticket 24's seam test (src/proxy/solver-transport.test.ts) does. Keep it green across the transport change.
