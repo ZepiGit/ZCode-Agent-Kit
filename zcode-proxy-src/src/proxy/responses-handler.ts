@@ -17,7 +17,7 @@
  * State management: in-memory only (process restart clears the store); see
  * `responses/store.ts`.
  */
-import { transformRequestBody } from "./body-transformer.js";
+import { transformBuiltRequestBody } from "./body-transformer.js";
 import { getProvider } from "../provider/providers.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";
@@ -196,11 +196,13 @@ export async function handleResponses(
     // same device/session blob as coding-plan. The /v1/responses path has no
     // client-session resolution — session_id falls back to "" (a legal `bnt`
     // output in the bundle).
-    upstreamRequestBody = transformRequestBody(JSON.stringify(anthropicReq), {
+    // Transformed as built, serialised once (ticket 20); the bytes are those
+    // of transformRequestBody(JSON.stringify(anthropicReq)).
+    upstreamRequestBody = transformBuiltRequestBody(anthropicReq, {
       format: "anthropic",
       metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined),
       startPlan,
-    }) ?? JSON.stringify(anthropicReq);
+    });
   }
   const transformedBody = upstreamRequestBody;
 

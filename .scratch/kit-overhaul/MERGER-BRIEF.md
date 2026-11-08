@@ -17,3 +17,6 @@ When the orchestrator asks for a local memory-loop run, pass `--out /home/AgentK
 
 ## Sanity diff for a staged ticket (added 2026-11-07)
 The ticket's own files are `git diff --name-only staging/NN^1 staging/NN -- . ':!.scratch'` (staging/NN's last commit merges the ticket into the tip). After your merge, `git diff staging/NN HEAD -- <those files>` must be empty; other differences come from tickets merged since and must be named in your report. If staging/NN's last commit merges the tip into the ticket (instead of the ticket into the tip), the ticket's files are `staging/NN^2..staging/NN` instead.
+
+## Whole-tree sanity diff (added 2026-11-08 after the ticket 29 merge)
+The `^1`/`^2` file lists undercount a ticket's files when staging/NN was restaged (its first parent already contains an earlier round of the ticket). Always also run `git diff staging/NN HEAD -- . ':!.scratch'` after your merge: every difference must come from integration commits that landed after the staged tree (name them by commit); anything else is a RED sanity check to report.
