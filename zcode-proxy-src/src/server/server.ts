@@ -103,13 +103,11 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     }
     const ticket = result.ticket;
     bindTicket(req, ticket);
-    // A client that goes away gives its bytes back even if a reader is stuck.
-    const onAbort = (): void => ticket.release();
-    req.signal.addEventListener("abort", onAbort, { once: true });
+    // A client that goes away ends the handler too (its body read or its
+    // upstream fetch fails on the request's signal), so this releases then.
     try {
       return await run();
     } finally {
-      req.signal.removeEventListener("abort", onAbort);
       ticket.release();
     }
   };

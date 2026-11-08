@@ -23,8 +23,9 @@
  *   cap by at most the inflation of requests already admitted; nothing new is
  *   admitted until they are back under it.
  * - The bytes are given back when the route handler has produced its
- *   response (the upstream answered, so no retry needs the body any more) or
- *   when the client goes away, whichever comes first. The response body that
+ *   response (the upstream answered, so no retry needs the body any more).
+ *   A client that goes away ends the handler as well: its body read or its
+ *   upstream fetch fails on the request's signal. The response body that
  *   follows, a stream however long, is not limited.
  */
 import { createEventLogger, type EventLogger } from "../log/event-line.mjs";

@@ -61,8 +61,10 @@ function gatedUpstream(opts: { stream?: boolean } = {}) {
   let held = 0;
   let maxHeld = 0;
   let open = false;
-  const fetchImpl = (async (input: Request | string | URL) => {
+  const fetchImpl = (async (input: Request | string | URL, init?: RequestInit) => {
     const req = input as Request;
+    // Like a real fetch, a held request fails once the proxy aborts it.
+    const signal = init?.signal ?? undefined;
     const text = await req.text();
     const tag = /\[tag:([^\]]+)\]/.exec(text)?.[1] ?? "?";
     arrivals.push(tag);
@@ -86,8 +88,18 @@ function gatedUpstream(opts: { stream?: boolean } = {}) {
       });
       return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
     }
-    if (!open) await new Promise<void>((r) => waiting.push(r));
-    held--;
+    if (!open) {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          waiting.push(resolve);
+          signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        });
+      } finally {
+        held--;
+      }
+    } else {
+      held--;
+    }
     return new Response(JSON.stringify({
       id: `msg_${tag}`, type: "message", role: "assistant", model: "glm-4.6",
       content: [{ type: "text", text: `ok ${tag}` }], stop_reason: "end_turn", stop_sequence: null,
@@ -474,6 +486,23 @@ describe("admission: bodies without Content-Length, slow uploads and aborts", ()
     expect(await resp.text()).toContain("ok next");
     await until(() => admission.stats().inFlightBytes === 0, "all bytes back");
     expect(upstream.arrivals).toEqual(["next"]);
+  }, 30_000);
+
+  it("gives back the bytes of a client that disconnects while its request waits for the upstream", async () => {
+    const upstream = gatedUpstream();
+    const admission = createAdmission({ maxInFlightBytes: 16 * MB });
+    const { base } = await startProxy(admission, upstream.fetchImpl);
+    const ac = new AbortController();
+    const gone = fetch(`${base}/v1/messages`, { method: "POST", headers: authHeaders, body: messagesBody("gone", 12 * MB), signal: ac.signal }).catch((e) => e);
+    await until(() => upstream.held === 1, "upstream holds it");
+    const next = fetch(`${base}/v1/messages`, { method: "POST", headers: authHeaders, body: messagesBody("next", 8 * MB) });
+    await until(() => admission.stats().queued === 1, "next queued");
+    ac.abort();
+    await gone;
+    await until(() => upstream.held === 1 && upstream.arrivals.length === 2, "next upstream");
+    upstream.openAll();
+    expect((await next).status).toBe(200);
+    await until(() => admission.stats().inFlightBytes === 0, "all bytes back");
   }, 30_000);
 
   it("drops a client that disconnects while queued from the queue without counting a shed", async () => {
