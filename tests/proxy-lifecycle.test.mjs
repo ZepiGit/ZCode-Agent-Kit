@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -122,6 +122,8 @@ async function until(what, fn, ms) {
 }
 
 const readJson = (file) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } };
+/** One file, however spelled: the ESM loader realpaths entry modules, and Windows runners' TEMP uses 8.3 short names. */
+const canonicalPath = (file) => { let p = resolve(file); try { p = realpathSync.native(p); } catch {} return process.platform === "win32" ? p.toLowerCase() : p; };
 const killQuietly = (pid) => { try { process.kill(pid, "SIGKILL"); } catch {} };
 
 // --------------------------------------------------------- spawned preflight
@@ -140,7 +142,7 @@ test("a spawned preflight loads the lifecycle module and no presentation module,
   assert.equal(run.status, 4, run.stderr);
   assert.equal(run.stdout, "ERROR: proxy dependencies missing. Run: cd zcode-proxy-src && bun install --frozen-lockfile\n");
   assert.equal(run.stderr, "ZCode safe start failed. Run zcode-kit proxy restart, then zcode-kit doctor; inspect logs/proxy.log and manager lock ownership.\n");
-  const loaded = JSON.parse(readFileSync(seen, "utf8")).filter((u) => u.startsWith("file:")).map((u) => relative(root, fileURLToPath(u)).split(sep).join("/"));
+  const loaded = JSON.parse(readFileSync(seen, "utf8")).filter((u) => u.startsWith("file:")).map((u) => relative(canonicalPath(root), canonicalPath(fileURLToPath(u))).split(sep).join("/"));
   assert.ok(loaded.includes("lib/proxy-lifecycle.mjs"), `loaded: ${loaded.join(", ")}`);
   assert.deepEqual(loaded.filter((f) => PRESENTATION.test(f)), []);
 });
@@ -309,7 +311,7 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
   assert.deepEqual({ pid: events[0].pid, reason: events[0].reason }, { pid: old.pid, reason: "memory" });
   const spawned = readJson(envOut);
   assert.equal(spawned.pid, fresh.pid);
-  assert.deepEqual({ node: spawned.node, manager: spawned.manager, argv: spawned.argv }, { node: process.execPath, manager, argv: ["serve"] });
+  assert.deepEqual({ node: canonicalPath(spawned.node), manager: canonicalPath(spawned.manager), argv: spawned.argv }, { node: canonicalPath(process.execPath), manager: canonicalPath(manager), argv: ["serve"] });
 });
 
 /** Run fn with console.log/console.warn recorded per stream (not passed through). */
@@ -367,7 +369,8 @@ test("a proxy started through the preflight carries the frozen respawn hook, and
   assert.equal(preflight.status, 0, preflight.stderr);
   assert.match(preflight.stdout, new RegExp(`^starting zcode-proxy \\.\\.\\.\\nstarted \\(pid ${record.pid}\\) — healthy on http://127\\.0\\.0\\.1:${port}\\n$`));
   const spawned = readJson(envOut);
-  assert.deepEqual(spawned, { pid: record.pid, node: process.execPath, manager: join(root, "proxy", "zcode-proxy-manager.mjs"), argv: ["serve"] });
+  assert.deepEqual({ ...spawned, node: canonicalPath(spawned.node), manager: canonicalPath(spawned.manager) },
+    { pid: record.pid, node: canonicalPath(process.execPath), manager: canonicalPath(join(root, "proxy", "zcode-proxy-manager.mjs")), argv: ["serve"] });
   const stop = spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "stop"], { env, encoding: "utf8", timeout: 60_000 });
   assert.equal(stop.status, 0, stop.stdout + stop.stderr);
   assert.equal(stop.stdout, `stopped (pid ${record.pid})\n`);
