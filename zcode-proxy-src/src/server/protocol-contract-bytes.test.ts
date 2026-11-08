@@ -195,7 +195,7 @@ async function send(s: Send): Promise<{ status: number; text: string }> {
     init.body = s.body();
     init.duplex = "half";
   } else {
-    init.body = s.body;
+    init.body = s.body as BodyInit;
   }
   const res = await fetch(`${base}${s.path}`, init);
   const text = await res.text();
