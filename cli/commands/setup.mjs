@@ -279,7 +279,7 @@ export async function run({ flags }, cmd) {
     // Same rules as `proxy status`: verified own proxy → running; nothing on
     // the port → configured values; a foreign service → details withheld
     // (never the key next to a URL that is not ours).
-    const identity = await manager.healthIdentify();
+    const { identity } = await manager.readState();
     if (identity === "ours" || identity === "down") await manager.printConnectionDetails(identity === "ours" ? "running" : "configured");
     else if (identity === "foreign") cmd.progress("  Connection details withheld: the configured port is answered by a service that is not this kit's proxy (see zcode-kit proxy status).");
     else cmd.progress(`  Connection details unavailable (${identity}); see zcode-kit proxy status.`);
