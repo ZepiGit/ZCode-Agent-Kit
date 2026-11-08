@@ -64,13 +64,14 @@ function body(index: number, version: number): Buffer {
 async function replay(make: Make, workload: Workload) {
   const fsync = spyOn(fs, "fsyncSync").mockImplementation(() => {});
   const unlink = fs.unlinkSync.bind(fs);
-  // Deletions outside an invalidation are the disk prune's.
+  // Deletions outside an invalidation are the disk prune's (it deletes an
+  // entry through a tombstone `<name>.<time>.<uuid>.prune`).
   let invalidating = false;
   const pruned = { names: new Set<string>(), count: 0 };
   const unlinkSpy = spyOn(fs, "unlinkSync").mockImplementation(((file: fs.PathLike) => {
-    const name = path.basename(String(file));
+    const name = /^([0-9a-f]{64})(?:\.\d+\.[0-9a-f-]{36}\.prune)?$/.exec(path.basename(String(file)))?.[1];
     const result = unlink(file); // a failed unlink throws here and is not counted
-    if (!invalidating && /^[0-9a-f]{64}$/.test(name)) { pruned.names.add(name); pruned.count++; }
+    if (!invalidating && name) { pruned.names.add(name); pruned.count++; }
     return result;
   }) as typeof fs.unlinkSync);
   try { return await replayWith(make, workload, pruned, (on) => { invalidating = on; }); }
