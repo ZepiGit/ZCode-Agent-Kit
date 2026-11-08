@@ -663,6 +663,24 @@ test("S1/burst1 is the only run judged on a median: n from the measured distribu
   for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1") assert.equal(repetitionRule(key), null, `${os} ${key}`);
 });
 
+// Round 17 Q3 (ticket 71): windows S1/short commit growth over 49 CI runs, min
+// 1.43, median 3.56, max 5.27 %/1k, RED in 2 of 49; normal fit P(> 5) = 4.3 %,
+// log-normal 7.8 %. Linux S1/short: 70 runs, max 4.43, never RED.
+test("windows S1/short is judged on 5 fresh repetitions, RED at ≥ 3 RED, ceiling 10 %/1k; n from the 49-run distribution at ≤ 1 %; linux stays a single run", async () => {
+  const { REPEATED } = await import("./lib/budgets.mjs");
+  assert.deepEqual(repetitionRule("S1/short", REPEATED, "windows"), { legs: ["windows"], kind: "majority", n: 5, redAtLeast: 3, check: "growth:proxy", budget: MEMORY.growth.maxPctPer1k, ceiling: 10, unit: "%/1k" });
+  assert.equal(repetitionRule("S1/short", REPEATED, "linux"), null);
+  // ≥ 3 of 5 RED is the binomial tail the median rule uses: the less favourable (log-normal) fit decides.
+  assert.equal(chooseRepetitions(0.078, { target: 0.01 }), 5);
+  assert.ok(Math.abs(medianFalseRedRate(0.078, 3) - 0.0173) < 5e-4 && Math.abs(medianFalseRedRate(0.078, 5) - 0.0042) < 5e-4);
+  assert.ok(Math.abs(medianFalseRedRate(2 / 49, 5) - 0.0006) < 1e-4, "empirical 2 of 49: 0.06 %");
+  assert.ok(Math.abs(medianFalseRedRate(0.14, 5) - 0.022) < 1e-3, "at the 95 % upper bound p = 0.14: 2.2 %");
+  assert.ok(10 - 5.27 > 4.7, "the ceiling sits 4.73 above the observed maximum");
+  // The keys judged on repetitions, per leg: every other run of either job is judged on one run.
+  const repeatedKeys = Object.fromEntries(Object.keys(JOB).map((os) => [os, JOB[os].filter((k) => repetitionRule(k, REPEATED, os))]));
+  assert.deepEqual(repeatedKeys, { linux: ["S1/burst1"], windows: ["S1/short", "S1/burst1"] });
+});
+
 test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6", () => {
   assert.deepEqual(JOB.windows, JOB.linux.filter((k) => !k.startsWith("S6/")));
   assert.ok(JOB.windows.includes("S3/hung") && JOB.windows.includes("S2/short"));

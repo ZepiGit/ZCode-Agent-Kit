@@ -39,11 +39,14 @@
 // Every run also gets a timeout (`timeout --kill-after=30` on Linux; on
 // Windows the job kills the wrapper, and closing the Job Object kills the tree).
 //
-// Run keys in lib/budgets.mjs REPEATED (S1/burst1) run n times, one fresh
-// isolated run after another, under <out>/<scenario>-<variant>/rep-<i>/, and
-// are judged as one verdict on the median peak plus a per-run ceiling
-// (lib/repetitions.mjs, Round 6 Q1); <out>/<scenario>-<variant>/summary.json
-// records every repetition's value, the median and the ceiling check.
+// Run keys in lib/budgets.mjs REPEATED run n times on the legs their rule names,
+// one fresh isolated run after another, under <out>/<scenario>-<variant>/rep-<i>/,
+// and are judged as one verdict (lib/repetitions.mjs): S1/burst1 (and linux
+// S6/short) on the median plus a per-run ceiling (Round 6 Q1, Round 21 Q1);
+// windows S1/short on a majority of RED repetitions under the unchanged
+// growth() verdict plus a per-run ceiling (Round 17 Q3).
+// <out>/<scenario>-<variant>/summary.json records every repetition's value
+// (and trend), the median and the ceiling check.
 //
 // Writes <out>/job-summary.json and <out>/job-summary.md (also appended to
 // $GITHUB_STEP_SUMMARY when set); each run's samples.csv and summary.json
@@ -171,6 +174,15 @@ function markdown({ os, cap, ratchet, results, partial }) {
       lines.push(`| ${r.key} | ${m.n} | ${gate} | ${m.values.map((v) => v ?? "—").join(", ")} | ${m.medianMB ?? "—"} | ≤ ${m.budgetMB} | ≤ ${m.ceilingMB} | ${m.overCeiling.length ? m.overCeiling.map((i) => `#${i}`).join(", ") : "none"} | ${m.commitValues ? `${m.commitValues.join(", ")} (median ${m.commitMedianMB})` : "—"} |`);
     }
   }
+  const majority = results.filter((r) => r.majority);
+  if (majority.length) {
+    lines.push("", "Judged on n fresh repetitions, RED when at least k of them are RED under the unchanged verdict (Round 17 Q3; the value reported is the median; every repetition must also stay within the per-run ceiling on commit; every other check is judged in each repetition):", "", "| run | n | gate | values | trend | RED repetitions | median | budget | RED when | ceiling | over ceiling | WS per repetition |", "|---|---|---|---|---|---|---|---|---|---|---|---|");
+    for (const r of majority) {
+      const m = r.majority;
+      const gate = m.gate === "ws" ? "WS" : m.gate === "commit" ? "commit" : "RSS";
+      lines.push(`| ${r.key} | ${m.n} | ${gate} | ${m.values.map((v) => v ?? "—").join(", ")} | ${m.trends.map((t) => t ?? "—").join(", ")} | ${m.redRepetitions.length ? m.redRepetitions.map((i) => `#${i}`).join(", ") : "none"} (${m.redRepetitions.length} of ${m.n}) | ${m.median ?? "—"} | ≤ ${m.budget} | ≥ ${m.redAtLeast} of ${m.n} | ≤ ${m.ceiling} | ${m.overCeiling.length ? m.overCeiling.map((i) => `#${i}`).join(", ") : "none"} | ${m.wsValues ? m.wsValues.join(", ") : "—"} |`);
+    }
+  }
   const overheads = results.filter((r) => r.samplerOverhead?.polls);
   if (overheads.length) {
     const mb = (kb) => Math.round(kb / 1024);
@@ -284,7 +296,7 @@ async function main() {
   const results = [];
   for (const key of selected) {
     const dir = join(args.out, key.replace("/", "-"));
-    const rule = repetitionRule(key);
+    const rule = repetitionRule(key, undefined, args.os);
     if (!rule) {
       console.log(`\n── ${key} ──`);
       results.push((await runIn(key, dir)).result);
@@ -296,14 +308,21 @@ async function main() {
       const { result, summary } = await runIn(key, join(dir, `rep-${i}`));
       return { ...result, checks: summary?.checks ?? [] };
     });
-    const repetitions = set.reps.map((r, i) => ({ rep: i + 1, exitCode: r.exitCode, value: set.values[i], ...(set.commitValues ? { commitValue: set.commitValues[i] } : {}), redChecks: r.redChecks, durationS: r.durationS, samples: r.samples, units: r.units, ...(r.jobApplied !== undefined ? { jobApplied: r.jobApplied } : {}), ...(r.error ? { error: r.error } : {}) }));
-    const median = { n: rule.n, check: rule.check, gate: set.gate, values: set.values, medianMB: set.medianMB, budgetMB: rule.budgetMB, ceilingMB: rule.ceilingMB, overCeiling: set.overCeiling, ...(set.commitValues ? { commitValues: set.commitValues, commitMedianMB: set.commitMedianMB } : {}) };
+    const majority = rule.kind === "majority";
+    const repetitions = set.reps.map((r, i) => ({ rep: i + 1, exitCode: r.exitCode, value: set.values[i], ...(majority ? { trend: set.trends[i], red: set.redRepetitions.includes(i + 1), ...(set.wsValues ? { wsValue: set.wsValues[i] } : {}) } : {}), ...(set.commitValues ? { commitValue: set.commitValues[i] } : {}), redChecks: r.redChecks, durationS: r.durationS, samples: r.samples, units: r.units, ...(r.jobApplied !== undefined ? { jobApplied: r.jobApplied } : {}), ...(r.error ? { error: r.error } : {}) }));
+    // Round 17 Q3: the majority rule reports every value, its trend and the median.
+    const verdictOf = majority
+      ? { majority: { n: rule.n, check: rule.check, gate: set.gate, unit: rule.unit, values: set.values, trends: set.trends, redRepetitions: set.redRepetitions, median: set.median, budget: rule.budget, redAtLeast: rule.redAtLeast, ceiling: rule.ceiling, overCeiling: set.overCeiling, ...(set.commitValues ? { commitValues: set.commitValues } : {}), ...(set.wsValues ? { wsValues: set.wsValues } : {}) } }
+      : { median: { n: rule.n, check: rule.check, gate: set.gate, values: set.values, medianMB: set.medianMB, budgetMB: rule.budgetMB, ceilingMB: rule.ceilingMB, overCeiling: set.overCeiling, ...(set.commitValues ? { commitValues: set.commitValues, commitMedianMB: set.commitMedianMB } : {}) } };
     const first = set.reps[0] ?? {};
     const rolesSeen = {};
     for (const r of set.reps) for (const [role, c] of Object.entries(r.rolesSeen ?? {})) rolesSeen[role] = Math.max(rolesSeen[role] ?? 0, c ?? 0);
-    const result = { key, exitCode: set.exitCode, cap: first.cap, durationS: set.reps.reduce((a, r) => a + (r.durationS ?? 0), 0), samples: set.reps.reduce((a, r) => a + (r.samples ?? 0), 0), rolesSeen, units: set.reps.find((r) => r.units && r.units.ok !== true)?.units ?? first.units ?? null, metric: first.metric ?? null, samplerOverhead: first.samplerOverhead ?? null, redOnlyOnCommit: set.redOnlyOnCommit, workingSetRedChecks: set.workingSetRedChecks, redChecks: set.redChecks, memoryChecks: [], error: set.error ?? null, median, repetitions };
-    writeFileSync(join(dir, "summary.json"), JSON.stringify({ key, outcome: { 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" }[set.exitCode], rule: "median of n fresh repetitions (Round 6 Q1)", ...median, redChecks: set.redChecks, redOnlyOnCommit: set.redOnlyOnCommit, ...(set.error ? { error: set.error } : {}), repetitions }, null, 2));
-    console.log(`${key}: median ${set.medianMB ?? "—"} MB of [${set.values.join(", ")}] (budget ${rule.budgetMB}, every run ≤ ${rule.ceilingMB}${set.gate ? `, gate ${set.gate === "ws" ? "WS" : "commit"}` : ""}): ${{ 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" }[set.exitCode]}${set.error ? ` (${set.error})` : ""}`);
+    const result = { key, exitCode: set.exitCode, cap: first.cap, durationS: set.reps.reduce((a, r) => a + (r.durationS ?? 0), 0), samples: set.reps.reduce((a, r) => a + (r.samples ?? 0), 0), rolesSeen, units: set.reps.find((r) => r.units && r.units.ok !== true)?.units ?? first.units ?? null, metric: first.metric ?? null, samplerOverhead: first.samplerOverhead ?? null, redOnlyOnCommit: set.redOnlyOnCommit, workingSetRedChecks: set.workingSetRedChecks, redChecks: set.redChecks, memoryChecks: [], error: set.error ?? null, ...verdictOf, repetitions };
+    const ruleText = majority ? `RED when ≥ ${rule.redAtLeast} of ${rule.n} fresh repetitions are RED, every repetition ≤ ${rule.ceiling} ${rule.unit} (Round 17 Q3)` : "median of n fresh repetitions (Round 6 Q1)";
+    writeFileSync(join(dir, "summary.json"), JSON.stringify({ key, outcome: { 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" }[set.exitCode], rule: ruleText, ...(majority ? verdictOf.majority : verdictOf.median), redChecks: set.redChecks, redOnlyOnCommit: set.redOnlyOnCommit, ...(set.error ? { error: set.error } : {}), repetitions }, null, 2));
+    const outcome = { 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" }[set.exitCode];
+    if (majority) console.log(`${key}: ${rule.check} ${set.redRepetitions.length} of ${set.reps.length} repetitions RED, median ${set.median ?? "—"} ${rule.unit} of [${set.values.join(", ")}] trends [${set.trends.join(", ")}] (budget ${rule.budget}, RED when ≥ ${rule.redAtLeast} of ${rule.n}, every run ≤ ${rule.ceiling}${set.gate ? `, gate ${set.gate}` : ""}): ${outcome}${set.error ? ` (${set.error})` : ""}`);
+    else console.log(`${key}: median ${set.medianMB ?? "—"} MB of [${set.values.join(", ")}] (budget ${rule.budgetMB}, every run ≤ ${rule.ceilingMB}${set.gate ? `, gate ${set.gate === "ws" ? "WS" : "commit"}` : ""}): ${outcome}${set.error ? ` (${set.error})` : ""}`);
     results.push(result);
   }
 

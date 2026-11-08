@@ -35,8 +35,8 @@ export const MEMORY = {
 };
 
 /**
- * Runs judged on the median of n fresh, sequential repetitions instead of one
- * run (Round 6 Q1, ticket 60; lib/repetitions.mjs). The one place n lives.
+ * Runs judged on n fresh, sequential repetitions instead of one run (Round 6
+ * Q1, ticket 60; Round 17 Q3, ticket 71; lib/repetitions.mjs). The one place n lives.
  * S1/burst1 (3 sequential ~10.8 MB requests per repetition): the median proxy
  * peak against the 250 MB S1 peak, and every repetition ≤ 400 MB, §18's budget
  * for 16 concurrent bodies (a run with ≤ 1 body in flight above it is a
@@ -49,9 +49,22 @@ export const MEMORY = {
  * 6.45 % at n = 5, 3.83 % at n = 7. Earlier estimates gave 3 (5 of 48 on the
  * ticket-60 tip) and 5 (8 of 59 with the earlier runs; Round 6 Q1, ticket 60).
  * One n for both legs; Round 6 Q1 allows n ≤ 9.
+ *
+ * S1/short, windows only (Round 17 Q3, ticket 71; a departure from "one n for
+ * both legs": Linux S1/short has no tail, 70 runs, max 4.43 %/1k, and stays a
+ * single run): n = 5 fresh, sequential repetitions, a majority rule on the
+ * unchanged growth() verdict. growth:proxy is RED when ≥ 3 of 5 repetitions
+ * are RED under growth() (commit > 5 %/1k AND trend); the reported value is
+ * the median; every repetition must stay ≤ 10 %/1k on commit (a ceiling 4.73
+ * above the observed max of 5.27). Every other check is judged in each
+ * repetition. n = 5: the smallest odd n with a predicted false-RED rate ≤ 1 %
+ * on the less favourable fit of the 49-run windows distribution (log-normal
+ * p = 0.078: n = 3 → 1.73 %, n = 5 → 0.42 %).
+ * A rule with `legs` applies on those OS legs only.
  */
 export const REPEATED = {
   "S1/burst1": { n: 7, check: "procPeak:proxy", budgetMB: MEMORY.S1.peakMB, ceilingMB: MEMORY.S1.burstPeakMB.burst16 },
+  "S1/short": { legs: ["windows"], kind: "majority", n: 5, redAtLeast: 3, check: "growth:proxy", budget: MEMORY.growth.maxPctPer1k, ceiling: 10, unit: "%/1k" },
 };
 
 // Windows only: in paced runs no proxy sample may exceed ADR-0008's 512 MB

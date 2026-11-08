@@ -1464,6 +1464,88 @@ test("S7 retained heap: a series shorter than 30 readings is a harness failure",
   assert.match(result.error, /29 readings, need ≥ 30/);
 });
 
+// ── windows S1/short: 5 fresh repetitions (Round 17 Q3, ticket 71) ──────────
+// growth:proxy is RED when ≥ 3 of 5 repetitions are RED under the unchanged
+// growth() (commit > 5 AND trend), the reported value is the median, every
+// repetition must stay ≤ 10 %/1k on commit, and every other check is judged in
+// each repetition. The fake run's s1-reps mode writes one windows-shaped
+// S1/short summary per repetition (rep-<i> in --out) from FAKE_RUN_REPS.
+// Linux S1/short stays a single run.
+function s1ShortJob(reps, { os = "windows" } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s1short-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const r = runJob(["--os", os, "--only", "S1/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "s1-reps", FAKE_RUN_REPS: JSON.stringify(reps), FAKE_RUN_SHAPE: os === "windows" ? "win32" : "linux", GITHUB_STEP_SUMMARY: stepSummary });
+  const read = (p) => { try { return JSON.parse(readFileSync(join(home, "job", p), "utf8")); } catch { return null; } };
+  const out = { r, job: read("job-summary.json"), set: read(join("S1-short", "summary.json")), stepSummary: readFileSync(stepSummary, "utf8"), dirs: (() => { try { return readdirSync(join(home, "job", "S1-short")).sort(); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return { ...out, row: out.job?.rows?.[0], result: out.job?.results?.[0] };
+}
+// One repetition: commit growth %/1k and its trend flag (RED under growth() only with both).
+const g = (growth, trend = growth > 5, extra = {}) => ({ growth, trend, ...extra });
+
+test("windows S1/short: five fresh repetitions with 2 RED pass; summary.json and the job summary print all five values, trends and the median", () => {
+  const { r, row, result, set, dirs, stepSummary } = s1ShortJob([g(5.27), g(3.1, false), g(5.4), g(3.6, true), g(2.9, false)]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(dirs, ["rep-1", "rep-2", "rep-3", "rep-4", "rep-5", "summary.json"]);
+  assert.equal(row.outcome, "GREEN");
+  assert.deepEqual(result.redChecks, []);
+  assert.deepEqual([set.outcome, set.n, set.check, set.values, set.trends, set.redRepetitions, set.median, set.budget, set.redAtLeast, set.ceiling], ["GREEN", 5, "growth:proxy", [5.27, 3.1, 5.4, 3.6, 2.9], [true, false, true, true, false], [1, 3], 3.6, 5, 3, 10]);
+  assert.equal(set.repetitions.length, 5);
+  for (const text of [r.stdout, stepSummary]) {
+    assert.match(text, /\| S1\/short \| 5 \| commit \| 5\.27, 3\.1, 5\.4, 3\.6, 2\.9 \| true, false, true, true, false \| #1, #3 \(2 of 5\) \| 3\.6 \| ≤ 5 \| ≥ 3 of 5 \| ≤ 10 \| none \|/);
+  }
+});
+
+test("windows S1/short: 3 RED repetitions fail on growth:proxy; three values over 5 with one trend missing are 2 RED and pass", () => {
+  const red = s1ShortJob([g(5.27), g(5.1), g(3.6, true), g(5.4), g(2.9, false)]);
+  assert.equal(red.r.status, 1, red.r.stdout + red.r.stderr);
+  assert.equal(red.row.outcome, "RED");
+  assert.deepEqual([red.result.redChecks, red.set.median, red.set.redRepetitions], [["growth:proxy"], 5.1, [1, 2, 4]]);
+  assert.match(red.r.stdout, /- S1\/short: RED but not listed in expected-red\.json \(windows\)/);
+  const noTrend = s1ShortJob([g(5.27), g(5.1, false), g(3.6, true), g(5.4), g(2.9, false)]);
+  assert.equal(noTrend.r.status, 0, noTrend.r.stdout);
+  assert.deepEqual(noTrend.set.redRepetitions, [1, 4]);
+});
+
+test("windows S1/short: one repetition above 10 %/1k on commit fails with a GREEN median, trend or not; 10.0 is within the ceiling", () => {
+  for (const trend of [true, false]) {
+    const { r, result, set } = s1ShortJob([g(3.1, false), g(10.1, trend), g(3.4, false), g(3.6, true), g(2.9, false)]);
+    assert.equal(r.status, 1, `${trend}: ${r.stdout}${r.stderr}`);
+    assert.equal(set.median, 3.4);
+    assert.deepEqual([result.redChecks, set.overCeiling], [["ceiling:growth:proxy"], [2]]);
+  }
+  assert.equal(s1ShortJob([g(3.1, false), g(10, true), g(3.4, false), g(3.6, true), g(2.9, false)]).r.status, 0);
+});
+
+test("windows S1/short: a RED steady, procPeak, count, orphans or commit-backstop in any one repetition fails the set", () => {
+  for (const name of ["steady:proxy", "procPeak:proxy", "count:proxy", "orphans", "commit-backstop:proxy"]) {
+    const { r, result } = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false, { red: [name] }), g(3.6, true), g(2.9, false)]);
+    assert.equal(r.status, 1, `${name}: ${r.stdout}${r.stderr}`);
+    assert.deepEqual(result.redChecks, [name], name);
+  }
+});
+
+test("windows S1/short: a missing repetition or one without a growth value is a harness failure, and the set stops there", () => {
+  const killed = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false, { harness: "killed (memory cap 3G?)" }), g(3.6, true), g(2.9, false)]);
+  assert.equal(killed.row.outcome, "HARNESS FAILURE", killed.r.stdout + killed.r.stderr);
+  assert.match(killed.result.error, /repetition 3: /);
+  assert.deepEqual(killed.dirs, ["rep-1", "rep-2", "rep-3", "summary.json"]);
+  assert.equal(killed.r.status, 1);
+  const insufficient = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false), g(null, false), g(2.9, false)]);
+  assert.equal(insufficient.row.outcome, "HARNESS FAILURE", insufficient.r.stdout);
+  assert.match(insufficient.result.error, /repetition 4: no growth:proxy value/);
+  const four = s1ShortJob([g(3.1, false), g(3.2, false), g(3.4, false), g(3.6, true)]);
+  assert.equal(four.row.outcome, "HARNESS FAILURE", four.r.stdout);
+});
+
+test("linux S1/short stays a single run under the unchanged growth() verdict", () => {
+  const { r, row, dirs, set } = s1ShortJob([g(5.27)], { os: "linux" });
+  assert.equal(row.outcome, "RED", r.stdout + r.stderr);
+  assert.equal(set, null, "no repetition set");
+  assert.equal(dirs.some((d) => d.startsWith("rep-")), false, dirs.join());
+});
+
 test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 30", () => {
   const { r, row, result } = s5LinuxReplay();
   assert.equal(r.status, 0, r.stdout + r.stderr);

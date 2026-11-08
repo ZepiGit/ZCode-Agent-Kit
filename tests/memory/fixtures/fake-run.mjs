@@ -19,6 +19,8 @@
 //                                 it reports the proxy's runtime Bun as run.mjs does:
 //                                 FAKE_RUN_BUN_REVISIONS maps ZCODE_KIT_BUN → revision
 //                                 ("" = none recorded), plus a fixed runtime environment.
+//   FAKE_RUN_MODE=s1-reps         an S1/short run per repetition, windows-shaped by
+//                                 default, from FAKE_RUN_REPS (see the mode below)
 //   FAKE_RUN_MODE=s7-series       an S7/short run whose responses-store check is read
 //                                 and judged by the scenario's own code
 //                                 (lib/retained-heap.mjs) from a fake /health:
@@ -78,6 +80,41 @@ if (mode === "burst1") {
   process.exit(v.red ? 1 : 0);
 }
 const role = (maxCount) => ({ peakMB: 100, peakProcMB: 100, peakHwmMB: 120, maxCount, maxFds: 10, maxThreads: 10, distinctPids: maxCount, peakHeapMB: null });
+if (mode === "s1-reps") {
+  // FAKE_RUN_REPS: one entry per repetition (rep-<i> in --out, else the first):
+  // { growth (commit %/1k, null = insufficient samples), trend, red: [other check
+  // names RED], harness: "why" (a harness failure, exit 2) }. growth:proxy is RED
+  // as growth() makes it: growth > 5 AND trend. FAKE_RUN_SHAPE win32 (default) or linux.
+  const rep = Number(opt("--out").match(/rep-(\d+)/)?.[1] ?? 1);
+  const p = JSON.parse(process.env.FAKE_RUN_REPS)[rep - 1];
+  const win = (process.env.FAKE_RUN_SHAPE ?? "win32") === "win32";
+  const base = { id: "fake", key, scenario, profile: "short", variant, platform: win ? "win32" : "linux", metric: win ? "commit" : "rss", durationS: 300, samples: 300, observations: [], orphans: [] };
+  if (!p || p.harness) {
+    writeFileSync(join(dir, "summary.json"), JSON.stringify({ ...base, outcome: "HARNESS FAILURE", error: p?.harness ?? `no fixture for repetition ${rep}`, notes: {} }, null, 2));
+    process.exit(2);
+  }
+  const reds = new Set(p.red ?? []);
+  const mem = (name, value, budget, gate) => ({ name, red: reds.has(name), value, budget, unit: "MB", ...(win ? { gate, commitValue: gate === "ws" ? value + 150 : value, wsValue: value } : {}) });
+  const ws = p.ws ?? 1.4;
+  const growthCheck = p.growth === null
+    ? { name: "growth:proxy", red: false, budget: 5, unit: "%/1k", trend: false, detail: { samples: 3, insufficient: true } }
+    : { name: "growth:proxy", red: p.growth > 5 && p.trend === true, value: p.growth, budget: 5, unit: "%/1k", trend: p.trend === true, detail: { samples: 280, windowMediansMB: [180, 182, 184, 186, 188, 190] }, ...(win ? { gate: "commit", commitValue: p.growth, wsValue: ws } : {}) };
+  const checks = [
+    growthCheck,
+    mem("procPeak:proxy", 190, 250, "ws"),
+    mem("steady:proxy", 120, 160, "ws"),
+    { name: "count:proxy", red: reds.has("count:proxy"), value: reds.has("count:proxy") ? 2 : 1, budget: 1, unit: "procs" },
+    { name: "orphans", red: reds.has("orphans"), value: reds.has("orphans") ? 1 : 0, budget: 0, unit: "procs", detail: [] },
+    ...(win ? [{ name: "commit-backstop:proxy", red: reds.has("commit-backstop:proxy"), value: reds.has("commit-backstop:proxy") ? 530 : 400, budget: 512, unit: "MB commit (per sample, ADR-0008 soft limit)", gate: "commit" }] : []),
+  ];
+  const red = checks.some((c) => c.red);
+  const wsRed = [...(ws > 5 && p.trend === true ? ["growth:proxy"] : []), ...checks.filter((c) => c.red && c.name !== "growth:proxy").map((c) => c.name)];
+  const summary = { ...base, outcome: red ? "RED" : "GREEN", red, checks, summary: { "*": role(2), kit: role(1), proxy: role(1), "mock-upstream": role(1) },
+    ...(win ? { workingSet: { red: wsRed.length > 0, redChecks: wsRed }, redOnlyOnCommit: red && wsRed.length === 0 } : {}),
+    notes: { sampler: { units: win ? { ok: true, compared: 40 } : null, overhead: null } } };
+  writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
+  process.exit(red ? 1 : 0);
+}
 if (mode === "s7-series") {
   const { before, readings } = JSON.parse(process.env.FAKE_RUN_HEAP);
   let next = 0;
