@@ -965,6 +965,8 @@ test("owners: a check under two owners, an empty owners map or an owner id witho
   assert.match(errorsOf({ owners: {} }), /linux S3\/short: `owners` must map at least one owner ticket to its checks \(Round 15 Q1 condition 1\)/);
   assert.match(errorsOf({ owners: [] }), /linux S3\/short: `owners` must map owner tickets to check names/);
   assert.match(errorsOf({ owners: { 99: ["peak:kit"] } }), /linux S3\/short: ticket 99 has no issue file/);
+  // Every owner is checked, not only the first.
+  assert.match(errorsOf({ owners: { 16: ["failed-launches"], 99: ["peak:kit"] } }), /linux S3\/short: ticket 99 has no issue file/);
   assert.match(errorsOf({ owners: { 7: ["peak:kit"] } }), /linux S3\/short: ticket id must be a two-digit string, got "7"/);
   assert.match(errorsOf({ owners: { 16: [] , 37: ["peak:kit"] } }), /linux S3\/short: owner 16 must name at least one check/);
 });
