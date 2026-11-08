@@ -13,7 +13,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -170,7 +171,8 @@ function childEnv(root, extra = {}) {
 }
 
 // A stand-in for the proxy: answers the identity proof with the key from its
-// config, and records the respawn hook environment it was spawned with.
+// config, and records the respawn hook environment it was spawned with (and,
+// in its own file, the per-spawn variables of ticket 18).
 const FAKE_PROXY = `
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -178,6 +180,7 @@ const config = readFileSync(process.env.ZCODE_PROXY_CONFIG, "utf8");
 const port = Number(config.match(/^  port:\\s*(\\d+)/m)[1]);
 const key = config.match(/proxyApiKey:\\s*"([^"]+)"/)[1];
 if (process.env.FAKE_PROXY_ENV_OUT) writeFileSync(process.env.FAKE_PROXY_ENV_OUT, JSON.stringify({ pid: process.pid, node: process.env.ZCODE_KIT_RESPAWN_NODE ?? null, manager: process.env.ZCODE_KIT_RESPAWN_MANAGER ?? null, argv: process.argv.slice(2) }));
+if (process.env.FAKE_PROXY_KIT_ENV_OUT) writeFileSync(process.env.FAKE_PROXY_KIT_ENV_OUT, JSON.stringify({ pid: process.pid, logDir: process.env.ZCODE_KIT_LOG_DIR ?? null, stopToken: process.env.ZCODE_KIT_STOP_TOKEN ?? null }), { mode: 0o600 });
 createServer((req, res) => {
   if (req.headers.authorization !== "Bearer " + key) return res.writeHead(401).end("{}");
   if (req.url === "/health") return res.end(JSON.stringify({ status: "ok", provider: "zai" }));
@@ -576,4 +579,110 @@ test("a proxy started through the preflight carries the frozen respawn hook, and
   assert.equal(await identity(port), "down");
   assert.equal(existsSync(join(root, "logs", "proxy.pid")), false);
   assert.deepEqual(readdirSync(join(root, "logs")).filter((f) => f === "manager.lock"), []);
+});
+
+// ------------------------------------------- per-spawn environment (ticket 18)
+// ADR-0014/ADR-0015, Round 4 Q4: at every proxy spawn the manager sets
+// ZCODE_KIT_STOP_TOKEN (fresh, 32 random bytes base64url, also written to
+// proxy.pid) and ZCODE_KIT_LOG_DIR (its own logs dir), overwriting whatever the
+// manager inherited. Assertions never print a token (B2): values are compared
+// inside assert.ok with a message that names no value.
+const STOP_TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+
+/** The per-spawn variables the stand-in recorded, once it is the recorded proxy. */
+function spawnedKitEnv(root, file) {
+  return until("the spawned proxy's per-spawn environment", () => {
+    const record = readJson(join(root, "logs", "proxy.pid"));
+    const seen = readJson(file);
+    return record && seen && seen.pid === record.pid ? { record, seen } : null;
+  }, 30_000);
+}
+
+/** `manager start`; the started proxy is torn down with the fixture. */
+async function managerStart(root, env, kitEnvOut) {
+  const run = spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "start"], { env, encoding: "utf8", timeout: 90_000 });
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  if (record) defer(root, () => killFixtureProxy(root, record.pid));
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  return spawnedKitEnv(root, kitEnvOut);
+}
+
+/** Stop the recorded proxy the way its start allows (Windows without a start time: by its fixture command line). */
+async function managerStop(t, root, env, record) {
+  if (startTimeMissing(record)) {
+    t.diagnostic("windows: no start time recorded, so stop refuses (ticket 16); stopped through its fixture command line");
+    killFixtureProxy(root, record.pid);
+    rmSync(join(root, "logs", "proxy.pid"), { force: true });
+  } else {
+    const stop = spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "stop"], { env, encoding: "utf8", timeout: 60_000 });
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+  }
+}
+
+test("every proxy spawn gets the manager's logs dir and a fresh stop token equal to proxy.pid's, overwriting ambient values", { timeout: 180_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port, { proxySrc: true });
+  const kitEnvOut = join(root, "kit-env.json");
+  // What a respawned chain or a stray shell would hand the manager: a token of the right shape and another logs dir.
+  const ambientToken = randomBytes(32).toString("base64url");
+  const ambientLogDir = join(root, "ambient-logs");
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PROXY_KIT_ENV_OUT: kitEnvOut, ZCODE_KIT_STOP_TOKEN: ambientToken, ZCODE_KIT_LOG_DIR: ambientLogDir });
+  // A world-readable proxy.pid the manager cannot parse (old or damaged): the
+  // record that now holds the token must still end up owner-only.
+  const pidFile = join(root, "logs", "proxy.pid");
+  writeFileSync(pidFile, "not a pid record\n");
+  chmodSync(pidFile, 0o644);
+
+  const spawns = [];
+  for (let i = 0; i < 2; i++) {
+    if (i > 0) {
+      await managerStop(t, root, env, spawns[i - 1].record);
+      await until("the proxy to leave the port", async () => await identity(port) === "down", 15_000);
+    }
+    const { record, seen } = await managerStart(root, env, kitEnvOut);
+    assert.equal(canonicalPath(seen.logDir ?? ""), canonicalPath(join(root, "logs")), `spawn ${i + 1}: ZCODE_KIT_LOG_DIR is the manager's own logs dir`);
+    assert.ok(typeof seen.stopToken === "string" && STOP_TOKEN_SHAPE.test(seen.stopToken), `spawn ${i + 1}: ZCODE_KIT_STOP_TOKEN is set, 32 random bytes as base64url`);
+    assert.ok(seen.stopToken !== ambientToken, `spawn ${i + 1}: the inherited stop token is overwritten`);
+    assert.ok(record.stopToken === seen.stopToken, `spawn ${i + 1}: proxy.pid records the token the proxy received`);
+    if (process.platform !== "win32") assert.equal(statSync(pidFile).mode & 0o777, 0o600, `spawn ${i + 1}: proxy.pid is owner-only`);
+    spawns.push({ record, seen });
+  }
+  assert.ok(spawns[0].seen.stopToken !== spawns[1].seen.stopToken, "two consecutive spawns get different tokens");
+  assert.equal(existsSync(ambientLogDir), false, "nothing is written to the inherited logs dir");
+  await managerStop(t, root, env, spawns[1].record);
+});
+
+test("the stop token appears in no output of status, status --json, doctor or logs, nor in any log file", { timeout: 180_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port, { proxySrc: true });
+  const kitEnvOut = join(root, "kit-env.json");
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PROXY_KIT_ENV_OUT: kitEnvOut });
+  const { record, seen } = await managerStart(root, env, kitEnvOut);
+  const token = seen.stopToken;
+  assert.ok(typeof token === "string" && STOP_TOKEN_SHAPE.test(token), "test premise: the proxy received a stop token");
+  const manager = join(root, "proxy", "zcode-proxy-manager.mjs");
+  const run = (args) => spawnSync(process.execPath, [manager, ...args], { env, encoding: "utf8", timeout: 60_000 });
+  const json = run(["status", "--json"]);
+  assert.equal(JSON.parse(json.stdout).health, "ours", "test premise: the commands see the running proxy");
+  const outputs = [["status --json", json], ...[["status"], ["doctor"], ["logs", "400"]].map((args) => [args.join(" "), run(args)])];
+  for (const [name, r] of outputs) {
+    assert.ok(!`${r.stdout}${r.stderr}`.includes(token), `${name} printed the stop token`);
+  }
+  await managerStop(t, root, env, record);
+  for (const name of readdirSync(join(root, "logs"))) {
+    if (name === "proxy.pid") continue;
+    assert.ok(!readFileSync(join(root, "logs", name), "utf8").includes(token), `logs/${name} holds the stop token`);
+  }
+});
+
+test("manager output masks the recorded stop token exactly, also where the token-shape rule would not", async (t) => {
+  const root = kitFixture(t, await freePort());
+  // A generated fixture token with more than four hyphens: the opaque-token
+  // shape rule leaves it alone, so only the exact known-secret match masks it.
+  const fixtureToken = `fixture-stop-${randomBytes(6).toString("hex")}-a-b-c-d`;
+  writeFileSync(join(root, "logs", "proxy.log"), `[zcode-proxy] echoed ${fixtureToken}\n`);
+  const logs = () => spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "logs", "10"], { env: childEnv(root), encoding: "utf8", timeout: 30_000 });
+  assert.equal(logs().stdout, `[zcode-proxy] echoed ${fixtureToken}\n`, "test premise: without a recorded token the line passes unchanged");
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: NEVER_ALLOCATED_PID, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z", stopToken: fixtureToken }) + "\n", { mode: 0o600 });
+  assert.equal(logs().stdout, "[zcode-proxy] echoed <redacted>\n");
 });
