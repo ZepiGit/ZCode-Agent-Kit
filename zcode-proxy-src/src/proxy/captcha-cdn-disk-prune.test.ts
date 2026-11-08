@@ -352,15 +352,41 @@ describe("CDN disk prune with several installations sharing the directory", () =
   it("counts an entry another pruner removed first as freed, so nothing else is deleted in its place", () => {
     const dir = directory();
     for (let i = 0; i < 5; i++) largeEnvelope(dir, urlOf(i), T0 - (5 - i) * HOUR, 60 * MiB);
-    const unlink = fs.unlinkSync.bind(fs);
+    // The other pruner wins the race for the oldest entry: it is gone just
+    // before this pruner's first rename or unlink of an entry name.
+    const real = { unlinkSync: fs.unlinkSync.bind(fs), renameSync: fs.renameSync.bind(fs) };
     let raced = false;
-    const hook = spyOn(fs, "unlinkSync").mockImplementation(((file: fs.PathLike) => {
-      if (!raced) { raced = true; unlink(file); } // the other pruner wins the race for the oldest entry
-      return unlink(file);
-    }) as typeof fs.unlinkSync);
-    try { new CaptchaCdnCache({ directory: dir, now: () => T0 }); } finally { hook.mockRestore(); }
+    const race = (file: fs.PathLike) => {
+      if (!raced && /^[0-9a-f]{64}$/.test(path.basename(String(file)))) { raced = true; real.unlinkSync(file); }
+    };
+    const hooks = [
+      spyOn(fs, "unlinkSync").mockImplementation(((file: fs.PathLike) => { race(file); return real.unlinkSync(file); }) as typeof fs.unlinkSync),
+      spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => { race(from); return real.renameSync(from, to); }) as typeof fs.renameSync),
+    ];
+    try { new CaptchaCdnCache({ directory: dir, now: () => T0 }); } finally { for (const hook of hooks) hook.mockRestore(); }
     expect(raced).toBe(true);
     expect(listing(dir)).toEqual([1, 2, 3, 4].map((i) => nameOf(urlOf(i))).sort());
+  });
+
+  it("does not delete a legacy raw file a kit up to v0.2.31 rewrote in place after the scan", () => {
+    const dir = directory();
+    const name = nameOf(urlOf(9));
+    const file = path.join(dir, name);
+    legacy(dir, name, 1_000, T0 - 40 * DAY); // expired at 14 days: the age prune takes it
+    const rewritten = Buffer.alloc(1_000, 121); // same size, same inode, new modification time
+    const real = { unlinkSync: fs.unlinkSync.bind(fs), renameSync: fs.renameSync.bind(fs) };
+    let rewrote = false;
+    const rewrite = (target: fs.PathLike) => {
+      if (!rewrote && String(target) === file) { rewrote = true; fs.writeFileSync(file, rewritten); fs.utimesSync(file, new Date(T0), new Date(T0)); }
+    };
+    const hooks = [
+      spyOn(fs, "unlinkSync").mockImplementation(((f: fs.PathLike) => { rewrite(f); return real.unlinkSync(f); }) as typeof fs.unlinkSync),
+      spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => { rewrite(from); return real.renameSync(from, to); }) as typeof fs.renameSync),
+    ];
+    try { new CaptchaCdnCache({ directory: dir, now: () => T0 }); } finally { for (const hook of hooks) hook.mockRestore(); }
+    expect(rewrote).toBe(true);
+    expect(listing(dir)).toEqual([name]);
+    expect(fs.readFileSync(file).equals(rewritten)).toBe(true);
   });
 
   it("skips an entry it cannot delete (on Windows: held open by another process) and removes the next oldest instead", () => {
