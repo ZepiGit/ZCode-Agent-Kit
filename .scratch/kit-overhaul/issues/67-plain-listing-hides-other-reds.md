@@ -2,7 +2,7 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: medium
@@ -213,3 +213,5 @@ The union-only derivation is wrong for the same reason the plain listing is: it 
   All 20 legs are valid. No unowned RED is left (a); there is no harness failure (b); every non-`flips` owned name is RED in all 10 runs (c); and no listed entry is GREEN without a `flips` name (d). METRICS.md has the per-tree rates with the S5 mark and the replay. The S7, S1/short and OMP-floor measurement tables belong to ticket 71.
 
 - 2026-11-08 (implementer, round 4 addendum). Merged the tip 24f4621 (ticket 70; round 18's ticket texts) at dfb0dfd. Traces re-checked. Ticket 19's new loop line (Round 18 Q1) names `procPeak:proxy` verbatim. Its Comments move 19's `procPeak:proxy` names in `S1/burst4`, `S1/burst16`, `S1/burst32` and `S1/bigbody` (both legs) to ticket 20 *in 19's commit*, so 67's list keeps 19 as their owner (Round 15 Q1 condition 5: only the owner's own commit edits its names). Suites on dfb0dfd: `npm run test` 836 tests, 817 pass, 19 skipped, 0 fail; `test:proxy` 1384 pass; `test:mcp` 96 pass, 1 skipped. The merge-gate replay of the ten runs on the 13 tree against the final list is unchanged: 20 of 20 PASS. Mutation script on 9d0240d: 10 of 10 killed (`reports/t67-r4-mutation.log`).
+
+- Merged 2026-11-08 as 482eef56be24c833129b1c3eed83ea4f8b779513 (ticket/67-owned-checks at 569922b into 96b79c3, no conflicts); fast suite: kit 817/836 (19 skipped, 0 fail), proxy 1384/1384, mcp 96/97 (1 skipped, 0 fail); `mcp/zcode-harness-mcp/dist/` unchanged. Pre-merge CI: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42448283566 (draft PR #29, green on all 8 jobs). Merge gate (Owner Proxy rounds 16-17): 10 runs on ticket 13's tree replayed against the final list, 20/20 legs PASS (two exclusions under round 17's signatures (i) and (ii)), see the round 4 entry above and METRICS.md. Local memory loop on the merged tree (`job.mjs --os linux --only S3/short,S5/short,S7/short`, port 19670): rc 0, "ratchet holds"; S3/short RED only on the checks owned by tickets 16 and 37, S5/short RED only on growth:mcp-bridge (ticket 30), S7/short RED only on proxy.log:bounded-while-running (ticket 33) (`reports/merge-67-memloop.log`, summaries under `/home/AgentKit/overhaul-tools/merge-67-memloop`). Sanity diff `git diff staging/67 HEAD -- <ticket files>` is empty; the rest of staging/67..HEAD is .scratch only (IMPLEMENTER-BRIEF.md, RUNLOG.md, INDEX.md, issues 27 and 73). Logs: `reports/merge-67-{npm-ci,test,proxy,mcp,memloop}.log`.
