@@ -1336,24 +1336,18 @@ test("runtime environment: cgroup type from the filesystem magic, the scope's Me
   assert.deepEqual([v1.type, v1.memoryMax], ["v1-only", null]);
 });
 
-test("job: windows S1/burst1 against the committed unstable entry prints its line for a median of 251–300 and of ≤ 250, and fails above 300", () => {
+test("job: windows S1/burst1 against the committed list (no entry since ticket 20) is GREEN at a median of 230 and fails the ratchet at a median of 251", () => {
   const ws = (...xs) => xs.map((w) => ({ ws: w, wsPeak: w, commit: 410 }));
   // Seven repetitions: the job's n since Round 11 Q1 condition 2 (budgets.mjs REPEATED).
-  for (const [peaks, medianMB] of [[ws(255, 251, 240, 262, 230, 280, 245), 251], [ws(230, 220, 240, 235, 225, 260, 228), 230]]) {
-    const { r, job, stepSummary } = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks });
-    assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.equal(job.results[0].repetitions.length, 7);
-    const line = `S1/burst1: unstable (median ${medianMB} MB, budget 250), owned by ticket 20`;
-    assert.equal(job.rows[0].note, line);
-    for (const text of [r.stdout, stepSummary]) {
-      assert.ok(text.includes(`- ${line}`), `${medianMB}: ${text}`);
-      assert.match(text, /\| S1\/burst1 \| (GREEN|RED) \(unstable\) \| ticket 20 \|/);
-    }
-  }
-  const high = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(301, 305, 290, 310, 280, 320, 295) });
-  assert.equal(high.r.status, 1, high.r.stdout + high.r.stderr);
-  assert.match(high.stepSummary, /S1\/burst1: unstable median 301 MB is above the 300 MB bound/);
-  assert.doesNotMatch(high.stepSummary, /owned by ticket 20/);
+  const green = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(230, 220, 240, 235, 225, 260, 228) });
+  assert.equal(green.r.status, 0, green.r.stdout + green.r.stderr);
+  assert.equal(green.job.results[0].repetitions.length, 7);
+  assert.doesNotMatch(green.stepSummary, /unstable|owned by ticket 20/);
+  // The band that tolerated a median of 251-300 left with the entry: 251 is now an unlisted RED.
+  const red = burst1Job(["--only", "S1/burst1"], { shape: "win32", peaks: ws(255, 251, 240, 262, 230, 280, 245) });
+  assert.equal(red.r.status, 1, red.r.stdout + red.r.stderr);
+  assert.match(red.stepSummary, /S1\/burst1: RED but not listed in expected-red\.json \(windows\)/);
+  assert.doesNotMatch(red.stepSummary, /owned by ticket 20/);
 });
 
 // ── windows S5/short at the job seam (Round 13 Q1, ticket 66) ──────────────────
