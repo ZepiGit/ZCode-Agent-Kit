@@ -582,3 +582,49 @@ describe("server.admission.maxInFlightMB (ADR-0004)", () => {
     expect(message).toMatch(/^ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB must be a whole number of MB from 1 to 4096 \(got "big"\)/);
   });
 });
+
+describe("health.memory (ADR-0008)", () => {
+  const base = (health: string) => writeYaml(`server:\n  port: 8080\n  host: "127.0.0.1"\nauth:\n  proxyApiKey: "${PROXY_KEY}"\n${health}`);
+  const failure = (yaml: string): string => {
+    try { loadConfig(base(yaml)); } catch (err) { return (err as Error).message; }
+    return "";
+  };
+
+  it("is optional: without the block the supervisor keeps its defaults", () => {
+    expect(loadConfig(base("")).health).toBeUndefined();
+    expect(loadConfig(base("health:\n  memory: {}\n")).health).toEqual({ memory: {} });
+  });
+
+  it("reads the limits, the sample count and the interval from config.yaml", () => {
+    const cfg = loadConfig(base("health:\n  memory:\n    softLimitMB: 768\n    hardLimitMB: 2048\n    samples: 4\n    sampleIntervalSeconds: 10\n"));
+    expect(cfg.health).toEqual({ memory: { softLimitMB: 768, hardLimitMB: 2048, samples: 4, sampleIntervalMs: 10_000 } });
+  });
+
+  it("a partial block keeps the defaults for the keys it leaves out", () => {
+    expect(loadConfig(base("health:\n  memory:\n    hardLimitMB: 1536\n")).health).toEqual({ memory: { hardLimitMB: 1536 } });
+  });
+
+  for (const [key, bad, range] of [
+    ["softLimitMB", "0", "64 to 65536"],
+    ["softLimitMB", "lots", "64 to 65536"],
+    ["hardLimitMB", "1.5", "64 to 65536"],
+    ["samples", "0", "1 to 20"],
+    ["samples", "21", "1 to 20"],
+    ["sampleIntervalSeconds", "0", "1 to 600"],
+    ["sampleIntervalSeconds", "\"\"", "1 to 600"],
+  ] as const) {
+    it(`rejects ${key}: ${bad} with what, why and next`, () => {
+      const message = failure(`health:\n  memory:\n    ${key}: ${bad}\n`);
+      expect(message).toMatch(new RegExp(`^health\\.memory\\.${key} must be a whole number from ${range}( MB| s)? \\(got `));
+      expect(message).toContain("health supervisor");
+      expect(message).toContain("or remove the key");
+    });
+  }
+
+  it("rejects a hard limit at or below the soft limit, with both values", () => {
+    const message = failure("health:\n  memory:\n    softLimitMB: 1024\n    hardLimitMB: 1024\n");
+    expect(message).toMatch(/^health\.memory\.hardLimitMB \(1024\) must be above health\.memory\.softLimitMB \(1024\)/);
+    // Defaults count: a soft limit above the default hard limit needs a hard limit too.
+    expect(failure("health:\n  memory:\n    softLimitMB: 2048\n")).toMatch(/^health\.memory\.hardLimitMB \(1024\) must be above health\.memory\.softLimitMB \(2048\)/);
+  });
+});

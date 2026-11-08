@@ -210,3 +210,18 @@ clientSigning:
 
 logging:
   level: info
+
+# Health supervisor (optional, ADR-0008): samples the proxy's memory footprint
+# (Pss on Linux, commit charge on Windows; RSS where neither is available).
+# Soft limit: WARN event line only. Hard limit: asks the kit manager for a
+# respawn (budget 3 per 15 min); the proxy then drains: requests already
+# accepted finish, new ones get 503 + Retry-After. Without the kit manager
+# (TUI, standalone proxy) it only logs and keeps serving. Each limit must be
+# held for "samples" samples taken "sampleIntervalSeconds" apart.
+# Defaults shown; no env override.
+# health:
+#   memory:
+#     softLimitMB: 512           # 64-65536
+#     hardLimitMB: 1024          # 64-65536, above softLimitMB
+#     samples: 3                 # 1-20
+#     sampleIntervalSeconds: 15  # 1-600
