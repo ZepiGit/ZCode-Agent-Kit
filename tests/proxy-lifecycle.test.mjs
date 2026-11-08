@@ -271,6 +271,33 @@ test("stop, restart, the respawn request and read state print nothing and return
   assert.deepEqual(state, { identity: "down", pidRecord: { pid: process.pid, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z" }, alive: true });
 });
 
+test("stop counts its proxy as gone when its pid is reused after the kill, and never signals the new process", {
+  skip: process.platform === "win32" && "the stand-in survives SIGTERM; Windows stops through the handle-checked TerminateProcess",
+}, async (t) => {
+  // Ticket 70 (orchestrator note on 15): the exit poll after a kill checked
+  // the pid alone, so a pid Windows hands to a new process at once made a
+  // successful stop refuse and report 2. The stand-in keeps running after
+  // SIGTERM (it is "the new process at that pid"); the injected probe reports
+  // its new start time once the signal arrived.
+  const port = 19159;
+  const root = kitFixture(t, port);
+  await identityServer(t, port, "ours");
+  const recordedMs = Date.now() - 10 * 60_000;
+  const stand = spawn(process.execPath, ["-e", 'process.on("SIGTERM", () => process.stdout.write("term\\n")); setInterval(() => {}, 1e6); process.stdout.write("up\\n");'], { stdio: ["ignore", "pipe", "ignore"] });
+  defer(root, () => killChild(stand));
+  await new Promise((r) => stand.stdout.once("data", r));
+  let reused = false;
+  stand.stdout.on("data", (b) => { if (String(b).includes("term")) reused = true; });
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, startedIso: new Date(recordedMs).toISOString() }) + "\n");
+  const lifecycle = await lifecycleFor(root, { processStartMsImpl: () => (reused ? recordedMs + 60_000 : recordedMs) });
+  const stopped = await lifecycle.stop();
+  assert.equal(reused, true, "test premise: the kill was sent");
+  assert.deepEqual({ code: stopped.code, outcome: stopped.outcome, lines: stopped.lines }, { code: 0, outcome: "stopped", lines: [`stopped (pid ${stand.pid})`] });
+  assert.equal(stand.exitCode, null, "the process that now holds the pid is never signalled again (C6)");
+  assert.equal(stand.signalCode, null);
+  assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "the stopped proxy's record is removed");
+});
+
 // ------------------------------------------------------ frozen respawn contract
 test("the lifecycle module imports every child_process helper it calls (H2a moved with the start-time probe)", () => {
   const src = readFileSync(join(ROOT, "lib", "proxy-lifecycle.mjs"), "utf8");
