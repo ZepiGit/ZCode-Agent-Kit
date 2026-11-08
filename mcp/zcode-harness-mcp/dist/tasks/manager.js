@@ -191,9 +191,7 @@ export class TaskManager {
             interactionIds: new Set(),
             warnings: [],
             errors: rec.error ? [rec.error] : [],
-            // An evicted task writes nothing: a late write would bring its file back.
-            persist: () => { if (this.tasks.get(rec.taskId) === t)
-                this.store.writeJson(`tasks/${rec.taskId}.json`, rec); },
+            persist: () => this.store.writeJson(`tasks/${rec.taskId}.json`, rec),
             onTerminal: () => {
                 this.drainQueue();
                 // Persist the structured result eagerly so it survives restarts.
@@ -267,7 +265,6 @@ export class TaskManager {
         if (params.sessionId)
             await this.verifySessionWorkspace(params.sessionId, params.workspacePath);
         if (params.idempotencyKey) {
-            this.enforceRetention();
             const existing = this.byIdempotency.get(params.idempotencyKey);
             if (existing) {
                 const rec = this.get(existing);
@@ -721,8 +718,7 @@ export class TaskManager {
             warnings: t.warnings,
             eventsRef: { firstSeq, lastSeq, storage: `tasks/${taskId}.events.jsonl` },
         };
-        // An evicted task's result is not written back (its files were pruned).
-        if (TERMINAL_STATES.includes(rec.state) && this.tasks.get(taskId) === t) {
+        if (TERMINAL_STATES.includes(rec.state)) {
             this.store.writeJson(`tasks/${taskId}.result.json`, result);
         }
         return result;

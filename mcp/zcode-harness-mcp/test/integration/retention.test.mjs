@@ -77,9 +77,15 @@ test('restore loads only the newest 500 terminal tasks within 7 days and prunes 
   // Three finished more than 7 days ago, newer by count than nothing: age alone evicts them.
   for (let i = 0; i < 3; i++) seedTask(dataDir, { id: `task-aged-${i}`, finishedAt: new Date(Date.now() - 7 * DAY - (i + 1) * 60_000).toISOString(), key: `aged-${i}` });
 
-  let c = await startBridge({ reuseDataDir: dataDir });
+  const stderr = [];
+  let c = await startBridge({ reuseDataDir: dataDir, collectStderr: stderr, env: { ZCODE_HARNESS_LOG_LEVEL: 'info' } });
   let first;
   try {
+    const restoreLines = await waitFor(() => {
+      const lines = stderr.join('').split('\n').filter((l) => l.includes('"restored tasks from store"'));
+      return lines.length > 0 && lines.map((l) => JSON.parse(l).data);
+    });
+    assert.deepEqual(restoreLines, [{ count: 500, evicted: 8 }], 'the start loads only the retained tasks');
     const { tasks } = await c.tool('zcode_tasks_list', {});
     assert.equal(tasks.length, 500);
     assert.deepEqual(tasks.map((r) => r.taskId), Array.from({ length: 500 }, (_, i) => seedId(i + 5)));
