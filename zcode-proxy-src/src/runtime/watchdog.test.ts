@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,28 @@ import { pathToFileURL } from "node:url";
 import { respawnHookCommand, spawnRespawnHook, watchdogStep, type WatchdogState } from "./watchdog.js";
 
 const CFG = { checkIntervalMs: 1_000, stallMs: 45_000 };
+
+// A stand-in manager that records what the respawn hook was started with:
+// its arguments, which spellings of the stop-token variable it saw (names
+// only; the value is never written, B2) and the logs dir.
+const HOOK_ENV_RECORDER = `import { writeFileSync } from "node:fs";
+writeFileSync(process.env.WATCHDOG_MARKER, JSON.stringify({
+  argv: process.argv.slice(2),
+  stopTokenNames: Object.keys(process.env).filter((k) => k.toUpperCase() === "ZCODE_KIT_STOP_TOKEN"),
+  logDir: process.env.ZCODE_KIT_LOG_DIR ?? null,
+}));
+`;
+/** A generated fixture stop token (32 random bytes as base64url, like the manager's). */
+const fixtureStopToken = () => randomBytes(32).toString("base64url");
+
+async function waitForContent(path: string, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(path) && readFileSync(path, "utf8").length > 0) return true;
+    await Bun.sleep(50);
+  }
+  return false;
+}
 
 describe("watchdogStep", () => {
   const fresh: WatchdogState = { beat: 7, changedAt: 0, checkedAt: 0 };
@@ -79,6 +102,43 @@ describe("spawnRespawnHook", () => {
   it("is false without the hook environment", async () => {
     expect(await spawnRespawnHook("memory", {})).toBe(false);
   });
+});
+
+// proxy-env suite (seam 8, ticket 18; ADR-0014 Round 4 amendment): the
+// respawn hook is the next manager, which spawns the next proxy; the stop
+// token of this spawn must not travel down that chain.
+describe("proxy-env: the respawn hook's environment", () => {
+  it("the memory-guard hook gets the proxy's environment without the stop token, in any casing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "zcode-hook-env-"));
+    try {
+      const marker = join(dir, "hook-env.json");
+      const recorder = join(dir, "env-manager.mjs");
+      writeFileSync(recorder, HOOK_ENV_RECORDER);
+      const token = fixtureStopToken();
+      const env: Record<string, string | undefined> = {};
+      for (const [k, v] of Object.entries(process.env)) if (!k.toUpperCase().startsWith("ZCODE_KIT_")) env[k] = v;
+      Object.assign(env, {
+        ZCODE_KIT_RESPAWN_NODE: process.execPath,
+        ZCODE_KIT_RESPAWN_MANAGER: recorder,
+        WATCHDOG_MARKER: marker,
+        ZCODE_KIT_STOP_TOKEN: token,
+        zcode_kit_stop_token: token,
+        ZCODE_KIT_LOG_DIR: join(dir, "logs"),
+      });
+      expect(await spawnRespawnHook("memory", env)).toBe(true);
+      expect(await waitForContent(marker, 10_000)).toBe(true);
+      expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual({
+        argv: ["respawn", String(process.pid), "--reason", "memory"],
+        stopTokenNames: [],
+        logDir: join(dir, "logs"),
+      });
+      // The proxy's own environment keeps its token (the stop route and the
+      // event-line redaction read it); only the hook's copy lacks it.
+      expect(env.ZCODE_KIT_STOP_TOKEN === token).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 // Real child processes: the property under test is that a separate thread
@@ -163,6 +223,26 @@ writeFileSync(process.env.WATCHDOG_MARKER, process.argv.slice(2).join(" "));
     expect(result.stderr).toMatch(/\[watchdog\] main thread unresponsive for \d+ms — requesting restart/);
     expect(await waitForFile(marker, 5_000)).toBe(true);
     expect(readFileSync(marker, "utf8")).toBe(`respawn ${result.pid} --reason watchdog`);
+  }, 30_000);
+
+  it("the watchdog's hook gets no stop token (proxy-env, ticket 18)", async () => {
+    const marker = join(dir, "marker-env.json");
+    const recorder = join(dir, "env-manager.mjs");
+    writeFileSync(recorder, HOOK_ENV_RECORDER);
+    const result = await runChild({
+      ZCODE_KIT_RESPAWN_NODE: process.execPath,
+      ZCODE_KIT_RESPAWN_MANAGER: recorder,
+      WATCHDOG_MARKER: marker,
+      ZCODE_KIT_STOP_TOKEN: fixtureStopToken(),
+      ZCODE_KIT_LOG_DIR: join(dir, "logs"),
+    });
+    expect(result.stdout).not.toContain("survived");
+    expect(await waitForContent(marker, 5_000)).toBe(true);
+    expect(JSON.parse(readFileSync(marker, "utf8"))).toEqual({
+      argv: ["respawn", String(result.pid), "--reason", "watchdog"],
+      stopTokenNames: [],
+      logDir: join(dir, "logs"),
+    });
   }, 30_000);
 
   it("still kills a stalled process when the hook executable is missing", async () => {
