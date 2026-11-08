@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: Owner Proxy round 29 (ticket 74 mutant proof failed: what now for 30 and S5/short); merge 76 when 42513423687 is green; 16 round 2 running, then restage. Running: t16 r2, t77. Next slots: 18 (after 21), 73, 75, 17 (after 16), 38, 31 (after 30). 78 needs-triage.
+- Next action: ticket 30 needs the integration tip merged (conflicts in tests/memory/loop.test.mjs, verdict.test.mjs and its issue file) by an implementer at the next free slot, then staging/30r = tip + ticket/30, tree hash in RUNLOG, exactly 10 full-CI runs per leg (Round 29 Q1 condition 2); merge 77 when its pre-merge run is green; 16 round 2 running, then restage. Running: t16 r2, t18, t75. Next slots: 30 (merge tip), 73, 17 (after 16), 38, 31 (after 30), 22/23 (after 18). 74 and 78 needs-triage.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -41,3 +41,4 @@
 - Ticket 29 merged 2026-11-08 as 5f754b8 (resolved f2795a1; pre-merge CI 42506095577, 8/8 green).
 - Ticket 21 merged 2026-11-08 as 2aab7db (resolved 74f8e9f; pre-merge CI 42509546483, 8/8 green).
 - Ticket 20 merged 2026-11-08 as 42ceccd (resolved 2db5088; pre-merge CI 42511390524, 8/8 green).
+- Ticket 76 merged 2026-11-08 as 9601392 (resolved 9256a33; pre-merge CI 42513423687, 8/8 green).

@@ -608,3 +608,52 @@ Single-run windows S1/short (before the 5-repetition rule): n 23, mean 3.47, sd 
 | 42483637377 | staging/30 a53152d | 5.18 | true | 2.46 |
 | 42483787372 | staging/72 ee48822 | 3.24 | true | -3.41 |
 | 42484868282 | overhaul/stability-terminal-ux eaa91b3 | 2.01 | false | -1.2 |
+
+## Round 25 Q1 condition 4: the first 20 windows S5/short values on trees with ticket 36 (Round 29 Q1 condition 4)
+
+Run-creation order, any branch; a tree "contains 36" when it contains ticket 36's first code commit e2990a2. Runs with no S5/short value (the burst1 measurement run 42502424683; cancelled runs) are skipped. Values: windows growth:mcp-bridge %/1k on commit (WS reported). Generator data: `/home/AgentKit/overhaul-tools/ci-art/r25-set/set.txt`.
+
+| # | run | branch, head | with 30 | commit %/1k | trend | WS %/1k |
+|---|---|---|---|---|---|---|
+| 1 | 42454650683 | staging/36 0cb730d | no | 15.43 | false | 35.21 |
+| 2 | 42469209389 | staging/36 b37393f | no | 18.14 | false | 29.31 |
+| 3 | 42483637377 | staging/30 a53152d | yes | 34.62 | true | 19.17 |
+| 4 | 42483787372 | staging/72 ee48822 | no | 19.82 | false | 25.2 |
+| 5 | 42484868282 | overhaul/stability-terminal-ux eaa91b3 | no | 24.83 | false | 33.77 |
+| 6 | 42493218404 | overhaul/stability-terminal-ux 8126454 | no | 20.69 | false | 19.79 |
+| 7 | 42494299680 | staging/29 57c3db0 | no | 16.39 | false | 22.17 |
+| 8 | 42495987510 | staging/15b a004477 | no | 21.29 | false | 24.33 |
+| 9 | 42500996594 | staging/21 57ebbc8 | no | 21.22 | false | 27.79 |
+| 10 | 42501852701 | overhaul/stability-terminal-ux 1b904a1 | no | 19.21 | false | 27.45 |
+| 11 | 42502565823 | staging/20 1b4a706 | no | 17.4 | false | 18.56 |
+| 12 | 42502646304 | staging/20 ce38cbc | no | 23.77 | false | 30.12 |
+| 13 | 42502739091 | staging/20 ce16fdf | no | 17.5 | false | 28.09 |
+| 14 | 42502835975 | staging/20 93667ae | no | 19.92 | false | 30.85 |
+| 15 | 42502922415 | staging/20 c97d59e | no | 25.39 | false | 31.94 |
+| 16 | 42503015768 | staging/20 8b88d97 | no | 23.17 | false | 33.58 |
+| 17 | 42503101039 | staging/20 39dd963 | no | 23.34 | false | 37.05 |
+| 18 | 42503197608 | staging/20 25697bd | no | 18.41 | false | 20.26 |
+| 19 | 42503284096 | staging/20 1a78acb | no | 19.84 | false | 27.46 |
+| 20 | 42503373851 | staging/20 17f1d36 | no | 22.2 | false | 31.4 |
+
+- all 20: n 20, mean 21.13, sd 4.22, max 34.62, above 30: 1, above 35: 0
+- with 30: n 1, mean 34.62 (one value)
+- without 30: n 19, mean 20.42, sd 2.85, max 25.39
+- Round 25 Q1 condition 4 triggers (>= 3 above 30, any above 35, mean above 23): none. The set is complete; 30's 10 staging runs are printed beside it as the "with 30" comparison (Round 29 Q1 condition 4).
+
+## S5/short after the retention bound: withdrawn rule (Round 29)
+
+Copied from ticket 74's branch (eab4ddf, METRICS lines 425-436). Round 29 Q1 withdrew the rule: MB/1k is %/1k rescaled by the mean (95.8-103.7 MB), so it is not a separate quantity; over tasks 900-1,199 M1 reads 3.79 / 16.79 / -15.03 and the tree 0.43 / -0.91 / 2.57; M1 removes only the in-run bound (3,600 files at reboot, 1,500 after restore), so reboot cost cannot see it.
+
+**Mutant proof, local linux (Round 24 Q1 condition 5): FAILED; the ticket comes back under the Fallback (condition 8).** Tree 8c5a947 (ticket/30 2c6720c + ticket 74's rule; contains ticket 36), Linux x64, Node 26.7.0, Bun 1.4.2. `job.mjs --os linux --only S5/short --cap none` under `run-capped.sh` (3G, no swap), 6 runs started 20 s apart and run side by side (load average < 1; ~1.77 s per task, the CI pace). The mutant is ticket 30's M1 (the count bound removed in `retentionExceeded`, src and a rebuilt `dist/`), in a scratch worktree, never committed, restored from 8c5a947 (clean). Data: `/home/AgentKit/overhaul-tools/t74-memloop/<arm>-<i>/`. In all six runs the job printed a harness failure: the evidence gate of 8c5a947 required the post-bound window to reach task 1,200, while the last sample inside the load is at task 1,199 (fixed in d6a17a0; no measured value changes). Replayed through the fixed job against the committed list (no S5/short entry), all six are GREEN, the three mutants included.
+
+| run | verdict | growth:mcp-bridge %/1k (trend) | slope MB/1k / mean MB | window medians MB (net rise, rising) | window tasks / samples | warm-up-growth:mcp-bridge %/1k (trend) | warm-up slope / mean, medians MB | procPeak MB | empty → 1,200 → reboot MB (cost) | failures / orphans | data dir | duration s |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| M1-1 | GREEN | 7.77 (false) | 7.96 / 102.4 | 98.5, 100.8, 102.7, 103.5, 102.2, 103.8 (5.4 %, 2) | 600–1,199 / samples 1059–2116, 1,058 of 2,125 | 38.11 (true) | 32.78 / 86; 80.7, 83.6, 85.8, 87.6, 88.5, 89.4 | 117.2 | 73 → 103 → 77 (4) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| M1-2 | GREEN | 17.01 (false) | 17.64 / 103.7 | 98.5, 101, 102.2, 104, 104.5, 106.1 (7.7 %, 2) | 600–1,199 / 1059–2116, 1,058 of 2,125 | 45.2 (true) | 38.72 / 85.7; 79.5, 82.7, 85.2, 87.2, 89.2, 88.8 | 120.9 | 73 → 104 → 77 (4) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| M1-3 | GREEN | 9.03 (false) | 9.33 / 103.4 | 99.9, 100.5, 103.6, 104.7, 103.4, 103.9 (4.0 %, 0) | 600–1,199 / 1059–2116, 1,058 of 2,125 | 40.9 (true) | 35.21 / 86.1; 80.3, 83.6, 85.8, 87.9, 89.3, 89.5 | 119.1 | 73 → 101 → 76 (3) | 0 / 0 | 3,600 files, 5.9 MB | 2,127 |
+| tree-1 | GREEN | 2.85 (false) | 2.74 / 96.2 | 94.6, 96, 96.7, 96.3, 96, 96.4 (1.9 %, 0) | 600–1,199 / 1059–2114, 1,056 of 2,122 | 41.99 (true) | 36.09 / 86; 80.1, 83.2, 85.7, 87.5, 89.3, 89.5 | 99 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,125 |
+| tree-2 | GREEN | **5.75** (false) | 5.56 / 96.6 | 94.7, 95.7, 96.5, 97.2, 97.7, 96.8 (2.2 %, 0) | 600–1,199 / 1059–2114, 1,056 of 2,122 | 43.37 (true) | 37.29 / 86; 80.1, 83.4, 85.5, 87.3, 89.1, 90 | 100.3 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,124 |
+| tree-3 | GREEN | **5.62** (false) | 5.39 / 95.8 | 93.8, 95, 95.1, 96, 96.6, 96.6 (3.0 %, 0) | 600–1,199 / 1059–2113, 1,055 of 2,122 | 40.58 (true) | 34.65 / 85.4; 79.6, 82.6, 85.6, 87, 88.2, 88.9 | 99.5 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,125 |
+
+- **Mutant:** 0 of 3 RED. Every value is over 5 (7.77, 17.01, 9.03), and the trend flag is false in all three (net rise 4.0–7.7 % against 10 %, trailing rising run ≤ 2 against 3). Round 24's Shared understanding 2 named this risk (the tip's one run had a 13.8 % net rise). The window sees the slope of an unbounded store (7.96–17.64 MB/1k against 2.74–5.56 on the tree, 3,600 against 1,500 stored files) but not its trend.
