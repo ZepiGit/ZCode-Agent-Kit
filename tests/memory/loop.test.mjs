@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,7 +13,8 @@ import { parseSamplesCsv, roleOf, scan, startSampler, survivors } from "./lib/sa
 import { chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { generateOmpExtension, startOmpHost } from "./lib/omp-host.mjs";
 import { causeLinesOf } from "./lib/omp-leg.mjs";
-import { OMP_LEG } from "./lib/budgets.mjs";
+import { OMP_FLOOR } from "./lib/budgets.mjs";
+import { floorMeasurement, floorVerdict } from "./lib/repetitions.mjs";
 import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
 import { resolveBun } from "../../lib/process.mjs";
 import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
@@ -456,23 +457,82 @@ test("killing a starter host takes its running preflight with it (the killed-sta
   }
 });
 
-test("the stub OMP host charges a hook that does nothing well under the 5 MB waiter gate (its own churn is in the baseline)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-floor-"));
-  const extension = join(dir, "noop-extension.ts");
-  writeFileSync(extension, `export default function (pi) { pi.on("before_provider_request", async () => {}); }\n`);
+/** One fresh stub host charged for a hook that does nothing: its OMP_HOST_DONE line ({ costMB, … }). */
+async function noopHostCost(extension) {
   const host = startOmpHost({ bun: resolveBun(KIT), extension, env: { ...process.env } });
   try {
     assert.ok(await host.ready, host.stderr());
     host.go();
     const done = await host.done;
     assert.ok(done, host.stderr());
-    // Half the gate: a measurement whose floor reached the gate could not tell a waiter from noise.
-    assert.ok(done.costMB < OMP_LEG.waiterCostMB / 2, `no-op hook charged ${done.costMB} MB`);
+    return done;
   } finally {
     host.close();
     if ((await within(host.exited, 10_000, "running")) === "running") host.killTree();
+  }
+}
+
+// The floor measurement mode (Round 17 Q4 condition 1), off by default: while
+// the one-run marker tests/memory/measure-omp-floor exists (content: N, 1–50),
+// the floor test below measures N fresh hosts instead of judging n, prints each
+// value as an OMP_FLOOR_VALUE line (as every run does), adds an
+// OMP_FLOOR_MEASURE_SUMMARY line and writes the reading to
+// $GITHUB_STEP_SUMMARY. It runs in every `npm run test` leg (test-kit: ubuntu
+// and windows × Node 24 and 26). The marker test fails while it exists, so it never merges.
+const OMP_FLOOR_MARKER = join(KIT_ROOT, "tests", "memory", "measure-omp-floor");
+function ompFloorMarker() {
+  let text;
+  try { text = readFileSync(OMP_FLOOR_MARKER, "utf8"); } catch { return null; }
+  const count = Number(text.trim());
+  if (!Number.isInteger(count) || count < 1 || count > 50) throw new Error(`tests/memory/measure-omp-floor must hold a whole number from 1 to 50, got ${JSON.stringify(text.trim())}`);
+  return count;
+}
+
+// Ticket 03's floor test, as Round 17 Q4 decided it: n fresh hosts (budgets.mjs
+// OMP_FLOOR), the median no-op cost < 2.5 MB, every repetition < 5 MB, every value printed, pass or fail.
+test("the stub OMP host charges a hook that does nothing well under the 5 MB waiter gate: median of n fresh hosts < 2.5 MB, every one < 5 MB (its own churn is in the baseline)", async (t) => {
+  const measure = ompFloorMarker();
+  const count = measure ?? OMP_FLOOR.n;
+  const dir = mkdtempSync(join(tmpdir(), "memloop-omp-floor-"));
+  const extension = join(dir, "noop-extension.ts");
+  writeFileSync(extension, `export default function (pi) { pi.on("before_provider_request", async () => {}); }\n`);
+  const os = process.platform === "win32" ? "windows" : "linux";
+  const runs = [];
+  try {
+    for (let i = 1; i <= count; i++) {
+      const done = await noopHostCost(extension);
+      runs.push(done);
+      t.diagnostic(`OMP_FLOOR_VALUE ${JSON.stringify({ os, node: process.version, rep: i, of: count, metric: done.metric, costMB: done.costMB, ...(done.wsCostMB !== undefined ? { wsCostMB: done.wsCostMB } : {}), baselineMB: done.baselineMB, peakMB: done.peakMB })}`);
+    }
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+  const values = runs.map((d) => d.costMB);
+  if (measure) {
+    // Measurement only: the distribution, no verdict (a tail is what it records).
+    const m = floorMeasurement(values, { thresholdMB: OMP_FLOOR.medianBelowMB, gateMB: OMP_FLOOR.everyBelowMB });
+    const reading = { os, node: process.version, metric: runs[0]?.metric, requested: count, ...m, values, ...(runs.every((d) => d.wsCostMB !== undefined) ? { wsValues: runs.map((d) => d.wsCostMB) } : {}) };
+    t.diagnostic(`OMP_FLOOR_MEASURE_SUMMARY ${JSON.stringify(reading)}`);
+    if (process.env.GITHUB_STEP_SUMMARY) {
+      appendFileSync(process.env.GITHUB_STEP_SUMMARY, [`## OMP no-op floor measurement (${os}, Node ${process.version}, ${count} fresh hosts, metric ${reading.metric})`, "",
+        `Not a verdict (Round 17 Q4 condition 1). Value: the stub host's no-op cost (commit on Windows, RSS on Linux)${reading.wsValues ? "; working set beside it" : ""}.`, "",
+        `- values (MB): ${values.join(", ")}`, ...(reading.wsValues ? [`- working set (MB): ${reading.wsValues.join(", ")}`] : []),
+        `- min / median / max: ${m.minMB} / ${m.medianMB} / ${m.maxMB} MB; at or above ${OMP_FLOOR.medianBelowMB} MB: ${m.atOrAbove} of ${m.count} (p = ${m.p})`,
+        `- predicted false-fail rate of the median clause: ${Object.entries(m.falseFailRate).map(([n, r]) => `n = ${n}: ${r}`).join(", ")}; smallest odd n at ≤ 1 %: ${m.n ?? "none"}`,
+        ...(m.comesBack.length ? [`- comes back: ${m.comesBack.join("; ")}`] : []), "", ""].join("\n"));
+    }
+    assert.equal(m.count, count, "every host produced a numeric cost");
+    return;
+  }
+  const v = floorVerdict(values, OMP_FLOOR);
+  t.diagnostic(`OMP no-op floor (${os}, ${runs[0]?.metric}): ${values.join(", ")} MB; median ${v.medianMB} (< ${OMP_FLOOR.medianBelowMB}), every one < ${OMP_FLOOR.everyBelowMB}: ${v.ok ? "pass" : "FAIL"}`);
+  assert.equal(v.error, null, v.error);
+  // Half the gate for the median: a floor at the gate could not tell a waiter from noise.
+  assert.ok(v.ok, `no-op hook charged ${values.join(", ")} MB over ${count} fresh hosts: ${v.failures.join("; ")}`);
+});
+
+test("the OMP floor measurement mode is off by default: the marker tests/memory/measure-omp-floor is not committed", () => {
+  assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-omp-floor"), false, "tests/memory/measure-omp-floor is a one-run switch: delete it before the pre-merge run");
 });
 
 // ── A run that never ran its scenario is a harness failure, never GREEN ──────

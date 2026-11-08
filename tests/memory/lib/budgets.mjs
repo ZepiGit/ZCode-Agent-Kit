@@ -105,6 +105,18 @@ export const OMP_LEG = {
   waiterCostMB: 5, // in-host waiter cost per host (build-time gate)
 };
 
+// The OMP no-op floor (ticket 03's floor test; Round 17 Q4, ticket 71): n fresh
+// stub hosts charged for a hook that does nothing. The median must be below
+// half the waiter gate (a floor at the gate could not tell a waiter from
+// noise) and every repetition below the gate itself (the gate stays one
+// measurement per host). Thresholds unchanged. n: the smallest odd n in
+// {3, 5, 7, 9} whose predicted false-fail rate (binomial on the measured
+// fraction at or above 2.5 MB, less favourable leg) is ≤ 1 %. Provisional
+// n = 5 from the windows record, 1 of 16 legs at 2.55 MB (n = 3: 1.12 %,
+// n = 5: 0.22 %), until the ≥ 20-per-leg CI measurement
+// (tests/memory/measure-omp-floor, loop.test.mjs) sets it.
+export const OMP_FLOOR = { n: 5, medianBelowMB: OMP_LEG.waiterCostMB / 2, everyBelowMB: OMP_LEG.waiterCostMB };
+
 /** S3's two-part verdict for one OS leg: (a) as `peaks.kit`, (b) as `procPeaks` per role. */
 export function s3Budgets(os) {
   return {

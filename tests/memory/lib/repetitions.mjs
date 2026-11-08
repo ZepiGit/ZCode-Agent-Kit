@@ -141,6 +141,46 @@ export function majorityVerdict(reps, rule) {
   return { exitCode: red ? 1 : 0, red, redChecks, values, trends, redRepetitions, median: median(values), overCeiling, ...base, gate, commitValues, wsValues, workingSetRedChecks, redOnlyOnCommit: gate ? red && workingSetRedChecks.length === 0 : false };
 }
 
+/**
+ * The OMP no-op floor (Round 17 Q4; budgets.mjs OMP_FLOOR): `values` are the
+ * no-op costs (MB) of n fresh stub hosts. The median must be < medianBelowMB
+ * and every value < everyBelowMB. Fewer than n values or a non-numeric one is
+ * a harness failure (`error`), never a pass. Returns { ok, error, values,
+ * medianMB, atOrAboveGate (1-based repetitions), failures }.
+ */
+export function floorVerdict(values, rule) {
+  const out = (o) => ({ ok: false, error: null, values, medianMB: null, atOrAboveGate: [], failures: [], ...o });
+  for (const [i, v] of values.entries()) if (typeof v !== "number" || !Number.isFinite(v)) return out({ error: `repetition ${i + 1}: no numeric no-op cost (${JSON.stringify(v)})` });
+  if (values.length !== rule.n) return out({ error: `${values.length} of ${rule.n} repetitions measured` });
+  const medianMB = median(values);
+  const atOrAboveGate = values.flatMap((v, i) => (v >= rule.everyBelowMB ? [i + 1] : []));
+  const failures = [];
+  if (!(medianMB < rule.medianBelowMB)) failures.push(`median no-op cost ${medianMB} MB is not below ${rule.medianBelowMB} MB`);
+  for (const i of atOrAboveGate) failures.push(`repetition ${i} charged ${values[i - 1]} MB, not below the ${rule.everyBelowMB} MB waiter gate`);
+  return out({ ok: failures.length === 0, medianMB, atOrAboveGate, failures });
+}
+
+/**
+ * The floor measurement's reading (Round 17 Q4 condition 1, Round 6 Q1
+ * condition 2's method): p = the fraction of no-op costs at or above
+ * thresholdMB (each would fail a single-sample test), the predicted false-fail
+ * rate of the median clause per odd n (binomial), and n, the smallest odd n in
+ * {3, 5, 7, 9} at ≤ target. `comesBack` lists what Round 17 Q4 sends back: a
+ * measurement ≥ gateMB, or no n reaching the target.
+ */
+export function floorMeasurement(values, { thresholdMB, gateMB, target = 0.01, candidates = [3, 5, 7, 9] }) {
+  const nums = values.filter((v) => typeof v === "number" && Number.isFinite(v));
+  const atOrAbove = nums.filter((v) => v >= thresholdMB).length;
+  const p = nums.length ? atOrAbove / nums.length : null;
+  const falseFailRate = p === null ? null : Object.fromEntries(candidates.map((n) => [String(n), Number(medianFalseRedRate(p, n).toFixed(4))]));
+  const n = p === null ? null : chooseRepetitions(p, { target, candidates });
+  const atGate = nums.filter((v) => v >= gateMB).length;
+  const comesBack = [];
+  if (atGate) comesBack.push(`${atGate} measurement${atGate > 1 ? "s" : ""} ≥ ${gateMB} MB (Round 17 Q4 condition 1)`);
+  if (p !== null && n === null) comesBack.push(`no n in ${candidates.join(", ")} reaches ≤ ${target * 100} % at p = ${Number(p.toFixed(4))} (Round 17 Q4 condition 1)`);
+  return { count: nums.length, invalid: values.length - nums.length, atOrAbove, p: p === null ? null : Number(p.toFixed(4)), falseFailRate, n, minMB: nums.length ? Math.min(...nums) : null, medianMB: nums.length ? median(nums) : null, maxMB: nums.length ? Math.max(...nums) : null, comesBack };
+}
+
 /** The set verdict under its rule's kind. */
 export function judgeRepetitions(reps, rule) {
   return rule.kind === "majority" ? majorityVerdict(reps, rule) : medianVerdict(reps, rule);

@@ -716,6 +716,51 @@ test("OMP leg budgets are the spec §18 numbers: 5 hosts, ≤ 1 concurrent prefl
   assert.deepEqual(OMP_LEG, { hosts: 5, concurrentPreflights: 1, waiterCostMB: 5 });
 });
 
+// ── The OMP no-op floor (ticket 03's floor test; Round 17 Q4, ticket 71) ────
+// n fresh stub hosts, each charged for a hook that does nothing: the median
+// cost < 2.5 MB (half the waiter gate), every repetition < 5 MB (the gate),
+// every value printed. The windows commit floor reached 2.55 once in 16 legs.
+test("OMP floor: one 2.55 MB repetition among five passes on the median; a median at 2.5 fails; one repetition at 5 MB fails with a GREEN median", async () => {
+  const { floorVerdict } = await import("./lib/repetitions.mjs");
+  const rule = { n: 5, medianBelowMB: 2.5, everyBelowMB: 5 };
+  assert.deepEqual(floorVerdict([0.7, 0.6, 2.55, 0.8, 0.7], rule), { ok: true, error: null, values: [0.7, 0.6, 2.55, 0.8, 0.7], medianMB: 0.7, atOrAboveGate: [], failures: [] });
+  const median = floorVerdict([2.6, 2.55, 2.5, 0.7, 0.6], rule);
+  assert.deepEqual([median.ok, median.medianMB, median.failures], [false, 2.5, ["median no-op cost 2.5 MB is not below 2.5 MB"]]);
+  const gate = floorVerdict([0.7, 0.6, 5, 0.8, 0.7], rule);
+  assert.deepEqual([gate.ok, gate.medianMB, gate.atOrAboveGate, gate.failures], [false, 0.7, [3], ["repetition 3 charged 5 MB, not below the 5 MB waiter gate"]]);
+  assert.equal(floorVerdict([0.7, 0.6, 4.99, 0.8, 0.7], rule).ok, true);
+});
+
+test("OMP floor: fewer repetitions than n or a repetition without a numeric cost is a harness failure, never a pass", async () => {
+  const { floorVerdict } = await import("./lib/repetitions.mjs");
+  const rule = { n: 5, medianBelowMB: 2.5, everyBelowMB: 5 };
+  const four = floorVerdict([0.7, 0.6, 0.8, 0.7], rule);
+  assert.deepEqual([four.ok, four.error], [false, "4 of 5 repetitions measured"]);
+  for (const bad of [null, "0.7", Number.NaN]) {
+    const v = floorVerdict([0.7, 0.6, bad, 0.8, 0.7], rule);
+    assert.equal(v.ok, false, String(bad));
+    assert.match(v.error, /repetition 3: no numeric no-op cost/, String(bad));
+  }
+});
+
+test("OMP floor n from data (Round 17 Q4 condition 1): the smallest odd n in {3, 5, 7, 9} at ≤ 1 % predicted false fails on the fraction at or above 2.5 MB; ≥ 5 MB or no n comes back", async () => {
+  const { floorMeasurement } = await import("./lib/repetitions.mjs");
+  const twenty = (high) => Array.from({ length: 20 }, (_, i) => (i < high.length ? high[i] : 0.7));
+  const one = floorMeasurement(twenty([2.55]), { thresholdMB: 2.5, gateMB: 5 });
+  assert.deepEqual([one.count, one.atOrAbove, one.p, one.n, one.comesBack], [20, 1, 0.05, 3, []]);
+  assert.equal(one.falseFailRate["3"], 0.0073);
+  // The windows record so far: 1 of 16 legs above 2.5 (2.55 MB, run 42436440284) → n = 5 (n = 3: 1.12 %).
+  assert.equal(floorMeasurement([2.55, ...Array(15).fill(0.7)], { thresholdMB: 2.5, gateMB: 5 }).n, 5);
+  assert.equal(floorMeasurement(twenty([]), { thresholdMB: 2.5, gateMB: 5 }).n, 3);
+  const gate = floorMeasurement(twenty([5.1]), { thresholdMB: 2.5, gateMB: 5 });
+  assert.match(gate.comesBack.join(), /1 measurement ≥ 5 MB/);
+  const none = floorMeasurement(twenty([3, 3, 3, 3, 3, 3, 3, 3]), { thresholdMB: 2.5, gateMB: 5 });
+  assert.equal(none.n, null);
+  assert.match(none.comesBack.join(), /no n in 3, 5, 7, 9 reaches ≤ 1 %/);
+  // n is the larger of the two legs' n (the less favourable leg decides).
+  assert.equal(Math.max(one.n, floorMeasurement([2.55, ...Array(15).fill(0.7)], { thresholdMB: 2.5, gateMB: 5 }).n), 5);
+});
+
 test("OMP leg: five hosts that each spawn their own preflight at once are red (today's extension)", () => {
   const today = ompRound("omp-5", [0, 1, 2, 3, 4].map((i) => host(i, { preflights: 1, causeLines: [QUOTA] })), 5);
   const c = ompCheck([today], "omp:concurrent-preflights");
