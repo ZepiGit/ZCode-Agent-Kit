@@ -35,7 +35,7 @@ Source: Phase 1B memory loop (`diagnosis/memory` @ 2ccafe2, `tests/memory/`). Co
 | S2 captcha solver, heavy happy-dom solves (short 420 / long 2,000) | RSS 179 → 958 MB at the 200-solve recycle (+4.1 MB/solve); heap after GC +2.5 MB/solve; per-generation peak 0.9–1.0 GB; HWM 1,068 MB | RED |
 | S2 retained guest heap before recycle | 686 MB (long 619 MB); 687 MB returned on recycle | RED |
 | S2 hung solves (5 × 256 MB parked) | reclaimed (−5 MB) | ok |
-| S2 CDN memory map | +151 MB / 600 URLs, +502 MB / 2,000 URLs (256 KB each) | RED |
+| S2 CDN memory map | +151 MB / 600 URLs, +502 MB / 2,000 URLs (256 KB each); bound ≤ 64 MB of memory (`cdn-cache:memory-growth`) and ≤ 256 entries, with a 32 MiB body budget (Round 20 Q1) | RED |
 | S3 5 / 10 concurrent launches | max simultaneous proxies 1; kit peak 852 MB (each: launcher 74, bridge 86, preflight 55–73, proxy 60 MB) | RED (footprint) |
 | S3 killed lock holder / hung proxy afterwards | 7–8 / 10 launches fail and a stale lock is left; then 10 / 10 fail. Clean hung recovery: 0 / 10 fail, ~36–44 s wait | RED |
 | S4 50 start/stop/restart/crash/update cycles | 0 leaked proxies, 0 listeners after stop, 1 log file | ok |
