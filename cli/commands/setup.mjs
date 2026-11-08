@@ -14,15 +14,15 @@
 //
 // The command ctx is `cmd`; `ctx` below is the kit context (cmd.kit), the
 // object the adapters, bootstrap and the consent records work on.
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { isAbsolute, join, normalize } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { acquireLock, beginTransaction, releaseLock } from "../../lib/transaction.mjs";
 import { detectHarnesses } from "../../lib/detect.mjs";
 import { ensureState } from "../../lib/state.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 import { withLineEndingsOf } from "../../lib/line-endings.mjs";
-import { BRIDGE_NODE_FLAGS, bridgeArgs, bridgeScriptOf, hasBridgeFlags, parseClaudeBridgeArgs } from "../../lib/mcp-bridge.mjs";
+import { BRIDGE_NODE_FLAGS, bridgeArgs, bridgeScriptOf, claudeRegistrationState, sameInstallationPath } from "../../lib/mcp-bridge.mjs";
 import { bootstrap } from "../context.mjs";
 import { decideAccountRotator, restartForAccountChange, rotatorChoice } from "../account-setup.mjs";
 import { setupOutput } from "../setup-output.mjs";
@@ -290,19 +290,10 @@ export async function run({ flags }, cmd) {
   return { exitCode: outcome.failed.length ? EXIT_HARNESS_FAILED : 0, records: [] };
 }
 
-function sameInstallationPath(candidate, expected) {
-  if (typeof candidate !== "string" || !isAbsolute(candidate)) return false;
-  const canonical = value => {
-    let resolved = normalize(value);
-    try { resolved = realpathSync(resolved); } catch { /* lexical identity still handles missing artifacts */ }
-    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
-  };
-  return canonical(candidate) === canonical(expected);
-}
-
 // `claude mcp get` is a human-readable display, not a shell command:
-// parseClaudeBridgeArgs matches the entire argument field (leading Node
-// flags, then a script path that may be quoted with spaces); substring checks
+// claudeRegistrationState (lib/mcp-bridge.mjs) matches the entire argument
+// field (leading Node flags, then a script path that may be quoted with
+// spaces) and compares the script with sameInstallationPath; substring checks
 // would incorrectly adopt `index.js.foreign`.
 function claudeMcpAdd(cmd, args) {
   return cmd.runCommandSync("claude", ["mcp", "add", "zcode-harness", "--scope", "user", "--", "node", ...args], { stdio: "pipe", encoding: "utf8" });
@@ -355,13 +346,13 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
   }
   if (targets.includes("claude-code") && detected["claude-code"]) {
     const get = cmd.runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
-    const registered = get.status === 0 ? parseClaudeBridgeArgs(get.stdout) : null;
-    if (get.status === 0 && !sameInstallationPath(registered?.script, serverJs)) {
+    const { state, registered } = get.status === 0 ? claudeRegistrationState(get.stdout, serverJs) : { state: "absent", registered: null };
+    if (state === "foreign") {
       // F-09: registered by another kit copy — never silently adopt it.
       log('  WARN: claude "zcode-harness" is registered by another kit copy — left untouched');
-    } else if (get.status === 0 && hasBridgeFlags(registered.flags)) {
+    } else if (state === "current") {
       log('  claude: "zcode-harness" already registered');
-    } else if (get.status === 0) {
+    } else if (state === "outdated") {
       // This installation's older registration (ticket 36): `claude mcp add`
       // refuses an existing name, so re-register. A failed add puts the
       // previous registration back, so the bridge is never left unregistered.
