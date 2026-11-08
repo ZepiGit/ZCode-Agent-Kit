@@ -30,7 +30,7 @@ Source: Phase 1B memory loop (`diagnosis/memory` @ 2ccafe2, `tests/memory/`). Co
 |---|---|---|
 | S1 proxy, 30,000 mixed requests (long, 20 min) | plateau median 127 MB, HWM 182 MB, heap ≤ 49 MB, growth 0.07 %/1k, 113 MB after idle | GREEN |
 | S1 proxy, 3,000 requests (short) | growth 5.5 %/1k (warm-up, no trend), HWM 152 MB | GREEN |
-| S1 burst: N concurrent 10.8 MB bodies, 3 × N requests (burst1: 3 sequential requests) | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight (Phase 1B, unbounded bodies; history). On ticket 19's tree (linux, RSS, 64 MiB cap = six 10.8 MB bodies, 64.8 MB admitted; Round 18 Q3): (peak − 90) / MB admitted ≈ 6.2 at N = 16 (median 488.6 MB, 5 runs, range 5.2–6.7), 7.1 at N = 32 (median 549.7 MB, 20 runs, range 6.0–8.0; the ~61 MB above burst16 is the queue cost), 5.5 at N = 4 (43.2 MB, cap not binding), 8.6 at N = 1; the ratio is not constant, so no single linear factor predicts the peaks (ADR-0004 amendment Round 18) | RED (N ≥ 4) |
+| S1 burst: N concurrent 10.8 MB bodies, 3 × N requests (burst1: 3 sequential requests) | HWM 219 / 425 / 998 / 1,619 MB at N = 1 / 4 / 16 / 32; heap ≤ 898 MB; ~4.5 MB RSS per MB in flight (Phase 1B, unbounded bodies; history). On ticket 19's tree (linux, RSS, 64 MiB cap = six 10.8 MB bodies, 64.8 MB admitted; Round 18 Q3): (peak − 90) / MB admitted ≈ 6.2 at N = 16 (median 488.6 MB, 5 runs, range 5.2–6.7), 7.1 at N = 32 (median 549.7 MB, 20 runs, range 6.0–8.0; the ~61 MB above burst16 is the queue cost), 5.5 at N = 4 (43.2 MB, cap not binding), 8.6 at N = 1; the ratio is not constant, so no single linear factor predicts the peaks (ADR-0004 amendment Round 18). On ticket 20's tree (2798d2e, linux, RSS, 10 runs; "Request-body copies removed one at a time" below): medians 225.8 / 313.8 / 351.1 MB at N = 4 / 16 / 32, bigbody 183.6, burst1 119.5 (20 runs); (peak − 90) / MB admitted ≈ 3.1 at N = 4, 3.5 at N = 16, 4.0 at N = 32 | RED (N ≥ 4) on ticket 19's tree; GREEN on ticket 20's tree (linux local; CI pending) |
 | S1 stalled readers, 3,000 | HWM 165 MB, heap 6 MB after idle | GREEN |
 | S2 captcha solver, heavy happy-dom solves (short 420 / long 2,000) | RSS 179 → 958 MB at the 200-solve recycle (+4.1 MB/solve); heap after GC +2.5 MB/solve; per-generation peak 0.9–1.0 GB; HWM 1,068 MB | RED |
 | S2 retained guest heap before recycle | 686 MB (long 619 MB); 687 MB returned on recycle | RED |
@@ -468,6 +468,48 @@ Run 42467078897 (staging/71 with the marker `tests/memory/measure-omp-floor` = 2
 | ticket 71, local mutant (never committed): `fitLine` stores the raw row without the copy | 5 | 20, 20, 20, 20, 20 (median 20, RED); `flushed` 0 MB above `C-start` | 7 in all 5 |
 
 From ticket 71 on, linux S6/short is the median of 5 fresh S6 body repetitions against 16 MB, every repetition ≤ 32 MB (`REPEATED`). n = 5 comes from 1 of 10 on the staging/19 tree (n = 3 → 2.80 %, n = 5 → 0.86 %; 1 of 33 → 0.027 %).
+
+### Request-body copies removed one at a time (ticket 20; Round 18 Q1–Q3)
+
+Linux x64, Node 26.7.0, Bun 1.4.2, local machine (AMD EPYC, 8 cores, shared with other agents' runs). Each run is `node tests/memory/job.mjs --only S1/burst4,S1/burst16,S1/burst32,S1/bigbody --cap systemd` from a detached snapshot worktree of the named commit (`/home/AgentKit/wt/t20-<step>`), port 19200. Logs: `reports/t20-red-base.log`, `t20-meas-s1.log` … `t20-meas-final.log`. Run directories: `/home/AgentKit/overhaul-tools/t20-memloop/<step>/`. The value is `procPeak:proxy` = max(sampled RSS, VmHWM) in MB: the median of the step's repetitions, with the range in brackets. Factor = (median − 90) / MB admitted, Round 18's formula: 64.8 MB at burst16 and burst32 (six 10.8 MB bodies under the 64 MiB cap), 43.2 MB at burst4 (the cap does not bind). Bigbody is paced and mixed, so it has no admitted-bytes figure. In every run the loop's own isolation proof is empty (`isolation.facts.externalConnections`, `isolation.externalConnectionsDuringRun`), so the proxy talked only to the loopback mock.
+
+| step | commit | copy removed | reps | burst4 | burst16 | burst32 | bigbody | factor 16 / 32 |
+|---|---|---|---|---|---|---|---|---|
+| base | e88821f | none (integration tip, ticket 19 merged) | 5 | 323.6 (300.2–339.5) | 480.6 (433.9–520) | 563.1 (560.2–569.5) | 366.5 (327.6–383.4) | 6.0 / 7.3 |
+| 1 | 21d747f | validation, request meta, translation and transforms read one `JSON.parse` (was 3) | 3 | 372.1 (350.1–386.1) | 565 (472.8–597) | 606.9 (539.9–645.7) | 382.3 (367.7–384.3) | 7.3 / 8.0 |
+| 2 | e2bbd28 | one buffer of the declared length, instead of every chunk plus their joined copy | 3 | 365.6 (340.9–373.1) | 519.1 (506.2–521) | 585.7 (545.1–621.9) | 388.9 (363.4–391.7) | 6.6 / 7.6 |
+| 3 | 25ff451 | the session resolver reads the parsed body (2 more parses gone) | 3 | 339.4 (293.5–342.5) | 464.8 (458.7–476.9) | 531.6 (480.1–550.1) | 315.7 (313.2–337.3) | 5.8 / 6.8 |
+| 4 | cc266d7 | the session identity is hashed piece by piece, not joined into one text at every nesting level (~4 copies) | 3 | 253.1 (243.4–296) | 399.6 (395.7–423) | 428.1 (418.2–461.9) | 244.4 (239.7–248.5) | 4.8 / 5.2 |
+| 4b | 8499b94 | long identity strings escaped in 16 Ki slices, not one `JSON.stringify` copy | 3 | 250.1 (244.1–274) | 389.1 (377.1–412.1) | 433 (428.5–436.1) | 240.4 (227.6–272.7) | 4.6 / 5.3 |
+| 5 | 375bea2 | the client text and object are released before the upstream text is built | 3 | 263.8 (234.3–268.1) | 397.8 (390.5–418.4) | 438.9 (415.1–445.5) | 227.9 (223.7–270.7) | 4.8 / 5.4 |
+| 6 | ec3ff73 | translated requests (chat, responses, both async routes) transformed as built: no stringify + parse round trip (2 copies) | 5 | 259.4 (235.8–282.2) | 393 (376.9–395.1) | 446.5 (404.1–461.7) | 214.9 (205.9–221) | 4.7 / 5.5 |
+| 7 | 147c87f | bodies ≥ 1 MiB parsed from their bytes (`Response.json()`), so no JS copy of the text | 5 | 247.9 (217–251.9) | 370.6 (342.9–398.7) | 406.7 (396.6–441.3) | 217.9 (207.6–220.6) | 4.3 / 4.9 |
+| 8 | e0de0e0 | identity slices with nothing to escape hashed as they are | 5 | 246.4 (227.6–259.1) | 350.7 (327.4–363.3) | 389.4 (362.5–404.2) | 193.8 (186.7–214.2) | 4.0 / 4.6 |
+| 9 (final) | 9ccf978, measured as the merge 2798d2e (the merge changes no file on the S1 request path) | identity pieces UTF-8 encoded into one reused buffer, not a new buffer per `hash.update` | 10 | **225.8 (193.3–241.2)** | **313.8 (297.4–342.2)** | **351.1 (330–375.8)** | **183.6 (173.6–198.6)** | **3.5 / 4.0** |
+| budget | | | | 250 | 400 | 600 | 250 | |
+
+Final against base: burst4 −30.2 %, burst16 −34.7 %, burst32 −37.6 %, bigbody −49.9 %. Every one of the 10 final repetitions is GREEN on every key. The burst4 factor goes from 5.4 to 3.1.
+
+Other S1 runs on the final tree (2798d2e, linux, `reports/t20-meas-final.log`):
+- S1/short: GREEN (growth 3.41 %/1k, no trend; peak 148.1 MB; steady 118 MB).
+- S1/stalled: GREEN (growth 0.61 %/1k; peak 165.8 MB).
+- **S1/burst1, ≥ 20 repetitions** (`node tests/memory/job.mjs --measure-burst1 20`, ticket 60's measurement mode; `/home/AgentKit/overhaul-tools/t20-memloop/final-burst1/out/measure-S1-burst1.{json,md}`): 20 of 20 valid, **0 of 20 above 250 MB**. Min / median / max are 116.2 / 119.5 / 128.6 MB. On the base tree e88821f the same 20-run measurement gave 177.6 / 186.4 / 199.9 MB, 0 of 20 above 250 (`red-base-burst1`). Linux already met the criterion after ticket 19's collection; ticket 20 adds 121 MB of margin. Windows has no measurement on this tree yet (pending CI, through the marker `tests/memory/measure-burst1`).
+
+What the steps show:
+- **Step 1 alone made the peaks worse.** The validation parse's object stayed reachable while the session resolver still parsed the body twice and joined the identity text. One more copy was therefore live at the moment of most allocation. Steps 3–4 removed what it overlapped with.
+- **The session resolver was the big lever** (`client-session.ts`; observe is the default mode). It parsed the body twice, joined the identity's stable text anew at every nesting level, and converted it to UTF-8 for the hash. That cost about 6 copies of a large body per request (steps 3, 4, 4b, 8 and 9).
+- **Steps 2 and 5 are within run-to-run noise on their own** (±30 MB at 3 repetitions on a shared machine). Their value shows once the overlapping copies are gone.
+- **Where the rest goes.** A phase probe measured an instrumented scratch copy that answers right after each phase, with 4 concurrent bodies (`/home/AgentKit/overhaul-tools/t20-scripts/probe.mjs`, never committed). At step 8 it placed the remaining peak in:
+  - receiving the bodies: the socket chunks plus the read buffer, about 2 copies, the same as `await request.arrayBuffer()`;
+  - the parsed tree;
+  - the upstream text;
+  - garbage not yet collected while the upstream reads the body.
+
+  Sending a string body to fetch costs nothing extra: Bun streams it.
+- **Measured with the probe and not adopted:**
+  - a collection right after the upstream text is built (eden or full): no change beyond noise;
+  - sending bytes or a Blob instead of the string: bytes +60 MB at 4 bodies, Blob no gain;
+  - Bun `--smol` (`BUN_OPTIONS=--smol`): no gain at 4 or 16 bodies.
 
 ## Current
 
