@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { BoundedCollection } from "../runtime/bounded-collection.js";
+import { CDN_DISK_MAX_BYTES, CdnDiskPruner } from "./captcha-cdn-disk.js";
 
 export const DEFAULT_CDN_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_CDN_TTL_MS = 2_147_483_647;
@@ -39,6 +40,11 @@ export interface CdnCacheOptions {
    * not a config key or env override (Owner Proxy round 20 Q1).
    */
   memoryMaxBytes?: number;
+  /**
+   * Byte cap of the disk directory. Tests only (the seam-3 replay records a
+   * workload above the cap); production always uses CDN_DISK_MAX_BYTES.
+   */
+  diskMaxBytes?: number;
 }
 
 const sha256 = (body: Buffer | string) => crypto.createHash("sha256").update(body).digest("hex");
@@ -59,6 +65,7 @@ export class CaptchaCdnCache {
   readonly ttlMs: number;
   private readonly now: () => number;
   private readonly memory: BoundedCollection<string, CdnEntry>;
+  private readonly disk: CdnDiskPruner;
   private readonly pending = new Map<string, Promise<CdnEntry>>();
   // Only failed deletions need a tombstone. Do not read an invalidated disk
   // entry again merely because the filesystem temporarily refused unlink.
@@ -78,6 +85,14 @@ export class CaptchaCdnCache {
     if (!this.directory.trim()) throw new Error("CAPTCHA_CDN_CACHE_DIR must not be empty");
     this.ttlMs = parseCdnTtl(options.ttlMs);
     this.now = options.now ?? Date.now;
+    this.disk = new CdnDiskPruner({
+      directory: this.directory,
+      now: this.now,
+      maxBytes: options.diskMaxBytes ?? CDN_DISK_MAX_BYTES,
+    });
+    // Pruned at start and after each write (spec §7). A TTL of 0 disables the
+    // disk tier, so such an installation leaves the directory alone.
+    if (this.ttlMs > 0) this.disk.prune();
   }
 
   /** What the memory tier holds now: entries and body bytes (diagnostics and tests). */
@@ -191,6 +206,7 @@ export class CaptchaCdnCache {
       } catch {} finally {
         if (directoryFd !== undefined) fs.closeSync(directoryFd);
       }
+      this.disk.afterWrite(path.basename(target), header.length + entry.body.length);
     } catch {
       // Disk availability must not turn a valid CDN response into a solve error.
     } finally {
