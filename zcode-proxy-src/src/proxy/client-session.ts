@@ -46,7 +46,8 @@ export interface ClientSessionResolver {
   /**
    * `parsedBody`, when given, is `JSON.parse(body)` done by the caller, so the
    * resolver reads it instead of parsing the body text again (ticket 20). It
-   * is only read, never changed.
+   * is only read, never changed. With it, `body` may be undefined: a large
+   * body parsed from its bytes has no text.
    */
   resolve(req: Request, body: string | undefined, format: Format, model: string, config: ClientIdentityConfig, parsedBody?: unknown): ClientSessionResult;
 }
@@ -183,7 +184,7 @@ function firstHeader(headers: Headers, names: string[]): string | null {
 }
 
 function bodyMetadataTrace(body: string | undefined, parsedBody?: unknown): ExplicitTraceContext {
-  if (!body) return {};
+  if (!body && parsedBody === undefined) return {};
   try {
     const parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body)) as Record<string, unknown>;
     const metadata = parsed?.metadata as Record<string, unknown> | undefined;
@@ -208,7 +209,7 @@ function stringProperty(obj: Record<string, unknown>, names: string[]): string |
 }
 
 function canonicalize(body: string | undefined, format: Format, fallbackModel: string, parsedBody?: unknown): CanonicalRequest | null {
-  if (!body) return null;
+  if (!body && parsedBody === undefined) return null;
   let parsed: Record<string, unknown>;
   try {
     parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body)) as Record<string, unknown>;

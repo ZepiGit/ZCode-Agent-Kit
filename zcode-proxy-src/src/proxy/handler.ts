@@ -101,9 +101,9 @@ export async function proxyRequest(
   const started = Date.now();
   const reqId = nextReqId();
 
-  let body: string | undefined;
+  let bodyBytes: Uint8Array | undefined;
   try {
-    body = await readBody(clientReq);
+    bodyBytes = await readBodyBytes(clientReq);
   } catch (err) {
     if (err instanceof InflatedBodyTooLargeError) {
       return errorResponse(413, "request_too_large", err.message);
@@ -112,9 +112,24 @@ export async function proxyRequest(
   }
 
   // The body is parsed once (ticket 20): validation, the request meta, the
-  // OpenAI translation and the body transforms all read this one object.
+  // OpenAI translation and the body transforms all read this one object. A
+  // large body is parsed straight from its bytes, which decodes them exactly
+  // as TextDecoder does but holds no JS copy of the text; the text is decoded
+  // only if it is sent as is. Debug and dump output keep the text path.
+  const parseFromBytes = bodyBytes !== undefined && bodyBytes.byteLength >= PARSE_FROM_BYTES_MIN && !debug && !dumpEnabled();
+  let body: string | undefined;
+  if (!parseFromBytes) {
+    body = bodyBytes === undefined ? undefined : new TextDecoder().decode(bodyBytes);
+    bodyBytes = undefined;
+  }
   let parsedBody: Record<string, unknown> | undefined;
-  if (body) {
+  if (parseFromBytes) {
+    try {
+      const parsed: unknown = await new Response(bodyBytes).json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse(400, 'invalid_request_error', 'Request body must be a JSON object');
+      parsedBody = parsed as Record<string, unknown>;
+    } catch { return errorResponse(400, format === 'openai' ? 'translation_failed' : 'invalid_request_error', 'Request body is not valid JSON'); }
+  } else if (body) {
     try {
       const parsed = JSON.parse(body);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse(400, 'invalid_request_error', 'Request body must be a JSON object');
@@ -211,6 +226,7 @@ export async function proxyRequest(
   let transformedBody: string | undefined;
   if (translatedRequest) {
     body = upstreamBody = undefined;
+    bodyBytes = undefined;
     parsedBody = undefined;
     // translatedRequest is already a jsonCopy: transformBuiltRequestBody minus its copy.
     applyRequestBodyTransforms(translatedRequest, transformContext);
@@ -221,9 +237,13 @@ export async function proxyRequest(
       // The client's text is not sent: let it go before the new text is
       // built (ticket 20). Debug output still compares the two.
       if (!debug) body = upstreamBody = undefined;
+      bodyBytes = undefined;
       transformedBody = JSON.stringify(parsedBody);
     } else {
-      transformedBody = upstreamBody;
+      // Sent as the client wrote it: the text, decoded now when the body was
+      // parsed from its bytes.
+      transformedBody = upstreamBody ?? (bodyBytes === undefined ? undefined : new TextDecoder().decode(bodyBytes));
+      bodyBytes = undefined;
     }
   } else {
     // A translated body: the client's text and object were read already.
@@ -896,6 +916,15 @@ async function sendUpstreamRequest(
  * payload cannot expand into unbounded proxy memory).
  */
 export async function readBody(req: Request): Promise<string | undefined> {
+  const bytes = await readBodyBytes(req);
+  return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+}
+
+/**
+ * readBody before decoding: the body bytes (inflated when gzip), undefined for
+ * an empty wire body. Same limits and errors as readBody.
+ */
+async function readBodyBytes(req: Request): Promise<Uint8Array | undefined> {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   const maxWireBytes = 32 * 1024 * 1024;
   if (Number(req.headers.get('content-length')) > maxWireBytes) {
@@ -948,10 +977,17 @@ export async function readBody(req: Request): Promise<string | undefined> {
     const inflated = await inflateGzipBody(bytes);
     // A gzip body is charged its inflated size once it is inflated.
     settleBodyBytes(req, Math.max(size, inflated.byteLength));
-    return new TextDecoder().decode(inflated);
+    return inflated;
   }
-  return new TextDecoder().decode(bytes);
+  return bytes;
 }
+
+/**
+ * From this size on a request body is parsed from its bytes (ticket 20).
+ * Smaller bodies take the text path: an empty decoded text (a lone BOM) must
+ * stay "no body", and their copies are cheap.
+ */
+const PARSE_FROM_BYTES_MIN = 1024 * 1024;
 
 /**
  * Decompressed-size ceiling, separate from the 32 MiB wire-body limit.
@@ -1079,12 +1115,12 @@ function translateOpenAIBody(body: string | undefined, alreadyParsed?: unknown):
  * JSON.parse would give for that text (jsonCopy), or the same error response.
  */
 function translateOpenAIRequest(body: string | undefined, alreadyParsed: unknown): Response | object {
-  if (body === undefined || body.length === 0) {
+  if (alreadyParsed === undefined && (body === undefined || body.length === 0)) {
     return errorResponse(400, "translation_failed", "OpenAI request body is empty; cannot translate.");
   }
   let parsed: unknown;
   try {
-    parsed = alreadyParsed ?? JSON.parse(body);
+    parsed = alreadyParsed ?? JSON.parse(body as string);
   } catch (err) {
     return errorResponse(400, "translation_failed", `OpenAI request body is not valid JSON: ${(err as Error).message}`);
   }
