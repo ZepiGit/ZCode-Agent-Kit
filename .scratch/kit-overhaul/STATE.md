@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: merge 15b (integration fix) when 42495987510 is green; 21 restaged (42500996594); 29 round 2 (ubuntu concurrency test). Running: t16, t20, t29. Ready for slots: 74 (on ticket/30, round 26 joint staging), 73, 75, 31 (after 30), 17 (after 16), 18 (after 21), 38.
+- Next action: ticket 20 evidence runs 42502565823..42503373851 (tree f1cdaff6dab8) -> list-only commit (windows S1/burst1 unstable entry removable, measurement 42502424683) -> final pre-merge run; 21 restaged (42500996594); 29 round 2 running. Running: t16, t29, t74 (on ticket/30, round 26). Next slot: 76 (high; proxy tests reach the real upstream), then 73, 75, 31 (after 30), 17 (after 16), 18 (after 21), 38.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -37,3 +37,4 @@
 - Model routing in Phase 4: glm tickets, mergers, explorers -> worker-glm (GLM-5.3-Flash; loads after restart but dispatch fails with provider-not-found for account:zai-start-plan/GLM-5.3-Flash as of 2026-11-06T21:05Z -> fallback general-purpose/opus until the owner fixes the provider); sol tickets -> general-purpose (opus); Standards review = reviewer-grok; Spec review = reviewer-sol; red team = reviewer-grok
 - Running subagents: see RUNLOG.md (latest "Spawned" lines)
 - Last green SHA: 9e45d05 (baseline); integration tip before Phase 4 = this commit
+- Ticket 15 teardown fix (staging/15b) merged 2026-11-08 as cbe2abb (record 3efcaf2; pre-merge CI 42495987510, 8/8 green).
