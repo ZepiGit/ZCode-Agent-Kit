@@ -62,6 +62,10 @@ import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
 import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
 import { measureMarkdown, measureObservation, measureReport, pairedMarkdown, pairedReport, parseBunArms, parseMeasureSpec } from "./lib/measure.mjs";
+import { heapAtCapLine } from "./lib/retained-heap.mjs";
+
+// Round 17 Q1 condition 3: a retained-heap minimum above this comes back as a question.
+const RETAINED_HEAP_QUESTION_MB = 66;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..", "..");
@@ -177,6 +181,17 @@ function markdown({ os, cap, ratchet, results, partial }) {
     lines.push("", "Memory checks, commit / working set (Round 7 Q1: WS gates the per-process peak and steady budgets of proxy, launcher, mcp-bridge and preflight; commit gates the rest):");
     for (const r of withValues) for (const c of r.memoryChecks) lines.push(`- ${r.key} ${c.name}: commit ${c.commitMB} / WS ${c.wsMB} MB (budget ${c.budget}, gate ${c.gate === "ws" ? "WS" : "commit"}) ${c.red ? "RED" : "ok"}`);
   }
+  // Round 17 Q1 conditions 1 and 3: every run records the retained-heap series; a minimum
+  // above 66 MB (the store's cluster is 59–65 MB) comes back as a question with the series.
+  const heaps = results.filter((r) => r.retainedHeap?.detail);
+  if (heaps.length) {
+    lines.push("", "Responses store retained heap (Round 17 Q1: the minimum of the /health series after the load, minus h0; budget 96 MB):");
+    for (const r of heaps) {
+      const c = r.retainedHeap;
+      lines.push(`- ${r.key} ${heapAtCapLine(c)}${c.value > RETAINED_HEAP_QUESTION_MB ? ` — minimum above ${RETAINED_HEAP_QUESTION_MB} MB: comes back as a question with the series (Round 17 Q1 condition 3)` : ""}`);
+      lines.push(`  series (MB): ${c.detail.seriesMB.join(" ")}`);
+    }
+  }
   const onlyCommit = results.filter((r) => r.redOnlyOnCommit);
   if (onlyCommit.length) lines.push("", "RED only on commit (working set within budget) — raised to the owner, never adjusted silently (build-time gate 3):", ...onlyCommit.map((r) => `- ${r.key}: ${r.redChecks.join(", ")} (working set: ${r.workingSetRedChecks.join(", ") || "green"})`));
   return lines.join("\n") + "\n";
@@ -224,6 +239,8 @@ async function main() {
     const result = { key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, scenarioS: summary?.durationS ?? null, samples: summary?.samples ?? null, rolesSeen: Object.fromEntries(Object.entries(summary?.summary ?? {}).filter(([role]) => role !== "*" && role !== "kit").map(([role, s]) => [role, s.maxCount])), units: summary?.notes?.sampler?.units ?? null, ...(r.job ? { jobApplied: r.job.applied === true, jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name),
       // Every check the run produced: the ratchet refuses an owned name the run never produces (Round 14 Q1).
       checkNames: (summary?.checks ?? []).map((c) => c.name),
+      // S7: the responses store's retained-heap check with its series (Round 17 Q1).
+      ...(() => { const c = (summary?.checks ?? []).find((x) => x.name === "responses-store:heap-at-cap" && x.detail?.seriesMB); return c ? { retainedHeap: c } : {}; })(),
       // Windows (Round 7 Q1): every memory check with both values and the metric that gates it.
       memoryChecks: (summary?.checks ?? []).filter((c) => c.commitValue !== undefined).map((c) => ({ name: c.name, red: c.red, gate: c.gate, commitMB: c.commitValue, wsMB: c.wsValue, budget: c.budget })),
       // Every growth check with its value, trend and sample count, insufficient ones included:

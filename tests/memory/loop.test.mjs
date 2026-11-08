@@ -1400,6 +1400,70 @@ function s5LinuxReplay(change = null) {
   }
 }
 
+// ── S7 responses store: retained heap (Round 17 Q1, ticket 71) ───────────────
+// heap-at-cap is the minimum of ≥ 30 /health heapUsedMB readings 1 s apart
+// after the existing 5 s wait, minus the reading before the load (h0). The fake
+// run reads its fixture series through the scenario's own reader and judge
+// (lib/retained-heap.mjs) from a fake /health, then the job and the ratchet
+// judge it against the committed list (S7/short: 33 owns proxy.log, RED as on CI).
+function s7Job({ before = { heapUsedMB: 20, rssMB: 140 }, readings }) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s7-"));
+  const r = runJob(["--os", "linux", "--only", "S7/short", "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "s7-series", FAKE_RUN_HEAP: JSON.stringify({ before, readings }) });
+  let report = null, summary = null;
+  try { report = JSON.parse(readFileSync(join(home, "job", "job-summary.json"), "utf8")); } catch {}
+  try { const d = join(home, "job", "S7-short"); summary = JSON.parse(readFileSync(join(d, readdirSync(d).find((n) => n.endsWith("-fake")), "summary.json"), "utf8")); } catch {}
+  rmSync(home, { recursive: true, force: true });
+  const heap = summary?.checks?.find((c) => c.name === "responses-store:heap-at-cap") ?? null;
+  return { r, report, summary, heap, row: report?.rows?.[0], result: report?.results?.[0] };
+}
+// Absolute heapUsedMB readings: h0 (20) plus the heap growth the round names.
+const above = (...growth) => growth.map((g) => 20 + g);
+const padTo = (xs, n, last = xs.at(-1)) => [...xs, ...Array.from({ length: n - xs.length }, () => last)];
+
+test("S7 retained heap: a series [98, 97, 80, 64, …] is GREEN on its minimum, and the check records first, minimum, maximum and RSS before and after", () => {
+  const { r, heap, row, summary } = s7Job({ readings: padTo(above(98, 97, 80, 64, 63, 65), 30).map((h, i) => ({ heapUsedMB: h, rssMB: 300 - i })) });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(row.outcome, "RED", "RED only on 33's proxy.log check");
+  assert.equal(row.note, "S7/short: RED on proxy.log:bounded-while-running, owned by ticket 33 (proxy.log:bounded-while-running)");
+  assert.deepEqual([heap.red, heap.value, heap.budget], [false, 63, 96]);
+  assert.deepEqual(
+    { readings: heap.detail.readings, intervalMs: heap.detail.intervalMs, h0MB: heap.detail.h0MB, firstMB: heap.detail.firstMB, minMB: heap.detail.minMB, maxMB: heap.detail.maxMB, firstReadingGrowthMB: heap.detail.firstReadingGrowthMB, rssBeforeMB: heap.detail.rssBeforeMB, rssAfterMB: heap.detail.rssAfterMB, rssLastMB: heap.detail.rssLastMB },
+    { readings: 30, intervalMs: 1000, h0MB: 20, firstMB: 118, minMB: 83, maxMB: 118, firstReadingGrowthMB: 98, rssBeforeMB: 140, rssAfterMB: 300, rssLastMB: 271 },
+  );
+  assert.equal(heap.detail.seriesMB.length, 30);
+  assert.deepEqual(summary.notes.responsesStore.heapSeriesMB, heap.detail.seriesMB, "summary.json records the series too");
+  assert.match(r.stdout, /S7\/short responses-store:heap-at-cap: 63 MB = min 83 − h0 20 over 30 readings 1 s apart \(first 118, max 118; rss 140 → 300 … 271\) ok/);
+});
+
+test("S7 retained heap: a series that never drops below 97 is RED, an unowned RED that fails the job", () => {
+  const { r, heap, row } = s7Job({ readings: padTo(above(99, 98, 97, 101), 30, 117).map((h) => ({ heapUsedMB: h, rssMB: 300 })) });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.deepEqual([heap.red, heap.value, heap.detail.minMB, heap.detail.firstMB], [true, 97, 117, 119]);
+  assert.match(r.stdout, /- S7\/short: RED on responses-store:heap-at-cap, not owned by ticket 33/);
+  assert.equal(row.note, undefined);
+});
+
+test("S7 retained heap: a missing or non-numeric reading is a harness failure, never GREEN", () => {
+  const good = padTo(above(70, 64), 30).map((h) => ({ heapUsedMB: h, rssMB: 300 }));
+  for (const [label, bad] of [["no /health answer", null], ["no heapUsedMB", { rssMB: 300 }], ["non-numeric", { heapUsedMB: "64", rssMB: 300 }], ["NaN", { heapUsedMB: Number.NaN, rssMB: 300 }]]) {
+    const readings = good.map((x, i) => (i === 7 ? bad : x));
+    const { r, row, result, heap } = s7Job({ readings });
+    assert.equal(row?.outcome, "HARNESS FAILURE", `${label}: ${r.stdout}${r.stderr}`);
+    assert.equal(heap, null, label);
+    assert.match(result.error, /reading 8 of 30/, label);
+    assert.equal(r.status, 1, label);
+  }
+  const noH0 = s7Job({ before: { rssMB: 140 }, readings: good });
+  assert.equal(noH0.row?.outcome, "HARNESS FAILURE", noH0.r.stdout);
+  assert.match(noH0.result.error, /no heapUsedMB before the load/);
+});
+
+test("S7 retained heap: a series shorter than 30 readings is a harness failure", () => {
+  const { r, row, result } = s7Job({ readings: padTo(above(70, 64), 29).map((h) => ({ heapUsedMB: h, rssMB: 300 })) });
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /29 readings, need ≥ 30/);
+});
+
 test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 30", () => {
   const { r, row, result } = s5LinuxReplay();
   assert.equal(r.status, 0, r.stdout + r.stderr);

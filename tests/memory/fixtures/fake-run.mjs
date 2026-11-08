@@ -19,10 +19,19 @@
 //                                 it reports the proxy's runtime Bun as run.mjs does:
 //                                 FAKE_RUN_BUN_REVISIONS maps ZCODE_KIT_BUN → revision
 //                                 ("" = none recorded), plus a fixed runtime environment.
+//   FAKE_RUN_MODE=s7-series       an S7/short run whose responses-store check is read
+//                                 and judged by the scenario's own code
+//                                 (lib/retained-heap.mjs) from a fake /health:
+//                                 FAKE_RUN_HEAP = { before, readings } (/health
+//                                 details; a null reading = no answer). The other S7
+//                                 checks are as on CI (proxy.log RED, ticket 33). An
+//                                 incomplete series is a harness failure, as run.mjs
+//                                 writes one (exit 2).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { osVerdict } from "../lib/verdict.mjs";
 import { parseSamplesCsv, rowsFromSamples } from "../lib/sampler.mjs";
+import { heapAtCapLine, readHeapSeries, storeHeapAtCap } from "../lib/retained-heap.mjs";
 
 const argv = process.argv.slice(2);
 const scenario = argv[0];
@@ -69,6 +78,31 @@ if (mode === "burst1") {
   process.exit(v.red ? 1 : 0);
 }
 const role = (maxCount) => ({ peakMB: 100, peakProcMB: 100, peakHwmMB: 120, maxCount, maxFds: 10, maxThreads: 10, distinctPids: maxCount, peakHeapMB: null });
+if (mode === "s7-series") {
+  const { before, readings } = JSON.parse(process.env.FAKE_RUN_HEAP);
+  let next = 0;
+  const health = async () => { const d = readings[next++]; return d === null ? null : { details: d }; };
+  const series = await readHeapSeries(health, { readings: readings.length, sleep: async () => {} });
+  const base = { id: "fake", key, scenario, profile: "short", variant, platform: "linux", metric: "rss", durationS: 90, samples: 90, observations: [], orphans: [] };
+  let heap;
+  try { heap = storeHeapAtCap({ before, series, budgetMB: 96 }); } catch (err) {
+    writeFileSync(join(dir, "summary.json"), JSON.stringify({ ...base, outcome: "HARNESS FAILURE", error: String(err.message), notes: {} }, null, 2));
+    process.exit(2);
+  }
+  console.log(heapAtCapLine(heap));
+  const checks = [
+    { name: "procPeak:proxy", red: false, value: 217, budget: 250, unit: "MB" },
+    { name: "orphans", red: false, value: 0, budget: 0, unit: "procs", detail: [] },
+    { name: "proxy.log:bounded-while-running", red: true, value: 6.37, budget: 6, unit: "MB" },
+    { name: "proxy.early.log:bounded", red: false, value: 0, budget: 1, unit: "MB (+64 KB overshoot)" },
+    heap,
+  ];
+  const red = checks.some((c) => c.red);
+  const summary = { ...base, outcome: red ? "RED" : "GREEN", red, checks, summary: { "*": role(2), kit: role(1), proxy: role(1), "mock-upstream": role(1) },
+    notes: { sampler: { units: null, overhead: null }, responsesStore: { heapBeforeMB: before.heapUsedMB, heapAfterMB: series[0].heapUsedMB, heapSeriesMB: series.map((x) => x.heapUsedMB) } } };
+  writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
+  process.exit(red ? 1 : 0);
+}
 const complete = mode === "green-complete";
 // Consistent with the OS it runs on: a Windows run is judged on commit with a passed units self-test.
 const win = process.platform === "win32";
