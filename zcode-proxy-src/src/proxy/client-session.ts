@@ -283,6 +283,27 @@ function hashJson(value: unknown): string {
 const STABLE_FLUSH_CHARS = 16 * 1024;
 
 /**
+ * JSON.stringify(text) written in slices, so a long leaf (a pasted file, an
+ * image's base64) is never copied whole. JSON.stringify escapes code unit by
+ * code unit except that a surrogate pair is kept and a lone surrogate is
+ * escaped; a slice therefore never ends on a high surrogate, which keeps every
+ * pair inside one slice and gives each slice the escapes of the whole text.
+ */
+function writeLongString(text: string, write: (text: string) => void): void {
+  write("\"");
+  for (let start = 0; start < text.length;) {
+    let end = Math.min(start + STABLE_FLUSH_CHARS, text.length);
+    if (end < text.length) {
+      const last = text.charCodeAt(end - 1);
+      if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    }
+    write(JSON.stringify(text.slice(start, end)).slice(1, -1));
+    start = end;
+  }
+  write("\"");
+}
+
+/**
  * Write the stable stringification of `value` in pieces. Pieces are whole
  * JSON tokens, so no surrogate pair is split between two hash updates.
  * `dropped` is the text for a leaf JSON.stringify drops: "undefined" in an
@@ -290,6 +311,10 @@ const STABLE_FLUSH_CHARS = 16 * 1024;
  * (Array.prototype.join).
  */
 function writeStable(value: unknown, write: (text: string) => void, dropped: string): void {
+  if (typeof value === "string" && value.length > STABLE_FLUSH_CHARS) {
+    writeLongString(value, write);
+    return;
+  }
   if (value === null || typeof value !== "object") {
     const leaf = JSON.stringify(value) as string | undefined;
     write(leaf === undefined ? dropped : leaf);
