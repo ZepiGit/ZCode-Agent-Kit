@@ -130,3 +130,6 @@ ADR: no
     - S6/short 8, 8, 8, 8, 8, GREEN.
   - **The marker:** not touched. It was never on this branch; the orchestrator removes it on staging/71.
   - **Still pending CI:** the pre-merge run confirming the four rules, and the memory-budget job and fast suite green on ubuntu and windows. The memory-budget legs of 42467078897 never ran (504), so the windows S1/short 5-repetition rule has not yet run on CI.
+  - **Later merge of the tip 3ed5896** (ticket 25: bounded collections; its lift moves the responses store onto `runtime/bounded-collection.ts`):
+    - suites rerun: `npm run test` 873 tests, 854 pass, 0 fail, 19 skipped; `npm run test:proxy` 1,451 pass, 0 fail; typecheck clean; `npm run test:mcp` 96 pass, 0 fail, 1 skipped;
+    - S7/short on that tree (`t71-r2c-s7`): heap-at-cap 63 MB (min 71 − h0 8, series flat at 71), ratchet holds. The store's retained heap is unchanged by 25's lift.
