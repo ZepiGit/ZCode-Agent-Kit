@@ -1757,3 +1757,18 @@ test("S3 failed launches leave out only the launch the kill-holder adversary kil
   // A victim pid that exited 0 (the kill came too late) is neither.
   assert.deepEqual(s3Scenario.launchOutcomes([{ i: 0, via: "preflight", pid: 101, code: 0 }], { killed: 101 }), { failedLaunches: [], killedByAdversary: [] });
 });
+
+// Owner Proxy round 27 Q1 condition 2: pid matching may only ever make the
+// count stricter. Windows reuses pids quickly; a pid carried by two launches
+// of the round names no single victim, so neither is left out.
+test("S3 failed launches: a killed pid carried by two launches leaves neither out (a reused pid never hides a real failure)", () => {
+  const results = [
+    { i: 0, via: "preflight", pid: 101, code: null, tail: "starting zcode-proxy ..." },
+    { i: 1, via: "preflight", pid: 101, code: 4, tail: "[zcode-preflight] cause=startup" },
+    { i: 2, via: "preflight", pid: 102, code: 0, tail: "ok" },
+  ];
+  assert.deepEqual(s3Scenario.launchOutcomes(results, { killed: 101, afterMs: 150 }), {
+    failedLaunches: ["preflight#0 code=null starting zcode-proxy ...", "preflight#1 code=4 [zcode-preflight] cause=startup"],
+    killedByAdversary: [],
+  });
+});
