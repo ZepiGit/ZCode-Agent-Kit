@@ -55,6 +55,17 @@ export function transformRequestBody(body: string | undefined, ctx: TransformCon
   }
   if (typeof parsed !== "object" || parsed === null) return body;
 
+  return applyRequestBodyTransforms(parsed, ctx) ? JSON.stringify(parsed) : body;
+}
+
+/**
+ * The transformations of `transformRequestBody`, applied in place to a body
+ * the caller has already parsed (ticket 20: one JSON parse per request body
+ * instead of one per reader). Returns true when the object changed; the caller
+ * then sends `JSON.stringify(parsed)`, otherwise the body text it parsed, so
+ * the bytes upstream are exactly those of `transformRequestBody(text, ctx)`.
+ */
+export function applyRequestBodyTransforms(parsed: object, ctx: TransformContext): boolean {
   let modified = false;
 
   if (ctx.format === "openai") {
@@ -78,7 +89,7 @@ export function transformRequestBody(body: string | undefined, ctx: TransformCon
     }
   }
 
-  return modified ? JSON.stringify(parsed) : body;
+  return modified;
 }
 
 /** OpenAI streaming: ensure `stream_options.include_usage: true`. */

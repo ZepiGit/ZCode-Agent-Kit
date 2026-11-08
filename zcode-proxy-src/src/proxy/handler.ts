@@ -22,7 +22,7 @@ import { getDefaultEndpointRouting, type EndpointRoutingService } from "./endpoi
 import { getDefaultClientSigning, sendWithClientSigning, type ClientSigningManager } from "./client-signing.js";
 import { credentialString, type Credential } from "../auth/types.js";
 import { isPostWriteError, sendOrderedUpstreamRequest } from "./ordered-transport.js";
-import { transformRequestBody } from "./body-transformer.js";
+import { applyRequestBodyTransforms, transformRequestBody } from "./body-transformer.js";
 import { CAPTCHA_CHALLENGE_HEADER, isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
 import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
@@ -111,13 +111,17 @@ export async function proxyRequest(
     return errorResponse(400, "invalid_request_error", (err as Error).message);
   }
 
+  // The body is parsed once (ticket 20): validation, the request meta, the
+  // OpenAI translation and the body transforms all read this one object.
+  let parsedBody: Record<string, unknown> | undefined;
   if (body) {
     try {
       const parsed = JSON.parse(body);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse(400, 'invalid_request_error', 'Request body must be a JSON object');
+      parsedBody = parsed as Record<string, unknown>;
     } catch { return errorResponse(400, format === 'openai' ? 'translation_failed' : 'invalid_request_error', 'Request body is not valid JSON'); }
   }
-  const meta = peekBody(body);
+  const meta = requestMeta(parsedBody);
 
   if (dumpEnabled()) {
     dumpPhase(reqId, "client_in", {
@@ -178,7 +182,7 @@ export async function proxyRequest(
 
   let upstreamBody = body;
   if (translateOpenAIToAnthropic) {
-    const translated = translateOpenAIBody(body);
+    const translated = translateOpenAIBody(body, parsedBody);
     if (translated instanceof Response) return translated;
     upstreamBody = translated;
     if (debug) debugLine(reqId, `translated OpenAI→Anthropic (bytes=${upstreamBody?.length ?? 0})`);
@@ -192,7 +196,13 @@ export async function proxyRequest(
   // Bundle `E2e` fires for EVERY anthropic-kind request (both plans) — the
   // injected user_id is the device/session blob, never the account uuid.
   const metadataUserId = buildAnthropicMetadataUserId(config.identity.deviceMid, clientSession?.sessionId);
-  const transformedBody = transformRequestBody(upstreamBody, { format: upstreamFormat, metadataUserId, startPlan });
+  const transformContext = { format: upstreamFormat, metadataUserId, startPlan };
+  // Passthrough transforms the parsed client body in place; a translated body
+  // is new text and goes through the text form. Either way the bytes are
+  // those of transformRequestBody(upstreamBody).
+  const transformedBody = upstreamBody === body && parsedBody
+    ? (applyRequestBodyTransforms(parsedBody, transformContext) ? JSON.stringify(parsedBody) : upstreamBody)
+    : transformRequestBody(upstreamBody, transformContext);
   if (debug && transformedBody !== upstreamBody) {
     debugLine(reqId, `body transformed (upstreamFormat=${upstreamFormat}, startPlan=${startPlan}, bytes=${transformedBody?.length ?? 0})`);
   }
@@ -998,13 +1008,13 @@ export function errorResponse(status: number, type: string, message: string): Re
 }
 
 /** Translate an OpenAI request body string to Anthropic JSON. Returns error Response on failure. */
-function translateOpenAIBody(body: string | undefined): Response | string | undefined {
+function translateOpenAIBody(body: string | undefined, alreadyParsed?: unknown): Response | string | undefined {
   if (body === undefined || body.length === 0) {
     return errorResponse(400, "translation_failed", "OpenAI request body is empty; cannot translate.");
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(body);
+    parsed = alreadyParsed ?? JSON.parse(body);
   } catch (err) {
     return errorResponse(400, "translation_failed", `OpenAI request body is not valid JSON: ${(err as Error).message}`);
   }
@@ -1166,17 +1176,13 @@ interface RequestMeta {
   stream: boolean;
 }
 
-function peekBody(body: string | undefined): RequestMeta {
-  if (!body) return { model: "-", stream: false };
-  try {
-    const p = JSON.parse(body) as Record<string, unknown>;
-    return {
-      model: typeof p.model === "string" ? p.model : "-",
-      stream: p.stream === true,
-    };
-  } catch {
-    return { model: "-", stream: false };
-  }
+/** Model and stream flag for the request log, from the parsed body. */
+function requestMeta(parsed: Record<string, unknown> | undefined): RequestMeta {
+  if (!parsed) return { model: "-", stream: false };
+  return {
+    model: typeof parsed.model === "string" ? parsed.model : "-",
+    stream: parsed.stream === true,
+  };
 }
 
 let reqCounter = 0;
