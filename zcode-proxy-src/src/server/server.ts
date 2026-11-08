@@ -22,6 +22,19 @@ import { loadAccountStore } from "../auth/account-store.js";
 import { errorResponse } from "../proxy/handler.js";
 import { healthDetails } from "../runtime/health-monitor.js";
 import type { ResponseStore } from "../responses/store.js";
+import {
+  ADMISSION_SHED_NEXT,
+  admissionCost,
+  admissionShedWhy,
+  bindTicket,
+  createAdmission,
+  DEFAULT_MAX_IN_FLIGHT_BYTES,
+  SHED_RETRY_AFTER_SECONDS,
+  shedResponse,
+  type Admission,
+  type AdmissionStats,
+  type EndpointShape,
+} from "./admission.js";
 
 interface ServerOptions {
   config: ProxyConfig;
@@ -32,6 +45,8 @@ interface ServerOptions {
   debug?: boolean;
   /** Responses-API state store. When absent, `/v1/responses` runs stateless (`previous_response_id` returns 404). */
   responseStore?: ResponseStore;
+  /** Admission control for request bodies (ADR-0004). Defaults to one built from `config.server.admission`. */
+  admission?: Admission;
 }
 
 /** Minimal server handle: what the caller needs to print URLs and shut down. */
@@ -42,6 +57,8 @@ export interface ProxyServer {
   stop(exit?: boolean): void;
   /** Promise that resolves once the server has fully stopped. */
   close(): Promise<void>;
+  /** Admission counters (`inFlightBytes`, `queued`, `shedTotal`, …), for observability (ticket 39). */
+  admission(): AdmissionStats;
 }
 
 /** Create a fetch-style handler that routes the request through the proxy. */
@@ -60,6 +77,41 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     auth,
     fetchImpl: opts.fetchImpl,
     debug: opts.debug === true,
+  };
+  const admission = opts.admission ?? admissionFor(config);
+
+  /**
+   * Run a body-carrying route under admission: the handler (which reads the
+   * body) starts only once the request is admitted, and the request's bytes
+   * are given back when the handler has produced its response, the point
+   * after which it no longer holds the body for a retry. The response body
+   * that follows (a stream, possibly long) is not limited.
+   */
+  const admitted = async (req: Request, shape: EndpointShape, run: () => Promise<Response>): Promise<Response> => {
+    const cost = admissionCost(req);
+    if (cost === null) return run();
+    const result = await admission.admit(cost, req.signal);
+    if (!result.ok) {
+      const why = result.reason === "aborted"
+        ? "The client went away while the request waited for admission."
+        : admissionShedWhy(result.reason, admission.stats(), result.waitedMs);
+      if (result.reason !== "aborted") {
+        admission.recordShed({ reason: result.reason, endpoint: new URL(req.url).pathname, bytes: cost, waitedMs: result.waitedMs });
+      }
+      // Nobody reads an aborted request's answer; the shed shape keeps it uniform.
+      return shedResponse(shape, { why, retryAfterSeconds: SHED_RETRY_AFTER_SECONDS, next: ADMISSION_SHED_NEXT });
+    }
+    const ticket = result.ticket;
+    bindTicket(req, ticket);
+    // A client that goes away gives its bytes back even if a reader is stuck.
+    const onAbort = (): void => ticket.release();
+    req.signal.addEventListener("abort", onAbort, { once: true });
+    try {
+      return await run();
+    } finally {
+      req.signal.removeEventListener("abort", onAbort);
+      ticket.release();
+    }
   };
 
   return async (req: Request): Promise<Response> => {
@@ -107,10 +159,10 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     // --- Routing ---
 
     if (path === "/v1/chat/completions" && method === "POST") {
-      return handleChatCompletions(req, proxyOpts);
+      return admitted(req, "openai", () => handleChatCompletions(req, proxyOpts));
     }
     if (config.responses.enabled && path === "/v1/responses" && method === "POST") {
-      return handleResponsesRoute(req, responsesOpts);
+      return admitted(req, "openai", () => handleResponsesRoute(req, responsesOpts));
     }
     if (path === "/v1/models" && method === "GET") {
       return handleListModels(req, config);
@@ -157,7 +209,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     }
 
     if (path === "/v1/messages" && method === "POST") {
-      return handleMessages(req, proxyOpts);
+      return admitted(req, "anthropic", () => handleMessages(req, proxyOpts));
     }
 
     if (config.async.enabled) {
@@ -175,10 +227,10 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
         );
       }
       if (path === "/async/v1/messages" && method === "POST") {
-        return handleAsyncMessagesRoute(req, asyncOpts);
+        return admitted(req, "anthropic", () => handleAsyncMessagesRoute(req, asyncOpts));
       }
       if (path === "/async/v1/chat/completions" && method === "POST") {
-        return handleAsyncChatRoute(req, asyncOpts);
+        return admitted(req, "openai", () => handleAsyncChatRoute(req, asyncOpts));
       }
       if (path === "/async/v1/health" && method === "GET") {
         return handleAsyncHealthRoute(req, asyncOpts);
@@ -226,7 +278,8 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
     );
   }
 
-  const handler = createFetchHandler(opts);
+  const admission = opts.admission ?? admissionFor(opts.config);
+  const handler = createFetchHandler({ ...opts, admission });
   const requestedPort = opts.config.server.port;
   const bindHost = host === 'localhost' ? '127.0.0.1' : host === '[::1]' ? '::1' : host;
 
@@ -247,7 +300,7 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
     }
 
     try {
-      const webReq = nodeReqToWebRequest(req, abortController.signal);
+      const webReq = nodeReqToWebRequest(req, abortController.signal, (n) => admission.noteBodyRead(n));
       const resp = await handler(webReq).then((r) => addCorsHeaders(r, webReq.headers.get("origin"), opts.config));
       await writeWebResponseToNodeResp(resp, res, abortController.signal);
     } catch (err) {
@@ -282,13 +335,14 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
           if (exit) process.exit(0);
         },
         close: () => new Promise<void>((r) => server.close(() => r())),
+        admission: () => admission.stats(),
       });
     });
   });
 }
 
 /** Convert a Node.js IncomingMessage to a Web API Request. */
-function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: AbortSignal): Request {
+function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: AbortSignal, onBodyRead?: (bytes: number) => void): Request {
   const headers = new Headers();
   for (const [key, val] of Object.entries(req.headers)) {
     if (val == null) continue;
@@ -307,7 +361,7 @@ function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: 
   }
 
   // Cast: Node's ReadableStream type ≠ Web ReadableStream type at the type layer, but `Readable.toWeb` returns a spec-compliant stream at runtime.
-  const bodyStream = Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>;
+  const bodyStream = countedPullStream(Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>, onBodyRead);
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
@@ -316,6 +370,34 @@ function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: 
     signal,
   };
   return new Request(url, init);
+}
+
+/**
+ * The request body as a pull-only stream: nothing is read from the socket
+ * before the handler asks for it (a request waiting for admission keeps its
+ * body on the socket), and every chunk handed over is counted.
+ */
+function countedPullStream(source: ReadableStream<Uint8Array>, onRead?: (bytes: number) => void): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      onRead?.(value.byteLength);
+      controller.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  }, { highWaterMark: 0 });
+}
+
+/** The admission control a proxy builds from its config (ADR-0004). */
+function admissionFor(config: ProxyConfig): Admission {
+  return createAdmission({ maxInFlightBytes: config.server.admission?.maxInFlightBytes ?? DEFAULT_MAX_IN_FLIGHT_BYTES });
 }
 
 /** Write a Web API Response to a Node.js ServerResponse. */
