@@ -77,7 +77,8 @@ test('start terminates a proven hung own proxy and starts a replacement', async 
   assert.match(output, new RegExp(`hung proxy pid ${hung.pid} \\(no /health answer on 3 probes.*\\) — terminating and restarting`));
   assert.equal(spawnAttempts, 1, 'a new start must follow the kill');
   assert.equal(code, 4, 'the synthetic Bun resolver refuses the actual spawn');
-  assert.equal(manager.pidAlive(hung.pid), false, 'the hung process is gone');
+  // Through the child's handle, not its PID: Windows may reuse a freed PID at once (ticket 70).
+  assert.equal(hung.kill(0), false, 'the hung process is gone');
   assert.equal(existsSync(join(root, 'logs', 'proxy.pid')), false, 'its record is removed');
   assert.equal(manager.lastRecovery()?.pid, hung.pid);
   assert.match(readFileSync(join(root, 'logs', 'heal.log'), 'utf8'), /cause=hung action=recover result=ok/);

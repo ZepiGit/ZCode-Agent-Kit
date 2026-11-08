@@ -36,3 +36,4 @@ Spec stories: 62, 65
 ## Comments
 
 - 2026-11-08 (orchestrator, Owner Proxy round 15): Q1 conditions 3 and 7 — added "remove `cdn-cache:memory-growth` from `S2/short`"; 25 owns that one S2 check on both legs (its "CDN memory ≤ 64 MB" criterion), and 58 owns the solver names in the same entry.
+- 2026-11-08 (orchestrator, Owner Proxy round 17): Round 17 Q1: 25 does not own `responses-store:heap-at-cap`. Its lift keeps the store unchanged. (The windows S7/short RED on that check, run 42436010878, is handled by ticket 71's retained-heap measurement rule, not by an owner.)

@@ -112,3 +112,40 @@ Spec stories: 61
 - `ux-before` on both legs, byte for byte (the windows leg against `tests/ux-before/windows`).
 - `memory-budget` on both legs: the ratchet holds with `expected-red.json` unchanged. Windows `S3/short`, `S3/hung` and `S4/short` keep their listed names, with no new RED name. Windows S3 `procPeak:preflight` (commit) must still be ≤ 76 MB; if it is RED there, 15 comes back with the numbers (Round 15).
 - Windows behaviour not exercised locally: the per-acquisition lock release, and the preflight running the lifecycle module without the manager.
+- 2026-11-08 (orchestrator, from ticket 70): the kit's own exit poll after a kill also checks by PID. If Windows reuses the PID before the first 300 ms poll, stop refuses to touch the new process (safe) but reports code 2 although the proxy died. Fix in the lifecycle stop path by waiting on the kill script's own process handle (or identity by PID + start time), keeping C6. Not seen in CI yet.
+
+### 2026-11-08 — implementer (ticket 15, round 2)
+
+**Branch:** `ticket/15-proxy-lifecycle-module`. Round 2 commits: `1e2d22e` (test fix), `c81cf9f` + `459f58e` (stop-path fix), `f778014` (fail-closed test). Integration tip `c9c4062` merged in (`0fc2491`). The head SHA is the commit that adds this comment.
+
+**Windows CI failure (run 42444449351, `proxy-lifecycle.test.mjs` "the fresh record carries its start time")**
+
+Root cause: the test asserted something the pre-15 code never guaranteed on Windows. The refactor did not change the start-time fill.
+- **Code.** The spawn → `writePidFile(pid, null)` → start-time probe loop (≤ 5 s, `processStartMs(pid, { timeoutMs: 2500 })`) → `writePidFile(pid, start)` sequence in `lib/proxy-lifecycle.mjs` `spawnProxy()` is byte-identical to origin/main 9e45d05 `proxy/zcode-proxy-manager.mjs` (a whitespace-normalised `diff` of the block is empty). Both fill the record before the health wait.
+- **What the test did.** It polled `proxy.pid` and `/health` and asserted on the first record with a new pid while the proxy answered. On Windows the probe is a PowerShell query (seconds on a cold runner), and the stand-in proxy answers `/health` within ~100 ms. So the record can be seen before the start time is written. On Linux the `/proc` probe is instant, which is why ubuntu passed.
+- **Reproduced on Linux, same path, both sides.** A scratch-only, uncommitted line made the Linux probe block for 1500 ms (as `spawnSync` of PowerShell blocks). The round-1 test then fails with the same assertion against origin/main's manager (`t15-r2-origin-main-probe1500`) and against the branch (`t15-r2-branch-probe1500`). Both pass with 0 ms (`…-probe0`). origin/main's manager also passes the fixed test with the 1500 ms probe (`t15-r2-origin-main-fixed`).
+- **Fix (test only).** The test reads the record once the respawn finished (`respawn: start finished with exit code 0`); the start time is filled before the health wait, so the record is final by then. It checks `verifyOwnProcess(record) === "match"` against the live proxy. On Windows a probe that never answered in its deadline leaves `startedMs` null. That is today's behaviour (DECISIONS Round 7 Q4); the test records a diagnostic for it, and ticket 16 tightens it. The other two spawned tests apply the same rule. The preflight-hook test asserts stop's `start-unknown` refusal (exit 4) in that case. The account-change test skips with a diagnostic if the first proxy has no start time. POSIX must always carry a start time.
+- **Ticket 70's lesson in the tests.** Teardown never kills by a bare pid. A direct child (the old proxy) is killed through its own handle. A manager-spawned proxy is killed only while its command line (`processCommandLine`) still names the fixture directory. Kills run before the fixture directory is removed (`t.after` hooks run in registration order). The account change's dead-record case no longer kills a pid and probes it afterwards: the proxy is stopped through the stop intent, which returns only after the exit, and the dead record names a pid no process has (2147483644).
+
+**Stop path after a kill (orchestrator note from ticket 70 on this ticket)**
+- **RED first.** `t15-r2-red-reuse`: a stand-in that survives SIGTERM plays "the new process at the pid", and the injected start-time probe reports a new generation once the signal arrived. Stop returned `{ code: 2, outcome: "kill-failed" }` with `refusing to signal pid N: its start time no longer matches the pid record` and `ERROR killing pid N`, although the recorded process was gone. C6 held: nothing signalled the new process.
+- **Fix.** In `killOwnedIn`, the recorded process counts as exited when its pid is gone or now names a process with another start time. An unknown start time never counts. The recorded start comes from the pid record (stop, hung recovery). Every signal still passes its guard, so C6 is unchanged. Freshly spawned children (no record), the public `killOwned` and the respawn wait still go by the pid alone. On Windows the extra start-time probe runs only while the pid still answers after the kill.
+- **GREEN.** `t15-r2-green-reuse`: lifecycle + manager-safety + manager-audit, 36/36. A second test pins the fail-closed side: a start time that becomes unknown after the kill gives `kill-failed` (exit 2), no SIGKILL, and the record stays.
+
+**Mutations (round 2; committed first, restored from HEAD, empty diff each)**
+- `r2-m14`: exit check by pid only. The reuse test fails.
+- `r2-m15`: an unknown start time counts as exited (fail-open). The fail-closed test fails.
+- `r2-m16`: stop does not pass the record's start time. The reuse test fails.
+- `r2-m17`: the start time is never filled into the record. The three spawned tests fail (old-proxy respawn, preflight hook, account change).
+
+**Full suites after merging `c9c4062`**
+- `npm run test` (`t15-r2-test`): 851 tests, 832 pass, 0 fail, 19 skipped. The proxy-lifecycle file has 14 tests; the 2 new ones are POSIX-only (skipped on Windows).
+- `npm run test:proxy` (`t15-r2-proxy`): 1384 pass, 0 fail, 92 files.
+- `npm run test:proxy-typecheck`: clean.
+- `npm run test:mcp` (`t15-r2-mcp`): 97 tests, 96 pass, 0 fail, 1 skipped.
+- `npm run test:ux-before` (`t15-r2-uxbefore`): 1/1, byte-identical in all seven variants.
+- Memory ratchet (`t15-r2-mem-job`, `job.mjs --os linux --only S3/short,S3/hung,S4/short`, expected-red in ticket 67's owned-checks format): **ratchet holds**. The RED checks are owned by 16/37 (S3) and 17 (S4). S4's `unstoppable-proxy-after-ctrl-c` was RED this run (1 of 8; a marked `flips` check, owned by 17). The cycle is the killed-start window: Ctrl-C at 0 ms, `pidRecordStartedMs: "no record"`, and the later stop refuses "proxy healthy but no pid file" before any kill. The stop-path change does not reach that cycle.
+
+**Pending CI (orchestrator verifies after restage)**
+- windows test-kit Node 24/26: `proxy-lifecycle.test.mjs` green. Watch for the `t.diagnostic` "start-time probe did not answer" lines, which mark the ticket-16 window; their presence is not a failure.
+- The Windows stop path with the new exit check (PowerShell probe after `TerminateProcess` only while the pid still answers): manager-safety "stop cleanly kills a verified-own process" and the S4 windows leg.

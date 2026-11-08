@@ -14,7 +14,7 @@ ADR: —
 
 **Acceptance criteria:**
 
-- [ ] Seam 3 test with a local recording proxy: set → all captcha egress goes through it; unset with ambient `HTTP(S)_PROXY` set → no proxy used.
+- [ ] Seam 3 test with a local recording proxy (Round 19): setting set → all captcha egress (`captchaFetch` http, sync-XHR, https CONNECT) goes through it and the ambient proxy receives nothing; setting invalid → all three fail closed and no listener receives anything; setting unset with ambient `HTTP(S)_PROXY` set → no proxy used, a plain test on Bun ≥ 1.4.3 and declared `it.failing` on Bun < 1.4.3 with that condition in the test name (gate `>=1.4.3`, never moved). On the pinned Bun 1.4.2 the unset-case guarantee is delivered by ticket 27 (solver child environment without ambient proxy variables).
 
 **Common acceptance (every ticket):**
 
@@ -30,3 +30,5 @@ ADR: —
 Spec stories: 130
 
 ## Comments
+
+- 2026-11-08 (orchestrator, Owner Proxy round 19, binding): closes on the amended criterion; the unset case on Bun 1.4.2 moves to ticket 27; suite counts include 1 declared-failing case on 1.4.2; the test name carries the version condition.
