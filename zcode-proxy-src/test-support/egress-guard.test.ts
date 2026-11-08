@@ -176,7 +176,8 @@ describe("the guarded bun test run fails on a non-loopback attempt", () => {
     const dir = mkdtempSync(join(scratch, `${name}-`));
     writeFileSync(join(dir, "bunfig.toml"), `[test]\npreload = [${JSON.stringify(PRELOAD)}]\n`);
     writeFileSync(join(dir, "probe.test.ts"), source);
-    const r = Bun.spawnSync([process.execPath, "test"], { cwd: dir, env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+    // The probe's mode is its own: a record-mode parent run must not leak into it.
+    const r = Bun.spawnSync([process.execPath, "test"], { cwd: dir, env: { ...process.env, ZCODE_EGRESS_GUARD: "", ...env }, stdout: "pipe", stderr: "pipe", timeout: 60_000 });
     return { exitCode: r.exitCode, output: r.stdout.toString() + r.stderr.toString() };
   }
   const swallowed = `fetch("http://${TARGET}/api/v1/client/configs?app_version=1").catch(() => {})`;
