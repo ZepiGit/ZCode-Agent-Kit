@@ -1373,3 +1373,42 @@ test("job: a GREEN run of a listed entry with flipping checks passes and the sum
   assert.equal(greenOrphan.r.status, 1, greenOrphan.r.stdout);
   assert.equal(greenOrphan.row.note, undefined);
 });
+
+// ── linux S5/short GREEN on the trend flag (Round 17 Q2) ───────────────────────
+// The real linux S5/short summary of CI run 42436186573 (staging/67, ticket 13's
+// tree): growth:mcp-bridge 39.53 %/1k RSS, eight times the 5 %/1k budget, GREEN
+// only because the net rise (9.7 %) missed the 10 % trend branch. Replayed through
+// the job against the committed list, it passes on the flipping mark and says so;
+// the same run with an orphan fails.
+const CI_S5_LINUX_GREEN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ci-42436186573-s5-short-linux-summary.json");
+
+function s5LinuxReplay(change = null) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-s5l-"));
+  try {
+    let path = CI_S5_LINUX_GREEN;
+    if (change) {
+      const s = JSON.parse(readFileSync(CI_S5_LINUX_GREEN, "utf8"));
+      change(s);
+      s.red = s.checks.some((c) => c.red);
+      s.outcome = s.red ? "RED" : "GREEN";
+      path = join(home, "summary.json");
+      writeFileSync(path, JSON.stringify(s));
+    }
+    return fakeJob("replay", "S5/short", { FAKE_RUN_SUMMARY: path });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 30", () => {
+  const { r, row, result } = s5LinuxReplay();
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(row.outcome, "GREEN");
+  assert.deepEqual(result.growthChecks.map((g) => [g.name, g.value, g.trend]), [["growth:mcp-bridge", 39.53, false]]);
+  const line = "S5/short: GREEN, listed for ticket 30 on flipping checks growth:mcp-bridge (Round 15 Q1)";
+  assert.equal(row.note, line);
+  assert.ok(r.stdout.includes(`- ${line}`), r.stdout);
+  const orphan = s5LinuxReplay((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 }));
+  assert.equal(orphan.r.status, 1, orphan.r.stdout);
+  assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 30 \(linux, Round 14 Q1, Round 15 Q1\)/);
+});

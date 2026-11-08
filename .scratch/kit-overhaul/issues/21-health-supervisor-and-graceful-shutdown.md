@@ -33,3 +33,5 @@ ADR: 0008
 Spec stories: 26, 27, 28, 52
 
 ## Comments
+
+- 2026-11-08 (orchestrator, Owner Proxy round 18): Q3 condition 3 — ADR-0008's "designed maximum of about 450 MB … 64 MB × ~4.5" is out of date: the measured linux maximum under the cap is 608.5 MB (RSS, S1/burst32, ticket 19's tree), so the 512 MB soft limit (WARN only) can fire under legitimate cap-saturating load; the 1024 MB hard limit keeps more than 400 MB of margin on linux; the windows footprint is EVIDENCE MISSING. The thresholds do not change. This ticket's evidence records the proxy footprint the supervisor samples, per leg, for the S1 burst runs on its tree. If that footprint can hold at or above 1024 MB for 3 samples, this ticket comes back with numbers before it merges (C1: no restart storms).
