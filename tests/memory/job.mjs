@@ -157,7 +157,7 @@ function markdown({ os, cap, ratchet, results, partial }) {
   const owned = ratchet.rows.filter((row) => row.note && row.state !== "unstable");
   if (owned.length) lines.push("", "Tolerated REDs and flipping GREENs (Round 14 Q1, Round 15 Q1: each listed run RED only on checks its owners own, GREEN only while a check is marked `flips`; each owner removes only its own names, in its own commit):", ...owned.map((row) => `- ${row.note}`));
   const notes = ratchet.rows.filter((row) => row.note && row.state === "unstable");
-  if (notes.length) lines.push("", "Unstable entries (Round 9 Q1, Round 13 Q1; each leaves only through its owner's measured exit: ticket 20's ≥ 20 runs, ticket 30's ≥ 10 runs):", ...notes.map((row) => `- ${row.note}`));
+  if (notes.length) lines.push("", "Unstable entries (Round 9 Q1, Round 13 Q1; each leaves only through its owner's measured exit: ticket 20's ≥ 20 runs, ticket 74's ≥ 10 runs):", ...notes.map((row) => `- ${row.note}`));
   const repeated = results.filter((r) => r.median);
   if (repeated.length) {
     lines.push("", "Judged on the median of n fresh repetitions (one verdict per run key; every repetition must also stay within the per-run ceiling; Windows: the WS gate, commit reported):", "", "| run | n | gate | repetitions (MB) | median | budget | ceiling | over ceiling | commit per repetition (MB) |", "|---|---|---|---|---|---|---|---|---|");
