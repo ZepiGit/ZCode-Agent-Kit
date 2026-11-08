@@ -496,3 +496,63 @@ From ticket 71 on, linux S6/short is the median of 5 fresh S6 body repetitions a
 ## Current
 
 (pending)
+
+## Windows S1/short repetitions by position (Round 28 Q1)
+
+Raw job logs, commit growth:proxy %/1k per repetition (5 sequential repetitions since ticket 71; "no trend" marks a repetition whose trend flag was false). Generator: `/home/AgentKit/overhaul-tools/t78-scripts/s1short-table.mjs`. Owner: ticket 78 (needs-triage), which appends every later windows S1/short run.
+
+| run | branch, head | rep 1 | rep 2 | rep 3 | rep 4 | rep 5 | median | verdict |
+|---|---|---|---|---|---|---|---|---|
+| 42481592284 | staging/71 d6efa3b | 5.32 | 3.57 | 3.3 | 4.67 | 5.33 | 4.67 | GREEN |
+| 42493218404 | overhaul/stability-terminal-ux 8126454 | 3.02 | 3.9 | 5.06 | 2.79 | 3.36 | 3.36 | GREEN |
+| 42494299680 | staging/29 57c3db0 | 5.34 | 3.04 | 3.59 | 4.66 | 3.18 | 3.59 | GREEN |
+| 42495987510 | staging/15b a004477 | 2.51 (no trend) | 4.5 | 2.2 (no trend) | 4.54 | 3.45 (no trend) | 3.45 | GREEN |
+| 42500996594 | staging/21 57ebbc8 | 2.6 | 3.98 | 3.02 (no trend) | 3.71 | 4.05 | 3.71 | RED |
+| 42501852701 | overhaul/stability-terminal-ux 1b904a1 | 3.34 | 4.85 | 4.98 | 5 | 4.47 | 4.85 | GREEN |
+| 42502565823 | staging/20 1b4a706 | 3.58 | 5.12 | 3.15 | 3.81 | 2.85 | 3.58 | GREEN |
+| 42502646304 | staging/20 ce38cbc | 3.23 (no trend) | 2.17 | 3.68 | 5.38 | 3.85 | 3.68 | GREEN |
+| 42502739091 | staging/20 ce16fdf | 3.99 | 3.27 | 3.66 | 4.53 | 5.6 | 3.99 | GREEN |
+| 42502835975 | staging/20 93667ae | 3.61 | 6.22 | 4.44 (no trend) | 3.65 | 4.21 | 4.21 | GREEN |
+| 42502922415 | staging/20 c97d59e | 3.51 | 4.18 | 2.46 | 4.88 | 3.67 | 3.67 | GREEN |
+| 42503015768 | staging/20 8b88d97 | 1.79 (no trend) | 4.12 | 3.88 | 4.78 | 3.83 | 3.88 | GREEN |
+| 42503101039 | staging/20 39dd963 | 4.02 | 4.85 | 3.4 | 5.15 | 4.31 | 4.31 | GREEN |
+| 42503197608 | staging/20 25697bd | 3.6 (no trend) | 3.09 | 4.29 | 4.09 | 4.09 | 4.09 | GREEN |
+| 42503284096 | staging/20 1a78acb | 5.27 | 4.5 | 5.12 | 6.04 | 4.92 | 5.12 | RED |
+| 42503373851 | staging/20 17f1d36 | 1.8 (no trend) | 5.2 | 2.05 | 4.79 | 5.51 | 4.79 | GREEN |
+
+Per position (all runs):
+- position 1: n 16, mean 3.53, sd 1.10, max 5.34, above 5: 3
+- position 2: n 16, mean 4.16, sd 1.00, max 6.22, above 5: 3
+- position 3: n 16, mean 3.64, sd 0.96, max 5.12, above 5: 2
+- position 4: n 16, mean 4.53, sd 0.78, max 6.04, above 5: 3
+- position 5: n 16, mean 4.17, sd 0.83, max 5.6, above 5: 3
+- ticket 20's tree: n 50, mean 4.06, sd 1.03, max 6.22, above 5: 10
+- other trees: n 30, mean 3.91, sd 0.93, max 5.34, above 5: 4
+
+Single-run windows S1/short (before the 5-repetition rule): n 23, mean 3.47, sd 0.87, max 5.18, above 5: 1
+
+| run | branch, head | commit %/1k | trend | WS %/1k |
+|---|---|---|---|---|
+| 42446746036 | staging/19 e341ef1 | 1.92 | false | -2.15 |
+| 42448137342 | overhaul/stability-terminal-ux 1fc7473 | 2.53 | true | -2.86 |
+| 42448283566 | staging/67 4de913b | 3.54 | true | 0.24 |
+| 42448791937 | staging/24 ea4f040 | 3.61 | false | 1.29 |
+| 42453037136 | overhaul/stability-terminal-ux 5e99b52 | 3.67 | true | -2.09 |
+| 42454650683 | staging/36 0cb730d | 4.91 | true | 2.94 |
+| 42455986931 | staging/25 e7451c6 | 2.14 | true | -0.88 |
+| 42457112513 | staging/19 b3e8fe7 | 4.1 | true | -1.39 |
+| 42457120690 | staging/26 d44d187 | 4.27 | true | -1.18 |
+| 42461329252 | staging/25 5707c95 | 3.01 | false | -3.47 |
+| 42462167868 | overhaul/stability-terminal-ux dcc7615 | 4.21 | true | 1.85 |
+| 42464297212 | staging/19 8239cde | 3.98 | true | 1.25 |
+| 42465834202 | staging/25 a8fd203 | 2.46 | false | -2.92 |
+| 42469136344 | overhaul/stability-terminal-ux e88821f | 4.38 | true | -0.15 |
+| 42469139184 | staging/15 5c7cda7 | 3.84 | true | 0.3 |
+| 42469209389 | staging/36 b37393f | 3.68 | true | -2.77 |
+| 42475847194 | staging/30 0e99864 | 3.17 | true | -2.52 |
+| 42478422809 | overhaul/stability-terminal-ux e8b16ed | 3.19 | false | -3.2 |
+| 42480631098 | staging/21 0f87d20 | 3.72 | true | 0.18 |
+| 42481585464 | overhaul/stability-terminal-ux 0f405d9 | 3.05 | true | -3.26 |
+| 42483637377 | staging/30 a53152d | 5.18 | true | 2.46 |
+| 42483787372 | staging/72 ee48822 | 3.24 | true | -3.41 |
+| 42484868282 | overhaul/stability-terminal-ux eaa91b3 | 2.01 | false | -1.2 |
