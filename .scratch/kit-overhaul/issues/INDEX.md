@@ -38,7 +38,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 32 | [TUI log pane capped at 2,000 lines and 8 MB](32-tui-log-pane-caps.md) | glm | low | 05, 11 | ready-for-agent |
 | 33 | [`proxy.log` single rotator: size-capped writer, manager rotation under the lock, file modes](33-proxy-log-single-rotator.md) | sol | high | 14, 16, 18, 21 | ready-for-agent |
 | 34 | [Early log (`proxy.early.log`): 1 MB cap and the tail copy into `proxy.log`](34-early-log-cap-and-tail-copy.md) | sol | medium | 33 | ready-for-agent |
-| 35 | [OMP in-host single-flight preflight with the cause-line result record](35-omp-single-flight-preflight.md) | sol | high | 03, 15, 33 | ready-for-agent |
+| 35 | [OMP in-host single-flight preflight with the cause-line result record](35-omp-single-flight-preflight.md) | sol | high | 03, 15, 33, 71 | ready-for-agent |
 | 36 | [MCP bridge: lazy HTTP transport and `--max-semi-space-size=1` in generated entries](36-mcp-bridge-lazy-http-and-semi-space-flag.md) | glm | medium | 13 | ready-for-agent |
 | 37 | [`process.execve` handover in `zcode-kit run` and the `ZCODE_KIT_RESIDENT_LAUNCHER=1` opt-out](37-execve-handover-and-resident-launcher-opt-out.md) | sol | high | 15, 35, 36, 17 | ready-for-agent |
 | 38 | [Manager `doctor` returns check records; `zcode-kit doctor` stops parsing text](38-manager-doctor-check-records.md) | glm | medium | 15 | ready-for-agent |
@@ -74,6 +74,9 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 68 | [Every writer of proxy/config.yaml and harness configs keeps the file's line endings (CRLF audit)](68-crlf-config-writers-audit.md) | sol | medium | 42 | ready-for-agent |
 | 69 | [`ensureDeviceMidInConfig` reads past the end of an empty unquoted `deviceMid:` line](69-devicemid-reader-runs-past-line.md) | sol | high | 68 | ready-for-agent |
 | 70 | [Windows: "stop cleanly kills a verified-own process" finds the process still alive](70-windows-stop-verified-own-process-flake.md) | sol | high | — | ready-for-agent |
+| 71 | [Measurement rules for three rare tails: S7 retained heap, windows S1/short repetitions, the OMP no-op floor](71-measurement-rules-rare-tails.md) | sol | low | 67 | ready-for-agent |
+| 72 | [Memory-loop tests check a PID after the process died (Windows PID reuse)](72-memory-tests-pid-after-death.md) | sol | low | 70 | ready-for-agent |
+| 73 | [Memory loop: `whileFrozen` resume and `scanWindows` filter by PID only](73-freeze-and-scanwindows-pid-identity.md) | sol | medium | 72 | ready-for-agent |
 
 ## Initial frontier
 

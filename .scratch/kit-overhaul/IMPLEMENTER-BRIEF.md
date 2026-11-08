@@ -16,6 +16,7 @@ All paths above are relative to `/home/AgentKit/wt/overhaul/.scratch/kit-overhau
 
 ## Running things
 - Every test, build, soak or process you start: `/home/AgentKit/overhaul-tools/run-capped.sh <name> <MemoryMax> <timeout_s> -- <cmd>` (systemd scope, no swap, timeout, `ZCODE_OVERHAUL_RUN=1`, isolated HOME; log goes to the integration worktree's `.scratch/kit-overhaul/reports/<name>.log` — prefix `<name>` with `tNN-`). Run it from your worktree with absolute paths (a background `cd X && (A) & B` runs B elsewhere).
+- RED-first runs against code that cannot yet be injected (solver, upstream clients): before the run, make sure it cannot reach a real external host (mock upstream, a blocked fetch/dispatcher preload, or no network namespace). A RED run that may have reached a real endpoint is a deviation to report.
 - Isolated ports only: your range is `19000 + NN*10` … `+9`. Never 8457, never another ticket's range. Mock upstream and fixtures only; no real credentials (B2).
 - Never kill a process you did not start. A sentinel kills run-tagged processes when RAM < 15 %.
 - If you set `PATH` inside a capped command, keep `$BUN_DIR` in it (the wrapper's Bun dir is otherwise lost).

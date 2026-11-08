@@ -1,30 +1,60 @@
 {
   "linux": {
-    "S1/burst4": "19",
-    "S1/burst16": "19",
-    "S1/burst32": "19",
-    "S1/bigbody": "19",
-    "S2/short": "58",
-    "S3/short": "37",
-    "S3/hung": "16",
-    "S3/omp": "35",
-    "S4/short": "17",
-    "S5/short": "30",
-    "S7/short": "34"
+    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S2/short": {
+      "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
+      "flips": ["growth:scenario", "procPeak:solver"]
+    },
+    "S3/short": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+      "flips": ["exactly-one-proxy-after-round", "procPeak:preflight", "procPeak:proxy"]
+    },
+    "S3/hung": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round", "start-over-stale-lock"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+      "flips": ["exactly-one-proxy-after-round", "start-over-stale-lock", "procPeak:preflight", "procPeak:proxy"]
+    },
+    "S3/omp": {
+      "owners": { "35": ["omp:concurrent-preflights"], "37": ["procPeak:proxy", "procPeak:preflight"] },
+      "flips": ["procPeak:proxy", "procPeak:preflight"]
+    },
+    "S4/short": {
+      "owners": { "17": ["stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
+      "flips": ["unstoppable-proxy-after-ctrl-c"]
+    },
+    "S5/short": { "owners": { "30": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] },
+    "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }
   },
   "windows": {
     "S1/burst1": { "ticket": "20", "state": "unstable" },
-    "S1/burst4": "19",
-    "S1/burst16": "19",
-    "S1/burst32": "19",
-    "S1/bigbody": "19",
-    "S1/stalled": "61",
-    "S2/short": "58",
-    "S3/short": "37",
-    "S3/hung": "16",
-    "S3/omp": "35",
-    "S4/short": "17",
+    "S1/burst4": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst16": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/burst32": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/bigbody": { "owners": { "19": ["procPeak:proxy"] } },
+    "S1/stalled": { "owners": { "61": ["procPeak:proxy"] } },
+    "S2/short": {
+      "owners": { "25": ["cdn-cache:memory-growth"], "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
+      "flips": ["growth:scenario", "procPeak:solver"]
+    },
+    "S3/short": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round"], "17": ["orphans"], "37": ["peak:kit"] },
+      "flips": ["exactly-one-proxy-after-round", "orphans"]
+    },
+    "S3/hung": {
+      "owners": { "16": ["failed-launches", "stale-lock-after-round", "exactly-one-proxy-after-round", "start-over-stale-lock"], "17": ["orphans"], "37": ["peak:kit"] },
+      "flips": ["exactly-one-proxy-after-round", "start-over-stale-lock", "orphans", "peak:kit"]
+    },
+    "S3/omp": {
+      "owners": { "35": ["omp:concurrent-preflights"], "37": ["peak:kit"] },
+      "flips": ["peak:kit"]
+    },
+    "S4/short": {
+      "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock", "count:proxy"] },
+      "flips": ["proxy-left-after-stop", "failed-lifecycle-steps", "count:proxy"]
+    },
     "S5/short": { "ticket": "30", "state": "unstable" },
-    "S7/short": "34"
+    "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }
   }
 }

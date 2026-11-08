@@ -112,3 +112,4 @@ Spec stories: 61
 - `ux-before` on both legs, byte for byte (the windows leg against `tests/ux-before/windows`).
 - `memory-budget` on both legs: the ratchet holds with `expected-red.json` unchanged. Windows `S3/short`, `S3/hung` and `S4/short` keep their listed names, with no new RED name. Windows S3 `procPeak:preflight` (commit) must still be ≤ 76 MB; if it is RED there, 15 comes back with the numbers (Round 15).
 - Windows behaviour not exercised locally: the per-acquisition lock release, and the preflight running the lifecycle module without the manager.
+- 2026-11-08 (orchestrator, from ticket 70): the kit's own exit poll after a kill also checks by PID. If Windows reuses the PID before the first 300 ms poll, stop refuses to touch the new process (safe) but reports code 2 although the proxy died. Fix in the lifecycle stop path by waiting on the kill script's own process handle (or identity by PID + start time), keeping C6. Not seen in CI yet.
