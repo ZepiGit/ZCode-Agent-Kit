@@ -24,7 +24,7 @@ import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
 import { credentialString } from "../auth/types.js";
 import { errorResponse } from "../proxy/handler.js";
-import { transformRequestBody } from "../proxy/body-transformer.js";
+import { transformBuiltRequestBody } from "../proxy/body-transformer.js";
 import { buildAnthropicMetadataUserId } from "../proxy/trace-headers.js";
 import { inflateWithCap } from "../proxy/inflate.js";
 import { settleBodyBytes } from "../server/admission.js";
@@ -238,7 +238,8 @@ export async function handleAsyncMessages(req: Request, opts: AsyncHandlerOption
     model: resolveModel({ model: modelStr }, opts.config),
     stream: true,
   } as AnthropicMessagesRequest;
-  const upstreamBodyText = transformRequestBody(JSON.stringify(upstreamBody), { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) }) ?? JSON.stringify(upstreamBody);
+  // Transformed as built, serialised once (ticket 20): the bytes of transformRequestBody(JSON.stringify(upstreamBody)).
+  const upstreamBodyText = transformBuiltRequestBody(upstreamBody, { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) });
 
   // Now we're safe to take a ticket
   try {
@@ -297,7 +298,8 @@ export async function handleAsyncChat(req: Request, opts: AsyncHandlerOptions): 
     return errorResponse(400, "invalid_request_error", `OpenAI→Anthropic translation failed: ${(err as Error).message}`);
   }
   anthropicReq.stream = true;
-  const upstreamBodyText = transformRequestBody(JSON.stringify(anthropicReq), { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) }) ?? JSON.stringify(anthropicReq);
+  // Transformed as built, serialised once (ticket 20): the bytes of transformRequestBody(JSON.stringify(anthropicReq)).
+  const upstreamBodyText = transformBuiltRequestBody(anthropicReq, { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) });
 
   try {
     if (typeof (opts.auth as AuthManager & { validateAccountHandle?: unknown }).validateAccountHandle === "function"
