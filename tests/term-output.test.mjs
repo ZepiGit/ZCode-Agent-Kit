@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createOutput, renderRecords } from "../lib/term/out.mjs";
-import { REDACTED_KEY } from "../cli/connection-details.mjs";
+import { REDACTED_KEY_CARD } from "../cli/connection-details.mjs";
 import { fakeClock } from "./term-fixtures.mjs";
 
 function fakeStream({ isTTY = false, columns } = {}) {
@@ -131,7 +131,7 @@ test("connection(): the key is shown only on an interactive terminal, never on a
   }
   const unicodePipe = output({ env: { ...UTF8, ZCODE_KIT_UNICODE: "1" } });
   unicodePipe.out.connection(facts, { reveal: true });
-  assert.ok(unicodePipe.stdout.text.includes(REDACTED_KEY), "the redaction marker is the shared one");
+  assert.ok(unicodePipe.stdout.text.includes(REDACTED_KEY_CARD), "the card's redaction marker is the shared one");
   const hidden = output({ tty: true, env: UTF8 });
   hidden.out.connection(facts, { reveal: false });
   assert.doesNotMatch(hidden.stdout.text, /UXFIXTURE/);
@@ -190,4 +190,92 @@ test("plain result rows map kit punctuation down on the ascii tier; check rows n
   out.result({ status: "ok", label: "proxy started", detail: "127.0.0.1:18458" });
   out.check({ status: "pass", name: "proxy reachable", detail: "127.0.0.1:18458" });
   assert.equal(stdout.text, "OK  proxy started - 127.0.0.1:18458\nPASS  proxy reachable — 127.0.0.1:18458\n");
+});
+
+// Ticket 40 (UX batch a): the doctor lead line, the status state line, blank
+// separators and the connection card at 80 columns (design-language §4.4,
+// §4.6, §7; ADR-0001 rule 3).
+test("lead(): the problem count only, before the rows; a glyph and its colour only on a TTY", () => {
+  const plain = output({ env: UTF8 });
+  plain.out.lead({ fail: 2, warn: 1 });
+  plain.out.lead({ fail: 1 });
+  assert.equal(plain.stdout.text, "3 problems: 2 failed, 1 warning\n1 problem: 1 failed\n");
+  const tty = output({ tty: true, env: UTF8 });
+  tty.out.lead({ fail: 2, warn: 2 });
+  assert.equal(tty.stdout.text, "\x1b[31m✗\x1b[0m 4 problems: 2 failed, 2 warnings\n");
+  const json = output({ env: UTF8, json: true });
+  json.out.lead({ fail: 1 });
+  assert.equal(json.stdout.text, "", "a report line: not in JSON mode");
+});
+
+test("state(): the state word in the text, the glyph before it on a TTY only", () => {
+  const plain = output({ env: UTF8 });
+  plain.out.state({ status: "run", text: "running, up 1 h 02 min (pid 4242)" });
+  plain.out.state({ status: "stop", text: "stopped" });
+  assert.equal(plain.stdout.text, "running, up 1 h 02 min (pid 4242)\nstopped\n");
+  const tty = output({ tty: true, env: UTF8 });
+  tty.out.state({ status: "run", text: "running" });
+  tty.out.state({ status: "stop", text: "stopped" });
+  assert.equal(tty.stdout.text, "\x1b[32m●\x1b[0m running\n\x1b[2m○\x1b[0m stopped\n");
+  const ascii = output({ tty: true, env: { TERM: "xterm", LANG: "C", NO_COLOR: "1" } });
+  ascii.out.state({ status: "run", text: "running" });
+  assert.equal(ascii.stdout.text, "* running\n");
+  assert.throws(() => plain.out.state({ status: "pass", text: "x" }), /state: unknown status "pass"/);
+});
+
+test("blank(): one empty report line, none in JSON mode", () => {
+  const { out, stdout } = output({ env: UTF8 });
+  out.blank();
+  assert.equal(stdout.text, "\n");
+  const json = output({ env: UTF8, json: true });
+  json.out.blank();
+  assert.equal(json.stdout.text, "");
+});
+
+const CARD_VARIANTS = {
+  "tty 80": { tty: true, columns: 80, env: UTF8 },
+  "tty 120": { tty: true, columns: 120, env: UTF8 },
+  "no colour": { tty: true, env: { ...UTF8, NO_COLOR: "1" } },
+  "pipe": { env: UTF8 },
+  "TERM=dumb": { tty: true, env: { TERM: "dumb", LANG: "C.UTF-8" } },
+  "conhost": { tty: true, platform: "win32", env: {} },
+};
+
+test("connection(): the card fits 80 columns in every variant, redacted or revealed, configured or running", () => {
+  const facts = [
+    { port: 18458, key: "UXFIXTURE-not-a-secret-0000000000000000000", source: "running", models: ["glm-5.3", "glm-5.3-flash"], modelsSource: "live" },
+    { port: 18458, source: "running", models: ["glm-5.3", "glm-5.3-flash"], modelsSource: "config" },
+    { port: 18458, source: "configured", host: "0.0.0.0" },
+  ];
+  for (const [label, variant] of Object.entries(CARD_VARIANTS)) {
+    for (const f of facts) {
+      for (const verbose of [false, true]) {
+        const { out, stdout } = output(variant);
+        out.connection(f, { reveal: true, verbose });
+        const lines = stdout.text.replace(/\x1b\[[0-9;]*m/g, "").split("\n").filter(Boolean);
+        for (const line of lines) assert.ok([...line].length <= 80, `${label}: ${line.length} columns: ${JSON.stringify(line)}`);
+        assert.doesNotMatch(stdout.text, /[╭╮╰╯┌┐└┘│]/, "unboxed");
+      }
+    }
+  }
+});
+
+test("connection(): routes only with verbose; a verified proxy says when its model list came from the configuration", () => {
+  const plain = output({ env: UTF8 });
+  plain.out.connection({ port: 18458, source: "running", models: ["glm-5.3"], modelsSource: "config" }, { verbose: true });
+  assert.equal(plain.stdout.text, [
+    "Connection details (manual clients) --------------------------------------------",
+    "  OpenAI base URL     http://127.0.0.1:18458/v1",
+    "  OpenAI routes       POST /chat/completions, POST /responses, GET /models",
+    "  Anthropic base URL  http://127.0.0.1:18458",
+    "  Anthropic routes    POST /v1/messages",
+    "  API key             (redacted - print it with: zcode-kit models --show-key)",
+    "  Models              glm-5.3 (configured; live list unavailable)",
+    "  State               * running, identity verified",
+    "",
+  ].join("\n"));
+  const terse = output({ env: UTF8 });
+  terse.out.connection({ port: 18458, source: "configured", models: ["glm-5.3"] });
+  assert.doesNotMatch(terse.stdout.text, /routes|POST/);
+  assert.match(terse.stdout.text, /  Models {14}glm-5\.3\n/, "configured: no live-list note");
 });
