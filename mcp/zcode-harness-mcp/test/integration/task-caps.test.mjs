@@ -27,10 +27,14 @@ function scriptDir(t) {
   return dir;
 }
 
-/** Split `text` into deltas of `size` code units, plus a cut at every index in `alsoAt`. */
+/**
+ * Split `text` into deltas of `size` code units, plus a cut at every index in
+ * `alsoAt`. No grid cut falls in the 70,000 code units before an `alsoAt` cut, so
+ * the delta that ends there is longer than the bridge's 64 KiB pieces.
+ */
 function deltasOf(text, size, alsoAt = []) {
   const cuts = new Set(alsoAt);
-  for (let i = size; i < text.length; i += size) cuts.add(i);
+  for (let i = size; i < text.length; i += size) if (!alsoAt.some((at) => i < at && i > at - 70_000)) cuts.add(i);
   const sorted = [...cuts].filter((i) => i > 0 && i < text.length).sort((a, b) => a - b);
   const out = [];
   let from = 0;
@@ -85,6 +89,7 @@ test('exactly 4 MiB is kept whole, even with a multi-byte character across the 1
   const exact = `${head}€${tail}`; // (1 MiB - 2) + 3 + (3 MiB - 1) bytes
   fs.writeFileSync(path.join(dir, 'exact.json'), JSON.stringify(deltasOf(exact, 100_000)));
   fs.writeFileSync(path.join(dir, 'over.json'), JSON.stringify(deltasOf(`${exact}!`, 100_000)));
+  fs.writeFileSync(path.join(dir, 'tail-fill.json'), JSON.stringify(deltasOf(`${head}€drop drop ${tail}!`, 100_000)));
   const c = await startBridge({ env: { FAKE_STREAM_DIR: dir } });
   try {
     const whole = (await runTask(c, 'exact')).result;
@@ -98,6 +103,11 @@ test('exactly 4 MiB is kept whole, even with a multi-byte character across the 1
     assertSameText(over.responseText, `${head}\n[… 3 bytes truncated …]\n${tail}!`, 'a 4 MiB + 1 text');
     assert.deepEqual(over.truncated, { droppedBytes: 3 });
     assert.equal(over.completeness.status, 'partial');
+
+    // The tail gets the bytes the head leaves: 4 MiB - (1 MiB - 2) = 3 MiB + 2, so it keeps the "p " before the 3 MiB.
+    const tailFill = (await runTask(c, 'tail-fill')).result;
+    assertSameText(tailFill.responseText, `${head}\n[… 11 bytes truncated …]\np ${tail}!`, 'the tail fills up to 4 MiB');
+    assert.deepEqual(tailFill.truncated, { droppedBytes: 11 });
   } finally { await c.stop(); }
 });
 
