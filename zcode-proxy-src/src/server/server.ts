@@ -524,6 +524,25 @@ function admissionFor(config: ProxyConfig): Admission {
   return createAdmission({ maxInFlightBytes: config.server.admission?.maxInFlightBytes ?? DEFAULT_MAX_IN_FLIGHT_BYTES });
 }
 
+/**
+ * The largest single write to a client socket (ticket 61). A body chunk can
+ * be hundreds of KB (a late read of an accumulated upstream body); written
+ * whole, whatever a client that does not read leaves of it stays in the
+ * proxy's write buffer. In pieces, that is at most one piece per client.
+ */
+const WRITE_PIECE_BYTES = 64 * 1024;
+
+/** Resolves true once `res` can take more, false if the client went away first. */
+function drained(res: import("node:http").ServerResponse): Promise<boolean> {
+  if (res.destroyed) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    const onDrain = (): void => { res.off("close", onClose); resolve(true); };
+    const onClose = (): void => { res.off("drain", onDrain); resolve(false); };
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+  });
+}
+
 /** Write a Web API Response to a Node.js ServerResponse. */
 async function writeWebResponseToNodeResp(resp: Response, res: import("node:http").ServerResponse, abortSignal?: AbortSignal): Promise<void> {
   const headers: Record<string, string | string[]> = {};
@@ -552,8 +571,12 @@ async function writeWebResponseToNodeResp(resp: Response, res: import("node:http
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (!res.write(Buffer.from(value))) {
-        await new Promise<void>((resolve) => res.once("drain", () => resolve()));
+      for (let at = 0; at < value.byteLength; at += WRITE_PIECE_BYTES) {
+        if (res.write(Buffer.from(value.subarray(at, at + WRITE_PIECE_BYTES)))) continue;
+        // A client that leaves while the proxy waits for room ends the write
+        // here (the abort above cancels the body); before, this wait never
+        // settled for a closed client.
+        if (!(await drained(res))) return;
       }
     }
     res.end();

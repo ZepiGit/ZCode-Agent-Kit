@@ -19,6 +19,8 @@
 //                                 it reports the proxy's runtime Bun as run.mjs does:
 //                                 FAKE_RUN_BUN_REVISIONS maps ZCODE_KIT_BUN → revision
 //                                 ("" = none recorded), plus a fixed runtime environment.
+//   FAKE_RUN_MODE=stalled-arms    an S1/stalled or S1/drained attribution run (see the
+//                                 mode below: idle floor, load peak, JS heap)
 //   FAKE_RUN_MODE=s1-reps         an S1/short run per repetition, windows-shaped by
 //                                 default, from FAKE_RUN_REPS (see the mode below)
 //   FAKE_RUN_MODE=s6-reps         an S6/short run per repetition from FAKE_RUN_REPS
@@ -78,6 +80,36 @@ if (mode === "burst1") {
   }
   writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
   if (shape === "win32") process.stderr.write(p.job === false ? "@@JOB applied=0 error=fake\n" : `@@JOB applied=1 limit=${3 * 1024 ** 3} peak=${kb(p.commit) * 1024}\n`);
+  process.exit(v.red ? 1 : 0);
+}
+if (mode === "stalled-arms") {
+  // FAKE_RUN_ARMS: { "S1/stalled": [rep…], "S1/drained": [rep…] }, one entry per
+  // rotation (rep-<k>-… in --out), in MB: { peak, floor, heapPeak, heapFloor }
+  // plus { commit, floorCommit, wsPeak } in the win32 shape; preSamples (default
+  // 4) proxy samples at the floor before the load window, then the load with the
+  // peak in its middle. Judged by the real osVerdict.
+  const rep = Number(opt("--out").match(/rep-(\d+)-/)?.[1] ?? 1);
+  const p = JSON.parse(process.env.FAKE_RUN_ARMS)[key]?.[rep - 1];
+  const shape = process.env.FAKE_RUN_SHAPE ?? "linux";
+  const kb = (mb) => Math.round(mb * 1024);
+  const pre = p.preSamples ?? 4;
+  let csv = "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb\n";
+  const row = (t, mb, heap, commit) => (shape === "win32"
+    ? `${t},4242,1,proxy,${kb(mb)},${kb(p.commit)},20,0,${heap},0,"bun proxy",${kb(commit)},${kb(p.wsPeak ?? p.peak)}\n`
+    : `${t},4242,1,proxy,${kb(mb)},${kb(p.peak)},20,30,${heap},0,"bun proxy",,\n`);
+  for (let i = 0; i < pre; i++) csv += row(i * 1000, p.floor, p.heapFloor, p.floorCommit ?? 0);
+  const mid = (p.peak + p.floor) / 2;
+  const midHeap = Math.round((p.heapPeak + p.heapFloor) / 2);
+  for (let i = 0; i < 6; i++) csv += row(5000 + i * 1000, i === 3 ? p.peak : mid, i === 3 ? p.heapPeak : midHeap, i === 3 ? p.commit ?? 0 : ((p.commit ?? 0) + (p.floorCommit ?? 0)) / 2);
+  writeFileSync(join(dir, "samples.csv"), csv);
+  const v = osVerdict(rowsFromSamples(parseSamplesCsv(csv)), { procPeaks: { proxy: 250 }, counts: { proxy: 1 }, orphans: 0 }, { orphans: [] });
+  const summary = {
+    id: "fake", key, scenario, profile: "short", variant, platform: shape, outcome: v.red ? "RED" : "GREEN", metric: v.metric, durationS: 300, red: v.red,
+    checks: v.checks, summary: v.summary, workingSet: v.workingSet, redOnlyOnCommit: v.redOnlyOnCommit, samples: pre + 6,
+    notes: { loadWindowMs: [5000, 10000], readers: 8, sampler: { units: shape === "win32" ? { ok: true, compared: 12 } : null, overhead: null } }, observations: [], orphans: [],
+  };
+  writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
+  if (shape === "win32") process.stderr.write(`@@JOB applied=1 limit=${3 * 1024 ** 3} peak=${kb(p.commit) * 1024}\n`);
   process.exit(v.red ? 1 : 0);
 }
 const role = (maxCount) => ({ peakMB: 100, peakProcMB: 100, peakHwmMB: 120, maxCount, maxFds: 10, maxThreads: 10, distinctPids: maxCount, peakHeapMB: null });

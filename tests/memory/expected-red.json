@@ -23,7 +23,6 @@
     "S5/short": { "owners": { "74": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] }
   },
   "windows": {
-    "S1/stalled": { "owners": { "61": ["procPeak:proxy"] } },
     "S2/short": {
       "owners": { "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
       "flips": ["growth:scenario", "procPeak:solver"]
