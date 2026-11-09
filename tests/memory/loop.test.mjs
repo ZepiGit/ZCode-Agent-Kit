@@ -19,7 +19,7 @@ import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
 import { resolveBun } from "../../lib/process.mjs";
 import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
-import { freezeProcess, killProcess, thawProcess, whileFrozen } from "./lib/freeze.mjs";
+import { whileFrozen } from "./lib/freeze.mjs";
 import { identityOf, isSameProcess, linuxStart, parseWindowsStart, startOf } from "./lib/process-identity.mjs";
 import * as s3Scenario from "./scenarios/s3-concurrency.mjs";
 const { makeHungRound } = s3Scenario;
@@ -244,17 +244,13 @@ test("a detached child whose parent exited is still found as a survivor", linuxO
   parent.stdout.on("data", (b) => { out += b; });
   await new Promise((r) => parent.on("close", r));
   const orphanPid = Number(out.trim());
-  // Its identity while it surely runs (it sleeps 20 s): the cleanup kills that
-  // process, never whatever holds its pid by then (ticket 73).
-  let orphan = null;
   try {
-    orphan = identityOf(orphanPid);
     await sleep(100);
     const found = survivors(marker);
     assert.deepEqual(found.map((s) => s.pid), [orphanPid]);
     assert.notEqual(found[0].ppid, parent.pid);
   } finally {
-    if (orphan) try { killProcess(orphan); } catch {}
+    try { process.kill(orphanPid, "SIGKILL"); } catch {}
   }
 });
 
@@ -350,7 +346,7 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-orphan-"));
   const id = `orphan-${process.pid}-${Date.now()}`;
   const marker = `ZCODE_MEMLOOP_RUN=${id}`;
-  const orphans = []; // identities, recorded while each orphan surely runs (it sleeps 30 s)
+  const pids = [];
   let sampler;
   // The parent starts a detached grandchild and exits; `token` puts the run id in the grandchild's command line.
   const orphanVia = async (token, parentLivesMs) => {
@@ -359,7 +355,7 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
     let out = "";
     parent.stdout.on("data", (b) => { out += b; });
     await new Promise((r) => parent.on("close", r));
-    orphans.push(identityOf(Number(out.trim())));
+    pids.push(Number(out.trim()));
     return { orphan: Number(out.trim()), parent: parent.pid };
   };
   try {
@@ -373,11 +369,9 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
     const after = survivors(marker).filter((s) => !/^conhost\.exe$/i.test(s.comm ?? ""));
     assert.deepEqual(after.map((s) => s.pid).sort((a, b) => a - b), [byToken.orphan, byTree.orphan].sort((a, b) => a - b), "a fresh poll after stop still finds both, and nothing else");
     assert.equal(after.find((s) => s.pid === byTree.orphan).ppid, byTree.parent, "Windows keeps the dead parent's pid");
-    // The cleanup kills each orphan by its identity (TerminateProcess under a held handle, ticket 73).
-    while (orphans.length) { assert.equal(killProcess(orphans[0]), true, `orphan ${orphans[0].pid} is still itself and is terminated`); orphans.shift(); }
   } finally {
     await sampler?.stop();
-    for (const o of orphans) { try { killProcess(o); } catch {} }
+    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch {} }
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -667,7 +661,14 @@ test("`--cap none` on Windows runs the run script directly under the job's own t
 // ── CI run 42252896054 (windows): S3/hung printed a complete RED verdict and
 // was turned into a harness failure because no MCP bridge was seen — every
 // launch failed on Windows, so no session ever started a bridge.
-const S3_HUNG_ROUNDS = [{ name: "kill-holder-10" }, { name: "hung-10-with-stale-lock" }, { name: "hung-10" }];
+// A kill-holder round as ticket 16's scenario records it: the adversary's kill
+// and exactly one launch on that pid that exited non-zero. A bare round name
+// is no evidence the killed-holder case ran (Owner Proxy round 27 Q1 condition 2).
+const KILL_HOLDER_ROUND = {
+  name: "kill-holder-10", n: 10, adversary: { killed: 501, afterMs: 160 },
+  launches: Array.from({ length: 10 }, (_, i) => ({ i, via: "preflight", pid: 500 + i, code: i === 1 ? null : 0, signal: i === 1 ? "SIGKILL" : null })),
+};
+const S3_HUNG_ROUNDS = [KILL_HOLDER_ROUND, { name: "hung-10-with-stale-lock" }, { name: "hung-10" }];
 test("run evidence: S3 is proven by its proxy, launchers and preflights; a bridge exists only after a launch succeeds", () => {
   const s3 = (roles) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 150, samples: 500, summary: Object.fromEntries(roles.map((r) => [r, { maxCount: 1 }])), notes: { sampler: {}, rounds: S3_HUNG_ROUNDS } });
   assert.deepEqual(runEvidence(s3(["proxy", "launcher", "preflight"]), { key: "S3/hung", exitCode: 1 }), { ok: true, problems: [] });
@@ -762,96 +763,14 @@ test("the S3/omp scenario runs exactly the rounds the evidence gate demands", as
 // process the loop left frozen is never reported as a kit orphan.
 test("whileFrozen thaws after the work, after a failing work, and a failed thaw fails the run", async () => {
   const calls = [];
-  // Fake identities and primitives: nothing is asked of the host's process table.
-  const freeze = (id) => { calls.push(`freeze ${id.pid}`); return true; };
-  const thaw = (id) => { calls.push(`thaw ${id.pid}`); return true; };
-  assert.equal(await whileFrozen({ pid: 7, start: "70" }, async () => { calls.push("work"); return 42; }, { freeze, thaw }), 42);
-  await assert.rejects(whileFrozen({ pid: 8, start: "80" }, async () => { throw new Error("round failed"); }, { freeze, thaw }), /round failed/);
+  const freeze = (pid) => calls.push(`freeze ${pid}`);
+  const thaw = (pid) => calls.push(`thaw ${pid}`);
+  // Fake pids: liveness is injected, never asked of the host (Windows and Linux answer differently for pid 7/8).
+  const alive = () => true;
+  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw, alive }), 42);
+  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw, alive }), /round failed/);
   assert.deepEqual(calls, ["freeze 7", "work", "thaw 7", "freeze 8", "thaw 8"]);
-  await assert.rejects(whileFrozen({ pid: 9, start: "90" }, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); } }), /could not thaw pid 9 .*0xC000000B/);
-});
-
-// ── Freeze, thaw and kill by identity (ticket 73) ───────────────────────────
-// The S3 hung proxy is named by its pid AND start time, as the run's scan saw
-// it. Once it is gone its pid may name a stranger (Windows reuses pids quickly,
-// tickets 70, 72): the stranger is never frozen, thawed or killed, and it
-// neither fails the run (a refused resume) nor passes it.
-/** A fake process table: pid → start time; `replace` hands a pid to a stranger, as Windows may at once. */
-function fakeTable(entries) {
-  const table = new Map(Object.entries(entries).map(([pid, start]) => [Number(pid), start]));
-  const signals = [];
-  return {
-    signals,
-    opts: { platform: "linux", start: (pid) => table.get(pid) ?? null, kill: (pid, sig) => { if (!table.has(pid)) throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" }); signals.push(`${sig} ${pid}:${table.get(pid)}`); } },
-    exit: (pid) => table.delete(pid),
-    replace: (pid, start) => table.set(pid, start),
-  };
-}
-
-test("a process gone during the freeze is never thawed: neither when its pid is free nor when a stranger holds it", async () => {
-  for (const after of ["free", "stranger"]) {
-    const t = fakeTable({ 4242: "1000" });
-    const id = { pid: 4242, start: "1000" };
-    const r = await whileFrozen(id, async () => {
-      t.exit(4242); // the kit's hung-own recovery killed it
-      if (after === "stranger") t.replace(4242, "5000"); // and its pid already names another process
-      return "round";
-    }, { freeze: (x) => freezeProcess(x, t.opts), thaw: (x) => thawProcess(x, t.opts) });
-    assert.equal(r, "round", `${after}: the round's result, no harness failure`);
-    assert.deepEqual(t.signals, ["SIGSTOP 4242:1000"], `${after}: only our process was ever signalled`);
-  }
-});
-
-test("a stranger at the chosen pid is never frozen, and the round does not run on it", async () => {
-  const t = fakeTable({ 4242: "5000" }); // the chosen proxy (start 1000) is gone, a stranger has its pid
-  let worked = false;
-  await assert.rejects(
-    whileFrozen({ pid: 4242, start: "1000" }, async () => { worked = true; }, { freeze: (x) => freezeProcess(x, t.opts), thaw: (x) => thawProcess(x, t.opts) }),
-    /pid 4242 no longer names the process chosen to freeze/,
-  );
-  assert.equal(worked, false);
-  assert.deepEqual(t.signals, []);
-});
-
-test("the process still frozen after the work is thawed; a kill reaches only the process it names", () => {
-  const t = fakeTable({ 4242: "1000" });
-  const id = { pid: 4242, start: "1000" };
-  assert.equal(freezeProcess(id, t.opts), true);
-  assert.equal(thawProcess(id, t.opts), true);
-  assert.equal(killProcess(id, t.opts), true);
-  t.replace(4242, "5000");
-  assert.equal(killProcess(id, t.opts), false, "a stranger at the pid is not killed");
-  t.exit(4242);
-  assert.equal(killProcess(id, t.opts), false, "a gone pid is not killed");
-  assert.deepEqual(t.signals, ["SIGSTOP 4242:1000", "SIGCONT 4242:1000", "SIGKILL 4242:1000"]);
-  // An identity that cannot be told is no reason to signal: the error surfaces (a harness failure).
-  assert.throws(() => thawProcess(id, { ...t.opts, start: () => { throw new Error("start time of pid 4242 unknown"); } }), /unknown/);
-});
-
-// Live, on this OS (on windows-latest through the held-handle PowerShell of lib/win-process.mjs).
-test("a live child is frozen, thawed and killed by its identity; once it is gone nothing is done to its pid", async () => {
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-  try {
-    await new Promise((r) => child.once("spawn", r));
-    const id = identityOf(child.pid);
-    // A stop or continue signal takes effect asynchronously: poll the state (bounded) instead of reading it once.
-    const stateIs = async (stopped) => {
-      for (let i = 0; i < 200; i++) {
-        if (/\) T /.test(readFileSync(`/proc/${child.pid}/stat`, "utf8")) === stopped) return true;
-        await new Promise((r) => setTimeout(r, 10));
-      }
-      return false;
-    };
-    assert.equal(freezeProcess(id), true);
-    if (process.platform === "linux") assert.ok(await stateIs(true), "stopped within 2 s");
-    assert.equal(thawProcess(id), true);
-    if (process.platform === "linux") assert.ok(await stateIs(false), "running again within 2 s");
-    const exited = new Promise((r) => child.once("exit", r));
-    assert.equal(killProcess(id), true);
-    await exited; // reaped: from here on the pid is free for anyone
-    assert.equal(thawProcess(id), false, "no thaw for a gone process");
-    assert.equal(killProcess(id), false, "no kill for a gone process");
-  } finally { try { child.kill("SIGKILL"); } catch {} }
+  await assert.rejects(whileFrozen(9, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); }, alive: () => true }), /could not thaw pid 9 .*0xC000000B/);
 });
 
 // ── CI run 42281731448 (ubuntu, staging/02): S3/hung ran 9 s. The killed start
@@ -861,16 +780,15 @@ test("a live child is frozen, thawed and killed by its identity; once it is gone
 // The hung round freezes the run's own proxy that serves the isolated port;
 // it never freezes a process that is not this run's, and it never guesses.
 function fakeHungRound({ record = null, ours = [], listening = {}, startCode = 0, startErr = "", lock = null } = {}) {
-  const calls = [], notes = {}, roundOpts = {}, frozen = [];
+  const calls = [], notes = {}, roundOpts = {};
   const kit = { port: 19026, manager: async () => ({ code: startCode, out: "", err: startErr }), pidRecord: () => record };
   const hungRound = makeHungRound({
-    // Scan rows carry the sample key <pid>:<start time>; here start = 1700<pid>.
-    kit, proxies: () => ours.map((pid) => ({ pid, role: "proxy", key: `${pid}:1700${pid}` })), portsOf: (pid) => listening[pid] ?? [],
+    kit, proxies: () => ours.map((pid) => ({ pid, role: "proxy", key: `${pid}` })), portsOf: (pid) => listening[pid] ?? [],
     round: async (name, n, opts) => { calls.push(`round ${name}`); roundOpts[name] = { n, ...opts }; }, note: (k, v) => { notes[k] = v; },
-    freeze: (id) => { frozen.push(id); calls.push(`freeze ${id.pid}`); return true; }, thaw: (id) => { calls.push(`thaw ${id.pid}`); return true; }, graceMs: 0,
+    freeze: (pid) => calls.push(`freeze ${pid}`), thaw: (pid) => calls.push(`thaw ${pid}`), alive: () => true, graceMs: 0,
     lockState: () => lock,
   });
-  return { hungRound, calls, notes, roundOpts, frozen };
+  return { hungRound, calls, notes, roundOpts };
 }
 
 test("S3 hung round: a proxy the killed start left without a pid record is frozen and the round runs (CI run 42281731448)", async () => {
@@ -881,11 +799,10 @@ test("S3 hung round: a proxy the killed start left without a pid record is froze
 });
 
 test("S3 hung round: the recorded proxy is frozen as before", async () => {
-  const { hungRound, calls, notes, frozen } = fakeHungRound({ record: { pid: 41, startedMs: 1 }, ours: [41], listening: { 41: [19026] } });
+  const { hungRound, calls, notes } = fakeHungRound({ record: { pid: 41, startedMs: 1 }, ours: [41], listening: { 41: [19026] } });
   await hungRound("hung-10");
   assert.deepEqual(calls, ["freeze 41", "round hung-10", "thaw 41"]);
   assert.deepEqual(notes, { "hung-10.target": { pid: 41, via: "pid-record", recordedPid: 41 } });
-  assert.deepEqual(frozen, [{ pid: 41, start: "170041" }], "frozen by the identity the run's scan saw (ticket 73)");
 });
 
 test("S3 hung round: nothing of this run to freeze is a skipped round, never a guess", async () => {
@@ -979,7 +896,7 @@ const refusedRound = (over = {}) => ({ name: "hung-10-with-stale-lock", n: 10, l
 const s3HungRun = ({ rounds, checks = [{ name: "start-over-stale-lock", red: true, value: 1, budget: 0 }], notes = {} }) => ({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 190, samples: 600, checks, summary: { proxy: { maxCount: 1 }, launcher: { maxCount: 5 }, preflight: { maxCount: 9 } }, notes: { sampler: {}, rounds, ...notes } });
 
 test("run evidence: the stale-lock round with a refused start, its launches and the RED check is a run that ran", () => {
-  const rounds = [{ name: "kill-holder-10" }, refusedRound(), { name: "hung-10" }];
+  const rounds = [KILL_HOLDER_ROUND, refusedRound(), { name: "hung-10" }];
   assert.deepEqual(runEvidence(s3HungRun({ rounds, notes: { "hung-10-with-stale-lock.startRefused": refusedEvidence } }), { key: "S3/hung", exitCode: 1 }), { ok: true, problems: [] });
 });
 
@@ -1014,15 +931,37 @@ const CI_REFUSED = {
 // stale-lock round, it is a harness failure.
 const S3_HUNG_REFUSED_RUN = join(dirname(CI_S3_HUNG), "local-20261107-s3-hung-refused-linux-summary.json");
 
-test("job: a real S3/hung run whose stale-lock start was refused passes the gate as ticket 16's RED; cut or unchecked it is a harness failure", () => {
-  const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: S3_HUNG_REFUSED_RUN });
-  assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Round 15 Q1: the refusal and the lock checks are ticket 16's, the memory peaks ticket 37's.
-  assert.deepEqual(row, { key: "S3/hung", outcome: "RED", ticket: "16, 37", owners: ["16", "37"], note: "S3/hung: RED on peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:proxy, exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round, owned by ticket 16 (exactly-one-proxy-after-round, failed-launches, start-over-stale-lock, stale-lock-after-round), ticket 37 (peak:kit, procPeak:launcher, procPeak:mcp-bridge, procPeak:proxy)" });
-  assert.ok(result.redChecks.includes("start-over-stale-lock"), result.redChecks.join());
+test("job: a real S3/hung run whose stale-lock start was refused passes the evidence gate as RED; the lock checks ticket 16 removed now fail it; cut or unchecked it is a harness failure", () => {
+  // Written before ticket 16, its kill-holder round recorded no launch pids, so
+  // as archived it no longer proves the killed-holder case ran (Round 27 Q1
+  // condition 2).
+  const archived = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: S3_HUNG_REFUSED_RUN });
+  assert.equal(archived.row?.outcome, "HARNESS FAILURE", archived.r.stdout + archived.r.stderr);
+  assert.match(archived.result.error, /round kill-holder-10: the round recorded no launch pids, so the killed pid 2138131 matches no launch/);
+  // The rest of the gate on the same run, with its kill-holder launches in the
+  // shape ticket 16's scenario records them: the victim is preflight#0 (its own
+  // failedLaunches line, code=null) under the adversary's pid; the other pids
+  // were not recorded.
+  const run = JSON.parse(readFileSync(S3_HUNG_REFUSED_RUN, "utf8"));
+  const killHolder = run.notes.rounds.find((x) => x.name === "kill-holder-10");
+  assert.equal(killHolder.failedLaunches[0], "preflight#0 code=null ");
+  killHolder.launches = Array.from({ length: killHolder.n }, (_, i) => ({ i, via: "preflight", pid: i === 0 ? killHolder.adversary.killed : null, code: i === 0 ? null : 4, signal: null }));
   const dir = mkdtempSync(join(tmpdir(), "memloop-s3hung-"));
   try {
-    const run = JSON.parse(readFileSync(S3_HUNG_REFUSED_RUN, "utf8"));
+    const withLaunches = join(dir, "with-launches.json");
+    writeFileSync(withLaunches, JSON.stringify(run));
+    const { r, row, result } = fakeJob("replay", "S3/hung", { FAKE_RUN_SUMMARY: withLaunches });
+    // The gate: a measured RED, not a harness failure.
+    assert.equal(row?.outcome, "RED", r.stdout + r.stderr);
+    assert.ok(result.redChecks.includes("start-over-stale-lock"), result.redChecks.join());
+    // Ticket 16 removed failed-launches and stale-lock-after-round from S3/hung
+    // (Round 15 Q1 condition 5): this pre-fix run's REDs on them are unowned now.
+    assert.equal(r.status, 1, "the ratchet fails on the removed names");
+    const unowned = r.stdout.split("\n").filter((l) => / not owned by /.test(l)).map((l) => l.trim());
+    assert.deepEqual(unowned, [
+      "- S3/hung: RED on failed-launches, not owned by tickets 16, 37 (linux, Round 14 Q1, Round 15 Q1); the RED comes back as an ownership question, do not edit owners",
+      "- S3/hung: RED on stale-lock-after-round, not owned by tickets 16, 37 (linux, Round 14 Q1, Round 15 Q1); the RED comes back as an ownership question, do not edit owners",
+    ]);
     const variants = {
       "the stale-lock round removed": [{ ...run, notes: { ...run.notes, rounds: run.notes.rounds.filter((x) => x.name !== "hung-10-with-stale-lock") } }, /round hung-10-with-stale-lock never ran/],
       "the refusal check not RED": [{ ...run, checks: run.checks.map((c) => (c.name === "start-over-stale-lock" ? { ...c, red: false } : c)) }, /refused start but the start-over-stale-lock check is not RED/],
@@ -1049,19 +988,10 @@ for (const [run, file] of Object.entries(CI_REFUSED)) {
 }
 
 test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery) needs no thaw", async () => {
-  // A real process and the OS primitives (windows-latest: NtSuspendProcess / NtResumeProcess by identity).
-  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-  try {
-    await new Promise((r) => child.once("spawn", r));
-    const id = identityOf(child.pid);
-    const r = await whileFrozen(id, async () => {
-      const exited = new Promise((ok) => child.once("exit", ok));
-      child.kill("SIGKILL"); // as the kit's recovery does; a frozen process dies of SIGKILL / TerminateProcess
-      await exited;
-      return "round";
-    });
-    assert.equal(r, "round", "the round's result, no harness failure");
-  } finally { try { child.kill("SIGKILL"); } catch {} }
+  const thawed = [];
+  const r = await whileFrozen(10, async () => "round", { freeze: () => {}, thaw: (pid) => { thawed.push(pid); throw new Error("kill ESRCH"); }, alive: () => false });
+  assert.equal(r, "round");
+  assert.deepEqual(thawed, []);
 });
 
 // ── S1/burst1 at the job seam: the median rule and the measurement mode (ticket 60) ──
@@ -1480,18 +1410,18 @@ function s5Variant(change) {
   return s;
 }
 
-test("job: the windows S5/short runs of CI 42404639968 (RED) and 42401136452 (GREEN) pass as unstable, owned by ticket 30", () => {
+test("job: the windows S5/short runs of CI 42404639968 (RED) and 42401136452 (GREEN) pass as unstable, owned by ticket 74", () => {
   for (const [fixture, outcome, line] of [
-    [CI_S5_RED, "RED", "S5/short: unstable (growth:mcp-bridge 23.71 %/1k commit, budget 5, bound 30, trend true), owned by ticket 30"],
-    [CI_S5_GREEN, "GREEN", "S5/short: unstable (growth:mcp-bridge 15.55 %/1k commit, budget 5, bound 30, trend false), owned by ticket 30"],
+    [CI_S5_RED, "RED", "S5/short: unstable (growth:mcp-bridge 23.71 %/1k commit, budget 5, bound 30, trend true), owned by ticket 74"],
+    [CI_S5_GREEN, "GREEN", "S5/short: unstable (growth:mcp-bridge 15.55 %/1k commit, budget 5, bound 30, trend false), owned by ticket 74"],
   ]) {
     const { r, row, result, stepSummary } = s5ReplayJob(fixture);
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.deepEqual([row.outcome, row.ticket, row.state, row.note], [outcome, "30", "unstable", line]);
+    assert.deepEqual([row.outcome, row.ticket, row.state, row.note], [outcome, "74", "unstable", line]);
     assert.deepEqual(result.growthChecks.map((g) => [g.name, g.commitValue, g.gate, g.trend, g.insufficient]), [["growth:mcp-bridge", outcome === "RED" ? 23.71 : 15.55, "commit", outcome === "RED", false]]);
     for (const text of [r.stdout, stepSummary]) {
       assert.ok(text.includes(`- ${line}`), text);
-      assert.ok(text.includes(`| S5/short | ${outcome} (unstable) | ticket 30 |`), text);
+      assert.ok(text.includes(`| S5/short | ${outcome} (unstable) | ticket 74 |`), text);
     }
   }
 });
@@ -1499,7 +1429,7 @@ test("job: the windows S5/short runs of CI 42404639968 (RED) and 42401136452 (GR
 test("job: the replayed windows S5/short fails above 30, at 5, with another RED check, or without a growth value", () => {
   const cases = {
     "30.01": [s5Variant((s, g) => Object.assign(g, { value: 30.01, commitValue: 30.01 })), /S5\/short: unstable growth:mcp-bridge 30\.01 %\/1k \(commit\) is above the 30 %\/1k bound/],
-    "5, no trend": [s5Variant((s, g) => Object.assign(g, { value: 5, commitValue: 5, red: false, trend: false })), /S5\/short: growth:mcp-bridge 5 %\/1k \(commit\) is at budget \(≤ 5\) but listed for ticket 30/],
+    "5, no trend": [s5Variant((s, g) => Object.assign(g, { value: 5, commitValue: 5, red: false, trend: false })), /S5\/short: growth:mcp-bridge 5 %\/1k \(commit\) is at budget \(≤ 5\) but listed for ticket 74/],
     orphans: [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 })), /S5\/short: RED on orphans: the unstable entry accepts only growth:mcp-bridge/],
     "task failures": [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "bridge:task-failures"), { red: true, value: 1 })), /S5\/short: RED on bridge:task-failures/],
     "reboot cost 21": [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "bridge:reboot-cost-of-history"), { red: true, value: 21 })), /S5\/short: RED on bridge:reboot-cost-of-history/],
@@ -1512,7 +1442,7 @@ test("job: the replayed windows S5/short fails above 30, at 5, with another RED 
     assert.equal(r.status, 1, `${label}: ${r.stdout}${r.stderr}`);
     assert.match(stepSummary, pattern, label);
     assert.equal(row.note, undefined, label);
-    assert.doesNotMatch(stepSummary, /owned by ticket 30/, label);
+    assert.doesNotMatch(stepSummary, /owned by ticket 74/, label);
   }
 });
 
@@ -1808,15 +1738,135 @@ test("linux S6/short: a missing repetition or a non-numeric value is a harness f
   }
 });
 
-test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 30", () => {
+test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 74", () => {
   const { r, row, result } = s5LinuxReplay();
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(row.outcome, "GREEN");
   assert.deepEqual(result.growthChecks.map((g) => [g.name, g.value, g.trend]), [["growth:mcp-bridge", 39.53, false]]);
-  const line = "S5/short: GREEN, listed for ticket 30 on flipping checks growth:mcp-bridge (Round 15 Q1)";
+  const line = "S5/short: GREEN, listed for ticket 74 on flipping checks growth:mcp-bridge (Round 15 Q1)";
   assert.equal(row.note, line);
   assert.ok(r.stdout.includes(`- ${line}`), r.stdout);
   const orphan = s5LinuxReplay((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 }));
   assert.equal(orphan.r.status, 1, orphan.r.stdout);
-  assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 30 \(linux, Round 14 Q1, Round 15 Q1\)/);
+  assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 74 \(linux, Round 14 Q1, Round 15 Q1\)/);
+});
+
+// Ticket 16: the kill-holder adversary SIGKILLs one of the round's own
+// launches (the lock holder). That launch was ended by the scenario and is
+// reported apart; every OTHER launch that did not exit 0 is a failed launch,
+// so `failed-launches` (budget 0, "incl. a killed lock holder") can be met.
+test("S3 failed launches leave out only the launch the kill-holder adversary killed, matched by pid", () => {
+  const results = [
+    { i: 0, via: "preflight", pid: 101, code: null, tail: "starting zcode-proxy ..." },
+    { i: 1, via: "preflight", pid: 102, code: 0, tail: "ok" },
+    { i: 2, via: "preflight", pid: 103, code: 4, tail: "safe start refused" },
+    { i: 3, via: "preflight", pid: 104, code: null, tail: "killed by something else" },
+  ];
+  assert.deepEqual(s3Scenario.launchOutcomes(results, { killed: 101, afterMs: 150 }), {
+    failedLaunches: ["preflight#2 code=4 safe start refused", "preflight#3 code=null killed by something else"],
+    killedByAdversary: ["preflight#0 code=null starting zcode-proxy ..."],
+  });
+  // No adversary, or one that killed nobody: every non-zero launch counts.
+  for (const adversary of [null, { killed: null, reason: "no holder observed" }]) {
+    assert.equal(s3Scenario.launchOutcomes(results, adversary).failedLaunches.length, 3);
+  }
+  // A victim pid that exited 0 (the kill came too late) is neither.
+  assert.deepEqual(s3Scenario.launchOutcomes([{ i: 0, via: "preflight", pid: 101, code: 0 }], { killed: 101 }), { failedLaunches: [], killedByAdversary: [] });
+});
+
+// Owner Proxy round 27 Q1 condition 2: pid matching may only ever make the
+// count stricter. Windows reuses pids quickly; a pid carried by two launches
+// of the round names no single victim, so neither is left out.
+test("S3 failed launches: a killed pid carried by two launches leaves neither out (a reused pid never hides a real failure)", () => {
+  const results = [
+    { i: 0, via: "preflight", pid: 101, code: null, tail: "starting zcode-proxy ..." },
+    { i: 1, via: "preflight", pid: 101, code: 4, tail: "[zcode-preflight] cause=startup" },
+    { i: 2, via: "preflight", pid: 102, code: 0, tail: "ok" },
+  ];
+  assert.deepEqual(s3Scenario.launchOutcomes(results, { killed: 101, afterMs: 150 }), {
+    failedLaunches: ["preflight#0 code=null starting zcode-proxy ...", "preflight#1 code=4 [zcode-preflight] cause=startup"],
+    killedByAdversary: [],
+  });
+});
+
+// ── The kill-holder round counts only with its victim (Owner Proxy round 27 Q1
+// condition 2). A real S3/short run on ticket 16's tree (Linux, Bun 1.4.2,
+// 2026-11-08): the adversary SIGKILLed preflight#6 (pid 31679), the other 9
+// launches exited 0. Every other adversary state is a harness failure that
+// names the round and prints the adversary record, never a verdict.
+const S3_SHORT_RUN = join(dirname(CI_S3_HUNG), "local-20261108-s3-short-linux-summary.json");
+const KILL_HOLDER_RULE = /a kill-holder round counts only with exactly one launch that carries the killed pid and exited non-zero/;
+
+function replayKillHolder(edit) {
+  const run = JSON.parse(readFileSync(S3_SHORT_RUN, "utf8"));
+  const rounds = run.notes.rounds.map((r) => (r.name === "kill-holder-10" ? edit(structuredClone(r)) : r));
+  const dir = mkdtempSync(join(tmpdir(), "memloop-killholder-"));
+  try {
+    const file = join(dir, "summary.json");
+    writeFileSync(file, JSON.stringify({ ...run, notes: { ...run.notes, rounds } }));
+    return fakeJob("replay", "S3/short", { FAKE_RUN_SUMMARY: file });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("job: a real S3/short run whose kill-holder round killed exactly one of its launches keeps its verdict", () => {
+  const { r, row } = replayKillHolder((round) => round);
+  assert.equal(row?.outcome, "RED", r.stdout + r.stderr);
+  assert.equal(r.status, 0, "RED only on ticket 37's listed names");
+});
+
+test("job: a kill-holder round whose adversary recorded no kill is a harness failure, not GREEN", () => {
+  for (const adversary of [{ killed: null, reason: "no holder observed" }, null]) {
+    const { r, row, result } = replayKillHolder((round) => ({ ...round, adversary }));
+    assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+    assert.match(result.error, /round kill-holder-10: the adversary recorded no kill/);
+    assert.match(result.error, KILL_HOLDER_RULE);
+    assert.ok(result.error.includes(`(adversary ${JSON.stringify(adversary)})`), result.error);
+  }
+});
+
+test("job: a kill-holder round whose killed pid matches no launch is a harness failure", () => {
+  const stranger = replayKillHolder((round) => ({ ...round, adversary: { ...round.adversary, killed: 2147483000 } }));
+  assert.equal(stranger.row?.outcome, "HARNESS FAILURE", stranger.r.stdout + stranger.r.stderr);
+  assert.match(stranger.result.error, /round kill-holder-10: the killed pid 2147483000 matches no launch/);
+  assert.match(stranger.result.error, KILL_HOLDER_RULE);
+  assert.match(stranger.result.error, /\(adversary \{"killed":2147483000,"afterMs":167,/);
+  // A round that recorded no launch pids (every summary before ticket 16) proves no match either.
+  const unrecorded = replayKillHolder(({ launches, ...round }) => round);
+  assert.equal(unrecorded.row?.outcome, "HARNESS FAILURE", unrecorded.r.stdout + unrecorded.r.stderr);
+  assert.match(unrecorded.result.error, /round kill-holder-10: the round recorded no launch pids, so the killed pid 31679 matches no launch/);
+});
+
+test("job: a kill-holder round whose matched launch exited 0 is a harness failure", () => {
+  const { r, row, result } = replayKillHolder((round) => {
+    round.launches[6] = { ...round.launches[6], code: 0, signal: null };
+    return round;
+  });
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /round kill-holder-10: the launch with the killed pid 31679 \(preflight#6\) exited 0/);
+  assert.match(result.error, KILL_HOLDER_RULE);
+});
+
+test("job: a kill-holder round with two launches on the killed pid is a harness failure (a reused pid never hides a real failure)", () => {
+  // preflight#7 failed for real, under the pid the adversary killed.
+  const { r, row, result } = replayKillHolder((round) => {
+    round.launches[7] = { ...round.launches[7], pid: 31679, code: 4 };
+    return round;
+  });
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /round kill-holder-10: 2 launches carry the killed pid 31679 \(preflight#6, preflight#7\)/);
+  assert.match(result.error, KILL_HOLDER_RULE);
+});
+
+test("job: a kill-holder round that recorded fewer launches than it ran is a harness failure", () => {
+  const { r, row, result } = replayKillHolder((round) => ({ ...round, launches: round.launches.filter((l) => l.i !== 7) }));
+  assert.equal(row?.outcome, "HARNESS FAILURE", r.stdout + r.stderr);
+  assert.match(result.error, /round kill-holder-10: 9 of 10 launches recorded/);
+});
+
+test("run evidence: S3/hung's kill-holder round is gated the same way", () => {
+  const hung = (killHolder) => runEvidence({ key: "S3/hung", platform: "linux", outcome: "RED", metric: "rss", durationS: 190, samples: 600, summary: { proxy: { maxCount: 1 }, launcher: { maxCount: 5 }, preflight: { maxCount: 9 } }, notes: { sampler: {}, rounds: [killHolder, { name: "hung-10-with-stale-lock" }, { name: "hung-10" }] } }, { key: "S3/hung", exitCode: 1 });
+  assert.deepEqual(hung(KILL_HOLDER_ROUND), { ok: true, problems: [] });
+  assert.match(hung({ ...KILL_HOLDER_ROUND, adversary: { killed: null, reason: "holder 7 not ours" } }).problems.join(), /round kill-holder-10: the adversary recorded no kill/);
 });

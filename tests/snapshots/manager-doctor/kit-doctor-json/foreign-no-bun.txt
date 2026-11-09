@@ -1,0 +1,103 @@
+{
+  "ok": false,
+  "failed": 3,
+  "skipped": 11,
+  "checks": [
+    {
+      "name": "bun available",
+      "ok": false,
+      "detail": "Bun native executable not found; install Bun or set ZCODE_KIT_BUN to its executable path"
+    },
+    {
+      "name": "config exists",
+      "ok": true,
+      "detail": "<KIT>/proxy/config.yaml"
+    },
+    {
+      "name": "key file exists",
+      "ok": true,
+      "detail": "<KIT>/.proxykey"
+    },
+    {
+      "name": "proxy source installed",
+      "ok": true,
+      "detail": "<KIT>/zcode-proxy-src/node_modules"
+    },
+    {
+      "name": "credentials store",
+      "ok": false,
+      "detail": "~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login"
+    },
+    {
+      "name": "omp integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp"
+    },
+    {
+      "name": "mcp bridge installed",
+      "ok": true,
+      "detail": "<KIT>/mcp/zcode-harness-mcp/dist/index.js"
+    },
+    {
+      "name": "mcp bridge deps",
+      "ok": true,
+      "detail": "<KIT>/mcp/zcode-harness-mcp/node_modules"
+    },
+    {
+      "name": "proxy reachable + identity",
+      "ok": false,
+      "detail": "health=foreign"
+    },
+    {
+      "name": "omp: integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp"
+    },
+    {
+      "name": "pi: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "claude-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "codex: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "opencode: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "cline: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "kilo-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "aider: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "continue: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "goose: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    }
+  ]
+}
+[exit 1]

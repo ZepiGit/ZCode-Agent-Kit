@@ -1,0 +1,27 @@
+PASS  bun available — <BUN> (<VERSION>)
+FAIL  config exists — <KIT>/proxy/config.yaml
+FAIL  key file exists — <KIT>/.proxykey
+FAIL  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+FAIL  credentials store — ~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login
+SKIP  omp integration — OMP not installed — skipped
+SKIP  proxy reachable + identity — no config — skipped
+doctor: 4 check(s) failed
+PASS  bun available — <BUN> (<VERSION>)
+FAIL  config exists — <KIT>/proxy/config.yaml
+FAIL  key file exists — <KIT>/.proxykey
+FAIL  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+FAIL  credentials store — ~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login
+SKIP  omp integration — OMP not installed — skipped
+SKIP  proxy reachable + identity — no config — skipped
+SKIP  omp: integration — not detected — skipped
+SKIP  pi: integration — not detected — skipped
+SKIP  claude-code: integration — not detected — skipped
+SKIP  codex: integration — not detected — skipped
+SKIP  opencode: integration — not detected — skipped
+SKIP  cline: integration — not detected — skipped
+SKIP  kilo-code: integration — not detected — skipped
+SKIP  aider: integration — not detected — skipped
+SKIP  continue: integration — not detected — skipped
+SKIP  goose: integration — not detected — skipped
+doctor: 4 check(s) failed
+[exit 1]

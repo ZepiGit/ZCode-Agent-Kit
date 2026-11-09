@@ -2,11 +2,12 @@
 // run 1 applies, run 2 is a no-op, rollback undoes run 1 exactly.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, cpSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, realpathSync, rmSync, cpSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createCtx, ensureRuntimeFiles } from "../cli/context.mjs";
+import { freePort } from "./free-port.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 const TMP = join(import.meta.dirname, "fakehome", "setup");
@@ -48,12 +49,32 @@ function fakeHome() {
   return { home, agent, modelsYml: join(agent, "models.yml"), configYml: join(agent, "config.yml") };
 }
 
-function runSetup(home, args = []) {
+/**
+ * The kit state for one fake home (ticket 75): created first with this
+ * checkout's .owner.json, so nothing of the checkout's own state is used, and
+ * a proxy config on a free port of this run, so setup's probe can never meet
+ * a listener of a parallel run or the owner's proxy on 8457.
+ */
+async function stateFor(home) {
+  const state = `${home}-state`;
+  if (existsSync(state)) return state;
+  mkdirSync(join(state, "proxy"), { recursive: true });
+  let identity = realpathSync(KIT);
+  if (process.platform === "win32") identity = identity.toLowerCase();
+  writeFileSync(join(state, ".owner.json"), JSON.stringify({ root: identity }) + "\n");
+  writeFileSync(join(state, ".proxykey"), "synthetic-setup-regressions-key\n");
+  writeFileSync(join(state, "proxy", "config.yaml"), readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8")
+    .replace(/^  port: \d+/m, `  port: ${await freePort()}`).replace('proxyApiKey: "GENERATE_ME"', 'proxyApiKey: "synthetic-setup-regressions-key"'));
+  return state;
+}
+
+async function runSetup(home, args = []) {
   return execFileSync(process.execPath, [join(KIT, "setup.mjs"), ...args], {
     env: {
       ...process.env,
       USERPROFILE: home,
       HOME: home,
+      ZCODE_KIT_STATE_DIR: await stateFor(home),
       ZCODE_KIT_SKIP_DEPS: "1",
       // The suite runs the kit from a source checkout (KIT has .git); tests
       // intentionally write to the disposable fake home, so opt in.
@@ -69,13 +90,13 @@ function runSetup(home, args = []) {
   });
 }
 
-test("setup applies, is idempotent, and rolls back exactly", () => {
+test("setup applies, is idempotent, and rolls back exactly", async () => {
   const { home, modelsYml, configYml } = fakeHome();
   const originalModels = readFileSync(modelsYml, "utf8");
   const originalConfig = readFileSync(configYml, "utf8");
 
   // ---- run 1: apply
-  const out1 = runSetup(home);
+  const out1 = await runSetup(home);
   assert.match(out1, /models\.yml updated/);
   assert.match(out1, /transaction (\S+) recorded/);
   assert.match(out1, /detected harnesses: omp/);
@@ -99,7 +120,7 @@ test("setup applies, is idempotent, and rolls back exactly", () => {
 
   // ---- run 2: idempotent (no file changes, no new transaction)
   const h1 = [sha(modelsYml), sha(configYml), sha(extFile)];
-  const out2 = runSetup(home);
+  const out2 = await runSetup(home);
   assert.match(out2, /already up to date/);
   assert.match(out2, /extension already current/);
   assert.doesNotMatch(out2, /transaction \S+ recorded/, "no-op run records no transaction");
@@ -107,7 +128,7 @@ test("setup applies, is idempotent, and rolls back exactly", () => {
   assert.deepEqual(h2, h1, "second run changes nothing");
 
   // ---- rollback of run 1
-  const outR = runSetup(home, ["--rollback", txId]);
+  const outR = await runSetup(home, ["--rollback", txId]);
   assert.match(outR, /restored:/);
   assert.match(outR, /removed \(kit-created\):/);
   assert.equal(readFileSync(modelsYml, "utf8"), originalModels, "models.yml byte-identical to pre-setup");
@@ -153,7 +174,7 @@ test("setup refuses to write user configs from a checkout without opt-in", () =>
 // one. Explicitly running `update` is itself the opt-in, so cmdUpdate sets
 // ZCODE_KIT_ALLOW_CHECKOUT=1 for its own re-setup step. Proven end-to-end
 // against a minimal fixture kit inside a real (local, offline) git repo.
-test("update from a checkout completes — re-setup implies the checkout opt-in (H3)", () => {
+test("update from a checkout completes — re-setup implies the checkout opt-in (H3)", async () => {
   const gitProbe = spawnSync("git", ["--version"]);
   if (gitProbe.status !== 0) {
     console.warn("git not on PATH — skipping the update e2e test (update itself requires git)");
@@ -171,7 +192,8 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
   // stub manager pins the restart contract: update must invoke it.
   cpSync(join(KIT, "cli"), join(checkout, "cli"), { recursive: true });
   cpSync(join(KIT, "lib"), join(checkout, "lib"), { recursive: true });
-  cpSync(join(KIT, "proxy", "config.example.yaml"), join(checkout, "proxy", "config.example.yaml"));
+  // Template port: a free port of this run (ticket 75), as the re-setup probes it.
+  writeFileSync(join(checkout, "proxy", "config.example.yaml"), readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8").replace(/^  port: \d+/m, `  port: ${await freePort()}`));
   writeFileSync(join(checkout, "proxy", "zcode-proxy-manager.mjs"), "console.log('stub manager:', process.argv[2] ?? 'none');\n");
   const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8" });
   try {
@@ -211,7 +233,7 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
 // integration's managed block already in models.yml. The kit must take that
 // block over (exactly one zcode provider afterwards), not insert a duplicate
 // (duplicate map keys made setup abort fail-closed in v0.2.0).
-test("omp adapter takes over legacy zcode-omp-integration managed block", () => {
+test("omp adapter takes over legacy zcode-omp-integration managed block", async () => {
   const home = join(TMP, `home-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const agent = join(home, ".omp", "agent");
   mkdirSync(agent, { recursive: true });
@@ -240,7 +262,7 @@ test("omp adapter takes over legacy zcode-omp-integration managed block", () => 
   );
   const modelsYml = join(agent, "models.yml");
 
-  const out1 = runSetup(home);
+  const out1 = await runSetup(home);
   assert.match(out1, /models\.yml updated/);
   const models1 = readFileSync(modelsYml, "utf8");
   assert.doesNotMatch(models1, /zcode-omp-integration/, "legacy markers and content gone");
@@ -251,14 +273,14 @@ test("omp adapter takes over legacy zcode-omp-integration managed block", () => 
 
   // second run: byte-identical, no new transaction
   const sha1 = sha(modelsYml);
-  const out2 = runSetup(home);
+  const out2 = await runSetup(home);
   assert.match(out2, /already up to date/);
   assert.equal(sha(modelsYml), sha1, "re-run changes nothing");
 });
 
 // A `zcode` entry nobody managed (hand-written, no markers) must not be
 // overwritten and must not be duplicated — the adapter aborts, nothing written.
-test("omp adapter fails closed on hand-written zcode entry outside managed blocks", () => {
+test("omp adapter fails closed on hand-written zcode entry outside managed blocks", async () => {
   const home = join(TMP, `home-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const agent = join(home, ".omp", "agent");
   mkdirSync(agent, { recursive: true });
@@ -278,7 +300,7 @@ test("omp adapter fails closed on hand-written zcode entry outside managed block
   const before = readFileSync(modelsYml, "utf8");
 
   try {
-    runSetup(home);
+    await runSetup(home);
     assert.fail("setup should have failed");
   } catch (err) {
     const out = `${err.stdout ?? ""}${err.stderr ?? ""}`;
