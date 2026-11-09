@@ -1,11 +1,11 @@
 // `zcode-kit doctor [--fix] [--harness <id>] [--json] [--upstream]` and
 // `doctor --forget <harness>`. The manager's checks come as its doctor
-// record (lib/proxy-doctor.mjs, ticket 38), never as parsed text: its own
-// report is shown first, as the manager CLI prints it, and its checks count
-// with the adapter checks: exit 0 when nothing failed, 1 otherwise, 2 on a
-// usage error.
-// `--fix` output that interleaves with the manager start (whose stdio is the
-// terminal's) is streamed through ctx.progress; the report is records.
+// record (lib/proxy-doctor.mjs, ticket 38), never as parsed text, and count
+// with the adapter checks: exit 0 when nothing failed (WARN and SKIP never
+// fail), 1 otherwise, 2 on a usage error. The report is ../doctor-report.mjs:
+// each check once, grouped, one verdict (ticket 40, A-02).
+// `--fix` progress (the repairs, the proxy start) goes to stderr as it
+// happens; the report is records on stdout.
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { acquireLock, beginTransaction, releaseLock } from "../../lib/transaction.mjs";
@@ -15,6 +15,8 @@ import {
   consentStatus, consentedForRepair, decisionFileChecks, forgetHarnessChoice, readHarnessChoices, storedDecisionIds,
 } from "../harness-consent.mjs";
 import { upstreamChecks } from "../upstream-config.mjs";
+import { doctorJson, doctorRecords } from "../doctor-report.mjs";
+import { finishStart } from "../proxy-report.mjs";
 import { ADAPTER_IDS, assertNotCheckoutWrite, keepRecords, loadAdapter, managerPath, stderrLine, stdoutLine } from "./common.mjs";
 
 /** @param {{ flags: Record<string, unknown> }} args */
@@ -84,27 +86,25 @@ async function doctor(flags, ctx, records) {
     const targets = flags.harness ? ids : consentedForRepair(kit, ids, detected, loaded);
     const adapters = targets.map(id => loaded[id]);
     const { repairManaged } = await import("../heal.mjs");
-    const repaired = await repairManaged(kit, adapters, flags.json ? () => {} : ctx.progress);
-    if (repaired.id && !flags.json) ctx.progress(`transaction ${repaired.id} recorded — undo with: zcode-kit rollback ${repaired.id}`);
+    const repaired = await repairManaged(kit, adapters, flags.json ? () => {} : ctx.progressError);
+    if (repaired.id && !flags.json) ctx.progressError(`transaction ${repaired.id} recorded — undo with: zcode-kit rollback ${repaired.id}`);
   }
   const checks = [];
   const add = (name, ok, detail) => checks.push({ name, ok, detail });
-  const manager = managerPath(kit);
   if (flags.fix) {
     // A down or hung proxy is the most common reason to run doctor --fix; the
-    // manager's safe start (with its hung-own proof) is the only repair path.
-    // The identity comes from the lifecycle's read-state intent; the start
-    // runs through the manager CLI, whose output (incl. the connection
-    // details) streams to the terminal under the start's own timeout.
+    // lifecycle's safe start (with its hung-own proof) is the only repair
+    // path. It runs in this process, as `zcode-kit proxy start` does, with its
+    // progress on stderr and no connection details: doctor reports checks.
     const { createLifecycle } = await import(pathToFileURL(join(kit.root, "lib", "proxy-lifecycle.mjs")).href);
-    if ((await createLifecycle({ root: kit.root, home: kit.home }).readState()).identity !== "ours") {
-      const started = ctx.spawnSync(ctx.execPath, [manager, "start"], {
-        encoding: "utf8", timeout: 180000, stdio: flags.json ? ["ignore", "pipe", "pipe"] : "inherit",
-      });
-      const code = started.error || started.signal ? null : started.status;
+    const lifecycle = createLifecycle({ root: kit.root, home: kit.home, managerPath: managerPath(kit) });
+    if ((await lifecycle.readState()).identity !== "ours") {
+      const progress = flags.json ? null : await ctx.step("Proxy start (--fix)");
+      const record = await lifecycle.ensureRunning();
+      if (progress) finishStart(progress, record, lifecycle);
+      const code = record.code;
       add("proxy start (--fix)", code === 0, code === 0 ? "proxy running and healthy"
-        : `manager start exit ${code ?? "timeout"} — see zcode-kit proxy logs; next: zcode-kit proxy restart`);
-      if (!flags.json) ctx.progress(code === 0 ? "doctor --fix: proxy started" : `doctor --fix: proxy start failed (exit ${code ?? "timeout"})`);
+        : `manager start exit ${code} — see zcode-kit proxy logs; next: zcode-kit proxy restart`);
     }
   }
   // The manager's checks arrive as its doctor record (lib/proxy-doctor.mjs of
@@ -121,9 +121,7 @@ async function doctor(flags, ctx, records) {
     if (core.code !== 0 && !core.checks.some((c) => c.ok === false)) {
       add("manager doctor completed", false, `manager check exited ${core.code ?? "unknown"} without a diagnostic failure result`);
     }
-    for (const c of core.checks) checks.push({ name: c.name, ok: c.ok, detail: c.detail ?? "" });
-    // The manager's own report first, as the manager CLI prints it.
-    if (!flags.json) records.push({ kind: "text", stream: "stdout", text: legacyReport(core.checks).join("") });
+    for (const c of core.checks) checks.push(checkOf(c));
   }
 
   const choices = readHarnessChoices(kit);
@@ -138,7 +136,7 @@ async function doctor(flags, ctx, records) {
         continue;
       }
     }
-    for (const c of adapter.verify(kit)) checks.push({ name: `${id}: ${c.name}`, ok: c.ok, detail: c.detail ?? "" });
+    for (const c of adapter.verify(kit)) checks.push(checkOf({ ...c, name: `${id}: ${c.name}` }));
   }
   // The decision files themselves: an unreadable one silently blocks every
   // refresh of its harness, so it is reported with the way out.
@@ -151,21 +149,19 @@ async function doctor(flags, ctx, records) {
     for (const c of await upstreamChecks(join(kit.root, "proxy", "config.yaml"))) checks.push(c);
   }
 
-  const failed = checks.filter((c) => c.ok === false).length;
-  const skipped = checks.filter((c) => c.ok === null).length;
-  if (flags.json) {
-    records.push({ kind: "json", value: { ok: failed === 0, failed, skipped, checks } });
-  } else {
-    for (const line of legacyReport(checks)) records.push(stdoutLine(line.slice(0, -1)));
-  }
-  return { exitCode: failed === 0 ? 0 : 1, records };
+  const report = doctorJson(checks);
+  records.push(...(flags.json ? [{ kind: "json", value: report }] : doctorRecords(checks)));
+  return { exitCode: report.failed === 0 ? 0 : 1, records };
 }
 
-/** Check rows and the summary line in the legacy off-TTY grammar (ADR-0001 rule 1), one "\n"-terminated string each. */
-function legacyReport(checks) {
-  const failed = checks.filter((c) => c.ok === false).length;
-  const skipped = checks.filter((c) => c.ok === null).length;
-  const lines = checks.map((c) => `${c.ok === null ? "SKIP" : c.ok ? "PASS" : "FAIL"}  ${c.name}${c.detail ? ` — ${c.detail}` : ""}\n`);
-  lines.push(failed === 0 ? `doctor: ${skipped} skipped, ${failed} failed — OK\n` : `doctor: ${failed} check(s) failed\n`);
-  return lines;
+/**
+ * A check as the report takes it: name, ok and detail (always a string, as
+ * before), plus the optional warn/why/next a check record may carry.
+ */
+function checkOf(c) {
+  const check = { name: c.name, ok: c.ok, detail: c.detail ?? "" };
+  if (c.warn === true) check.warn = true;
+  if (typeof c.why === "string" && c.why) check.why = c.why;
+  if (c.next !== undefined && c.next !== null) check.next = c.next;
+  return check;
 }

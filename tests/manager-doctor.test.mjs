@@ -5,9 +5,11 @@
 // stdout, the exit code and stderr with a snapshot captured on the code
 // before ticket 38 (tests/snapshots/manager-doctor/, written once with
 // UPDATE_SNAPSHOTS=1 at the integration tip 91fa58f). `zcode-kit doctor` and
-// `doctor --json` run over the same states against snapshots of the same
-// origin (seam 5 spawn tests): its output and exit codes stay as they were
-// when it consumes the manager's check records instead of its text.
+// `doctor --json` run over the same states (seam 5 spawn tests). Their
+// snapshots (kit-doctor-{text,json}/) were captured at 91fa58f as well and
+// refreshed once by ticket 40: the text is the new report (each check once,
+// grouped, one verdict, the off-TTY grammar), the JSON gained only the
+// additive `warned` and per-check `status`; every exit code stayed.
 //
 // Fixtures: a temp kit root that is its own state directory, a temp HOME, a
 // fixture credential store read by a fixture `src/auth/store.ts` (no real
@@ -70,6 +72,10 @@ function kitFixture(t, { port, configured = false, installed = false, artifacts 
   }
   mkdirSync(join(root, "zcode-proxy-src", "src", "auth"), { recursive: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "auth", "store.ts"), FAKE_STORE);
+  // The output module's shared token set and width core (ADR-0011; every
+  // payload ships them): zcode-kit doctor renders through it since ticket 40.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"));
+  for (const file of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", file), join(root, "zcode-proxy-src", "src", "tui", file));
   if (configured) {
     writeFileSync(join(root, "proxy", "config.yaml"), `server:\n  host: 127.0.0.1\n  port: ${port}\nauth:\n  proxyApiKey: "${KEY}"\n`);
     writeFileSync(join(root, ".proxykey"), KEY + "\n");
@@ -292,7 +298,7 @@ test("zcode-kit doctor --json counts checks, not lines: a Bun version string wit
   writeFileSync(fakeBun, `#!/bin/sh\nif [ "$1" = "--version" ]; then printf '1.4.2\\nFAIL  injected — from a version string\\n'; exit 0; fi\nexec "${env.ZCODE_KIT_BUN}" "$@"\n`, { mode: 0o755 });
   const run = await spawnKit(root, join("cli", "zcode-kit.mjs"), ["doctor", "--json"], { ...env, ZCODE_KIT_BUN: fakeBun });
   const report = JSON.parse(run.stdout);
-  assert.deepEqual(report.checks[0], { name: "bun available", ok: true, detail: `${fakeBun} (1.4.2\nFAIL  injected — from a version string)` });
+  assert.deepEqual(report.checks[0], { name: "bun available", ok: true, detail: `${fakeBun} (1.4.2\nFAIL  injected — from a version string)`, status: "pass" });
   assert.deepEqual(report.checks.filter((c) => /injected/.test(c.name)), [], "no check is made up from a line inside a detail");
   assert.deepEqual([run.code, report.ok, report.failed], [0, true, 0]);
 });
@@ -307,23 +313,27 @@ test("Windows spellings meet the Linux snapshots: JSON-escaped root and Bun path
   const root = String.raw`C:\Users\RUNNER~1\AppData\Local\Temp\kit-manager-doctor-2vCm5M`;
   const roots = [String.raw`C:\Users\runneradmin\AppData\Local\Temp\kit-manager-doctor-2vCm5M`, root];
   const line = (rel, n) => readFileSync(join(SNAPSHOT_ROOT, "manager-doctor", rel), "utf8").split("\n")[n - 1];
+  // Since ticket 40 a JSON check carries "status" after its detail, so the
+  // detail line ends with a comma there; the logged lines predate that.
+  const jsonDetail = (rel, n) => line(rel, n).replace(/,$/, "");
 
-  // kit-doctor-json/{fresh,proxy-down,proxy-running,proxy-running-auth-rejected}.txt line 9
-  assert.equal(normalise(logged(String.raw`"      \"detail\": \"C:\\\\Users\\\\runneradmin\\\\.bun\\\\bin\\\\bun.exe (1.4.2)\""`), roots, bun), line("kit-doctor-json/fresh.txt", 9));
-  // kit-doctor-json/foreign-no-bun.txt line 14 (the short-name spelling of the temp root)
-  assert.equal(normalise(logged(String.raw`"      \"detail\": \"C:\\\\Users\\\\RUNNER~1\\\\AppData\\\\Local\\\\Temp\\\\kit-manager-doctor-2vCm5M\\\\proxy\\\\config.yaml\""`), roots, null), line("kit-doctor-json/foreign-no-bun.txt", 14));
+  // kit-doctor-json/{fresh,proxy-down,proxy-running,proxy-running-auth-rejected}.txt line 10
+  assert.equal(normalise(logged(String.raw`"      \"detail\": \"C:\\\\Users\\\\runneradmin\\\\.bun\\\\bin\\\\bun.exe (1.4.2)\""`), roots, bun), jsonDetail("kit-doctor-json/fresh.txt", 10));
+  // kit-doctor-json/foreign-no-bun.txt line 16 (the short-name spelling of the temp root)
+  assert.equal(normalise(logged(String.raw`"      \"detail\": \"C:\\\\Users\\\\RUNNER~1\\\\AppData\\\\Local\\\\Temp\\\\kit-manager-doctor-2vCm5M\\\\proxy\\\\config.yaml\""`), roots, null), jsonDetail("kit-doctor-json/foreign-no-bun.txt", 16));
   // The long-name (realpath) spelling, raw as the text report prints it and JSON-escaped.
   assert.equal(normalise(String.raw`PASS  key file exists — C:\Users\runneradmin\AppData\Local\Temp\kit-manager-doctor-2vCm5M\.proxykey`, roots, bun), line("proxy-down.txt", 3));
-  assert.equal(normalise(String.raw`      "detail": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\kit-manager-doctor-2vCm5M\\.proxykey"`, roots, bun), line("kit-doctor-json/proxy-down.txt", 19));
+  assert.equal(normalise(String.raw`      "detail": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\kit-manager-doctor-2vCm5M\\.proxykey"`, roots, bun), jsonDetail("kit-doctor-json/proxy-down.txt", 22));
 
-  // proxy-down.txt and kit-doctor-text/proxy-down.txt line 5: the environment block's order.
-  const windowsLine5 = logged(`"FAIL  proxy env overrides — ignored by the kit-managed proxy (unset them): ZCODE_CLAIM_FIXTURE, ZCODE_PROXY_PORT"`);
-  for (const rel of ["proxy-down.txt", "kit-doctor-text/proxy-down.txt"]) {
+  // proxy-down.txt line 5 and kit-doctor-text/proxy-down.txt line 8 (its one
+  // env-override row since ticket 40): the environment block's order.
+  const windowsRow = logged(`"FAIL  proxy env overrides — ignored by the kit-managed proxy (unset them): ZCODE_CLAIM_FIXTURE, ZCODE_PROXY_PORT"`);
+  for (const [rel, at] of [["proxy-down.txt", 5], ["kit-doctor-text/proxy-down.txt", 8]]) {
     const stored = readFileSync(join(SNAPSHOT_ROOT, "manager-doctor", rel), "utf8");
     const expected = windowsExpectation(stored).split("\n");
-    assert.equal(expected[4], windowsLine5, rel);
+    assert.equal(expected[at - 1], windowsRow, rel);
     const changed = stored.split("\n").flatMap((l, i) => (l === expected[i] ? [] : [i + 1]));
-    assert.deepEqual(changed, rel === "proxy-down.txt" ? [5] : [5, 19], `${rel}: only the env-override rows differ`);
+    assert.deepEqual(changed, [at], `${rel}: only the env-override row differs`);
   }
   const json = readFileSync(join(SNAPSHOT_ROOT, "manager-doctor", "kit-doctor-json/proxy-down.txt"), "utf8");
   assert.ok(windowsExpectation(json).includes(`"detail": "ignored by the kit-managed proxy (unset them): ZCODE_CLAIM_FIXTURE, ZCODE_PROXY_PORT"`));
@@ -343,10 +353,10 @@ for (const state of STATES) {
     matchPlatformSnapshot(`manager-doctor/${state.id}.txt`, snapshotText(run, root));
   });
 
-  // zcode-kit doctor over the same states: its text report, its --json and
-  // their exit codes as before ticket 38.
+  // zcode-kit doctor over the same states: its text report (ticket 40), its
+  // --json (today's keys plus ticket 40's additive ones) and their exit codes.
   for (const [variant, args] of [["text", ["doctor"]], ["json", ["doctor", "--json"]]]) {
-    test(`zcode-kit doctor${variant === "json" ? " --json" : ""}, ${state.title}: output and exit code unchanged`, { timeout: 120_000 }, async (t) => {
+    test(`zcode-kit doctor${variant === "json" ? " --json" : ""}, ${state.title}: output and exit code as in the snapshot`, { timeout: 120_000 }, async (t) => {
       const { root, env } = await stateFixture(t, state);
       const run = await spawnKit(root, join("cli", "zcode-kit.mjs"), args, env);
       matchPlatformSnapshot(`manager-doctor/kit-doctor-${variant}/${state.id}.txt`, snapshotText(run, root));
