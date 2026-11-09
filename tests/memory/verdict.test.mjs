@@ -502,17 +502,17 @@ test("unstable is rejected on any other key and on linux S1/burst1; a plain list
   assert.match(judgeBurst({ windows: { "S1/burst1": "20" } }, setResult("S1/burst1", wsFive(230, 220, 240, 235, 225))).failures.join("\n"), /GREEN but listed for ticket 20/);
 });
 
-test("the committed list has no S1/burst1 entry (ticket 20 removed it) and marks windows S5/short unstable for ticket 30, its only unstable entry", () => {
+test("the committed list has no S1/burst1 entry (ticket 20 removed it) and marks windows S5/short unstable for ticket 74, its only unstable entry", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
   // Ticket 20 deleted the windows entry, citing the 24-run measurement 42502424683 (WS gate max 131.7 MB, 0 above 250).
   assert.equal(Object.hasOwn(expected.windows, "S1/burst1"), false);
   assert.equal(Object.hasOwn(expected.linux, "S1/burst1"), false);
-  // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30); linux stays
-  // a binary entry (since Round 14/15 Q1 one that names the check ticket 30 owns).
-  assert.deepEqual(expected.windows["S5/short"], { ticket: "30", state: "unstable" });
+  // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30, re-owned to
+  // ticket 74 by Round 24 Q1); linux stays a binary entry (since Round 14/15 Q1 one that names the check its owner owns).
+  assert.deepEqual(expected.windows["S5/short"], { ticket: "74", state: "unstable" });
   // Round 17 Q2: its one name flips (RED in 9 of 10 runs on ticket 13's tree, run 42436186573 GREEN on the trend flag).
-  assert.deepEqual(expected.linux["S5/short"], { owners: { 30: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] });
+  assert.deepEqual(expected.linux["S5/short"], { owners: { 74: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] });
   const unstable = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => v?.state === "unstable").map(([k]) => `${os} ${k}`));
   assert.deepEqual(unstable, ["windows S5/short"]);
 });

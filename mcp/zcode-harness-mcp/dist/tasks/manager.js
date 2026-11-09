@@ -19,6 +19,35 @@ import { TaskIngress } from "./ingress.js";
 import { TaskRelay } from "./relay.js";
 const log = createLogger("tasks");
 export const TERMINAL_STATES = ["completed", "failed", "cancelled", "interrupted", "unknown"];
+/**
+ * Task retention (ADR-0009 correction 3): a terminal task is evicted when there
+ * are more than 500 of them or it finished more than 7 days ago, whichever
+ * comes first. Its files go with it and its idempotency key is forgotten, so
+ * the idempotency window equals the retention. Non-terminal tasks are never
+ * evicted. `unknown` counts as non-terminal here: execution could not be
+ * confirmed, and every slot, session and workspace guard still treats it as
+ * active (those are bounded by the task queue limit instead).
+ */
+export const TASK_RETENTION = Object.freeze({ maxTerminalTasks: 500, maxAgeMs: 7 * 24 * 60 * 60 * 1000 });
+const EVICTABLE_STATES = ["completed", "failed", "cancelled", "interrupted"];
+/** Finish time in ms (createdAt when missing); an unreadable time counts as oldest. */
+function finishedMs(rec) {
+    const at = Date.parse(rec.finishedAt ?? rec.createdAt);
+    if (Number.isFinite(at))
+        return at;
+    const created = Date.parse(rec.createdAt);
+    return Number.isFinite(created) ? created : -Infinity;
+}
+/** Ids to evict at `now`: the oldest terminal tasks beyond the count, plus every terminal task past the age limit. */
+function retentionVictims(records, now) {
+    const cutoff = now - TASK_RETENTION.maxAgeMs;
+    const evictable = records.filter((rec) => EVICTABLE_STATES.includes(rec.state)).map((rec) => ({ rec, at: finishedMs(rec) }));
+    evictable.sort((a, b) => (a.at === b.at ? 0 : a.at < b.at ? -1 : 1) || a.rec.createdAt.localeCompare(b.rec.createdAt) || a.rec.taskId.localeCompare(b.rec.taskId));
+    const excess = evictable.length - TASK_RETENTION.maxTerminalTasks;
+    return evictable.filter((e, i) => i < excess || e.at < cutoff).map((e) => e.rec.taskId);
+}
+/** Every file a task owns in the store; the record goes last, so an interrupted prune is redone at the next start. */
+const TASK_FILE_SUFFIXES = [".result.json", ".events.jsonl", ".events.jsonl.previous", ".json"];
 const READ_ONLY_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "BashOutput", "KillShell"];
 export class TaskError extends Error {
     code;
@@ -40,11 +69,24 @@ export class TaskManager {
     byIdempotency = new Map();
     bySession = new Map();
     startQueue = new Map();
-    constructor(runtime, interactions, store, config) {
+    clock;
+    /**
+     * Retention index, so that the check on every request is O(1) instead of a
+     * scan of every retained task (a scan per request is garbage that grows with
+     * the retained set). `evictableCount` is the exact number of retained tasks
+     * in an evictable state; `oldestEvictableMs` is a lower bound of their finish
+     * times. Every change of a record goes through `persist()`, which updates
+     * both; a task leaving an evictable state can leave the bound too low, which
+     * costs one scan that recomputes it, never a missed eviction.
+     */
+    evictableCount = 0;
+    oldestEvictableMs = Infinity;
+    constructor(runtime, interactions, store, config, clock = () => Date.now()) {
         this.runtime = runtime;
         this.interactions = interactions;
         this.store = store;
         this.config = config;
+        this.clock = clock;
         this.allowlist = new WorkspaceAllowlist([...config.allowWorkspaces, store.ensureDir("workspaces")]);
         this.ingress = new TaskIngress(runtime, store);
         this.relay = new TaskRelay(interactions, this.ingress, config.interactionTimeoutSec);
@@ -57,10 +99,12 @@ export class TaskManager {
         };
     }
     /** Load persisted tasks. Non-terminal states become `interrupted` — never
-     * auto-completed; the harness state is not re-verified on restart. */
+     * auto-completed; the harness state is not re-verified on restart. Only the
+     * tasks within the retention are loaded; the files of the others are pruned
+     * (the retention migration: a no-op when run again). */
     restore() {
         const files = this.store.listFiles("tasks");
-        let n = 0;
+        const loaded = [];
         for (const f of files) {
             // Only plain task records: task-<id>.json (not .result.json snapshots).
             if (!/^task-[A-Za-z0-9-]+\.json$/.test(f))
@@ -68,12 +112,27 @@ export class TaskManager {
             const rec = this.store.readJson(`tasks/${f}`);
             if (!rec || rec.schemaVersion !== 1 || !this.allowlist.isAllowed(rec.workspacePath))
                 continue;
-            if (!TERMINAL_STATES.includes(rec.state)) {
+            const interrupted = !TERMINAL_STATES.includes(rec.state);
+            if (interrupted) {
                 rec.state = "interrupted";
                 rec.interruptionReason = "bridge restart; harness state not re-verified";
-                rec.finishedAt = rec.finishedAt ?? new Date().toISOString();
-                this.store.writeJson(`tasks/${f}`, rec);
+                rec.finishedAt = rec.finishedAt ?? new Date(this.clock()).toISOString();
             }
+            loaded.push({ file: f, rec, interrupted });
+        }
+        const victims = new Set(retentionVictims(loaded.map((l) => l.rec), this.clock()));
+        for (const { file, rec } of loaded) {
+            if (!victims.has(rec.taskId))
+                continue;
+            this.deleteTaskFiles(rec.taskId);
+            this.store.deleteFile(`tasks/${file}`);
+        }
+        let n = 0;
+        for (const { file, rec, interrupted } of loaded) {
+            if (victims.has(rec.taskId))
+                continue;
+            if (interrupted)
+                this.store.writeJson(`tasks/${file}`, rec);
             this.tasks.set(rec.taskId, this.internalFromRecord(rec));
             if (rec.idempotencyKey)
                 this.byIdempotency.set(rec.idempotencyKey, rec.taskId);
@@ -82,9 +141,65 @@ export class TaskManager {
             n += 1;
         }
         if (n > 0)
-            log.info("restored tasks from store", { count: n });
+            log.info("restored tasks from store", victims.size > 0 ? { count: n, evicted: victims.size } : { count: n });
+        this.reindexRetention();
         this.syncIngress();
         return n;
+    }
+    /** Recount the retention index from the retained tasks (restore, and after a scan). */
+    reindexRetention() {
+        let count = 0;
+        let oldest = Infinity;
+        for (const t of this.tasks.values()) {
+            t.retentionCounted = EVICTABLE_STATES.includes(t.record.state);
+            if (!t.retentionCounted)
+                continue;
+            count += 1;
+            oldest = Math.min(oldest, finishedMs(t.record));
+        }
+        this.evictableCount = count;
+        this.oldestEvictableMs = oldest;
+    }
+    /** Update the retention index for one task after its record changed. */
+    noteRetention(t) {
+        const evictable = EVICTABLE_STATES.includes(t.record.state);
+        if (evictable !== t.retentionCounted) {
+            this.evictableCount += evictable ? 1 : -1;
+            t.retentionCounted = evictable;
+        }
+        if (evictable)
+            this.oldestEvictableMs = Math.min(this.oldestEvictableMs, finishedMs(t.record));
+    }
+    deleteTaskFiles(taskId) {
+        // Only ids the bridge mints; a hand-edited record cannot aim the prune elsewhere.
+        if (!/^task-[A-Za-z0-9-]+$/.test(taskId))
+            return;
+        for (const suffix of TASK_FILE_SUFFIXES)
+            this.store.deleteFile(`tasks/${taskId}${suffix}`);
+    }
+    /** Evict the terminal tasks beyond the retention (memory, files, idempotency key). */
+    enforceRetention() {
+        const now = this.clock();
+        // O(1) on every request: nothing can be beyond the retention unless the index says so.
+        if (this.evictableCount <= TASK_RETENTION.maxTerminalTasks && this.oldestEvictableMs >= now - TASK_RETENTION.maxAgeMs)
+            return;
+        const victims = retentionVictims([...this.tasks.values()].map((t) => t.record), now);
+        for (const taskId of victims) {
+            const t = this.tasks.get(taskId);
+            if (!t)
+                continue;
+            this.tasks.delete(taskId);
+            this.startQueue.delete(taskId);
+            const rec = t.record;
+            if (rec.idempotencyKey && this.byIdempotency.get(rec.idempotencyKey) === taskId)
+                this.byIdempotency.delete(rec.idempotencyKey);
+            if (rec.sessionId && this.bySession.get(rec.sessionId) === taskId)
+                this.bySession.delete(rec.sessionId);
+            this.deleteTaskFiles(taskId);
+        }
+        this.reindexRetention();
+        if (victims.length > 0)
+            this.syncIngress();
     }
     internalFromRecord(rec) {
         const t = {
@@ -99,24 +214,35 @@ export class TaskManager {
             interactionIds: new Set(),
             warnings: [],
             errors: rec.error ? [rec.error] : [],
-            persist: () => this.store.writeJson(`tasks/${rec.taskId}.json`, rec),
+            retentionCounted: false,
+            persist: () => {
+                this.store.writeJson(`tasks/${rec.taskId}.json`, rec);
+                this.noteRetention(t);
+            },
             onTerminal: () => {
                 this.drainQueue();
                 // Persist the structured result eagerly so it survives restarts.
                 void this.buildResult(rec.taskId).catch(() => {
                     /* best effort; buildResult can be retried via zcode_task_result */
                 });
+                this.enforceRetention();
             },
         };
         return t;
+    }
+    /** The task, if retained; every lookup first applies the retention. */
+    lookup(taskId) {
+        this.enforceRetention();
+        return this.tasks.get(taskId);
     }
     syncIngress() {
         this.ingress.syncTasks(this.tasks.values(), this.bySession);
     }
     get(taskId) {
-        return this.tasks.get(taskId)?.record ?? null;
+        return this.lookup(taskId)?.record ?? null;
     }
     list(filter) {
+        this.enforceRetention();
         let all = [...this.tasks.values()].map((t) => t.record);
         if (filter?.workspace) {
             const norm = filter.workspace.replace(/[\\/]+$/, "");
@@ -127,7 +253,7 @@ export class TaskManager {
         return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     }
     events(taskId, afterSeq, limit) {
-        const t = this.tasks.get(taskId);
+        const t = this.lookup(taskId);
         if (!t)
             throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
         const res = this.store.readLinesAfter(`tasks/${taskId}.events.jsonl`, afterSeq, limit);
@@ -136,8 +262,8 @@ export class TaskManager {
     /** Bounded wait for a terminal (or requested) state. */
     async wait(taskId, timeoutMs, until) {
         const start = Date.now();
-        for (;;) {
-            const t = this.tasks.get(taskId);
+        for (let first = true;; first = false) {
+            const t = first ? this.lookup(taskId) : this.tasks.get(taskId);
             if (!t)
                 throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
             if (TERMINAL_STATES.includes(t.record.state))
@@ -379,7 +505,7 @@ export class TaskManager {
     }
     /** Send additional input: steering while running, follow-up when terminal. */
     async addInput(taskId, content) {
-        const t = this.tasks.get(taskId);
+        const t = this.lookup(taskId);
         if (!t)
             throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
         const rec = t.record;
@@ -469,7 +595,7 @@ export class TaskManager {
     }
     /** Cancel a task. The wish only counts as cancelled after verification. */
     async cancel(taskId) {
-        const t = this.tasks.get(taskId);
+        const t = this.lookup(taskId);
         if (!t)
             throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
         const rec = t.record;
@@ -530,7 +656,7 @@ export class TaskManager {
     }
     // ------------------------------------------------------------------ result
     async buildResult(taskId) {
-        const t = this.tasks.get(taskId);
+        const t = this.lookup(taskId);
         if (!t)
             throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
         const rec = t.record;

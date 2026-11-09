@@ -7,6 +7,7 @@
  *
  * Behaviour flags via env:
  *   FAKE_TURN=ok|fail|hang          turn outcome (default ok)
+ *   FAKE_HANG_PROMPT=...            hang only turns whose prompt contains this text
  *   FAKE_PERMISSION=0|1             raise interaction/requestPermission during turn
  *   FAKE_USERINPUT=0|1              raise interaction/requestUserInput during turn
  *   FAKE_SLOW_CREATE_MS=...         delay before session/create answers
@@ -433,6 +434,8 @@ async function runTurn(s, sessionId, content, toolDenylist) {
   // Stream a scripted answer.
   const mode = env("FAKE_TURN", "ok");
   if (mode === "hang") return;
+  const hangPrompt = env("FAKE_HANG_PROMPT", "");
+  if (hangPrompt && content.includes(hangPrompt)) return;
   if (env("FAKE_NO_STREAM", "0") !== "1") {
     seq += 1;
     notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text: "FA" } });
