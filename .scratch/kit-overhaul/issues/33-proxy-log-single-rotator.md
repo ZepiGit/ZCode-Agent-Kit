@@ -52,7 +52,10 @@ Spec stories: 74, 75, 77, 78, 79
       - `appendLog` creates the logs dir `0o700` and `proxy.log` `0o600`.
     - `lib/heal-log.mjs`: the `heal.log.1` marker file is created `0o600`, since it is a log-dir file too.
     - `proxy logs N` (`proxy/zcode-proxy-manager.mjs`): when the current file's 64 KB tail holds the whole file and fewer than N lines, the tail of `proxy.log.1` comes first. With only `.1` present it reads `.1`.
-  - **Suites (after the final merge of the tip, which had not moved since e0962b7).** `npm run test`: 998 tests, 980 pass, 0 fail, 18 skipped. `npm run test:proxy`: 1604 tests, 1603 pass, 0 fail, 1 skip, 108 files. `test:proxy-typecheck`: pass. `npm run test:mcp`: 107 tests, 106 pass, 0 fail, 1 skipped; `dist/` unchanged after the build. Memory-loop unit tests: 228 tests, 223 pass, 5 skipped.
+  - **Suites on 8da4906 (tip e0962b7).** `npm run test`: 998 tests, 980 pass, 0 fail, 18 skipped. `npm run test:proxy`: 1604 tests, 1603 pass, 0 fail, 1 skip, 108 files. `test:proxy-typecheck`: pass. `npm run test:mcp`: 107 tests, 106 pass, 0 fail, 1 skipped; `dist/` unchanged after the build. Memory-loop unit tests: 228 tests, 223 pass, 5 skipped.
+  - **Suites after merging the moved tip 0e0b96f (ticket 61; merge e6e73fd, no conflicts)** (`t33-merged-*.log`). `npm run test`: 1003 tests, 985 pass, 0 fail, 18 skipped. `npm run test:proxy`: 1633 tests, 1632 pass, 0 fail, 1 skip, 110 files. `test:proxy-typecheck`: pass. `npm run test:mcp`: 107 tests, 106 pass, 0 fail, 1 skipped; worktree clean. Loop runs on the merged tree:
+    - S7/short GREEN: `proxy.log` 0.08 MB, rotated true, `procPeak:proxy` 206.7 MB, heap-at-cap 63 MB. That makes 4 of 4 GREEN runs with 33.
+    - S1/short GREEN: 3.35 %/1k, steady 119.6 MB, peak 153.9 MB.
   - **RED → GREEN.**
     - Loop S7/short (linux), on the tip: RED, `proxy.log:bounded-while-running` 6.37 MB, `rotatedWhileRunning: false` (`t33-s7-red-tip.log`).
     - Loop S7/short with 33: GREEN in 3 of 3 runs. Each run measured 0.08 MB with `rotatedWhileRunning: true` (`t33-s7-green-1.log`, `t33-loop-S7-2.log`, `t33-loop-S7-3.log`).
