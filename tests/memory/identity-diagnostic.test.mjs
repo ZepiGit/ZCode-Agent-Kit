@@ -24,7 +24,9 @@ test('two actual fixture executions overlap below polling interval and remain di
     }
     // Let both fixtures finish startup before closing stdin. No process-table
     // polling is involved: this interval is deliberately shorter than 1000 ms.
-    await new Promise((r) => setTimeout(r, 200));
+    const deadline = Date.now() + 90000;
+    while (readRecords(rawPath).records.filter((r) => r.event === 'start').length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(readRecords(rawPath).records.filter((r) => r.event === 'start').length, 2, 'both actual fixtures acknowledged startup before closing stdin');
     const exited = children.map((c) => once(c, 'exit'));
     for (const c of children) c.stdin.end();
     await Promise.all(exited);
