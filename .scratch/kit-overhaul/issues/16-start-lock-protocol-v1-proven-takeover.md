@@ -440,3 +440,83 @@ The head is the commit that adds this report.
 2. **The start lock's v1 record does not gain Windows ticks.** That would mean a PowerShell call for the holder's own start on every acquisition (round 1 decision 2). The ticket asks for exact comparison "when both sides have them", and the lock's holder side has no ticks on Windows.
 
 **Addendum (round 3).** The tip merged in `88f07dc` is 91fa58f, not 8160c69 as written above (91fa58f contains 8160c69 and 78f51bd). The tip then moved to 788f2fb, a docs-only commit (`.scratch` only). It is merged in the commit after `5c92dc7`, with no conflicts and no code change, so the suites and loop above stand for the code at the head.
+
+### 2026-11-09 — implementer (ticket 16), round 4 (pre-merge CI run 42535365053: windows Node 26 takeover race)
+
+**Branch:** `ticket/16-start-lock-v1`, from 1a9b457.
+- `b443d7e`: merge of the integration tip de1d550 (tickets 75 and 73). There were no conflicts. `lib/start-lock.mjs`, `lib/proxy-lifecycle.mjs`, `tests/start-lock.test.mjs` and the fixtures are unchanged by it.
+- `9bb23ec`: the fix and the seam test.
+- `eed991d`: one more seam test (release), added after a mutant survived.
+
+The head is the commit that adds this report.
+
+**Root cause.** On Windows, an fs call on a name that another process is deleting (delete pending) or holds open fails with EPERM, sometimes EBUSY or EACCES. It does not give the ENOENT/EEXIST the protocol expects. In the race, a racer read or linked `manager.lock` while another racer released it (or while a claimant deleted it). The error left the protocol as `unavailable` (`reason: "io"`), and the racer failed with `EPERM: operation not permitted, open '…\logs\manager.lock'`.
+
+There was a second defect on the same path. `link()` failing with EPERM counted as "this filesystem has no hard links" (`NO_LINK`). The lock was then written with the plain exclusive write, which is not atomic, although hard links work. A reader could see an empty or half-written lock, and it would then be reported as unparsable.
+
+The Node 24 leg passing and Node 26 failing is consistent with timing. I did not prove that it comes from a libuv difference.
+
+**Fix (`lib/start-lock.mjs`)**
+- `BUSY = { EPERM, EBUSY, EACCES }`. Every path-based fs call of the protocol goes through `patient()`, which retries a busy code with backoff (2 → 50 ms) for at most `busyMs` (default 2 s) and then throws the last error. That covers:
+  - the open of the temp file;
+  - the reads of the lock and of claims (`readStable`, the takeover re-check, release, the final holder read);
+  - the deletes (the stale target, the temp files, release, sweep).
+- After the budget runs out, the error behaves as before: `unavailable`/io, exit code 1, and the message names the code. So on POSIX, where these codes are permanent, the only change is a delay of at most 2 s before the same error (C2).
+- `link()` busy: the plain write is used only when a probe link (temp → a fresh temp name) proves that this directory has no hard links. If links work, the busy link is contention at the target name and is retried. EEXIST is still "exists". A positive probe is cached.
+- `releaseIfOwn` still never deletes a lock it could not read and verify as its own. `discard()` (temp files, sweep, release) leaves a file it cannot delete for a later sweep.
+
+**Why each code is safe to retry**
+- **EPERM.** On Windows this is the delete-pending or access-denied state of a name that another holder is releasing or a claimant is deleting. A retry either sees the name gone (ENOENT: released, so go on) or sees the new record (EEXIST: judge it). A retry never counts as success:
+  - a read retry returns only real bytes;
+  - a link retry succeeds only when the exclusive link itself succeeds.
+- **EBUSY.** A sharing violation (another open handle, an antivirus scanner). The same retry rules apply.
+- **EACCES.** The same as EPERM on some Windows paths. On POSIX all three are permanent, and after the budget the error is reported unchanged.
+- **The deletes.** A busy delete of the judged target is retried only while this contender holds the claim for exactly those bytes. While the claim is held, only this claimant can make those bytes leave the lock name, so the re-check still stands (the comment is at the call). Release and sweep never delete anything they could not verify.
+- **The guarantees.** Never two holders: creation stays an exclusive `link()`. Never a deleted live lock: busy codes never lead to a judge or a delete. Never a partial lock: there is no non-atomic write while links work.
+
+**Seam test, RED → GREEN** (`tests/start-lock-busy.test.mjs`, wired into `npm run test`)
+- **The shim.** An fs shim wraps `openSync`, `linkSync`, `readFileSync`, `unlinkSync` and `writeFileSync` for the fixture's files only. `module.syncBuiltinESMExports()` makes the shim reach `lib/start-lock.mjs`'s named imports, so the same test runs unchanged on the old code.
+- **How it injects.** A clean run records the call sequence. Then each recorded call is failed with each code: once, as a burst of 3, and for good.
+- **Transient cases.** There are 3 scenarios: fresh; stale lock; stale lock with a dead claimant's claim plus a dead contender's temp file. Each must end acquired, with its own record on disk, the expected number of takeovers (0 or 1), no plain write, and nothing left after release.
+- **A live holder's lock.** Each injection, once or for good, is never an acquisition and never changes the lock. A one-off injection must give `contended`.
+- **A stale lock with an injection for good.** The result is never a partial lock, never a new record without the acquisition, and at most one takeover. Any `unavailable` names the code.
+- **Release.** A lock that release cannot read, for good (a successor's record), is never deleted.
+- **RED on 1a9b457's code** (`reports/t16-r4-red-busy.log`): 4 of 5 tests fail.
+  - fresh: 30/30 injections broke. For example, `EPERM x1 at call 1 linkSync(…tmp, manager.lock): non-atomic write while hard links work: writeFileSync(manager.lock)`, and `EBUSY … unavailable`.
+  - stale lock: 87/96.
+  - claimed stale lock: 150/168.
+  - live holder: 11 (`a transient gave unavailable`, temp files left).
+  - The persistent stale test passed (a preservation test).
+- **GREEN after the fix:** `t16-r4-green-busy2`, 6/6.
+- **Mutation proof** (`/home/AgentKit/overhaul-tools/t16-scripts/r4-mutate.py`; each mutant restored with `git checkout <sha> -- lib/start-lock.mjs`, `git diff` empty after each; logs `t16-r4-mut-*`):
+  - m1, a busy link falls back to the plain write: killed by 4 tests.
+  - m2, the busy delete of the target is ignored: killed by 3 tests (more than one takeover).
+  - m3, no retry: killed by 4 tests.
+  - m4, release deletes a lock it cannot read: it survived on 9bb23ec. The release test in eed991d was added for it, and it then killed m4.
+- **The windows race test is unchanged** (no weakening, no retry in the test). It is GREEN on Linux: `t16-r4-lock-suites`, start-lock-busy + start-lock + proxy-lifecycle, 65/65.
+
+**Suites on the merged tree** (eed991d plus the uncommitted ADR line; Bun 1.4.2, Node 26.7.0)
+- `npm run test` (`t16-r4-final-test`): 961 tests, 943 pass, 0 fail, 18 skipped.
+- `npm run test:proxy` + `test:proxy-typecheck` (`t16-r4-final-proxy`): 1596 pass, 0 fail, 107 files; typecheck clean.
+- `npm run test:mcp` (`t16-r4-final-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped. `dist/` is unchanged.
+
+**Linux S3 loop** (`job.mjs --os linux --only S3/short,S3/hung`, free loopback ports 41383/45209/42911; `/home/AgentKit/overhaul-tools/t16-memloop/r4-final-1..3`; logs `t16-r4-final-mem1–3`)
+
+| run | S3/short failed-launches / stale / exactly-one | S3/hung failed-launches / stale / exactly-one | kill-holder rounds (killedByAdversary, failedLaunches; kill at) | ratchet |
+|---|---|---|---|---|
+| r4-1 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 0 (302 ms) and 1, 0 (237 ms) | holds |
+| r4-2 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 0 (251 ms) and 1, 0 (307 ms) | holds |
+| r4-3 | 0 / 0 / 0 | 0 / 0 / 0 | 1, 0 (142 ms) and 1, 0 (190 ms) | holds |
+
+- `start-over-stale-lock` and `orphans` are 0 in all 6 keys. There was no HARNESS FAILURE.
+- REDs are 37's only: `peak:kit`, `procPeak:launcher`, plus `procPeak:proxy` 62.1 MB (budget 62) once, in r4-1 S3/short.
+- `expected-red.json` is unchanged. 16's kept names (`exactly-one-proxy-after-round`, plus `start-over-stale-lock` in S3/hung) stay until 10 GREEN runs per leg, as decided in round 1.
+
+**Pending CI (orchestrator verifies after merge+push)**
+- windows-latest test-kit, Node 24 and 26: `tests/start-lock.test.mjs`, the takeover race above all, and `tests/start-lock-busy.test.mjs` green.
+- The round 3 windows items stay pending as written: the round 2 seam proofs, the windows memory leg (round 27 condition 4), and 77's guard on stops.
+
+**Decisions taken**
+1. **An exhausted busy budget stays `unavailable`/io, as before; it is not turned into `contended`.** Turning it into `contended` would turn a permanent POSIX EACCES on the lock into a 45 s contention wait and exit code 4 instead of exit code 1 (C2). 2 s covers a delete-pending window, which lasts only while the deleter's handle is open, since a failed open creates no handle.
+2. **`busyMs` is an option of `createStartLock` (default 2000) for the seam test only.** It is not wired to config or env, so there is no new config key.
+3. **ADR-0003 amendment, condition 1:** one sentence states the busy rule.
