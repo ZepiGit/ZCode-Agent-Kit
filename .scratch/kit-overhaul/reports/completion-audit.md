@@ -6,6 +6,8 @@ Status: **INCOMPLETE**. This is a requirements-to-evidence index, not proof that
 
 Implement every accepted overhaul story/ticket; satisfy memory/process/compatibility/terminal requirements; complete independent Standards/Spec review and adversarial verification; run the final acceptance commands and long-profile measurements; update canonical English docs and translations; push a review-ready, unmerged PR against main; complete retro and reviewed environment improvement ticket; deliver the German final report. GitHub issue32 safe diagnostics and newest official ZCode compatibility are additional requirements tracked in local ticket82. Security B1-B6 and current requested-model workflow routing remain binding.
 
+Individual numbered stories: [story-evidence-map.md](story-evidence-map.md) maps all 144 stories to ticket files and current statuses. All final-evidence cells remain pending audit; no missing ticket reference was found, which does not establish implementation or acceptance.
+
 ## Prompt-to-artifact checklist
 
 | Requirement | Required evidence | Current evidence / gap |
