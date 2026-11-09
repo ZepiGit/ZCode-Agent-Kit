@@ -13,7 +13,7 @@
 // the frozen proxy is gone its pid may name a stranger. A stranger is never
 // frozen or thawed, and it neither fails the run (a refused or failed resume
 // of a process the loop never froze) nor passes it.
-import { startOf } from "./process-identity.mjs";
+import { assertIdentity, startOf } from "./process-identity.mjs";
 import { resumeProcess, suspendProcess, terminateProcess } from "./win-process.mjs";
 
 // Pid-only liveness, kept for what it describes: the kit's own view of a start
@@ -43,6 +43,7 @@ const defaults = (o) => ({ platform: process.platform, start: (pid) => startOf(p
  * fake one); `platform` selects the primitive.
  */
 export function freezeProcess(id, opts = {}) {
+  assertIdentity(id); // on every platform, so a bare pid fails on Linux too (CI run 42554009537)
   const o = defaults(opts);
   if (o.platform === "win32") return suspendProcess(id);
   return posixSignal(id, "SIGSTOP", o);
@@ -50,6 +51,7 @@ export function freezeProcess(id, opts = {}) {
 
 /** Thaw the process `id` names. false: it is gone, and a stranger at its pid is left alone. */
 export function thawProcess(id, opts = {}) {
+  assertIdentity(id);
   const o = defaults(opts);
   if (o.platform === "win32") return resumeProcess(id);
   return posixSignal(id, "SIGCONT", o);
@@ -61,6 +63,7 @@ export function thawProcess(id, opts = {}) {
  * its pid is left alone. For the loop's own cleanup of processes it started.
  */
 export function killProcess(id, { signal = "SIGKILL", ...opts } = {}) {
+  assertIdentity(id);
   const o = defaults(opts);
   if (o.platform === "win32") return terminateProcess(id);
   return posixSignal(id, signal, o);
@@ -72,6 +75,7 @@ export function killProcess(id, { signal = "SIGKILL", ...opts } = {}) {
  * default to the OS primitives.
  */
 export async function whileFrozen(id, work, { freeze = freezeProcess, thaw = thawProcess } = {}) {
+  assertIdentity(id);
   if (!freeze(id)) throw new Error(`pid ${id.pid} no longer names the process chosen to freeze (start ${id.start}): nothing was frozen`);
   let result, failure = null;
   try { result = await work(); } catch (err) { failure = err; }

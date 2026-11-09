@@ -80,6 +80,17 @@ export function startOf(pid, { platform = process.platform, procRoot = "/proc" }
   return linuxStart(pid, stat);
 }
 
+/**
+ * Throws unless `id` is an identity `{ pid, start }`: a positive integer pid
+ * and a non-empty start time string (decimal on Linux and Windows, `ps
+ * lstart` text on macOS). Every freeze, thaw and kill checks it first, on
+ * every platform: a bare pid from a caller is a defect, never "gone".
+ */
+export function assertIdentity(id) {
+  if (!id || typeof id !== "object" || !Number.isInteger(id.pid) || id.pid <= 0) throw new Error(`not a process identity: ${JSON.stringify(id)}`);
+  if (typeof id.start !== "string" || id.start === "") throw new Error(`pid ${id.pid}: no start time to judge it by (${JSON.stringify(id.start)})`);
+}
+
 /** { pid, start } of the live process `pid`; throws when no process holds it (record it while it surely runs). */
 export function identityOf(pid, opts) {
   const start = startOf(pid, opts);

@@ -14,7 +14,7 @@
 // time is the expected one. A pid that names another process, or none, is
 // reported as such and nothing is done to it.
 import { spawnSync } from "node:child_process";
-import { WINDOWS_START_EXPRESSION } from "./process-identity.mjs";
+import { assertIdentity, WINDOWS_START_EXPRESSION } from "./process-identity.mjs";
 
 const CS = String.raw`
 using System;
@@ -44,8 +44,9 @@ public static class MemloopProcess {
 const ACCESS = { suspend: 0x0800, resume: 0x0800, terminate: 0x0001 };
 
 function checkIdentity(id) {
-  if (!id || !Number.isInteger(id.pid) || id.pid <= 0) throw new Error(`not a process identity: ${JSON.stringify(id)}`);
-  if (!/^\d+$/.test(String(id.start ?? ""))) throw new Error(`pid ${id.pid}: no start time to judge it by (${JSON.stringify(id.start)})`);
+  assertIdentity(id);
+  // A Windows start time is a decimal FILETIME; it is written into the script.
+  if (!/^\d+$/.test(id.start)) throw new Error(`pid ${id.pid}: no start time to judge it by (${JSON.stringify(id.start)})`);
 }
 
 /**

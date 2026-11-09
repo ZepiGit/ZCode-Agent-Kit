@@ -861,6 +861,122 @@ test("a live child is frozen, thawed and killed by its identity; once it is gone
   } finally { try { child.kill("SIGKILL"); } catch {} }
 });
 
+// ── Every caller names the process by its identity (CI run 42554009537) ─────
+// Ticket 16's start-lock test froze its own proxy with `suspendProcess(pid)` on
+// Windows and `process.kill(pid, "SIGSTOP")` elsewhere: the bare pid reached
+// the identity API only on windows-latest, so every Linux run stayed green.
+// A bare pid is refused on every platform, before anything is signalled or
+// spawned, and only lib/freeze.mjs drives the Windows actions, so a platform
+// branch cannot hide a pid-only caller from Linux again.
+test("a bare pid is refused by freeze, thaw and kill on every platform, before anything is signalled or spawned", async () => {
+  const notAnIdentity = 7048; // CI run 42554009537's pid
+  for (const platform of ["linux", "darwin", "win32"]) {
+    for (const [name, fn] of [["freeze", freezeProcess], ["thaw", thawProcess], ["kill", killProcess]]) {
+      const t = fakeTable({ 7048: "1000" });
+      assert.throws(() => fn(notAnIdentity, { ...t.opts, platform }), /not a process identity: 7048/, `${name} on ${platform}`);
+      assert.throws(() => fn({ pid: 7048 }, { ...t.opts, platform }), /pid 7048: no start time/, `${name} on ${platform}: a pid without a start time`);
+      assert.deepEqual(t.signals, [], `${name} on ${platform}: nothing signalled`);
+    }
+  }
+  let worked = false;
+  await assert.rejects(whileFrozen(notAnIdentity, async () => { worked = true; }), /not a process identity: 7048/);
+  assert.equal(worked, false, "the round does not run on a bare pid");
+});
+
+const IDENTITY_ACTIONS = ["freezeProcess", "thawProcess", "killProcess", "whileFrozen", "suspendProcess", "resumeProcess", "terminateProcess"];
+const FREEZE_LIB = join(KIT_ROOT, "tests", "memory", "lib", "freeze.mjs");
+const WIN_PROCESS_LIB = join(KIT_ROOT, "tests", "memory", "lib", "win-process.mjs");
+/** Every .mjs/.js file of the kit's own code and tests (no dependencies, no build output). */
+function kitSources(dir = KIT_ROOT, out = []) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === "node_modules" || e.name === "dist" || e.name.startsWith(".")) continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) kitSources(p, out);
+    else if (/\.(mjs|js)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+/** The text of the first argument of the call whose `(` is at `open`. */
+function firstArgument(src, open) {
+  let depth = 0;
+  for (let i = open + 1; i < src.length; i++) {
+    const c = src[i];
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) { if (depth === 0) return src.slice(open + 1, i).trim(); depth--; }
+    else if (c === "," && depth === 0) return src.slice(open + 1, i).trim();
+  }
+  return "";
+}
+/** `src` with the contents of comments and string literals blanked (same length and lines): calls are matched in code only. */
+function codeOnly(src) {
+  let out = "", i = 0;
+  const blank = (s) => s.replace(/[^\n]/g, " ");
+  while (i < src.length) {
+    const c = src[i], two = src.slice(i, i + 2);
+    let end = -1;
+    if (two === "//") end = src.indexOf("\n", i) === -1 ? src.length : src.indexOf("\n", i);
+    else if (two === "/*") end = src.indexOf("*/", i + 2) === -1 ? src.length : src.indexOf("*/", i + 2) + 2;
+    else if (c === '"' || c === "'" || c === "`") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== c && !(c !== "`" && src[j] === "\n")) j += src[j] === "\\" ? 2 : 1;
+      end = Math.min(j + 1, src.length);
+    }
+    if (end === -1) { out += c; i++; continue; }
+    out += src[i] + blank(src.slice(i + 1, end - 1)) + (end - i > 1 ? src[end - 1] : "");
+    i = end;
+  }
+  return out;
+}
+/** Callers of the identity actions in `file` (source `src`): violations as "path:line what". */
+function identityCallViolations(file, src) {
+  const rel = file.slice(KIT_ROOT.length + 1).replaceAll("\\", "/");
+  const found = [];
+  const lineOf = (i) => src.slice(0, i).split("\n").length;
+  const local = new Map(); // local name → imported name
+  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
+    const target = m[2].startsWith(".") ? join(dirname(file), m[2]) : m[2];
+    if (target !== FREEZE_LIB && target !== WIN_PROCESS_LIB) continue;
+    for (const spec of m[1].split(",").map((s) => s.trim()).filter(Boolean)) {
+      const [imported, alias = imported] = spec.split(/\s+as\s+/).map((s) => s.trim());
+      if (target === WIN_PROCESS_LIB && /^(suspend|resume|terminate)Process$/.test(imported) && file !== FREEZE_LIB) {
+        found.push(`${rel}:${lineOf(m.index)} imports ${imported} from win-process.mjs (use freezeProcess/thawProcess/killProcess of lib/freeze.mjs: identity-checked on every platform)`);
+      }
+      if (IDENTITY_ACTIONS.includes(imported)) local.set(alias, imported);
+    }
+  }
+  if (/import\(\s*[^)]*win-process\.mjs/.test(src) && file !== FREEZE_LIB) found.push(`${rel}: imports win-process.mjs dynamically`);
+  const code = codeOnly(src);
+  for (const [name, imported] of local) {
+    for (const m of code.matchAll(new RegExp(`(?<![\\w$.])${name}\\s*\\(`, "g"))) {
+      const arg = firstArgument(code, m.index + m[0].length - 1);
+      // A bare pid: a number, `pid`, `x.pid`, `holderPid`, `Number(…)`.
+      if (/^\d+$/.test(arg) || /(^|\.)pid$/i.test(arg) || /Pid$/.test(arg) || /^Number\(/.test(arg)) {
+        found.push(`${rel}:${lineOf(m.index)} ${imported}(${arg}): a bare pid, not an identity`);
+      }
+    }
+  }
+  return found;
+}
+
+test("every caller of the freeze, thaw and kill actions passes an identity, and only lib/freeze.mjs drives the Windows actions", () => {
+  // The check itself, on the shape of the defect it exists for (a file at tests/x.test.mjs).
+  const at = join(KIT_ROOT, "tests", "x.test.mjs");
+  assert.deepEqual(identityCallViolations(at, `import { suspendProcess } from "./memory/lib/win-process.mjs";\nconst f = (pid) => suspendProcess(pid);`), [
+    "tests/x.test.mjs:1 imports suspendProcess from win-process.mjs (use freezeProcess/thawProcess/killProcess of lib/freeze.mjs: identity-checked on every platform)",
+    "tests/x.test.mjs:2 suspendProcess(pid): a bare pid, not an identity",
+  ]);
+  assert.deepEqual(identityCallViolations(at, `import { freezeProcess as freeze } from "./memory/lib/freeze.mjs";\nfreeze(child.pid); freeze(Number(x)); freeze(identityOf(child.pid));`), [
+    "tests/x.test.mjs:2 freezeProcess(child.pid): a bare pid, not an identity",
+    "tests/x.test.mjs:2 freezeProcess(Number(x)): a bare pid, not an identity",
+  ]);
+  assert.deepEqual(identityCallViolations(at, `import { killProcess } from "./memory/lib/freeze.mjs";\nkillProcess({ pid: 1, start: "2" }); killProcess(orphans[0]);`), []);
+  // The kit's code and tests as they are.
+  const sources = kitSources();
+  assert.ok(sources.includes(FREEZE_LIB) && sources.some((f) => f.endsWith(join("tests", "start-lock.test.mjs"))), "the scan covers the memory loop and the kit tests");
+  const violations = sources.flatMap((f) => identityCallViolations(f, readFileSync(f, "utf8")));
+  assert.deepEqual(violations, []);
+});
+
 // ── CI run 42281731448 (ubuntu, staging/02): S3/hung ran 9 s. The killed start
 // lock holder had spawned the proxy but not yet written proxy.pid, so
 // `manager start` answered 0 (healthy) with no pid record, both hung rounds
