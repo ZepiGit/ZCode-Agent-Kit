@@ -2,7 +2,7 @@
 
 **Blocked by:** 02 (Windows sampler …), 19 (Admission control: 64 MB in-flight byte cap, FIFO queue, 503 shed contract), 20 (Fewer redundant request-body copies (bytes upstream unchanged))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: high
@@ -204,3 +204,12 @@ Spec stories: none yet (outside spec.md; recorded in Round 7).
       - S1/short peak 138.2, steady 113.1, growth 3.44 %/1k.
     - On fb17d71: stalled 149 / 144.2 / 152.9, burst4 227.4 / 225.8 / 227.9, short 142.
     - burst4 beside ticket 20's final 225.8 (193.3-241.2, n 10): every value is inside that range, and the maximum 231.3 is 18.7 MB under 250. The earlier paired shift stays flagged and unattributed (round 32 condition 5). Windows and the pre-merge CI run are pending CI (orchestrator, round 32 condition 4).
+- 2026-11-09 (merger): Merged 2026-11-09 as eb8aaae; fast suite: kit 981/999 (0 fail, 18 skipped), proxy 1627/1627 (109 files), mcp 106/107 (0 fail, 1 skipped). Plain `--no-ff` merge of ticket/61-s1-stalled-windows (326f5f5) into the tip 9b87c23, no conflicts; no earlier merge or revert of 61 on the integration branch, so no revert-of-revert. No lockfile changed (`npm ci` only); `mcp/zcode-harness-mcp/dist/` unchanged after `test:mcp`'s build (B5). Pre-merge CI run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42585304203 (staging/61r, head 7b9896f = e0962b7 + ticket/61 326f5f5; tree equal to 326f5f5, no marker), green on all 8 jobs; the tip moved since e0962b7 only by 9b87c23 (`.scratch` only, no other file). Owner Proxy rounds 32 (Q1 conditions 4 and 5) and 34 (condition 3 and the linux HWM trigger), checked by the merger in that run's memory-budget artefacts (`/home/AgentKit/overhaul-tools/ci-art/42585304203-t61r-{windows,linux}/`), all hold:
+  - windows S1/stalled GREEN, no `expected-red.json` entry (removed by this ticket; windows list at 326f5f5 is S2/short, S3/hung, S3/omp, S3/short, S4/short, S5/short, S7/short): procPeak:proxy WS 127.6 MB <= 250, commit 312.8 MB <= 512 (commit-backstop per sample 290.6 < 512), growth:proxy 0.23 %/1k trend false, count 1.
+  - linux S1/stalled GREEN: procPeak:proxy 151.7 MB, <= 181 (round 34 HWM trigger not fired); growth:proxy 2.57 %/1k (budget 5), trend true, count 1. Value for ticket 79's record.
+  - S1/burst4 GREEN on both legs: windows WS 245.6 MB (commit 388.6), 4.4 MB under 250; linux 218.3 MB. Round 32 condition 5's post-merge trigger now applies (the first S1/burst4 RED on either leg names 61 as the suspect).
+  - windows S1/short GREEN under ticket 71's 5-repetition rule: commit growth 3.51, 2.23, 4.21, 3.73, 2.36 %/1k (median 3.51, budget 5), 0 of 5 RED (RED at >= 3), none over the 10 ceiling. linux S1/short GREEN (peak 145.3, steady 116.7, growth 3.14 %/1k).
+  - every other S1 key GREEN on both legs: burst1 (median-of-7: windows WS 113.4, linux 132.9), burst16 (windows WS 301.3 / linux 336.2, budget 400), burst32 (370.8 / 364.6, budget 600), bigbody (142.6 / 144.2, budget 250).
+  - S7/short RED only on ticket 33's `proxy.log:bounded-while-running` on both legs; every other RED run tolerated only on its owners' names; job-summary `ok: true`, `failures: []`, "ratchet holds" on both legs.
+  - The transfer-rule rerun 42585293731 (staging/61m3, 326f5f5) is not accounted on windows WS under the pre-registered two-sided rule (-21.1 %); round 34 lets 61 merge because the conditions above hold. Nothing was rerun.
+  Sanity diffs: `git diff staging/61r HEAD` over the ticket's 17 files (`staging/61r^1..staging/61r`, `.scratch` excluded) and over the whole tree (excluding `.scratch`) are both empty; the only `.scratch` differences come from 9b87c23 (DECISIONS, RUNLOG, rounds 33/34). Logs: `reports/merge-61-{npmci,test,proxy,mcp}.log`.
