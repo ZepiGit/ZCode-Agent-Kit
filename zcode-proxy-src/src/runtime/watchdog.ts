@@ -7,7 +7,15 @@
  * only a manual kill recovered it. A hung proxy is unrecoverable for every
  * harness; a dead one is not. So a second thread watches a heartbeat the main
  * thread ticks, and when the heartbeat freezes past the threshold it asks the
- * kit manager to respawn (hook env present) and hard-kills the process.
+ * kit manager to respawn (hook env present) and hard-kills the process: with
+ * the manager's logs dir after the respawn acknowledgement or a refusal, at
+ * most 10 s later (ADR-0015 cond 5), logging the outcome it saw.
+ *
+ * The respawn acknowledgement (ADR-0015) lives here too, self-contained so the
+ * watcher can embed it: the hook is spawned with unchanged arguments, and the
+ * manager's answer is a `respawn.json` event with this pid and an `at` later
+ * than the request time (written at budget reservation by old and new
+ * managers alike), or the hook's exit 4 (a refusal).
  *
  * Implementation constraints (spikes on Bun 1.4.2, see fix context):
  * - The watcher is an eval'd `node:worker_threads` worker: no extra
@@ -81,6 +89,20 @@ export function respawnHookCommand(
 }
 
 /**
+ * The respawn hook's environment: `env` without the stop token
+ * (`ZCODE_KIT_STOP_TOKEN`, any casing; ADR-0014). The token belongs to this
+ * spawn only, and the hook is the next manager, which spawns the next proxy.
+ * `env` itself is left unchanged. Self-contained (embedded in the worker).
+ */
+export function hookEnvironment(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  const hookEnv: Record<string, string | undefined> = {};
+  for (const name of Object.keys(env)) {
+    if (name.toUpperCase() !== "ZCODE_KIT_STOP_TOKEN") hookEnv[name] = env[name];
+  }
+  return hookEnv;
+}
+
+/**
  * Launch the hook detached and report whether the OS actually started it.
  * spawn() failures such as ENOENT/EACCES arrive as an async `error` event,
  * not a throw — without a listener they would crash the host, and a
@@ -88,9 +110,9 @@ export function respawnHookCommand(
  * Resolves `{ ok: true }` on the child's `spawn` event; `{ ok: false }` on
  * `error`, a synchronous throw, or no answer within `ackMs`.
  *
- * The hook gets `env` without the stop token (`ZCODE_KIT_STOP_TOKEN`, any
- * casing; ADR-0014): it belongs to this spawn only, and the hook is the next
- * manager, which spawns the next proxy. `env` itself is left unchanged.
+ * Today's handoff, kept for a proxy whose manager set no logs dir (an old
+ * manager): without `ZCODE_KIT_LOG_DIR` there is no acknowledgement to read.
+ * The hook gets `hookEnvironment(env)`.
  *
  * Self-contained (spawn is passed in) because its source is also embedded
  * in the watcher worker.
@@ -101,10 +123,7 @@ export function launchRespawnHook(
   env: Record<string, string | undefined>,
   ackMs: number,
 ): Promise<{ ok: boolean; error?: string }> {
-  const hookEnv: Record<string, string | undefined> = {};
-  for (const name of Object.keys(env)) {
-    if (name.toUpperCase() !== "ZCODE_KIT_STOP_TOKEN") hookEnv[name] = env[name];
-  }
+  const hookEnv = hookEnvironment(env);
   const { promise, resolve } = Promise.withResolvers<{ ok: boolean; error?: string }>();
   const timer = setTimeout(() => resolve({ ok: false, error: `no spawn acknowledgment within ${ackMs}ms` }), ackMs);
   const settle = (result: { ok: boolean; error?: string }) => {
@@ -119,6 +138,108 @@ export function launchRespawnHook(
   } catch (err) {
     settle({ ok: false, error: err instanceof Error ? err.message : String(err) });
   }
+  return promise;
+}
+
+/** How long the proxy waits for the respawn acknowledgement or a refusal (ADR-0015), on both paths. */
+export const RESPAWN_ACK_WAIT_MS = 10_000;
+/** How often the wait reads `respawn.json`. */
+export const RESPAWN_ACK_POLL_MS = 100;
+
+/**
+ * How a respawn request ended:
+ * - `acknowledged`: the manager reserved the budget for this proxy (a
+ *   `respawn.json` event with its pid, written after the request);
+ * - `refused`: the hook exited 4 without that event (budget used up, pid not
+ *   the recorded one, unreadable history);
+ * - `no-acknowledgement`: no event within the wait, or the hook ended
+ *   otherwise without one;
+ * - `hook-failed`: the hook did not start;
+ * - `started`: no logs dir to read an acknowledgement from (a manager older
+ *   than ADR-0015): today's handoff, the hook's start is the confirmation.
+ */
+export type RespawnOutcome = "acknowledged" | "refused" | "no-acknowledgement" | "hook-failed" | "started";
+
+export interface RespawnAnswer {
+  outcome: RespawnOutcome;
+  /** Only a confirmed request may drain the proxy: `acknowledged` (or `started` with an old manager). */
+  confirmed: boolean;
+  waitedMs: number;
+  /** The hook's exit code when it ended during the wait. */
+  exitCode?: number | null;
+  error?: string;
+}
+
+/**
+ * Whether `text` (the contents of `respawn.json`) holds the acknowledgement:
+ * an event whose `pid` is `pid` and whose `at` is later than `requestTime`.
+ * An earlier event for the same pid never matches, so a wall clock that jumped
+ * back fails safe (no acknowledgement: keep serving). Self-contained.
+ */
+export function isRespawnAcknowledgement(text: string, pid: number, requestTime: number): boolean {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return false; }
+  const events = (parsed as { events?: unknown } | null)?.events;
+  if (!Array.isArray(events)) return false;
+  return events.some((e) => e !== null && typeof e === "object"
+    && (e as { pid?: unknown }).pid === pid
+    && typeof (e as { at?: unknown }).at === "number" && Number.isFinite((e as { at: number }).at)
+    && (e as { at: number }).at > requestTime);
+}
+
+/**
+ * Spawn the respawn hook (unchanged arguments, `hookEnvironment(env)`) and
+ * wait at most `ackWaitMs` for the manager's answer:
+ * - the acknowledgement in `ackFile` (read every `pollMs`) → `acknowledged`;
+ * - the hook's exit 4 → `refused` at once; another exit without the event →
+ *   `no-acknowledgement` at once (the file is read once more first, so an
+ *   event written just before the exit still counts);
+ * - the wait running out → `no-acknowledgement`;
+ * - a spawn failure → `hook-failed`.
+ * The request time is `io.now()` right before the spawn. The hook handle stays
+ * referenced during the wait (its `exit` is watched) and is unref'd once the
+ * wait ends: the detached hook outlives this process. Never rejects.
+ *
+ * Self-contained (its I/O is passed in) because its source is also embedded
+ * in the watcher worker, next to `hookEnvironment` and `isRespawnAcknowledgement`.
+ */
+export function awaitRespawnAcknowledgement(
+  io: { spawn: typeof spawn; readFile: (path: string) => string; now: () => number },
+  hook: { command: string; args: string[] },
+  env: Record<string, string | undefined>,
+  opts: { pid: number; ackFile: string; ackWaitMs: number; pollMs: number },
+): Promise<RespawnAnswer> {
+  const requestTime = io.now();
+  const { promise, resolve } = Promise.withResolvers<RespawnAnswer>();
+  let child: ReturnType<typeof spawn> | null = null;
+  let done = false;
+  let poll: ReturnType<typeof setInterval> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const acknowledged = (): boolean => {
+    try { return isRespawnAcknowledgement(io.readFile(opts.ackFile), opts.pid, requestTime); } catch { return false; }
+  };
+  const finish = (outcome: RespawnOutcome, extra: { exitCode?: number | null; error?: string } = {}): void => {
+    if (done) return;
+    done = true;
+    clearInterval(poll);
+    clearTimeout(timer);
+    try { child?.unref(); } catch { /* already gone */ }
+    resolve({ outcome, confirmed: outcome === "acknowledged", waitedMs: Math.max(0, io.now() - requestTime), ...extra });
+  };
+  try {
+    child = io.spawn(hook.command, hook.args, { detached: true, stdio: "ignore", windowsHide: true, env: hookEnvironment(env) });
+  } catch (err) {
+    finish("hook-failed", { error: err instanceof Error ? err.message : String(err) });
+    return promise;
+  }
+  // `on`, not `once`: an `error` after the wait must not crash the host.
+  child.on("error", (err: Error) => finish(acknowledged() ? "acknowledged" : "hook-failed", { error: err.message }));
+  child.once("exit", (code: number | null) => {
+    if (acknowledged()) return finish("acknowledged");
+    finish(code === 4 ? "refused" : "no-acknowledgement", { exitCode: code });
+  });
+  poll = setInterval(() => { if (acknowledged()) finish("acknowledged"); }, opts.pollMs);
+  timer = setTimeout(() => finish(acknowledged() ? "acknowledged" : "no-acknowledgement"), opts.ackWaitMs);
   return promise;
 }
 
@@ -145,8 +266,10 @@ export interface WatchdogOptions {
   checkIntervalMs?: number;
   /** Main-thread heartbeat cadence (default 250 ms). */
   heartbeatMs?: number;
-  /** Longest wait for the respawn hook to start before the kill (default 2 s). */
+  /** Without the manager's logs dir: longest wait for the respawn hook to start before the kill (default 2 s). */
   hookAckMs?: number;
+  /** With the manager's logs dir: longest wait for the respawn acknowledgement or a refusal before the kill (default 10 s). */
+  ackWaitMs?: number;
 }
 
 export interface WatchdogHandle {
@@ -160,16 +283,23 @@ function watcherSource(): string {
   return `
 const { workerData } = require("node:worker_threads");
 const { spawn } = require("node:child_process");
-const { writeSync } = require("node:fs");
+const { readFileSync, writeSync } = require("node:fs");
+const { join } = require("node:path");
 const watchdogStep = (${watchdogStep.toString()});
 const respawnHookCommand = (${respawnHookCommand.toString()});
+const hookEnvironment = (${hookEnvironment.toString()});
 const launchRespawnHook = (${launchRespawnHook.toString()});
+const isRespawnAcknowledgement = (${isRespawnAcknowledgement.toString()});
+const awaitRespawnAcknowledgement = (${awaitRespawnAcknowledgement.toString()});
 const beat = new Int32Array(workerData.sab);
 const cfg = { checkIntervalMs: workerData.checkIntervalMs, stallMs: workerData.stallMs };
 const start = Date.now();
 let state = { beat: Atomics.load(beat, 0), changedAt: start, checkedAt: start };
 let firing = false;
 const kill = () => process.kill(process.pid, "SIGKILL");
+// An event line (log/event-line.mjs format); every value here is a plain token.
+const event = (level, message, fields) => writeSync(2, new Date().toISOString() + " " + level + " watchdog " + message
+  + Object.entries(fields).filter(([, v]) => v !== undefined).map(([k, v]) => " " + k + "=" + v).join("") + "\\n");
 setInterval(() => {
   if (firing) return;
   const step = watchdogStep(state, Atomics.load(beat, 0), Date.now(), cfg);
@@ -180,11 +310,32 @@ setInterval(() => {
   const hook = respawnHookCommand(process.env, process.pid, "watchdog");
   if (!hook) return kill();
   // Kill regardless of the outcome — a hung proxy is never recoverable in
-  // place — but only after the manager launch is acknowledged or has failed,
-  // bounded so a wedged spawn cannot keep the hung process alive.
-  launchRespawnHook(spawn, hook, process.env, workerData.hookAckMs).then((result) => {
-    if (!result.ok) writeSync(2, "[watchdog] respawn hook failed: " + result.error + "\\n");
-    kill();
+  // place — but only after the manager has answered or the wait is over.
+  const logDir = process.env.ZCODE_KIT_LOG_DIR;
+  if (!logDir) {
+    // A manager older than ADR-0015 (no logs dir): wait for the hook's start
+    // only, bounded so a wedged spawn cannot keep the hung process alive.
+    launchRespawnHook(spawn, hook, process.env, workerData.hookAckMs).then((result) => {
+      if (!result.ok) writeSync(2, "[watchdog] respawn hook failed: " + result.error + "\\n");
+      kill();
+    }, kill);
+    return;
+  }
+  // ADR-0015 cond 5: wait at most ackWaitMs for the acknowledgement or a
+  // refusal, then terminate regardless and log the outcome. A refusal here
+  // can end with no proxy; the next launch's preflight starts a fresh one.
+  setTimeout(kill, workerData.ackWaitMs + 2000).unref?.();
+  awaitRespawnAcknowledgement(
+    { spawn, readFile: (path) => readFileSync(path, "utf8"), now: Date.now },
+    hook, process.env,
+    { pid: process.pid, ackFile: join(logDir, "respawn.json"), ackWaitMs: workerData.ackWaitMs, pollMs: 100 },
+  ).then((answer) => {
+    try {
+      event(answer.outcome === "acknowledged" ? "INFO" : "ERROR", "respawn handoff ended; terminating", {
+        outcome: answer.outcome, waitedMs: answer.waitedMs,
+        hookExit: answer.exitCode === undefined ? undefined : String(answer.exitCode),
+      });
+    } finally { kill(); }
   }, kill);
 }, workerData.checkIntervalMs);
 `;
@@ -204,6 +355,7 @@ export function installWatchdog(opts: WatchdogOptions = {}): WatchdogHandle | nu
   const checkIntervalMs = opts.checkIntervalMs ?? 1_000;
   const heartbeatMs = opts.heartbeatMs ?? 250;
   const hookAckMs = opts.hookAckMs ?? 2_000;
+  const ackWaitMs = opts.ackWaitMs ?? RESPAWN_ACK_WAIT_MS;
 
   const sab = new SharedArrayBuffer(4);
   const beat = new Int32Array(sab);
@@ -211,7 +363,7 @@ export function installWatchdog(opts: WatchdogOptions = {}): WatchdogHandle | nu
   heartbeat.unref();
   const worker = new Worker(watcherSource(), {
     eval: true,
-    workerData: { sab, stallMs, checkIntervalMs, hookAckMs },
+    workerData: { sab, stallMs, checkIntervalMs, hookAckMs, ackWaitMs },
   });
   // Neither thread may keep a finished process alive.
   worker.unref();
