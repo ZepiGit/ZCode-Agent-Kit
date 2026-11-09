@@ -7,6 +7,19 @@
  */
 import path from "node:path";
 import os from "node:os";
+export const DEFAULT_RESTART_BUDGET = Object.freeze({ limit: 3, windowSec: 900 });
+/** `ZCODE_HARNESS_RESTART_BUDGET`: `<restarts>/<window seconds>`, both integers (restarts ≥ 0, window ≥ 1). */
+export function parseRestartBudget(raw) {
+    if (raw === undefined)
+        return { ...DEFAULT_RESTART_BUDGET };
+    const m = /^\s*(\d{1,9})\s*\/\s*(\d{1,9})\s*$/.exec(raw);
+    const limit = Number(m?.[1]);
+    const windowSec = Number(m?.[2]);
+    if (!m || windowSec < 1) {
+        throw new Error(`invalid ZCODE_HARNESS_RESTART_BUDGET: ${JSON.stringify(raw)} (use <restarts>/<window seconds>, e.g. 3/900; unset it for the default)`);
+    }
+    return { limit, windowSec };
+}
 function defaultDataDir() {
     return process.env.ZCODE_HARNESS_DATA_DIR ?? path.join(os.homedir(), ".zcode-harness-mcp");
 }
@@ -60,6 +73,7 @@ export function parseConfig(argv) {
             modelContextBudgetStrategy: "preflight-v1",
         },
         providerRuntimeHeaders: null,
+        restartBudget: parseRestartBudget(process.env.ZCODE_HARNESS_RESTART_BUDGET),
     };
     for (let i = 0; i < args.length; i += 1) {
         const a = args[i] ?? "";
