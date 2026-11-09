@@ -535,6 +535,33 @@ What the steps show:
   - sending bytes or a Blob instead of the string: bytes +60 MB at 4 bodies, Blob no gain;
   - Bun `--smol` (`BUN_OPTIONS=--smol`): no gain at 4 or 16 bodies.
 
+### S1/stalled: response-side attribution and backpressure (ticket 61; Round 12 Q3)
+
+**Windows, from the archived `memory-budget-windows` artefacts (shipped `tee()` tree).** 75 distinct S1/stalled runs from 42265988296 on (every `S1-stalled/**/samples.csv` under `/home/AgentKit/overhaul-tools`, deduplicated; `/home/AgentKit/overhaul-tools/t61-scripts/stalled-art.py` and `stalled-art-stats.py`). Proxy rows only; "idle" is the first sample before the load window (`notes.loadWindowMs`); heap is the proxy's `/health` `heapUsedMB` that the sampler records with every sample. Values in MB, min / median / max.
+
+| leg | runs | idle WS (RSS) | idle commit | idle heap | WS gate (procPeak) | commit peak | WS during load, median | heap during load, median | heap during load, peak |
+|---|---|---|---|---|---|---|---|---|---|
+| windows | 75 | 51.0 / 52.5 / 55.0 | 177.2 / 182.2 / 187.4 | 4 / 4 / 5 | 278.3 / 301.5 / 332.5 (without the Round 7 runs 42252896054 and 42265988296, whose 444 and 452.3 are commit-gated values) | 429.9 / 451.1 / 485.1 | 216.1 / 224.6 / 235.7 | 47 / 54 / 60 | 88 / 111 / 140 |
+| linux | 70 | — (no sample before the load) | — | — | 141.7 / 174.1 / 208.2 | — | 113.9 / 135.2 / 164.2 | 15 / 16.5 / 30 | 21 / 25 / 51 |
+
+At the peak the windows proxy's JS heap holds about 107 MB more than at idle (13 MB per stalled reader at 8 readers); the linux heap about 20 MB. A `tee()` branch queue is JS-held bytes (a local probe: 17.2 MB queued in an unread branch raises `heapUsed` by 18 MB and RSS by 36 MB), so the heap is where bucket (i) shows. The split against a drained reference on windows is the attribution mode's job (`job.mjs --measure-stalled`, marker `tests/memory/measure-stalled`): pending CI.
+
+**Mechanism, linux experiments** (Bun 1.4.2, `/home/AgentKit/overhaul-tools/t61-scratch/`): Bun's response writer stops pulling once the kernel send buffer is full. For one paused loopback client it pulled 3.95 MiB of a 4.5 MB answer, all of it in the kernel (`ss`: Send-Q 4,025,344 B, `tcp_wmem` max 4 MiB, client Recv-Q 127,096 B), so on linux only ~0.35 MB per stalled reader stayed in the `tee()` queue. A Bun `fetch` body that JS does not read costs about 1.0–1.1 MB per stream and stops there (the upstream's kernel queues hold the rest; 0.78 MB per stream once drained). Read late, a `fetch` body returns what accumulated meanwhile: 130–330 KB per read against 64 KB when read as it arrives.
+
+**Linux attribution mode, local** (`node tests/memory/job.mjs --measure-stalled N --cap systemd`, port 19614–19617; run dirs `/home/AgentKit/overhaul-tools/t61-memloop/attr-*`). Pre-fix tree: 1495c03 (the integration tip's proxy plus the mode). The pairs of 3 rotations ran side by side, pre against the branch. RSS, MB, medians:
+
+| tree | rotations | stalled peak | drained peak | idle floor | (iii) drained excess | (i) JS-held | (ii) residual | stalled per reader (excess) |
+|---|---|---|---|---|---|---|---|---|
+| 1495c03 (`tee()`) alone | 1 | 169.8 | 149.8 | 59.7 | 89.8 | 5 | 15.3 | 13.8 |
+| 1495c03, beside e540752 | 3 | 174.4 | 166 | 59.7 | 106.1 | 3 | 5.6 | 14.3 |
+| e540752 (backpressure, whole chunks) | 3 | **188.8** | 167.1 | 60.3 | 107 | 5 | 16.5 | 16.1 |
+| 1495c03, beside caf66db | 3 (184.3, 175, 173.4) | 175 | 161.2 | 60.1 | 101.3 | 5 | 8.6 | 14.4 |
+| caf66db (backpressure, 64 KiB pieces) | 3 (147.8, 150.6, 148.5) | **148.5** | 144.1 | 59.8 | 84.4 | 6 | −1.7 | 11.1 |
+
+All rows "accounted" (|residual| ≤ 20 % of the excess). On linux the stalled excess is almost all (iii): the kernel holds what a stalled reader leaves. Backpressure alone (e540752) raised the linux stalled peak by ~14 MB; the cause was the large late reads above, copied and held whole by every stage after the upstream (terminal-frame guard, decoders, socket write). Standalone A/B (`t61-scratch/ab-proxy.ts`: the proxy's `startServer` against the soak mock, 8 stalled readers at 25/s for 60 s, VmHWM): tee() tree 129.9–143.4 MB, e540752 145.9–150, with the 64 KiB pieces 117.1–119.8 (4 rounds).
+
+**Other S1 and S7 runs on caf66db** (`job.mjs --only …`, `t61-memloop/fix2-s1-job`, "ratchet holds"): S1/short GREEN (growth 3.53 %/1k, peak 145.5, steady 114.3); S1/burst1 median 121.3 of 7 (118.1–123.7); burst4 230.8; burst16 327.2; burst32 348.7; bigbody 201.7; S1/stalled 148.9 (growth −0.03 %/1k); S7/short RED only on `proxy.log:bounded-while-running` (ticket 33), heap-at-cap 63, peak 211.7. Paired, alternating with 1495c03 (`t61-memloop/paired-heavy`, `paired-burst4`): bigbody 196.7 / 190 / 193.7 against 195.5 / 172.8 / 187.4; burst4 median 219.9 (206.4–228.6, 9 runs) against 230.6 (214.7–235.8, 9 runs), one-sided permutation p = 0.015. The burst4 path (non-streaming bodies, a "mock-ok" answer) runs none of the changed code except one socket write per answer; the standalone A/B of that shape (4 × 10.8 MB, 12 requests, 5 rounds) gives 189.9–217.7 MB on the tee() tree and 177.4–214.6 on the branch.
+
 ## Current
 
 (pending)

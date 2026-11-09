@@ -60,3 +60,83 @@ Spec stories: none yet (outside spec.md; recorded in Round 7).
 ---
 
 - 2026-11-08 (orchestrator, Owner Proxy round 17): Q3 condition 4 — criterion 3's "S1/short … do not regress on either leg" is judged on windows under ticket 71's `S1/short` rule: 5 fresh sequential repetitions, `growth:proxy` RED when ≥ 3 of 5 are RED under the unchanged `growth()`, every repetition ≤ 10 %/1k on commit, every other S1/short check judged in each repetition. Linux `S1/short` stays a single run.
+
+---
+
+- 2026-11-09 (implementer, ticket 61). Branch `ticket/61-s1-stalled-windows`, code head 3820c9a (this Comments commit sits on top), merged with the integration tip 6d4331d. Stage 1 numbers, stage 2 built, linux evidence local, every windows criterion **pending CI (orchestrator verifies)**. Numbers in METRICS.md "S1/stalled: response-side attribution and backpressure (ticket 61; Round 12 Q3)".
+
+  **Commits.**
+  - a7435ce `test(proxy)`: client-bytes contract, fixture captured on the tip 788f2fb before any change.
+  - 1495c03 `test(memory)`: the stage 1 attribution mode (`job.mjs --measure-stalled N`, marker `tests/memory/measure-stalled`, new `S1/drained` variant in no job). This commit has the shipped `tee()` proxy, so it is the "before" tree for the windows attribution.
+  - e540752, caf66db `fix(proxy)` and 0da10d7, b4b98ef `test(proxy)`: stage 2.
+  - 3820c9a: the list-only commit.
+
+  **Stage 1, attribution (criterion 1).**
+  - Windows, from evidence that already exists: the 75 archived windows S1/stalled artefacts (shipped `tee()` tree, METRICS table). Proxy JS heap is 4 MB at idle. During the load it has a median of 54 MB and a peak of 88–140 MB (median 111). WS gate 301.5 MB (278–333), commit peak 451 MB, idle floor 52.5 MB WS and 182 MB commit. Linux: heap 16.5 MB median during the load and 25 MB at the peak. So at the peak, windows holds about 107 MB of JS heap above idle (13 MB per stalled reader at 8 readers), against about 20 MB on linux. Queued `tee()` chunks are JS heap: a local probe put 17.2 MB in an unread branch and saw `heapUsed` +18 MB and RSS +36 MB. That points at bucket (i).
+  - Mechanism, from linux experiments (METRICS): Bun's writer stops pulling when the kernel send buffer is full. On linux the kernel takes almost the whole 4.5 MB answer of a paused client (Send-Q 4.0 MB), so only ~0.35 MB per reader stays in the tee queue. A smaller loopback buffer leaves the same bytes in the queue. Bun `fetch` with an unread body holds ~1 MB per stream and stops there.
+  - **The ±20 % accounting on windows is not done yet.** It needs the drained reference on the windows leg. **CI measurement mode needed (the orchestrator runs it):**
+    1. staging at 1495c03 + a commit adding `tests/memory/measure-stalled` with content `3`;
+    2. the same on the branch head;
+    3. both legs each. Per leg: 3 rotations × 2 arms, about 35 min on linux and likely 60–70 on windows, under the 150 min timeout.
+
+    The artefact `measure-S1-stalled.{json,md}` gives per arm the peak and floor (WS and commit on windows), the JS heap, and the buckets (iv) floor, (iii) drained excess, (i) JS-held, (ii) residual, in MB and per stalled reader, with "accounted" when (i) + (iii) explain the excess within 20 %. The marker must not merge (a loop test fails while it exists).
+  - Linux attribution (local, the mode as CI runs it, 3 rotations side by side, medians). Tee tree: stalled 175, drained 161.2, floor 60.1, (iii) 101.3, (i) 5, residual 8.6, accounted. So on linux the stalled excess is (iii); the kernel holds the rest. Branch: stalled **148.5** (147.8, 150.6, 148.5), drained 144.1, (iii) 84.4, (i) 6, residual −1.7.
+  - **Decision taken (smallest step that satisfies the criteria, recorded here):** I built stage 2 on the windows heap evidence before the windows drained-arm attribution exists, because I cannot run windows CI. The two are separate commits, so the orchestrator can run stage 1 on 1495c03 first. If windows stage 1 puts the excess in (iii) or (iv) instead, criterion 4 applies, and the fix commits come back rather than ship.
+
+  **Stage 2, what changed (criterion 2; `zcode-proxy-src/**`, so ineligible for signature (vii)).**
+  - New `src/proxy/response-body.ts`: `observeInClientPath(source, { compressed, sample, onEnd })` replaces the three `tee()` sites in `handler.ts`.
+    - It observes tokens and timings as the client pulls (high-water mark 0, one upstream read per pull).
+    - It prints the request row once, on end, read failure or client cancel. A cancel propagates to the upstream.
+    - The token parse is moved unchanged.
+  - The two SSE translators (`sse-translator.ts`) wait for demand before each upstream read. They used to pump eagerly inside `start()`, which never let `pull()` run.
+  - **The 64 KiB piece bound (caf66db), measured, not planned.** Backpressure alone (e540752) *raised* the linux stalled peak by ~14 MB: 188.8 against 174.4 side by side; standalone A/B HWM 145.9–150 against 129.9–143.4.
+    - Cause: a late read of a `fetch` body returns what accumulated meanwhile, 130–330 KB, against 64 KB when read as it arrives. The terminal guard, the decoders and the socket write then each copied and held that chunk whole.
+    - Fix: the response-body module now hands on at most 64 KiB per pull (views, no copy). `writeWebResponseToNodeResp` writes at most 64 KiB at a time.
+    - Its drain wait also settles on `close`. That is lifecycle only: mutant M9 shows no observable difference, so the old wait was unreachable garbage once the socket was gone.
+    - Result, standalone A/B HWM: 117.1–119.8 MB.
+  - Nothing is capped, shed or ended, and no stream count is limited: Round 1 Q5 stays intact. No anti-abuse module touched (B1). No config key, env var or endpoint.
+
+  **Criterion 2, bullets 2–3 (bytes, resume, fields).**
+  - Client bytes and event order unchanged: `response-bytes-contract.test.ts` (seam 4) has 9 cases pinned on 788f2fb and passes on the branch. The cases: split frames and UTF-8, one chunk, a cut stream, a mid-stream read failure, gzip for a client that takes it and one that does not, translated chat text and tool call, chat cut, chat read failure.
+  - Upstream bytes unchanged: `protocol-contract-bytes.test.ts` passes untouched.
+  - Resume: a client that stops reading, then reads again, gets all 49,497,591 bytes in order (sha256 compared), and its row carries the usage total (3007).
+  - **Comes back before it ships (Round 12 Q3 condition 2, third bullet).** Row and `--json` field names and the TTFB meaning are unchanged, but two values change for a client that is slower than its upstream:
+    - **Total** (and tok/s) is the time until the upstream stream ended at the proxy, as before. The proxy now reads that stream at the client's pace, so for a slow client Total includes the client's drain time.
+    - **Tok**, for a client that leaves early, counts the events read up to its departure. Before, it counted what the upstream raced ahead to deliver until the abort.
+
+    For a client that keeps up, both are the same as before. This is exactly the case the condition names ("total time measured at client pull speed"), so the orchestrator should bring it to the Owner Proxy before merge. The alternative, keeping today's values, needs the upstream read ahead of the client, which is the queue this ticket removes.
+  - Also changed, dump mode only: the 4 KiB dump sample now uses its own decoder. It used to share the token parser's streaming `TextDecoder`, which could garble a token line split inside a multi-byte character while dump was on.
+
+  **RED → GREEN.**
+  - Seam 4, `src/server/response-backpressure.test.ts`: a real proxy on loopback, an injected pull-counting upstream with a 48 MB answer, and raw paused clients (`reports/t61-bp-red.log`, on the tip proxy code).
+    - Messages, held back: RED, pulled 49,497,591 of 49,497,591 against < 16 MiB. GREEN after the fix.
+    - Messages, client leaves while stalled (upstream released, row printed once): RED, all bytes pulled. GREEN after.
+    - Chat translated: RED. Still RED after the handler change alone (`t61-bp-slice1`), GREEN after the translators changed.
+    - Pieces at the socket, ≤ 64 KiB: RED on e540752 (2,640,431 in one write). GREEN on caf66db.
+    - Pieces at the handler, ≤ 64 KiB + one frame: kills M7.
+  - Seam 1, linux, S1/stalled:
+    - tee tree: single runs 169.8 (`base-stalled-1`, the job) and 169.8 (the mode alone), median 175 of 3 side by side;
+    - branch: 148.9 (job) and median 148.5 of 3.
+
+    Windows: pending CI.
+  - Mutants on the committed tree (`/home/AgentKit/overhaul-tools/t61-scripts/mutants.py`, each restored with `git checkout b4b98ef -- src`, `git diff` against b4b98ef empty after). 8 of 9 killed: M1 drop a byte; M2 read error turned into an end; M3 usage total ignored (survived the first version of the row check, killed after 0da10d7); M4 eager translator; M5 no row on cancel; M6 eager observer (large high-water mark); M7 no module pieces; M8 no write pieces. **M9 survived** (drain wait ignores `close`): no observable difference at the seam, see above.
+
+  **Criterion 3, GREEN means.**
+
+  | criterion | status |
+  |---|---|
+  | windows S1/stalled ≤ 250 MB WS and < 512 MB commit | pending CI (orchestrator verifies). Expected from the heap evidence, not proven |
+  | delete windows `S1/stalled` from `expected-red.json` | ✓ 3820c9a, list-only. The pre-merge CI run must be GREEN on that name (Round 15 Q1 condition 5) |
+  | linux S1/stalled GREEN, no HWM regression | ✓ local: 175 → 148.5 MB median of 3, side by side (−15 %). linux CI: pending |
+  | S1/short, burst*, bigbody, S7 do not regress (both legs) | linux local, caf66db. S1/short GREEN 3.53 %/1k, peak 145.5, steady 114.3. burst1 median 121.3 of 7. burst16 327.2, burst32 348.7. bigbody paired 193.7 → 187.4. S7 RED only on ticket 33's name, heap-at-cap 63. **burst4 paired: 219.9 → 230.6, 9 runs each, p = 0.015.** GREEN, inside ticket 20's 10-run range 193.3–241.2. Its path runs none of the changed code except one socket write per answer, and the standalone A/B of that shape shows no difference (189.9–217.7 against 177.4–214.6). No proxy-side cause found; flagged. Windows (S1/short under ticket 71's rule): pending CI |
+
+  **Suites after the merge of 6d4331d (Bun 1.4.2, Node 26.7.0).**
+  - `npm run test`: 906 tests, 888 pass, 0 fail, 18 skipped (`t61-full-kit`).
+  - `npm run test:proxy`: 1611 pass, 0 fail, 109 files (`t61-full-proxy`).
+  - `npm run test:proxy-typecheck`: pass.
+  - `npm run test:mcp`: 100 tests, 99 pass, 0 fail, 1 skipped; `dist/` unchanged.
+  - The memory unit tests after the list edit: 214, 209 pass, 5 skipped.
+
+  **Left for others.**
+  - The `/v1/responses` stream (`responses-handler.ts` `streamResponse`) and the async bridge still pump eagerly in `start()`, so a stalled client of those routes still queues. They are not in S1/stalled, and they are a follow-up if wanted.
+  - Measurements and egress: every run used the loopback soak mock or an injected upstream (B2), and the proxy test suite ran under its egress guard.
