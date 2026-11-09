@@ -2,7 +2,7 @@
 
 **Blocked by:** 15 (Proxy lifecycle module: intents return outcome records, every caller uses them (prefactor for the lifecycle tickets))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -179,3 +179,5 @@ Spec stories: 61, 92
 **Left for another ticket:** ticket 73's live freeze test should wait until `/proc/<pid>/stat` shows `T` (poll with a bound) before it asserts the state. Its thaw assertion has the same race in the other direction.
 
 **Addendum (2026-11-09):** the integration tip moved to `8d243c2` while the suites ran: ticket 73 was reverted, plus docs. That tip is merged in `33090a6` with no conflicts. The merge touches only `tests/memory/` and `.scratch/`, so no proxy or MCP code changed. `npm run test` after the merge (`t38-r2-full-test3`): 923 tests, 905 pass, 0 fail, 18 skipped. The live freeze test noted above left with the revert. The head SHA is the commit that adds this addendum.
+
+Merged 2026-11-09 as dfb9b43 (`dfb9b4360022d78b2fee346e16d90cc185261662`; ticket/38-doctor-check-records at 6907eda; first merge, no revert-of-revert step: `git log --grep 'Revert'` shows no ticket 38 merge or revert, only the 02/06/73 reverts) onto 8d243c2; clean merge (no conflicts). Fast suite: kit 905/923 (0 fail, 18 skipped; includes the new `tests/manager-doctor.test.mjs`), proxy 1596/1596 (107 files), mcp 99/100 (0 fail, 1 skipped); mcp `dist/` unchanged after the `test:mcp` build (B5); no lockfile changes, so only the root `npm ci` ran. `npm run test:ux-before`: 1/1 pass, every capture (tty-color-80, tty-color-120, no-color, term-dumb, ascii-locale, pipe, ci) byte-identical to the BEFORE baseline. `node pack/verify-payload.mjs` not run: it checks the assembled `pack/dist`, which needs `node pack/build.mjs` first (the ignored `pack/dist` on disk dates from 2026-11-06, predates this ticket and has no `lib/proxy-doctor.mjs`). Pre-merge CI (staging/38b 2146654 = tip 8d243c2 + ticket/38 at 6907eda), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42543302875 (restaged: staging/38's first run 42535337819 was RED on the windows doctor snapshot tests, fixed in round 2 by de77861). Staged-ticket sanity: `git diff --name-only staging/38b^1 staging/38b -- . ':!.scratch'` gives 26 files, and `git diff staging/38b HEAD` over them is empty. Whole tree: `git diff staging/38b HEAD -- . ':!.scratch'` is empty (HEAD's tree equals staging/38b's tree); no tip changes since staging/38b's base 8d243c2. Logs: `.scratch/kit-overhaul/reports/merge-38-{npmci,test,proxy,mcp,ux-before}.log`.
