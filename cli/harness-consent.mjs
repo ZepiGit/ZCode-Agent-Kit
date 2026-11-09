@@ -276,12 +276,21 @@ export function isUnreadableChoice(choices, id) {
  * Record one decision through the transaction (rollback of that setup removes
  * it again). `mcp` records consent for the kit's MCP bridge separately from
  * the provider consent; it is never inferred from a stored decision.
+ * In a dry run nothing is written: a decision file the real run WOULD write
+ * is reported through `tx.touch` (the `integrate --dry-run` would-write list),
+ * with the same would-change predicate as the real write.
  * Returns false when nothing could be recorded (unreadable decision file).
  */
 export function recordHarnessChoice(ctx, tx, choices, id, decision, source, now = () => new Date().toISOString(), { mcp = false } = {}) {
-  if (ctx.dryRun) return true;
-  if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
   const previous = choices.harnesses[id];
+  if (ctx.dryRun) {
+    if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
+    if (!(previous && previous.decision === decision && previous.source === source && previous.mcp === mcp)) {
+      tx?.touch?.(join(harnessChoicesDir(ctx), `${id}.json`));
+    }
+    return true;
+  }
+  if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
   if (previous && previous.decision === decision && previous.source === source && previous.mcp === mcp) return true;
   const entry = { schema: 1, harness: id, decision, source, decidedAt: now(), ...(mcp ? { mcp: true } : {}) };
   ensureDir(ctx, harnessChoicesDir(ctx));
