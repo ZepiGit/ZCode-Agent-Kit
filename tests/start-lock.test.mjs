@@ -25,7 +25,8 @@ import { tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { processCommandLine, resolveBun } from "../lib/process.mjs";
-import { suspendProcess } from "./memory/lib/win-process.mjs";
+import { freezeProcess } from "./memory/lib/freeze.mjs";
+import { identityOf } from "./memory/lib/process-identity.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const KEY = "synthetic-start-lock-key";
@@ -503,7 +504,14 @@ for (const [i, killAt] of ["spawn:spawned", "spawn:pid-recorded", "spawn:start-r
 // through CIM (ParentProcessId keeps naming a dead creator); elsewhere a
 // killed spawner never leaves an unstarted child (fork + exec), so the scan
 // is injected with what Windows reports.
-const freezeProcess = (pid) => (process.platform === "win32" ? suspendProcess(pid) : process.kill(pid, "SIGSTOP"));
+// The proxy is frozen by its identity (pid + start time, ticket 73), recorded
+// as soon as it announced its pid: it is surely running then (it waits
+// listen-delay-ms before it listens), so a stranger at a reused pid is never
+// frozen. lib/freeze.mjs: SIGSTOP, or NtSuspendProcess under a held handle.
+function freezeOwnProxy(pid) {
+  const id = identityOf(pid);
+  assert.equal(freezeProcess(id), true, `test premise: the killed start's proxy ${pid} (start ${id.start}) is frozen`);
+}
 async function pollFor(what, fn, ms) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -526,7 +534,7 @@ test("a start killed while its proxy never ran (intent without a pid, proxy froz
   const intent = readJson(join(root, "logs", "proxy.pid"));
   assert.deepEqual({ pid: intent?.pid, by: intent?.spawning?.by }, { pid: null, by: killed.pid }, "test premise: the killed spawner's intent names no pid");
   const child = Number(await pollFor("the killed start's proxy", () => readdirSync(join(root, "spawned"))[0], 30_000));
-  freezeProcess(child);
+  freezeOwnProxy(child);
   assert.equal((await health(port)).state, "down", "test premise: the frozen proxy does not serve");
 
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);

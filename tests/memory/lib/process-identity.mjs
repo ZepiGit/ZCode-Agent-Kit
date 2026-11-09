@@ -12,6 +12,14 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+/**
+ * The PowerShell 5.1 expression for the start time of the Win32_Process `$p`
+ * (FILETIME, decimal). Every Windows identity of the loop uses this one
+ * expression (also lib/win-process.mjs), so two answers about one process are
+ * the same string.
+ */
+export const WINDOWS_START_EXPRESSION = "$(if ($p.CreationDate) { $p.CreationDate.ToFileTimeUtc() } else { 0 })";
+
 /** The PowerShell 5.1 script that prints `START <FILETIME>` for the process holding `pid`, or `NONE`. */
 export function windowsStartScript(pid) {
   if (!Number.isInteger(pid) || pid <= 0) throw new Error(`not a pid: ${pid}`);
@@ -19,7 +27,7 @@ export function windowsStartScript(pid) {
     "$ProgressPreference = 'SilentlyContinue'",
     "$ErrorActionPreference = 'Stop'",
     `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'`,
-    "if ($p) { [Console]::Out.Write('START ' + $(if ($p.CreationDate) { $p.CreationDate.ToFileTimeUtc() } else { 0 })) } else { [Console]::Out.Write('NONE') }",
+    `if ($p) { [Console]::Out.Write('START ' + ${WINDOWS_START_EXPRESSION}) } else { [Console]::Out.Write('NONE') }`,
   ].join("\n");
 }
 
@@ -70,6 +78,17 @@ export function startOf(pid, { platform = process.platform, procRoot = "/proc" }
     throw err;
   }
   return linuxStart(pid, stat);
+}
+
+/**
+ * Throws unless `id` is an identity `{ pid, start }`: a positive integer pid
+ * and a non-empty start time string (decimal on Linux and Windows, `ps
+ * lstart` text on macOS). Every freeze, thaw and kill checks it first, on
+ * every platform: a bare pid from a caller is a defect, never "gone".
+ */
+export function assertIdentity(id) {
+  if (!id || typeof id !== "object" || !Number.isInteger(id.pid) || id.pid <= 0) throw new Error(`not a process identity: ${JSON.stringify(id)}`);
+  if (typeof id.start !== "string" || id.start === "") throw new Error(`pid ${id.pid}: no start time to judge it by (${JSON.stringify(id.start)})`);
 }
 
 /** { pid, start } of the live process `pid`; throws when no process holds it (record it while it surely runs). */
