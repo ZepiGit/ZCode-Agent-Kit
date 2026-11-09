@@ -82,6 +82,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 76 | [The proxy test suite reaches the real upstream (zcode.z.ai:443)](76-proxy-tests-reach-real-upstream.md) | sol | high | — | ready-for-agent |
 | 77 | [Windows kill guard refuses ~1 in 3,500 proxies (start-time ticks rounded through a JS Number)](77-windows-kill-guard-start-time-rounding.md) | sol | medium | — | ready-for-agent |
 | 78 | [windows S1/short commit growth: repetition-position and tree effects](78-windows-s1-short-repetition-position-and-tree-effects.md) | sol | medium | — | needs-triage |
+| 79 | [linux S1/stalled growth:proxy: tail and burst spread](79-linux-s1-stalled-growth-tail.md) | sol | low | — | needs-triage |
 
 ## Initial frontier
 

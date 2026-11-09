@@ -326,13 +326,15 @@ test("ensure running prints nothing and returns an outcome record per identity o
 test("ensure running reports a lock it may not take as an outcome, leaves the lock untouched and prints nothing", async (t) => {
   const root = kitFixture(t, await freePort());
   const lock = join(root, "logs", "manager.lock");
-  writeFileSync(lock, '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale"}');
+  // Ticket 16: a dead holder's lock is now taken over on proof (ADR-0003), so
+  // the lock it may not take is one of an unknown higher protocol version.
+  writeFileSync(lock, '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale","v":99}');
   const { value, out } = await printed(async () => (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 }));
   assert.deepEqual(out, []);
   assert.equal(value.outcome, "start-lock-unavailable");
   assert.equal(value.code, 1);
-  assert.match(value.error, /refusing automatic takeover/);
-  assert.equal(readFileSync(lock, "utf8"), '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale"}');
+  assert.match(value.error, /so it was left untouched/);
+  assert.equal(readFileSync(lock, "utf8"), '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale","v":99}');
 });
 
 test("stop, restart, the respawn request and read state print nothing and return records", async (t) => {
@@ -467,9 +469,15 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
 
   const asked = await fetch(`http://127.0.0.1:${port}/__test/respawn`).then((r) => r.text());
   assert.equal(asked, "true", "the old hook started the new manager");
+  // The port first, then the record: since ticket 16 the spawner records a
+  // spawn intent (pid null) before the spawn, so a record read before a slow
+  // port check may be that intent while the proxy it spawned already answers
+  // (CI run 42507303528, ubuntu Node 24). Only a record naming a pid is the
+  // respawned proxy's.
   const fresh = await until("the respawned proxy", async () => {
+    if (await identity(port) !== "ours") return null;
     const record = readJson(join(root, "logs", "proxy.pid"));
-    return record && record.pid !== old.pid && await identity(port) === "ours" ? record : null;
+    return record && Number.isInteger(record.pid) && record.pid !== old.pid ? record : null;
   }, 90_000);
   defer(root, () => killFixtureProxy(root, fresh.pid));
   await until("the respawn to finish", () => /respawn: start finished with exit code 0/.test(readFileSync(join(root, "logs", "proxy.log"), "utf8")), 30_000);

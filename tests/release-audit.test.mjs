@@ -46,6 +46,8 @@ function packageFixture(t) {
     ...readdirSync(join(KIT, "cli", "commands")).filter((f) => f.endsWith(".mjs")).map((f) => `cli/commands/${f}`),
     // The proxy lifecycle module and the heal log, required by verify-payload since ticket 15.
     "lib/proxy-lifecycle.mjs", "lib/heal-log.mjs",
+    // The manager's doctor module, required by verify-payload since ticket 38.
+    "lib/proxy-doctor.mjs",
   ]) put(root, path);
   put(root, "zcode-proxy-src/src/runtime.test.ts", "throw new Error('must not ship');\n");
   put(root, "zcode-proxy-src/src/__fixtures__/credential.json", "fixture\n");
