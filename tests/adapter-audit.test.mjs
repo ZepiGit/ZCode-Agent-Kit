@@ -10,10 +10,13 @@ import { parseJsonc, setTopLevelKey } from '../lib/jsonc.mjs';
 import goose, { providerDir } from '../cli/adapters/goose.mjs';
 import pi from '../cli/adapters/pi.mjs';
 import { configPath } from '../cli/adapters/opencode.mjs';
+import { freePort } from './free-port.mjs';
 
 const KIT = path.join(import.meta.dirname, '..');
 const { parse: parseYaml } = createRequire(path.join(KIT, 'zcode-proxy-src', 'package.json'))('yaml');
-const PORT = 19500; // written into the fixture config only; nothing listens
+// Written into the fixture config only; nothing listens. Setup probes it, so it
+// is a free port of this run (ticket 75), never one a parallel run may hold.
+const PORT = await freePort();
 
 /**
  * Seam 8: an existing user's temp HOME plus an isolated kit state directory
@@ -389,7 +392,7 @@ test('integrate adds Kilo Code per-model Reasoning and Image toggles to the valu
   const f = existingInstall(t);
   const sheet = path.join(f.state, 'generated', 'kilo-zcode-values.md');
   const before = kiloSheetAfterHighFix();
-  assert.match(before, /Base URL +\| http:\/\/127\.0\.0\.1:19500\/v1 \|/, 'fixture is the post-HIGH-fix sheet');
+  assert.match(before, new RegExp(`Base URL +\\| http://127\\.0\\.0\\.1:${PORT}/v1 \\|`), 'fixture is the post-HIGH-fix sheet');
   const migrated = refreshCycle(f, 'kilo-code', sheet, before);
   const rows = [...migrated.matchAll(/^\| (glm-[^ |]+) +\| ([^|]+?) +\| (on|off) +\| (on|off) +\|$/gm)]
     .map(m => [m[1], m[2], m[3], m[4]]);

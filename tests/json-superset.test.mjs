@@ -36,8 +36,12 @@ test("every --json output of this tree is a key/type superset of the baseline, w
 }, (t) => {
   const out = mkdtempSync(join(tmpdir(), "json-superset-"));
   t.after(() => rmSync(out, { recursive: true, force: true }));
+  // No UX_CAPTURE_PORT: every scenario takes a free port of its own (ticket 75),
+  // so the "down" captures cannot see a parallel capture's fixture proxy.
+  const env = { ...process.env };
+  delete env.UX_CAPTURE_PORT;
   const run = spawnSync(process.execPath, [join(ROOT, "tests", "ux-before", "capture", "capture.mjs"), "--kit", ROOT, "--out", out,
-    "--extra", "json", "--only", "json|auth-status", "--variants", "pipe"], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 9 * 60_000 });
+    "--extra", "json", "--only", "json|auth-status", "--variants", "pipe"], { env, encoding: "utf8", maxBuffer: 16 * 1024 * 1024, timeout: 9 * 60_000 });
   assert.equal(run.status, 0, `capture failed:\n${(run.stdout + run.stderr).slice(-3000)}`);
   const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
   const problems = [];
