@@ -5,7 +5,9 @@
 // fail), 1 otherwise, 2 on a usage error. The report is ../doctor-report.mjs:
 // each check once, grouped, one verdict (ticket 40, A-02).
 // `--fix` progress (the repairs, the proxy start) goes to stderr as it
-// happens; the report is records on stdout.
+// happens; the report is records on stdout. The report builders load on use:
+// every command module is imported by the CLI entry, `run` included, whose
+// launcher process stays lean (S3 procPeak:launcher).
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { acquireLock, beginTransaction, releaseLock } from "../../lib/transaction.mjs";
@@ -15,8 +17,6 @@ import {
   consentStatus, consentedForRepair, decisionFileChecks, forgetHarnessChoice, readHarnessChoices, storedDecisionIds,
 } from "../harness-consent.mjs";
 import { upstreamChecks } from "../upstream-config.mjs";
-import { doctorJson, doctorRecords } from "../doctor-report.mjs";
-import { finishStart } from "../proxy-report.mjs";
 import { ADAPTER_IDS, assertNotCheckoutWrite, keepRecords, loadAdapter, managerPath, stderrLine, stdoutLine } from "./common.mjs";
 
 /** @param {{ flags: Record<string, unknown> }} args */
@@ -101,7 +101,7 @@ async function doctor(flags, ctx, records) {
     if ((await lifecycle.readState()).identity !== "ours") {
       const progress = flags.json ? null : await ctx.step("Proxy start (--fix)");
       const record = await lifecycle.ensureRunning();
-      if (progress) finishStart(progress, record, lifecycle);
+      if (progress) (await import("../proxy-report.mjs")).finishStart(progress, record, lifecycle);
       const code = record.code;
       add("proxy start (--fix)", code === 0, code === 0 ? "proxy running and healthy"
         : `manager start exit ${code} — see zcode-kit proxy logs; next: zcode-kit proxy restart`);
@@ -149,6 +149,7 @@ async function doctor(flags, ctx, records) {
     for (const c of await upstreamChecks(join(kit.root, "proxy", "config.yaml"))) checks.push(c);
   }
 
+  const { doctorJson, doctorRecords } = await import("../doctor-report.mjs");
   const report = doctorJson(checks);
   records.push(...(flags.json ? [{ kind: "json", value: report }] : doctorRecords(checks)));
   return { exitCode: report.failed === 0 ? 0 : 1, records };

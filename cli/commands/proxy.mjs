@@ -5,11 +5,11 @@
 // output module (../proxy-report.mjs, ticket 40): progress, the result row
 // and error blocks on stderr, the connection details once on stdout after a
 // successful start or restart. `status` is shared with `zcode-kit status`;
-// `logs` lives in ./logs.mjs.
+// `logs` lives in ./logs.mjs. The report builders and the reveal rule load on
+// use: the CLI entry imports every command module, `run` included, whose
+// launcher process stays lean (S3 procPeak:launcher).
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { shouldRevealKey } from "../connection-details.mjs";
-import { connectionRecords, finishStart, finishStop, statusRecords } from "../proxy-report.mjs";
 import { managerPath, stderrLine } from "./common.mjs";
 import { run as runLogs } from "./logs.mjs";
 
@@ -24,8 +24,11 @@ export async function lifecycleOf({ kit }) {
   return createLifecycle({ root: kit.root, home: kit.home, managerPath: managerPath(kit) });
 }
 
+const report = () => import("../proxy-report.mjs");
+
 /** The key, only when the connection details may show it (cli/connection-details.mjs rule). */
-function revealedKey(lifecycle, { terminal, env }) {
+async function revealedKey(lifecycle, { terminal, env }) {
+  const { shouldRevealKey } = await import("../connection-details.mjs");
   if (!shouldRevealKey({ stdin: terminal.stdin, stdout: terminal.stdout, env })) return null;
   try { return lifecycle.readKey(); } catch { return null; }
 }
@@ -36,8 +39,8 @@ export async function statusReport({ flags }, ctx) {
   const { readProxyStatus, statusDocument, statusExitCode } = await kitModule(ctx.kit, "lib/proxy-status.mjs");
   const status = await readProxyStatus({ lifecycle, fetch: ctx.fetch });
   if (flags.json === true) return { exitCode: statusExitCode(status), records: [{ kind: "json", value: statusDocument(status) }] };
-  const key = status.connection?.facts ? revealedKey(lifecycle, ctx) : null;
-  return statusRecords(status, { key, reveal: key !== null, verbose: flags.verbose === true });
+  const key = status.connection?.facts ? await revealedKey(lifecycle, ctx) : null;
+  return (await report()).statusRecords(status, { key, reveal: key !== null, verbose: flags.verbose === true });
 }
 
 /** The connection details after a successful start, re-proven right before they are shown. */
@@ -50,8 +53,8 @@ async function cardAfterStart(lifecycle, { flags }, ctx) {
   } catch (err) {
     connection = { source, facts: null, error: String(err?.message ?? err) };
   }
-  const key = connection.facts ? revealedKey(lifecycle, ctx) : null;
-  return connectionRecords(connection, { key, reveal: key !== null, verbose: flags.verbose === true });
+  const key = connection.facts ? await revealedKey(lifecycle, ctx) : null;
+  return (await report()).connectionRecords(connection, { key, reveal: key !== null, verbose: flags.verbose === true });
 }
 
 /**
@@ -59,7 +62,7 @@ async function cardAfterStart(lifecycle, { flags }, ctx) {
  * error, e.g. an unreadable config) ends as an error block with exit 1, the
  * manager CLI's `manager error: …` code.
  */
-async function step(ctx, label, intent, finish, lifecycle, failure) {
+async function step(ctx, label, intent, finishName, lifecycle, failure) {
   const progress = await ctx.step(label);
   let record;
   try {
@@ -68,16 +71,16 @@ async function step(ctx, label, intent, finish, lifecycle, failure) {
     progress.fail({ what: failure, why: String(err?.message ?? err), next: ["zcode-kit doctor"], exit: 1 });
     return { ok: false, code: 1 };
   }
-  return { ok: finish(progress, record, lifecycle), code: record.code };
+  return { ok: (await report())[finishName](progress, record, lifecycle), code: record.code };
 }
 
 async function start(args, ctx, lifecycle) {
-  const started = await step(ctx, "Proxy start", () => lifecycle.ensureRunning(), finishStart, lifecycle, "The proxy did not start");
+  const started = await step(ctx, "Proxy start", () => lifecycle.ensureRunning(), "finishStart", lifecycle, "The proxy did not start");
   if (!started.ok) return { exitCode: started.code, records: [] };
   return { exitCode: 0, records: await cardAfterStart(lifecycle, args, ctx) };
 }
 
-const stop = (ctx, lifecycle) => step(ctx, "Proxy stop", () => lifecycle.stop(), finishStop, lifecycle, "The proxy did not stop");
+const stop = (ctx, lifecycle) => step(ctx, "Proxy stop", () => lifecycle.stop(), "finishStop", lifecycle, "The proxy did not stop");
 
 /** @param {{ positional: string[], flags: Record<string, unknown> }} args */
 export async function run(args, ctx) {
