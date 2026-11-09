@@ -18,7 +18,10 @@
  * message protocol below unchanged. threadTransport() is the Bun Worker; the
  * module-level functions drive the proxy's own dispatcher over it.
  */
+import { spawn, type ChildProcess } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { CaptchaSdkError, type CaptchaFailureCategory } from "./captcha-token.js";
+import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
 
 const BACKEND = process.env.ZCODE_CAPTCHA_BACKEND?.trim().toLowerCase() || "happy";
 
@@ -164,7 +167,8 @@ export interface SolverTransport {
 // From source the worker sits next to this module; in a compiled binary
 // import.meta.url is the executable inside the embedded root (the common
 // directory of the entrypoints, src/), so the worker lives under ./proxy/.
-const WORKER_URL = import.meta.url.endsWith("captcha-solver.ts")
+const FROM_SOURCE = import.meta.url.endsWith("captcha-solver.ts");
+const WORKER_URL = FROM_SOURCE
   ? new URL("./captcha-solver-worker.ts", import.meta.url)
   : new URL("./proxy/captcha-solver-worker.ts", import.meta.url);
 
@@ -182,6 +186,156 @@ export function threadTransport(): SolverTransport {
       return {
         post: (message) => w.postMessage(message),
         terminate: () => w.terminate(),
+      };
+    },
+  };
+}
+
+// Names the solver process never receives, in any case (Windows names are
+// case-insensitive): the respawn chain's variables and this spawn's stop token
+// belong to the proxy (ADR-0002, Round 3 Q3; ADR-0014), and the ambient proxy
+// variables — the set lib/proxy-env.mjs strips — would route captcha egress
+// past ZCODE_PROXY_UPSTREAM_PROXY (Round 19; Bun < 1.4.3 ignores `proxy: false`).
+// Everything else passes as the worker got it: ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA,
+// the CDN cache variables and ZCODE_PROXY_UPSTREAM_PROXY included.
+const EXCLUDED_FROM_SOLVER_ENV: readonly RegExp[] = [
+  /^ZCODE_KIT_RESPAWN_/i,
+  /^ZCODE_KIT_STOP_TOKEN$/i,
+  /^(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i,
+  /^(?:npm|yarn|pnpm)_(?:http_proxy|https_proxy|all_proxy|no_proxy|proxy)$/i,
+];
+
+function solverProcessEnv(source: NodeJS.ProcessEnv): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value === undefined || EXCLUDED_FROM_SOLVER_ENV.some((pattern) => pattern.test(name))) continue;
+    env[name] = value;
+  }
+  return env;
+}
+
+/**
+ * argv of the solver process: from source the running Bun plus the solver
+ * entry module; a compiled binary runs itself with the self-exec subcommand
+ * (ADR-0002 condition 1; never `-e`). The parent pid is appended at spawn.
+ */
+export function solverProcessCommand(): string[] {
+  return FROM_SOURCE
+    ? [process.execPath, fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url))]
+    : [process.execPath, SOLVER_PROCESS_COMMAND];
+}
+
+/** A child line longer than this is passed on in pieces rather than held. */
+const MAX_RELAYED_LINE = 64 * 1024;
+
+/**
+ * Re-emits a child stream on the proxy's own stream, whole lines at a time,
+ * bytes unchanged, so a child line never interleaves with a proxy line.
+ * A line without its newline is held up to MAX_RELAYED_LINE bytes, then
+ * written as it is; the rest is written when the stream ends.
+ */
+function relayLines(from: NodeJS.ReadableStream, to: NodeJS.WritableStream): void {
+  let held: Buffer | null = null;
+  from.on("data", (chunk: Buffer) => {
+    const buf = held ? Buffer.concat([held, chunk]) : chunk;
+    const end = buf.lastIndexOf(10) + 1;
+    if (end > 0) to.write(buf.subarray(0, end));
+    held = end < buf.length ? Buffer.from(buf.subarray(end)) : null;
+    if (held && held.length >= MAX_RELAYED_LINE) {
+      to.write(held);
+      held = null;
+    }
+  });
+  from.on("end", () => {
+    if (held) to.write(held);
+    held = null;
+  });
+}
+
+export interface SolverProcessTransportOptions {
+  /** argv of the solver process (default: solverProcessCommand()). */
+  command?: readonly string[];
+  /** How long an ended generation may take to exit after SIGTERM before it is killed. */
+  graceMs?: number;
+}
+
+/** Default grace between SIGTERM and SIGKILL for an ended generation. */
+export const SOLVER_EXIT_GRACE_MS = 2_000;
+
+/**
+ * The child-process adapter: each solver generation is a solver process
+ * (ADR-0002). One generation at a time: a new process is spawned only after
+ * the previous one has exited; until then (and until it has started) posts
+ * are held. The 90 s deadline is armed by the dispatcher at dispatch, so a
+ * cold start counts against it. The proxy never stays alive for an idle
+ * solver process (unref); the in-flight solve's deadline timer holds it.
+ */
+export function solverProcessTransport(opts: SolverProcessTransportOptions = {}): SolverTransport {
+  const graceMs = opts.graceMs ?? SOLVER_EXIT_GRACE_MS;
+  // Settles when the latest generation's process has exited (or never started).
+  let lastExit: Promise<void> = Promise.resolve();
+
+  return {
+    spawn(events) {
+      const command = opts.command ?? solverProcessCommand();
+      let child: ChildProcess | null = null;
+      let ended = false;
+      const held: SolverHostMessage[] = [];
+      const { promise: exited, resolve: markExited } = Promise.withResolvers<void>();
+
+      const start = () => {
+        if (ended) { markExited(); return; }
+        try {
+          child = spawn(command[0]!, [...command.slice(1), String(process.pid)], {
+            stdio: ["ignore", "pipe", "pipe", "ipc"],
+            serialization: "json",
+            env: solverProcessEnv(process.env),
+            windowsHide: true,
+          });
+        } catch {
+          markExited();
+          if (!ended) events.error();
+          return;
+        }
+        const proc = child;
+        proc.on("message", (raw) => { if (!ended) events.message(raw); });
+        proc.on("error", () => {
+          // A spawn failure has no process to wait for.
+          if (proc.pid === undefined) markExited();
+          if (!ended) events.error();
+        });
+        proc.on("exit", () => {
+          markExited();
+          if (!ended) events.exit();
+        });
+        relayLines(proc.stdout!, process.stdout);
+        relayLines(proc.stderr!, process.stderr);
+        proc.unref();
+        // A process that failed at once reports through "error"/"exit".
+        try { for (const message of held.splice(0)) proc.send(message); } catch {}
+      };
+
+      // Asynchronous in every case: events never come from inside spawn().
+      const previous = lastExit;
+      lastExit = exited;
+      void previous.then(start);
+
+      return {
+        post(message) {
+          if (child) child.send(message);
+          else held.push(message);
+        },
+        terminate() {
+          if (ended) return;
+          ended = true;
+          held.length = 0;
+          const proc = child;
+          if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+          try { proc.kill("SIGTERM"); } catch {}
+          const kill = setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, graceMs);
+          kill.unref?.();
+          void exited.then(() => clearTimeout(kill));
+        },
       };
     },
   };

@@ -20,7 +20,7 @@ function resources(): string {
   return `cdn:${entries}:${bytes}:stalls:${stallCounts.size}`;
 }
 
-export async function solveTraceless({ scene }: { scene: string }): Promise<string> {
+export async function solveTraceless({ scene, region, prefix }: { scene: string; region?: string; prefix?: string }): Promise<string> {
   active += 1;
   try {
     const [kind, arg] = scene.split(":");
@@ -31,6 +31,19 @@ export async function solveTraceless({ scene }: { scene: string }): Promise<stri
       case "env":
         // Environment parity: what the solver generation sees of one variable.
         return param(`env:${process.env[arg!] ?? "unset"}`);
+      case "env-names":
+        // The names (any case) of the generation's environment matching a pattern.
+        return param(`env-names:${Object.keys(process.env).filter((name) => new RegExp(arg!, "i").test(name)).sort().join(",")}`);
+      case "args":
+        // Solve inputs as the generation received them.
+        return param(`args:${JSON.stringify({ scene, region, prefix })}`);
+      case "pid":
+        return param(`pid:${process.pid}`);
+      case "stderr-line": {
+        // A child log line, as captcha-happy writes its own (e.g. [pe-cache-evict]).
+        process.stderr.write(Buffer.from(arg!, "base64"));
+        return param("stderr-line:written");
+      }
       case "slow":
         await Bun.sleep(Number(arg));
         return param(`token:slow:${concurrency}`);
