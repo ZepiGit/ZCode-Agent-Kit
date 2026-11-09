@@ -13,27 +13,31 @@
 // fixture credential store read by a fixture `src/auth/store.ts` (no real
 // credential, B2), Bun named through ZCODE_KIT_BUN (or no Bun at all), and a
 // stand-in proxy on a free loopback port in this process. Normalised: the
-// fixture root (<KIT>, with `/` separators), the Bun path and its version.
+// fixture root (<KIT>, with `/` separators), the Bun path and its version,
+// each in its raw and its JSON-escaped spelling (`doctor --json` prints a
+// Windows path with `\\` separators).
+//
+// The snapshots were captured on Linux. One more platform fact on Windows:
+// libuv sorts the environment block of every process it spawns, so a list the
+// doctor builds from `Object.keys(env)` (the env-override row) reads in
+// sorted order there, on the tip as after ticket 38 (the tip's manager read
+// `Object.keys(process.env)` in a spawned child). The Windows expectation is
+// the stored snapshot with that list sorted (windowsExpectation); on Linux the
+// stored bytes are compared as they are.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";import http from "node:http";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveBun } from "../lib/process.mjs";
-import { matchSnapshot } from "./snapshot-harness.mjs";
+import { freePort } from "./free-port.mjs";
+import { SNAPSHOT_ROOT, matchSnapshot } from "./snapshot-harness.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const KEY = "synthetic-doctor-key";
-
-function freePort() {
-  return new Promise((resolvePort, reject) => {
-    const probe = http.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => { const { port } = probe.address(); probe.close(() => resolvePort(port)); });
-  });
-}
 
 function bunOrFail() {
   try { return resolveBun(ROOT); } catch (err) { assert.fail(`the doctor's Bun checks need Bun: ${err.message}`); }
@@ -125,18 +129,45 @@ function spawnKit(root, entry, args, env) {
   });
 }
 
-/** Explicit normalisation: the fixture root, the Bun path and the Bun version. Nothing else. */
-function normalise(text, root, bun) {
+/** A path as printed raw and as `doctor --json` prints it (JSON-escaped); on Linux both are the same. */
+const spellings = (path) => new Set([JSON.stringify(path).slice(1, -1), path]);
+
+/**
+ * Explicit normalisation: the fixture root, the Bun path and the Bun version,
+ * each raw or JSON-escaped, and the separators after <KIT> (`\` raw, `\\` in
+ * JSON; none on Linux). Nothing else.
+ */
+function normalise(text, roots, bun) {
   let out = text;
-  for (const spelling of new Set([realpathSync.native(root), root])) out = out.split(spelling).join("<KIT>");
-  out = out.replace(/<KIT>[^\s)]*/g, (path) => path.replace(/\\/g, "/"));
-  if (bun) out = out.split(bun).join("<BUN>").replace(/<BUN> \(\d+\.\d+\.\d+[^)]*\)/g, "<BUN> (<VERSION>)");
+  for (const path of new Set(roots)) {
+    for (const spelling of spellings(path)) out = out.split(spelling).join("<KIT>");
+  }
+  out = out.replace(/<KIT>[^\s)]*/g, (path) => path.replace(/\\\\|\\/g, "/"));
+  if (bun) {
+    for (const spelling of spellings(bun)) out = out.split(spelling).join("<BUN>");
+    out = out.replace(/<BUN> \(\d+\.\d+\.\d+[^)]*\)/g, "<BUN> (<VERSION>)");
+  }
   return out;
 }
 
 function snapshotText(run, root) {
   assert.equal(run.signal, null, "the command finished on its own");
-  return `${normalise(run.stdout, root, run.bun)}[exit ${run.code}]\n${run.stderr ? `[stderr]\n${normalise(run.stderr, root, run.bun)}` : ""}`;
+  const roots = [realpathSync.native(root), root];
+  return `${normalise(run.stdout, roots, run.bun)}[exit ${run.code}]\n${run.stderr ? `[stderr]\n${normalise(run.stderr, roots, run.bun)}` : ""}`;
+}
+
+/** The stored (Linux) snapshot as Windows prints it: the env-override list in the sorted order of the Windows environment block. */
+function windowsExpectation(stored) {
+  return stored.replace(/(ignored by the kit-managed proxy \(unset them\): )([A-Z0-9_]+(?:, [A-Z0-9_]+)*)/g,
+    (_, lead, names) => lead + names.split(", ").sort().join(", "));
+}
+
+/** matchSnapshot on Linux and macOS (stored bytes as they are); on Windows the stored bytes through windowsExpectation. */
+function matchPlatformSnapshot(rel, actual) {
+  if (process.platform !== "win32") return matchSnapshot(rel, actual);
+  const expected = windowsExpectation(readFileSync(join(SNAPSHOT_ROOT, rel), "utf8"));
+  assert.equal(actual, expected, `snapshot differs on Windows: ${rel}`);
+  return "match";
 }
 
 /** A stand-in proxy: the identity proof and /quota, both authenticated with the fixture key. */
@@ -266,11 +297,50 @@ test("zcode-kit doctor --json counts checks, not lines: a Bun version string wit
   assert.deepEqual([run.code, report.ok, report.failed], [0, true, 0]);
 });
 
+// The Windows legs' actual lines (CI run 42535337819, test-kit on windows,
+// Node 24 and 26), copied from the job logs as logged (JSON.stringify of the
+// line), against the stored Linux lines: the normalisation and the Windows
+// expectation take each one to the stored bytes, and nothing else changes.
+test("Windows spellings meet the Linux snapshots: JSON-escaped root and Bun paths, the sorted environment block", () => {
+  const logged = (literal) => JSON.parse(literal);
+  const bun = String.raw`C:\Users\runneradmin\.bun\bin\bun.exe`;
+  const root = String.raw`C:\Users\RUNNER~1\AppData\Local\Temp\kit-manager-doctor-2vCm5M`;
+  const roots = [String.raw`C:\Users\runneradmin\AppData\Local\Temp\kit-manager-doctor-2vCm5M`, root];
+  const line = (rel, n) => readFileSync(join(SNAPSHOT_ROOT, "manager-doctor", rel), "utf8").split("\n")[n - 1];
+
+  // kit-doctor-json/{fresh,proxy-down,proxy-running,proxy-running-auth-rejected}.txt line 9
+  assert.equal(normalise(logged(String.raw`"      \"detail\": \"C:\\\\Users\\\\runneradmin\\\\.bun\\\\bin\\\\bun.exe (1.4.2)\""`), roots, bun), line("kit-doctor-json/fresh.txt", 9));
+  // kit-doctor-json/foreign-no-bun.txt line 14 (the short-name spelling of the temp root)
+  assert.equal(normalise(logged(String.raw`"      \"detail\": \"C:\\\\Users\\\\RUNNER~1\\\\AppData\\\\Local\\\\Temp\\\\kit-manager-doctor-2vCm5M\\\\proxy\\\\config.yaml\""`), roots, null), line("kit-doctor-json/foreign-no-bun.txt", 14));
+  // The long-name (realpath) spelling, raw as the text report prints it and JSON-escaped.
+  assert.equal(normalise(String.raw`PASS  key file exists — C:\Users\runneradmin\AppData\Local\Temp\kit-manager-doctor-2vCm5M\.proxykey`, roots, bun), line("proxy-down.txt", 3));
+  assert.equal(normalise(String.raw`      "detail": "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\kit-manager-doctor-2vCm5M\\.proxykey"`, roots, bun), line("kit-doctor-json/proxy-down.txt", 19));
+
+  // proxy-down.txt and kit-doctor-text/proxy-down.txt line 5: the environment block's order.
+  const windowsLine5 = logged(`"FAIL  proxy env overrides — ignored by the kit-managed proxy (unset them): ZCODE_CLAIM_FIXTURE, ZCODE_PROXY_PORT"`);
+  for (const rel of ["proxy-down.txt", "kit-doctor-text/proxy-down.txt"]) {
+    const stored = readFileSync(join(SNAPSHOT_ROOT, "manager-doctor", rel), "utf8");
+    const expected = windowsExpectation(stored).split("\n");
+    assert.equal(expected[4], windowsLine5, rel);
+    const changed = stored.split("\n").flatMap((l, i) => (l === expected[i] ? [] : [i + 1]));
+    assert.deepEqual(changed, rel === "proxy-down.txt" ? [5] : [5, 19], `${rel}: only the env-override rows differ`);
+  }
+  const json = readFileSync(join(SNAPSHOT_ROOT, "manager-doctor", "kit-doctor-json/proxy-down.txt"), "utf8");
+  assert.ok(windowsExpectation(json).includes(`"detail": "ignored by the kit-managed proxy (unset them): ZCODE_CLAIM_FIXTURE, ZCODE_PROXY_PORT"`));
+  // No other snapshot names an env override: the Windows expectation leaves them as stored.
+  for (const id of STATES.map((s) => s.id).filter((id) => id !== "proxy-down")) {
+    for (const rel of [`${id}.txt`, `kit-doctor-text/${id}.txt`, `kit-doctor-json/${id}.txt`]) {
+      const stored = readFileSync(join(SNAPSHOT_ROOT, "manager-doctor", rel), "utf8");
+      assert.equal(windowsExpectation(stored), stored, rel);
+    }
+  }
+});
+
 for (const state of STATES) {
   test(`manager CLI doctor, ${state.title}: the legacy rows and exit code, byte for byte`, { timeout: 120_000 }, async (t) => {
     const { root, env } = await stateFixture(t, state);
     const run = await spawnKit(root, join("proxy", "zcode-proxy-manager.mjs"), ["doctor"], env);
-    matchSnapshot(`manager-doctor/${state.id}.txt`, snapshotText(run, root));
+    matchPlatformSnapshot(`manager-doctor/${state.id}.txt`, snapshotText(run, root));
   });
 
   // zcode-kit doctor over the same states: its text report, its --json and
@@ -279,7 +349,7 @@ for (const state of STATES) {
     test(`zcode-kit doctor${variant === "json" ? " --json" : ""}, ${state.title}: output and exit code unchanged`, { timeout: 120_000 }, async (t) => {
       const { root, env } = await stateFixture(t, state);
       const run = await spawnKit(root, join("cli", "zcode-kit.mjs"), args, env);
-      matchSnapshot(`manager-doctor/kit-doctor-${variant}/${state.id}.txt`, snapshotText(run, root));
+      matchPlatformSnapshot(`manager-doctor/kit-doctor-${variant}/${state.id}.txt`, snapshotText(run, root));
     });
   }
 }
