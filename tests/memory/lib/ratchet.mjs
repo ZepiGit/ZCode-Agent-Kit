@@ -66,7 +66,8 @@
 //     <t>"; above max fails (a step change); ≤ budget fails as "at budget but
 //     listed" (an entry is RED until its owner's fix); any other RED check
 //     fails; no commit value (insufficient samples, no check) is a measurement
-//     gap and fails. It leaves only through ticket 30's ≥ 10-run criterion.
+//     gap and fails. It leaves only through ticket 74's ≥ 10-run criterion
+//     (re-owned from ticket 30 by Round 24 Q1).
 // Ticket 55 removes this allow-list.
 
 import { readdirSync, readFileSync } from "node:fs";

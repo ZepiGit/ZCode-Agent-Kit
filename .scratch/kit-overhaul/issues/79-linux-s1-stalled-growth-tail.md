@@ -8,3 +8,4 @@
 **Comes back:** after 20 more linux runs; earlier on a second RED within any 20 consecutive linux runs, on any value above 6 %/1k, or on any linux S1/stalled RED in a ticket's own staged or pre-merge run.
 
 ## Comments
+- 2026-11-09 (orchestrator, Owner Proxy round 32): early-return trigger fired: measurement run 42561009557 (m1, the tee() tree 1495c03) linux rotation 3 S1/stalled growth:proxy 6.09 %/1k trend true (above 6). Not charged to 61. This ticket is due back for its own round once its table exists.

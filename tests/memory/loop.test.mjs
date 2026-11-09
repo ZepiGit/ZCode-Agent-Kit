@@ -1495,18 +1495,18 @@ function s5Variant(change) {
   return s;
 }
 
-test("job: the windows S5/short runs of CI 42404639968 (RED) and 42401136452 (GREEN) pass as unstable, owned by ticket 30", () => {
+test("job: the windows S5/short runs of CI 42404639968 (RED) and 42401136452 (GREEN) pass as unstable, owned by ticket 74", () => {
   for (const [fixture, outcome, line] of [
-    [CI_S5_RED, "RED", "S5/short: unstable (growth:mcp-bridge 23.71 %/1k commit, budget 5, bound 30, trend true), owned by ticket 30"],
-    [CI_S5_GREEN, "GREEN", "S5/short: unstable (growth:mcp-bridge 15.55 %/1k commit, budget 5, bound 30, trend false), owned by ticket 30"],
+    [CI_S5_RED, "RED", "S5/short: unstable (growth:mcp-bridge 23.71 %/1k commit, budget 5, bound 30, trend true), owned by ticket 74"],
+    [CI_S5_GREEN, "GREEN", "S5/short: unstable (growth:mcp-bridge 15.55 %/1k commit, budget 5, bound 30, trend false), owned by ticket 74"],
   ]) {
     const { r, row, result, stepSummary } = s5ReplayJob(fixture);
     assert.equal(r.status, 0, r.stdout + r.stderr);
-    assert.deepEqual([row.outcome, row.ticket, row.state, row.note], [outcome, "30", "unstable", line]);
+    assert.deepEqual([row.outcome, row.ticket, row.state, row.note], [outcome, "74", "unstable", line]);
     assert.deepEqual(result.growthChecks.map((g) => [g.name, g.commitValue, g.gate, g.trend, g.insufficient]), [["growth:mcp-bridge", outcome === "RED" ? 23.71 : 15.55, "commit", outcome === "RED", false]]);
     for (const text of [r.stdout, stepSummary]) {
       assert.ok(text.includes(`- ${line}`), text);
-      assert.ok(text.includes(`| S5/short | ${outcome} (unstable) | ticket 30 |`), text);
+      assert.ok(text.includes(`| S5/short | ${outcome} (unstable) | ticket 74 |`), text);
     }
   }
 });
@@ -1514,7 +1514,7 @@ test("job: the windows S5/short runs of CI 42404639968 (RED) and 42401136452 (GR
 test("job: the replayed windows S5/short fails above 30, at 5, with another RED check, or without a growth value", () => {
   const cases = {
     "30.01": [s5Variant((s, g) => Object.assign(g, { value: 30.01, commitValue: 30.01 })), /S5\/short: unstable growth:mcp-bridge 30\.01 %\/1k \(commit\) is above the 30 %\/1k bound/],
-    "5, no trend": [s5Variant((s, g) => Object.assign(g, { value: 5, commitValue: 5, red: false, trend: false })), /S5\/short: growth:mcp-bridge 5 %\/1k \(commit\) is at budget \(≤ 5\) but listed for ticket 30/],
+    "5, no trend": [s5Variant((s, g) => Object.assign(g, { value: 5, commitValue: 5, red: false, trend: false })), /S5\/short: growth:mcp-bridge 5 %\/1k \(commit\) is at budget \(≤ 5\) but listed for ticket 74/],
     orphans: [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 })), /S5\/short: RED on orphans: the unstable entry accepts only growth:mcp-bridge/],
     "task failures": [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "bridge:task-failures"), { red: true, value: 1 })), /S5\/short: RED on bridge:task-failures/],
     "reboot cost 21": [s5Variant((s) => Object.assign(s.checks.find((c) => c.name === "bridge:reboot-cost-of-history"), { red: true, value: 21 })), /S5\/short: RED on bridge:reboot-cost-of-history/],
@@ -1527,7 +1527,7 @@ test("job: the replayed windows S5/short fails above 30, at 5, with another RED 
     assert.equal(r.status, 1, `${label}: ${r.stdout}${r.stderr}`);
     assert.match(stepSummary, pattern, label);
     assert.equal(row.note, undefined, label);
-    assert.doesNotMatch(stepSummary, /owned by ticket 30/, label);
+    assert.doesNotMatch(stepSummary, /owned by ticket 74/, label);
   }
 });
 
@@ -1823,17 +1823,17 @@ test("linux S6/short: a missing repetition or a non-numeric value is a harness f
   }
 });
 
-test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 30", () => {
+test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 39.53 %/1k) passes on its flipping mark, owned by ticket 74", () => {
   const { r, row, result } = s5LinuxReplay();
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(row.outcome, "GREEN");
   assert.deepEqual(result.growthChecks.map((g) => [g.name, g.value, g.trend]), [["growth:mcp-bridge", 39.53, false]]);
-  const line = "S5/short: GREEN, listed for ticket 30 on flipping checks growth:mcp-bridge (Round 15 Q1)";
+  const line = "S5/short: GREEN, listed for ticket 74 on flipping checks growth:mcp-bridge (Round 15 Q1)";
   assert.equal(row.note, line);
   assert.ok(r.stdout.includes(`- ${line}`), r.stdout);
   const orphan = s5LinuxReplay((s) => Object.assign(s.checks.find((c) => c.name === "orphans"), { red: true, value: 1 }));
   assert.equal(orphan.r.status, 1, orphan.r.stdout);
-  assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 30 \(linux, Round 14 Q1, Round 15 Q1\)/);
+  assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 74 \(linux, Round 14 Q1, Round 15 Q1\)/);
 });
 
 // Ticket 16: the kill-holder adversary SIGKILLs one of the round's own
