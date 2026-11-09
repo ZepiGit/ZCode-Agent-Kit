@@ -106,14 +106,16 @@ test("activation imports before changing config and preserves policies/comments;
 // enable|disable` update the stored decision; nothing prompts without a
 // terminal, and `update` never blocks without a usable TTY on stdin and stderr.
 // The proxy CLI is a fixture script (no account store, no credentials: B2) and
-// every fixture config listens on this ticket's port range (19420-19429).
+// every fixture config names a free loopback port (FIXTURE_PORT, taken from
+// the kernel: nothing of this or a parallel run listens there; ticket 75).
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { C3_VARIANTS, matchSnapshot } from "./snapshot-harness.mjs";
+import { freePort } from "./free-port.mjs";
 
 const KIT = join(import.meta.dirname, "..");
-const FIXTURE_PORT = 19421;
+const FIXTURE_PORT = await freePort();
 const ROTATOR_PROMPT = `${ACCOUNT_ROTATOR_QUESTION} [y/N] `;
 const loadAccountSetup = () => import(pathToFileURL(join(KIT, "cli", "account-setup.mjs")).href);
 
