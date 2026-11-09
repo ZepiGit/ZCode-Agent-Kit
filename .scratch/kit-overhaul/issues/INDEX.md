@@ -58,7 +58,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 52 | [Docs: README × 5 at content parity](52-docs-readme-parity.md) | glm | medium | 10, 19, 21, 30, 31, 33, 34, 37, 41, 42, 43, 47, 58 | ready-for-agent |
 | 53 | [Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST](53-docs-security-harness-bridge-and-manifests.md) | glm | medium | 11, 13, 16, 22, 31, 51, 58, 57, 56 | ready-for-agent |
 | 54 | [Release notes vNEXT and owner actions](54-release-notes-and-owner-actions.md) | glm | low | 29, 44, 45, 46, 48, 52, 53, 59, 61, 69 | ready-for-agent |
-| 55 | [CI guardrails: snapshot-update refusal and an empty expected-RED list](55-ci-guardrails-snapshot-refusal-and-empty-expected-red.md) | glm | low | 06, 16, 17, 19, 20, 30, 32, 34, 35, 37, 58, 61, 74, and every typecheck-baseline ticket filed by 11, 67 | ready-for-agent |
+| 55 | [CI guardrails: snapshot-update refusal and an empty expected-RED list](55-ci-guardrails-snapshot-refusal-and-empty-expected-red.md) | glm | low | 06, 16, 17, 19, 20, 30, 32, 34, 35, 37, 58, 61, 74, and every typecheck-baseline ticket filed by 11, 67, 81 | ready-for-agent |
 | 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol | high | 13, 30, 31, 36, 57 | ready-for-agent |
 | 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol | medium | 30, 36 | ready-for-agent |
 | 58 | [Solver recycle triggers and failure semantics (abnormal-exit budget, fail-fast shed)](58-solver-recycle-and-failure-semantics.md) | sol | high | 19, 25, 28 | ready-for-agent |
@@ -84,6 +84,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 78 | [windows S1/short commit growth: repetition-position and tree effects](78-windows-s1-short-repetition-position-and-tree-effects.md) | sol | medium | — | needs-triage |
 | 79 | [linux S1/stalled growth:proxy: tail and burst spread](79-linux-s1-stalled-growth-tail.md) | sol | low | — | needs-triage |
 | 80 | [windows S2/short cdn-cache:memory-growth after ticket 29: A/B attribution](80-windows-s2-cdn-memory-after-29.md) | sol | medium | — | ready-for-agent |
+| 81 | [windows S4: deliver a real console control event in the Ctrl-C-during-start trial](81-windows-s4-console-event-ctrl-c-trial.md) | sol | medium | 17 | ready-for-agent |
 
 ## Initial frontier
 

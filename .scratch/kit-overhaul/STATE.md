@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: merge 17 (staging/17s) and 33 (staging/33) when green; after 17: ticket 81 (round 33) and the windows S4 name move; t40 r2 then restage 40. Running: t27, t57, t40 r2. Next slots: 80, 79 table, 22 (after 40), 23 (after 17), 34/35 (after 33), 37, 39, 41, 43-49, 52-54, 56 (after 57), 58.
+- Next action: merge 33 (staging/33) and 40 (staging/40b) when green. Running: t27, t57, t80. Next slots: 23 (after 17, now free), 81, 34/35 (after 33), 22 (after 40), 79 table, 37, 39, 41, 43-49, 52-54, 56 (after 57), 58.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -51,3 +51,4 @@
 - Ticket 73 merged 2026-11-09 as 38b3d3e (resolved a5abe10; pre-merge CI 42567882391, 8/8 green).
 - Ticket 61 merged 2026-11-09 as eb8aaae (resolved d5b81a6; pre-merge CI 42585304203, 8/8 green).
 - Ticket 31 merged 2026-11-09 as 667f967 (resolved 437d69c; pre-merge CI 42583681662, 8/8 green).
+- Ticket 17 merged 2026-11-09 as 6edf13f (resolved 50d2e01; pre-merge CI 42600357562, 8/8 green).

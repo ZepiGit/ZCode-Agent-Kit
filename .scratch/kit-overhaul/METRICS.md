@@ -744,6 +744,9 @@ Copied from ticket 74's branch (eab4ddf, METRICS lines 425-436). Round 29 Q1 wit
 - failed pre-fix set b46596a: windows mean 27.33 (3 above 30, one above 35); fixed set e5b2c50: windows mean 20.94 (all in (5, 30], trend false 10/10); Round 25 without-30 subset: n 19, mean 20.42, sd 2.85 (Welch t per Round 30: fixed vs without-30 0.41, fixed vs failed 3.48). Every other S5 check GREEN on all 40 legs.
 - "with 30" subsets: pre-fix (42483637377 + b46596a, n 11), fixed (e5b2c50, n 10).
 
+## Windows S4 'Ctrl-C during start' trial (Round 33)
+Until ticket 81 merges, the windows S4/short value of `stale-lock-after-ctrl-c` is a TerminateProcess (crash) result, not a console event (Node maps `child.kill("SIGINT")` to TerminateProcess); it is owned by 81 and never judged as a pass. 81's merge restarts the windows S4/short matching count; 17's windows `flips` floor (proxy-left-after-stop, failed-lifecycle-steps, count:proxy) counts on 81's tree or later.
+
 ## Ticket 27: solver process cold start (build-time gate 4) and S2 with the solver process
 
 Cold start = dispatch of the first solve to a fresh solver generation → its answer: spawn (from source: the running Bun + `captcha-solver-process.ts`) + IPC + module load of the offline fixture backend, which imports `captcha-happy` and happy-dom, + one `token:` solve. No cap handshake yet (ticket 28 adds it). Gate: ≤ 4.5 s (5 % of the 90 s deadline); a miss is a finding, the deadline does not move.
