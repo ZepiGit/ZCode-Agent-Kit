@@ -362,20 +362,34 @@ export interface CaptchaSolver {
   concurrency(): number;
 }
 
+/** The dispatcher's timers (the per-solve deadline and the idle exit). */
+export interface SolverClock {
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(timer: unknown): void;
+}
+
+const realClock: SolverClock = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (timer) => clearTimeout(timer as Timer),
+};
+
 export interface CaptchaSolverDeps {
   /** Default: the thread transport. */
   transport?: SolverTransport;
+  /** Default: the runtime's timers. Tests inject a manual clock. */
+  clock?: SolverClock;
 }
 
 /** A solver dispatcher that owns all of its state: queue, in-flight solve, generation, timers, stats. */
 export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver {
   const transport = deps.transport ?? threadTransport();
+  const { setTimeout, clearTimeout } = deps.clock ?? realClock;
   const options: Required<CaptchaSolverOptions> = { ...DEFAULT_OPTIONS };
 
   const queue: Job[] = [];
-  let inFlight: { job: Job; id: number; deadline: Timer } | null = null;
+  let inFlight: { job: Job; id: number; deadline: unknown } | null = null;
   let worker: SolverChannel | null = null;
-  let idleTimer: Timer | null = null;
+  let idleTimer: unknown = null;
   let pendingRecycle: string | null = null;
   let shutdownRequested = false;
   let nextId = 0;
@@ -512,7 +526,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
       idleTimer = null;
       if (!inFlight && !queue.length) recycle("idle");
     }, options.idleMs);
-    idleTimer.unref?.();
+    (idleTimer as { unref?: () => void }).unref?.();
   }
 
   function pump(): void {
