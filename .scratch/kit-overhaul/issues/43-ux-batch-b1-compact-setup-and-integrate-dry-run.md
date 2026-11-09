@@ -77,3 +77,9 @@ Spec stories: 95, 97, 111, 115
 **Pending CI (orchestrator verifies after merge+push)**
 - The `ux-before` windows leg: the Windows baseline's pipe/ci captures of the 12 changed scenarios need a windows capture (tests/ux-before/windows/) — cannot be produced on linux (path shapes, shims). The linux ux-before job is satisfied by this refresh.
 - The `memory-budget` job, the PowerShell 5.1 stderr gate (ADR-0005's windows verification: prompts now go to stderr — the installer's setup call must not turn them into a NativeCommandError; ADR-0005's gate exists for exactly this) and the snapshot-update refusal (ticket 55) run only in CI.
+
+### 2026-11-09 — closing evidence
+
+- FINAL full `npm run test` on head 7bdaf7a: 1037 tests, 1017 pass, 0 fail, 0 cancelled, 20 skipped (platform gates) — reports/t43-kit-final.log. `npm run test:proxy` 1652 tests, 0 fail (t43-testproxy.log); `npm run test:mcp` 115 pass, 1 skipped, tsc clean (t43-testmcp.log). dist/ untouched (B5).
+- ux-before (linux) equivalence after the refresh: compareCaptures(committed baseline, fresh capture of this branch) → 0 diffs (capture t43-uxcap-full2.log; the ux-before CI job runs the same comparison). Windows baseline for the 12 scenarios: pending CI.
+- Head: 7bdaf7a. Pending CI: windows ux-before baseline for the 12 changed scenarios, ADR-0005's PowerShell 5.1 stderr gate, the memory-budget job, the snapshot-update refusal (ticket 55).
