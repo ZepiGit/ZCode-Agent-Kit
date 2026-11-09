@@ -870,3 +870,133 @@ test("the kill guard after a record 16 completed uses the exact ticks: the same 
     }
   }
 });
+
+// ------------------------------------------- signal release (ticket 17)
+// A holder releases its own start lock when a signal ends it (SIGINT,
+// SIGTERM, SIGHUP; on Windows the console control events Node delivers as
+// SIGINT = Ctrl-C, SIGBREAK = Ctrl-Break and SIGHUP = console close), and
+// only while the record on disk is still its own. It then ends the way the
+// signal would have ended it without a listener (POSIX: by that signal;
+// Windows: STATUS_CONTROL_C_EXIT). A process that handles the signal itself
+// keeps its lock; its own exit releases it.
+const HOLDER = join(ROOT, "tests", "fixtures", "start-lock-holder.mjs");
+const STATUS_CONTROL_C_EXIT = 0xC000013A;
+const posixOnly = { skip: process.platform === "win32" && "POSIX signals; windows-latest runs the console-control-event cases" };
+const windowsOnly = { skip: process.platform !== "win32" && "a Windows console control event (SIGBREAK; SIGHUP = console close)" };
+
+function startHolder(root, extra = {}) {
+  const child = spawn(process.execPath, [HOLDER, JSON.stringify({ kitRoot: ROOT, root, ...extra })], { env: childEnv(root), stdio: ["pipe", "pipe", "pipe"] });
+  defer(root, () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  let out = "", err = "";
+  child.stderr.on("data", (b) => { err += b; });
+  const exited = new Promise((r) => child.on("close", (code, signal) => r({ code, signal, out, err })));
+  const held = new Promise((resolveHeld, reject) => {
+    child.stdout.on("data", (b) => {
+      out += b;
+      const first = out.split("\n")[0];
+      if (out.includes("\n")) { try { resolveHeld(JSON.parse(first)); } catch (e) { reject(e); } }
+    });
+    child.on("close", () => reject(new Error(`holder exited before it held the lock: ${out}${err}`)));
+  });
+  held.catch(() => {});
+  const waitFor = (text) => pollFor(`holder output "${text}"`, () => out.includes(text), 20_000);
+  return { child, held, exited, waitFor, send: (line) => child.stdin.write(line + "\n") };
+}
+const releaseLines = (root) => { try { return readFileSync(join(root, "logs", "proxy.log"), "utf8").split("\n").filter((l) => / INFO manager start lock released on signal /.test(l)); } catch { return []; } };
+
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  test(`a holder ended by ${signal} releases its own start lock and dies by ${signal}, with one event line`, { ...posixOnly, timeout: 60_000 }, async (t) => {
+    const root = await stateFixture(t);
+    const h = startHolder(root);
+    const info = await h.held;
+    assert.equal(info.status, "acquired");
+    assert.equal(JSON.parse(readFileSync(lockPath(root), "utf8")).nonce, info.nonce, "test premise: the holder's lock is on disk");
+    h.child.kill(signal);
+    const end = await h.exited;
+    assert.deepEqual({ code: end.code, signal: end.signal }, { code: null, signal }, `ended as ${signal} would end it (${end.err})`);
+    assert.deepEqual(lockFiles(root), [], "no stale lock after the signal");
+    const lines = releaseLines(root);
+    assert.equal(lines.length, 1, lines.join("\n"));
+    assert.match(lines[0], new RegExp(`^\\S+ INFO manager start lock released on signal signal=${signal} pid=${info.pid} path=\\S+manager\\.lock$`));
+  });
+}
+
+for (const signal of ["SIGINT", "SIGBREAK", "SIGHUP"]) {
+  const opts = signal === "SIGINT" ? {} : windowsOnly;
+  test(`a holder that receives ${signal} as Node delivers a console control event releases its own start lock`, { ...opts, timeout: 30_000 }, async (t) => {
+    const root = await stateFixture(t);
+    const h = startHolder(root);
+    assert.equal((await h.held).status, "acquired");
+    h.send(`emit ${signal}`);
+    const end = await h.exited;
+    if (process.platform === "win32") assert.equal(end.code, STATUS_CONTROL_C_EXIT, `the exit code a console control event gives (${end.code}) ${end.err}`);
+    else assert.deepEqual({ code: end.code, signal: end.signal }, { code: null, signal }, end.err);
+    assert.deepEqual(lockFiles(root), [], "no stale lock after the console control event");
+    assert.equal(releaseLines(root).length, 1);
+  });
+}
+
+test("adversarial: a holder whose lock was taken over leaves the new holder's lock untouched on SIGINT and SIGTERM", { timeout: 60_000 }, async (t) => {
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    if (process.platform === "win32" && signal === "SIGTERM") continue; // Windows delivers no SIGTERM (TerminateProcess runs no handler)
+    const root = await stateFixture(t);
+    const h = startHolder(root);
+    const info = await h.held;
+    assert.equal(info.status, "acquired");
+    // The on-disk record is no longer this holder's: another start owns the lock now.
+    const successor = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), nonce: "9".repeat(32), v: 1, holderStartMs: Math.ceil(performance.timeOrigin) });
+    writeFileSync(lockPath(root), successor);
+    if (process.platform === "win32") h.send(`emit ${signal}`); else h.child.kill(signal);
+    const end = await h.exited;
+    assert.ok(end.signal === signal || end.code === STATUS_CONTROL_C_EXIT, `${signal}: the holder ended (${end.code} ${end.signal}) ${end.err}`);
+    assert.equal(readFileSync(lockPath(root), "utf8"), successor, `${signal}: the new holder's lock is byte-identical`);
+    assert.deepEqual(lockFiles(root), ["manager.lock"], signal);
+    assert.deepEqual(releaseLines(root), [], `${signal}: nothing was released`);
+  }
+});
+
+test("a holder that handles the signal itself keeps its start lock (it keeps running); its own exit then releases it", { timeout: 60_000 }, async (t) => {
+  const root = await stateFixture(t);
+  const h = startHolder(root, { ownListener: "SIGINT" });
+  const info = await h.held;
+  assert.equal(info.status, "acquired");
+  if (process.platform === "win32") h.send("emit SIGINT"); else h.child.kill("SIGINT");
+  await h.waitFor("handled SIGINT");
+  await sleep(300);
+  assert.equal(h.child.exitCode, null, "still running");
+  assert.equal(JSON.parse(readFileSync(lockPath(root), "utf8")).nonce, info.nonce, "a running holder keeps its lock: no second start can begin beside it");
+  h.send("exit 3");
+  const end = await h.exited;
+  assert.equal(end.code, 3);
+  assert.deepEqual(lockFiles(root), [], "released by its own exit");
+});
+
+test("Ctrl-C (SIGINT) of a manager start during its health wait leaves no stale lock; the next start adopts that proxy, stop stops it, 0 orphans", { ...posixOnly, timeout: 180_000 }, async (t) => {
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  defer(root, () => killFixtureProxies(root));
+  writeFileSync(join(root, "listen-delay-ms"), "3000"); // the start sits in its health wait
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+  const start = spawn(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "start"], { env, stdio: "ignore" });
+  const exited = new Promise((r) => start.on("close", (code, signal) => r({ code, signal })));
+  // Its proxy is spawned and recorded (pid + start time), then Ctrl-C.
+  await pollFor("the start's proxy, running and recorded", () => {
+    const r = readJson(join(root, "logs", "proxy.pid"));
+    return Number.isFinite(r?.startedMs) && liveProxies(root).includes(r.pid) && readJson(lockPath(root))?.pid === start.pid;
+  }, 30_000);
+  start.kill("SIGINT");
+  assert.deepEqual(await exited, { code: null, signal: "SIGINT" });
+  assert.deepEqual(lockFiles(root), [], "no stale lock after Ctrl-C during start");
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  assert.equal(liveProxies(root).length, 1, "its proxy was detached and keeps coming up");
+  assert.equal(record.pid, liveProxies(root)[0], "the record names it");
+
+  const next = manager(root, ["start"], env);
+  assert.equal(next.status, 0, next.stdout + next.stderr);
+  assert.equal(readdirSync(join(root, "spawned")).length, 1, "no second proxy was spawned");
+  assert.equal((await health(port)).pid, record.pid);
+  const stop = manager(root, ["stop"], env);
+  assert.equal(stop.stdout, `stopped (pid ${record.pid})\n`, stop.stdout + stop.stderr);
+  assert.deepEqual(liveProxies(root), [], "0 orphans");
+  assert.deepEqual(lockFiles(root), []);
+});
