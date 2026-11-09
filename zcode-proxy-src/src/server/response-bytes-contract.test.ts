@@ -14,8 +14,14 @@
  * to what a client receives fails here.
  *
  * The fixture is (re)written only with UPDATE_SNAPSHOTS=1, like every snapshot.
+ *
+ * The same clients keep up with their answers (each reads to the end at once),
+ * so their request rows must also be what the tip printed: the Tok column of
+ * every case is compared with a second fixture captured on 788f2fb (Owner
+ * Proxy round 31 Q2 condition 5 (a): only a slower or early-leaving client
+ * sees different row values).
  */
-import { describe, it, expect, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -26,6 +32,7 @@ import type { ProxyConfig } from "../config/types.js";
 import { fixtureSecret } from "../test-fixtures.js";
 
 const FIXTURE = join(import.meta.dir, "__fixtures__", "client-response-bytes.json");
+const ROW_FIXTURE = join(import.meta.dir, "__fixtures__", "request-row-tok.json");
 const KEY = fixtureSecret("response-bytes-proxy-key");
 
 function sse(event: string, data: unknown): string {
@@ -128,6 +135,9 @@ function makeConfig(): ProxyConfig {
 
 let server: ProxyServer;
 let current: UpstreamAnswer | null = null;
+/** Every console.log line: the request rows (printRow) are among them. */
+const logged: string[] = [];
+let logSpy: ReturnType<typeof spyOn>;
 
 beforeAll(async () => {
   const auth = new AuthManager();
@@ -138,15 +148,32 @@ beforeAll(async () => {
     return new Response(streamOf(answer), { status: 200, headers: answer.headers });
   }) as typeof fetch;
   server = await startServer({ config: makeConfig(), auth, fetchImpl });
+  logSpy = spyOn(console, "log").mockImplementation((...args: unknown[]) => { logged.push(args.map(String).join(" ")); });
 });
 
 afterAll(async () => {
+  logSpy.mockRestore();
   await server.close();
   if (update) {
     mkdirSync(dirname(FIXTURE), { recursive: true });
     writeFileSync(FIXTURE, `${JSON.stringify(results, null, 1)}\n`);
+    writeFileSync(ROW_FIXTURE, `${JSON.stringify(rowResults, null, 1)}\n`);
   }
 });
+
+/** The table row's cells: #, Time, Fmt, Model, Mode, Stat, TTFB, Tok, tok/s, Total. */
+function rowCells(row: string): string[] {
+  return row.split("|").slice(1, -1).map((cell) => cell.trim());
+}
+
+const isRequestRow = (line: string): boolean => /^\| \S+\s+\| [^|]+\| (ANT|OAI) \|/.test(line);
+
+/** The request rows printed since `from`, once the first has appeared and nothing more follows for a moment. */
+async function rowsSince(from: number): Promise<string[]> {
+  for (let i = 0; i < 300 && !logged.slice(from).some(isRequestRow); i++) await new Promise((r) => setTimeout(r, 10));
+  await new Promise((r) => setTimeout(r, 100));
+  return logged.slice(from).filter(isRequestRow);
+}
 
 interface ClientRecord {
   status: number;
@@ -201,6 +228,9 @@ async function receive(path: string, acceptEncoding = "identity"): Promise<Clien
 const update = process.env.UPDATE_SNAPSHOTS === "1";
 const results: Record<string, ClientRecord> = {};
 const expected: Record<string, ClientRecord> | null = existsSync(FIXTURE) ? JSON.parse(readFileSync(FIXTURE, "utf8")) : null;
+/** Per case: the number of request rows the answer printed and the Tok cell of each. */
+const rowResults: Record<string, { rows: number; tok: string[] }> = {};
+const expectedRows: Record<string, { rows: number; tok: string[] }> | null = existsSync(ROW_FIXTURE) ? JSON.parse(readFileSync(ROW_FIXTURE, "utf8")) : null;
 
 describe("protocol contract: bytes a client receives for a streamed answer are unchanged (ticket 61)", () => {
   it("the fixture exists and names every case (write it with UPDATE_SNAPSHOTS=1 on the reference tree)", () => {
@@ -212,10 +242,29 @@ describe("protocol contract: bytes a client receives for a streamed answer are u
   for (const [name, c] of Object.entries(CASES)) {
     it(name, async () => {
       current = c.answer;
+      const from = logged.length;
       const rec = await receive(c.path, c.acceptEncoding);
       results[name] = rec;
+      const rows = await rowsSince(from);
+      rowResults[name] = { rows: rows.length, tok: rows.map((row) => rowCells(row)[7]) };
       if (update) return;
       expect(rec).toEqual(expected![name]);
     }, 30_000);
+  }
+});
+
+describe("request row: a client that keeps up sees the Tok the tip 788f2fb printed (ticket 61, round 31 Q2 condition 5 (a))", () => {
+  it("the row fixture exists and names every case (written with UPDATE_SNAPSHOTS=1 on 788f2fb)", () => {
+    if (update) return;
+    expect(expectedRows).not.toBeNull();
+    expect(Object.keys(expectedRows!).sort()).toEqual(Object.keys(CASES).sort());
+  });
+
+  // Runs after the contract cases above (bun runs a file's tests in order).
+  for (const name of Object.keys(CASES)) {
+    it(`${name}: one row, Tok as on the tip`, () => {
+      if (update) return;
+      expect(rowResults[name]).toEqual(expectedRows![name]);
+    });
   }
 });

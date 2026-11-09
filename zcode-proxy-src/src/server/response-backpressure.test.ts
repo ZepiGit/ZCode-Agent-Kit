@@ -301,3 +301,94 @@ describe("a streaming client's reads pace the upstream (ticket 61)", () => {
     expect(u.pulled).toBe(ANSWER_BYTES);
   }, 60_000);
 });
+
+/** The table row's cells: #, Time, Fmt, Model, Mode, Stat, TTFB, Tok, tok/s, Total. */
+function rowCells(row: string): string[] {
+  return row.split("|").slice(1, -1).map((cell) => cell.trim());
+}
+
+/** The request rows of `tag` printed since `from`, once the first has appeared and nothing more follows for a moment. */
+async function rowsSince(from: number, tag: "ANT" | "OAI", maxMs = 10_000): Promise<string[]> {
+  const mine = (): string[] => rows.slice(from).filter((r) => r.includes(`| ${tag} |`));
+  for (const t0 = Date.now(); Date.now() - t0 < maxMs && mine().length === 0;) await sleep(10);
+  await sleep(300);
+  return mine();
+}
+
+/**
+ * The Tok a row must show for `text` as delivered: the upstream's usage total
+ * when a usage event is among the delivered events, otherwise the counted
+ * text deltas (Owner Proxy round 31 Q2, correction 6).
+ */
+function tokOf(text: string): string {
+  let tokens = 0;
+  for (const line of text.split("\n")) {
+    if (!line.startsWith("data:") || line.includes("[DONE]")) continue;
+    const j = JSON.parse(line.slice(5).trim());
+    if (j.usage?.completion_tokens) tokens = j.usage.completion_tokens;
+    else if (j.usage?.output_tokens) tokens = j.usage.output_tokens;
+    else if (typeof j.choices?.[0]?.delta?.content === "string" && j.choices[0].delta.content.length > 0) tokens++;
+    else if (j.type === "content_block_delta" && j.delta?.type === "text_delta" && j.delta.text.length > 0) tokens++;
+  }
+  return tokens > 0 ? String(tokens) : "-";
+}
+
+/** The number of text deltas among the events in `text` (either wire format). */
+function deltasIn(text: string): number {
+  return text.split("\n").filter((l) => l.startsWith("data:") && (l.includes("\"text_delta\"") || l.includes("\"content\":\"y"))).length;
+}
+
+describe("the request row of a client that is slower than its upstream (ticket 61, round 31 Q2 condition 5)", () => {
+  /** Longer than the tip's stats branch takes to read the whole 48 MB answer at upstream speed. */
+  const PAUSE_MS = 3000;
+
+  for (const [route, path, body, tag] of [["messages", "/v1/messages", MESSAGES, "ANT"], ["chat (translated)", "/v1/chat/completions", CHAT, "OAI"]] as const) {
+    it(`(b) ${route}: a client that pauses ${PAUSE_MS} ms mid-stream gets a row whose Total is at least the pause`, async () => {
+      const firstRow = rows.length;
+      const client = stallingClient(path, body);
+      await client.headSeen;
+      const pausedAt = Date.now();
+      await sleep(PAUSE_MS);
+      const paused = Date.now() - pausedAt;
+      await client.readToEnd();
+      const mine = await rowsSince(firstRow, tag);
+      expect(mine.length).toBe(1);
+      const total = rowCells(mine[0])[9];
+      expect(total).toMatch(/^\d+ms$/);
+      expect(Number.parseInt(total, 10)).toBeGreaterThanOrEqual(paused);
+    }, 60_000);
+  }
+
+  for (const [route, format, path, body, tag] of [["messages", "anthropic", "/v1/messages", MESSAGES, "ANT"], ["chat (translated)", "openai", "/v1/chat/completions", CHAT, "OAI"]] as const) {
+    it(`(c) ${route}: a client that leaves early gets one row, and its Tok is that of the events delivered before the cancel, never more`, async () => {
+      // At the handler, where "delivered" is exact: the bytes the response
+      // body handed to its reader (what the server writes to the socket).
+      const fetchImpl = (async (input: Request | string | URL, init?: RequestInit) => {
+        await (input as Request).text();
+        return upstreamAnswer(init?.signal ?? undefined);
+      }) as typeof fetch;
+      const auth = new AuthManager();
+      auth.setOAuthCredential({ apiKey: "testkey", secret: "testsecret", provider: "zai" });
+      const firstRow = rows.length;
+      const clientReq = new Request(`http://127.0.0.1${path}`, { method: "POST", headers: { "content-type": "application/json" }, body });
+      const resp = await proxyRequest(clientReq, format, { config: makeConfig(), auth, fetchImpl });
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let delivered = "";
+      while (deltasIn(delivered) < 5) {
+        const r = await reader.read();
+        if (r.done) break;
+        delivered += decoder.decode(r.value, { stream: true });
+      }
+      // Let any read-ahead inside the proxy finish before the client leaves: a
+      // stage that reads before it is asked would count events not delivered.
+      await sleep(300);
+      await reader.cancel();
+      const mine = await rowsSince(firstRow, tag);
+      expect(mine.length).toBe(1);
+      expect(deltasIn(delivered)).toBeGreaterThanOrEqual(5);
+      // Only whole events count as delivered (an unfinished last line is not one).
+      expect(rowCells(mine[0])[7]).toBe(tokOf(delivered.slice(0, delivered.lastIndexOf("\n") + 1)));
+    }, 60_000);
+  }
+});
