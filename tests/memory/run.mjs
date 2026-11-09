@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join, resolve } from "node:path";
-import { countRoles, startSampler, survivors, supported } from "./lib/sampler.mjs";
+import { countRoles, settled as tableSettled, startSampler, survivors, supported } from "./lib/sampler.mjs";
 import { osVerdict } from "./lib/verdict.mjs";
 import { assertSafeRun, bunPath, KIT_ROOT, prepareRunBun } from "./lib/isolated-kit.mjs";
 import { proxyBunTracker, runtimeEnv } from "./lib/runtime-probe.mjs";
@@ -76,8 +76,18 @@ async function main() {
     addHeapProbe(fn) { probes.push(fn); },
     reportHeap(pid, mb) { heapByPid[pid] = mb; },
     note(k, value) { notes[k] = value; },
-    /** Count the marked processes per role right now, under a label the budgets name. */
-    observe(label) { const counts = countRoles(marker); observations.push({ label, tMs: ctx.elapsed(), counts }); return counts; },
+    /**
+     * Count the marked processes per role as they are now, under a label the
+     * budgets name. Resolves with the counts once the sampler has seen the
+     * process table after this call (lib/sampler.mjs `settled`), so a process
+     * that exited before it is never counted, whatever its pid names by then.
+     */
+    async observe(label) {
+      await tableSettled(marker);
+      const counts = countRoles(marker);
+      observations.push({ label, tMs: ctx.elapsed(), counts });
+      return counts;
+    },
     log(line) { console.log(`[${args.scenario}] ${line}`); },
   };
   // Measurement mode only (job.mjs --measure-burst1 sets it; Round 10 Q1
