@@ -695,6 +695,95 @@ test("manager output masks the recorded stop token exactly, also where the token
   assert.equal(logs().stdout, "[zcode-proxy] echoed <redacted>\n");
 });
 
+// ------------------------------------------- proxy.log ownership (ticket 33)
+// Spec §8: while it runs, the proxy is the single rotator of proxy.log. The
+// manager keeps appending its `[manager <ISO>] …` lines and rotates only
+// under the start lock and only when no live recorded proxy exists (the
+// rotation before lock acquisition is gone). Every log-dir file the manager
+// creates is 0o600, the logs dir 0o700 (POSIX). `proxy logs N` reads across
+// proxy.log.1 and proxy.log.
+const FIVE_MB = 5 * 1024 * 1024;
+/** proxy.log past the 5 MB rotation threshold, with a first line to recognise it by. */
+function oversizedLog(root) {
+  const file = join(root, "logs", "proxy.log");
+  writeFileSync(file, `oversized-log-start\n${`${"#".repeat(1023)}\n`.repeat(5 * 1024 + 1)}`);
+  return file;
+}
+function assertNotRotated(file, what) {
+  assert.equal(existsSync(`${file}.1`), false, `${what}: proxy.log.1 was not created`);
+  const text = readFileSync(file, "utf8");
+  assert.ok(text.startsWith("oversized-log-start\n") && statSync(file).size > FIVE_MB, `${what}: proxy.log kept its bytes`);
+}
+
+test("the manager never rotates proxy.log while its proxy answers, without the start lock, or over a live recorded proxy", async (t) => {
+  // Its own proxy answers: already running, nothing else happens.
+  const oursPort = await freePort();
+  const ours = kitFixture(t, oursPort);
+  await identityServer(t, oursPort, "ours");
+  const oursLog = oversizedLog(ours);
+  assert.equal((await (await lifecycleFor(ours)).ensureRunning()).outcome, "already-running");
+  assertNotRotated(oursLog, "while its proxy answers");
+
+  // The start lock is not this start's to take.
+  const locked = kitFixture(t, await freePort());
+  writeFileSync(join(locked, "logs", "manager.lock"), '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale","v":99}');
+  const lockedLog = oversizedLog(locked);
+  assert.equal((await (await lifecycleFor(locked)).ensureRunning({ waitMs: 1000 })).outcome, "start-lock-unavailable");
+  assertNotRotated(lockedLog, "without the start lock");
+
+  // Under the lock, a live recorded process that does not answer (not proven hung): refused, log untouched.
+  const live = kitFixture(t, await freePort());
+  writeFileSync(join(live, "logs", "proxy.pid"), JSON.stringify({ pid: process.pid, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z" }) + "\n", { mode: 0o600 });
+  const liveLog = oversizedLog(live);
+  assert.equal((await (await lifecycleFor(live)).ensureRunning({ waitMs: 1000 })).outcome, "unproven-live-record");
+  assertNotRotated(liveLog, "over a live recorded proxy");
+});
+
+test("under the start lock with no live recorded proxy, a start rotates proxy.log first: the old bytes in proxy.log.1, its own lines in a new proxy.log", async (t) => {
+  const root = kitFixture(t, await freePort()); // nothing listens; no proxy dependencies: the start ends there
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: NEVER_ALLOCATED_PID, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z" }) + "\n", { mode: 0o600 });
+  const file = oversizedLog(root);
+  const record = await (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 });
+  assert.equal(record.outcome, "dependencies-missing");
+  assert.ok(readFileSync(`${file}.1`, "utf8").startsWith("oversized-log-start\n"), "proxy.log.1 holds the rotated bytes");
+  assert.match(readFileSync(file, "utf8"), /^\[manager [^\]]+\] ERROR: proxy dependencies missing\. Run: cd zcode-proxy-src && bun install --frozen-lockfile\n$/);
+  if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600, "the new proxy.log is owner-only");
+});
+
+test("POSIX: the logs dir and every log file the manager creates are owner-only (0o700 / 0o600)", {
+  skip: process.platform === "win32" && "POSIX modes; Windows files take the profile directory's ACL",
+}, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port);
+  await identityServer(t, port, "ours");
+  rmSync(join(root, "logs"), { recursive: true, force: true });
+  const lifecycle = await lifecycleFor(root);
+  assert.equal((await lifecycle.ensureRunning()).outcome, "already-running"); // narrates into a new proxy.log
+  assert.equal(statSync(join(root, "logs")).mode & 0o777, 0o700, "logs dir");
+  assert.equal(statSync(join(root, "logs", "proxy.log")).mode & 0o777, 0o600, "proxy.log");
+  // heal.log past its cap: the discarded-oversized marker file is a new heal.log.1.
+  writeFileSync(join(root, "logs", "heal.log"), "x".repeat(70 * 1024), { mode: 0o600 });
+  assert.equal((await lifecycle.requestRespawn(process.pid, "memory")).outcome, "refused"); // writes a heal line
+  assert.equal(statSync(join(root, "logs", "heal.log.1")).mode & 0o777, 0o600, "heal.log.1");
+  assert.equal(statSync(join(root, "logs", "heal.log")).mode & 0o777, 0o600, "heal.log");
+});
+
+test("`proxy logs N` reads across proxy.log.1 and proxy.log: the last N lines of both, oldest first", async (t) => {
+  const root = kitFixture(t, await freePort());
+  const logs = join(root, "logs");
+  writeFileSync(join(logs, "proxy.log.1"), Array.from({ length: 10 }, (_, i) => `old-${i + 1}\n`).join(""));
+  writeFileSync(join(logs, "proxy.log"), "new-1\nnew-2\n");
+  const run = (n) => spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "logs", String(n)], { env: childEnv(root), encoding: "utf8", timeout: 30_000 });
+  assert.equal(run(5).stdout, "old-8\nold-9\nold-10\nnew-1\nnew-2\n");
+  assert.equal(run(2).stdout, "new-1\nnew-2\n");
+  assert.equal(run(40).stdout, `${Array.from({ length: 10 }, (_, i) => `old-${i + 1}`).join("\n")}\nnew-1\nnew-2\n`);
+  // Right after a rotation the current file may not exist yet.
+  rmSync(join(logs, "proxy.log"));
+  assert.equal(run(3).stdout, "old-8\nold-9\nold-10\n");
+  rmSync(join(logs, "proxy.log.1"));
+  assert.equal(run(3).stdout, `(no log file at ${join(logs, "proxy.log")})\n`);
+});
+
 // -------------------------------------------- Windows kill guard identity (77)
 // Ticket 77 (found by ticket 21 round 3, run 42500996594): the Windows start
 // time was read as `Number(.NET ticks) / 10000 - epoch`, and the kill guard

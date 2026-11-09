@@ -1,7 +1,8 @@
 // S7 Disk-adjacent growth, against the real manager-started proxy:
 //   A logs/proxy.log: bytes per request at the shipped log level, and whether
-//     the 5 MB rotation can trigger while the proxy runs (the manager rotates
-//     only in `start`; the proxy writes to the inherited fd for its lifetime);
+//     the 5 MB rotation triggers while the proxy runs (since ticket 33 the
+//     proxy's size-capped writer rotates it; the filler below is a kit
+//     appender writing by path);
 //   B the in-memory responses store (shipped config: 1,000 entries, 64 MB
 //     byte budget): heap and RSS when it is driven to its byte cap, judged on
 //     the store's retained heap: the minimum of ≥ 30 /health readings 1 s
