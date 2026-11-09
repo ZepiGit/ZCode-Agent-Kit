@@ -1080,16 +1080,31 @@ test("adoption without a record needs the whole proof: a listener whose pid is n
     "a pid whose start time changes between the two reads": (root) => { let n = 0; return { processCommandLineImpl: () => kitCommand(root), processStartMsImpl: () => steady + (n++) * 1000 }; },
     "a pid whose start time is unknown": (root) => ({ processCommandLineImpl: () => kitCommand(root), processStartMsImpl: () => null }),
   };
+  // The whole proof holds for the first answer, but the second names another pid.
+  cases["a listener whose second answer names another pid"] = (root, decoy) => ({ processCommandLineImpl: () => kitCommand(root), processStartMsImpl: () => steady, answers: [decoy.pid, process.pid] });
+  // The whole proof holds, but proxy.pid exists and is unreadable: it is left alone.
+  cases["an unreadable proxy.pid (left alone)"] = (root) => ({ processCommandLineImpl: () => kitCommand(root), processStartMsImpl: () => steady, pidFile: "not a record\n" });
   for (const [label, impl] of Object.entries(cases)) {
     const port = await freePort();
     const root = await stateFixture(t, port, { kit: true });
     const decoy = harmless(t);
-    await identityListener(t, port, decoy.pid);
-    const lifecycle = await lifecycleFor(root, impl(root));
+    const { answers, pidFile, ...options } = impl(root, decoy);
+    if (answers) {
+      let n = 0;
+      const server = http.createServer((req, res) => {
+        if (req.headers.authorization !== `Bearer ${KEY}`) return res.writeHead(401).end();
+        res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pid: answers[n++ % answers.length] } }));
+      });
+      await new Promise((r) => server.listen(port, "127.0.0.1", r));
+      t.after(() => { server.closeAllConnections(); server.close(); });
+    } else await identityListener(t, port, decoy.pid);
+    if (pidFile) writeFileSync(join(root, "logs", "proxy.pid"), pidFile);
+    const lifecycle = await lifecycleFor(root, options);
     assert.equal((await lifecycle.ensureRunning()).outcome, "already-running", label);
     const stopped = await lifecycle.stop();
     assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 4, outcome: "no-pid-record" }, `${label}: ${stopped.lines.join(" | ")}`);
-    assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, `${label}: no record is written`);
+    if (pidFile) assert.equal(readFileSync(join(root, "logs", "proxy.pid"), "utf8"), pidFile, `${label}: the file is unchanged`);
+    else assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, `${label}: no record is written`);
     assert.ok(untouched(decoy), `${label}: nothing is signalled`);
     assert.deepEqual(adoptionLines(root), [], label);
   }
