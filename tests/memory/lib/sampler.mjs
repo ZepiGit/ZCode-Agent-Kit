@@ -20,25 +20,73 @@ export function supported(platform = process.platform) {
 }
 
 // Windows sampling sessions, per marker: the tracker (tree + token, with every
-// parent seen so far), the latest poll and how to take a fresh one.
+// parent seen so far), the latest poll, when it started, the reads waiting for
+// a newer one, and how to take a fresh one.
 const winSessions = new Map();
-const isAlive = (pid) => { try { process.kill(pid, 0); return true; } catch (err) { return err.code === "EPERM"; } };
-function winSession(marker, { rootPid = process.pid, spawn = powershellPoller, alive = isAlive } = {}) {
+function winSession(marker, { rootPid = process.pid, spawn = powershellPoller } = {}) {
   let s = winSessions.get(marker);
   if (!s) {
-    s = { tracker: createKitTracker({ rootPid, token: marker.split("=")[1] }), latest: null, selfPid: null, live: false, spawn, alive };
+    s = { tracker: createKitTracker({ rootPid, token: marker.split("=")[1] }), latest: null, latestStartNs: null, waiters: new Set(), selfPid: null, live: false, spawn };
     winSessions.set(marker, s);
   }
   return s;
 }
 const useWindows = (marker) => winSessions.has(marker) || process.platform === "win32";
 
+// With the live poller, a scan is the latest poll as the tracker selects it:
+// each process is its pid and creation time, as the poll saw them. No pid is
+// asked whether it is still alive: on Windows a freed pid may already name a
+// stranger (tickets 70, 72), so such an answer could keep a dead process in the
+// scan and fail a check (ticket 73). A scan is as old as its poll; a read that
+// must see the state after an event (a stop, a kill) awaits `settled` first.
 function scanWindows(marker) {
   const s = winSession(marker);
-  if (s.live && s.latest) return s.tracker.select(s.latest, { selfPid: s.selfPid }).filter((p) => s.alive(p.pid));
+  if (s.live && s.latest) return s.tracker.select(s.latest, { selfPid: s.selfPid });
   // No live poller (before start, after stop): one fresh poll, same tracker.
   const f = pollOnce(s.spawn);
   return s.tracker.select(f.table, { selfPid: f.selfPid });
+}
+
+// A poll counts as "after" a read only when it started at least this much later
+// (the poller's and the loop's monotonic clocks read the same counter; this
+// covers their rounding).
+const SETTLE_MARGIN_NS = 1_000_000n;
+
+/**
+ * Resolves once the next scan(marker) reflects the process table as it is
+ * now, or later. Linux scans read /proc when asked, and Windows without a live
+ * poller polls afresh, so both resolve at once. With the live Windows poller it
+ * resolves when a poll that started after this call has arrived: a process that
+ * exited before the call is in no such poll, whatever its pid names by then.
+ * Rejects after `timeoutMs` without one (a stuck poller is a harness failure).
+ */
+export function settled(marker, { timeoutMs = 120_000, now = () => process.hrtime.bigint() } = {}) {
+  const s = winSessions.get(marker);
+  if (!s?.live) return Promise.resolve();
+  const after = now() + SETTLE_MARGIN_NS;
+  return new Promise((resolve, reject) => {
+    const w = { after, resolve: () => { clearTimeout(w.timer); s.waiters.delete(w); resolve(); } };
+    w.timer = setTimeout(() => {
+      s.waiters.delete(w);
+      reject(new Error(`memory loop sampler: no process table poll started within ${timeoutMs} ms after this read (poller stuck, or its frames carry no start stamp)`));
+    }, timeoutMs);
+    s.waiters.add(w);
+  });
+}
+
+function onWindowsPoll(s, f) {
+  s.latest = f.table;
+  s.selfPid = f.selfPid;
+  s.latestStartNs = f.startNs ?? null;
+  if (s.latestStartNs === null) return;
+  for (const w of [...s.waiters]) if (s.latestStartNs >= w.after) w.resolve();
+}
+
+/** The identity (pid + start time) of a process a scan returned: its sample key `<pid>:<start>`. */
+export function sampleIdentity(p) {
+  const at = typeof p?.key === "string" ? p.key.indexOf(":") : -1;
+  if (at < 0 || p.key.slice(0, at) !== String(p.pid)) throw new Error(`no identity in sample ${JSON.stringify(p?.key)} of pid ${p?.pid}`);
+  return { pid: p.pid, start: p.key.slice(at + 1) };
 }
 
 function readText(path) {
@@ -251,7 +299,7 @@ export function countRoles(marker) {
  * `progress()` returns the scenario's work counter (requests, solves, …).
  * `ready` resolves once sampling runs (at once on Linux; on Windows after the
  * units self-test, and it rejects when that fails). `windows` selects the
- * Windows backend off Windows too (tests: { rootPid, spawn, alive }).
+ * Windows backend off Windows too (tests: { rootPid, spawn }).
  */
 export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null, progress = () => 0, windows = null }) {
   const onWindows = windows !== null || process.platform === "win32";
@@ -291,13 +339,16 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
       intervalMs,
       spawnSpec: session.spawn,
       onPoll(f) {
-        session.latest = f.table;
-        session.selfPid = f.selfPid;
+        onWindowsPoll(session, f);
         void record(session.tracker.select(f.table, { selfPid: f.selfPid }));
       },
     });
     session.live = true;
-    const ready = poller.ready.then((r) => ({ units: r.units }), (err) => { session.live = false; throw err; });
+    const ready = poller.ready.then((r) => ({ units: r.units }), (err) => {
+      session.live = false;
+      for (const w of [...session.waiters]) w.resolve();
+      throw err;
+    });
     ready.catch(() => {});
     return {
       rows,
@@ -311,6 +362,8 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
       async stop() {
         await poller.stop();
         session.live = false;
+        // From here every scan polls afresh: whoever waited for a newer poll has one.
+        for (const w of [...session.waiters]) w.resolve();
         while (running) await new Promise((r) => setTimeout(r, 20));
         return rows;
       },
