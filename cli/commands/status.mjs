@@ -1,9 +1,8 @@
-// `zcode-kit status [--json]`: forwarded to the manager, which prints the
-// status itself (its stdio is the terminal's) and owns the exit code.
-import { managerPath } from "./common.mjs";
+// `zcode-kit status [--json] [--verbose]`: the same report as `proxy status`
+// (./proxy.mjs statusReport): exit 0 only when this kit's proxy answers.
+import { statusReport } from "./proxy.mjs";
 
 /** @param {{ flags: Record<string, unknown> }} args */
-export async function run({ flags }, ctx) {
-  const res = ctx.spawnSync(ctx.execPath, [managerPath(ctx.kit), "status", ...(flags.json === true ? ["--json"] : [])], { stdio: "inherit" });
-  return { exitCode: res.status ?? 1, records: [] };
+export async function run(args, ctx) {
+  return statusReport(args, ctx);
 }

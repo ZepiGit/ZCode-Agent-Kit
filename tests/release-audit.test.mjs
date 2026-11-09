@@ -48,6 +48,8 @@ function packageFixture(t) {
     "lib/proxy-lifecycle.mjs", "lib/heal-log.mjs",
     // The manager's doctor module, required by verify-payload since ticket 38.
     "lib/proxy-doctor.mjs",
+    // The status record, the log tail and the CLI's report builders, required since ticket 40.
+    "lib/proxy-status.mjs", "lib/proxy-logs.mjs", "cli/doctor-report.mjs", "cli/proxy-report.mjs",
   ]) put(root, path);
   put(root, "zcode-proxy-src/src/runtime.test.ts", "throw new Error('must not ship');\n");
   put(root, "zcode-proxy-src/src/__fixtures__/credential.json", "fixture\n");

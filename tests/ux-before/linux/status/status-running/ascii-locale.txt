@@ -1,15 +1,21 @@
-port:      18458
-pid file:  <PID> (started <TS>)
-health:    ours
-process:   pid 4242, up 3725s, rss 182 MB, heap 64 MB, event-loop lag 2 ms
-captcha:   ready 2/2, active solves 0, storm no, mint success 96% (10 min)
-solver:    generation 3, recycles 2 (last: rss-budget at <TS>), solves 118, failures 3, idle
-  quota: GLM Coding Lite 4120/6000 prompts (expires <TS>)
-  quota: Start Plan Bonus 35/200 prompts (expires <TS>)
+* running on 127.0.0.1:18458, up 1 h 02 min (pid <PID>)
 
-  Connection details (local ZCode proxy, running and verified)
-    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
-    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
-    API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
-    Model IDs:                     glm-5.3, glm-5.3-flash
-    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required.
+Memory -------------------------------------------------------------------------
+  proxy  182 MB (heap 64 MB, event-loop lag 2 ms)
+
+Quota --------------------------------------------------------------------------
+  GLM Coding Lite   4120 of 6000 prompts left (69 %), expires 2027-01-01
+  Start Plan Bonus  35 of 200 prompts left (18 %), expires 2026-12-01
+
+Captcha ------------------------------------------------------------------------
+  workers       ready 2/2, 0 active solves, no storm
+  mint success  96 % (10 min)
+  solver        generation 3, 2 recycles (last: rss-budget, 2026-11-05 11:50
+                UTC), 118 solves, 3 failures, idle
+
+Connection details (manual clients) --------------------------------------------
+  OpenAI base URL     http://127.0.0.1:18458/v1
+  Anthropic base URL  http://127.0.0.1:18458
+  API key             UXFIXTURE-not-a-secret-0000000000000000000
+  Models              glm-5.3, glm-5.3-flash
+  State               * running, identity verified

@@ -1,0 +1,6 @@
+| Proxy start[K[31mx FAIL  The proxy did not become healthy in time[0m
+   [2mwhy[0m   proxy did not become healthy within <MS>ms (pid <PID>). See
+         /kit/logs/proxy.log
+   [2mnext[0m  [1mzcode-kit proxy logs 50[0m
+     [2mor[0m  [1mzcode-kit proxy restart[0m
+   [2mexit[0m 2

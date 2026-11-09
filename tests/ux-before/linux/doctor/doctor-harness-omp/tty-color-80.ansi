@@ -1,27 +1,33 @@
-PASS  bun available — <BUN> (1.4.2)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  codex adapter artifact — generated/codex-home/config.toml
-FAIL  proxy reachable + identity — health=down
-doctor: 2 check(s) failed
-PASS  bun available — <BUN> (1.4.2)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  codex adapter artifact — generated/codex-home/config.toml
-FAIL  proxy reachable + identity — health=down
-PASS  omp: omp provider registered — providers.zcode in models.yml
-PASS  omp: omp key resolver — key current
-PASS  omp: omp extension installed
-doctor: 2 check(s) failed
+[31m✗[0m 2 problems: 2 failed
+
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  bun available           [2m<BUN> (1.4.2)[0m
+  [32m✓ PASS[0m  config exists           [2m<KIT>/proxy/config.yaml[0m
+  [32m✓ PASS[0m  key file exists         [2m<KIT>/.proxykey[0m
+  [32m✓ PASS[0m  proxy source installed  [2m<KIT>/zcode-proxy-src/node_modules[0m
+  [32m✓ PASS[0m  mcp bridge installed    [2m<KIT>/mcp/zcode-harness-mcp/dist/index.js[0m
+  [32m✓ PASS[0m  mcp bridge deps         [2m<KIT>/mcp/zcode-harness-mcp/node_modules[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [31m✗ FAIL[0m  proxy reachable + identity  [2mhealth=down[0m
+                                      [2mwhy[0m   no proxy of this kit answers on the
+                                            configured port
+                                      [2mnext[0m  [1mzcode-kit proxy start[0m
+                                        [2mor[0m  [1mzcode-kit doctor --fix[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [31m✗ FAIL[0m  credentials store  [2mZCODE_PROXY_CREDENTIALS_PATH (explicit store): no[0m
+                             [2mcredential store — run: zcode-kit auth login[0m
+                             [2mwhy[0m   no ZCode login is stored, or this machine
+                                   cannot decrypt it
+                             [2mnext[0m  [1mzcode-kit auth login zai[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  omp provider registered       [2mzcode block in ~/.omp/agent/models.yml[0m
+  [32m✓ PASS[0m  extension installed           [2m~/.omp/agent/extensions/zcode-proxy-autostart.ts[0m
+  [32m✓ PASS[0m  codex adapter artifact        [2mgenerated/codex-home/config.toml[0m
+  [32m✓ PASS[0m  omp: omp provider registered  [2mproviders.zcode in models.yml[0m
+  [32m✓ PASS[0m  omp: omp key resolver         [2mkey current[0m
+  [32m✓ PASS[0m  omp: omp extension installed
+
+doctor: [31m2 failed[0m, [32m12 passed[0m → exit 1

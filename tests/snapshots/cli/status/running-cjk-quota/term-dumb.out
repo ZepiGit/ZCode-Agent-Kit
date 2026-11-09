@@ -1,0 +1,21 @@
+running on 127.0.0.1:<PORT>, up 1 h 02 min (pid <PID>)
+
+Memory -------------------------------------------------------------------------
+  proxy  182 MB (heap 64 MB, event-loop lag 2 ms)
+
+Quota --------------------------------------------------------------------------
+  GLM 编程套餐      4120 of 6000 prompts left (69 %), expires 2025-12-31
+  Start Plan Bonus  35 of 200 prompts left (18 %), expires 2025-11-30
+
+Captcha ------------------------------------------------------------------------
+  workers       ready 2/2, 0 active solves, no storm
+  mint success  96 % (10 min)
+  solver        generation 3, 2 recycles (last: rss-budget, 2025-11-06 10:11
+                UTC), 118 solves, 3 failures, idle
+
+Connection details (manual clients) --------------------------------------------
+  OpenAI base URL     http://127.0.0.1:<PORT>/v1
+  Anthropic base URL  http://127.0.0.1:<PORT>
+  API key             UXFIXTURE-not-a-secret-0000000000000000000
+  Models              glm-5.3, glm-5.3-flash
+  State               * running, identity verified
