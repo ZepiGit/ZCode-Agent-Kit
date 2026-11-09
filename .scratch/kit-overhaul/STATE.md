@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: merge 33 (staging/33) and 40 (staging/40b) when green. Running: t27, t57, t80. Next slots: 23 (after 17, now free), 81, 34/35 (after 33), 22 (after 40), 79 table, 37, 39, 41, 43-49, 52-54, 56 (after 57), 58.
+- Next action (2026-11-09 resume): ticket 33 is already merged (278d329, resolved e01327b); do not re-merge it. staging/40b run 42608977405 is green 8/8; merge only after integration-tree sanity checks and fast suites. staging/27 run 42614407069 failed both Windows test legs and Windows memory-budget; read-only diagnosis running. Tickets 23 (1f084b2), 57 (86d0cd3) and 80 stage 1 (5febef6) reported complete locally, not pushed/merged; their Windows evidence is pending. New ticket 82 tracks GitHub issue #32 safe diagnostics and latest-ZCode compatibility. Next frontier includes 81, 34/35, then 22 after 40; use individual ticket Status/Blocked by lines rather than stale INDEX status cells.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -34,7 +34,7 @@
 - Owner checkout (read-only for this run): /home/AgentKit/ZCode-Agent-Kit
 - Other branches: diagnosis/memory (1B loop, merged into ticket 01), prototype/terminal-ux (d27b890, throwaway, never merged)
 - Briefs: IMPLEMENTER-BRIEF.md, MERGER-BRIEF.md, OWNER-PROXY-BRIEF.md
-- Model routing in Phase 4: glm tickets, mergers, explorers -> worker-glm (GLM-5.3-Flash; loads after restart but dispatch fails with provider-not-found for account:zai-start-plan/GLM-5.3-Flash as of 2026-11-06T21:05Z -> fallback general-purpose/opus until the owner fixes the provider); sol tickets -> general-purpose (opus); Standards review = reviewer-grok; Spec review = reviewer-sol; red team = reviewer-grok
+- Model routing superseded by user: only gpt-6.1-sol-subagent high/xhigh, grok-4.7 xhigh, and Gemini 3.8 Flash high read-only scouts. Do not use previous GLM/Opus fallbacks. Current fixed reviewer-sol definition is gpt-6.1-sol xhigh (not the requested sol-subagent selector); reviewer-grok is high (not requested xhigh), and no writable exact-model agent type is exposed. Two read-only agents launched on this resume (Sol diagnosis and Gemini frontier scout); the Sol selector mismatch was noticed and disclosed. Do not launch further mismatched agents or represent a prompt as changing fixed model/effort.
 - Running subagents: see RUNLOG.md (latest "Spawned" lines)
 - Last green SHA: 9e45d05 (baseline); integration tip before Phase 4 = this commit
 - Ticket 15 teardown fix (staging/15b) merged 2026-11-08 as cbe2abb (record 3efcaf2; pre-merge CI 42495987510, 8/8 green).
@@ -52,3 +52,4 @@
 - Ticket 61 merged 2026-11-09 as eb8aaae (resolved d5b81a6; pre-merge CI 42585304203, 8/8 green).
 - Ticket 31 merged 2026-11-09 as 667f967 (resolved 437d69c; pre-merge CI 42583681662, 8/8 green).
 - Ticket 17 merged 2026-11-09 as 6edf13f (resolved 50d2e01; pre-merge CI 42600357562, 8/8 green).
+- Ticket 33 merged 2026-11-09 as 278d329 (resolved e01327b). Merge recorded from git history; local merged fast-suite evidence is in ticket 33's Comments. Integration is ahead of its remote; push remains pending.
