@@ -185,7 +185,8 @@ if (mode === "s7-series") {
   const checks = [
     { name: "procPeak:proxy", red: false, value: 217, budget: 250, unit: "MB" },
     { name: "orphans", red: false, value: 0, budget: 0, unit: "procs", detail: [] },
-    { name: "proxy.log:bounded-while-running", red: true, value: 6.37, budget: 6, unit: "MB" },
+    // Since ticket 33 the proxy rotates proxy.log while it runs (0.08 MB in its loop run).
+    { name: "proxy.log:bounded-while-running", red: false, value: 0.08, budget: 6, unit: "MB" },
     { name: "proxy.early.log:bounded", red: false, value: 0, budget: 1, unit: "MB (+64 KB overshoot)" },
     heap,
   ];
