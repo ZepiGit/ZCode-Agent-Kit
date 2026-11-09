@@ -218,14 +218,16 @@ test('repair refuses checkout writes and preserves a competing transaction lock'
   try { await assert.rejects(repairManaged(ctx, []), /another setup/); assert.equal(readFileSync(lock, 'utf8'), before); }
   finally { releaseLock(lock); }
 });
-test('stale pid is removed safely but stale manager lock is not stolen', async t => {
+// Ticket 16: a dead holder's lock is taken over on proof (ADR-0003); a lock the
+// kit cannot judge (here an unknown higher protocol version) is never stolen.
+test('stale pid is removed safely but a manager lock the kit cannot judge is not stolen', async t => {
   const ctx = fixture(t); const { startupPreflight } = await api();
   const pid = join(ctx.root, 'logs', 'proxy.pid'); writeFileSync(pid, '{"pid":2147483647,"startedMs":1}');
   assert.equal((await startupPreflight(ctx)).code, 4); // no dependencies: never spawn a proxy
   assert.equal(existsSync(pid), false);
-  const lock = join(ctx.root, 'logs', 'manager.lock'); writeFileSync(lock, '{"pid":2147483647,"nonce":"stale"}');
+  const lock = join(ctx.root, 'logs', 'manager.lock'); writeFileSync(lock, '{"pid":2147483647,"nonce":"stale","v":99}');
   assert.notEqual((await startupPreflight(ctx)).code, 0);
-  assert.equal(readFileSync(lock, 'utf8'), '{"pid":2147483647,"nonce":"stale"}');
+  assert.equal(readFileSync(lock, 'utf8'), '{"pid":2147483647,"nonce":"stale","v":99}');
 });
 test('heal log is bounded and only accepts fixed secret-free vocabulary', async t => {
   const ctx = fixture(t); const { logHeal } = await api();
