@@ -36,6 +36,9 @@ const REQUIRED_FILES = [
   // share, and the heal log it writes.
   "lib/proxy-lifecycle.mjs",
   "lib/heal-log.mjs",
+  // Ticket 38: the manager's doctor checks, which the manager CLI and
+  // zcode-kit doctor both read as a check record.
+  "lib/proxy-doctor.mjs",
   "proxy/resolve-zcode-proxy-key.mjs",
   "proxy/config.example.yaml",
   "mcp/zcode-harness-mcp/dist/index.js",

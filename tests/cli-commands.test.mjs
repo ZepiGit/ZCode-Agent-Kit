@@ -268,78 +268,91 @@ test("models --show-key with an unreadable key fails after the list: the error c
 });
 
 // doctor runs against a temp kit (no stored decisions, an empty home: no
-// kit integration anywhere) with the manager's own `doctor` faked at the
-// spawn boundary.
+// kit integration anywhere) with the manager's doctor faked at its boundary:
+// the kit's lib/proxy-doctor.mjs, whose check record zcode-kit doctor reads
+// (ticket 38; before, the manager CLI was faked at the spawn boundary).
 const HARNESS_IDS = "omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose";
 
-async function doctorCtx(managerResult) {
+/** `manager` is the doctor record the fake returns, or `{ throws: message }`. */
+async function doctorCtx(manager) {
   const { createCtx } = await import(pathToFileURL(join(ROOT, "cli", "context.mjs")).href);
   const root = mkdtempSync(join(tmpdir(), "cli-commands-doctor-"));
   const home = join(root, "home");
   mkdirSync(home);
+  mkdirSync(join(root, "lib"));
+  const tag = `__doctorCalls_${root.replace(/\W/g, "_")}`;
+  writeFileSync(join(root, "lib", "proxy-doctor.mjs"), `export async function managerDoctor(opts) {
+  (globalThis[${JSON.stringify(tag)}] ??= []).push(opts);
+  ${manager.throws ? `throw new Error(${JSON.stringify(manager.throws)});` : `return ${JSON.stringify(manager)};`}
+}\n`);
   const kit = { ...createCtx(root, home), stateDir: root, generated: join(root, "generated"), backupDir: join(root, "backups") };
-  const calls = [];
+  const env = { FIXTURE_ENV: "doctor" };
   return {
-    calls,
+    calls: () => globalThis[tag] ?? [],
     cleanup: () => rmSync(root, { recursive: true, force: true }),
     ctx: {
       kit,
-      env: {},
+      env,
       execPath: "node-under-test",
-      spawnSync: (cmd, cmdArgs, opts) => { calls.push({ cmd, args: cmdArgs, opts }); return managerResult; },
+      spawnSync: () => assert.fail("doctor without --fix spawns nothing"),
       fetch: () => Promise.reject(new Error("no network in this test")),
       progress: () => assert.fail("doctor without --fix streams nothing"),
     },
   };
 }
 const texts = (records) => records.map((r) => { assert.equal(r.kind, "text"); return `${r.stream}:${r.text}`; });
+const doctorRecord = (checks) => ({ intent: "doctor", code: checks.some((c) => c.ok === false) ? 1 : 0, outcome: checks.some((c) => c.ok === false) ? "failed" : "ok", checks });
 
 test("doctor: unknown --harness ids are a usage error, exit 2 on stderr, before anything runs", async () => {
   const { run } = await load("doctor");
-  const d = await doctorCtx({ status: 0, stdout: "" });
+  const d = await doctorCtx(doctorRecord([]));
   try {
     assert.deepEqual(await run(args(["doctor"], { harness: "omp,nope" }), d.ctx), {
       exitCode: 2,
       records: [{ kind: "text", stream: "stderr", text: `unknown harness "nope". Known: ${HARNESS_IDS}\n` }],
     });
-    assert.equal(d.calls.length, 0);
+    assert.equal(d.calls().length, 0);
   } finally { d.cleanup(); }
 });
 
-test("doctor: a clean manager and only unconsented harnesses is exit 0; the manager's report comes first, verbatim", async () => {
+test("doctor: a clean manager and only unconsented harnesses is exit 0; the manager's report comes first, in the legacy grammar", async () => {
   const { run } = await load("doctor");
-  const manager = "PASS  proxy running — pid 4242\nPASS  key file — present\n";
-  const d = await doctorCtx({ status: 0, stdout: manager });
+  const d = await doctorCtx(doctorRecord([
+    { name: "proxy running", ok: true, detail: "pid 4242" },
+    { name: "key file", ok: true, detail: "present" },
+    { name: "omp integration", ok: null, detail: "OMP not installed — skipped" },
+  ]));
   try {
     const { exitCode, records } = await run(args(["doctor"]), d.ctx);
     assert.equal(exitCode, 0);
     const lines = texts(records);
-    assert.equal(lines[0], `stdout:${manager}`);
-    assert.deepEqual(lines.slice(1, 3), ["stdout:PASS  proxy running — pid 4242\n", "stdout:PASS  key file — present\n"]);
-    assert.equal(lines.length, 3 + 10 + 1, "one row per harness, then the summary");
-    for (const line of lines.slice(3, 13)) assert.match(line, /^stdout:SKIP {2}[a-z-]+: integration — /);
-    assert.equal(lines.at(-1), "stdout:doctor: 10 skipped, 0 failed — OK\n");
-    assert.deepEqual(d.calls.map((c) => [c.cmd, c.args, c.opts.encoding]), [["node-under-test", [join(d.ctx.kit.root, "proxy", "zcode-proxy-manager.mjs"), "doctor"], "utf8"]]);
+    assert.equal(lines[0], "stdout:PASS  proxy running — pid 4242\nPASS  key file — present\nSKIP  omp integration — OMP not installed — skipped\ndoctor: 1 skipped, 0 failed — OK\n");
+    assert.deepEqual(lines.slice(1, 4), ["stdout:PASS  proxy running — pid 4242\n", "stdout:PASS  key file — present\n", "stdout:SKIP  omp integration — OMP not installed — skipped\n"]);
+    assert.equal(lines.length, 4 + 10 + 1, "one row per harness, then the summary");
+    for (const line of lines.slice(4, 14)) assert.match(line, /^stdout:SKIP {2}[a-z-]+: integration — /);
+    assert.equal(lines.at(-1), "stdout:doctor: 11 skipped, 0 failed — OK\n");
+    assert.deepEqual(d.calls(), [{ root: d.ctx.kit.root, home: d.ctx.kit.home, env: d.ctx.env }], "the manager's doctor runs once, for this kit, with the command's env");
   } finally { d.cleanup(); }
 });
 
 test("doctor: a FAIL from the manager is exit 1 and counted in the summary", async () => {
   const { run } = await load("doctor");
-  const d = await doctorCtx({ status: 1, stdout: "FAIL  proxy running — not running\n" });
+  const d = await doctorCtx(doctorRecord([{ name: "proxy running", ok: false, detail: "not running" }]));
   try {
     const { exitCode, records } = await run(args(["doctor"]), d.ctx);
     assert.equal(exitCode, 1);
+    assert.equal(texts(records)[0], "stdout:FAIL  proxy running — not running\ndoctor: 1 check(s) failed\n");
     assert.equal(texts(records).at(-1), "stdout:doctor: 1 check(s) failed\n");
   } finally { d.cleanup(); }
 });
 
-test("doctor: a manager that times out, or fails without a FAIL row, still fails the report (exit 1)", async () => {
+test("doctor: a manager doctor that throws, or fails without a failed check, still fails the report (exit 1)", async () => {
   const { run } = await load("doctor");
-  for (const [result, detail] of [
-    [{ status: null, signal: "SIGTERM", error: new Error("ETIMEDOUT"), stdout: "" }, "manager check failed or timed out"],
-    [{ status: 3, stdout: "PASS  proxy running — pid 1\n" }, "manager check exited 3 without a diagnostic failure result"],
+  for (const [manager, detail] of [
+    [{ throws: "EACCES config.yaml" }, "manager check failed or timed out"],
+    [{ intent: "doctor", code: 3, outcome: "failed", checks: [{ name: "proxy running", ok: true, detail: "pid 1" }] }, "manager check exited 3 without a diagnostic failure result"],
   ]) {
-    const d = await doctorCtx(result);
+    const d = await doctorCtx(manager);
     try {
       const { exitCode, records } = await run(args(["doctor"]), d.ctx);
       assert.equal(exitCode, 1);
@@ -348,9 +361,23 @@ test("doctor: a manager that times out, or fails without a FAIL row, still fails
   }
 });
 
+test("doctor: a check detail spanning lines is one check, never a row of its own", async () => {
+  // A detail is data (a version string, an error message): a line inside it
+  // that looks like a FAIL row must not count as a failed check.
+  const { run } = await load("doctor");
+  const d = await doctorCtx(doctorRecord([{ name: "bun available", ok: true, detail: "/opt/bun (1.4.2\nFAIL  injected — from a version string)" }]));
+  try {
+    const { exitCode, records } = await run(args(["doctor"], { json: true }), d.ctx);
+    assert.equal(exitCode, 0);
+    assert.deepEqual(records[0].value.checks[0], { name: "bun available", ok: true, detail: "/opt/bun (1.4.2\nFAIL  injected — from a version string)" });
+    assert.deepEqual([records[0].value.ok, records[0].value.failed], [true, 0]);
+    assert.equal(records[0].value.checks.filter((c) => c.name.startsWith("injected")).length, 0);
+  } finally { d.cleanup(); }
+});
+
 test("doctor --harness codex verifies a requested harness without consent: its missing artifact fails, exit 1", async () => {
   const { run } = await load("doctor");
-  const d = await doctorCtx({ status: 0, stdout: "PASS  proxy running — pid 1\n" });
+  const d = await doctorCtx(doctorRecord([{ name: "proxy running", ok: true, detail: "pid 1" }]));
   try {
     const { exitCode, records } = await run(args(["doctor"], { harness: "codex" }), d.ctx);
     assert.equal(exitCode, 1);
@@ -362,9 +389,9 @@ test("doctor --harness codex verifies a requested harness without consent: its m
   } finally { d.cleanup(); }
 });
 
-test("doctor --json: one JSON record (the manager's text is not echoed), exit code as in text mode", async () => {
+test("doctor --json: one JSON record (the manager's report is not echoed), exit code as in text mode", async () => {
   const { run } = await load("doctor");
-  const d = await doctorCtx({ status: 1, stdout: "FAIL  proxy running — not running\nSKIP  solver — idle\n" });
+  const d = await doctorCtx(doctorRecord([{ name: "proxy running", ok: false, detail: "not running" }, { name: "solver", ok: null, detail: "idle" }]));
   try {
     const { exitCode, records } = await run(args(["doctor"], { json: true }), d.ctx);
     assert.equal(exitCode, 1);
@@ -379,9 +406,22 @@ test("doctor --json: one JSON record (the manager's text is not echoed), exit co
   } finally { d.cleanup(); }
 });
 
+test("doctor reads the manager's check records: no text parsing and no manager doctor spawn remain in the CLI (grep)", () => {
+  const strip = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1");
+  const doctor = strip(readFileSync(join(ROOT, "cli", "commands", "doctor.mjs"), "utf8"));
+  assert.match(doctor, /proxy-doctor\.mjs/, "the doctor command reads the manager's doctor module");
+  // A verdict word inside a regex literal is a row parser.
+  assert.doesNotMatch(doctor, /\/\^?\(?\??:?(?:PASS|FAIL|SKIP|WARN)\b/, "no regex over check rows");
+  assert.doesNotMatch(doctor, /\.stdout\b/, "no manager stdout is read");
+  for (const file of readdirSync(join(ROOT, "cli"), { recursive: true }).filter((f) => String(f).endsWith(".mjs"))) {
+    const source = strip(readFileSync(join(ROOT, "cli", String(file)), "utf8"));
+    assert.doesNotMatch(source, /\[\s*(?:manager|managerPath\([^)]*\))\s*,\s*["']doctor["']/, `cli/${file} spawns the manager's doctor`);
+  }
+});
+
 test("doctor --forget: a missing or unknown id is a usage error (exit 2); an id with nothing stored is exit 0", async () => {
   const { run } = await load("doctor");
-  const d = await doctorCtx({ status: 0, stdout: "" });
+  const d = await doctorCtx(doctorRecord([]));
   try {
     for (const forget of [true, "", "nonsense"]) {
       assert.deepEqual(await run(args(["doctor"], { forget }), d.ctx), {
@@ -393,7 +433,7 @@ test("doctor --forget: a missing or unknown id is a usage error (exit 2); an id 
       exitCode: 0,
       records: [{ kind: "text", stream: "stdout", text: "No stored decision for goose; nothing to forget.\n" }],
     });
-    assert.equal(d.calls.length, 0, "--forget never asks the manager");
+    assert.equal(d.calls().length, 0, "--forget never asks the manager");
   } finally { d.cleanup(); }
 });
 
