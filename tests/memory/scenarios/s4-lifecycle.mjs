@@ -15,7 +15,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
-import { scan, portsOf } from "../lib/sampler.mjs";
+import { scan, settled, portsOf } from "../lib/sampler.mjs";
 import { PROCESSES, PROXY_COMMIT_BACKSTOP } from "../lib/budgets.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -25,6 +25,10 @@ export async function run(ctx) {
   const { kit } = session;
   const lockFile = join(kit.logDir, "manager.lock");
   const proxies = () => scan(ctx.marker).filter((p) => p.role === "proxy");
+  // What is left after a lifecycle step is read from the process table as it is
+  // after the step (on Windows the first poll that started after it): a proxy
+  // that exited is never counted, whatever its pid names by then (ticket 73).
+  const settle = () => settled(ctx.marker);
   const listening = () => proxies().filter((p) => portsOf(p.pid).includes(kit.port)).length;
   const logFiles = () => readdirSync(kit.logDir).sort();
   const cycles = [];
@@ -42,7 +46,7 @@ export async function run(ctx) {
       const pid = kit.pidRecord()?.pid;
       if (pid && proxies().some((p) => p.pid === pid)) process.kill(pid, "SIGKILL");
       await sleep(300);
-      ctx.observe(`after-proxy-sigkill:cycle-${i}`); // no solver may outlive its proxy
+      await ctx.observe(`after-proxy-sigkill:cycle-${i}`); // no solver may outlive its proxy
       await step(["start"]); // the next harness session after a crash
       await step(["stop"]);
     } else {
@@ -51,6 +55,7 @@ export async function run(ctx) {
       await step(["start"]); // … restart on the new code
       await step(["stop"]);
     }
+    await settle();
     rec.proxiesAfter = proxies().length;
     rec.listenersAfter = listening();
     rec.lockLeft = existsSync(lockFile);
@@ -77,6 +82,7 @@ export async function run(ctx) {
   for (let k = 0; k < 6; k++) {
     const pid = kit.pidRecord()?.pid;
     const r = await kit.manager(["respawn", String(pid), "--reason", "memory"], { timeoutMs: 120_000 });
+    await settle();
     storm.push({ k, pid, code: r.code, newPid: kit.pidRecord()?.pid, proxies: proxies().length, last: (r.out + r.err).trim().split("\n").slice(-1)[0]?.slice(0, 160) });
   }
   ctx.note("respawnStorm", storm);
@@ -96,11 +102,13 @@ export async function run(ctx) {
     }
     await new Promise((r) => (child.exitCode !== null ? r() : child.once("exit", r)));
     await sleep(500);
+    await settle();
     const stale = existsSync(lockFile);
     const orphanedChild = proxies().map((p) => p.pid);
     const pidRecord = kit.pidRecord();
     const nextStart = await kit.manager(["start"], { timeoutMs: 60_000 });
     const nextStop = await kit.manager(["stop"], { timeoutMs: 60_000 });
+    await settle();
     const entry = { delayMs: (t % 8) * 150, sent, staleLock: stale, childSurvived: orphanedChild.length > 0, pidRecordStartedMs: pidRecord ? pidRecord.startedMs ?? null : "no record", nextStart: nextStart.code, nextStop: nextStop.code, nextStopTail: (nextStop.out + nextStop.err).trim().split("\n").slice(-1)[0]?.slice(0, 200), proxiesAfter: proxies().length };
     // Clean state for the next trial: our own lock file, then the kit's stop
     // once more; whatever the kit still cannot stop is ours and is killed here.
@@ -108,6 +116,7 @@ export async function run(ctx) {
     if (proxies().length) {
       const retry = await kit.manager(["stop"], { timeoutMs: 60_000 });
       entry.stopAfterLockRemoved = retry.code;
+      await settle();
       for (const p of proxies()) { try { process.kill(p.pid, "SIGKILL"); entry.killedByHarness = (entry.killedByHarness ?? 0) + 1; } catch {} }
       try { unlinkSync(join(kit.logDir, "proxy.pid")); } catch {}
     }
@@ -129,6 +138,7 @@ export async function run(ctx) {
   try { process.kill(victim, "SIGTERM"); } catch {}
   const rr = await respawning;
   await sleep(1000);
+  await settle();
   Object.assign(staleRespawn, { respawnCode: rr.code, respawnTail: (rr.out + rr.err).trim().split("\n").slice(-1)[0]?.slice(0, 200), proxiesAfter: proxies().length, healthy: (await kit.health()) !== null });
   unlinkSync(lockFile);
   ctx.note("respawnWithStaleLock", staleRespawn);
