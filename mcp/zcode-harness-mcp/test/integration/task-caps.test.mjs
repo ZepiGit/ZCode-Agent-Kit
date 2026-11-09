@@ -183,3 +183,50 @@ test('the bridge retains about 4 MiB of a task text, however much is streamed an
     assert.ok(afterBig - base < 16, `retained after a further 24 MiB in one delta: +${(afterBig - base).toFixed(1)} MiB`);
   } finally { await c.stop(); }
 });
+
+// Spec story 72: a result cached before the cap is served exactly as stored,
+// even when its text is longer than the cap allows today.
+test('a result cached before the change is served byte-identical, its long text untouched', async (t) => {
+  const dataDir = scriptDir(t);
+  const workspacePath = path.join(dataDir, 'ws');
+  fs.mkdirSync(path.join(dataDir, 'tasks'), { recursive: true });
+  fs.mkdirSync(workspacePath, { recursive: true });
+  const id = 'task-cached-old';
+  const finishedAt = new Date(Date.now() - 60_000).toISOString();
+  const rec = {
+    schemaVersion: 1, taskId: id, idempotencyKey: null, workspacePath, workspaceKey: workspacePath,
+    sessionId: `sess_${id}`, sessionOwnedByTask: true, prompt: 'old', state: 'completed', readOnly: true, mode: null,
+    requestedModel: null, effectiveModel: null, thoughtLevel: null, createdAt: finishedAt, startedAt: finishedAt, finishedAt,
+    lastSeq: 1, followUpCount: 0, error: null, usage: null,
+    fileChanges: { added: [], modified: [], deleted: [], source: 'none', preExistingUncommitted: [] }, interruptionReason: null,
+  };
+  const old = {
+    schemaVersion: 1, taskId: id, sessionId: rec.sessionId, workspacePath, status: 'completed', createdAt: finishedAt, startedAt: finishedAt, finishedAt,
+    requestedModel: null, effectiveModel: null, mode: null, thoughtLevel: null,
+    responseText: `${filler('old', 5 * MiB)}€😀`, partial: false, completeness: { status: 'full', explanation: 'turn stream captured via session events' },
+    usage: { cumulative: null, note: 'usage unavailable' }, toolCalls: [], fileChanges: rec.fileChanges, artifacts: [], interactions: [],
+    errors: [], warnings: [], eventsRef: { firstSeq: 1, lastSeq: 1, storage: `tasks/${id}.events.jsonl` },
+  };
+  fs.writeFileSync(path.join(dataDir, 'tasks', `${id}.json`), JSON.stringify(rec, null, 2));
+  const resultFile = path.join(dataDir, 'tasks', `${id}.result.json`);
+  const stored = JSON.stringify(old, null, 2);
+  fs.writeFileSync(resultFile, stored);
+  const c = await startBridge({ reuseDataDir: dataDir });
+  try {
+    const resp = await c.call('tools/call', { name: 'zcode_task_result', arguments: { taskId: id } });
+    assert.ok(resp.result.content[0].text === JSON.stringify(old), `served text of ${resp.result.content[0].text.length} code units`);
+    assert.deepEqual(resp.result.structuredContent, old);
+    assert.ok(fs.readFileSync(resultFile, 'utf8') === stored, 'the cached file is not rewritten');
+  } finally { await c.stop(); }
+});
+
+test('the task result tool describes the cap, the marker, the truncated field and the per-task caps', async () => {
+  const c = await startBridge();
+  try {
+    const { tools } = await c.result('tools/list', {});
+    const { description } = tools.find((tool) => tool.name === 'zcode_task_result');
+    for (const phrase of ['4 MiB', 'first 1 MiB', 'last 3 MiB', '[… N bytes truncated …]', 'truncated: { droppedBytes }', 'completeness partial', '200 warnings', '200 errors', '1,000 tool calls']) {
+      assert.ok(description.includes(phrase), `zcode_task_result description lacks "${phrase}": ${description}`);
+    }
+  } finally { await c.stop(); }
+});
