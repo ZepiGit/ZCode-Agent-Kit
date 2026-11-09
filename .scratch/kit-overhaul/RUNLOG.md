@@ -261,3 +261,5 @@
 - 2026-11-09T10:33:06Z SENTINEL ALERT: MemAvailable 14% < 15%; terminated run-owned PIDs: none
 - 2026-11-09T10:29Z cancelled 42597582719 (9b87c23, docs only; superseded by 0e0b96f with 61).
 - 2026-11-09T10:51Z second sentinel alert (10:33Z, 14 %) with 3 implementers + a merger: the 31 merger stopped on the dirty RUNLOG as its brief required. MERGER-BRIEF now lets a merger commit sentinel-only RUNLOG lines and proceed when >= 8 GB are free. t33 done (head 7d548f9: single proxy.log writer rotating at 5 MB with readers/appenders open, blocked-rename path, manager rotation under the start lock, 0o700/0o600 modes, logs across .1; linux S7/short 6.37 -> 0.08 MB 4/4; S7/short entries removed on both legs; ticket 71's two S7 tests updated). staging/40 needs t40 round 2.
+- 2026-11-09T10:54Z staged 33 as staging/33 68f9981 (PR #69); merger 31 retried; dispatched t40 round 2 (ux-before baseline captured without the bun version).
+- 2026-11-09T11:04Z ticket 31 merged as 667f967 (resolved 437d69c; pre-merge 42583681662 8/8 after an infra re-run; windows S5/short 24.19 commit, linux 40.06; kit 981/999, proxy 1627, mcp 115/116; both sanity diffs clean).
