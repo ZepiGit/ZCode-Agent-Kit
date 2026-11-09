@@ -175,7 +175,7 @@ Equivalent: a4 and a4b. Each removes one of two guards against overwriting an un
   - 133 are a record without a start time ("start time of pid N is not determinable"), which 16's completion proof now closes;
   - 8 are "not running" finals, which are the never-started proxy (for example 5728 in 16's round 1 run) that 16's round 2 resume closes;
   - 1 is "proxy healthy but no pid file".
-- **On 16's tree:** 0 orphans in my 12 local runs (24 S3 keys) and in the windows legs archived from 16's CI runs (42546127654 and the 2026-11-08 20:59 run in `merge-16-ci/`).
+- **On 16's tree:** 0 orphans in my 11 local runs (22 S3 keys, plus scratch A) and in the windows legs archived from 16's CI runs (42546127654 and the 2026-11-08 20:59 run in `merge-16-ci/`).
 - My own runs had no S3 orphans RED, so there is nothing new to attribute.
 
 **expected-red.json** (Round 15 Q1 condition 5)
