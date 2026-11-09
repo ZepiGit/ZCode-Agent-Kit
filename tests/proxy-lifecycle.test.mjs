@@ -523,6 +523,10 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHealthSupervisor, managerRespawnHandoff } from ${JSON.stringify(SUPERVISOR_URL)};
+// Model the managed proxy's writer too: inherited native stdio now belongs
+// to proxy.early.log, while supervisor console output belongs in proxy.log.
+import { startProxyLog } from ${JSON.stringify(pathToFileURL(join(ROOT, "zcode-proxy-src", "src", "log", "proxy-log-writer.ts")).href)};
+startProxyLog();
 const config = readFileSync(process.env.ZCODE_PROXY_CONFIG, "utf8");
 const port = Number(config.match(/^  port:\\s*(\\d+)/m)[1]);
 const key = config.match(/proxyApiKey:\\s*"([^"]+)"/)[1];
