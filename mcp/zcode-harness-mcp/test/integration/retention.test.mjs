@@ -176,7 +176,7 @@ test('the task start tool states the idempotency window', async () => {
 // retention on every lookup must not visit every retained task. A full scan per
 // request is quadratic garbage over a bridge's life; on windows it raised the
 // bridge's commit growth in S5/short (400 tasks, no eviction) by ~7 %/1k.
-async function lookupWork(t, retained) {
+async function lookupWork(t, retained, { runFirst = 0 } = {}) {
   const dataDir = freshDataDir(t);
   seedCompleted(dataDir, retained);
   const countFile = path.join(dataDir, 'scan-count.json');
@@ -184,10 +184,14 @@ async function lookupWork(t, retained) {
   const read = async () => { await new Promise((r) => setTimeout(r, 120)); return JSON.parse(fs.readFileSync(countFile, 'utf8')); };
   try {
     await c.tool('zcode_health', {});
+    for (let k = 0; k < runFirst; k++) {
+      const started = await c.tool('zcode_task_start', { workspacePath: c.workspaceDir, prompt: `run ${k}`, readOnly: true });
+      assert.equal((await c.tool('zcode_task_wait', { taskId: started.taskId, timeoutMs: 15_000 })).state, 'completed');
+    }
     const before = await read();
     let lookups = 0;
     for (let k = 0; k < 10; k++) {
-      const taskId = seedId(k);
+      const taskId = seedId(retained - 1 - k);
       assert.equal((await c.tool('zcode_task_get', { taskId })).taskId, taskId);
       assert.equal((await c.tool('zcode_task_result', { taskId })).responseText, `stored ${taskId}`);
       await c.tool('zcode_task_events', { taskId });
@@ -199,11 +203,15 @@ async function lookupWork(t, retained) {
   } finally { await c.stop(); }
 }
 
-test('a lookup does not visit the retained tasks: per-request work is the same with 10 and with 400 of them', async (t) => {
+test('a lookup does not visit the retained tasks: per-request work is the same with 10, with 400 and at the 500 bound after an eviction', async (t) => {
   const few = await lookupWork(t, 10);
   const many = await lookupWork(t, 400);
-  assert.ok(many.mapVisits - few.mapVisits <= 1, `Map elements visited per lookup: ${few.mapVisits} with 10 tasks, ${many.mapVisits} with 400`);
-  assert.ok(many.dateParses - few.dateParses <= 1, `Date.parse calls per lookup: ${few.dateParses} with 10 tasks, ${many.dateParses} with 400`);
+  // 500 seeded, then one more task finishes: seed-0000 is evicted at run time and the bridge sits at the bound.
+  const atBound = await lookupWork(t, 500, { runFirst: 1 });
+  for (const [label, w] of [['400', many], ['500 after an eviction', atBound]]) {
+    assert.ok(w.mapVisits - few.mapVisits <= 1, `Map elements visited per lookup: ${few.mapVisits} with 10 tasks, ${w.mapVisits} with ${label}`);
+    assert.ok(w.dateParses - few.dateParses <= 1, `Date.parse calls per lookup: ${few.dateParses} with 10 tasks, ${w.dateParses} with ${label}`);
+  }
 });
 
 // Adversarial for the O(1) check: the index must see every record change, not
