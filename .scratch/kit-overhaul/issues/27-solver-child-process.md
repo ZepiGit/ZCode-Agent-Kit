@@ -37,4 +37,8 @@ Spec stories: 1, 7, 8, 9, 17, 18, 19, 20
 
 ## Comments
 
+### 2026-11-09 — Windows pre-merge failure diagnosis
+
+CI 42614407069 at staging/27 36d9a34 is RED, not eligible to merge. Both Windows proxy suites report 1642 pass, 2 skips and one afterAll EPERM removing t27-compiled-*; compiled self-exec assertions pass first. Typecheck/MCP stages after that failure are skipped, not passed. Windows S2 cache delta is 68 MB commit (budget 64), WS delta 62 MB; same-run Linux 52 MB. Moving A-C allocations to the child while D creates a host cache changed allocator warm-up, not proven cache behavior. Do not edit owners, budgets, workload or cache limits to recover green. Lifecycle counts pass; Windows cold start 193 ms is below 4500 ms. Detailed read-only evidence: /home/AgentKit/overhaul-tools/t27-windows-diagnosis-2026-11-09.md. Workflow dwfrun-40031bfb-6490-4df3-94c3-7594369b3da9 sends the decision to a fresh Sol-high proxy under Charter v1; answers target /home/AgentKit/overhaul-tools/rounds/round-35-answers.md. No repair or renewed CI has yet been verified.
+
 - 2026-11-08 (orchestrator, from ticket 24): the existing captcha-solver suite alone does not catch a deadline kill that never terminates the generation; only ticket 24's seam test (src/proxy/solver-transport.test.ts) does. Keep it green across the transport change.
