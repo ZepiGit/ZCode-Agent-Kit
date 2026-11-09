@@ -127,7 +127,9 @@ test("with the budget exhausted, a burst of concurrent calls spawns nothing and 
   }
 });
 
-test("a bridge stopped while a restart waits out its backoff exits without starting a harness", async () => {
+// The timeout: a bridge that starts a harness after its stop never exits
+// (mutant M2 in the ticket), which would otherwise hang the suite.
+test("a bridge stopped while a restart waits out its backoff exits without starting a harness", { timeout: 30_000 }, async () => {
   const spawnLog = spawnLogFile();
   const c = await startBridge({ env: { FAKE_EXIT_ON_SEND: "1", FAKE_SPAWN_LOG: spawnLog } });
   await crashingTask(c, 0);
