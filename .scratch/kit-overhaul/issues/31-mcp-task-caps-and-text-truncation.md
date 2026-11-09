@@ -117,3 +117,22 @@ Spec stories: 69, 70, 71, 72
     - `fileChanges.added/modified` and the `artifacts` Map, keyed by path, grow with the number of distinct written paths;
     - `modified.includes` makes each Write event O(paths).
     - Candidate `needs-triage` ticket.
+- 2026-11-09 (implementer, addendum).
+  - **Second merge.** The integration tip moved to e0962b7 (ticket 73: `tests/memory/**` including `s5-mcp.mjs` and the sampler, and `tests/start-lock.test.mjs`; nothing under `mcp/`). It is merged at 7b095d3 with no conflicts.
+  - **Suites on 7b095d3** (`reports/t31-suite2-*.log`):
+    - `npm run test`: 994 tests, 976 pass, 0 fail, 18 skipped;
+    - `test:proxy`: 1598 pass, 0 fail (107 files);
+    - `test:proxy-typecheck`: clean;
+    - `test:mcp`: 116 tests, 115 pass, 0 fail, 1 skipped;
+    - `git status` is clean after the build.
+  - **Linux S5/short on the new tree**, two more side-by-side pairs (tip worktree at e0962b7; logs `reports/t31-s5-{before-3,after-2,before-4,after-3}.log`):
+
+    | pair | tip growth %/1k (slope MB/1k) | branch growth %/1k (slope MB/1k) | branch − tip | procPeak tip / branch MB | reboot cost tip / branch MB |
+    |---|---|---|---|---|---|
+    | 1 (63a704b, above) | 43.56 (37.32) | 43.60 (37.17) | +0.04 | 91.6 / 91.2 | 0 / 1 |
+    | 2 (e0962b7) | 40.10 (34.10) | 43.66 (37.43) | +3.56 | 90.1 / 91.6 | 1 / 2 |
+    | 3 (e0962b7) | 41.95 (35.95) | 41.21 (35.35) | −0.74 | 91.2 / 91.0 | 1 / 1 |
+
+    - The 4 tip runs give 40.10–44.34 (mean 42.49) and the 3 branch runs 41.21–43.66 (mean 42.82). The pair differences change sign, so the difference is noise: there is no growth change attributable to this ticket.
+    - Every value is ≤ 55, trend is true in all runs, and every other S5 check is GREEN (0 failures, 0 orphans, reboot cost ≤ 2 MB).
+    - The ratchet holds: "S5/short: RED on growth:mcp-bridge, owned by ticket 74".
