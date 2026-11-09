@@ -153,6 +153,9 @@ function snapshot(pid, marker, cache, root) {
   try { fds = readdirSync(`${root}/${pid}/fd`).length; } catch {}
   return {
     pid, ppid, state, key, role: meta.role, comm: meta.comm,
+    argv: meta.argv,
+    exe: (() => { try { return readlinkSync(`${root}/${pid}/exe`); } catch { return null; } })(),
+    parentStart: (() => { const s = readText(`${root}/${ppid}/stat`); return s ? s.slice(s.lastIndexOf(")") + 2).split(" ")[19] : null; })(),
     rssKb: kb("VmRSS"), hwmKb: kb("VmHWM"), threads: kb("Threads"), fds,
     cmd: meta.argv.slice(0, 4).map((a) => a.split(/[\\/]/).slice(-2).join("/")).join(" ").slice(0, 120),
   };
@@ -301,7 +304,7 @@ export function countRoles(marker) {
  * units self-test, and it rejects when that fails). `windows` selects the
  * Windows backend off Windows too (tests: { rootPid, spawn }).
  */
-export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null, progress = () => 0, windows = null }) {
+export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null, progress = () => 0, windows = null, onIdentitySample = null }) {
   const onWindows = windows !== null || process.platform === "win32";
   if (!onWindows && !supported()) throw new Error(`memory loop sampler supports Linux /proc and Windows only (platform ${process.platform})`);
   const cache = new Map();
@@ -311,7 +314,7 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
   let timer = null;
   let running = false;
   let heap = {};
-  const record = async (snaps) => {
+  const record = async (snaps, table = null) => {
     if (running) return;
     running = true;
     try {
@@ -320,6 +323,7 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
         try { heap = (await probe(snaps)) ?? heap; } catch {}
       }
       const p = progress();
+      onIdentitySample?.(snaps, table);
       let csv = "";
       for (const s of snaps) {
         const h = heap[s.pid];
@@ -340,7 +344,7 @@ export function startSampler({ marker, csvPath, intervalMs = 1000, probe = null,
       spawnSpec: session.spawn,
       onPoll(f) {
         onWindowsPoll(session, f);
-        void record(session.tracker.select(f.table, { selfPid: f.selfPid }));
+        void record(session.tracker.select(f.table, { selfPid: f.selfPid }), f.table);
       },
     });
     session.live = true;

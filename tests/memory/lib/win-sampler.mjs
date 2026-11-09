@@ -100,6 +100,7 @@ const time = (s) => { try { return BigInt(s || "0"); } catch { return 0n; } };
  * are excluded by pid.
  */
 export function createKitTracker({ rootPid, token }) {
+  const diagnosticParents = new Map(); // child identity -> original parent identity, never rewritten on PID reuse
   const known = new Map(); // pid -> created (FILETIME string) of every process ever selected
   let rootCreated = null;
   const needle = token ? String(token).toLowerCase() : null;
@@ -159,11 +160,15 @@ export function createKitTracker({ rootPid, token }) {
       }
       const out = [];
       for (const p of members.values()) {
+        const diagnosticKey = `${p.pid}:${p.created}`;
+        if (!diagnosticParents.has(diagnosticKey) && diagnosticParents.size < 4096) diagnosticParents.set(diagnosticKey, parentCreated(p.ppid));
         known.set(p.pid, p.created);
         const argv = p.commandLine ? splitCommandLine(p.commandLine) : [p.executablePath ?? p.name ?? ""];
         out.push({
           pid: p.pid, ppid: p.ppid, state: "R", key: `${p.pid}:${p.created}`, role: roles.get(p.pid), comm: p.name,
           rssKb: p.rssKb, hwmKb: p.hwmKb, commitKb: p.commitKb, wsPeakKb: p.wsPeakKb, threads: p.threads, fds: p.fds,
+          argv: p.commandLine ? argv : null,
+          parentStart: diagnosticParents.get(diagnosticKey) ?? null,
           exe: p.executablePath ?? null, // measurement mode's runtime-Bun record (lib/runtime-probe.mjs); not in samples.csv
           cmd: argv.slice(0, 4).map((a) => a.split(/[\\/]/).slice(-2).join("/")).join(" ").slice(0, 120),
         });

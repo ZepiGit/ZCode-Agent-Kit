@@ -42,8 +42,16 @@ const env = (k, d) => process.env[k] ?? d;
 // Every app-server start and exit, so a test can count the harness children a
 // bridge spawned, their rate and their overlap (S5/restart, ticket 57). A
 // SIGKILLed child writes no exit line.
+const diagnosticRun = env('ZCODE_S5_DIAGNOSTIC_RUN', '');
+const diagnosticRaw = env('ZCODE_S5_DIAGNOSTIC_RAW', '');
+if (diagnosticRun && diagnosticRaw) {
+  const { appendRecord, liveRecord } = await import('../../../../tests/memory/lib/identity-diagnostic.mjs');
+  const identity = liveRecord(process.pid, process.ppid, { event: 'start', run: diagnosticRun, argv: process.argv, exe: process.execPath });
+  appendRecord(diagnosticRaw, identity);
+  process.on('exit', () => appendRecord(diagnosticRaw, { ...identity, event: 'exit', t: Date.now() }));
+}
 const spawnLog = env("FAKE_SPAWN_LOG", "");
-if (spawnLog) {
+if (spawnLog && spawnLog !== diagnosticRaw) {
   const record = (event) => fs.appendFileSync(spawnLog, JSON.stringify({ event, pid: process.pid, ppid: process.ppid, t: Date.now() }) + "\n", "utf8");
   record("start");
   process.on("exit", () => record("exit"));

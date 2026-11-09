@@ -59,7 +59,13 @@ async function runRestart(ctx, startBridge) {
   mkdirSync(join(dataDir, "workspaces"), { recursive: true });
   const spawnLog = join(ctx.outDir, "harness-spawns.jsonl");
   const t0 = Date.now();
-  const c = await startBridge({ reuseDataDir: dataDir, maxConcurrentTasks: "2", interactionTimeoutSec: "2", env: { FAKE_EXIT_ON_SEND: "1", FAKE_SPAWN_LOG: spawnLog } });
+  const diagnosticOptions = ctx.diagnostic ? {
+    nodeArgs: ['--max-semi-space-size=1', '--import', join(KIT_ROOT, 'tests/memory/lib/identity-preload.mjs')],
+  } : {};
+  const c = await startBridge({ ...diagnosticOptions, reuseDataDir: dataDir, maxConcurrentTasks: "2", interactionTimeoutSec: "2", env: {
+    FAKE_EXIT_ON_SEND: "1", FAKE_SPAWN_LOG: spawnLog,
+    ...(ctx.diagnostic ? { ZCODE_S5_DIAGNOSTIC_RUN: ctx.id, ZCODE_S5_DIAGNOSTIC_RAW: spawnLog, ZCODE_S5_DIAGNOSTIC_PARENT: join(ctx.outDir, 'diagnostic-parent-spawns.jsonl') } : {}),
+  } });
   const calls = [];
   for (let i = 0; i < MCP_RESTART.calls; i++) {
     const started = ctx.elapsed();

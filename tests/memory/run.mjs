@@ -16,8 +16,11 @@
 // overhaul; ZCODE_MEMLOOP_ALLOW=1 in CI where the runner itself is disposable).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { spawnSync } from 'node:child_process';
+import { cgroupInfo } from './lib/runtime-probe.mjs';
 import { join, resolve } from "node:path";
-import { countRoles, settled as tableSettled, startSampler, survivors, supported } from "./lib/sampler.mjs";
+import { countRoles, scan, settled as tableSettled, startSampler, survivors, supported } from "./lib/sampler.mjs";
+import { captureProcesses, classifyFiles, readRecords, windowsIdentityRows } from './lib/identity-diagnostic.mjs';
 import { osVerdict } from "./lib/verdict.mjs";
 import { assertSafeRun, bunPath, KIT_ROOT, prepareRunBun } from "./lib/isolated-kit.mjs";
 import { proxyBunTracker, runtimeEnv } from "./lib/runtime-probe.mjs";
@@ -50,6 +53,9 @@ async function main() {
   const outDir = resolve(args.out ?? process.env.ZCODE_MEMLOOP_OUT ?? join(KIT_ROOT, ".memloop"), id);
   mkdirSync(outDir, { recursive: true });
   const marker = `ZCODE_MEMLOOP_RUN=${id}`;
+  const diagnostic = process.env.ZCODE_MEMLOOP_IDENTITY_DIAGNOSTIC === '1' && args.scenario === 'S5' && args.variant === 'restart';
+  const processPath = join(outDir, 'diagnostic-processes.jsonl');
+  const capture = diagnostic ? (snaps, label) => captureProcesses(processPath, id, snaps, label) : null;
   // Children inherit the marker; this process itself was exec'd without it,
   // so the runner never counts itself.
   process.env.ZCODE_MEMLOOP_RUN = id;
@@ -68,8 +74,23 @@ async function main() {
   const probes = [];
   const notes = {};
   const observations = [];
+  if (diagnostic) {
+    const revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: KIT_ROOT, encoding: 'utf8', timeout: 5000 });
+    const dirty = spawnSync('git', ['diff', '--quiet'], { cwd: KIT_ROOT, timeout: 5000 });
+    const bun = spawnSync(bunPath(), ['--version'], { encoding: 'utf8', timeout: 5000 });
+    notes.diagnosticProvenance = {
+      candidateSha: revision.status === 0 ? revision.stdout.trim() : null,
+      testedMergeSha: revision.status === 0 ? revision.stdout.trim() : null,
+      trackedDirty: dirty.status !== 0,
+      runnerImage: process.env.ImageOS ?? 'local-linux',
+      node: process.version, bun: bun.status === 0 ? bun.stdout.trim() : null,
+      cap: { requested: process.env.ZCODE_MEMLOOP_CAP ?? 'external-run-capped', cgroup: process.platform === 'linux' ? cgroupInfo() : null },
+      isolatedHome: process.env.HOME, command: [process.execPath, ...process.argv.slice(1)],
+      classification: 'diagnostic-candidate-central-validation-only',
+    };
+  }
   const ctx = {
-    id, outDir, marker, profile: args.profile, variant: args.variant,
+    id, outDir, marker, profile: args.profile, variant: args.variant, diagnostic,
     long: args.profile === "long",
     setProgress(n) { progress = n; },
     addProgress(n = 1) { progress += n; },
@@ -85,6 +106,7 @@ async function main() {
     async observe(label) {
       await tableSettled(marker);
       const counts = countRoles(marker);
+      capture?.(scan(marker), label);
       observations.push({ label, tMs: ctx.elapsed(), counts });
       return counts;
     },
@@ -107,6 +129,10 @@ async function main() {
   const sampler = startSampler({
     marker,
     csvPath: join(outDir, "samples.csv"),
+    onIdentitySample: diagnostic ? (snaps, table) => {
+      const parents = table ? readRecords(join(outDir, 'diagnostic-parent-spawns.jsonl')).records : [];
+      capture(table ? windowsIdentityRows(table, snaps, parents) : snaps, 'poll');
+    } : null,
     // Scenarios with short-lived processes (S3 preflights live ~1 s) sample faster.
     intervalMs: mod.sampleIntervalMs ?? 1000,
     progress: () => progress,
@@ -144,6 +170,18 @@ async function main() {
   // minus processes the scenario deliberately keeps (none by default).
   await new Promise((r) => setTimeout(r, result.settleMs ?? 2000));
   const orphans = survivors(marker, result.keepPids ?? []);
+  capture?.(orphans, 'orphans');
+  if (diagnostic) {
+    notes.identityDiagnostic = classifyFiles({ run: id, rawPath: join(outDir, 'harness-spawns.jsonl'), parentPath: join(outDir, 'diagnostic-parent-spawns.jsonl'), processPath });
+    writeFileSync(join(outDir, 'diagnostic-summary.json'), JSON.stringify(notes.identityDiagnostic, null, 2), { mode: 0o600 });
+    // Offline controls are separate from shipping measurement. They inherit the
+    // same cap and isolated HOME, but not the measured workload's marker.
+    const controlEnv = { ...process.env };
+    delete controlEnv.ZCODE_MEMLOOP_RUN;
+    const controls = spawnSync(process.execPath, ['--test', '--test-reporter=tap', join(KIT_ROOT, 'tests/memory/identity-diagnostic.test.mjs')], { env: controlEnv, encoding: 'utf8', timeout: 120000, maxBuffer: 256 * 1024 });
+    notes.diagnosticControls = { exitCode: controls.status, signal: controls.signal, passed: controls.status === 0 };
+    writeFileSync(join(outDir, 'diagnostic-controls.tap'), String(controls.stdout ?? '').slice(0, 256 * 1024), { mode: 0o600 });
+  }
   // RSS on Linux, commit on Windows (with the working-set verdict beside it).
   const v = osVerdict(rows, result.budgets, { orphans, observations });
   // The loop never leaves its own processes behind: orphans are recorded as
