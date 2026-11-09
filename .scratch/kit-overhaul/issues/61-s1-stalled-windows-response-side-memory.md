@@ -144,3 +144,20 @@ Spec stories: none yet (outside spec.md; recorded in Round 7).
 - 2026-11-09 (implementer, ticket 61), addendum. The tip moved to 984b45d (tickets 16 and 38, Round 30, ticket 79), and I merged it in 6728f62. The only conflict was METRICS.md: both sides appended a section, and I kept both. Suites on 6728f62: `npm run test` 980 tests, 962 pass, 0 fail, 18 skipped (`t61-full2-kit`); `npm run test:proxy` 1611 pass, 0 fail; proxy typecheck passes; `npm run test:mcp` 100 tests, 99 pass, 0 fail, 1 skipped, `dist/` unchanged.
   - **Ticket 79 (record only, local runs, not CI).** Linux S1/stalled `growth:proxy` was 1.03 %/1k on the tip 788f2fb (job), 0.47 on e540752 and −0.03 on caf66db (no trend). The pre-merge run's linux S1/stalled value goes to 79, and a RED there comes back under Round 30 Q1.
   - **The diff touches `zcode-proxy-src/**` and `tests/memory/**`.** So no signature applies to this ticket's runs, including Round 28 (vii).
+
+- 2026-11-09 (implementer, ticket 61, round 2). Branch `ticket/61-s1-stalled-windows` at ce6d627 before this commit. **Criterion 1 (Round 12 Q3) on windows: not met, so the attribution is inconclusive. Criterion 4 applies, and I stopped there.** None of the Round 31 Q2 conditions were built (source comment, seam-4 tests (a)–(c)), the integration tip was not merged and no suite or S1 run was started, because Round 31 Q2 condition 1 makes that acceptance binding only if stage 2 ships.
+  - Runs: m1 = 1495c03 (the shipped `tee()` proxy plus the mode), 42561009557; m2 = ce6d627, 42561017903. Artefacts are in `/home/AgentKit/overhaul-tools/ci-art/t61m/`, and the full table is in METRICS.md under "Windows attribution mode, CI".
+  - The rule was fixed in the mode before the run (`STALLED_ACCOUNTED_SHARE = 0.2`, this ticket's Comments above): accounted when (i) + (iii) explain the excess above idle within ±20 %, i.e. |(ii) residual| ≤ 20 %.
+
+    | m1 windows (medians of 3) | excess above idle | (iii) drained | (i) JS-held | (ii) residual | residual share | accounted |
+    |---|---|---|---|---|---|---|
+    | WS | 238.2 (peak 293.1, floor 54.9) | 102.4 | 85 | 50.8 | 21.3 % | no |
+    | commit | 271.3 (peak 453.7, floor 182.4) | 111.7 | 85 | 74.6 | 27.5 % | no |
+
+    Per rotation (WS / commit): 20.5 / 26.9 %, 19.5 / 20.6 %, 18.4 / 24.9 %, so commit fails in every rotation. On m1 linux the share is also 21.1 % (not accounted).
+  - Why this is the reading as written: (ii) is the residual, not a measured bucket. Counting it would make "the buckets account within ±20 %" true for any data, so only the measured buckets count, which is the rule the mode recorded beforehand.
+  - Not part of the rule, for the Owner Proxy:
+    - On m2 (ce6d627) windows the excess is accounted: WS residual −5.2 %, commit −3.3 %, (i) 9 MB. The stalled peak is 132.4 WS / 298.1 commit, against 293.1 / 453.7 on m1. Stalled minus drained WS falls from 135.7 to 5.0 MB. So the stage-2 change removes the stalled-specific excess: causal evidence for a proxy-side lever, though not the attribution criterion 1 asks for.
+    - One plausible reason for the residual: (i) is measured in `heapUsed`, and a local probe saw RSS rise about 2× `heapUsed` for queued `tee()` bytes.
+    - The m2 S1/stalled windows runs are GREEN on WS (121.6, 133.2, 132.4) and under the 512 MB commit backstop (292.7, 306.5, 298.1). These are attribution-mode runs, not a ratchet verdict.
+  - Left for the orchestrator: an Owner Proxy round on criterion 4 with these numbers. The stage-2 commits (e540752, caf66db, 0da10d7, b4b98ef), the list-only commit 3820c9a and Round 31 Q2's acceptance come back together.
