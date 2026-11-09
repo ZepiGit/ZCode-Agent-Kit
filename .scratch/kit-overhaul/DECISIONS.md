@@ -4679,3 +4679,615 @@ Open branches I still see:
 3. **The attribution of 34.62** is decided by 30's 10 runs, laid beside the set.
 4. **74's question** (condition 8): a separating quantity, or none (30's deterministic test as the guard). Also how the entries and 55's empty list end, and how a windows mutant arm runs without a committed mutant. The windows post-bound value is still EVIDENCE MISSING.
 5. **Linux S5/short has no value ceiling** again after 30 merges (Round 17's branch reopens), and signature (vi) has no end date until a 74 rule merges. Both are bounded meanwhile by Round 25's triggers and the hard 35.
+
+
+# Round 30 (2026-11-09): ticket 30's round-4 set passed; one linux S1/stalled RED in it
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The decisions of Rounds 1–29 in DECISIONS.md bind these answers. Where an answer departs from one of them, it names that decision.
+
+Evidence read (read-only):
+- `OWNER-PROXY-BRIEF.md` and `rounds/round-30.md`.
+- DECISIONS Rounds 25, 26, 28 and 29 in full. I also read Round 13 Q1 condition 6 for the "restage on a changed tree" precedent.
+- The integration worktree at 7f0c368: RUNLOG lines 210–224 (both pre-registrations, the b46596a verdict, the round-4 diagnosis), METRICS lines 602–632 (Round 25's set), STATE.md.
+- Ticket 30's issue file at 540752f (`git -C /home/AgentKit/wt/t30 show HEAD:…`): the Round 29 verdict comment and the implementer's round-4 entries (root cause, fix d8b34db, mutations M1–M17, the addendum).
+- Git (read-only): `git diff --stat e84971f c6ead53`, the full diff of `job.mjs`, `lib/ratchet.mjs` and `expected-red.json` on 30's branch, `git diff --stat f56c46d e84971f` (failed-tree base against new-tree base), `git diff e84971f HEAD` (tip since the build), `git diff HEAD...origin/staging/16c`, and the PR merge base of every run.
+- Raw job logs `ci-art/t30s/<run>-{windows,ubuntu}.log` and `ci-art/t30r/` (29-character prefix stripped). I re-extracted every S5/short check line on all 40 legs and did not use `values.txt`.
+- Every archived log under `ci-art/` that contains a linux S1/stalled loop. I deduplicated by the loop id (`S1-short-stalled-<time>-<hex>`) and took the platform from the summary path (`/home/runner/…` against `D:\a\…`).
+- `gh run view --json jobs` for the 10 t30s runs. I streamed the ubuntu `memory-budget` job logs of 11 recent runs not archived (42513423687 … 42543302875) through `grep` and saved nothing.
+
+**Recomputed facts and corrections to the round.**
+
+1. **Confirmed: the S5/short verdict on tree e5b2c50.**
+   - Windows `growth:mcp-bridge` on commit: 17.1, 16.67, 26.04, 18.17, 21.16, 23.53, 19.72, 20.43, 26.59, 20.0. That is n 10, mean 20.94, sd 3.46, min 16.67, max 26.59. Trend is false in 10 of 10, and the windows S5 loop is GREEN outright in all 10.
+   - Linux: 42.52, 44.14, 45.09, 42.81, 38.86, 34.85, 37.78, 40.39, 39.42, 37.67. That is mean 40.35, sd 3.24, all ≤ 55 (listed under 74, as expected).
+   - Every other S5 check is GREEN on all 20 legs:
+     - procPeak: windows WS 59.1–60.3 MB, linux 91.5–93.9 MB;
+     - reboot cost 0–2 MB;
+     - 0 task failures and 0 orphans.
+   - Round 25's set (METRICS 606–632) is complete: n 20, mean 21.13, max 34.62, 1 value above 30, none above 35. No trigger fires.
+2. **The measured tree is e5b2c50 plus one docs line, and it was fixed before any value existed.**
+   - Every run checks out "Merge <staging/30s head> into 8d243c2". 8d243c2 is e84971f plus one RUNLOG line (the pre-registration itself), so it is the same shape as staging/30r (merged into 6875cd3).
+   - All ten heads carry tree e5b2c50.
+   - 8d243c2 was committed at 00:52:51Z. The first run was created at 00:52:59Z.
+3. **The fix is the only S5-relevant difference between the failed tree and the new one.** Between the failed tree's base f56c46d and e84971f, nothing changed under `mcp/`, `lib/mcp-bridge.mjs`, `tests/memory/`, `.github/`, `package.json` or `zcode-proxy-src/`. The only changes were `lib/proxy-lifecycle.mjs` (77), `scripts/fixture-ports.mjs` and kit tests (75).
+   - Windows mean, old tree against new: 27.33 against 20.94, Welch t 3.48. Trend true: 6 of 10 against 0 of 10.
+   - New tree against Round 25's without-30 subset (20.42, n 19): t 0.41.
+   - **This closes Round 25 Q1 condition 7's EVIDENCE MISSING.** The 34.62 of 42483637377 and the b46596a set came from 30's per-request retention scan before the fix. They did not come from 36's base or from the tail.
+4. **How the new set came about (process).**
+   - Round 29 Q1 condition 2 says a failed value "sends 30 back with all values, and nothing is rerun". The orchestrator read "back" as "back to its implementer". It then pre-registered a fresh set on a new tree as its own decision (RUNLOG 00:52Z), and no Owner Proxy round looked at it before the runs.
+   - The failed tree was not rerun. The new tree changes S5-executed code at a diagnosed cause:
+     - the new constant-lookup-work test is RED on the pre-fix dist and GREEN on the fix;
+     - M17 (full scan per request) is killed;
+     - minor GCs match the tip after the fix (321 against 319.7).
+   - The verdict and the count are unchanged. This is Round 13 Q1 condition 6's shape, except that the cause was shown by the implementer and is confirmed here, not decided here beforehand.
+5. **Only one job failed in the 10 runs: ubuntu `memory-budget` of 42542646289.** The other 79 jobs are GREEN. The 10th run 42543167527 is 8/8 GREEN, but it cannot serve as the pre-merge run, because the tip has moved: dfb9b43 (ticket 38) and 7f0c368 (Round 29 Q1 condition 3).
+6. **What the tip changed since e84971f is off S5's path.**
+   - Ticket 38 touches `cli/commands/doctor.mjs`, `lib/proxy-doctor.mjs`, `proxy/zcode-proxy-manager.mjs`, `pack/verify-payload.mjs`, `package.json` (only the `test` script list) and tests.
+   - staging/16c (in flight) touches `tests/memory/lib/completeness.mjs`, the S3/S4 scenarios, the S3 entries of `expected-red.json`, `package.json` (test list) and tests.
+   - None of this is on Round 25 Q1 condition 2's S5 list.
+7. **Confirmed: the S1/stalled RED is the only failure in 42542646289.**
+   - The values: `growth:proxy` 5.5 %/1k, trend true; `procPeak:proxy` 206 MB; `count:proxy` 1; `orphans` 0. The ratchet prints "S1/stalled: RED but not listed in expected-red.json (linux)".
+   - **Correction: S1/stalled has no `steady` check.** Its four checks are `growth:proxy`, `procPeak:proxy`, `count:proxy` and `orphans`. Recommendation 2's clause "and steady GREEN" cannot be checked.
+8. **Correction: 30's diff on `tests/memory/` is five files, not three.** They are `expected-red.json`, `job.mjs`, `lib/ratchet.mjs`, `loop.test.mjs` and `verdict.test.mjs`.
+   - The last two are test files. The memory job does not run them.
+   - The `job.mjs` change is one markdown label string ("ticket 30's ≥ 10 runs" → "ticket 74's"). The `ratchet.mjs` change is a comment. The `expected-red.json` change re-labels both S5/short owners to 74.
+   - None of these can change a measured S1 value.
+9. **Correction: the history is 135 distinct linux S1/stalled executions, not 197.** The archive holds 267 raw occurrences, with copies of the same loop in several directories. I deduplicated by loop id.
+   - The 135: median 1.58 (confirmed), mean 1.41, sd 1.94, min −5.81, max 5.5. Seven are above 4.5 (5.5, 4.95, 4.88, 4.81, 4.81, 4.75, 4.56), and 5.5 is the only one above 5.
+   - The 11 streamed runs (0.45, 4.5, 3.19, 1.62, 4.01, 0.97, 2.14, 2.05, 1.16, 1.64, 0.3) are all GREEN.
+   - **Combined: 1 RED in 146, 0.68 % per run (95 % Clopper–Pearson 0.02–3.8 %).**
+   - A normal fit predicts P(> 5) = 3.2 %, but only 1 of 135 values is above 5, so the upper tail is lighter than normal.
+   - The round's conclusion ("max, first above 5") holds.
+10. **Record only: the spread in the t30s burst.** Its ten S1/stalled values range from −5.81 to 5.5 (sd 3.43). The other 125 values have sd 1.79, and the means are 1.27 against 1.43.
+    - The other trees that contain 77 (8 streamed, plus t73b) read sd 1.38. The staging/30r burst reads sd 1.44.
+    - A spread on both sides with an unchanged mean is what measurement noise looks like, not a leak, which would raise the mean. It is local to one burst of 10 runs started within 7 minutes, not to the tree.
+
+---
+
+## Q1 — does ticket 30 merge, and what about the linux S1/stalled RED in run 42542646289?
+
+**DECISION:** REJECTED in part.
+
+Accepted:
+- **Item 1.** 30 passes its pre-registered verdict on tree e5b2c50, and it merges after one confirming pre-merge run on the current tip (condition 2). I ratify the new-tree pre-registration explicitly here, under condition 1.
+- **Item 2, first half.** The linux S1/stalled RED of 42542646289 is not charged to 30.
+- **Item 2, the triage ticket.** It records values only and comes back on its triggers. I add one trigger and one question (condition 4).
+- **Item 3.** A linux S1/stalled RED in 30's confirming run comes back with both values, and nothing is rerun.
+
+Rejected:
+- (i) **Interim signature (viii)** (condition 5). The measured rate does not support a standing exception: 1 RED in 146 runs, 0.68 % per run. That is below Round 17 Q3's 1 % design bar, against the 1.4–3.7 % that justified (vi) and the about 4 % that justified (vii).
+  - Its 6 %/1k ceiling is the one observed value plus 0.5, with no distribution behind it.
+  - Its "steady GREEN" clause names a check that S1/stalled does not have (correction 7).
+  - Until ticket 79 answers, each linux S1/stalled RED comes back with its values, as 20's S1/short RED did in Round 28.
+- (ii) **"Every other S1 failure in 197 values"** is corrected to 135 + 11 distinct runs (correction 9). No conclusion changes.
+
+Consistency with earlier decisions:
+- Consistent with Round 29 Q1 condition 2 ("nothing is rerun"). The failed tree b46596a was not rerun, and its 10 values stay on record.
+- Consistent with Round 29 Q1 condition 3 (re-merge, one confirming run), Round 26 Q1 condition 2 (failures outside S5 do not remove S5 values) and Round 28 Q1 condition 1 (a RED that a diff cannot reach is decided on its distribution, for the one run only).
+- Round 25 Q1 conditions 2 and 4 and signature (vi) are unchanged. So are Round 28's (vii) and ticket 78.
+- It *clarifies* Round 29 Q1 condition 2. "Sends 30 back" means back to its implementer and to a new pre-registered set on a new tree. It never means a rerun. From now on, a fresh set after a failed verdict needs an Owner Proxy round before its first run (condition 1).
+
+**I loosen no bound.** These are all unchanged:
+- the 5 %/1k budget, the trend rule and `growth()`;
+- the windows band (5 < v ≤ 30 commit) and the linux ≤ 55 judgement;
+- the S5 budgets (150 MB, 20 MB, 0);
+- S1's 250 MB procPeak and count/orphans budgets;
+- (vi) with its hard 35, and (vii).
+
+Binding conditions:
+
+1. **The new set is ratified, once.**
+   - staging/30s (tree e5b2c50, 42542570923 … 42543167527) is ticket 30's pre-registered set under Round 29 Q1 condition 2. It counts because:
+     - it was registered before its first run;
+     - it uses the same verdict and count as the failed set;
+     - on S5-executed code, the tree differs from the failed one only by the fix for the diagnosed cause (correction 3).
+   - b46596a's set stays on record as "failed, pre-fix" in METRICS and in 30's Comments.
+   - If 30's confirming or post-merge run fails S5, it comes back to an Owner Proxy round with all values before any new set is registered. The orchestrator does not pre-register one itself.
+2. **Merge (Round 29 Q1 condition 3).**
+   - Re-merge `ticket/30` (540752f or its successor, with no change under `mcp/`) onto the current tip, then make one pre-merge CI run. It confirms and decides nothing new:
+     - the windows band applies;
+     - linux S5/short is listed on growth only (≤ 55 from the printed value);
+     - every other S5 check is GREEN;
+     - every other job is GREEN under the normal rules.
+   - **Transfer rule.** The 10 runs carry over to the re-merged tree only if the tip since e84971f has merged nothing on Round 25 Q1 condition 2's S5 list:
+     - `mcp/**`, `lib/mcp-bridge.mjs`, `tests/memory/scenarios/s5-mcp.mjs`;
+     - `tests/memory/lib/{verdict,budgets,sampler*,win-*,ratchet}.mjs`;
+     - the Bun pin, or the memory job's Node version.
+   - Today that holds (correction 6). If the tip touches that list before the re-merge, 30 comes back.
+   - A windows S1/short RED in that run comes back under Round 28 (30 is ineligible for (vii); Round 29 Q1 condition 5).
+   - A linux S1/stalled RED comes back with both values (item 3): its value, 5.5, and this round's record. Nothing is rerun. No signature applies.
+   - Then 30 merges alone. Revert: 30 may be reverted on its own.
+3. **Run 42542646289 and ticket 30.**
+   - The run's S5 values count, under Round 26 Q1 condition 2.
+   - Its linux S1/stalled RED is not charged to 30:
+     - 30's S1-reachable edits are one markdown label string and one comment (correction 8);
+     - 5.5 lies inside a 146-run history with 1 RED;
+     - every other S1/stalled check is GREEN.
+   - This covers this run only. It is no standing exception for 30 or for this key.
+4. **Ticket 79 (the next free number), `Status: needs-triage`: "linux S1/stalled growth:proxy: tail and burst spread".**
+   - It owns no name and lists nothing.
+   - **What it records:** for every linux S1/stalled run from now on, in its Comments or a METRICS table:
+     - run id, tree, `growth:proxy` value, trend, `procPeak:proxy`;
+     - the window medians from `summary.json` where the artefact exists;
+     - how many CI runs were created in the 10 minutes before it.
+   - It back-fills the 146 values above, with run ids.
+   - **What it asks:**
+     - (a) Is the upper tail stable, or did any merged tree shift it?
+     - (b) Is the spread in the t30s burst runner contention (correction 10) or a tree effect?
+     - (c) If a rule is needed, which one holds a false-RED rate ≤ 1 % without loosening the 5 %/1k budget or the trend rule?
+   - **When it comes back:**
+     - after 20 more linux runs;
+     - earlier on a second RED within any 20 consecutive linux runs;
+     - earlier on any value above 6 %/1k;
+     - earlier on any linux S1/stalled RED in a ticket's own staged or pre-merge run.
+   - Until then, there is no change to the budget, the trend rule, `growth()` or the list.
+5. **No signature (rejected (viii)).**
+   - Until ticket 79 is answered, a staged or pre-merge run whose only unexcused failure is linux S1/stalled RED comes back to an Owner Proxy round with its value, the diff's paths and the ticket 79 table. Nothing is rerun.
+   - A post-merge run follows PROMPT §7 Phase 4 unchanged.
+   - Departing from the default needs measured evidence of a rate above 1 %. Ticket 79 gathers it.
+6. **Records.**
+   - RUNLOG records:
+     - this round;
+     - the ratification and the rule of condition 1;
+     - the correction of the history count (135 + 11 distinct, not 197);
+     - that run 42542646289's S1/stalled RED is not charged to 30.
+   - METRICS gains:
+     - the staging/30s table (both legs, every S5 field, per run), printed beside the failed b46596a set and Round 25's set, with the Welch figures of correction 3;
+     - the "with 30" subset split into pre-fix (42483637377 and b46596a, n 11) and fixed (e5b2c50, n 10).
+
+**Rationale:** The pre-registered verdict holds on every clause, recomputed from the raw logs. Windows is 16.67–26.59, trend false in all 10, with a mean indistinguishable from the without-30 set (t 0.41). Linux is ≤ 45.09. Every other S5 check is GREEN on all 20 legs, and Round 25's set is complete with no trigger. The change from the failed tree is exactly the fix for a cause that was shown in three ways: the minor-GC excess, the late-window commit gap, and a lookup-work test that is RED before the fix. So the new set is evidence, not a second roll of the same dice, and I can ratify it. I close the door for later sets so that the orchestrator cannot pick its own retries. 30 is a finished C1 fix: S5/long peak 238.6 → 111.4 MB, and M1/M1b/M17 are killed in `test:mcp`. It should merge after the one confirming run Round 29 requires. The linux S1/stalled RED cannot come from 30's edits, which are a label and a comment, and 5.5 is the tail of a 146-run history. Charging it to 30 would be the random block that Rounds 9, 13, 15 and 28 refused. The standing signature fails C9's first test, though. At 0.68 % per run, the default rule rarely blocks anyone and no exception is needed. Its ceiling was fitted to the value it would excuse, and one of its clauses names a check that does not exist. So "do nothing" plus a recording ticket is the stronger-evidence, simpler and smaller-blast-radius answer.
+
+**Charter:** C1 (the retention bound lands on 10 runs per leg plus a confirming run; no bound loosened; the proxy growth gate stays hard), C7 (windows decides the S5 verdict; linux judged ≤ 55; the linux tail recorded), C9 (stronger measured evidence: 40 legs and 146 linux S1/stalled values recomputed; simpler and smaller blast radius: no new signature, a recording ticket, one ratification with a closed door), §9 (5 %/1k, 30, 55, 150 MB, 20 MB and 0 unchanged), Round 13 Q1 condition 6, Round 17 Q3 condition 2 (≤ 1 % design bar), Round 25 Q1 conditions 2, 4 and 7, Round 26 Q1 conditions 2 and 4, Round 28 Q1 conditions 1 and 5, Round 29 Q1 conditions 2, 3 and 5, PROMPT §7 Phase 4 (no rerun-until-green; no merge on an unattributed RED).
+
+**REVERSIBILITY:** Two-way door: a merge that is revertible on its own, a recording ticket, a process rule and records. ADR: no.
+
+### Exact text changes
+
+**`issues/30-mcp-task-retention-and-idempotency-window.md`**, add under `## Comments`:
+
+```
+- 2026-11-09 (orchestrator, Owner Proxy round 30, binding): the round-4 set on staging/30s (tree e5b2c50, 42542570923..42543167527, pre-registered at 00:52Z before the first run) is ratified as this ticket's Round 29 Q1 condition 2 set and PASSES: windows commit 17.1, 16.67, 26.04, 18.17, 21.16, 23.53, 19.72, 20.43, 26.59, 20.0 (mean 20.94, trend false 10/10; t 0.41 against the without-30 mean 20.42, t 3.48 against the failed b46596a set), linux 34.85-45.09 (all <= 55), every other S5 check GREEN on all 20 legs, Round 25's set complete with no trigger. The 34.62 of 42483637377 and the b46596a set are attributed to the pre-fix per-request retention scan (Round 25 Q1 condition 7 closed). Merge: re-merge onto the current tip and one confirming pre-merge run (band in force, linux listed on growth only, every other S5 check and every other job GREEN); the 10 runs transfer only if the tip since e84971f touched nothing on Round 25 Q1 condition 2's S5 list. Run 42542646289's linux S1/stalled RED (growth:proxy 5.5 %/1k, trend true; procPeak 206 MB, count 1, orphans 0) is not charged to this ticket (its S1-reachable edits are a label string in job.mjs and a comment in lib/ratchet.mjs); a linux S1/stalled or windows S1/short RED in the confirming run comes back with its values; nothing is rerun. A further failed S5 set comes back to an Owner Proxy round before any new set is pre-registered.
+```
+
+**New `issues/79-linux-s1-stalled-growth-tail.md`:**
+
+```
+# 79: linux S1/stalled growth:proxy: tail and burst spread (needs triage)
+
+**Status:** needs-triage
+**Blocked by:** none
+
+**What to build:** nothing yet. Record every linux S1/stalled run from 2026-11-09 on (run id, tree, growth:proxy %/1k, trend, procPeak:proxy, window medians from summary.json where the artefact exists, number of CI runs created in the 10 minutes before it) and back-fill the 146 distinct values recomputed in Owner Proxy round 30 (135 archived under ci-art, deduplicated by loop id, plus 11 streamed; 1 RED: 42542646289, 5.5 %/1k, trend true). Questions for an Owner Proxy round: (a) is the upper tail stable or did a merged tree shift it; (b) is the wider spread of the staging/30s burst (sd 3.43 against 1.79, mean unchanged) runner contention or a tree effect; (c) if a rule is needed, which one holds a false-RED rate <= 1 % without loosening the 5 %/1k budget or the trend rule. This ticket owns no name and lists nothing; no signature applies meanwhile.
+
+**Comes back:** after 20 more linux runs; earlier on a second RED within any 20 consecutive linux runs, on any value above 6 %/1k, or on any linux S1/stalled RED in a ticket's own staged or pre-merge run.
+```
+
+**`issues/INDEX.md`:** add row 79 (`linux S1/stalled growth:proxy: tail and burst spread`, blocked by none, `needs-triage`). No other edge or status changes.
+
+**METRICS:** the staging/30s table and the pre-fix/fixed subsets (condition 6).
+
+---
+
+## Shared understanding
+
+Open branches I still see:
+1. **30's confirming run** can still fail by chance on keys 30 cannot reach. Windows S1/short is about 4 % per run (Round 28; 30 is ineligible for (vii)), and linux S1/stalled 0.7 % (up to 3.8 %). Either one comes back with values.
+2. **Linux S1/stalled tail and the t30s burst spread** (ticket 79). Is it contention or a tree effect? Until it answers, each RED comes back to a round.
+3. **74's question (Round 29 Q1 condition 8) is unchanged.** Signature (vi) has no end date until a 74 rule merges, and linux S5/short has no value ceiling once 30 merges (Round 17's branch).
+4. **Record only: at the 500 bound, each new terminal task still costs one scan and sort** (30's implementer, "Left open"). S5/short does not reach the bound, and S5/long was GREEN with it.
+
+
+# Round 31 (2026-11-09): a post-merge windows S2/short RED (cdn-cache:memory-growth 65 MB) and ticket 61's row values
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The decisions of Rounds 1–30 in DECISIONS.md bind these answers. Where an answer departs from one of them, it names that decision.
+
+Evidence read (read-only):
+- `OWNER-PROXY-BRIEF.md` and `rounds/round-31.md`.
+- DECISIONS Round 12 Q3, Rounds 14 and 15 in full, Round 17 (Q1, Q3, cross-question condition 2), Round 20 Q1 with its Shared understanding, Round 22 Q1, Rounds 28, 29 and 30 in full. PROMPT §5 B1 and §7 Phase 4.
+- Issues 29, 54 (Blocked-by line) and INDEX rows 29, 54, 55 and 61 on the integration tree. Ticket 61's file on `ticket/61-s1-stalled-windows` at ce6d627.
+- Raw logs `ci-art/cdn29/<run>.log` (106 with a value; 42467078897 and 42502424683 have no S2 line). I re-extracted every `cdn-cache:memory-growth` value and the phase-D `rss` marks (WS) from the logs. My values match `vals.txt` run for run. For each run I took the tree from `runs.txt` and classified it by its contents (`git show <sha>:…`), not by the flag column. The checks were: `CDN_MEMORY_MAX_BYTES` in `captcha-cdn-cache.ts` (ticket 25), `captcha-cdn-disk.ts` present (ticket 29), and ancestry of each merged ticket's first code commit. I also read the runner image line of every log.
+- `ci-art/int-984b-128954839021.log` (42553765178, windows): the S2 marks, the check table, the ratchet lines and the sampler line.
+- Git (read-only): `git diff 5f754b8^1 5f754b8` (29's merge), `git diff --stat 3ed5896 984b45d` on the S2 path, `git diff --name-only` of the 16 (b811246), 38 (dfb9b43) and 61 (984b45d..ce6d627) merges. I computed the S2 body's static import closure at 984b45d: `s2-captcha-run.ts` → `captcha-solver.ts`, `captcha-cdn-cache.ts`, `captcha-cdn-disk.ts`, `captcha-token.ts`, `runtime/bounded-collection.ts`, plus the worker `captcha-solver-worker.ts` → `runtime/guest-error.ts`. I also read `s2-captcha.mjs:96-105` (the value is `footprintMB` at D-end minus D-start on windows) and `captcha-cdn-disk.ts` (`afterWrite`, `prune`).
+- On 61's branch: `handler.ts` (`printHeader`, `printRow`, `observeStream`), `response-body.ts` (`countTokens`, `onEnd`), and a grep of README*, `docs/`, `zcode-proxy-src/README*`, `cli/`, `lib/` and `zcode-proxy-src/src/tui` for consumers of TTFB, Tok, tok/s and Total.
+
+**Recomputed facts and corrections to the round.**
+
+1. **The round's tree bins are wrong in two places. The conclusion survives the correction, but it gets weaker.**
+   - The three `staging/25` runs (42455986931 58, 42461329252 57, 42465834202 59) are counted as "before 25". Their trees carry the 32 MiB cap. That is where "before 25: n 44, mean 145.2" comes from. The true pre-25 set is n 41, mean 151.6, sd 1.8, range 147–155.
+   - The first `staging/29` run 42494299680 (61) is flagged `no29`, but its tree has `captcha-cdn-disk.ts` (round-1 version of 29).
+   - Corrected values:
+     - with 25, without 29: n 26, mean 52.88, sd 6.00, max 62;
+     - with 25 and 29: n 39, mean 56.44, sd 5.26, max 65.
+   - The difference is +3.55 MB: Welch t 2.45 (df 49), Mann–Whitney z 2.66.
+2. **The values are bimodal on both trees, so a single normal fit is the wrong model.** Splitting at 54 MB:
+
+   | tree | low mode | high mode | share high |
+   |---|---|---|---|
+   | 25 only (n 26) | 14 runs, mean 47.6, sd 1.4 | 12 runs, mean 59.1, sd 1.3 | 46 % |
+   | 25 + 29 (n 39) | 13 runs, mean 49.8, sd 2.1 | 26 runs, mean 59.8, sd 2.3 | 67 % |
+
+   - Most of the +3.55 MB mean shift comes from a larger share of high-mode runs. That share change alone is not significant (Fisher p = 0.13).
+   - The low mode moved +2.2 MB (t ≈ 3.2). The high mode moved +0.7 MB (t 1.16), but it widened.
+   - **So "29 added about 3.7 MB per run" is not what the data show.** What they show is a shift on 29's trees of uncertain form.
+   - **The tail is also smaller than the round says.**
+     - Under the two-mode fit, P(≥ 65) is about 1.4 % per run on 29's trees, not about 7 %.
+     - Empirically it is 1 of 39 = 2.6 % (95 % Clopper–Pearson 0.06–13.5 %).
+     - On the 25-only trees, the high mode puts ≥ 65 at about 0.
+3. **29 is the only change on S2's measured path between the two groups, so it is the leading suspect. It is not a proven cause.**
+   - Since 29's merge, the tip changed `async/handler.ts`, `config/*`, `index.ts`, `proxy/{body-transformer,client-session,handler,responses-handler,session-context}.ts`, `runtime/{health-monitor,memory-thresholds,supervisor}.ts` and `server/server.ts` (tickets 20 and 21). None of these is in the S2 body's import closure.
+   - 73's edit of `s2-captcha.mjs` was reverted (2347fa2) before 984b45d.
+   - All 106 logs ran on runner image `win25-vs2026` 20261103.298.1, with Bun 1.4.2.
+   - **Mechanism unknown.** Phase D writes 600 × 256 KiB ≈ 150 MiB, which is below the 256 MiB disk cap. So 29's pruner does no cap prune there. Per write it does Map bookkeeping. Beyond that, at most a 60 s rescan: one `lstat` and one 513-byte header read per entry.
+4. **The 65 MB run is a commit/WS gap event.**
+   - In 42553765178, phase D reads WS 77 → 139 MB = 62 (under 64) and commit 65. Its commit − WS gap is 3 MB. On 29's trees the mean gap is 0.9, and on the 25-only trees it is 0.3.
+   - WS growth on 29's trees: mean 55.5, max 62. On the 25-only trees: mean 52.6, max 62.
+   - The only ratchet failure in the run is this name. Every other S2 RED is one of 58's names.
+   - **EVIDENCE MISSING (not blocking): the linux S2 value of 42553765178.** Its ubuntu log is not on this host.
+5. **Confirmed: 16 and 38 cannot reach the value.**
+   - 38 touches `cli/commands/doctor.mjs`, `lib/proxy-doctor.mjs`, `pack/verify-payload.mjs`, `proxy/zcode-proxy-manager.mjs`, the `package.json` test list and tests.
+   - 16 touches `lib/{start-lock,proxy-lifecycle}.mjs`, the S3/S4 scenarios, `tests/memory/lib/completeness.mjs`, `expected-red.json`, the `package.json` test list and tests.
+   - Neither touches a file in the S2 body's closure, `s2-captcha*`, `budgets.mjs`, `verdict.mjs`, a sampler, the Bun pin or the Node version.
+6. **Q2: two facts in the round need correcting.**
+   - **There is no "row help text".**
+     - No README (any language), `docs/` page, `zcode-proxy-src/README*`, CLI help or TUI code describes the request-row columns.
+     - The row is a console/log line in two formats: the table, and `ZCODE_LOG_FORMAT=compact`. Dump mode also writes an `upstream_stream_summary` with `totalMs` and `tokensObserved`.
+     - **No `--json` output carries Total, Tok or tok/s.**
+   - **Tok is not an event count.** `countTokens` takes the upstream's usage total (`completion_tokens` / `output_tokens`) when a usage event is read, and otherwise counts content deltas.
+   - Also: the change covers only the three former `tee()` sites in `handler.ts`. Per 61's "Left for others", `/v1/responses` (`responses-handler.ts` `streamResponse`) and the async bridge still pump eagerly. They keep today's values.
+7. Record drift: INDEX row 29 says `ready-for-agent`, but the file says `resolved`.
+
+---
+
+## Q1 — integration run 42553765178 (984b45d) is RED on windows S2/short `cdn-cache:memory-growth` 65 MB (budget 64), unowned
+
+**DECISION:** REJECTED in part.
+
+Accepted:
+- **Item (1), first half.** Neither 16 nor 38 is reverted, because they cannot reach the value (correction 5). Ticket 29 is not reverted either.
+- **Item (3).** The post-merge RED is recorded, and nothing is rerun.
+
+Rejected:
+- (i) **Attributing the shift to ticket 29 "on the measured evidence", and reopening 29 to "find why … and remove it".** The bins were wrong, the distribution is bimodal, and the mechanism is unknown (corrections 1–3). The evidence makes 29 the suspect, not the cause. A fix-forward that must "remove" a cost nobody has isolated would leave the implementer to decide whether a defect exists. Instead, a new ticket **80** measures first, by an A/B on one tree against the verbatim pre-29 cache. The fix lands only if that A/B attributes the shift (conditions 2–3).
+- (ii) **Listing windows S2/short `cdn-cache:memory-growth` under owner 29 with `flips`.** This re-adds a removed name. Round 15 Q1 condition 5 ("a later RED of a removed name is an unowned RED: a question, never a re-add") forbids it, and so does Round 20 Q1 condition 3, which named "re-adding the name to `S2/short`" as forbidden for this very check. A `flips` listing would also tolerate the CDN memory bound at any value, including the 90 MB and 150 MB defect values. Round 17 Q1 and Q3 rejected exactly that. Round 22's listing is not a precedent here: there the mechanism was shown from the artefact and a role check bounded what was tolerated, and neither holds here.
+- (iii) **"About 7 % per run".** The measured tail is about 1.4 % (two-mode fit) to 2.6 % (empirical) per run (correction 2). That is still above Round 30's 1 % bar, so a narrow interim signature is justified in place of the listing (condition 4).
+
+Departures, stated explicitly:
+- **PROMPT §7 Phase 4's revert rule, Round 6 Q2 condition 4's last bullet and Round 13 Q1 condition 6.** I depart from them for run 42553765178 and for signature (ix) only. This is the same departure as Round 17 cross-question condition 2, Round 22 Q1 condition 5 and Round 28 Q1 condition 5: the RED is one that the merged diffs cannot reach, and it is decided on its distribution.
+- **Round 30 Q1 condition 5** ("a post-merge run follows PROMPT §7 Phase 4 unchanged") was written for linux S1/stalled. It is not contradicted, because that key gets no signature.
+- **Consistent with:** Round 15 Q1 condition 5, Round 20 Q1 condition 3, and Round 20's Shared understanding. That Shared understanding foresaw this case: the 6–7 MB Linux margin, and "that RED comes back as an unowned RED, not as a quiet cap change".
+
+**I loosen no bound.** These are all unchanged:
+- the 64 MB `cdn-cache:memory-growth` budget and the windows commit gate (Round 7 Q1);
+- the 32 MiB body budget and 256 entries (Round 20 Q1);
+- 29's 256 MiB disk cap and its max(14 days, TTL) age rule;
+- the S2 workload and phase order;
+- every other S2 name and owner;
+- `expected-red.json`.
+
+Binding conditions:
+
+1. **Run 42553765178.**
+   - It does not count against 16 or 38 and causes no revert.
+   - Its RED stands as an unowned RED, decided here. It is not rerun.
+   - It satisfies signature (ix) below, and it is the first entry in ticket 80's record.
+2. **New ticket 80** (exact text below). `Status: ready-for-agent`, Model sol, Risk medium, ADR no, Blocked by none.
+
+   **Stage 1, A/B attribution (pre-registered).**
+   - The setup:
+     - An off-by-default measurement mode in the test loop only: a marker file, never merged, the same pattern as 61's `--measure-stalled`.
+     - It runs full S2/short with phase D on either head's `CaptchaCdnCache` or the verbatim pre-29 cache `zcode-proxy-src/src/__fixtures__/captcha-cdn-cache.7555b87.ts` (in tree, blob checked by 29's replay test).
+     - Everything else in the run is identical.
+   - Counts and order:
+     - **≥ 30 S2/short runs per arm on windows**, arms alternating ABAB in one job and BABA in the next;
+     - ≥ 10 per arm on linux as the control.
+     - Why 30: with sd ≈ 5.5, it takes about 30 per arm to see 3.5 MB at t ≈ 2.5. Ten per arm would see it with t ≈ 1.4 only.
+   - What it records per run: commit and WS at D-start and D-end; the low/high mode (≤ 54 / > 54); and whether the pruner's 60 s rescan ran during phase D.
+   - **Verdict (fixed now):**
+     - **attributed to 29's code** if the windows commit mean of head minus pre-29 is ≥ 2.0 MB with Welch t ≥ 2.5;
+     - **not attributed** if the difference is < 1.0 MB or t < 1.5;
+     - **inconclusive** otherwise, and it comes back with all values.
+     - The mode shares and a Fisher test are reported beside it.
+   - If 58 (or anything else on S2's path) merges during the runs, the count restarts on the new tree.
+
+   **Stage 2, only if attributed.**
+   - The cost is removed inside 29's code under B1's IN SCOPE (resource lifecycle). 29's `captcha-cdn-disk-prune.test.ts` and `captcha-cdn-disk-replay.test.ts` and 25's seam-3 replay pass unchanged. Prune decisions, fetches, bytes, `sha256` and `fetchedAt` stay identical.
+   - Forbidden: changing any bound in the list above, the S2 workload or the metric.
+   - Exit: ≥ 10 GREEN windows S2/short runs on the fix tree, plus the A/B rerun on the fix tree showing a difference of < 1.0 MB.
+   - If attributed but no lever exists inside those limits, it comes back with the numbers.
+
+   **Not attributed.** It comes back with all values. The question then becomes the S2 phase-D bimodality on windows, with no owner, in the manner of tickets 78 and 79.
+3. **Ticket 29 stays `resolved`.** It gets a Comments line (informational, no criterion, no ownership; Round 15 Q1 condition 6). If ticket 80 attributes the shift, the fix is 80's, and 29's number and record stay as they are.
+4. **Interim signature (ix)** (Round 17 cross-question condition 2 form). A staged or post-merge run qualifies when all of these hold:
+   - its only unexcused failure is windows S2/short RED on `cdn-cache:memory-growth`;
+   - the value is ≤ 70 MB on commit;
+   - phase-D WS growth (D-end − D-start `rss`) is ≤ 64 MB;
+   - every other S2 RED name is one 58 owns;
+   - the linux S2 `cdn-cache:memory-growth` of the same run is ok.
+
+   Such a run does not count against the ticket, does not block its merge and causes no revert. The orchestrator records each occurrence in ticket 80's Comments with the run id, commit, WS and the linux value.
+   - **Ineligible**, by exact path:
+     - a diff touching `zcode-proxy-src/src/proxy/captcha-*`, `zcode-proxy-src/src/runtime/{bounded-collection,guest-error}.ts`, `zcode-proxy-src/package.json` or `bun.lock`;
+     - `tests/memory/scenarios/s2-captcha*`, `tests/memory/lib/{verdict,budgets,sampler*,win-*}.mjs` or `tests/memory/job.mjs`;
+     - the Bun pin or the memory job's Node version.
+     - So ticket 80 itself, 58, 27, 28 and 61 (whose diff touches `job.mjs`) get no exception. A RED in their runs comes back with values.
+   - **Why 70.**
+     - It is 4.4 sd above the high mode on 29's trees (59.8, sd 2.3), and 2.6 sd above the single-normal mean. It was not fitted to the 65.
+     - It lies well below the known defect values: 90 MB with 64 MiB of bodies, and 147–155 MB unbounded.
+     - The WS clause sends back any run in which the tier's working set itself exceeds the budget.
+   - **Comes back early:**
+     - on two (ix) occurrences within any 20 consecutive windows runs;
+     - on any value above 70, or WS above 64;
+     - on any linux S2 `cdn-cache:memory-growth` RED.
+   - **Ends** when the Owner Proxy answers ticket 80.
+   - Signature (viii) is skipped, because that number was the proposal Round 30 rejected.
+5. **Records.**
+   - RUNLOG records: this round; corrections 1–4; that 42553765178 is not charged to 16 or 38 and is not rerun; and signature (ix) with its start time.
+   - METRICS gains the corrected windows table: pre-25, 25-only and 25+29 by tree contents, the two-mode split, the WS column, and the run ids.
+   - INDEX: row 29's status becomes `resolved` (drift), and row 80 is added.
+
+**Rationale:** Three facts settle this. First, the RED cannot come from the merges that produced the tip, so a revert would punish two finished tickets for nothing. Second, the shift is real enough to name a suspect but not to name a cause. Once the bins are corrected, the data are two modes on both trees, the mode share moves without significance, and a small low-mode shift remains. 29 is the only change on S2's path, but its phase-D work is a Map entry per write. Third, the tail is about 1.4–2.6 % per run, not 7 %.
+
+Under C9, the stronger evidence is the one that isolates the code. The verbatim pre-29 cache already sits in the tree, so an interleaved A/B on one runner is cheap and removes the tree and time confound. Pre-registering its verdict keeps the implementer from deciding whether a defect exists.
+
+The listing is the wrong instrument. Two binding decisions forbid re-adding this exact name, and it would tolerate the CDN bound at any size. A narrow signature with a value ceiling, a WS clause and exact-path ineligibility does the listing's useful job instead: it shields tickets that cannot cause a roughly 2 % tail. It hides nothing that a real regression of the tier would show.
+
+**Charter:** C1 (the CDN memory bound stays enforced at 64 MB; nothing tolerates it at an unbounded value; the disk bound is kept rather than reverted), C7 (windows evidence decides; linux is the control), C9 (stronger measured evidence: 106 runs re-binned by tree contents, the WS column and a pre-registered A/B; smaller blast radius: no revert, no list edit, one narrow signature; simpler: an existing fixture as the A arm), C6 (test-loop marker only, no endpoint), §9 (no bound loosened), B1 (any stage-2 change is lifecycle only, with 25's and 29's replay proofs unchanged), Round 7 Q1, Round 13 Q1 condition 6, Round 15 Q1 conditions 5 and 6, Round 17 Q1 and Q3 and cross-question condition 2, Round 20 Q1 condition 3 and its Shared understanding, Round 22 Q1 (distinguished), Round 28 Q1 conditions 1, 4 and 5, Round 30 Q1 condition 5 (the 1 % bar), PROMPT §7 Phase 4 (departure for this run and (ix) only; no rerun-until-green).
+
+**REVERSIBILITY:** Two-way door: a measurement ticket, an interim signature that ends on a named answer, records. No code or list changes. ADR: no.
+
+### Exact text changes
+
+**New `issues/80-windows-s2-cdn-memory-after-29.md`:**
+
+```
+# 80: windows S2/short cdn-cache:memory-growth after ticket 29: A/B attribution
+
+**Status:** ready-for-agent
+**Blocked by:** none
+
+Model: sol
+Risk: medium
+ADR: no
+
+**What to build:** Owner Proxy round 31 Q1. Post-merge run 42553765178 (984b45d) was RED on windows S2/short cdn-cache:memory-growth 65 MB commit (WS 62; budget 64), unowned. By tree contents, windows values are 25-only n 26 mean 52.88 sd 6.00 max 62 and 25+29 n 39 mean 56.44 sd 5.26 max 65 (Welch t 2.45), bimodal on both trees (low ~47.6 / 49.8, high ~59.1 / 59.8; high share 46 % -> 67 %, Fisher p 0.13). Ticket 29 is the only change on S2's measured path but is not proven to be the cause. Stage 1 (pre-registered): an off-by-default test-loop marker (never merged) runs full S2/short with phase D on head's CaptchaCdnCache or on the verbatim pre-29 cache zcode-proxy-src/src/__fixtures__/captcha-cdn-cache.7555b87.ts, everything else identical; >= 30 runs per arm on windows (ABAB in one job, BABA in the next) and >= 10 per arm on linux; record commit and WS at D-start/D-end, the mode (<= 54 / > 54) and whether the pruner's 60 s rescan ran in phase D. Verdict: attributed if windows commit mean(head) - mean(pre-29) >= 2.0 MB with Welch t >= 2.5; not attributed if < 1.0 MB or t < 1.5; otherwise inconclusive and it comes back. Stage 2 only if attributed: remove the cost inside 29's code as resource lifecycle (B1 IN SCOPE); captcha-cdn-disk-prune.test.ts, captcha-cdn-disk-replay.test.ts and ticket 25's seam-3 replay pass unchanged (same prune decisions, fetches, bytes, sha256, fetchedAt). Never change the 64 MB budget, the 32 MiB body budget, 256 entries, the 256 MiB disk cap, the age rule, the S2 workload or the metric. Exit: >= 10 GREEN windows S2/short runs on the fix tree and the A/B on the fix tree < 1.0 MB. Attributed with no lever inside those limits, not attributed, or inconclusive: comes back to an Owner Proxy round with all values. A merge on S2's path (for example 58) during the runs restarts the count. This ticket owns no name and lists nothing; it records every signature (ix) occurrence (run id, commit, WS, linux value), starting with 42553765178.
+
+**Acceptance criteria:**
+- [ ] Stage 1 A/B recorded with all per-run values and the verdict under the pre-registered rule.
+- [ ] Stage 2 (only if attributed): fix with the three replay/prune suites unchanged and green, then the exit evidence above.
+- [ ] METRICS table: per arm, per leg, per run.
+```
+
+**`issues/29-cdn-disk-cache-pruning.md`**, add under `## Comments`:
+
+```
+- 2026-11-09 (orchestrator, Owner Proxy round 31 Q1, informational; no criterion, no ownership): windows S2/short cdn-cache:memory-growth reads +3.55 MB higher on trees with this ticket (n 39 against 26, bimodal on both). This ticket is the only change on S2's path but is not proven to be the cause; ticket 80 measures head against the verbatim pre-29 cache. This ticket stays resolved and is not reverted.
+```
+
+**`issues/INDEX.md`:** row 29's status becomes `resolved`. Add row 80 (`windows S2/short cdn-cache:memory-growth after ticket 29: A/B attribution`, sol, medium, blocked by none, `ready-for-agent`). No other edge.
+
+---
+
+## Q2 — ticket 61 changes two row values for slow clients (Round 12 Q3 condition 2, third bullet)
+
+**DECISION:** ACCEPTED with conditions. The recommendation's text is corrected in three places (correction 6):
+- there is no row help text;
+- Tok is the upstream usage total, or the counted deltas, from the events read;
+- the release-notes line must name the routes that changed.
+
+This answers the "comes back before it ships" that Round 12 Q3 condition 2 required. It does not contradict that decision. The field names stay as they were. Each value keeps its definition: Total is still the time until the proxy saw the upstream end, and Tok is still what the proxy observed. The values move because the proxy now reads at the client's pace, which is the backpressure Round 12 ordered. Keeping today's values would need the read-ahead queue that Round 12 Q3 told 61 to remove.
+
+Binding conditions:
+1. **This acceptance binds only if stage 2 ships.** Stage 2 still needs the windows attribution on staging/61m1 and staging/61m2 to put the excess in bucket (i) or (ii) within ±20 % (Round 12 Q3 criterion 1). If it puts the excess in (iii) or (iv), or is inconclusive, criterion 4 applies, and the stage-2 commits come back together with this acceptance. Every windows GREEN criterion stays pending CI, as written.
+2. **What is unchanged:**
+   - column names, order and widths;
+   - the compact format;
+   - TTFB's meaning;
+   - the dump field names (`totalMs`, `tokensObserved`);
+   - every other route's values.
+   No config key, env var or switch restores the old values. Such a switch would re-enable the queue (C1) and add surface for no gain (C9).
+3. **Release notes (C2: announced, not silent).** New edge **54 ← 61**, following the 59 and 69 precedent. Acyclic: 54 has no dependents, and 61's ancestors (02, 19, 20 and theirs) do not include 54.
+
+   The line, exact. The implementer may correct the route list to the code, but not the meaning:
+
+   `Proxy request log: on streamed /v1/messages and /v1/chat/completions answers, the proxy now reads the upstream at the client's pace instead of buffering ahead of a slow client. For a client that reads slower than the upstream sends, Total and tok/s now include the time the client takes to read the answer. If such a client disconnects early, Tok reflects only what was read before it left (the upstream's usage total if it arrived by then, otherwise the counted text deltas). Clients that keep up see the same values as before; TTFB, the column names and the compact format are unchanged; /v1/responses streams are unchanged.`
+
+   The dump-mode decoder fix (the 4 KiB sample's own decoder) gets one more clause in the same item. The orchestrator records the line in 54's Comments when 61 closes.
+4. **Where it is documented (C8).** No README, translation, `harnesses/README*` or help text describes the request row today (correction 6), so none is owed a change. Instead:
+   - a source comment at `printHeader` / `printRow` states the column semantics as in condition 3;
+   - if ticket 52's README parity work documents the row later, it uses this wording.
+5. **Tests that pin the new semantics** (seam 4; add the ones that the existing backpressure and contract tests do not already cover):
+   - (a) for a client that keeps up, every one of the 9 contract cases yields the same Tok as on the tip 788f2fb;
+   - (b) for a client that pauses P ms mid-stream, the row's Total is ≥ P;
+   - (c) for a client that leaves early, the row is printed once, and Tok equals the usage total or delta count of the events delivered before the cancel, never more.
+6. **Scope note.** The eager `/v1/responses` stream and the async bridge keep today's values. Until a follow-up exists, the row's semantics differ by route, and the release-notes line says so. A follow-up that converts them carries the same note. Nothing more is decided here.
+
+**Rationale:** The new values describe what the proxy actually did, so the user sees the client's real experience instead of an upstream finish time reached only by queueing. The cost is a changed number for slow and early-leaving clients, in a human-readable log line. No `--json` output and no kit consumer reads that line (correction 6), so C3's `--json` stability and C2's JSON fields are untouched. The rest of C2 asks that the change be announced, which condition 3 does. The alternative would undo the C1 fix. A switch to keep old values would be a second mode that exists only to bring an unbounded queue back. The recommendation's own wording needed tightening: Tok is not an event count, the help text it relies on does not exist, and the change covers only some routes.
+
+**Charter:** C1 (backpressure bounds response memory without shedding; no switch brings the queue back), C2 (field names unchanged; the change is announced in the release notes; no state or migration), C3 (consistency and clarity of the row; `--json` untouched), C8 (release notes; no affected README text), C9 (simpler: no switch; smaller blast radius: acceptance conditional on stage 2 shipping), B1 (`handler.ts` and `sse-translator.ts` are not anti-abuse modules; upstream request bytes are unchanged), Round 1 Q5, Round 12 Q3 criteria 1, 2 and 4, Round 12 Q2 and Round 14 Q2 condition 5 (the 54-edge precedent).
+
+**REVERSIBILITY:** Two-way door: an internal response pipeline behind unchanged names, a log line's values, and a release-notes line. ADR: no.
+
+### Exact text changes
+
+**`issues/61-s1-stalled-windows-response-side-memory.md`**, add under `## Comments`:
+
+```
+- 2026-11-09 (orchestrator, Owner Proxy round 31 Q2, binding): the two row-value changes are accepted on the condition that stage 2 ships (windows attribution on staging/61m1 and staging/61m2 in bucket (i)/(ii) within ±20 %; otherwise criterion 4 and the stage-2 commits come back with this acceptance). Unchanged: column names, order and widths, compact format, TTFB, dump field names, other routes; no config switch. Release-notes line (edge 54 ← 61) as in round 31 Q2 condition 3; a source comment at printHeader/printRow states the semantics; seam-4 tests pin (a) Tok equal to the tip 788f2fb for a client that keeps up in all 9 contract cases, (b) Total >= an imposed client pause, (c) one row and Tok never above what was delivered for an early leaver. Corrections: Tok is the usage total or the counted deltas of the events read, not an event count; no row help text or README describes the row; no --json output carries Total, Tok or tok/s. This ticket's diff touches tests/memory/job.mjs, so signature (ix) does not apply to its runs.
+```
+
+**`issues/54-release-notes-and-owner-actions.md`:** add `61 (S1/stalled on Windows: proxy memory under many stalled streaming readers)` to `**Blocked by:**`. **INDEX row 54:** add 61.
+
+---
+
+## Shared understanding
+
+Open branches I still see:
+1. **Ticket 80's verdict.**
+   - Attributed: a stage-2 fix inside 29's code.
+   - Not attributed or inconclusive: windows S2 phase D has an unexplained two-mode distribution (≈ 48 / ≈ 60 MB) on both trees with no owner, and it comes back as a rule question like 78 and 79. Round 20's 6–7 MB margin is the underlying risk.
+   - Signature (ix) holds until then.
+2. **EVIDENCE MISSING: the linux S2 value of 42553765178.** It is not on this host. Ticket 80 records it.
+3. **Ineligible tickets meet the tail with no exception.** 58, 27, 28 and 61 each have about a 13–23 % chance over 10 runs, and each RED comes back with values. If that happens often before 80 answers, the answer is due early.
+4. **61's windows attribution** (staging/61m1, 61m2) is still pending. If the excess sits in (iii) or (iv), stage 2 and Q2's acceptance come back together, the windows `S1/stalled` entry stays, and 55's empty-list criterion becomes the owner question that Round 12 Q3 named.
+5. **The row semantics differ by route** until `/v1/responses` and the async bridge get backpressure (61's "Left for others"). No ticket exists for that yet.
+6. **61's burst4 paired shift** (219.9 → 230.6, p = 0.015, GREEN) is flagged by the implementer and was not decided here. It is judged with 61's pre-merge evidence under Round 12 Q3 criterion 3.
+
+
+# Round 32 (2026-11-09): ticket 61's windows attribution is borderline-unaccounted, and the fix removes the excess
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The decisions of Rounds 1–31 in DECISIONS.md bind these answers. Where an answer departs from one of them, it names that decision.
+
+Evidence read (read-only):
+- `OWNER-PROXY-BRIEF.md` and `rounds/round-32.md`.
+- DECISIONS Round 12 Q3 in full, with its Shared understanding; Round 30 Q1 (conditions 4 and 5, ticket 79); Round 31 Q2 in full, with its Shared understanding (branches 4 and 6).
+- Ticket 61 at 6993e3d (`git -C /home/AgentKit/wt/t61 show HEAD:…`): every Comments entry, including the round-2 entry with the criterion-1 verdict. METRICS on the same branch: the caf66db S1 runs, the paired burst4 run, "Windows attribution mode, CI", and ticket 20's burst table.
+- `tests/memory/lib/measure.mjs` at HEAD. The rule (`STALLED_ACCOUNTED_SHARE = 0.2`, `|residual| ≤ 0.2 × excess`) is computed from the medians of each component. It was committed in 1495c03 (00:11:48Z), before either run, and `git diff 1495c03 HEAD -- tests/memory/lib/measure.mjs` is empty.
+- Artefacts `ci-art/t61m/{m1,m2}-{windows,linux}/`: the `.md` and `.json` files, plus each rotation's `summary.json` (outcome, every check, `growth:proxy` with trend, Bun runtime).
+- Git (read-only):
+  - `origin/staging/61m1` is 1495c03 plus one commit that adds only `tests/memory/measure-stalled`. `origin/staging/61m2` is ce6d627 plus the same one-file commit.
+  - `git diff --name-only 788f2fb 984b45d -- zcode-proxy-src/` is empty.
+  - `git diff --stat 984b45d ce6d627 -- zcode-proxy-src/src`.
+  - `git diff --stat ce6d627 6993e3d` changes only docs (METRICS and ticket 61).
+  - The integration tip since 984b45d is at 2b4e2e0 (tickets 30 and 18; `watchdog.ts` b63f453).
+
+**Recomputed facts and corrections to the round.**
+
+1. **Confirmed: the m1 windows verdict under the pre-registered rule.** Recomputed from the per-rotation raw values in the JSON.
+   - Medians:
+     - WS: excess 238.2, (iii) 102.4, (i) 85, residual 50.8, so 21.3 %, not accounted.
+     - Commit: 271.3 / 111.7 / 85 / 74.6, so 27.5 %, not accounted.
+   - Per rotation:
+     - WS 20.5 / 19.5 / 18.4 %. Two of three rotations would pass, but the rule is the median form, and that fails.
+     - Commit 26.9 / 20.6 / 24.9 %, so commit fails in every rotation.
+   - Linux m1: 24.8 / 117.6 = 21.1 %.
+2. **Confirmed: m2 is accounted under the same rule.**
+   - Windows WS residual −4.0 / 77.6 = −5.2 %. Commit −3.8 / 116.3 = −3.3 %. (i) is 9 MB.
+   - Linux m2: 15.3 / 80.8 = 18.9 %, accounted with little margin.
+3. **Confirmed: the fix removes the stalled-specific excess.**
+   - Stalled minus drained: WS 293.1 − 157.4 = 135.7 → 132.4 − 127.4 = 5.0 MB. Commit 453.7 − 298.3 = 155.4 → 298.1 − 294.7 = 3.4 MB.
+   - m2's stalled WS peaks (121.6, 133.2, 132.4) are each more than 140 MB below the lowest of the 75 archived windows S1/stalled artefacts on the `tee()` tree (278–333, median 301.5; ticket 61 Comments).
+   - m2's commit peaks are 292.7–306.5, under the 512 backstop.
+   - The drained arm also falls on WS, 157.4 → 127.4, so the change helps readers that keep up too.
+4. **The round's "when only the response copies change" holds for the proxy source, with one qualification.**
+   - Nothing under `zcode-proxy-src/` changed between m1's base 788f2fb and 984b45d. Between the two measured trees, the proxy source differs only by 61's stage-2 files (`handler.ts`, `response-body.ts`, `server.ts`, `sse-translator.ts`) and their tests.
+   - Both runs used Bun 1.4.2 (revision 744846f), Node v26.13.0 and the jobobject cap.
+   - The trees also differ by kit-side tickets 16 and 38 and `tests/memory/lib/completeness.mjs`. None of these is on S1's proxy response path.
+   - m1 and m2 are two CI runs, not one interleaved job. The size of the effect (point 3) makes runner variance an implausible explanation.
+5. **Not in the round: m1 linux S1/stalled is RED on `growth:proxy` 6.09 %/1k (trend true) in rotation 3** (procPeak 178.6, count 1, orphans 0).
+   - m1 linux stalled growth: 2.46, 4.33, 6.09, trend true in all three.
+   - m2 linux stalled growth: 1.40, 1.34, 0.57, trend false in all three.
+   - Drained arms on both trees: 0.04–1.27.
+   - 6.09 is above 6 %/1k, which is one of ticket 79's early-return triggers (Round 30 Q1 condition 4). The run is an attribution-mode run ("no verdict, no ratchet") on the shipped `tee()` proxy, not on 61's change.
+6. **The tip has moved past 984b45d** to 2b4e2e0: tickets 30 and 18. The only proxy-source change is `runtime/watchdog.ts` (the respawn hook's env drops the stop token). That is off the response path, but 61 must still merge it before its pre-merge run.
+7. **The burst4 record (ticket 61 METRICS, local, shared machine).**
+   - Paired runs: 219.9 (206.4–228.6, n 9) against 230.6 (214.7–235.8, n 9), permutation p = 0.015.
+   - Both sit inside ticket 20's final 10-run range of 193.3–241.2. The budget is 250, and burst4 is unlisted on both legs.
+   - The only changed code on that path is the 64 KiB socket-write piece.
+
+---
+
+## Q1 — does ticket 61's stage 2 (backpressure) ship?
+
+**DECISION:** ACCEPTED with conditions. One part is REJECTED as worded: "burst4 recorded" (condition 5). The recommendation's merge conditions also leave out the windows half of Round 12 Q3 criterion 3, which is restored here (condition 4).
+
+Stated departure:
+- This **departs from the literal gate of Round 12 Q3 criterion 2** ("Stage 2, only if (i) or (ii) carries the excess", evidenced by criterion 1's ±20 % accounting) **and from Round 31 Q2 condition 1** ("Stage 2 still needs the windows attribution … within ±20 %"; inconclusive sends the commits back under criterion 4). The departure is for ticket 61 only.
+- The commits have come back as those decisions required, and this round is that return. I decide on stronger measured evidence (C9).
+
+What stays unchanged:
+- The pre-registered rule, which is not reinterpreted.
+- m1's verdict.
+- Every budget.
+
+Consistent with:
+- **Round 12 Q3 criterion 4.** Its "the entry stays" branch needs the excess to sit in (iii)/(iv), or in Bun internals with no proxy-side lever.
+  - m1's stalled-specific excess (135.7 WS) lies above the drained reference by construction. So it is neither (iii) nor (iv) as the mode defines them.
+  - m2 shows a proxy-side lever directly.
+- **Round 1 Q5.** Nothing is capped, shed or ended.
+- **Round 30 Q1 condition 5.**
+- **Round 31 Q2.** Its row-value acceptance now binds, because stage 2 ships.
+
+Binding conditions:
+
+1. **Records, with no retroactive change.**
+   - m1 is recorded as "not accounted under the pre-registered rule (WS 21.3 %, commit 27.5 %; per rotation WS 20.5/19.5/18.4, commit 26.9/20.6/24.9)". `STALLED_ACCOUNTED_SHARE` and its median form stay as they are.
+   - The residual (50.8 WS / 74.6 commit MB) is recorded as "unattributed, stalled-specific". The "RSS ≈ 2× heapUsed for queued `tee()` bytes" idea is recorded as an unproven hypothesis, not as an attribution.
+   - **Basis for shipping.** The m2 intervention:
+     - stalled minus drained 135.7 → 5.0 WS and 155.4 → 3.4 commit;
+     - (i) 85 → 9;
+     - m2 accounted on both metrics;
+     - stalled WS 121.6–133.2, against an archive minimum of 278.
+   - **No precedent.** A causal A/B does not in general replace a pre-registered attribution. Any other ticket that wants this substitution needs its own round.
+2. **Finish Round 31 Q2.** Build conditions 2–6 of Round 31 Q2:
+   - the source comment at `printHeader` / `printRow`;
+   - seam-4 tests (a)–(c);
+   - the release-notes line under edge 54 ← 61, recorded in 54's Comments when 61 closes;
+   - the scope note for `/v1/responses` and the async bridge.
+
+   Then merge the current tip (2b4e2e0 or later) into `ticket/61-s1-stalled-windows`.
+3. **Transfer rule for the m2 evidence.**
+   - m2 covers the shipping tree only if the non-test code of `zcode-proxy-src/src/{proxy/handler.ts,proxy/response-body.ts,server/server.ts,translator/sse-translator.ts}` matches ce6d627's, apart from the comment from condition 2 and anything the tip merge brings in.
+   - Otherwise, for example if tests (a)–(c) force a code change, the attribution mode is rerun once on the new head (marker `3`, both legs). Before merge it must:
+     - be accounted under the unchanged rule on windows WS and commit;
+     - have a stalled WS median ≤ 250 and a commit maximum < 512.
+
+     If either fails, 61 comes back with all values. Nothing is rerun beyond that one run.
+   - The marker never merges, and the loop test enforces this.
+4. **One pre-merge CI run on the merged head confirms Round 12 Q3 criterion 3 in full, on both legs.** Any RED comes back to an Owner Proxy round with its values, and nothing is rerun. No signature applies: 61 is ineligible for (vii) and (ix).
+   - Windows S1/stalled must be GREEN on WS (≤ 250) and under the 512 MB commit backstop, with no `expected-red.json` entry (3820c9a; Round 15 Q1 condition 5).
+   - Linux S1/stalled must be GREEN. A RED comes back under Round 30 Q1 condition 5 with the ticket 79 table. The value goes into ticket 79 either way.
+   - S1/short, S1/burst1/4/16/32, S1/bigbody and S7 must not regress on either leg:
+     - windows S1/short under ticket 71's 5-repetition rule (Round 17 Q3 condition 4);
+     - S7 RED only on ticket 33's listed name;
+     - every other job GREEN under the normal rules.
+   - Then 61 merges alone. It may be reverted on its own.
+5. **burst4 (REJECTED: "recorded" alone does not meet criterion 3's "do not regress").**
+   - In the pre-merge run, S1/burst4 must be GREEN on both legs (condition 4).
+   - The local paired shift (+10.7 MB, p = 0.015) is recorded in 61's Comments and METRICS as "flagged, unattributed". It came from a shared local machine, and both medians sit inside ticket 20's 193.3–241.2.
+   - **Trigger, pre-registered now.** After 61 merges, the first S1/burst4 RED on either leg, in any run, comes back to an Owner Proxy round with 61 named as the suspect. 61's 64 KiB socket-write piece is the only changed code on that path, and the margin is 250 − 235.8 = 14 MB.
+   - No budget changes.
+6. **The m1 linux RED and ticket 79.**
+   - The 6.09 %/1k RED of m1 linux rotation 3 is recorded. It is not charged to 61, because the tree is the shipped `tee()` proxy with a test-only mode. It is not rerun.
+   - The six linux stalled values of both runs go into ticket 79's record with their run ids, trees and trends:
+     - m1 (`tee()`): 2.46, 4.33, 6.09, trend true;
+     - m2 (61's head): 1.40, 1.34, 0.57, trend false.
+   - The three drained values of each run go in beside them.
+   - Ticket 79's "any value above 6 %/1k" trigger has fired, so 79 is due back to an Owner Proxy round. Its question (a), "did a merged tree shift the tail", should then use this contrast as evidence. This round does not answer 79.
+7. **When 61 merges:**
+   - `S1/stalled` (windows) leaves the list, so 55's empty-list criterion is no longer blocked by 61.
+   - Round 31 Shared understanding branch 4 is closed.
+   - Round 31 branch 6 (burst4) is settled by condition 5.
+
+**Rationale:** Criterion 1 exists so that a fix is not built on the wrong bucket. Under the rule fixed in advance, the m1 split narrowly fails on WS (21.3 % against 20 %, with two of three rotations passing) and clearly fails on commit. That failure stays on record. The question it was meant to answer has been answered more directly, though. On the same Bun, Node and cap, with the proxy source different only by 61's response-path change, the stalled-specific excess falls from 135.7 to 5.0 MB WS and from 155.4 to 3.4 MB commit. The JS heap that stalled readers hold falls from 85 to 9 MB, and the stalled peaks land more than 140 MB below every one of 75 archived `tee()` runs. The modified tree also passes the very rule that m1 failed. An intervention that removes the effect is stronger evidence than a subtraction-based split of the old tree, and C9 says the stronger measured evidence wins.
+
+Criterion 4 keeps the entry only when the excess is in the drained or floor buckets, or in Bun internals with no proxy-side lever. m2 refutes the lever clause outright, and the stalled-specific part sits outside (iii)/(iv) by construction. Holding back a fix that turns a primary-platform RED GREEN, with an untouched contract, no shedding and no new surface, would fail C1 and C7 for the sake of a 1.3-point miss on an accounting rule whose purpose is already met.
+
+I keep the rule and the m1 verdict exactly as recorded, so nothing is reinterpreted after the fact. I also bound the departure: it does not set a precedent, the m2 evidence transfers only to an unchanged response path, and one pre-merge run must confirm criterion 3 in full on both legs. That includes the windows items the recommendation left out. "burst4 recorded" is too weak for "do not regress" when a significant shift leaves 14 MB of margin, so it gets a GREEN requirement and a pre-registered return trigger. The m1 linux 6.09 is a ticket 79 trigger that the round missed. It belongs to 79, not to 61, and the m1/m2 contrast is useful evidence for that ticket.
+
+**Charter:** C1 (bounded response memory by backpressure, without shedding; the windows RED removed; no budget loosened), C2 (client bytes and field names unchanged; row-value change announced via 54 under Round 31 Q2), C7 (the primary-platform RED fixed; linux not regressed: CI 181 → 144.3, local 175 → 148.5), C9 (stronger measured evidence: a causal intervention over a subtraction split; smaller blast radius: one revertible ticket, a transfer rule, no precedent), §9 (250 WS, 512 commit, 5 %/1k and the S1 budgets unchanged), B1 (no anti-abuse module touched), B5, Round 1 Q5, Round 12 Q3 criteria 1–4 (criterion 2's gate departed from for 61 only), Round 15 Q1 condition 5, Round 17 Q3 condition 4, Round 30 Q1 conditions 4–5, Round 31 Q2 (conditions 1 departed from, 2–6 binding), PROMPT §7 Phase 4 (no rerun-until-green).
+
+**REVERSIBILITY:** Two-way door: an internal response pipeline behind unchanged contracts, a list deletion and records. 61 merges alone and can be reverted alone. ADR: no.
+
+### Exact text change
+
+**`issues/61-s1-stalled-windows-response-side-memory.md`**, add under `## Comments`:
+
+```
+- 2026-11-09 (orchestrator, Owner Proxy round 32, binding): stage 2 ships. Criterion 1 is recorded as not accounted under the pre-registered rule on m1 (1495c03, 42561009557): WS 21.3 % (rotations 20.5/19.5/18.4), commit 27.5 % (26.9/20.6/24.9); the rule (STALLED_ACCOUNTED_SHARE 0.2, median form) is unchanged, and the residual (50.8 WS / 74.6 commit MB) is unattributed stalled-specific memory (the RSS ~2x heapUsed idea is unproven). The basis for shipping is the m2 intervention (ce6d627, 42561017903; proxy source differs from m1 only by this ticket's response-path files; same Bun 1.4.2, Node, cap): stalled minus drained WS 135.7 -> 5.0 MB, commit 155.4 -> 3.4 MB, (i) 85 -> 9 MB, m2 accounted (WS -5.2 %, commit -3.3 %), stalled WS 121.6-133.2 against an archive minimum of 278. This is a departure from Round 12 Q3 criterion 2's gate and Round 31 Q2 condition 1 for this ticket only, and no precedent. Before merge: Round 31 Q2 conditions 2-6, merge the current tip, then one pre-merge CI run confirming criterion 3 on both legs (windows S1/stalled GREEN WS <= 250 and commit < 512 with no entry; linux S1/stalled GREEN, a RED comes back under Round 30 Q1 condition 5; S1/short with windows under ticket 71's rule, burst1/4/16/32, bigbody, S7 except ticket 33's name; every other job GREEN); any RED comes back with values, nothing rerun, no signature. m2 transfers only if the non-test code of handler.ts, response-body.ts, server.ts and sse-translator.ts equals ce6d627's (apart from the printHeader/printRow comment and the tip merge); otherwise one rerun of the attribution mode on the new head must be accounted on windows WS and commit with stalled WS median <= 250 and commit max < 512, or 61 comes back. burst4: the local paired shift 219.9 -> 230.6 (p 0.015) is flagged and unattributed; it must be GREEN on both legs pre-merge, and the first S1/burst4 RED on either leg after this ticket merges comes back naming this ticket as the suspect. The m1 linux S1/stalled RED (growth:proxy 6.09 %/1k, trend true, tee() tree) is not charged to this ticket and goes to ticket 79 with the other five linux stalled values (m1 2.46/4.33/6.09 trend true; m2 1.40/1.34/0.57 trend false).
+```
+
+**`issues/79-linux-s1-stalled-growth-tail.md`**, add under `## Comments`: the six stalled and six drained linux values of 42561009557 and 42561017903, with trees 1495c03 / ce6d627 and trends, and "early-return trigger (value > 6 %/1k) fired by 42561009557 rotation 3, 6.09 %/1k; due back to an Owner Proxy round".
+
+**RUNLOG:** this round; m1 not accounted (rule unchanged); the departure for 61 only; the 6.09 trigger for 79.
+
+---
+
+## Shared understanding
+
+Open branches I still see:
+1. **61's pre-merge run** can fail a criterion-3 item. Windows S1/short runs at about 4 % per run under Round 28 with no signature, and linux S1/stalled at about 0.7 %. Either comes back with values. If the response path changes before merge, condition 3's rerun decides.
+2. **Ticket 79 is due back now** (6.09 %/1k on the `tee()` tree). The m1/m2 contrast (trend true 3/3 against false 3/3) suggests that `tee()` queuing feeds the linux S1/stalled tail. That is 79's question (a), not decided here.
+3. **The burst4 shift** stays flagged with a return trigger. If it is real, the 14 MB margin under 250 is the risk.
+4. **The m1 residual's nature** (native or allocator share of queued bytes, against socket send buffering) stays unproven. It is record only, because the fix removes it.
+5. **`/v1/responses` and the async bridge still pump eagerly.** A stalled client of those routes still queues without bound (C1), the row semantics differ by route, and no ticket or measurement exists for them yet (Round 31 branch 5).
+6. Round 31 branches 1–3 (ticket 80, the missing linux S2 value, ineligible tickets meeting the S2 tail) are unchanged.

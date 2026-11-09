@@ -32,7 +32,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 26 | [Captcha egress routing under Bun](26-captcha-egress-routing-under-bun.md) | glm | medium | 12 | ready-for-agent |
 | 27 | [Solver as a child process: spawn, environment parity, lazy start, idle exit, one generation](27-solver-child-process.md) | sol | high | 24, 18, 26 | ready-for-agent |
 | 28 | [Solver cap enforcement per OS and the cap handshake](28-solver-cap-enforcement-and-handshake.md) | sol | high | 27 | ready-for-agent |
-| 29 | [CDN disk cache pruning](29-cdn-disk-cache-pruning.md) | sol | medium | 25 | ready-for-agent |
+| 29 | [CDN disk cache pruning](29-cdn-disk-cache-pruning.md) | sol | medium | 25 | resolved |
 | 30 | [MCP task retention (500 / 7 days) and the idempotency window](30-mcp-task-retention-and-idempotency-window.md) | sol | high | 13 | ready-for-agent |
 | 31 | [Per-task caps and 4 MiB head/tail truncation of task text](31-mcp-task-caps-and-text-truncation.md) | sol | medium | 30 | ready-for-agent |
 | 32 | [TUI log pane capped at 2,000 lines and 8 MB](32-tui-log-pane-caps.md) | glm | low | 05, 11 | resolved |
@@ -57,7 +57,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 51 | [Harness adapters: confirmed MEDIUM fixes and record refresh](51-harness-adapters-medium-fixes.md) | glm | medium | 50 | ready-for-agent |
 | 52 | [Docs: README × 5 at content parity](52-docs-readme-parity.md) | glm | medium | 10, 19, 21, 30, 31, 33, 34, 37, 41, 42, 43, 47, 58 | ready-for-agent |
 | 53 | [Docs: SECURITY (+de), harness docs, MCP bridge READMEs × 5, `docs/MCP_API.md`, SUPPORT_MATRIX, MANIFEST](53-docs-security-harness-bridge-and-manifests.md) | glm | medium | 11, 13, 16, 22, 31, 51, 58, 57, 56 | ready-for-agent |
-| 54 | [Release notes vNEXT and owner actions](54-release-notes-and-owner-actions.md) | glm | low | 29, 44, 45, 46, 48, 52, 53, 59, 69 | ready-for-agent |
+| 54 | [Release notes vNEXT and owner actions](54-release-notes-and-owner-actions.md) | glm | low | 29, 44, 45, 46, 48, 52, 53, 59, 61, 69 | ready-for-agent |
 | 55 | [CI guardrails: snapshot-update refusal and an empty expected-RED list](55-ci-guardrails-snapshot-refusal-and-empty-expected-red.md) | glm | low | 06, 16, 17, 19, 20, 30, 32, 34, 35, 37, 58, 61, 74, and every typecheck-baseline ticket filed by 11, 67 | ready-for-agent |
 | 56 | [MCP SDK 2.x and protocol revision 2026-07-28 migration](56-mcp-sdk-2-migration.md) | sol | high | 13, 30, 31, 36, 57 | ready-for-agent |
 | 57 | [MCP runtime restart budget (architecture candidate 8)](57-mcp-runtime-restart-budget.md) | sol | medium | 30, 36 | ready-for-agent |
@@ -82,6 +82,8 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 76 | [The proxy test suite reaches the real upstream (zcode.z.ai:443)](76-proxy-tests-reach-real-upstream.md) | sol | high | — | ready-for-agent |
 | 77 | [Windows kill guard refuses ~1 in 3,500 proxies (start-time ticks rounded through a JS Number)](77-windows-kill-guard-start-time-rounding.md) | sol | medium | — | ready-for-agent |
 | 78 | [windows S1/short commit growth: repetition-position and tree effects](78-windows-s1-short-repetition-position-and-tree-effects.md) | sol | medium | — | needs-triage |
+| 79 | [linux S1/stalled growth:proxy: tail and burst spread](79-linux-s1-stalled-growth-tail.md) | sol | low | — | needs-triage |
+| 80 | [windows S2/short cdn-cache:memory-growth after ticket 29: A/B attribution](80-windows-s2-cdn-memory-after-29.md) | sol | medium | — | ready-for-agent |
 
 ## Initial frontier
 

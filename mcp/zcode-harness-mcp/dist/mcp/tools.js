@@ -629,7 +629,7 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_task_start",
         title: "Start a task",
-        description: "Start real harness work in an allowlisted workspace: creates (or reuses) a session, optionally selects model/reasoning/mode, sends the prompt and returns a stable taskId immediately (non-blocking). Supports idempotencyKey (repeated calls return the same task), readOnly (harness-enforced plan mode + write-tool denylist) and queued execution under concurrency limits.",
+        description: "Start real harness work in an allowlisted workspace: creates (or reuses) a session, optionally selects model/reasoning/mode, sends the prompt and returns a stable taskId immediately (non-blocking). Supports idempotencyKey (repeated calls return the same task), readOnly (harness-enforced plan mode + write-tool denylist) and queued execution under concurrency limits. Idempotency keys are remembered for as long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after that the same key starts a new task.",
         inputSchema: {
             type: "object",
             properties: {

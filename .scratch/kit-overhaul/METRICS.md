@@ -535,6 +535,16 @@ What the steps show:
   - sending bytes or a Blob instead of the string: bytes +60 MB at 4 bodies, Blob no gain;
   - Bun `--smol` (`BUN_OPTIONS=--smol`): no gain at 4 or 16 bodies.
 
+### S3 kill-holder round: the adversary's victim is not a failed launch (ticket 16; Round 27 Q1)
+
+**The rule (spec §18 PROCESSES, first bullet).** Measurement-rule amendment (Round 27 Q1): in the kill-holder round, the launch the adversary SIGKILLed (its pid equals the adversary's recorded `killed` pid, and it exited non-zero) is reported as `killedByAdversary` and is never a failed launch. Every other launch that does not exit 0 is a failed launch. A round counts as run only with exactly one such launch. Budget 0 is unchanged (`budgets.mjs` `PROCESSES.failedLaunches`, untouched).
+
+- **Where it is enforced.** `tests/memory/scenarios/s3-concurrency.mjs` `launchOutcomes` leaves a launch out only when exactly one launch of the round carries the killed pid and it exited non-zero. Each round records `launches[]` (`i`, `via`, `pid`, `code`, `signal`). `tests/memory/lib/completeness.mjs` (`KILL_HOLDER_ROUNDS`: `kill-holder-10` in S3/short, S3/long and S3/hung) makes the run a harness failure, never GREEN, in these cases: no kill (`killed` not an integer, or no adversary record); a killed pid that matches no launch (this includes a round without `launches[]`, which is every summary written before 16); a matched launch that exited 0; two or more launches on the killed pid (a reused pid); or fewer launch records than launches. The failure names the round and prints the adversary record. If it fires in CI, it comes back with the run ids and adversary records, never rerun-until-green (Round 6 Q2 condition 3, Round 8 condition 4).
+- **Power on archived pre-16 code under the new counting** (Round 27 correction 3; 62 linux and 43 windows archived runs, `/home/AgentKit/overhaul-tools/ci-art/t67-logs/`): `failed-launches` stays RED in S3/hung 62 of 62 linux and 43 of 43 windows, and in linux S3/short 61 of 62. Windows S3/short stays RED in only 34 of 43. In 9 of 43 runs (21 %), and in 4 of the latest 20, the victim was the only failure. Those runs would have been GREEN on pre-16 code. So, on windows, the removal of `failed-launches` and `stale-lock-after-round` also rests on the two kill-holder rounds of the pre-merge run (S3/short and S3/hung, each with one `killedByAdversary` and 0 `failedLaunches`) and on `tests/start-lock.test.mjs` on the windows `test-kit` legs of the same run (Round 27 Q1 condition 4).
+- **History is not rewritten.** Every `failed-launches` value recorded before ticket 16 includes the victim, including the memory baseline's "7/10 failed (killed holder)" (above, from the memory report §6) and every count in the tables above.
+- **S4 `staleLockLeft` (recorded, not judged; Round 27 Q1 condition 5).** `notes.respawnWithStaleLock.staleLockLeft` says whether the planted dead-holder lock (pid 2147483646) was still there after the respawn. No check reads it; `respawn-recovers-despite-stale-lock` is unchanged. On 16's tree (linux, local, `/home/AgentKit/overhaul-tools/t16-memloop/branch4`–`branch10`): `false` in 7 of 7, with the proxy healthy and respawn exit 0. Before the harness change, branch1–3 ended in an ENOENT harness failure on `unlinkSync`, because 16's kit had already taken that lock over. A judged check on it would be a new check name and a new question.
+- **Matching-count restart (Round 27 Q1 condition 6, Round 16 Q2 condition 1).** Ticket 16 changes `s3-concurrency.mjs`, `s4-lifecycle.mjs` and the lifecycle path (`lib/start-lock.mjs`, `lib/proxy-lifecycle.mjs`). The matching runs restart on 16's tree for S3/short, S3/hung, S3/omp and S4/short, on both legs. 16's remaining `flips` names (`exactly-one-proxy-after-round` in S3/short and S3/hung; `start-over-stale-lock` in S3/hung) need ≥ 10 GREEN matching CI runs per leg on that tree. 17's S3 and S4 floors also count on that tree or a later one.
+
 ## Current
 
 (pending)
@@ -647,3 +657,31 @@ Copied from ticket 74's branch (eab4ddf, METRICS lines 425-436). Round 29 Q1 wit
 | tree-3 | GREEN | **5.62** (false) | 5.39 / 95.8 | 93.8, 95, 95.1, 96, 96.6, 96.6 (3.0 %, 0) | 600–1,199 / 1059–2113, 1,055 of 2,122 | 40.58 (true) | 34.65 / 85.4; 79.6, 82.6, 85.6, 87, 88.2, 88.9 | 99.5 | 73 → 97 → 75 (2) | 0 / 0 | 1,500 files, 2.5 MB | 2,125 |
 
 - **Mutant:** 0 of 3 RED. Every value is over 5 (7.77, 17.01, 9.03), and the trend flag is false in all three (net rise 4.0–7.7 % against 10 %, trailing rising run ≤ 2 against 3). Round 24's Shared understanding 2 named this risk (the tip's one run had a 13.8 % net rise). The window sees the slope of an unbounded store (7.96–17.64 MB/1k against 2.74–5.56 on the tree, 3,600 against 1,500 stored files) but not its trend.
+
+## Ticket 30: S5/short pre-registered sets (Round 29 Q1 condition 2, Round 30 Q1)
+
+| set | tree | run | windows commit %/1k (trend) | windows WS %/1k | linux RSS %/1k (trend) |
+|---|---|---|---|---|---|
+| failed, pre-fix | b46596a | 42524937233 | 26.57 (true) | 20.83 | 42.1 (true) |
+| failed, pre-fix | b46596a | 42525082650 | 31.22 (true) | 37.82 | 43.75 (true) |
+| failed, pre-fix | b46596a | 42525149472 | 32.77 (true) | 36.96 | 43.25 (true) |
+| failed, pre-fix | b46596a | 42525211005 | 26.01 (false) | 29 | 41.85 (true) |
+| failed, pre-fix | b46596a | 42525275217 | 35.5 (true) | 22.38 | 41.33 (true) |
+| failed, pre-fix | b46596a | 42525337005 | 20.75 (false) | 33.82 | 44.96 (true) |
+| failed, pre-fix | b46596a | 42525400425 | 21.71 (false) | 19.73 | 41.02 (true) |
+| failed, pre-fix | b46596a | 42525461331 | 27.82 (true) | 30.18 | 42.32 (true) |
+| failed, pre-fix | b46596a | 42525529102 | 25.38 (false) | 9.92 | 42.05 (true) |
+| failed, pre-fix | b46596a | 42525602188 | 25.56 (true) | 22.36 | 40.59 (true) |
+| passed, fixed | e5b2c50 | 42542570923 | 17.1 (false) | 28.19 | 42.52 (true) |
+| passed, fixed | e5b2c50 | 42542646289 | 16.67 (false) | 24.24 | 44.14 (true) |
+| passed, fixed | e5b2c50 | 42542711246 | 26.04 (false) | 13.27 | 45.09 (true) |
+| passed, fixed | e5b2c50 | 42542784560 | 18.17 (false) | 11.39 | 42.81 (true) |
+| passed, fixed | e5b2c50 | 42542851697 | 21.16 (false) | 32.3 | 38.86 (true) |
+| passed, fixed | e5b2c50 | 42542917206 | 23.53 (false) | 28.24 | 34.85 (true) |
+| passed, fixed | e5b2c50 | 42542983151 | 19.72 (false) | 29.7 | 37.78 (true) |
+| passed, fixed | e5b2c50 | 42543045085 | 20.43 (false) | 29.46 | 40.39 (true) |
+| passed, fixed | e5b2c50 | 42543105037 | 26.59 (false) | 41.03 | 39.42 (true) |
+| passed, fixed | e5b2c50 | 42543167527 | 20 (false) | 26.61 | 37.67 (true) |
+
+- failed pre-fix set b46596a: windows mean 27.33 (3 above 30, one above 35); fixed set e5b2c50: windows mean 20.94 (all in (5, 30], trend false 10/10); Round 25 without-30 subset: n 19, mean 20.42, sd 2.85 (Welch t per Round 30: fixed vs without-30 0.41, fixed vs failed 3.48). Every other S5 check GREEN on all 40 legs.
+- "with 30" subsets: pre-fix (42483637377 + b46596a, n 11), fixed (e5b2c50, n 10).
