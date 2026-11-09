@@ -173,14 +173,13 @@ test('the bridge retains about 4 MiB of a task text, however much is streamed an
     await runTask(c, 'warm-up');
     const base = await retained();
     const small = await runTask(c, 'small-deltas');
-    assert.equal(small.result.truncated.droppedBytes, 36 * MiB);
     const afterSmall = await retained();
     const big = await runTask(c, 'one-delta');
-    assert.equal(big.result.truncated.droppedBytes, 20 * MiB);
     const afterBig = await retained();
     t.diagnostic(`retained heap: ${base.toFixed(1)} MiB, +${(afterSmall - base).toFixed(1)} after small deltas, +${(afterBig - base).toFixed(1)} after one delta`);
     assert.ok(afterSmall - base < 12, `retained after 40 MiB in 4 KiB deltas: +${(afterSmall - base).toFixed(1)} MiB`);
     assert.ok(afterBig - base < 16, `retained after a further 24 MiB in one delta: +${(afterBig - base).toFixed(1)} MiB`);
+    assert.deepEqual([small.result.truncated, big.result.truncated], [{ droppedBytes: 36 * MiB }, { droppedBytes: 20 * MiB }]);
   } finally { await c.stop(); }
 });
 
