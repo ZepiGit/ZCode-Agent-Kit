@@ -149,7 +149,7 @@ export function classify({ run, raw = [], parents = [], processes = [], problems
       if (!console && r.role === 'fake-harness') {
         const l = lives.get(key(r)), p = observers.get(key(r));
         if (!fixtureArgv(r.argv) || !l?.start || !l.exit || !p?.spawn || !p['child-exit']) problems.push('unproved-fixture-process');
-        else if (r.ppid !== l.start.ppid || r.parentStart !== l.start.parentStart || r.exe !== l.start.exe || JSON.stringify(r.argv) !== JSON.stringify(l.start.argv) || r.t < p.spawn.t || r.t > p['child-exit'].t) problems.push('contradictory-process-lifecycle');
+        else if (r.ppid !== l.start.ppid || r.parentStart !== l.start.parentStart || r.exe !== l.start.exe || JSON.stringify(r.argv.slice(1)) !== JSON.stringify(l.start.argv.slice(1)) || r.t < p.spawn.t || r.t > p['child-exit'].t) problems.push('contradictory-process-lifecycle');
       }
       if (console) {
         if (/^(?:after-exit|after-bridge-stop|orphans)/.test(r.label ?? '')) cleanupFailures.push(key(r));

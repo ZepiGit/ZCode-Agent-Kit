@@ -70,6 +70,7 @@ test('offline Windows identity fixture keeps two process rows and footprint but 
   assert.equal(result.fixturePeakRssKb, 5120);
   assert.equal(result.executionRed, false);
   assert.deepEqual(rows, [sample, consoleRow]);
+  assert.equal(classify({ run, raw, parents: parentLife(raw), processes: [{ ...sample, argv: ['node', ...argv.slice(1)] }] }).valid, true, 'OS argv[0] spelling may differ from Node process.argv[0]; exact executable and all fixture arguments must still agree');
   const { osVerdict } = await import('./lib/verdict.mjs');
   const shipping = osVerdict([{ t: 0, progress: 0, procs: rows.map((r) => ({ ...r, key: `${r.pid}:${r.start}`, hwmKb: r.commitKb, fds: 0, threads: 0 })) }], { counts: { 'fake-harness': 1 }, orphans: 0 });
   assert.equal(shipping.checks.find((c) => c.name === 'count:fake-harness').value, 2);
