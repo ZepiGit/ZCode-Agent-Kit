@@ -13,7 +13,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cloneArgs, describeFailure, fakeProxySource, fixtureBaseEnv, importBase, pathForms, swapPath, tarBinary, windowsGitDir } from "./ux-before/capture/host.mjs";
+import { cloneArgs, describeFailure, fakeProxySource, fixtureBaseEnv, importBase, pathForms, pinBun, swapPath, tarBinary, windowsGitDir } from "./ux-before/capture/host.mjs";
 import { VOLATILE, compareCaptures, normaliseVolatile } from "./ux-before/compare.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -110,6 +110,64 @@ test("Linux end to end: a kit path with `\\u` in it starts the fixture proxy (th
   assert.equal(m.error, undefined, m.error);
   assert.equal(m.exit, 0);
   assert.equal(JSON.parse(readFileSync(join(out, "proxy", "proxy-status-json-running", "pipe.txt"), "utf8").replace(/<PID>/g, "0")).health, "ours", "the fixture proxy answered as this kit's own");
+});
+
+// ------------------------------------------- the Bun path (ubuntu, run 42590699086)
+// The kit prints the Bun it runs (doctor's `bun available` row) and an
+// 80-column TTY wraps that row by the path's real length before `<BUN>`
+// replaces it: a baseline captured with Bun under a long directory had
+// `(1.4.2)` on a continuation line, the CI runner (~/.bun/bin/bun) one line.
+test("POSIX: the fixtures run Bun through a fixed-length path, whatever the host's Bun directory", () => {
+  const made = [];
+  const deps = { windows: false, tmp: "/tmp", mkdtemp: (prefix) => `${prefix}Ab12Cd`, symlink: (target, path) => made.push([target, path]) };
+  const longHost = `/home/${"x".repeat(80)}/node_modules/.bin/bun`;
+  const short = pinBun("/home/runner/.bun/bin/bun", deps);
+  assert.equal(short, "/tmp/ux-bun-Ab12Cd/bun");
+  assert.equal(pinBun(longHost, deps), short, "the host's directory never reaches the fixtures");
+  assert.deepEqual(made, [["/home/runner/.bun/bin/bun", short], [longHost, short]]);
+});
+
+test("Windows: the host's Bun as found (no symlink rights; the pipe/ci rows never wrap)", () => {
+  const made = [];
+  const host = "C:\\Users\\runneradmin\\.bun\\bin\\bun.exe";
+  assert.equal(pinBun(host, { windows: true, tmp: "C:\\T", mkdtemp: () => { throw new Error("no temp dir on Windows"); }, symlink: (...a) => made.push(a) }), host);
+  assert.deepEqual(made, []);
+});
+
+test("capture.mjs runs the fixtures with the pinned Bun and writes both spellings back as <BUN> (wiring)", () => {
+  const src = readFileSync(CAPTURE, "utf8");
+  assert.match(src, /const BUN = pinBun\(BUN_HOST, \{ windows: IS_WIN, tmp: tmpdir\(\), mkdtemp: mkdtempSync, symlink: symlinkSync \}\);/);
+  assert.match(src, /swap\(swap\(s, BUN, "<BUN>"\), BUN_HOST, "<BUN>"\)/);
+  assert.doesNotMatch(src, /spawnSync\(BUN_HOST/, "nothing runs the host's spelling");
+});
+
+/** The first `bun` on PATH, or null. */
+function hostBun() {
+  for (const dir of (process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")) {
+    if (dir && existsSync(join(dir, "bun"))) return join(dir, "bun");
+  }
+  return null;
+}
+
+test("Linux end to end: Bun under a short or a long directory captures the doctor's rows as the BEFORE baseline", {
+  timeout: 300_000,
+  skip: process.platform !== "linux" ? "the 80-column variants need the Linux pty runner" : hostBun() ? false : "no bun on PATH",
+}, (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ux-capture-bun-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const variants = ["tty-color-80", "no-color", "ascii-locale"];
+  for (const [label, sub] of [["short", "b"], ["long", join("a".repeat(40), "node_modules", ".bin")]]) {
+    mkdirSync(join(dir, label, sub), { recursive: true });
+    const bun = join(dir, label, sub, "bun");
+    symlinkSync(hostBun(), bun);
+    const out = join(dir, label, "out");
+    const run = spawnSync(process.execPath, [CAPTURE, "--out", out, "--only", "^doctor-fresh$", "--variants", variants.join(",")], {
+      encoding: "utf8", timeout: 140_000, env: { ...captureEnv(), UX_BUN: bun },
+    });
+    assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
+    const diffs = compareCaptures(join(ROOT, "tests", "ux-before", "linux"), out, { variants, only: /^doctor\/doctor-fresh$/ });
+    assert.deepEqual(diffs, [], `Bun under a ${label} directory (${bun.length} chars):\n${diffs.join("\n")}`);
+  }
 });
 
 // ----------------------------------------------------------- tar, git, paths

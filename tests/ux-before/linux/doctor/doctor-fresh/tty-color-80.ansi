@@ -1,8 +1,7 @@
 [31m✗[0m 3 problems: 3 failed
 
 [1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
-  [32m✓ PASS[0m  bun available           [2m<BUN>[0m
-                                  [2m(1.4.2)[0m
+  [32m✓ PASS[0m  bun available           [2m<BUN> (1.4.2)[0m
   [31m✗ FAIL[0m  config exists           [2m<KIT>/proxy/config.yaml[0m
                                   [2mwhy[0m   setup has not run here, or its files
                                         were removed

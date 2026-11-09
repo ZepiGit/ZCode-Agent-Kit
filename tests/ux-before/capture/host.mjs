@@ -2,8 +2,25 @@
 // platform-injectable so their Windows behaviour is tested on Linux
 // (tests/ux-before-capture.test.mjs). Path normalisation, tar and clone
 // arguments on POSIX are those of the original Phase 1C capture.
-import { win32 } from "node:path";
+import { posix, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
+
+/**
+ * The Bun the fixtures run. POSIX: a symlink of fixed length,
+ * `<tmp>/ux-bun-XXXXXX/bun`, to the host's Bun. The kit prints the path of
+ * the Bun it runs (doctor's `bun available` row), and an 80-column TTY wraps
+ * that row by the real path's length before normalise() writes `<BUN>`: Bun
+ * under a long host directory put `(1.4.2)` on a continuation line where the
+ * CI runner's ~/.bun/bin/bun printed one line (ticket 40, run 42590699086).
+ * Windows: the host's path as found (symlinks need rights there, and its
+ * pipe/ci variants never wrap a row).
+ */
+export function pinBun(host, { windows = false, tmp, mkdtemp, symlink }) {
+  if (windows) return host;
+  const pinned = posix.join(mkdtemp(posix.join(tmp, "ux-bun-")), "bun");
+  symlink(host, pinned);
+  return pinned;
+}
 
 /**
  * How a Bun script given a directory should import from it: a file URL, on

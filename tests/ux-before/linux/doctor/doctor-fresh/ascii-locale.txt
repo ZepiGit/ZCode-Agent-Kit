@@ -1,8 +1,7 @@
 x 3 problems: 3 failed
 
 Runtime ------------------------------------------------------------------------
-  + PASS  bun available           <BUN>
-                                  (1.4.2)
+  + PASS  bun available           <BUN> (1.4.2)
   x FAIL  config exists           <KIT>/proxy/config.yaml
                                   why   setup has not run here, or its files
                                         were removed

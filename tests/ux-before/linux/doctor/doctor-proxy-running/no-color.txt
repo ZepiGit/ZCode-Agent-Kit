@@ -1,6 +1,5 @@
 Runtime ────────────────────────────────────────────────────────────────────────
-  ✓ PASS  bun available           <BUN>
-                                  (1.4.2)
+  ✓ PASS  bun available           <BUN> (1.4.2)
   ✓ PASS  config exists           <KIT>/proxy/config.yaml
   ✓ PASS  key file exists         <KIT>/.proxykey
   ✓ PASS  proxy source installed  <KIT>/zcode-proxy-src/node_modules
