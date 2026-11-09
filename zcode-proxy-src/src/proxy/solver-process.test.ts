@@ -15,6 +15,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { removeExecutableDirectory, terminateOwnedChild, withinCleanupDeadline } from "./__fixtures__/solver-test-cleanup.js";
 
 const solverPath = fileURLToPath(new URL("./captcha-solver.ts", import.meta.url));
 const tokenPath = fileURLToPath(new URL("./captcha-token.ts", import.meta.url));
@@ -308,21 +309,36 @@ describe("solver process: compiled proxy", () => {
     binary = join(dir, process.platform === "win32" ? "solver-host.exe" : "solver-host");
     const build = Bun.spawn([process.execPath, "build", "--compile", "--define", "require.resolve=undefined", harness, "--outfile", binary],
       { cwd: proxyRoot, stdout: "pipe", stderr: "pipe", env: hermeticEnv() });
-    const [code, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()]);
-    expect({ code, stderr: code === 0 ? "" : stderr }).toEqual({ code: 0, stderr: "" });
+    try {
+      const [code, , stderr] = await withinCleanupDeadline(Promise.all([
+        build.exited, new Response(build.stdout).text(), new Response(build.stderr).text(),
+      ]), 110_000, "compiled fixture build");
+      expect({ code, stderr: code === 0 ? "" : stderr }).toEqual({ code: 0, stderr: "" });
+    } finally {
+      await terminateOwnedChild(build);
+    }
   }, 120_000);
 
-  afterAll(() => {
-    if (dir) rmSync(dir, { recursive: true, force: true });
-  });
+  afterAll(async () => {
+    if (dir) await removeExecutableDirectory(dir);
+  }, 5_000);
 
   it("starts its solver process by self-exec through the proxy's own CLI route, never with -e", async () => {
     const plainBackend = new URL("./__fixtures__/plain-backend.ts", import.meta.url).href;
     const run = Bun.spawn([binary, plainBackend, "argv", "token:compiled", "pid"],
       { stdout: "pipe", stderr: "pipe", env: { ...hermeticEnv(), ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA: "0" } });
-    const [code, stdout, stderr] = await Promise.all([run.exited, new Response(run.stdout).text(), new Response(run.stderr).text()]);
+    let result: [number, string, string];
+    try {
+      result = await withinCleanupDeadline(Promise.all([run.exited, new Response(run.stdout).text(), new Response(run.stderr).text()]), 50_000, "compiled fixture host");
+    } finally {
+      await terminateOwnedChild(run);
+    }
+    const [code, stdout, stderr] = result;
     expect({ code, stderr: code === 0 ? "" : stderr }).toEqual({ code: 0, stderr: "" });
     const report = reported({ code, stdout, stderr: Buffer.from(stderr) });
+    expect(report.solverExited).toBe(true);
+    expect(report.results[2]).toBe(`pid:${report.solverPid}`);
+    expect(alive(report.solverPid)).toBe(false);
     expect(report.command).toEqual([report.execPath, "__captcha-solver-process"]);
     const started = JSON.parse(report.results[0].slice("argv:".length));
     expect(started.execPath).toBe(report.execPath);
