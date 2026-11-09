@@ -146,7 +146,7 @@ Spec stories: 89, 90, 91, 92, 93, 95, 105
 17. removing `json-before/` (the committed JSON baseline test fails).
 
 **Full suites** (Bun 1.4.2, Node 26.7.0, after both merges):
-- `npm run test` (`t40-final-test2`, after e32d372): 1078 tests, 1060 pass, 0 fail, 18 skipped. The new and changed test files add 63 tests in the three new files, +7 in term-output, +2 in connection-details and +2 in ux-before-capture; 5 superseded forwarding tests were removed from cli-commands.
+- `npm run test` (`t40-final-test2`, after e32d372): 1078 tests, 1060 pass, 0 fail, 18 skipped. The new and changed test files add 63 tests in the three new files, +6 in term-output, +2 in connection-details and +2 in ux-before-capture; 5 superseded forwarding tests were removed from cli-commands.
 - `npm run test:proxy` (`t40-final-proxy`): 1598 pass, 0 fail, 107 files.
 - `npm run test:mcp` (`t40-final-mcp`): 107 tests, 106 pass, 1 skipped. `dist/` unchanged.
 - `npm run test:ux-before` (`t40-final-uxbefore`): 1/1, Linux, seven variants, against the refreshed baseline.
