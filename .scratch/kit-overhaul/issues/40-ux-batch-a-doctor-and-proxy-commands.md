@@ -211,3 +211,17 @@ Spec stories: 89, 90, 91, 92, 93, 95, 105
   - `warned`/`status` in `doctor --json`;
   - `--level`/`--grep`;
   - the card wording.
+
+### Round 2 (2026-11-09) — ux-before ubuntu red on the bun row
+
+Branch `ticket/40-doctor-proxy-ux`, integration tip merged (929a90d, clean), fix 081dc00.
+
+**Cause.** Pre-merge CI run 42590699086 (staging/40 5c24049) failed `ux-before (ubuntu-latest)` on 48 files: the 80-column variants (`tty-color-80`, `no-color`, `ascii-locale`, `.txt`+`.ansi`) of the 8 doctor scenarios with a `bun available` row. Bun was found and probed (the version was there); the doctor's TTY row wraps its detail by the real path's length, and only then does normalise() write `<BUN>`. The round-1 refresh ran Bun from `/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin/bun` (realpath `…/node_modules/bun/bin/bun.exe`, 60+ chars): col 34 + path > 80, so `(1.4.2)` went onto a continuation line. The CI runner's `/home/runner/.bun/bin/bun` fits, one line. The baseline was host-dependent, not CI wrong. Reproduced locally before the fix: a doctor-only capture with a 19-char `UX_BUN` symlink gave exactly CI's 48 diffs against the round-1 baseline.
+
+**Fix (no kit change, compare.mjs untouched).** `tests/ux-before/capture/host.mjs` `pinBun`: on POSIX the fixtures run Bun through a fixed-length symlink `<tmp>/ux-bun-XXXXXX/bun` (removed on exit); capture.mjs writes both the pinned and the host spelling back as `<BUN>`. Windows keeps the host path (pipe/ci never wrap). The normalisation rule is the tip's: path → `<BUN>`, version kept, a non-1.4.2 Bun written back as `(1.4.2)`; every capture now shows `<BUN> (1.4.2)` on one line, as the BEFORE set and `json-before/` do. Not an intended visible change: the round-1 continuation line was a capture artefact.
+
+**Baselines.** Full Linux recapture (`t40-recapture`, 640 ok) vs the round-1 baseline: exactly 48 files differ, all in the bun row (+48/−96 lines: the row gains ` (1.4.2)`, the continuation line goes); copied those 48 only, plus one INDEX.md "Refreshed on purpose" line. Windows (`tests/ux-before/windows`): unchanged; its 16 plain rows and 2 JSON details already read `<BUN> (1.4.2)`.
+
+**Tests.** `tests/ux-before-capture.test.mjs` +4: pinBun on POSIX (fixed path whatever the host directory), Windows (host path, no symlink), capture.mjs wiring, and a Linux end-to-end capture of `doctor-fresh` (3 × 80-column variants) with Bun under a short (38 chars) and a long (94 chars) directory, both byte-equal to the baseline. RED: against the round-1 baseline (short directory: the CI diff). Mutation: `pinBun` returning the host path → the POSIX unit test and the long-directory capture fail; restored from 081dc00, `git diff` empty.
+
+**Suites (after the merge).** `npm run test` 1087 tests: 1069 pass, 0 fail, 18 skipped. `npm run test:proxy` 1627 pass, 0 fail (109 files). `npm run test:mcp` 116: 115 pass, 0 fail, 1 skipped. `npm run test:ux-before` (Linux, 7 variants): 1/1 pass. Pending CI: `ux-before (ubuntu-latest)` and windows (orchestrator verifies after merge+push).
