@@ -222,7 +222,7 @@ const CIM_PROPS = ["ProcessId", "ParentProcessId", "CreationDate", "Name", "Exec
 /**
  * The PowerShell 5.1 poller. Frames on stdout:
  *   @@UNITS <poller pid>\n<Win32_Process CSV>\n@@GETPROCESS\n<Get-Process CSV>\n@@END\n   (once, when units)
- *   @@POLL <poller pid> <poll ms> <start ticks> <ticks/s>\n<Win32_Process CSV>\n@@END\n (every interval)
+ *   @@POLL <poller pid> <poll ms>\n<Win32_Process CSV>\n@@END\n                         (every interval)
  *   @@ERROR <message>\n
  * It exits after one poll when `once`, and on its own as soon as `parentPid`
  * is gone or its stdout pipe breaks (the loop also kills it on stop and exit).
@@ -248,16 +248,11 @@ export function pollerScript({ intervalMs = 1000, parentPid = 0, once = false, u
     "    $out.Write(\"@@UNITS $PID`n$cim`n@@GETPROCESS`n$gp`n@@END`n\"); $out.Flush()",
     "  }",
     "  $sw = New-Object System.Diagnostics.Stopwatch",
-    // The poll's start on QueryPerformanceCounter, the clock the loop's own
-    // process.hrtime reads (libuv uv_hrtime): a read that must follow an event
-    // waits for a poll that started after it (lib/sampler.mjs `settled`).
-    "  $freq = [System.Diagnostics.Stopwatch]::Frequency",
     "  while ($true) {",
     "    $sw.Restart()",
-    "    $t0 = [System.Diagnostics.Stopwatch]::GetTimestamp()",
     "    $csv = Poll",
     "    $ms = $sw.ElapsedMilliseconds",
-    "    $out.Write(\"@@POLL $PID $ms $t0 $freq`n$csv`n@@END`n\"); $out.Flush()",
+    "    $out.Write(\"@@POLL $PID $ms`n$csv`n@@END`n\"); $out.Flush()",
     "    if ($once) { break }",
     "    if ($parentPid -gt 0 -and -not (Get-Process -Id $parentPid -ErrorAction SilentlyContinue)) { break }",
     "    $wait = $interval - $sw.ElapsedMilliseconds",
@@ -273,12 +268,6 @@ export function powershellPoller(opts) {
     command: "powershell.exe",
     args: ["-NoProfile", "-NonInteractive", "-OutputFormat", "Text", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(pollerScript(opts), "utf16le").toString("base64")],
   };
-}
-
-/** A poll head's start stamp (counter ticks, ticks per second) → nanoseconds on the monotonic clock; null when absent. */
-export function pollStartNs(ticks, frequency) {
-  if (!/^\d+$/.test(ticks ?? "") || !/^[1-9]\d*$/.test(frequency ?? "")) return null;
-  return (BigInt(ticks) * 1_000_000_000n) / BigInt(frequency);
 }
 
 /** Incremental parser for the poller's frames; independent of chunk boundaries. */
@@ -300,7 +289,7 @@ export function createPollParser(onFrame) {
       if (end < 0) return;
       const body = buf.slice(nl + 1, end);
       buf = buf.slice(end + buf.slice(end).indexOf("@@END") + 5).replace(/^\r?\n/, "");
-      if (head[0] === "@@POLL") onFrame({ type: "poll", selfPid: Number(head[1]), pollMs: Number(head[2]), startNs: pollStartNs(head[3], head[4]), table: parseCimCsv(body) });
+      if (head[0] === "@@POLL") onFrame({ type: "poll", selfPid: Number(head[1]), pollMs: Number(head[2]), table: parseCimCsv(body) });
       else if (head[0] === "@@UNITS") {
         const [cim, gp = ""] = body.split(/\r?\n@@GETPROCESS\r?\n/);
         onFrame({ type: "units", selfPid: Number(head[1]), table: parseCimCsv(cim), getProcess: parseGetProcessCsv(gp) });
