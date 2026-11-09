@@ -233,3 +233,32 @@ Equivalent: a4 and a4b. Each removes one of two guards against overwriting an un
 - **52:** the README ×5 "never taken over" line.
 - **53:** SECURITY.md:26.
 - **Orchestrator/Owner Proxy:** the windows S4 Ctrl-C measurement question above.
+
+### 2026-11-09 — implementer (ticket 17, round 2: windows test-kit teardown)
+Branch `ticket/17-signal-release-orphan-adoption`. Fix `baaa34e`, merged with the integration tip `9b87c23` (docs only) as `5e88671`.
+
+**Failure.** Pre-merge CI run 42585313129 (staging/17r 2492c11) was RED only on both windows test-kit legs, in one test: `tests/start-lock.test.mjs:1030`, "this kit's start killed right after spawn() leaves its spawn intent …". Its `t.after` failed with `EPERM, Permission denied … kit-start-lock-…` (syscall `rm`).
+
+**Cause (test, not product).** The test SIGKILLs a start at `spawn:spawned` and ended about 200 ms later. The proxy that start spawned (`bun run <fixture>/zcode-proxy-src/src/index.ts serve`, cwd `zcode-proxy-src`, stdout/stderr on `logs/proxy.log`) was still booting. It had not yet written its `spawned/<pid>` marker, so `killFixtureProxies` found nothing to kill. Windows will not remove a directory that a live process runs in or holds a file of. Proof on linux: a scratch probe (not committed) listed the fixture's processes at the `rm`. On the old code it showed the proxy alive (`t17-red-probe`: `… bun run /tmp/kit-start-lock-3rkvs3/zcode-proxy-src/src/index.ts serve`); on the fix it showed `none` (`t17-green-probe`). The probe was restored from `baaa34e`. On linux the `rm` succeeded, and the proxy died once its directory was gone, so the leak went unnoticed. No kit stop ever runs in this test (the kill is the scenario; adoption from the intent is the `spawn:spawned` case of 16's loop). So the kit was never asked to stop that proxy: not a product bug.
+
+**Fix (tests only).**
+- The test waits until the killed start's proxy announces its pid, then asserts it is the one live fixture proxy.
+- `stopFixtureProxies` replaces `killFixtureProxies` for every kit fixture in the file. It works per announced pid:
+  1. it reads the identity (pid + start time, `tests/memory/lib/process-identity.mjs`);
+  2. the command line must name this fixture;
+  3. `killProcess` (`tests/memory/lib/freeze.mjs`) re-checks the start time, under a held handle on Windows. B4: a stranger at a reused pid is never signalled;
+  4. it waits (30 s bound) until each is gone. A linux zombie counts as gone.
+- Holder children and `harmless` children are now awaited through their own handles after the kill.
+- The fixture `after` hook awaits every cleanup. If a cleanup fails, it throws and keeps the directory, so a leak fails the test instead of being hidden. Only then does it run `rmSync(…, { maxRetries: 8, retryDelay: 100 })`, the bounded retry for Windows' asynchronous delete.
+- The other new tests of this ticket had the same pattern (holder kill without a wait; `killFixtureProxies` in the Round 22 tests) and are covered by the same helpers.
+- The `start-lock-holder.mjs` header named a non-existent `start-lock-signals.test.mjs`; it is corrected to `start-lock.test.mjs`.
+
+**Suites on `5e88671`** (Bun 1.4.2):
+- `npm run test` (`t17r2-test`): 1010 tests, 990 pass, 0 fail, 20 skipped. No `kit-start-lock-` process survives the run.
+- `tests/start-lock.test.mjs` alone (`t17-startlock`): 53 tests, 51 pass, 2 skipped.
+- `npm run test:proxy` + typecheck (`t17r2-proxy`): 1598 pass, 0 fail, 107 files. Typecheck clean.
+- `npm run test:mcp` (`t17r2-mcp`): 107 tests, 106 pass, 0 fail, 1 skipped. `dist/` unchanged.
+
+**Pending CI (orchestrator verifies after merge+push):** windows-latest test-kit on Node 24 and 26, `tests/start-lock.test.mjs` GREEN, with the teardown `rm` no longer failing; the other criteria as listed in the round 1 report.
+
+**Interim label (Owner Proxy round 33, condition 5; records only, the scenario is unchanged):** windows S4 `stale-lock-after-ctrl-c` = `child.kill("SIGINT")` = TerminateProcess (crash), not a console event; on 16's tree 6/8 stale in both archived runs, with next start 0, next stop 0 and 0 proxies in 8/8. Merge check status: "moves to N (Round 33); not clearable under a TerminateProcess trial". This answers the round 1 question above.
