@@ -532,4 +532,4 @@ The Node 24 leg passing and Node 26 failing is consistent with timing. I did not
     - run 2: 1, 0 (171 ms) and 1, 0 (217 ms);
     - run 3: 1, 0 (190 ms) and 1, 0 (248 ms).
   - The ratchet holds and there was no HARNESS FAILURE.
-  - REDs are 37's only: `peak:kit`, `procPeak:launcher`, plus `procPeak:proxy` 62.4 MB (r2-1 S3/short) and 62.1 MB (r2-2 S3/hung), against a budget of 62.
+  - REDs are 37's only: `peak:kit`, `procPeak:launcher`, plus `procPeak:proxy` 62.4 MB (r4-final2-1 S3/short) and 62.1 MB (r4-final2-2 S3/hung), against a budget of 62.
