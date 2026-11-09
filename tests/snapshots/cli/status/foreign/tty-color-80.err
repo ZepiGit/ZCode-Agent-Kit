@@ -1,0 +1,6 @@
+[31m✗ FAIL  Port 18458 is answered by another service[0m
+   [2mwhy[0m   it does not prove this kit's identity, so no connection details are
+         shown; the kit never stops a service it did not start
+   [2mnext[0m  [1mchange server.port in proxy/config.yaml, then zcode-kit proxy start[0m
+     [2mor[0m  [1mzcode-kit doctor[0m
+   [2mexit[0m 1

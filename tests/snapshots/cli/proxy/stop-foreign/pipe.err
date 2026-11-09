@@ -1,0 +1,5 @@
+Proxy stop ...
+FAIL  Port 18458 is answered by another service
+  why: it does not prove this kit's identity, so nothing was stopped; the kit never stops a service it did not start
+  next: zcode-kit proxy status
+  exit: 3

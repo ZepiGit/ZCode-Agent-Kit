@@ -67,6 +67,17 @@ export const PRIMITIVE_FIXTURES = {
   "connection-configured-exposed": (out) => renderRecords(out, [
     { kind: "connection", facts: { port: 18458, key: KEY, host: "0.0.0.0", source: "configured" }, reveal: false },
   ]),
+  // Ticket 40: the lead line, state lines, a blank separator and the verbose card.
+  "lead-state": (out) => renderRecords(out, [
+    { kind: "lead", counts: { fail: 2, warn: 1 } },
+    { kind: "blank" },
+    { kind: "state", status: "run", text: "running, up 1 h 02 min (pid 4242)" },
+    { kind: "state", status: "stop", text: "stopped" },
+    { kind: "state", status: "warn", text: "not answering (pid 4242 is alive)" },
+  ]),
+  "connection-verbose": (out) => renderRecords(out, [
+    { kind: "connection", facts: { port: 18458, key: KEY, models: ["glm-5.3", "glm-5.3-flash"], modelsSource: "config", source: "running" }, reveal: false, verbose: true },
+  ]),
   "next": (out) => renderRecords(out, [
     { kind: "next", commands: ["zcode-kit proxy start", "zcode-kit doctor --fix"] },
   ]),

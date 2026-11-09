@@ -2,136 +2,163 @@
   "ok": false,
   "failed": 2,
   "skipped": 9,
+  "warned": 0,
   "checks": [
     {
       "name": "bun available",
       "ok": true,
-      "detail": "<BUN> (<VERSION>)"
+      "detail": "<BUN> (<VERSION>)",
+      "status": "pass"
     },
     {
       "name": "config exists",
       "ok": true,
-      "detail": "<KIT>/proxy/config.yaml"
+      "detail": "<KIT>/proxy/config.yaml",
+      "status": "pass"
     },
     {
       "name": "key file exists",
       "ok": true,
-      "detail": "<KIT>/.proxykey"
+      "detail": "<KIT>/.proxykey",
+      "status": "pass"
     },
     {
       "name": "proxy source installed",
       "ok": true,
-      "detail": "<KIT>/zcode-proxy-src/node_modules"
+      "detail": "<KIT>/zcode-proxy-src/node_modules",
+      "status": "pass"
     },
     {
       "name": "proxy env overrides",
       "ok": false,
-      "detail": "ignored by the kit-managed proxy (unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE"
+      "detail": "ignored by the kit-managed proxy (unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE",
+      "status": "fail"
     },
     {
       "name": "credentials store",
       "ok": true,
-      "detail": "ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine"
+      "detail": "ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine",
+      "status": "pass"
     },
     {
       "name": "omp provider registered",
       "ok": true,
-      "detail": "zcode block in ~/.omp/agent/models.yml"
+      "detail": "zcode block in ~/.omp/agent/models.yml",
+      "status": "pass"
     },
     {
       "name": "extension installed",
       "ok": true,
-      "detail": "~/.omp/agent/extensions/zcode-proxy-autostart.ts"
+      "detail": "~/.omp/agent/extensions/zcode-proxy-autostart.ts",
+      "status": "pass"
     },
     {
       "name": "mcp bridge installed",
       "ok": true,
-      "detail": "<KIT>/mcp/zcode-harness-mcp/dist/index.js"
+      "detail": "<KIT>/mcp/zcode-harness-mcp/dist/index.js",
+      "status": "pass"
     },
     {
       "name": "mcp bridge deps",
       "ok": true,
-      "detail": "<KIT>/mcp/zcode-harness-mcp/node_modules"
+      "detail": "<KIT>/mcp/zcode-harness-mcp/node_modules",
+      "status": "pass"
     },
     {
       "name": "claude adapter artifact",
       "ok": true,
-      "detail": "generated/claude-zcode-settings.json"
+      "detail": "generated/claude-zcode-settings.json",
+      "status": "pass"
     },
     {
       "name": "codex adapter artifact",
       "ok": true,
-      "detail": "generated/codex-home/config.toml"
+      "detail": "generated/codex-home/config.toml",
+      "status": "pass"
     },
     {
       "name": "proxy reachable + identity",
       "ok": false,
-      "detail": "health=down"
+      "detail": "health=down",
+      "status": "fail"
     },
     {
       "name": "omp: omp provider registered",
       "ok": true,
-      "detail": "providers.zcode in models.yml"
+      "detail": "providers.zcode in models.yml",
+      "status": "pass"
     },
     {
       "name": "omp: omp key resolver",
       "ok": true,
-      "detail": "key current"
+      "detail": "key current",
+      "status": "pass"
     },
     {
       "name": "omp: omp extension installed",
       "ok": true,
-      "detail": ""
+      "detail": "",
+      "status": "pass"
     },
     {
       "name": "pi: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "claude-code: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "codex: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "opencode: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "cline: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "kilo-code: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "aider: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "continue: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "goose: integration",
       "ok": null,
-      "detail": "not detected — skipped"
+      "detail": "not detected — skipped",
+      "status": "skip"
     },
     {
       "name": "harness decisions",
       "ok": true,
-      "detail": "1 stored decision(s) readable"
+      "detail": "1 stored decision(s) readable",
+      "status": "pass"
     }
   ]
 }

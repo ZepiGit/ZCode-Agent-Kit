@@ -1,0 +1,6 @@
+Proxy start ...
+FAIL  The proxy did not become healthy in time
+  why: proxy did not become healthy within <MS>ms (pid <PID>). See /kit/logs/proxy.log
+  next: zcode-kit proxy logs 50
+  next: zcode-kit proxy restart
+  exit: 2

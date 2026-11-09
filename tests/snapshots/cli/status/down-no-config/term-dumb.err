@@ -1,0 +1,3 @@
+WARN  Connection details unavailable
+  why: config not found: /kit/proxy/config.yaml — run setup first: zcode-kit setup
+  next: zcode-kit setup

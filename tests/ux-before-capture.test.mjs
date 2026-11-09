@@ -227,6 +227,45 @@ test("git's diffstat of the fixture update normalises whatever the checkout's li
   assert.notEqual(normaliseVolatile(ffwd([" cli/zcode-kit.mjs | 2 +-", DIFFSTAT_LF[1]])), want, "the path stays: a different file is a difference");
 });
 
+// Ticket 40: the TTY progress of `proxy start|stop|restart` and `doctor --fix`
+// as the capture stores it (\r turned into \n): one line per spinner frame
+// (colour: ESC[K before every redraw; NO_COLOR: a line of spaces after each).
+const frames = (label, n, { colour = true, elapsedFrom = Infinity } = {}) => {
+  const lines = [""];
+  for (let i = 0; i < n; i++) {
+    const text = `${"|/-\\"[i % 4]} ${label}${i >= elapsedFrom ? ` (${2 + Math.floor((i - elapsedFrom) / 10)} s)` : ""}`;
+    lines.push(colour && i > 0 ? `\x1b[K${text}` : text);
+    if (!colour) lines.push(" ".repeat(text.length));
+  }
+  return lines.join("\n") + "\n";
+};
+
+test("the step's spinner frames and elapsed time normalise whatever the start or stop took", () => {
+  for (const colour of [true, false]) {
+    for (const label of ["Proxy start", "Proxy stop", "Proxy start (--fix)"]) {
+      const result = `${colour ? "\x1b[K" : ""}  ✓ OK    ${label}  started (pid <PID>)\n`;
+      const quick = normaliseVolatile(frames(label, 3, { colour }) + result);
+      const slow = normaliseVolatile(frames(label, 47, { colour, elapsedFrom: 20 }) + result.replace(label, `${label} (5 s)`));
+      assert.equal(quick, slow, `${label} colour=${colour}`);
+      assert.equal(quick, `\n<SPINNER> ${label}\n${result}`);
+    }
+  }
+  assert.equal(normaliseVolatile("OK  Proxy start (3 s) - started (pid <PID>)\n"), "OK  Proxy start - started (pid <PID>)\n", "the plain result row too");
+});
+
+test("the spinner rules touch no other line: other labels, list items and kit text stay", () => {
+  const kit = [
+    "- Proxy started by hand",
+    "| Proxy dependencies",
+    "  - Proxy start",
+    "- skipped: Proxy start is not needed",
+    "Proxy start took (3 seconds)",
+    "doctor: 1 failed (2 s)",
+    "",
+  ].join("\n");
+  assert.equal(normaliseVolatile(kit), kit);
+});
+
 test("the diffstat rules leave kit lines strict: indentation, trailing text and other wording stay", () => {
   const kit = [
     "  [OK]   OMP / Oh My Pi | 2 +",

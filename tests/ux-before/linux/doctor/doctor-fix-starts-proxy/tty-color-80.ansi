@@ -1,55 +1,60 @@
   extension already current
   models.yml already up to date
   config.yml already up to date
-starting zcode-proxy ...
-started (pid <PID>) — healthy on http://127.0.0.1:18458
 
-  Connection details (local ZCode proxy, running and verified)
-    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
-    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
-    API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
-    Model IDs:                     glm-5.3, glm-5.3-flash
-    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required.
-doctor --fix: proxy started
-PASS  bun available — <BUN> (1.4.2)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-PASS  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  codex adapter artifact — generated/codex-home/config.toml
-PASS  proxy reachable + identity — health=ours
-PASS  account auth valid — valid
-PASS  start-plan JWT age (info) — 5.2h since issue — age is informational, validity is the auth check above
-doctor: 0 skipped, 0 failed — OK
-PASS  proxy start (--fix) — proxy running and healthy
-PASS  bun available — <BUN> (1.4.2)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-PASS  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  codex adapter artifact — generated/codex-home/config.toml
-PASS  proxy reachable + identity — health=ours
-PASS  account auth valid — valid
-PASS  start-plan JWT age (info) — 5.2h since issue — age is informational, validity is the auth check above
-PASS  omp: omp provider registered — providers.zcode in models.yml
-PASS  omp: omp key resolver — key current
-PASS  omp: omp extension installed
-SKIP  pi: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate pi
-SKIP  claude-code: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate claude-code
-PASS  codex: codex adapter artifact — generated/codex-home/config.toml
-SKIP  opencode: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate opencode
-SKIP  cline: integration — not detected — skipped
-SKIP  kilo-code: integration — not detected — skipped
-SKIP  aider: integration — not detected — skipped
-SKIP  continue: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate continue
-SKIP  goose: integration — not detected — skipped
-PASS  harness decisions — 2 stored decision(s) readable
-doctor: 8 skipped, 0 failed — OK
+| Proxy start (--fix)
+[K/ Proxy start (--fix)
+[K- Proxy start (--fix)
+[K\ Proxy start (--fix)
+[K| Proxy start (--fix)
+[K/ Proxy start (--fix)
+[K- Proxy start (--fix)
+[K  [32m✓ OK[0m    Proxy start (--fix)  [2mstarted (pid <PID>)[0m
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  bun available           [2m<BUN>[0m
+                                  [2m(1.4.2)[0m
+  [32m✓ PASS[0m  config exists           [2m<KIT>/proxy/config.yaml[0m
+  [32m✓ PASS[0m  key file exists         [2m<KIT>/.proxykey[0m
+  [32m✓ PASS[0m  proxy source installed  [2m<KIT>/zcode-proxy-src/node_modules[0m
+  [32m✓ PASS[0m  mcp bridge installed    [2m<KIT>/mcp/zcode-harness-mcp/dist/index.js[0m
+  [32m✓ PASS[0m  mcp bridge deps         [2m<KIT>/mcp/zcode-harness-mcp/node_modules[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  proxy start (--fix)         [2mproxy running and healthy[0m
+  [32m✓ PASS[0m  proxy reachable + identity  [2mhealth=ours[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  credentials store          [2mZCODE_PROXY_CREDENTIALS_PATH (explicit[0m
+                                     [2mstore): present and decryptable on this[0m
+                                     [2mmachine[0m
+  [32m✓ PASS[0m  account auth valid         [2mvalid[0m
+  [32m✓ PASS[0m  start-plan JWT age (info)  [2m5.2h since issue — age is informational,[0m
+                                     [2mvalidity is the auth check above[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  omp provider registered        [2mzcode block in ~/.omp/agent/models.yml[0m
+  [32m✓ PASS[0m  extension installed            [2m~/.omp/agent/extensions/zcode-proxy-autostart.ts[0m
+  [32m✓ PASS[0m  codex adapter artifact         [2mgenerated/codex-home/config.toml[0m
+  [32m✓ PASS[0m  omp: omp provider registered   [2mproviders.zcode in models.yml[0m
+  [32m✓ PASS[0m  omp: omp key resolver          [2mkey current[0m
+  [32m✓ PASS[0m  omp: omp extension installed
+  [2m– SKIP[0m  pi: integration                [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate pi[0m
+  [2m– SKIP[0m  claude-code: integration       [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate claude-code[0m
+  [32m✓ PASS[0m  codex: codex adapter artifact  [2mgenerated/codex-home/config.toml[0m
+  [2m– SKIP[0m  opencode: integration          [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate opencode[0m
+  [2m– SKIP[0m  cline: integration             [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration         [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration             [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration          [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate continue[0m
+  [2m– SKIP[0m  goose: integration             [2mnot detected — skipped[0m
+  [32m✓ PASS[0m  harness decisions              [2m2 stored decision(s) readable[0m
+
+doctor: [32m19 passed[0m, [2m8 skipped[0m
