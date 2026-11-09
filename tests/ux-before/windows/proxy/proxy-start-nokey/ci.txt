@@ -1,1 +1,0 @@
-ERROR: <KIT>\.proxykey missing — cannot verify identity. Run setup first (node setup.mjs).

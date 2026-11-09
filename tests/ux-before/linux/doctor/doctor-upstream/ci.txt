@@ -1,26 +1,28 @@
+2 problems: 2 failed
+
+Runtime ------------------------------------------------------------------------
 PASS  bun available — <BUN> (1.4.2)
 PASS  config exists — <KIT>/proxy/config.yaml
 PASS  key file exists — <KIT>/.proxykey
 PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
 PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
 PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  codex adapter artifact — generated/codex-home/config.toml
+
+Proxy --------------------------------------------------------------------------
 FAIL  proxy reachable + identity — health=down
-doctor: 2 check(s) failed
-PASS  bun available — <BUN> (1.4.2)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+  why: no proxy of this kit answers on the configured port
+  next: zcode-kit proxy start
+  next: zcode-kit doctor --fix
+
+Account ------------------------------------------------------------------------
 FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
+  why: no ZCode login is stored, or this machine cannot decrypt it
+  next: zcode-kit auth login zai
+
+Integrations -------------------------------------------------------------------
 PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
 PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
 PASS  codex adapter artifact — generated/codex-home/config.toml
-FAIL  proxy reachable + identity — health=down
 PASS  omp: omp provider registered — providers.zcode in models.yml
 PASS  omp: omp key resolver — key current
 PASS  omp: omp extension installed
@@ -34,6 +36,9 @@ SKIP  aider: integration — not detected — skipped
 SKIP  continue: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate continue
 SKIP  goose: integration — not detected — skipped
 PASS  harness decisions — 2 stored decision(s) readable
+
+Upstream -----------------------------------------------------------------------
 PASS  upstream gateway (zai, start-plan) — https://zcode.z.ai/api/v1/zcode-plan/anthropic matches the remote provider release rev 23
 SKIP  upstream models (start-plan) — configured but not offered to the ZCode client for this plan: glm-5.3 (offered: glm-5.3-flash, glm-5.2) — may still work; informational
-doctor: 2 check(s) failed
+
+doctor: 2 failed, 15 passed, 9 skipped -> exit 1

@@ -1,0 +1,3 @@
+[33m! WARN  Connection details unavailable[0m
+   [2mwhy[0m   config not found: /kit/proxy/config.yaml — run setup first: zcode-kit setup
+   [2mnext[0m  [1mzcode-kit setup[0m

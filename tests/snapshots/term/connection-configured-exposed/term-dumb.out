@@ -1,9 +1,7 @@
 Connection details (manual clients) --------------------------------------------
   OpenAI base URL     http://0.0.0.0:18458/v1
   Anthropic base URL  http://0.0.0.0:18458
-  API key             (redacted: not an interactive terminal - print it with:
-                      zcode-kit models --show-key)
+  API key             (redacted - print it with: zcode-kit models --show-key)
   Models              glm-5.3, glm-5.3-flash
   State               o not verified running
-  Warning             server.host is 0.0.0.0 - keep the proxy on loopback; do
-                      not expose it
+  Warning             server.host 0.0.0.0 is not loopback - do not expose it

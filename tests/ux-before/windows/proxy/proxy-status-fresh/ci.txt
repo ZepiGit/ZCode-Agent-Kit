@@ -1,4 +1,0 @@
-port:      (config missing)
-pid file:  none
-health:    nokey
-  connection details unavailable: <KIT>\.proxykey missing — run setup first

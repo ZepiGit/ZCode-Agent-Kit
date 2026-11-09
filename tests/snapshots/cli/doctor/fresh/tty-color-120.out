@@ -1,0 +1,36 @@
+[31m✗[0m 4 problems: 4 failed
+
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  bun available           [2m/opt/bun/bin/bun (<VERSION>)[0m
+  [31m✗ FAIL[0m  config exists           [2m/kit/proxy/config.yaml[0m
+                                  [2mwhy[0m   setup has not run here, or its files were removed
+                                  [2mnext[0m  [1mzcode-kit setup[0m
+  [31m✗ FAIL[0m  key file exists         [2m/kit/.proxykey[0m
+                                  [2mwhy[0m   setup has not run here, or its files were removed
+                                  [2mnext[0m  [1mzcode-kit setup[0m
+  [31m✗ FAIL[0m  proxy source installed  [2m/kit/zcode-proxy-src/node_modules[0m
+                                  [2mwhy[0m   the proxy's dependencies are not installed
+                                  [2mnext[0m  [1mzcode-kit setup[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  proxy reachable + identity  [2mno config — skipped[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [31m✗ FAIL[0m  credentials store  [2m~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login[0m
+                             [2mwhy[0m   no ZCode login is stored, or this machine cannot decrypt it
+                             [2mnext[0m  [1mzcode-kit auth login zai[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  omp integration           [2mOMP not installed — skipped[0m
+  [2m– SKIP[0m  omp: integration          [2mnot detected — skipped[0m
+  [2m– SKIP[0m  pi: integration           [2mnot detected — skipped[0m
+  [2m– SKIP[0m  claude-code: integration  [2mnot detected — skipped[0m
+  [2m– SKIP[0m  codex: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  opencode: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  cline: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration    [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  goose: integration        [2mnot detected — skipped[0m
+
+doctor: [31m4 failed[0m, [32m1 passed[0m, [2m12 skipped[0m → exit 1

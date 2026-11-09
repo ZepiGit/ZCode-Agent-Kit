@@ -1,0 +1,17 @@
+● running on 127.0.0.1:<PORT>, up 1 h 02 min (pid <PID>)
+
+Memory ─────────────────────────────────────────────────────────────────────────
+  proxy  182 MB (heap 64 MB, event-loop lag 2 ms)
+
+Quota ──────────────────────────────────────────────────────────────────────────
+  quota  unavailable (HTTP 503)
+
+Captcha ────────────────────────────────────────────────────────────────────────
+  captcha  not loaded
+
+Connection details (manual clients) ────────────────────────────────────────────
+  OpenAI base URL     http://127.0.0.1:<PORT>/v1
+  Anthropic base URL  http://127.0.0.1:<PORT>
+  API key             UXFIXTURE-not-a-secret-0000000000000000000
+  Models              glm-5.3, glm-5.3-flash
+  State               ● running, identity verified

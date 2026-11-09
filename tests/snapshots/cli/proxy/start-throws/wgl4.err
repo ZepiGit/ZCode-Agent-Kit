@@ -1,0 +1,4 @@
+| Proxy start[K[31m× FAIL  The proxy did not start[0m
+   [2mwhy[0m   EACCES: permission denied, open '/kit/logs/proxy.log'
+   [2mnext[0m  [1mzcode-kit doctor[0m
+   [2mexit[0m 1
