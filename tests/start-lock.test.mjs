@@ -1122,3 +1122,43 @@ test("adoption without a record needs the whole proof: a listener whose pid is n
   assert.ok(!untouched(proxy) || await pollFor("the adopted proxy to exit", () => !untouched(proxy), 10_000), "the adopted proxy is stopped");
   assert.equal(adoptionLines(root).length, 1);
 });
+
+// The same orphan beside a record whose pid is gone (scratch reproduction with
+// the spawn → record window widened and no spawn intent, linux S3/short: a
+// waiter spawned a second proxy that lost the port and exited, its record
+// stayed; final stop "pid … from the pid file is gone but something still
+// answers"). A record whose process is proven gone (pid dead, or its start
+// time differs) records no proxy, so it is replaced by the same proof; one
+// whose process may still be there (no start time) is left alone.
+test("a record whose process is gone, beside a healthy unrecorded proxy: stop adopts that proxy by proof and stops it; the recorded pid is never signalled", { timeout: 180_000 }, async (t) => {
+  for (const kind of ["dead pid", "reused pid (another start time)"]) {
+    const { root, port, env, orphan } = await killedBeforeAnyRecord(t);
+    const stranger = kind === "dead pid" ? null : harmless(t);
+    const stale = { pid: stranger?.pid ?? DEAD_PID, startedMs: Date.now() - 3_600_000, startedIso: new Date(Date.now() - 3_600_000).toISOString() };
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify(stale) + "\n");
+    const stop = manager(root, ["stop"], env);
+    assert.equal(stop.stdout, `stopped (pid ${orphan})\n`, `${kind}: ${stop.stdout}${stop.stderr}`);
+    assert.equal((await health(port)).state, "down", kind);
+    assert.deepEqual(liveProxies(root), [], `${kind}: 0 orphans`);
+    if (stranger) assert.ok(untouched(stranger), `${kind}: the process now at the recorded pid is never signalled`);
+    assert.match(adoptionLines(root)[0] ?? "", new RegExp(`orphaned proxy adopted pid=${orphan} replaced=${stale.pid}$`), kind);
+  }
+});
+
+test("a record whose live pid has no start time is not proven gone: it is never replaced by an adoption", { timeout: 60_000 }, async (t) => {
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  const steady = Date.now() - 60_000;
+  const recorded = harmless(t);
+  const listener = harmless(t);
+  await identityListener(t, port, listener.pid);
+  const text = JSON.stringify({ pid: recorded.pid, startedMs: null, startedIso: null }) + "\n";
+  writeFileSync(join(root, "logs", "proxy.pid"), text);
+  const kitCommand = { commandLine: `"bun" "run" "${join(root, "zcode-proxy-src", "src", "index.ts")}" "serve"`, executablePath: "bun" };
+  const lifecycle = await lifecycleFor(root, { processCommandLineImpl: () => kitCommand, processStartMsImpl: (pid) => (pid === listener.pid ? steady : null) });
+  const stopped = await lifecycle.stop();
+  assert.equal(stopped.code, 4, stopped.lines.join(" | "));
+  assert.equal(readFileSync(join(root, "logs", "proxy.pid"), "utf8"), text, "the record is unchanged");
+  assert.ok(untouched(recorded) && untouched(listener), "nothing is signalled");
+  assert.deepEqual(adoptionLines(root), []);
+});
