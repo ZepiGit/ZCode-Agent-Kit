@@ -34,3 +34,9 @@ Two additive setup-UX changes, tests/memory excluded, no product behaviour beyon
 Design is co-authored by **GLM-5.3-Flash max**, **gpt-6.1-sol xhigh**, **claude-sonnet-5-5 high** and **grok-4.7-build-fast xhigh** in cooperation. Each model produces a design brief (layout, key bindings, copy, degradation rules); the controller aggregates them; if one model is unavailable or its output is unusable, the remaining three continue and agree on the best result together. The agreed design is recorded in this ticket's Comments before implementation starts. Standard language for all user-facing copy is **English** (C8).
 
 ## Comments
+
+### 2026-11-09 — controller design rulings (binding for all four model briefs)
+
+1. **Locked saved rows (escalation dwfq-82f6e729-1).** The list UI replaces the ask loop, not the consent policy. Saved yes/skipped decisions stay locked on a normal setup run (design-language.md:185-189, cli/commands/setup.mjs:157-158 stay authoritative). Already-decided harnesses render as locked context rows — visible, visually distinct, not toggleable. `a`/none apply only to editable rows. Editing a saved row still requires `--reask`, which unlocks everything in the same list UI. Rationale: C2 — stored consent is never silently reversible; `--reask` remains the explicit reset.
+2. **Scope and renderer corrections (escalation dwfq-82f6e729-2).** `cli/commands/setup.mjs` is added to What-to-build (the actual setup flow; the Next steps block inserts at :264-290; cli/zcode-kit.mjs:31-35,107-116 delegates there). A small additive described-command renderer is approved in `lib/term/out.mjs` (aligned command+description rows, grep-stable `^  zcode-kit ` prefix, no box chrome off TTY) rather than duplicating caps/ANSI/width logic in setup-output.mjs; `Out.kv` stays untouched.
+3. Both rulings were delivered to the design lead in the workflow; all four model briefs inherit them.
