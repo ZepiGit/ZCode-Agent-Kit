@@ -15,3 +15,7 @@ ADR: no
 - [ ] METRICS table: per arm, per leg, per run.
 
 ## Comments
+
+### 2026-11-09 — first CI attribution attempt launched
+
+Stage-1 tooling 5febef6 staged with integration354305b on staging/80m. Measurement commit03e20a6a30476f5ab8052a9bb73a16fe64bd96a5, tree50fdff58b751d4c6f894fd84f80e8133ef2d1d78, marker tests/memory/measure-cdn content8. Draft PR https://github.com/ZepiGit/ZCode-Agent-Kit/pull/74; run42635373819. One attempt is not the >=30-per-arm Windows dataset; four complete valid attempts are required, with alternating order and unchanged measured path. Marker guard test failures are intentional and never approval. Never merge the marker. The measurement tree does not contain ticket27, so it cannot silently settle ticket27's changed host/child attribution question. No CI verdict or pooled result is recorded yet.
