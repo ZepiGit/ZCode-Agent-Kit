@@ -283,12 +283,13 @@ test("connection(): routes only with verbose; a verified proxy says when its mod
 
 test("prose without spaces in a wide script (CJK) wraps between characters on a TTY; a long path stays whole", () => {
   const { out, stdout } = output({ tty: true, env: { ...UTF8, NO_COLOR: "1" } });
-  out.check({ status: "fail", name: "account auth valid", detail: "上游返回：账号额度已用完，请在明天零点之后再试一次 (quota exhausted)" });
+  // 31 wide characters (62 cells) in a 50-cell detail column.
+  out.check({ status: "fail", name: "account auth valid", detail: "上游返回：账号额度已用完，请在明天零点之后再试一次或者联系管理员 (quota exhausted)" });
   out.check({ status: "pass", name: "extension installed", detail: "~/.omp/agent/extensions/zcode-proxy-autostart-with-a-very-long-name.ts" });
   const lines = stdout.text.split("\n").slice(0, -1);
   assert.deepEqual(lines.slice(0, 2), [
     "  ✗ FAIL  account auth valid  上游返回：账号额度已用完，请在明天零点之后再试一次",
-    "                              (quota exhausted)",
+    "                              或者联系管理员 (quota exhausted)",
   ]);
   for (const line of lines.slice(0, 2)) assert.ok(displayWidth(line) <= 80, `${displayWidth(line)} columns`);
   assert.equal(lines.at(-1), "  ✓ PASS  extension installed  ~/.omp/agent/extensions/zcode-proxy-autostart-with-a-very-long-name.ts", "a token is never broken");
