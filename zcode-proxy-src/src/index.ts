@@ -23,6 +23,8 @@ import { randomUUID } from "node:crypto";
 import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
 import { installGuestErrorBoundary } from "./runtime/guest-error.js";
 import { shutdownCaptchaRuntime } from "./runtime/health-monitor.js";
+import { SOLVER_PROCESS_COMMAND } from "./proxy/solver-process-command.js";
+import { createEventLogger } from "./log/event-line.mjs";
 import { createGracefulShutdown, createHealthSupervisor, handleShutdownSignals } from "./runtime/supervisor.js";
 import {
   addAccount,
@@ -78,6 +80,19 @@ export function main(): void {
 
 function runCli(): void {
   const args = process.argv.slice(2);
+
+  // A compiled proxy's solver process (ADR-0002): the binary runs itself with
+  // this internal subcommand. Nothing else of the CLI runs in it.
+  if (args[0] === SOLVER_PROCESS_COMMAND) {
+    import("./proxy/captcha-solver-process.js")
+      .then((m) => m.runSolverProcess(args.slice(1)))
+      .catch((err: unknown) => {
+        createEventLogger({ component: "solver", write: (line) => process.stderr.write(`${line}\n`) })
+          .error("solver process failed to start", { error: err instanceof Error ? err : String(err) });
+        process.exit(1);
+      });
+    return;
+  }
 
   // `--cli` opts out of the default TUI and restores the classic CLI dispatch
   // (bare `--cli` = the old no-arg default: serve).

@@ -3,7 +3,7 @@
  * solver worker via configureCaptchaSolver({ backendModule }); the scene name
  * selects the behavior. Never touches the network.
  */
-import { captchaGenerationResources, solveTraceless as realSolveTraceless } from "../captcha-happy.js";
+import { captchaFetch, captchaGenerationResources, solveTraceless as realSolveTraceless, syncFetchBlocking } from "../captcha-happy.js";
 import { CaptchaSdkIncompatibleError, normalizeCaptchaError } from "../captcha-token.js";
 
 let active = 0;
@@ -20,7 +20,7 @@ function resources(): string {
   return `cdn:${entries}:${bytes}:stalls:${stallCounts.size}`;
 }
 
-export async function solveTraceless({ scene }: { scene: string }): Promise<string> {
+export async function solveTraceless({ scene, region, prefix }: { scene: string; region?: string; prefix?: string }): Promise<string> {
   active += 1;
   try {
     const [kind, arg] = scene.split(":");
@@ -31,6 +31,36 @@ export async function solveTraceless({ scene }: { scene: string }): Promise<stri
       case "env":
         // Environment parity: what the solver generation sees of one variable.
         return param(`env:${process.env[arg!] ?? "unset"}`);
+      case "env-names":
+        // The names (any case) of the generation's environment matching a pattern.
+        return param(`env-names:${Object.keys(process.env).filter((name) => new RegExp(arg!, "i").test(name)).sort().join(",")}`);
+      case "args":
+        // Solve inputs as the generation received them.
+        return param(`args:${JSON.stringify({ scene, region, prefix })}`);
+      case "pid":
+        return param(`pid:${process.pid}`);
+      case "keep-loop":
+        // Leaves work on the generation's event loop, as uncleared guest timers do.
+        setInterval(() => {}, 1000);
+        return param("keep-loop:armed");
+      case "egress": {
+        // Captcha egress from inside the generation (loopback targets only):
+        // the real captchaFetch over http and https, and the sync-XHR path.
+        const { target, tlsPort } = JSON.parse(Buffer.from(arg!, "base64").toString()) as { target: string; tlsPort: number };
+        const out: Record<string, string> = {};
+        try { const r = await captchaFetch(`${target}/fetch`); out.fetch = `${r.status} ${await r.text()}`; }
+        catch { out.fetch = "error"; }
+        const s = syncFetchBlocking(`${target}/sync-xhr`, { method: "GET", headers: {} }, 5000);
+        out.syncXhr = "error" in s ? "error" : `${s.status} ${s.body.toString()}`;
+        try { const r = await captchaFetch(`https://127.0.0.1:${tlsPort}/tls`); out.tls = String(r.status); await r.body?.cancel(); }
+        catch { out.tls = "error"; }
+        return param(`egress:${JSON.stringify(out)}`);
+      }
+      case "stderr-line": {
+        // A child log line, as captcha-happy writes its own (e.g. [pe-cache-evict]).
+        process.stderr.write(Buffer.from(arg!, "base64"));
+        return param("stderr-line:written");
+      }
       case "slow":
         await Bun.sleep(Number(arg));
         return param(`token:slow:${concurrency}`);
