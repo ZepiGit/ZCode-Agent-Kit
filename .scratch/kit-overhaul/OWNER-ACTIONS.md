@@ -50,3 +50,31 @@ Remove-Item Env:NO_COLOR
 ```
 
 Expected: setup stops at once with exit 130 and no traceback, no escape sequences are printed, and a second `zcode-kit setup --reask` asks the same question again (nothing was stored). Unblocks: ticket 42's plain-mode Ctrl-C criterion (no automated proof on a real console).
+
+## OA-3 — Ctrl-C, Ctrl-Break and console close during `proxy start` on a real Windows console (ticket 17, A2) — unverified, owner action
+
+Run in Windows PowerShell 5.1 and in PowerShell 7, in both conhost and Windows Terminal, on a machine where the kit is installed. Each step interrupts a start while it holds the start lock. The proxy then comes up on its own, because it is detached.
+
+```powershell
+zcode-kit proxy stop
+# 1. Ctrl-C: press Ctrl-C as soon as "starting zcode-proxy ..." appears
+zcode-kit proxy start
+zcode-kit proxy logs 30 | Select-String 'start lock released on signal|lock takeover'
+zcode-kit proxy start      # adopts the proxy the interrupted start left
+zcode-kit proxy stop       # expected: stopped (pid N)
+# 2. Ctrl-Break: the same, pressing Ctrl-Break instead of Ctrl-C
+zcode-kit proxy start
+zcode-kit proxy logs 30 | Select-String 'start lock released on signal|lock takeover'
+zcode-kit proxy start; zcode-kit proxy stop
+# 3. Console close: run `zcode-kit proxy start` in a new console window and close
+#    that window while "starting zcode-proxy ..." is shown; then, in this window:
+zcode-kit proxy logs 30 | Select-String 'start lock released on signal|lock takeover'
+zcode-kit proxy start; zcode-kit proxy stop
+```
+
+Expected, for each of the three:
+- the log shows `INFO manager start lock released on signal signal=SIGINT` (`SIGBREAK` for Ctrl-Break, `SIGHUP` for console close);
+- the next `proxy start` prints no `WARN manager lock takeover` line, exits 0 and starts no second proxy (Task Manager shows one `bun.exe … serve`);
+- `proxy stop` prints `stopped (pid N)` and leaves no `bun.exe … serve` running.
+
+Unblocks: ticket 17's criterion "A2 (real PowerShell/conhost Ctrl-C) listed as an owner action, marked unverified". The seam tests deliver these events through Node's own signal listeners (`process.emit`), not through a real console.
