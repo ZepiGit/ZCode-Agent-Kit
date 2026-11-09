@@ -15,6 +15,7 @@
 import path from "node:path";
 import { ZcodeConnection, ZcodeConnectionError } from "../protocol/connection.js";
 import { workspaceRef, parseSessionId } from "../protocol/types.js";
+import { DEFAULT_RESTART_BUDGET } from "../config.js";
 import { createEventLogger, createLogger } from "../util/log.js";
 const log = createLogger("runtime");
 const events = createEventLogger("runtime");
@@ -77,6 +78,7 @@ export class RuntimeManager {
     restarting = null;
     requestTimeoutMs;
     budget;
+    windowSec;
     /** The in-flight harness start; concurrent callers share it (and its budget slot). */
     connecting = null;
     /** Whether the bridge started a harness before: every later start is a restart. */
@@ -90,7 +92,10 @@ export class RuntimeManager {
         this.runtimeInfo = runtimeInfo;
         this.interactions = interactions;
         this.requestTimeoutMs = config.defaultRequestTimeoutMs;
-        this.budget = new RestartBudget(config.restartBudget.limit, config.restartBudget.windowSec * 1000);
+        // A config built without the key (an older programmatic caller) gets the default budget.
+        const { limit, windowSec } = config.restartBudget ?? DEFAULT_RESTART_BUDGET;
+        this.windowSec = windowSec;
+        this.budget = new RestartBudget(limit, windowSec * 1000);
     }
     get info() {
         return this.runtimeInfo;
@@ -133,7 +138,7 @@ export class RuntimeManager {
             events.warn("harness restart", {
                 restart: slot.restart,
                 budget: this.budget.limit,
-                windowSec: this.config.restartBudget.windowSec,
+                windowSec: this.windowSec,
                 backoffMs: waitMs,
                 lastExitCode: this.lastExit?.code,
                 lastExitSignal: this.lastExit?.signal ?? undefined,
@@ -151,7 +156,8 @@ export class RuntimeManager {
         return conn;
     }
     budgetExhausted(now) {
-        const { limit, windowSec } = this.config.restartBudget;
+        const { limit } = this.budget;
+        const windowSec = this.windowSec;
         const window = windowText(windowSec);
         const retryAt = this.budget.retryAt(now);
         const retryIso = retryAt === null ? null : new Date(retryAt).toISOString();
@@ -418,7 +424,7 @@ export class RuntimeManager {
         const used = this.budget.used(now);
         return {
             limit: this.budget.limit,
-            windowSec: this.config.restartBudget.windowSec,
+            windowSec: this.windowSec,
             used,
             exhausted: used >= this.budget.limit,
             retryAt: retryAt === null ? null : new Date(retryAt).toISOString(),

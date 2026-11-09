@@ -17,7 +17,7 @@ import { ZcodeConnection, ZcodeConnectionError, type ReverseRequestContext } fro
 import { workspaceRef, parseSessionId } from "../protocol/types.js";
 import type { InteractionManager } from "../interactions/manager.js";
 import type { RuntimeInfo } from "../discovery.js";
-import type { BridgeConfig } from "../config.js";
+import { DEFAULT_RESTART_BUDGET, type BridgeConfig } from "../config.js";
 import { createEventLogger, createLogger } from "../util/log.js";
 
 const log = createLogger("runtime");
@@ -89,6 +89,7 @@ export class RuntimeManager {
   private restarting: Promise<void> | null = null;
   private readonly requestTimeoutMs: number;
   private readonly budget: RestartBudget;
+  private readonly windowSec: number;
   /** The in-flight harness start; concurrent callers share it (and its budget slot). */
   private connecting: Promise<ZcodeConnection> | null = null;
   /** Whether the bridge started a harness before: every later start is a restart. */
@@ -103,7 +104,10 @@ export class RuntimeManager {
     this.runtimeInfo = runtimeInfo;
     this.interactions = interactions;
     this.requestTimeoutMs = config.defaultRequestTimeoutMs;
-    this.budget = new RestartBudget(config.restartBudget.limit, config.restartBudget.windowSec * 1000);
+    // A config built without the key (an older programmatic caller) gets the default budget.
+    const { limit, windowSec } = config.restartBudget ?? DEFAULT_RESTART_BUDGET;
+    this.windowSec = windowSec;
+    this.budget = new RestartBudget(limit, windowSec * 1000);
   }
 
   get info(): RuntimeInfo {
@@ -151,7 +155,7 @@ export class RuntimeManager {
       events.warn("harness restart", {
         restart: slot.restart,
         budget: this.budget.limit,
-        windowSec: this.config.restartBudget.windowSec,
+        windowSec: this.windowSec,
         backoffMs: waitMs,
         lastExitCode: this.lastExit?.code,
         lastExitSignal: this.lastExit?.signal ?? undefined,
@@ -168,7 +172,8 @@ export class RuntimeManager {
   }
 
   private budgetExhausted(now: number): ZcodeConnectionError {
-    const { limit, windowSec } = this.config.restartBudget;
+    const { limit } = this.budget;
+    const windowSec = this.windowSec;
     const window = windowText(windowSec);
     const retryAt = this.budget.retryAt(now);
     const retryIso = retryAt === null ? null : new Date(retryAt).toISOString();
@@ -441,7 +446,7 @@ export class RuntimeManager {
     const used = this.budget.used(now);
     return {
       limit: this.budget.limit,
-      windowSec: this.config.restartBudget.windowSec,
+      windowSec: this.windowSec,
       used,
       exhausted: used >= this.budget.limit,
       retryAt: retryAt === null ? null : new Date(retryAt).toISOString(),
