@@ -200,8 +200,11 @@ test("doctor: WARN never changes the exit code, and a check that fails is never 
       const expected = ok === false ? "FAIL" : ok === null ? "SKIP" : warn === true ? "WARN" : "PASS";
       assert.equal(text.exitCode, ok === false ? 1 : 0, `ok=${ok} warn=${warn}: exit code`);
       assert.equal(json.exitCode, text.exitCode, "JSON and text agree");
-      const rows = renderIn("pipe", text.records).stdout.split("\n").filter((l) => l.match(CHECK_ROW)?.[2] === "matrix check");
+      const pipe = renderIn("pipe", text.records).stdout;
+      const rows = pipe.split("\n").filter((l) => l.match(CHECK_ROW)?.[2] === "matrix check");
       assert.deepEqual(rows, [`${expected}  matrix check — d`], `ok=${ok} warn=${warn}`);
+      const verdict = pipe.trimEnd().split("\n").at(-1);
+      assert.equal(/ -> exit 1$/.test(verdict), ok === false, `ok=${ok} warn=${warn}: the verdict names exit 1 only for a failure: ${verdict}`);
       const doc = json.records[0].value;
       const row = doc.checks.find((c) => c.name === "matrix check");
       assert.equal(row.status, expected.toLowerCase());
