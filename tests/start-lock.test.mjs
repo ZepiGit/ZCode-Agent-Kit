@@ -991,10 +991,13 @@ test("Ctrl-C (SIGINT) of a manager start during its health wait leaves no stale 
   assert.equal(liveProxies(root).length, 1, "its proxy was detached and keeps coming up");
   assert.equal(record.pid, liveProxies(root)[0], "the record names it");
 
+  assert.equal(typeof record.stopToken, "string", "the spawner's record carries its stop token (ticket 18)");
+
   const next = manager(root, ["start"], env);
   assert.equal(next.status, 0, next.stdout + next.stderr);
   assert.equal(readdirSync(join(root, "spawned")).length, 1, "no second proxy was spawned");
   assert.equal((await health(port)).pid, record.pid);
+  assert.equal(readJson(join(root, "logs", "proxy.pid"))?.stopToken, record.stopToken, "the adopted record keeps the spawn's stop token");
   const stop = manager(root, ["stop"], env);
   assert.equal(stop.stdout, `stopped (pid ${record.pid})\n`, stop.stdout + stop.stderr);
   assert.deepEqual(liveProxies(root), [], "0 orphans");
@@ -1049,6 +1052,7 @@ test("Round 22 Q1: a holder killed after spawn() before any pid record leaves a 
   assert.equal(record?.pid, orphan, `adopted: the record names the orphan (${JSON.stringify(record)})`);
   assert.ok(Number.isFinite(record.startedMs), "with its start time");
   assert.equal((await lifecycleFor(root)).verifyOwnProcess(record), "match");
+  assert.equal(Object.hasOwn(record, "stopToken"), false, "its stop token died with the killed spawner: none is invented (ticket 18)");
   assert.deepEqual(lockFiles(root), [], "the killed holder's lock was taken over and released");
   const adopted = adoptionLines(root);
   assert.equal(adopted.length, 1, adopted.join("\n"));
