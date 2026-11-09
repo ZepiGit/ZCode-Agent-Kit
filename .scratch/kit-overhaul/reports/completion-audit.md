@@ -51,7 +51,7 @@ Individual numbered stories: [story-evidence-map.md](story-evidence-map.md) maps
 
 ## Current evidence additions, 2026-11-09
 
-- Ticket23 pre-merge CI42634889797:8/8SUCCESS, candidate0badcae. Artifacts /home/AgentKit/overhaul-tools/t23-ci-yUPAQx/. Windows pressure:3restarts, <=1proxy,40/40serving after refusal,0furtherhooks,1errorline,0orphans. Existing expected-RED ratchet still contains other owners. No merge yet.
+- Ticket23 pre-merge CI42634889797:8/8SUCCESS, candidate0badcae. Artifacts /home/AgentKit/overhaul-tools/t23-ci-yUPAQx/. Windows pressure:3restarts, <=1proxy,40/40serving after refusal,0furtherhooks,1errorline,0orphans. Existing expected-RED ratchet still contains other owners. Merged as a413614, resolved282557f: fresh local fast suites and proxytypecheck passed, dist unchanged, staged/wholeproduct sanitydiffs empty. Merger reused exactpremerge memory evidence under explicit ask permission; no freshpostmerge memoryrun.
 - Ticket80 attempt1 CI42635373819: both measurement legsSUCCESS, marker guards intentionallyFAIL. Artifacts /home/AgentKit/overhaul-tools/t80-attempt1-X4kZ0t/. Windows8/8valid each arm, head mean54.13/pre29 51.38MB, difference2.75,t0.76. Linux8/8each, difference-1.75,t-1.18. These are insufficient for >=30Windows/>=10Linux per arm; no attribution verdict. Attempt2 launched via rerun, order reverses. Source commit03e20a6/tree50fdff58; reports identify CI merge commit d619ad8. GitHub commit API confirms parents542749b/03e20a6 and tree50fdff58b751d4c6f894fd84f80e8133ef2d1d78, exactly matching the staged tree. The report field named tree actually contains a commit SHA; preserve this distinction when pooling.
 
 ## Final audit rule
