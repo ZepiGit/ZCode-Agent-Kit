@@ -445,6 +445,36 @@ test("integrate --dry-run lists every file a real run writes, with the undo comm
   );
 });
 
+// A-07 / story 115: the Codex adapter names the launcher that works on the
+// user's OS — `bin/zcode-codex.sh` on POSIX, `bin\zcode-codex.cmd` on Windows
+// — in its output and in the generated config.toml. The platform is read from
+// ctx.platform (the kit context's own value), so both branches run here.
+test("codex adapter prints the POSIX launcher on POSIX and the .cmd on Windows", async () => {
+  const codex = (await import("../cli/adapters/codex.mjs")).default;
+  for (const [platform, launcher, wrong] of [
+    ["linux", "bin/zcode-codex.sh", "zcode-codex.cmd"],
+    ["win32", "bin\\zcode-codex.cmd", "bin/zcode-codex"],
+  ]) {
+    const home = fakeHome(`codex-launcher-${platform}`);
+    const { ctx, restore } = ctxWithAppData(home);
+    ctx.platform = platform;
+    ctx.root = join(home, "kitroot");
+    ctx.generated = join(ctx.root, "generated");
+    const lines = [];
+    try {
+      await codex.apply(ctx, noopTx(), (m) => lines.push(m));
+    } finally {
+      restore();
+    }
+    const text = lines.join("\n");
+    assert.match(text, new RegExp(`use via: ${launcher.replace(/\\/g, "\\\\")}`), `${platform}: the shown launcher must work on the user's OS`);
+    assert.ok(!text.includes(wrong), `${platform}: the wrong platform's launcher must not appear`);
+    const toml = readFileSync(join(ctx.generated, "codex-home", "config.toml"), "utf8");
+    assert.match(toml, new RegExp(`use ${launcher.replace(/\\/g, "\\\\")} to enter this setup`), `${platform}: the config comment names the same launcher`);
+    assert.ok(!toml.includes(wrong), `${platform}: the config comment must not name the other platform's launcher`);
+  }
+});
+
 // ------------------------------------------- test backlog: dry-run matrix
 import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";
