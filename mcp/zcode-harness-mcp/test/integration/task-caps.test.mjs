@@ -11,9 +11,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startBridge } from './client.mjs';
+import { pathToFileURL } from 'node:url';
+import { BRIDGE_NODE_FLAGS, startBridge } from './client.mjs';
 
 const MiB = 1024 * 1024;
+const heapPreload = pathToFileURL(path.join(import.meta.dirname, '..', 'fixture', 'heap-probe.mjs')).href;
 const MARKER_RE = /\[… \d+ bytes truncated …\]/g;
 
 /** `n` ASCII characters of `word ` repeated (spaces keep the text clear of the long-token redaction). */
@@ -142,5 +144,42 @@ test('a tool call past the cap is reported in the warnings', async () => {
     assert.equal(result.toolCalls.length, 1000);
     assert.ok(!result.toolCalls.some((call) => call.summary === 'toolCall tc1'));
     assert.deepEqual(result.warnings, ['tool calls capped at 1000; later tool calls are not listed']);
+  } finally { await c.stop(); }
+});
+
+// The bound is a memory bound, not an output trim (Round 3 Q6 condition 1), and
+// a kept slice must not keep its parent alive (ticket 32's probe): the bridge's
+// retained heap after a 40 MiB stream of small deltas, and after one 24 MiB
+// delta, stays near the 4 MiB the task may keep.
+test('the bridge retains about 4 MiB of a task text, however much is streamed and however it is split', async (t) => {
+  const dir = scriptDir(t);
+  const heapDir = scriptDir(t);
+  fs.writeFileSync(path.join(dir, 'small-deltas.gen.json'), JSON.stringify({ count: 10 * 1024, chars: 4096 }));
+  fs.writeFileSync(path.join(dir, 'one-delta.gen.json'), JSON.stringify({ count: 1, chars: 24 * MiB }));
+  const c = await startBridge({ nodeArgs: [...BRIDGE_NODE_FLAGS, '--expose-gc', '--import', heapPreload], env: { FAKE_STREAM_DIR: dir, ZCODE_TEST_HEAP_DIR: heapDir } });
+  let n = 0;
+  const retained = async () => {
+    n += 1;
+    fs.writeFileSync(path.join(heapDir, 'request'), '');
+    for (const start = Date.now(); Date.now() - start < 20_000; await new Promise((r) => setTimeout(r, 50))) {
+      try {
+        const reading = JSON.parse(fs.readFileSync(path.join(heapDir, 'heap.json'), 'utf8'));
+        if (reading.n === n) return reading.heapUsed / MiB;
+      } catch { /* not written yet */ }
+    }
+    throw new Error('no heap reading');
+  };
+  try {
+    await runTask(c, 'warm-up');
+    const base = await retained();
+    const small = await runTask(c, 'small-deltas');
+    assert.equal(small.result.truncated.droppedBytes, 36 * MiB);
+    const afterSmall = await retained();
+    const big = await runTask(c, 'one-delta');
+    assert.equal(big.result.truncated.droppedBytes, 20 * MiB);
+    const afterBig = await retained();
+    t.diagnostic(`retained heap: ${base.toFixed(1)} MiB, +${(afterSmall - base).toFixed(1)} after small deltas, +${(afterBig - base).toFixed(1)} after one delta`);
+    assert.ok(afterSmall - base < 12, `retained after 40 MiB in 4 KiB deltas: +${(afterSmall - base).toFixed(1)} MiB`);
+    assert.ok(afterBig - base < 16, `retained after a further 24 MiB in one delta: +${(afterBig - base).toFixed(1)} MiB`);
   } finally { await c.stop(); }
 });
