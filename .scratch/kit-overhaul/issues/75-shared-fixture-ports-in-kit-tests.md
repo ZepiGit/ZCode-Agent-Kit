@@ -2,7 +2,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 Risk: low
@@ -90,3 +90,5 @@ After the fix, a traced run on 2aeed5d logged 592 listen/connect records. None w
 **Left for another ticket**
 - The memory loop's default port 18457: two local memory-loop runs without `ZCODE_MEMLOOP_PORT` would collide.
 - The guard is static. A fixture that inherits 8457 from the template without any literal (the case fixed here in harness-consent, cli-audit and setup-regressions) is invisible to it. The committed tests keep that case fixed, and the traced run above is the evidence. A permanent runtime trap (a `--import` preload in `npm run test` that refuses listen/connect on fixed ports) would close the gap, but it changes the test command for every leg.
+
+Merged 2026-11-09 as e3ae8d0 (`e3ae8d0b8950bd600727d609d295d4aed09e31e0`; ticket/75-free-fixture-ports at 09c4e9f; first merge, no revert-of-revert step) onto 788f2fb; clean merge (no conflicts). Fast suite: kit 883/901 (0 fail, 18 skipped), proxy 1596/1596, mcp 99/100 (0 fail, 1 skipped); mcp `dist/` unchanged; no lockfile changes, so only the root `npm ci` ran. `npm run test:ux-before`: 1/1 pass, every capture (tty-color-80, tty-color-120, no-color, term-dumb, ascii-locale, pipe, ci) byte-identical to the BEFORE baseline. Pre-merge CI (staging/75 19988b4), green on all 8 jobs: https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42531830576; `git diff --stat 19988b4^1 overhaul/stability-terminal-ux -- . ':!.scratch'` was empty before the merge (only docs commit 788f2fb since). Sanity: `git diff staging/75 HEAD` over the ticket's 16 non-.scratch files (`staging/75^1..staging/75`) is empty; whole-tree `git diff staging/75 HEAD -- . ':!.scratch'` is empty. Logs: `.scratch/kit-overhaul/reports/merge-75-{npmci,test,proxy,mcp,ux-before}.log`.
