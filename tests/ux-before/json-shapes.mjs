@@ -10,9 +10,13 @@
 // The baseline (tests/ux-before/json-baseline.json) is generated once from
 // the pre-change captures: the pipe variant of the Phase 1C BEFORE set
 // (tests/ux-before/linux, 0960696) plus the `--extra json` captures of the
-// ticket-06 base commit (tests/ux-before/json-extra). Regenerate only on purpose:
+// ticket-06 base commit (tests/ux-before/json-extra). A BEFORE capture that a
+// later ticket refreshed on purpose (keys added, as ticket 40 did for
+// `doctor --json`) keeps its pre-change pipe output under
+// tests/ux-before/json-before/<group>/<id>/pipe.txt, which the baseline reads
+// instead. Regenerate only on purpose:
 //   node tests/ux-before/json-shapes.mjs --write
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -94,12 +98,14 @@ export function checkSuperset(shape, value, path = "$") {
 }
 
 /** Build the baseline document from capture directories (pipe variant). */
-export function buildBaseline({ before = join(HERE, "linux"), extra = join(HERE, "json-extra") } = {}) {
+export function buildBaseline({ before = join(HERE, "linux"), extra = join(HERE, "json-extra"), frozenDir = join(HERE, "json-before") } = {}) {
   const manifests = [before, extra].flatMap((dir) => JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")));
   const outputs = {};
   for (const [capture, command] of Object.entries(JSON_OUTPUTS)) {
     // json-extra/<id> captures are committed flat as tests/ux-before/json-extra/<id>/.
-    const file = capture.startsWith("json-extra/") ? join(extra, capture.slice("json-extra/".length), "pipe.txt") : join(before, capture, "pipe.txt");
+    const frozen = join(frozenDir, capture, "pipe.txt");
+    const file = capture.startsWith("json-extra/") ? join(extra, capture.slice("json-extra/".length), "pipe.txt")
+      : existsSync(frozen) ? frozen : join(before, capture, "pipe.txt");
     const m = manifests.find((x) => `${x.group}/${x.id}` === capture && x.variant === "pipe");
     if (!m) throw new Error(`no pipe capture for ${capture}`);
     outputs[capture] = { command, exit: m.exit, shape: shapeOf(parseCapture(readFileSync(file, "utf8"))) };

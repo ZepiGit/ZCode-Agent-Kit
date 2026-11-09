@@ -1,38 +1,56 @@
-PASS  bun available — <BUN> (1.4.2)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  codex adapter artifact — generated/codex-home/config.toml
-FAIL  proxy reachable + identity — health=down
-doctor: 2 check(s) failed
-PASS  bun available — <BUN> (1.4.2)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  codex adapter artifact — generated/codex-home/config.toml
-FAIL  proxy reachable + identity — health=down
-PASS  omp: omp provider registered — providers.zcode in models.yml
-PASS  omp: omp key resolver — key current
-PASS  omp: omp extension installed
-SKIP  pi: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate pi
-SKIP  claude-code: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate claude-code
-PASS  codex: codex adapter artifact — generated/codex-home/config.toml
-SKIP  opencode: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate opencode
-SKIP  cline: integration — not detected — skipped
-SKIP  kilo-code: integration — not detected — skipped
-SKIP  aider: integration — not detected — skipped
-SKIP  continue: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate continue
-SKIP  goose: integration — not detected — skipped
-PASS  harness decisions — 2 stored decision(s) readable
-SKIP  upstream gateway — upstream config unreachable or unreadable (fetch failed) — skipped
-doctor: 2 check(s) failed
+[31mx[0m 2 problems: 2 failed
+
+[1mRuntime[0m [2m------------------------------------------------------------------------[0m
+  [32m+ PASS[0m  bun available           [2m<BUN>[0m
+                                  [2m(1.4.2)[0m
+  [32m+ PASS[0m  config exists           [2m<KIT>/proxy/config.yaml[0m
+  [32m+ PASS[0m  key file exists         [2m<KIT>/.proxykey[0m
+  [32m+ PASS[0m  proxy source installed  [2m<KIT>/zcode-proxy-src/node_modules[0m
+  [32m+ PASS[0m  mcp bridge installed    [2m<KIT>/mcp/zcode-harness-mcp/dist/index.js[0m
+  [32m+ PASS[0m  mcp bridge deps         [2m<KIT>/mcp/zcode-harness-mcp/node_modules[0m
+
+[1mProxy[0m [2m--------------------------------------------------------------------------[0m
+  [31mx FAIL[0m  proxy reachable + identity  [2mhealth=down[0m
+                                      [2mwhy[0m   no proxy of this kit answers on the
+                                            configured port
+                                      [2mnext[0m  [1mzcode-kit proxy start[0m
+                                        [2mor[0m  [1mzcode-kit doctor --fix[0m
+
+[1mAccount[0m [2m------------------------------------------------------------------------[0m
+  [31mx FAIL[0m  credentials store  [2mZCODE_PROXY_CREDENTIALS_PATH (explicit store): no[0m
+                             [2mcredential store — run: zcode-kit auth login[0m
+                             [2mwhy[0m   no ZCode login is stored, or this machine
+                                   cannot decrypt it
+                             [2mnext[0m  [1mzcode-kit auth login zai[0m
+
+[1mIntegrations[0m [2m-------------------------------------------------------------------[0m
+  [32m+ PASS[0m  omp provider registered        [2mzcode block in ~/.omp/agent/models.yml[0m
+  [32m+ PASS[0m  extension installed            [2m~/.omp/agent/extensions/zcode-proxy-autostart.ts[0m
+  [32m+ PASS[0m  codex adapter artifact         [2mgenerated/codex-home/config.toml[0m
+  [32m+ PASS[0m  omp: omp provider registered   [2mproviders.zcode in models.yml[0m
+  [32m+ PASS[0m  omp: omp key resolver          [2mkey current[0m
+  [32m+ PASS[0m  omp: omp extension installed
+  [2m- SKIP[0m  pi: integration                [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate pi[0m
+  [2m- SKIP[0m  claude-code: integration       [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate claude-code[0m
+  [32m+ PASS[0m  codex: codex adapter artifact  [2mgenerated/codex-home/config.toml[0m
+  [2m- SKIP[0m  opencode: integration          [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate opencode[0m
+  [2m- SKIP[0m  cline: integration             [2mnot detected — skipped[0m
+  [2m- SKIP[0m  kilo-code: integration         [2mnot detected — skipped[0m
+  [2m- SKIP[0m  aider: integration             [2mnot detected — skipped[0m
+  [2m- SKIP[0m  continue: integration          [2mnot configured (no consent yet) —[0m
+                                         [2manswer y in zcode-kit setup or run[0m
+                                         [2mzcode-kit integrate continue[0m
+  [2m- SKIP[0m  goose: integration             [2mnot detected — skipped[0m
+  [32m+ PASS[0m  harness decisions              [2m2 stored decision(s) readable[0m
+
+[1mUpstream[0m [2m-----------------------------------------------------------------------[0m
+  [2m- SKIP[0m  upstream gateway  [2mupstream config unreachable or unreadable (fetch[0m
+                            [2mfailed) — skipped[0m
+
+doctor: [31m2 failed[0m, [32m14 passed[0m, [2m9 skipped[0m -> exit 1

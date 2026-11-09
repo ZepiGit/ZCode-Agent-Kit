@@ -1,4 +1,6 @@
-port:      18458
-pid file:  none
-health:    foreign
-  connection details withheld: port 18458 is answered by a service that is not this kit's proxy
+✗ FAIL  Port 18458 is answered by another service
+   why   it does not prove this kit's identity, so no connection details are
+         shown; the kit never stops a service it did not start
+   next  change server.port in proxy/config.yaml, then zcode-kit proxy start
+     or  zcode-kit doctor
+   exit 1
