@@ -33,3 +33,87 @@ Spec stories: 69, 70, 71, 72
 ## Comments
 
 - 2026-11-07 (orchestrator, from ticket 32): in Bun 1.4.2 a substring keeps its whole parent string alive (probe in ticket 32 Comments: 2,000 short rows split from one 20 MB record kept all 20 MB). A bound that counts the bytes of slices, split parts or tail copies is beaten unless it makes a fresh copy of what it keeps. Check your truncation/tail copy for this and pin it with an adversarial test.
+
+- 2026-11-09 (implementer, branch `ticket/31-mcp-task-caps`). Code 68b37b4..6faae51; the integration tip 63a704b is merged at 0c65be0 (no conflicts; the tip's new commits touch only `.scratch/`). Linux x64, Node 26.7.0, Bun 1.4.2.
+
+  **What changed (all under `mcp/zcode-harness-mcp/`, `dist/` rebuilt by `tsc`, B5):**
+  - New `src/tasks/response-text.ts`: the response text is bounded while the deltas are ingested.
+    - Up to 4 MiB of UTF-8 the text is kept whole.
+    - Past 4 MiB the head (the first ≤ 1 MiB, cut on a code-point boundary) is frozen, the rest is a rolling window and the dropped bytes are counted.
+    - The text is kept in sealed pieces of about 64 KiB. The window drops whole pieces during ingestion, and the exact cut happens when the result is read. Memory therefore stays at most 4 MiB plus about 192 KiB of slack. Every kept piece is a fresh copy (UTF-8 round trip, or UTF-16 when the piece has a lone surrogate), so no slice keeps a parent alive (the ticket 32 lesson in the Comments above).
+    - Per delta the work is O(delta) with nothing proportional to the retained tasks (the ticket 30 O(n²) lesson). Per task it adds one small object; the piece arrays are allocated only past 64 KiB.
+  - `buildResult`: the text reads as head + `\n[… N bytes truncated …]\n` + tail. A truncated result gets `completeness: partial` (so `partial: true`), with the note `<explanation>; response text capped at 4 MiB: N bytes truncated between the first 1 MiB and the last 3 MiB` merged **after** the terminal-state override. It also gets the additive `truncated: { droppedBytes }`.
+  - The transcript fallback goes through the same buffer.
+  - Cached `.result.json` files are still returned as read (unchanged code path, now pinned).
+  - Per-task caps (`TASK_CAPS` in `ingress.ts`): every warning and error goes through `addWarning`/`addError`, which cap the list at 200. Tool calls are capped at 1,000 distinct ids.
+  - The `zcode_task_result` tool description and `docs/MCP_API.md` describe the cap, the marker, the `truncated` field, the per-task caps and old cached results. `docs/MCP_API.md` also carries the idempotency sentence (the `zcode_task_start` description has had it since ticket 30).
+  - Fixture: `fake-harness.mjs` gains `FAKE_STREAM_DIR` (per-prompt delta lists, generated streams and transcripts), `FAKE_EVENT_GAPS` and `FAKE_TOOL_CALLS`, all off by default. The new `test/fixture/heap-probe.mjs` preload reports the retained heap after a forced GC.
+
+  **Tests (seam 7).**
+  - New `test/integration/task-caps.test.mjs`, 8 tests, wired into the mcp `test` script:
+    - 5 MiB + 5 with "€" across the 1 MiB mark and a "😀" split across two deltas at the tail cut: exact text, one marker, `droppedBytes` 1,048,583, the explanation;
+    - exactly 4 MiB is kept whole; 4 MiB + 1 drops exactly the "€" (3 bytes); the tail fills up to 4 MiB (11 bytes);
+    - a failed turn: the explanation starts "task ended in state failed; " and still names the truncation;
+    - 250 event gaps and 1,100 tool calls: 200 warnings, 1,000 tool calls, the file change still recorded, still partial;
+    - the 1,001st tool call is reported in the warnings;
+    - retained heap after 40 MiB in 4 KiB deltas and after one 24 MiB delta;
+    - an old cached 5 MiB result is served byte-identical (text block = `JSON.stringify(stored)`, `structuredContent` deep-equal, file not rewritten);
+    - the tool description.
+  - `security-audit`: D-11 is extended (a short transcript has `partial: false` and no `truncated`), and a new D-11 test caps a 4 MiB + 3 transcript (3 bytes dropped, explanation "response recovered from stored transcript; …"). No assertion was weakened, and no other pre-existing test changed.
+
+  **RED → GREEN.**
+  - RED: the new tests run against the tip's committed dist (detached worktree `/home/AgentKit/overhaul-tools/t31-tip`, test files copied in and restored afterwards). Logs: `reports/t31-red-tip.log`, `reports/t31-red-tip-heap.log`.
+    - 8 of 9 new tests fail on the tip. The 9th, the cached result, already holds; it is a preservation test, proven by mutant M2.
+    - The heap test on the tip retains **+40.3 MiB** after the 40 MiB stream and **+63.2 MiB** after the further 24 MiB delta. On the branch it retains **+3.3 / +7.3 MiB** (base 13.3 MiB), against bounds of 12 / 16.
+  - GREEN: `reports/t31-green-*.log` and the suites below.
+  - **Mutations** on committed 6faae51 in the scratch worktree `/home/AgentKit/overhaul-tools/t31-mut` (script `/home/AgentKit/overhaul-tools/t31-scripts/mutate.py`, `reports/t31-mutations-2.log`). All 10 mutants are killed, and every restore with `git checkout <sha> -- src dist` is clean:
+    - M1: no fresh copy (+27.3 MiB retained);
+    - M2: a cached result is re-capped;
+    - M3: the note is merged before the override;
+    - M4: the tail is a fixed 3 MiB;
+    - M5: warnings and errors are uncapped;
+    - M6: tool calls are uncapped;
+    - M7: the transcript is uncapped;
+    - M8: a surrogate pair is counted as two lone surrogates;
+    - M9: a sealed piece ends inside a pair;
+    - M10: no head is frozen.
+  - M4 and M9 survived the first run (`reports/t31-mutations.log`). The test fixed forward in 6faae51 (the tail-fill case, and a delta long enough to be sealed on its own before the split pair).
+
+  **Suites on 0c65be0** (`reports/t31-suite-*.log`):
+  - `npm run test`: 984 tests, 966 pass, 0 fail, 18 skipped;
+  - `test:proxy`: 1598 pass, 0 fail (107 files);
+  - `test:proxy-typecheck`: clean;
+  - `test:mcp`: 116 tests, 115 pass, 0 fail, 1 skipped (+9);
+  - `git status` is clean after the build.
+
+  **Memory loop, linux S5/short.** `job.mjs --os linux --only S5/short --cap none` inside run-capped's 6G scope, the same machine. `before-2` and `after-1` ran side by side. Logs: `reports/t31-s5-{before-1,before-2,after-1}.log`. Data: `/home/AgentKit/overhaul-tools/t31-memloop/`.
+
+  | run | tree | growth:mcp-bridge %/1k (trend) | slope MB/1k | window medians MB | procPeak MB | reboot cost MB | failures / orphans |
+  |---|---|---|---|---|---|---|---|
+  | before-1 | tip 2b4e2e0 | 44.34 (true) | 38.03 | 79.7 / 82.8 / 85.6 / 87.2 / 89.2 / 89.6 | 91.6 | 1 | 0 / 0 |
+  | before-2 | tip 63a704b | 43.56 (true) | 37.32 | 79.5 / 82.5 / 85.9 / 87.9 / 88.4 / 89.6 | 91.6 | 0 | 0 / 0 |
+  | after-1 | branch 0c65be0 | 43.60 (true) | 37.17 | 78.9 / 82.0 / 85.4 / 87.4 / 87.8 / 89.3 | 91.2 | 1 | 0 / 0 |
+
+  - Growth on the branch is the same as on the tip: 43.60 against 43.56 and 44.34, a delta within run-to-run noise. Every linux value is ≤ 55.
+  - Every other S5 check is GREEN, and the ratchet holds: "S5/short: RED on growth:mcp-bridge, owned by ticket 74".
+  - S5 streams "FAKE-OK", so it never reaches the cap. What it measures here is the per-task and per-delta overhead, and that overhead is not visible.
+  - Windows S5/short (band (5, 30] owned by ticket 74) and the memory-budget/fast-suite windows legs: **pending CI (orchestrator verifies after merge+push).**
+
+  **Decisions taken (spec silent):**
+  1. **The kept text is at most 4 MiB in total.** The head is the longest prefix of at most 1 MiB that ends on a code-point boundary. The tail gets the bytes the head leaves (4 MiB − head, so at least 3 MiB and at most 3 bytes more), so a text of exactly 4 MiB is never cut. The marker line and its two newlines come on top, and they are not counted in N.
+  2. **`truncated` is present only when bytes were dropped.** Untruncated results keep exactly today's shape (C2).
+  3. **How the caps report a drop.**
+     - A full warnings or errors list keeps its first 199 entries, and the 200th slot becomes `warnings capped at 200; later warnings were dropped` (or `errors …`).
+     - A tool call past 1,000 is left out (updates to kept ids still apply), and one warning reports it: `tool calls capped at 1000; later tool calls are not listed`.
+     - File changes are still recorded for a dropped call.
+  4. **The errors cap is not reachable through seam 7.** Every `turn.failed` and every start failure is terminal, and a follow-up resets the list, so there are at most 2 errors per turn. The cap runs through the same helper as warnings, which M5 kills.
+  5. **The "events were lost" partial check stays a scan of the warnings** (now ≤ 200). A gap warning could be lost only after 199 earlier warnings of another kind.
+  6. **A lone surrogate counts 3 bytes** (U+FFFD, as `Buffer.byteLength`), and copies keep it unchanged (UTF-16 round trip).
+
+  **Left for other tickets:**
+  - Release-notes line for ticket 54 (spec §7/§16): "MCP task text capped at 4 MiB with a head/tail marker: a longer response keeps its first 1 MiB and last 3 MiB with one `[… N bytes truncated …]` line, is `completeness: partial` and carries `truncated: { droppedBytes }`; per task at most 200 warnings, 200 errors and 1,000 tool calls; results cached before the change are served as stored."
+  - The bridge READMEs × 5: ticket 53.
+  - Not capped, because the spec's list names only warnings, errors and tool calls:
+    - `fileChanges.added/modified` and the `artifacts` Map, keyed by path, grow with the number of distinct written paths;
+    - `modified.includes` makes each Write event O(paths).
+    - Candidate `needs-triage` ticket.
