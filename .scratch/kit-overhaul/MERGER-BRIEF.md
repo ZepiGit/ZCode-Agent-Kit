@@ -20,3 +20,6 @@ The ticket's own files are `git diff --name-only staging/NN^1 staging/NN -- . ':
 
 ## Whole-tree sanity diff (added 2026-11-08 after the ticket 29 merge)
 The `^1`/`^2` file lists undercount a ticket's files when staging/NN was restaged (its first parent already contains an earlier round of the ticket). Always also run `git diff staging/NN HEAD -- . ':!.scratch'` after your merge: every difference must come from integration commits that landed after the staged tree (name them by commit); anything else is a RED sanity check to report.
+
+## Sentinel lines (added 2026-11-09 after two mergers stopped on them)
+The resource sentinel (`tools/sentinel.sh`) appends `SENTINEL ALERT` lines to RUNLOG.md directly. If the ONLY uncommitted change in the integration worktree is such lines appended to `.scratch/kit-overhaul/RUNLOG.md`, commit them first (`gitc.sh commit -m "docs(overhaul): sentinel alert"`), check that `free -g` shows at least 8 GB available, and proceed. Any other dirty change still stops the merge.

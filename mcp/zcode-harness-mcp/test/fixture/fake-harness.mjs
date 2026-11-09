@@ -19,6 +19,12 @@
  *   FAKE_REQUIRE_REASONING=0|1      require model.options.reasoningLevel in setModel
  *   FAKE_MODEL_MISMATCH=0|1         acknowledge model selection without applying it
  *   FAKE_THOUGHT_MISMATCH=0|1       acknowledge effort selection without applying it
+ *   FAKE_STREAM_DIR=...             per-prompt turn scripts, looked up by the prompt text:
+ *                                     <prompt>.json            JSON array of text deltas streamed instead of "FA","KE-OK"
+ *                                     <prompt>.gen.json        { count, chars }: count deltas of `chars` ASCII characters
+ *                                     <prompt>.transcript.json JSON string: the assistant text of the stored transcript
+ *   FAKE_EVENT_GAPS=N               emit N events that each skip one seq number
+ *   FAKE_TOOL_CALLS=N               emit N tool.updated events with distinct ids (Read, before the Write)
  *   FAKE_SPAWN_LOG=...              append {event:"start"|"exit", pid, ppid, t} as JSONL
  *                                   (app-server processes only, not the --version probe)
  */
@@ -402,6 +408,22 @@ rl.on("line", async (line) => {
   }
 });
 
+/** The FAKE_STREAM_DIR script of the turn whose prompt is `content`, if any. */
+function turnScript(content) {
+  const dir = env("FAKE_STREAM_DIR", "");
+  if (!dir || !/^[A-Za-z0-9._-]+$/.test(content)) return {};
+  const read = (suffix) => {
+    try { return JSON.parse(fs.readFileSync(`${dir}/${content}${suffix}`, "utf8")); } catch { return undefined; }
+  };
+  const gen = read(".gen.json");
+  const pattern = "lorem ipsum dolor sit amet, ";
+  const piece = gen ? pattern.repeat(Math.ceil(gen.chars / pattern.length)).slice(0, gen.chars) : "";
+  return {
+    deltas: gen ? Array.from({ length: gen.count }, () => piece) : read(".json"),
+    transcript: read(".transcript.json"),
+  };
+}
+
 async function runTurn(s, sessionId, content, toolDenylist) {
   const turnNo = (s.turnCount = (s.turnCount ?? 0) + 1);
   s.status = "running";
@@ -448,11 +470,20 @@ async function runTurn(s, sessionId, content, toolDenylist) {
   if (mode === "hang") return;
   const hangPrompt = env("FAKE_HANG_PROMPT", "");
   if (hangPrompt && content.includes(hangPrompt)) return;
+  const script = turnScript(content);
+  for (let i = 0; i < Number(env("FAKE_EVENT_GAPS", "0")); i += 1) {
+    seq += 2;
+    notify("session/event", { sessionId, seq, type: "session.updated", payload: { gap: i } });
+  }
   if (env("FAKE_NO_STREAM", "0") !== "1") {
+    for (const text of script.deltas ?? ["FA", "KE-OK"]) {
+      seq += 1;
+      notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text } });
+    }
+  }
+  for (let i = 0; i < Number(env("FAKE_TOOL_CALLS", "0")); i += 1) {
     seq += 1;
-    notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text: "FA" } });
-    seq += 1;
-    notify("session/event", { sessionId, seq, type: "model.streaming", payload: { kind: "text_delta", text: "KE-OK" } });
+    notify("session/event", { sessionId, seq, type: "tool.updated", payload: { toolCallId: `read-${i}`, toolName: "Read", state: "completed" } });
   }
   seq += 1;
   notify("session/event", { sessionId, seq, type: "tool.updated", payload: { toolCallId: "tc1", toolName: "Write", state: "completed", input: { file_path: "fixture-output.txt" } } });
@@ -461,7 +492,7 @@ async function runTurn(s, sessionId, content, toolDenylist) {
   s.outputTokens = (s.outputTokens ?? 0) + 12;
   s.transcript = [
     { info: { role: "user", sessionId }, parts: [{ type: "text", text: content }] },
-    { info: { role: "assistant", sessionId }, parts: [{ type: "text", text: "FAKE-OK" }] },
+    { info: { role: "assistant", sessionId }, parts: [{ type: "text", text: script.transcript ?? "FAKE-OK" }] },
   ];
 
   await new Promise((r) => setTimeout(r, 50));
