@@ -743,3 +743,27 @@ Copied from ticket 74's branch (eab4ddf, METRICS lines 425-436). Round 29 Q1 wit
 
 - failed pre-fix set b46596a: windows mean 27.33 (3 above 30, one above 35); fixed set e5b2c50: windows mean 20.94 (all in (5, 30], trend false 10/10); Round 25 without-30 subset: n 19, mean 20.42, sd 2.85 (Welch t per Round 30: fixed vs without-30 0.41, fixed vs failed 3.48). Every other S5 check GREEN on all 40 legs.
 - "with 30" subsets: pre-fix (42483637377 + b46596a, n 11), fixed (e5b2c50, n 10).
+
+## Ticket 27: solver process cold start (build-time gate 4) and S2 with the solver process
+
+Cold start = dispatch of the first solve to a fresh solver generation → its answer: spawn (from source: the running Bun + `captcha-solver-process.ts`) + IPC + module load of the offline fixture backend, which imports `captcha-happy` and happy-dom, + one `token:` solve. No cap handshake yet (ticket 28 adds it). Gate: ≤ 4.5 s (5 % of the 90 s deadline); a miss is a finding, the deadline does not move.
+
+| leg | how | solver process | thread transport (for reference) |
+|---|---|---|---|
+| linux (local, Bun 1.4.2, 8 cores) | `/home/AgentKit/overhaul-tools/t27-scripts/cold-start.ts`, 20 fresh generations each, `reports/t27-coldstart.log` | median 155 ms, p90 161, max 166 | median 138 ms, p90 146, max 156 |
+| linux (local) | loop S2/short `solver:cold-start` (phase E, under the S2 load), 2 runs | 286 ms, 169 ms | tip: 156 ms, 155 ms |
+| windows | loop S2/short `solver:cold-start` on the windows `memory-budget` leg | pending CI (orchestrator records the value after merge+push) | — |
+
+Linux S2/short, branch `ticket/27-solver-child-process` vs the integration tip 0e0b96f, alternated (br-1, base-1, br-2, base-2; `/home/AgentKit/overhaul-tools/t27-memloop/`, `reports/t27-mem-s2-*.log`): ratchet holds on all four.
+
+| check | tip (2 runs) | branch (2 runs) | note |
+|---|---|---|---|
+| solver:cost-per-generation (scenario + solver roles) | 1016, 1038 MB | 1052, 1150 MB | still RED, 58's |
+| procPeak:solver | 0, 0 MB | 1043, 1139 MB | RED as Round 15 expected (58's, `flips`) |
+| procPeak:scenario | 1043, 1074 MB | 102, 103 MB | the host no longer holds the solver |
+| perParent:solver (max per sample) | 0, 0 | 1, 1 | ≤ 1 |
+| solver:after-idle-exit | 0, 0 | 0, 0 | |
+| solver:after-proxy-sigkill (hung and idle host) | 0, 0 (no process exists) | 0, 0 (hung 0, idle 0 in both) | with the parent watcher removed (mutant M5): 1 → RED, plus `orphans` 1; ratchet FAILED (`reports/t27-mem-s2-mutM5.log`) |
+| solver:retained-before-recycle, solver:hang-not-reclaimed, growth:scenario | 688/689, −3/−5 MB, −34.65/11.34 %/1k | 0/0, 1/1 MB, 5.21/4.61 %/1k | measured from the S2 body's own memory: after 27 these read the host only (finding for 58, ticket 27 Comments) |
+
+S3/short and S4/short on the branch (port 19270, `reports/t27-mem-s3s4.log`): `procPeak:solver` 0 MB in S3 (a solver that is never used costs nothing), 0 solver processes and 0 orphans in S4; REDs only on names owned by 16/17/37; ratchet holds.
