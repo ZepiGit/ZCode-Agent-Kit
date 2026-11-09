@@ -2,7 +2,7 @@
 
 **Blocked by:** 17 (Start-lock release on signals, orphan adoption, respawn over a proven-stale lock), 18 (Per-spawn proxy environment: stop token and log dir set by the manager, token stripped from the respawn hook), 21 (Health supervisor: one graceful shutdown sequence, footprint thresholds 512/1024 MB)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -92,3 +92,31 @@ Spec stories: 49, 50, 51, 53
 - Windows legs (fast suite and `memory-budget` S4/short with the new `pressure:*` checks): pending CI (orchestrator verifies after merge+push).
 - Ticket 22 touches the same stop path: the acknowledgement code is local to `watchdog.ts` / the supervisor's hard-limit branch, and `SHUTDOWN_TIMING.memory` is read but not changed.
 - Possible, not observed: with very low `health.memory` settings, a fresh proxy could request a respawn before the manager that started it has finished its start. That manager could then see it exit and remove its record, and the second hook would refuse with `record changed`. With the defaults (3 × 15 s) this is far outside the start time. The seam 2 stand-in starts its pressure only after its start finished, and the loop phase holds 3 × 2 s.
+
+### 2026-11-09 merger verification — GREEN
+
+Merged 2026-11-09 as `a41361424ca3c2d1e562b1f3ab3c95f13d17e4f6`; fast suite: kit 1002/1022 (20 skipped), proxy 1651/1652 (1 skipped), mcp 115/116 (1 skipped), zero failures. Integration was clean at `1b243b5561c3cc021b28514ee663c8069e0a66fd`. Command: `/home/AgentKit/overhaul-tools/gitc.sh -C /home/AgentKit/wt/overhaul merge --no-ff staging/23 -m "Merge ticket 23: respawn acknowledgement before drain"`; clean automatic merge, no conflict resolution or source edits. This ticket has no previous merge revert to undo.
+
+**Executed here**, from `/home/AgentKit/wt/overhaul`, each with `BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin` and `/home/AgentKit/overhaul-tools/run-capped.sh <name> 3G 1800 -- <command>` (isolated HOME, hard memory cap, timeout):
+- `merge-23-install -- npm ci`: exit 0, 1 s; `reports/merge-23-install.log:2-5`. No package/lockfile changed in this ticket; nested reinstall not required by the merger brief.
+- `merge-23-kit -- npm run test`: exit 0, 129 s; 1002 passed / 1022 total, 20 skipped; `reports/merge-23-kit.log:1098-1106`.
+- `merge-23-proxy -- npm run test:proxy`: exit 0, 106 s; 1651 passed / 1652 total, 1 skipped, 111 files; pinned Bun 1.4.2 at `reports/merge-23-proxy.log:5`, counts at `:2415-2420`.
+- `merge-23-mcp -- npm run test:mcp`: exit 0, 55 s; build plus 115 passed / 116 total, 1 skipped; `reports/merge-23-mcp.log:144-152`. `git diff --exit-code HEAD -- mcp/zcode-harness-mcp/dist/` after this build exited 0 with empty output: regenerated dist unchanged (B5).
+- Additional `merge-23-proxy-typecheck -- npm run test:proxy-typecheck`: exit 0, 1 s; `reports/merge-23-proxy-typecheck.log:2-6`.
+
+**Premerge CI reverified here, not rerun:** `gh run view 42634889797 --repo ZepiGit/ZCode-Agent-Kit --json headSha,status,conclusion,url,jobs --jq '{headSha,status,conclusion,url,jobs:[.jobs[]|{name,status,conclusion}]}'` returned `headSha=0badcae9e7a2b9c32d936679ee2881b061939759`, `status=completed`, `conclusion=success`, all 8 jobs completed/success (Linux/Windows test-kit Node 24/26, ux-before, memory-budget). PR #72; https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42634889797 . This supersedes the implementer's pending-CI note, without claiming fresh Windows execution by the merger.
+
+**Memory-after-merge:** no fresh local memory loop was run. The ask explicitly permits the exact premerge evidence only when the product tree is unchanged; whole-product equality below proves that condition. Read `/home/AgentKit/overhaul-tools/t23-ci-yUPAQx/memory-budget-{linux,windows}/job-summary.json`: both `partial=false`, `ok=true`, `failures=[]`; the ratchet still includes unrelated owned RED scenarios, so this is not final all-scenarios acceptance. Windows `S4-short/run.log:14-19` has all six pressure checks GREEN: refusal 1, restarts 3/15 min, max proxies 1, zero bad samples of 40 after refusal, zero later hooks, exactly one ERROR; `:7` has zero orphans. Linux has the same six checks and zero orphans. Windows S4 as a whole is RED only on `stale-lock-after-ctrl-c` 6/8 (`:10`), owned by existing ticket 81 (`job-summary.json:85-94`); no ownership, test or budget was weakened. Its proxy commit backstop is 247.9 MB <= 512 MB (`S4-short/run.log:21`).
+
+**Historical RED evidence read, not rerun here:** `reports/t23-red-tip.log:42-50` records proxy 20 failures and kit 3/3 failures (the aggregate wrapper's exit 0 at `:58` is not a passing test result); `reports/t23-loop-s4-tip-light.log:17-19,27` records 40/40 unhealthy samples and zero ERROR lines, exit 1. The historical branch loop at `reports/t23-loop-s4-light.log:17-19,27` records zero unhealthy samples and one ERROR, exit 0. Fresh merged kit/proxy suites above include these ticket tests.
+
+**Sanity checks executed here:** `git diff --name-only staging/23^1 staging/23 -- . ':!.scratch'` identified 12 product files. `git diff --exit-code staging/23 HEAD -- <all 12 files>` and `git diff --exit-code staging/23 HEAD -- . ':!.scratch'` both exited 0 with empty output. `git diff --check HEAD^1 HEAD` and working-tree `git diff --check` were clean. `git diff --exit-code HEAD^1 HEAD -- .scratch ':!.scratch/kit-overhaul/issues/23-respawn-acknowledgement-before-drain.md'` was empty: the merge preserved every controller document and all other ticket files, including ticket 82.
+
+**Every later integration delta relative to staging/23:** only `.scratch` documents differ, attributable to these seven first-parent commits after staged parent `354305b`; no product delta exists:
+- `ec5d2de`: RUNLOG, STATE, comments in tickets 27/40/80 (CI candidates and workflow routing).
+- `d0fa880`: RUNLOG/STATE (round 35 and continuation); `e0c9062`: DECISIONS (verbatim round 35 answers); `50daa6e`: STATE decision pointer.
+- `8d2bcb6`: RUNLOG/STATE/completion-audit (CI evidence and incomplete gate index).
+- `cb40041`: completion-audit/story-evidence-map (story-to-evidence gaps).
+- `1b243b5`: ticket INDEX status synchronization. Resolution metadata subsequently changes only this ticket, its INDEX row and STATE/RUNLOG; other ticket files remain untouched.
+
+No release notes, push, release, owner-checkout changes, live upstream/model calls or new task-observer records were made.
