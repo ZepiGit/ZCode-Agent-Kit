@@ -834,10 +834,18 @@ test("a live child is frozen, thawed and killed by its identity; once it is gone
   try {
     await new Promise((r) => child.once("spawn", r));
     const id = identityOf(child.pid);
+    // A stop or continue signal takes effect asynchronously: poll the state (bounded) instead of reading it once.
+    const stateIs = async (stopped) => {
+      for (let i = 0; i < 200; i++) {
+        if (/\) T /.test(readFileSync(`/proc/${child.pid}/stat`, "utf8")) === stopped) return true;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      return false;
+    };
     assert.equal(freezeProcess(id), true);
-    if (process.platform === "linux") assert.match(readFileSync(`/proc/${child.pid}/stat`, "utf8"), /\) T /, "stopped");
+    if (process.platform === "linux") assert.ok(await stateIs(true), "stopped within 2 s");
     assert.equal(thawProcess(id), true);
-    if (process.platform === "linux") assert.doesNotMatch(readFileSync(`/proc/${child.pid}/stat`, "utf8"), /\) T /, "running again");
+    if (process.platform === "linux") assert.ok(await stateIs(false), "running again within 2 s");
     const exited = new Promise((r) => child.once("exit", r));
     assert.equal(killProcess(id), true);
     await exited; // reaped: from here on the pid is free for anyone
