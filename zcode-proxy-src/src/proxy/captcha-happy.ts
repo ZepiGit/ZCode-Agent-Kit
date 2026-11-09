@@ -22,7 +22,7 @@ import vm from "node:vm";
 import { Worker } from "node:worker_threads";
 import { CaptchaCdnCache } from "./captcha-cdn-cache.js";
 import { isPeBundleUrl, StallCounts } from "./captcha-stall-counts.js";
-import { normalizeCaptchaError } from "./captcha-token.js";
+import { CaptchaLocalVerificationError, normalizeCaptchaError } from "./captcha-token.js";
 import { beginCaptchaAttempt, recordCaptchaRequest, recordCaptchaLoad, recordCaptchaEvaluation,
   lastCaptchaActivity, lastCaptchaPeUrl, captchaResourceId, captchaFailureSummary,
   captchaDiagnostics, startCaptchaInstance } from "./captcha-diagnostics.js";
@@ -2236,34 +2236,33 @@ function extractVerifyParam(param) {
     verifyParam = param.verifyParam || param.data || param.param;
   }
   if (!verifyParam || String(verifyParam).length < 20) {
-    throw new Error("solver returned empty param");
+    throw new CaptchaLocalVerificationError("solver returned empty param");
   }
   const str = String(verifyParam);
   // Strict validation: a REAL Aliyun verify param is ~280 chars of base64
   // JSON containing certifyId + sceneId + isSign + a long securityToken.
   // Len-76 junk like {"certifyId":"70bdb",...,"isSign":true} (no securityToken)
   // comes from a degraded SDK result path and WILL 3007 upstream — never let
-  // it out of the solver.
+  // it out of the solver. Refusals are typed so the sanitized detail (lengths,
+  // host-built text, never the refused payload) survives normalization and
+  // surfaces on request failures instead of collapsing into a generic
+  // "captcha SDK failure" (GitHub issue 32).
   if (str.length < 200) {
-    throw new Error(
-      "verify param too short (" + str.length + " chars) — degraded result, refusing: ",
+    throw new CaptchaLocalVerificationError(
+      "verify param too short (" + str.length + " chars) — degraded result, refused",
     );
   }
   try {
     const decoded = JSON.parse(Buffer.from(str, "base64").toString("utf8"));
     const secTok = decoded && (decoded.securityToken || decoded.SecurityToken);
     if (!secTok || String(secTok).length < 50) {
-      throw new Error(
-        "verify param missing securityToken — refusing degraded result: ",
+      throw new CaptchaLocalVerificationError(
+        "verify param missing securityToken — degraded result, refused",
       );
     }
   } catch (err) {
-    if (err instanceof SyntaxError || /securityToken/.test(String(err.message))) {
-      throw err instanceof SyntaxError
-        ? new Error("verify param not base64-JSON: ")
-        : err;
-    }
-    throw err;
+    if (err instanceof CaptchaLocalVerificationError) throw err;
+    throw new CaptchaLocalVerificationError("verify param not base64-JSON");
   }
   return str;
 }
@@ -2481,4 +2480,4 @@ async function solveTraceless(opts, resources?: DomResources) {
 
 // captchaFetch and syncFetchBlocking are exported as the egress-routing seam
 // (captcha-egress.test.ts); the solve path keeps using them internally.
-export { solveTraceless, createDom, destroyDom, lastCaptchaSdkScripts, captchaFetch, syncFetchBlocking };
+export { solveTraceless, createDom, destroyDom, lastCaptchaSdkScripts, captchaFetch, syncFetchBlocking, extractVerifyParam };

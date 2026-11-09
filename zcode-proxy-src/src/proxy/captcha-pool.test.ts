@@ -535,3 +535,70 @@ describe("CaptchaTokenPool mint-storm breaker", () => {
     expect(pool.stats().storm).toBe(false);
   });
 });
+
+describe("CaptchaTokenPool — sanitized mint-failure provenance on later take failures (issue 32)", () => {
+  let clock = 0;
+  const tick = () => Bun.sleep(0);
+  // The sanitized refusal the real chain produces once the local verification
+  // detail survives normalization (see captcha-happy extractVerifyParam).
+  const REFUSAL = "verify param refused: verify param too short (76 chars) — degraded result, refused";
+
+  function provenancePool(): InstanceType<typeof CaptchaTokenPool> {
+    return new CaptchaTokenPool({
+      poolSizeMin: 1,
+      poolSizeMax: 1,
+      tokenTtlMs: 60_000,
+      refillIntervalMs: 600_000,
+      staggerMs: 0,
+      solveRetries: 1,
+      solveConcurrency: 1,
+      emptyTakeRace: 1,
+      scaleDownIdleMs: 600_000,
+      deepIdleAfterMs: 600_000,
+      now: () => clock,
+    });
+  }
+
+  beforeEach(() => {
+    clock = 2_000_000;
+    solveMock.mockClear();
+    recycleMock.mockClear();
+  });
+  afterEach(() => {
+    pool?.stopBackgroundRefill?.();
+    solveMock.mockImplementation(async () => "x".repeat(64));
+  });
+
+  it("the storm take failure names the last local mint failure (sanitized, bounded)", async () => {
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => { throw new Error(REFUSAL); });
+    for (let i = 0; i < 5; i++) await pool.prefill(CFG);
+    expect(pool.stats().storm).toBe(true);
+    // The generic storm sentence stays intact (clients match on it), and the
+    // recorded LOCAL failure provenance is surfaced alongside it.
+    await expect(pool.takeToken(CFG)).rejects.toThrow("captcha minting degraded (storm) — retry later");
+    const err = await pool.takeToken(CFG).catch((e: Error) => e);
+    expect(err.message).toMatch(/last local mint failure: verify param refused/);
+    expect(err.message).toContain("too short (76 chars)");
+    expect(err.message.length).toBeLessThan(400);
+  });
+
+  it("the empty-pool take deadline names why the raced mints failed", async () => {
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => { throw new Error(REFUSAL); });
+    await pool.prefill(CFG); // one failed mint → provenance recorded
+    solveMock.mockImplementation(() => new Promise<string>(() => {})); // stuck mint
+    const savedDeadline = process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS;
+    const savedGrace = process.env.CAPTCHA_TAKE_GRACE_MS;
+    process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = "1000";
+    process.env.CAPTCHA_TAKE_GRACE_MS = "0";
+    try {
+      const err = await pool.takeToken(CFG).catch((e: Error) => e);
+      expect(err.message).toContain("captcha take deadline (1000ms)");
+      expect(err.message).toMatch(/last local mint failure: verify param refused/);
+    } finally {
+      if (savedDeadline === undefined) delete process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS; else process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = savedDeadline;
+      if (savedGrace === undefined) delete process.env.CAPTCHA_TAKE_GRACE_MS; else process.env.CAPTCHA_TAKE_GRACE_MS = savedGrace;
+    }
+  });
+});

@@ -19,7 +19,13 @@
  * Evidence is the source URL of the throwing frame: guest bundles are served
  * from Aliyun CDN/API hosts and carry those URLs in their stack frames (and,
  * for generated code, in the `//# sourceURL` we preserve when evaluating).
+ *
+ * Diagnostics are METADATA-ONLY (GitHub issue 32): guest error messages,
+ * names and stack URLs can carry page content, tokens or account data, so
+ * they are reduced to the error class, a bounded length+digest pair and the
+ * bundle filename. Host errors keep their full detail (own code, own text).
  */
+import { createHash } from "node:crypto";
 
 // CDN/API hosts serving the Aliyun captcha SDK bundles. Anchored at the URL
 // authority (`scheme://`, optional userinfo) and terminated by a port/path/
@@ -92,14 +98,21 @@ export function installGuestErrorBoundary(): void {
 
 /** One-line render of a guest error for the log pane / stderr. */
 export function describeGuestError(err: unknown): string {
+  // Metadata-only (GitHub issue 32): a guest message, name or stack URL can
+  // echo page content, tokens or account data. Record the error class (only
+  // when it is a plain identifier), the message's length and digest, and the
+  // serving bundle's filename — never the text itself.
   const e = err as { name?: unknown; message?: unknown; stack?: unknown } | null;
-  const name = typeof e?.name === "string" ? e.name.slice(0, 64).replace(/[\r\n\t]/g, " ") : "Error";
-  const message = (typeof e?.message === "string" ? e.message : "guest callback failed").slice(0, 1024).replace(/[\r\n\t]/g, " ");
+  const rawName = typeof e?.name === "string" ? e.name : "";
+  const name = /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(rawName) ? rawName : "Error";
+  const message = typeof e?.message === "string" ? e.message : "";
+  const digest = createHash("sha256").update(message).digest("hex");
   const frame =
     typeof e?.stack === "string"
-      ? (e.stack.slice(0, 8192).split("\n").find((line) => GUEST_SCRIPT_HOST.test(line)) ?? "").trim().slice(0, 1024)
+      ? (e.stack.slice(0, 8192).split("\n").find((line) => GUEST_SCRIPT_HOST.test(line)) ?? "").trim()
       : "";
-  // Bundle URLs carry a 64-char content hash — keep the readable filename only.
-  const source = frame.replace(/^at\s+/, "").replace(/https?:\/\/[^\s)]*\/([^/\s)]+)/, "$1");
-  return source ? `${name}: ${message} (${source})` : `${name}: ${message}`;
+  // Bundle URLs carry a 64-char content hash and may carry query strings
+  // (which themselves can hold tokens) — keep the readable filename only.
+  const source = frame.replace(/^at\s+/, "").replace(/\?[^)\s]*/, "").replace(/https?:\/\/[^\s)]*\/([^/\s)]+)/, "$1");
+  return source ? `${name} [len=${message.length} sha256=${digest}] (${source})` : `${name} [len=${message.length} sha256=${digest}]`;
 }
