@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -158,7 +158,7 @@ describe("watchdog in a child process", () => {
     writeFileSync(
       childScript,
       `import { installWatchdog } from ${JSON.stringify(watchdogUrl)};
-const handle = installWatchdog({ stallMs: ${STALL_MS}, checkIntervalMs: 100, heartbeatMs: 50 });
+const handle = installWatchdog({ stallMs: ${STALL_MS}, checkIntervalMs: 100, heartbeatMs: 50, ...(process.env.ACK_WAIT_MS ? { ackWaitMs: Number(process.env.ACK_WAIT_MS) } : {}) });
 console.log("installed:" + (handle !== null) + " pid:" + process.pid);
 await Bun.sleep(300);
 const until = Date.now() + Number(process.env.BLOCK_MS);
@@ -279,6 +279,77 @@ writeFileSync(process.env.WATCHDOG_MARKER, process.argv.slice(2).join(" "));
     await Bun.sleep(500);
     expect(existsSync(marker)).toBe(false);
   }, 30_000);
+
+  // Ticket 23 (ADR-0015 cond 5): with the manager's logs dir, the watchdog
+  // waits for the respawn acknowledgement or a refusal, at most 10 s, then
+  // terminates regardless and logs which outcome it saw (event-line format).
+  // The stand-in hooks end by themselves once the stop file exists, and the
+  // test awaits their exit markers.
+  const ACK_HOOK = `import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const dir = process.env.HOOK_DIR;
+writeFileSync(join(dir, "hook-" + process.pid), "started");
+const finish = (code) => { writeFileSync(join(dir, "hook-" + process.pid), "exited"); process.exit(code); };
+if (process.env.HOOK_MODE === "refuse") finish(4);
+if (process.env.HOOK_MODE === "ack") {
+  const file = join(process.env.ZCODE_KIT_LOG_DIR, "respawn.json");
+  writeFileSync(file + ".tmp", JSON.stringify({ events: [{ at: Date.now(), pid: Number(process.argv[3]), reason: process.argv[5] }] }));
+  renameSync(file + ".tmp", file);
+}
+const until = Date.now() + 30_000;
+const timer = setInterval(() => { if (existsSync(join(dir, "stop")) || Date.now() > until) { clearInterval(timer); finish(0); } }, 50);
+`;
+
+  async function withHooks(mode: string, fn: (env: Record<string, string>) => Promise<void>) {
+    const hookDir = mkdtempSync(join(dir, `hooks-${mode}-`));
+    const logs = join(hookDir, "logs");
+    mkdirSync(logs);
+    const hook = join(hookDir, "hook.mjs");
+    writeFileSync(hook, ACK_HOOK);
+    try {
+      await fn({ ZCODE_KIT_RESPAWN_NODE: process.execPath, ZCODE_KIT_RESPAWN_MANAGER: hook, ZCODE_KIT_LOG_DIR: logs, HOOK_DIR: hookDir, HOOK_MODE: mode });
+    } finally {
+      writeFileSync(join(hookDir, "stop"), "");
+      const markers = () => readdirSync(hookDir).filter((n) => n.startsWith("hook-") && n !== "hook.mjs");
+      const deadline = Date.now() + 30_000;
+      while (markers().some((n) => readFileSync(join(hookDir, n), "utf8") !== "exited") && Date.now() < deadline) await Bun.sleep(50);
+      expect(markers().every((n) => readFileSync(join(hookDir, n), "utf8") === "exited")).toBe(true);
+    }
+  }
+
+  const OUTCOME_LINE = (level: string, outcome: string) =>
+    new RegExp(`^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z ${level} watchdog respawn handoff ended; terminating outcome=${outcome} waitedMs=\\d+`, "m");
+
+  it("acknowledged: terminates at once and logs the outcome", async () => {
+    await withHooks("ack", async (env) => {
+      const result = await runChild(env);
+      expect(result.stdout).not.toContain("survived");
+      expect(result.stderr).toMatch(OUTCOME_LINE("INFO", "acknowledged"));
+      expect(result.elapsedMs).toBeLessThan(STALL_MS + 6_000);
+    });
+  }, 40_000);
+
+  it("refused (hook exit 4): terminates at once and logs the refusal", async () => {
+    await withHooks("refuse", async (env) => {
+      const result = await runChild(env);
+      expect(result.stdout).not.toContain("survived");
+      expect(result.stderr).toMatch(OUTCOME_LINE("ERROR", "refused"));
+      expect(result.elapsedMs).toBeLessThan(STALL_MS + 6_000);
+    });
+  }, 40_000);
+
+  it("no answer: the wait is bounded at 10 s (the default), then it terminates regardless", async () => {
+    await withHooks("silent", async (env) => {
+      const result = await runChild(env, 30_000);
+      expect(result.stdout).not.toContain("survived");
+      expect(result.stderr).toMatch(OUTCOME_LINE("ERROR", "no-acknowledgement"));
+      const waited = Number(/outcome=no-acknowledgement waitedMs=(\d+)/.exec(result.stderr)?.[1]);
+      expect(waited).toBeGreaterThanOrEqual(9_900);
+      expect(waited).toBeLessThan(10_500);
+      // Stall detection + the 10 s wait + process start-up, far below the 30 s block.
+      expect(result.elapsedMs).toBeLessThan(STALL_MS + 10_000 + 6_000);
+    });
+  }, 60_000);
 
   it("is not installed with ZCODE_KIT_WATCHDOG=0", async () => {
     const result = await runChild({ ZCODE_KIT_WATCHDOG: "0" }, STALL_MS * 2);

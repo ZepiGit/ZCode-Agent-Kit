@@ -12,7 +12,10 @@
  *   15 s apart). The soft limit only WARNs: it never recycles the solver. The
  *   hard limit requests a respawn through the handoff;
  * - the respawn handoff point: the respawn request goes to the kit manager's
- *   hook; only a confirmed request starts the graceful shutdown. Without a
+ *   hook; only the respawn acknowledgement (ADR-0015: the manager reserved the
+ *   restart budget) starts the graceful shutdown. A refused or unacknowledged
+ *   request keeps the proxy serving, logs one ERROR, reports the restarts as
+ *   exhausted and spawns no further hook within the budget window. Without a
  *   manager hook (TUI, standalone proxy) the supervisor logs and keeps serving:
  *   a proxy at 3 GB still serves, a dead one does not;
  * - the single graceful shutdown sequence (`createGracefulShutdown`), used by
@@ -23,13 +26,19 @@
  */
 import { createEventLogger, type EventLogger } from "../log/event-line.mjs";
 import { startEventLoopMonitor, stopEventLoopMonitor } from "./health-monitor.js";
-import { installWatchdog, respawnHookCommand, spawnRespawnHook, type WatchdogHandle } from "./watchdog.js";
+import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  awaitRespawnAcknowledgement, installWatchdog, respawnHookCommand, spawnRespawnHook,
+  RESPAWN_ACK_POLL_MS, RESPAWN_ACK_WAIT_MS, type RespawnAnswer, type RespawnOutcome, type WatchdogHandle,
+} from "./watchdog.js";
 import { DEFAULT_MEMORY_THRESHOLDS, type MemoryThresholds } from "./memory-thresholds.js";
 import { SHED_RETRY_AFTER_SECONDS } from "../server/admission.js";
 // Type-only: erased at runtime.
 import type { ProxyServer } from "../server/server.js";
 
-export { DEFAULT_MEMORY_THRESHOLDS, type MemoryThresholds };
+export { DEFAULT_MEMORY_THRESHOLDS, RESPAWN_ACK_WAIT_MS, type MemoryThresholds, type RespawnAnswer, type RespawnOutcome };
 
 const MB = 1024 * 1024;
 
@@ -76,22 +85,50 @@ export const realClock: SupervisorClock = {
 };
 
 /**
- * The respawn handoff point. `request` resolves true once the kit manager
- * has taken the request (today: its hook process started; ticket 23: its
- * acknowledgement arrived), false when it did not. Only then may the proxy
- * drain; on false it keeps serving.
+ * The respawn handoff point (ADR-0008 cond 1, ADR-0015). `request` resolves
+ * with the manager's answer; only a confirmed one (the respawn
+ * acknowledgement: the manager has reserved the restart budget) lets the
+ * proxy drain. Otherwise it keeps serving.
  */
 export interface RespawnHandoff {
   available(): boolean;
-  request(reason: "memory"): Promise<boolean>;
+  request(reason: "memory"): Promise<RespawnAnswer>;
 }
 
-/** The kit manager's respawn hook from this process's environment, or null without one. */
-export function managerRespawnHandoff(env: Record<string, string | undefined> = process.env): RespawnHandoff | null {
+export interface ManagerRespawnHandoffOptions {
+  /** Longest wait for the acknowledgement or a refusal (default 10 s). */
+  ackWaitMs?: number;
+  pollMs?: number;
+  /** The wall clock the request time is taken from (the manager stamps `at` with its own). */
+  now?: () => number;
+  spawn?: typeof spawn;
+}
+
+/**
+ * The kit manager's respawn hook from this process's environment, or null
+ * without one. With the manager's logs dir (`ZCODE_KIT_LOG_DIR`) a request
+ * waits for the respawn acknowledgement in `respawn.json`; without it (a
+ * manager older than ADR-0015) the hook's start is the confirmation, as before.
+ */
+export function managerRespawnHandoff(env: Record<string, string | undefined> = process.env, opts: ManagerRespawnHandoffOptions = {}): RespawnHandoff | null {
   if (respawnHookCommand(env, process.pid, "memory") === null) return null;
   return {
     available: () => respawnHookCommand(env, process.pid, "memory") !== null,
-    request: (reason) => spawnRespawnHook(reason, env),
+    async request(reason) {
+      const hook = respawnHookCommand(env, process.pid, reason);
+      if (!hook) return { outcome: "hook-failed", confirmed: false, waitedMs: 0, error: "no manager hook" };
+      const logDir = env.ZCODE_KIT_LOG_DIR;
+      if (!logDir) {
+        const started = await spawnRespawnHook(reason, env);
+        return { outcome: started ? "started" : "hook-failed", confirmed: started, waitedMs: 0 };
+      }
+      return awaitRespawnAcknowledgement(
+        { spawn: opts.spawn ?? spawn, readFile: (path) => readFileSync(path, "utf8"), now: opts.now ?? Date.now },
+        hook,
+        env,
+        { pid: process.pid, ackFile: join(logDir, "respawn.json"), ackWaitMs: opts.ackWaitMs ?? RESPAWN_ACK_WAIT_MS, pollMs: opts.pollMs ?? RESPAWN_ACK_POLL_MS },
+      );
+    },
   };
 }
 
@@ -110,12 +147,29 @@ export interface HealthSupervisorOptions {
   watchdog?: boolean;
 }
 
+/**
+ * The manager's restart budget window (3 restarts per 15 min). After a
+ * refused or unacknowledged respawn the proxy spawns no further hook until a
+ * window has passed since that request (ADR-0015 cond 6).
+ */
+export const RESPAWN_BUDGET_WINDOW_MS = 15 * 60 * 1000;
+
 export interface MemoryState {
   last: FootprintSample | null;
   lastAt: number | null;
   softStreak: number;
   hardStreak: number;
   respawnPending: boolean;
+  /** How the last respawn request ended (null before the first). */
+  respawnOutcome: RespawnOutcome | null;
+  /**
+   * The restart budget as this proxy last saw it: true from a refused or
+   * unacknowledged respawn until the budget window has passed (`restarts`
+   * exhausted, ADR-0015); no hook is spawned meanwhile.
+   */
+  restartsExhausted: boolean;
+  /** When the next respawn request may spawn a hook (null: at once). */
+  respawnRetryAt: number | null;
 }
 
 export interface HealthSupervisor {
@@ -134,24 +188,41 @@ export function createHealthSupervisor(opts: HealthSupervisorOptions): HealthSup
 
   let cancel: (() => void) | null = null;
   let watchdog: WatchdogHandle | null = null;
-  const state: MemoryState = { last: null, lastAt: null, softStreak: 0, hardStreak: 0, respawnPending: false };
+  const state: MemoryState = {
+    last: null, lastAt: null, softStreak: 0, hardStreak: 0, respawnPending: false,
+    respawnOutcome: null, restartsExhausted: false, respawnRetryAt: null,
+  };
   // Once per episode (an episode ends with a sample at or under the soft limit).
   let softWarned = false;
-  let hardHandled = false;
+  let hardWarned = false;
+
+  // The ERROR line of a respawn that did not confirm, one per request (so at
+  // most one per budget window). `restarts=exhausted` is the report ADR-0015
+  // asks for; the state carries it too (`restartsExhausted`).
+  const NOT_CONFIRMED: Record<Exclude<RespawnOutcome, "acknowledged" | "started">, string> = {
+    "refused": "respawn refused by the kit manager; keeps serving",
+    "no-acknowledgement": "respawn not acknowledged by the kit manager; keeps serving",
+    "hook-failed": "respawn hook did not start; keeps serving",
+  };
 
   function tick(): void {
     if (state.respawnPending) return;
     let s: FootprintSample;
     try { s = sample(); } catch { return; }
+    const now = clock.now();
     state.last = s;
-    state.lastAt = clock.now();
+    state.lastAt = now;
+    if (state.respawnRetryAt !== null && now >= state.respawnRetryAt) {
+      state.respawnRetryAt = null;
+      state.restartsExhausted = false;
+    }
     const fields = { footprintMB: s.mb, metric: s.metric };
     if (s.mb <= t.softLimitMB) {
       if (softWarned) log.info("memory back under the soft limit", { ...fields, softLimitMB: t.softLimitMB });
       state.softStreak = 0;
       state.hardStreak = 0;
       softWarned = false;
-      hardHandled = false;
+      hardWarned = false;
       return;
     }
     state.softStreak++;
@@ -161,25 +232,49 @@ export function createHealthSupervisor(opts: HealthSupervisorOptions): HealthSup
       // ADR-0008 cond 5: the soft limit only warns; the solver is not recycled.
       log.warn("memory above the soft limit", { ...fields, softLimitMB: t.softLimitMB, samples: t.samples, intervalS: t.sampleIntervalMs / 1000 });
     }
-    if (hardHandled || state.hardStreak < t.samples) return;
-    hardHandled = true;
+    if (state.hardStreak < t.samples) return;
     if (!respawn || !respawn.available()) {
-      log.warn("memory above the hard limit; no manager hook, keeps serving", { ...fields, hardLimitMB: t.hardLimitMB, samples: t.samples });
+      if (!hardWarned) log.warn("memory above the hard limit; no manager hook, keeps serving", { ...fields, hardLimitMB: t.hardLimitMB, samples: t.samples });
+      hardWarned = true;
       return;
     }
+    if (state.respawnRetryAt !== null) {
+      // A refused or unacknowledged respawn in this budget window: no hook
+      // until the window has passed, however often the condition comes back.
+      if (!hardWarned) {
+        log.warn("memory above the hard limit; restart budget exhausted, keeps serving", {
+          ...fields, hardLimitMB: t.hardLimitMB, restarts: "exhausted", retryInS: Math.ceil((state.respawnRetryAt - now) / 1000),
+        });
+      }
+      hardWarned = true;
+      return;
+    }
+    hardWarned = true;
     log.warn("memory above the hard limit", { ...fields, hardLimitMB: t.hardLimitMB, samples: t.samples, action: "respawn-request" });
     state.respawnPending = true;
-    const refused = (): void => {
-      // Nobody would bring a stopped proxy back: keep serving.
+    const requestedAt = now;
+    const notConfirmed = (answer: RespawnAnswer): void => {
+      // Nobody would bring a stopped proxy back: keep serving, and spawn no
+      // further hook within the budget window.
       state.respawnPending = false;
       state.hardStreak = 0;
-      log.error("respawn hook did not start; keeps serving", { ...fields, hardLimitMB: t.hardLimitMB });
+      state.respawnOutcome = answer.outcome;
+      state.restartsExhausted = true;
+      state.respawnRetryAt = requestedAt + RESPAWN_BUDGET_WINDOW_MS;
+      const outcome = answer.outcome as keyof typeof NOT_CONFIRMED;
+      log.error(NOT_CONFIRMED[outcome] ?? NOT_CONFIRMED["no-acknowledgement"], {
+        ...fields, hardLimitMB: t.hardLimitMB, outcome: answer.outcome, waitedMs: answer.waitedMs,
+        ...(answer.exitCode !== undefined ? { hookExit: answer.exitCode } : {}),
+        restarts: "exhausted", retryInS: RESPAWN_BUDGET_WINDOW_MS / 1000,
+      });
     };
-    respawn.request("memory").then((confirmed) => {
-      if (!confirmed) return refused();
+    respawn.request("memory").then((answer) => {
+      if (!answer.confirmed) return notConfirmed(answer);
+      state.respawnOutcome = answer.outcome;
       stopSampling();
+      log.info("respawn confirmed; draining", { outcome: answer.outcome, waitedMs: answer.waitedMs });
       void opts.shutdown("memory");
-    }, refused);
+    }, (err: unknown) => notConfirmed({ outcome: "hook-failed", confirmed: false, waitedMs: 0, error: String(err) }));
   }
 
   function stopSampling(): void {
@@ -202,7 +297,10 @@ export function createHealthSupervisor(opts: HealthSupervisorOptions): HealthSup
       watchdog = null;
       if (opts.watchdog !== false) stopEventLoopMonitor();
     },
-    memory: () => ({ ...state }),
+    memory: () => {
+      const exhausted = state.respawnRetryAt !== null && clock.now() < state.respawnRetryAt;
+      return { ...state, restartsExhausted: exhausted, respawnRetryAt: exhausted ? state.respawnRetryAt : null };
+    },
   };
 }
 

@@ -26,7 +26,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 20 | [Fewer redundant request-body copies (bytes upstream unchanged)](20-fewer-request-body-copies.md) | sol | medium | 19 | resolved |
 | 21 | [Health supervisor: one graceful shutdown sequence, footprint thresholds 512/1024 MB](21-health-supervisor-and-graceful-shutdown.md) | sol | high | 19, 14 | resolved |
 | 22 | [Graceful stop request `POST /__kit/stop`, shared deadlines and the manager's stop path](22-graceful-stop-request-and-shared-deadlines.md) | sol | high | 18, 21, 40 | ready-for-agent |
-| 23 | [Respawn acknowledgement before drain (a refused respawn leaves the proxy serving)](23-respawn-acknowledgement-before-drain.md) | sol | high | 17, 18, 21 | ready-for-agent |
+| 23 | [Respawn acknowledgement before drain (a refused respawn leaves the proxy serving)](23-respawn-acknowledgement-before-drain.md) | sol | high | 17, 18, 21 | resolved |
 | 24 | [Solver transport seam (prefactor): dispatcher state as an object, thread transport adapter](24-solver-transport-seam.md) | sol | medium | 12 | resolved |
 | 25 | [Bounded-collection module; CDN memory cache and stall counters bounded](25-bounded-collections-cdn-memory-and-stall-counters.md) | glm | medium | 12 | resolved |
 | 26 | [Captcha egress routing under Bun](26-captcha-egress-routing-under-bun.md) | glm | medium | 12 | resolved |
