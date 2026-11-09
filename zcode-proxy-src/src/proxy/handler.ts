@@ -1361,6 +1361,32 @@ function previewBody(body: string): string {
 
 const COMPACT_LOG = process.env.ZCODE_LOG_FORMAT === "compact";
 
+/*
+ * The request row (table, or one line with ZCODE_LOG_FORMAT=compact), printed
+ * once per request of the routes this handler serves: /v1/messages and
+ * /v1/chat/completions. /v1/responses and the /async/v1/* routes print no row.
+ *
+ * - TTFB: from the request reaching the proxy to the first chunk of a streamed
+ *   answer from the upstream (to the upstream's headers for any other answer).
+ * - Tok: for a streamed answer, the upstream's usage total (completion_tokens
+ *   or output_tokens) if a usage event was among the events read, otherwise
+ *   the counted text deltas; for a translated batch answer, the body's usage
+ *   total; "-" for none and for any other answer.
+ * - tok/s: Tok / Total for a streamed answer; "-" otherwise.
+ * - Total: for a streamed answer, from the request reaching the proxy to the
+ *   end of the upstream stream at the proxy (its end, a read failure or the
+ *   client leaving); "-" for any other answer.
+ *
+ * Streamed answers on these two routes are read from the upstream at the
+ * client's pace instead of being buffered ahead of a slow client (ticket 61,
+ * response-body.ts). So for a client that reads slower than the upstream
+ * sends, Total and tok/s include the time the client takes to read the answer;
+ * if such a client disconnects early, Tok reflects only what was read before
+ * it left (the usage total if it arrived by then, otherwise the counted text
+ * deltas). For a client that keeps up the values are what they were before
+ * that change. TTFB, the column names and the compact format are unchanged
+ * (Owner Proxy round 31 Q2; the release-notes line is in ticket 54).
+ */
 function printHeader(): void {
   if (headerPrinted) return;
   headerPrinted = true;
