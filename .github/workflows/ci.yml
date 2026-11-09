@@ -189,13 +189,23 @@ jobs:
       # Round 12 Q3 condition 1) is the same kind of one-run switch: while
       # tests/memory/measure-stalled (content "N") is committed, the ratchet is
       # replaced by N rotations of S1/stalled and its drained reference.
+      # The S2 CDN cache A/B (ticket 80, Owner Proxy round 31 Q1, stage 1) is
+      # another such switch: while tests/memory/measure-cdn is committed
+      # (content "N", "N ABAB" or "N BABA"), the ratchet is replaced by N
+      # rotations of full S2/short runs whose phase D uses head's
+      # CaptchaCdnCache (A) or the verbatim pre-29 cache (B). A re-run attempt
+      # with an even number reverses the marker's order.
       - name: Memory loop (short profile) and expected-RED ratchet
-        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') == ''
+        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') == '' && hashFiles('tests/memory/measure-cdn') == ''
         run: node tests/memory/job.mjs --out "${{ runner.temp }}/memloop"
       - name: S1/stalled attribution (only with the tests/memory/measure-stalled marker)
-        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') != ''
+        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') != '' && hashFiles('tests/memory/measure-cdn') == ''
         shell: bash
         run: node tests/memory/job.mjs --measure-stalled "$(tr -d '\r' < tests/memory/measure-stalled)" --out "${{ runner.temp }}/memloop"
+      - name: S2 CDN cache A/B (only with the tests/memory/measure-cdn marker)
+        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') == '' && hashFiles('tests/memory/measure-cdn') != ''
+        shell: bash
+        run: node tests/memory/job.mjs --measure-cdn "$(tr -d '\r' < tests/memory/measure-cdn)" --out "${{ runner.temp }}/memloop"
       - name: S1/burst1 measurement (only with the tests/memory/measure-burst1 marker)
         if: hashFiles('tests/memory/measure-burst1') != ''
         shell: bash
@@ -222,6 +232,8 @@ jobs:
             ${{ runner.temp }}/memloop/measure-S1-burst1.md
             ${{ runner.temp }}/memloop/measure-S1-stalled.json
             ${{ runner.temp }}/memloop/measure-S1-stalled.md
+            ${{ runner.temp }}/memloop/measure-S2-cdn.json
+            ${{ runner.temp }}/memloop/measure-S2-cdn.md
             ${{ runner.temp }}/memloop/**/run.log
             ${{ runner.temp }}/memloop/**/samples.csv
             ${{ runner.temp }}/memloop/**/summary.json

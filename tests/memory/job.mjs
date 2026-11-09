@@ -36,6 +36,16 @@
 // answer), each with the measurement probes, recorded with the buckets of
 // lib/measure.mjs in <out>/measure-S1-stalled.{json,md}. Same exit codes.
 //
+//   node tests/memory/job.mjs --measure-cdn "N[ ABAB|BABA]" [--os …] [--out DIR] [--cap …]
+//
+// The S2 CDN cache A/B (ticket 80 stage 1, Owner Proxy round 31 Q1; CI: only
+// while the test-loop marker tests/memory/measure-cdn exists, never merged):
+// N rotations of full S2/short runs, phase D on head's CaptchaCdnCache (head)
+// or on the verbatim pre-29 cache (pre-29), in the marker's order (an even
+// GITHUB_RUN_ATTEMPT reverses it), recorded with lib/measure-cdn.mjs in
+// <out>/measure-S2-cdn.{json,md}, rewritten after every run so a job that
+// hits its timeout still leaves every finished run. Same exit codes.
+//
 // Caps (--cap auto picks the first that works; lib/caps.mjs):
 //   systemd    `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`,
 //              verified by reading the scope's memory.max from inside it;
@@ -74,6 +84,7 @@ import { runEvidence } from "./lib/completeness.mjs";
 import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
 import { measureMarkdown, measureObservation, measureReport, pairedMarkdown, pairedReport, parseBunArms, parseMeasureSpec, parseStalledCount, STALLED_ARMS, stalledMarkdown, stalledObservation, stalledReport } from "./lib/measure.mjs";
 import { heapAtCapLine } from "./lib/retained-heap.mjs";
+import { CDN_ARM_ENV, cdnMarkdown, cdnObservation, cdnOrder, cdnPlan, cdnReport, parseCdnSpec } from "./lib/measure-cdn.mjs";
 
 // Round 17 Q1 condition 3: a retained-heap minimum above this comes back as a question.
 const RETAINED_HEAP_QUESTION_MB = 66;
@@ -102,9 +113,11 @@ function parseArgs(argv) {
     else if (argv[i] === "--measure-burst1") out.measure = parseMeasureSpec(argv[++i]);
     else if (argv[i] === "--bun") out.bun = parseBunArms(argv[++i]);
     else if (argv[i] === "--measure-stalled") out.measureStalled = parseStalledCount(argv[++i]);
+    else if (argv[i] === "--measure-cdn") out.measureCdn = parseCdnSpec(argv[++i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
   if (out.measureStalled && (out.measure || out.bun || out.only)) throw new Error("--measure-stalled runs on its own (no --measure-burst1, --bun or --only)");
+  if (out.measureCdn && (out.measure || out.bun || out.only || out.measureStalled)) throw new Error("--measure-cdn runs on its own (no --measure-burst1, --measure-stalled, --bun or --only)");
   // --bun exists only for the paired measurement, and names exactly its arms (Round 10 Q1 condition 1).
   if (out.bun && !out.measure) throw new Error("--bun exists only in measurement mode (--measure-burst1 \"N bun=<v>,<v>…\")");
   if (out.measure?.arms || out.bun) {
@@ -234,7 +247,12 @@ async function main() {
     issueIds = issueIdsIn(join(ROOT, ".scratch", "kit-overhaul", "issues"));
   } catch (err) { console.error(`memory-budget: cannot read the expected-RED list or the issues: ${err.message}`); return 2; }
   mkdirSync(args.out, { recursive: true });
-  console.log(args.measureStalled
+  // The A/B's order for this job: the marker's, reversed on an even re-run attempt.
+  const attempt = Number(process.env.GITHUB_RUN_ATTEMPT) >= 1 ? Number(process.env.GITHUB_RUN_ATTEMPT) : 1;
+  const cdnRunOrder = args.measureCdn ? cdnOrder(args.measureCdn.order, attempt) : null;
+  console.log(args.measureCdn
+    ? `memory-budget: S2 CDN cache A/B, ${args.measureCdn.count} rotations in order ${cdnRunOrder} (marker ${args.measureCdn.order ?? "ABAB"}, attempt ${attempt}) on ${args.os}, cap ${capChoice.cap}, output ${args.out}`
+    : args.measureStalled
     ? `memory-budget: S1/stalled attribution, ${args.measureStalled} rotations of ${STALLED_ARMS.join(" → ")} on ${args.os}, cap ${capChoice.cap}, output ${args.out}`
     : args.measure?.arms
     ? `memory-budget: S1/burst1 paired Bun measurement, ${args.measure.count} runs per arm (${args.measure.arms.join(" → ")} in rotation) on ${args.os}, cap ${capChoice.cap}, output ${args.out}`
@@ -271,6 +289,36 @@ async function main() {
       growthChecks: (summary?.checks ?? []).filter((c) => /^growth:/.test(c.name)).map((c) => ({ name: c.name, red: c.red, value: c.value ?? null, commitValue: c.commitValue ?? null, wsValue: c.wsValue ?? null, gate: c.gate ?? null, budget: c.budget, trend: c.trend === true, insufficient: c.detail?.insufficient === true, samples: c.detail?.samples ?? null, windowMediansMB: c.detail?.windowMediansMB ?? null, risingWindows: c.detail?.risingWindows ?? null, netRisePct: c.detail?.netRisePct ?? null })),
       error: why ?? summary?.error ?? r.error ?? null };
     return { result, summary };
+  }
+
+  if (args.measureCdn) {
+    // The S2 CDN cache A/B (ticket 80 stage 1): no verdict, no ratchet. Each
+    // run is told its arm through the environment; the S2 body reports the
+    // cache phase D built, and a run that does not is invalid.
+    const { count, order: markerOrder } = args.measureCdn;
+    const tree = (() => { try { const r = spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", windowsHide: true }); return r.status === 0 ? r.stdout.trim() : process.env.GITHUB_SHA ?? null; } catch { return process.env.GITHUB_SHA ?? null; } })();
+    const plan = cdnPlan(count, cdnRunOrder);
+    const reps = [];
+    const write = () => {
+      const report = { ...cdnReport(reps, { os: args.os, requested: count, markerOrder: markerOrder ?? "ABAB", attempt, order: cdnRunOrder, tree }), cap: capChoice.cap, node: process.version };
+      writeFileSync(join(args.out, "measure-S2-cdn.json"), JSON.stringify(report, null, 2));
+      const md = cdnMarkdown(report);
+      writeFileSync(join(args.out, "measure-S2-cdn.md"), md);
+      return { report, md };
+    };
+    for (const [idx, { rotation, arm }] of plan.entries()) {
+      console.log(`\n── S2 CDN cache A/B run ${idx + 1} of ${plan.length} (rotation ${rotation}, ${arm}) ──`);
+      const dir = join(args.out, "measure-S2-cdn", `rep-${rotation}-${arm}`);
+      const { result, summary } = await runIn("S2/short", dir, { [CDN_ARM_ENV]: arm });
+      const obs = cdnObservation({ run: idx + 1, rotation, arm, result, summary });
+      console.log(`S2 CDN A/B run ${idx + 1} [${arm}, phase D ran ${obs.armRan ?? "?"}]: cdn-cache:memory-growth ${obs.valueMB ?? "—"} MB (${obs.mode ?? "—"}), rescan ${obs.rescan ?? "—"}${obs.valid ? "" : ` (invalid: ${obs.problems.join("; ")})`}`);
+      reps.push(obs);
+      write();
+    }
+    const { report, md } = write();
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+    console.log(`\n${md}`);
+    return report.complete ? 0 : 2;
   }
 
   if (args.measureStalled) {

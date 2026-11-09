@@ -15,6 +15,21 @@ import { tmpdir } from "node:os";
 import { configureCaptchaSolver, getCaptchaSolverStats, requestCaptchaSolverRecycle, runCaptchaSolve, shutdownCaptchaSolver } from "../../../zcode-proxy-src/src/proxy/captcha-solver.js";
 import { CaptchaCdnCache } from "../../../zcode-proxy-src/src/proxy/captcha-cdn-cache.js";
 
+// The CDN cache A/B (ticket 80 stage 1; set only by job.mjs --measure-cdn):
+// ZCODE_MEMLOOP_CDN_ARM=head|pre-29 picks the class phase D constructs, head's
+// CaptchaCdnCache or the verbatim pre-29 cache. Both arms load the same
+// modules here, before phase A, so everything but phase D's instance is
+// identical. Unset: nothing more is loaded, phase D runs head's cache and its
+// marks are as they always were.
+const CDN_ARM = process.env.ZCODE_MEMLOOP_CDN_ARM;
+let Pre29CdnCache: typeof CaptchaCdnCache | null = null;
+let rescanInPhaseD: ((t: { c0: number; c1: number; p0: number; p1: number }) => string) | null = null;
+if (CDN_ARM !== undefined) {
+  if (CDN_ARM !== "head" && CDN_ARM !== "pre-29") throw new Error(`ZCODE_MEMLOOP_CDN_ARM must be "head" or "pre-29" (got ${JSON.stringify(CDN_ARM)})`);
+  Pre29CdnCache = (await import("../../../zcode-proxy-src/src/__fixtures__/captcha-cdn-cache.7555b87.js")).CaptchaCdnCache as unknown as typeof CaptchaCdnCache;
+  rescanInPhaseD = (await import("../lib/measure-cdn.mjs")).rescanInPhaseD;
+}
+
 const LONG = process.env.S2_PROFILE === "long";
 const PHASES = process.env.S2_PHASES ?? "ABCDE";
 const BACKEND = join(import.meta.dir, "..", "fixtures", "s2-backend.ts");
@@ -97,16 +112,26 @@ if (PHASES.includes("D")) {
 //    evicted from memory, only refused on read after the TTL.
 phase = "D-cdn-cache";
 const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "s2-cdn-"));
-const cache = new CaptchaCdnCache({ directory: dir });
-mark("D-start");
+const Cache = CDN_ARM === "pre-29" ? Pre29CdnCache! : CaptchaCdnCache;
+const c0 = Date.now();
+const cache = new Cache({ directory: dir });
+const c1 = Date.now();
+// The A/B reports the class of the instance built, not the label it was given.
+const built = CDN_ARM === undefined ? null : Pre29CdnCache && cache instanceof Pre29CdnCache ? "pre-29" : cache instanceof CaptchaCdnCache ? "head" : "unknown";
+mark("D-start", built ? { cdnArm: built } : {});
 const body = Buffer.alloc(256 * 1024, 1);
 const nD = LONG ? 2000 : 600;
+let p0 = 0;
+let p1 = 0;
 for (let i = 0; i < nD; i++) {
+  if (built) p0 = Date.now();
   cache.put(`https://o.alicdn.com/captcha-frontend/dynamicJS/${i}/pe.js`, Buffer.from(body));
+  if (built) p1 = Date.now();
   if ((i + 1) % 100 === 0) mark(`D-after-${i + 1}`, { entries: i + 1 });
 }
 rmSync(dir, { recursive: true, force: true });
-mark("D-end");
+// Whether the pruner's 60 s rescan ran: the pre-29 cache has no pruner.
+mark("D-end", built ? { cdnArm: built, cdnPhaseD: { rescan: built === "head" ? rescanInPhaseD!({ c0, c1, p0, p1 }) : "no pruner", putSpanMs: p1 - c0 } } : {});
 }
 
 if (PHASES.includes("E")) {

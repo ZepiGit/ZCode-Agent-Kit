@@ -21,6 +21,8 @@
 //                                 ("" = none recorded), plus a fixed runtime environment.
 //   FAKE_RUN_MODE=stalled-arms    an S1/stalled or S1/drained attribution run (see the
 //                                 mode below: idle floor, load peak, JS heap)
+//   FAKE_RUN_MODE=cdn-arms        an S2/short run of the CDN cache A/B (see the mode
+//                                 below: D-start / D-end marks per arm and rotation)
 //   FAKE_RUN_MODE=s1-reps         an S1/short run per repetition, windows-shaped by
 //                                 default, from FAKE_RUN_REPS (see the mode below)
 //   FAKE_RUN_MODE=s6-reps         an S6/short run per repetition from FAKE_RUN_REPS
@@ -112,7 +114,44 @@ if (mode === "stalled-arms") {
   if (shape === "win32") process.stderr.write(`@@JOB applied=1 limit=${3 * 1024 ** 3} peak=${kb(p.commit) * 1024}\n`);
   process.exit(v.red ? 1 : 0);
 }
-const role = (maxCount) => ({ peakMB: 100, peakProcMB: 100, peakHwmMB: 120, maxCount, maxFds: 10, maxThreads: 10, distinctPids: maxCount, peakHeapMB: null });
+if (mode === "cdn-arms") {
+  // An S2/short run of the CDN cache A/B (ticket 80). FAKE_RUN_CDN: { head: [rep…],
+  // "pre-29": [rep…] }, one entry per rotation (rep-<k>-… in --out), picked by the
+  // arm in ZCODE_MEMLOOP_CDN_ARM as the S2 body reads it: { start: { rss,
+  // footprint }, end: { rss, footprint } } (the D-start / D-end marks, MB),
+  // rescan ("yes" | "no" | "unsure" | "no pruner"), putSpanMs, noPhaseD (no D
+  // marks), harness ("why": exit 2). The value is computed as s2-captcha.mjs
+  // does: footprint (commit) on win32, RSS on linux, D-end minus D-start.
+  // FAKE_RUN_CDN_DEAF=1: the body never saw the arm (no cdnArm in its marks).
+  const rep = Number(opt("--out").match(/rep-(\d+)-/)?.[1] ?? 1);
+  const arm = process.env.ZCODE_MEMLOOP_CDN_ARM ?? null;
+  const p = JSON.parse(process.env.FAKE_RUN_CDN)[arm]?.[rep - 1];
+  const win = (process.env.FAKE_RUN_SHAPE ?? "linux") === "win32";
+  const base = { id: "fake", key, scenario, profile: "short", variant, platform: win ? "win32" : "linux", metric: win ? "commit" : "rss", durationS: 200, samples: 200, observations: [], orphans: [] };
+  if (!p || p.harness) {
+    writeFileSync(join(dir, "summary.json"), JSON.stringify({ ...base, outcome: "HARNESS FAILURE", error: p?.harness ?? `no fixture for ${arm} rotation ${rep}`, notes: {} }, null, 2));
+    process.exit(2);
+  }
+  const reported = process.env.FAKE_RUN_CDN_DEAF === "1" ? {} : { cdnArm: arm };
+  const marks = p.noPhaseD ? [] : [
+    { name: "D-start", tMs: 130000, rssMB: p.start.rss, footprintMB: p.start.footprint, mainHeapMB: 1, generation: 10, recycles: 9, ...reported },
+    { name: "D-end", tMs: 131000, rssMB: p.end.rss, footprintMB: p.end.footprint, mainHeapMB: 152, generation: 10, recycles: 9, ...reported, ...(reported.cdnArm ? { cdnPhaseD: { rescan: p.rescan ?? "no", putSpanMs: p.putSpanMs ?? 900 } } : {}) },
+  ];
+  const metricKey = win ? "footprint" : "rss";
+  const value = p.noPhaseD ? null : p.end[metricKey] - p.start[metricKey];
+  const checks = [
+    { name: "growth:scenario", red: false, value: 1, budget: 5, unit: "%/1k" },
+    ...(value === null ? [] : [{ name: "cdn-cache:memory-growth", red: value > 64, value, budget: 64, unit: "MB" }]),
+    { name: "orphans", red: false, value: 0, budget: 0, unit: "procs", detail: [] },
+  ];
+  const red = checks.some((c) => c.red);
+  const summary = { ...base, outcome: red ? "RED" : "GREEN", red, checks, summary: { "*": role(1), kit: role(0), scenario: role(1) },
+    notes: { marks, sampler: { units: win ? { ok: true, compared: 40 } : null, overhead: null } } };
+  writeFileSync(join(dir, "summary.json"), JSON.stringify(summary, null, 2));
+  if (win) process.stderr.write(`@@JOB applied=1 limit=${4 * 1024 ** 3} peak=${1400 * 1024 * 1024}\n`);
+  process.exit(red ? 1 : 0);
+}
+function role(maxCount) { return { peakMB: 100, peakProcMB: 100, peakHwmMB: 120, maxCount, maxFds: 10, maxThreads: 10, distinctPids: maxCount, peakHeapMB: null }; }
 if (mode === "s1-reps") {
   // FAKE_RUN_REPS: one entry per repetition (rep-<i> in --out, else the first):
   // { growth (commit %/1k, null = insufficient samples), trend, red: [other check

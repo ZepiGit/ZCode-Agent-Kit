@@ -94,7 +94,8 @@ export async function run(ctx) {
   const heap = existsSync(heapLog) ? readFileSync(heapLog, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
   const byName = Object.fromEntries(marks.map((m) => [m.name, m]));
   const maxWorkerHeap = (kind) => Math.max(0, ...heap.filter((h) => h.kind === kind).map((h) => h.heapMB));
-  ctx.note("marks", marks.map(({ name, rssMB, footprintMB, mainHeapMB, tMs, solver, entries, coldStartMs, idleExited }) => ({ name, tMs, rssMB, footprintMB, mainHeapMB, generation: solver.generation, recycles: solver.recycles, lastRecycleReason: solver.lastRecycleReason, deadlineKills: solver.deadlineKills, ...(entries ? { entries } : {}), ...(coldStartMs !== undefined ? { coldStartMs, idleExited } : {}) })));
+  // cdnArm / cdnPhaseD: only in the CDN cache A/B (ticket 80, job.mjs --measure-cdn).
+  ctx.note("marks", marks.map(({ name, rssMB, footprintMB, mainHeapMB, tMs, solver, entries, coldStartMs, idleExited, cdnArm, cdnPhaseD }) => ({ name, tMs, rssMB, footprintMB, mainHeapMB, generation: solver.generation, recycles: solver.recycles, lastRecycleReason: solver.lastRecycleReason, deadlineKills: solver.deadlineKills, ...(entries ? { entries } : {}), ...(coldStartMs !== undefined ? { coldStartMs, idleExited } : {}), ...(cdnArm ? { cdnArm } : {}), ...(cdnPhaseD ? { cdnPhaseD } : {}) })));
   ctx.note("workerHeap", {
     heavyDomMaxMB: maxWorkerHeap("heavy-dom"),
     heavyDomFirst10: heap.filter((h) => h.kind === "heavy-dom").slice(0, 10).map((h) => h.heapMB),
