@@ -18,7 +18,7 @@ import { floorMeasurement, floorVerdict } from "./lib/repetitions.mjs";
 import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
 import { resolveBun } from "../../lib/process.mjs";
 import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
-import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
+import { bunPath, isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
 import { freezeProcess, killProcess, thawProcess, whileFrozen } from "./lib/freeze.mjs";
 import { identityOf, isSameProcess, linuxStart, parseWindowsStart, startOf } from "./lib/process-identity.mjs";
 import * as s3Scenario from "./scenarios/s3-concurrency.mjs";
@@ -1367,6 +1367,228 @@ test("stalled attribution is off by default: the ratchet step runs unless the ma
   assert.match(attribution, /--measure-stalled "\$\(tr -d '\\r' < tests\/memory\/measure-stalled\)"/);
   assert.match(step("Upload memory loop artefacts"), /measure-S1-stalled\.json[\s\S]*measure-S1-stalled\.md/);
   assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-stalled"), false, "tests/memory/measure-stalled is a one-run switch: delete it before the pre-merge run");
+});
+
+// ── The S2 CDN cache A/B at the job seam (ticket 80, Owner Proxy round 31 Q1, stage 1) ──
+test("CDN cache A/B is off by default: the ratchet step runs unless the marker exists, the A/B step only with it, and the marker is not committed", () => {
+  const ci = lf(ciWorkflow());
+  const job = ci.slice(ci.indexOf("\n  memory-budget:"));
+  const step = (name) => job.slice(job.indexOf(`- name: ${name}`)).split(/\n      - /)[0];
+  assert.match(step("Memory loop (short profile) and expected-RED ratchet"), /if: hashFiles\('tests\/memory\/measure-burst1'\) == '' && hashFiles\('tests\/memory\/measure-stalled'\) == '' && hashFiles\('tests\/memory\/measure-cdn'\) == ''/);
+  assert.match(step("S1/stalled attribution"), /&& hashFiles\('tests\/memory\/measure-cdn'\) == ''/, "one marker at a time: the stalled attribution does not run beside the A/B");
+  const ab = step("S2 CDN cache A/B");
+  assert.match(ab, /if: hashFiles\('tests\/memory\/measure-burst1'\) == '' && hashFiles\('tests\/memory\/measure-stalled'\) == '' && hashFiles\('tests\/memory\/measure-cdn'\) != ''/);
+  assert.match(ab, /--measure-cdn "\$\(tr -d '\\r' < tests\/memory\/measure-cdn\)"/);
+  assert.match(step("Upload memory loop artefacts"), /measure-S2-cdn\.json[\s\S]*measure-S2-cdn\.md/);
+  assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-cdn"), false, "tests/memory/measure-cdn is a test-loop switch for ticket 80's A/B: it never merges, delete it before the pre-merge run");
+});
+
+function cdnJob(args, { shape = "linux", arms, env = {} }) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-cdn-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const os = shape === "win32" ? "windows" : "linux";
+  const r = runJob(["--os", os, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN, ...args], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "cdn-arms", FAKE_RUN_SHAPE: shape, FAKE_RUN_CDN: JSON.stringify(arms), GITHUB_STEP_SUMMARY: stepSummary, GITHUB_RUN_ATTEMPT: "", ...env });
+  const read = (p) => { try { return readFileSync(join(home, "job", p), "utf8"); } catch { return null; } };
+  const out = { r, job: read("job-summary.json"), measure: JSON.parse(read("measure-S2-cdn.json") ?? "null"), md: read("measure-S2-cdn.md"), stepSummary: readFileSync(stepSummary, "utf8"), runDirs: (() => { try { return readdirSync(join(home, "job", "measure-S2-cdn")).sort(); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return out;
+}
+const cdnRun = (start, end, extra = {}) => ({ start: typeof start === "number" ? { rss: start, footprint: start } : start, end: typeof end === "number" ? { rss: end, footprint: end } : end, ...extra });
+
+test("CDN A/B: N rotations of full S2/short runs, head (A) then pre-29 (B), each run told its arm; per-arm values, modes, phase-D marks and the Welch reading (worked example, linux)", () => {
+  const arms = {
+    head: [cdnRun(75, 135, { rescan: "no", putSpanMs: 1144 }), cdnRun(75, 133, { rescan: "no", putSpanMs: 1150 })],
+    "pre-29": [cdnRun(75, 132, { rescan: "no pruner", putSpanMs: 700 }), cdnRun(76, 126, { rescan: "no pruner", putSpanMs: 710 })],
+  };
+  const { r, job, measure, md, stepSummary, runDirs } = cdnJob(["--measure-cdn", "2"], { arms });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(job, null, "an A/B run is not a ratchet run");
+  assert.deepEqual(runDirs, ["rep-1-head", "rep-1-pre-29", "rep-2-head", "rep-2-pre-29"]);
+  assert.equal(measure.order, "ABAB");
+  assert.deepEqual(measure.reps.map((x) => `${x.run} ${x.rotation} ${x.arm} ${x.armRan}`), ["1 1 head head", "2 1 pre-29 pre-29", "3 2 head head", "4 2 pre-29 pre-29"], "ABAB: the arms alternate, and each run's body ran the arm it was given");
+  assert.equal(measure.complete, true);
+  // head 60, 58: mean 59, sd 1.41; pre-29 57, 50: mean 53.5, sd 4.95; difference 5.5,
+  // se √(2/2 + 24.5/2) = 3.64, Welch t 1.51, df 13.25² / (1 + 12.25²) = 1.16.
+  assert.deepEqual(measure.reps.map((x) => [x.valueMB, x.mode]), [[60, "high"], [57, "high"], [58, "high"], [50, "low"]]);
+  assert.deepEqual([measure.head.values, measure.head.meanMB, measure.head.sdMB, measure.head.low, measure.head.high], [[60, 58], 59, 1.41, 0, 2]);
+  assert.deepEqual([measure["pre-29"].values, measure["pre-29"].meanMB, measure["pre-29"].sdMB, measure["pre-29"].low, measure["pre-29"].high], [[57, 50], 53.5, 4.95, 1, 1]);
+  assert.deepEqual(measure.difference, { meanMB: 5.5, welchT: 1.51, df: 1.16 });
+  assert.equal(measure.reading, null, "the pre-registered rule judges the windows commit values only");
+  assert.deepEqual(measure.reps.map((x) => [x.dStart.rssMB, x.dEnd.rssMB, x.rescan, x.putSpanMs]), [[75, 135, "no", 1144], [75, 132, "no pruner", 700], [75, 133, "no", 1150], [76, 126, "no pruner", 710]]);
+  for (const text of [md, stepSummary]) {
+    assert.match(text, /S2 CDN cache A\/B \(linux, 2 rotations, order ABAB/);
+    assert.match(text, /\| head \| 2 of 2 \| 60, 58 \| 59 \| 1\.41 \| 0 \/ 2 \|/);
+    assert.match(text, /\| 4 \| 2 \| pre-29 \| 50 \| low \| 76 \/ 76 \| 126 \/ 126 \| 50 \/ 50 \| 0 \| no pruner \| 710 \| yes \|/);
+    assert.match(text, /head − pre-29: 5\.5 MB, Welch t 1\.51 \(df 1\.16\)/);
+  }
+});
+
+test("CDN A/B on windows: the commit value, commit and WS at D-start and D-end, the commit − WS gap; an even re-run attempt reverses the marker's order", () => {
+  const arms = {
+    head: [cdnRun({ footprint: 80, rss: 77 }, { footprint: 145, rss: 139 }, { rescan: "no" })],
+    "pre-29": [cdnRun({ footprint: 76, rss: 75 }, { footprint: 125, rss: 123 }, { rescan: "no pruner" })],
+  };
+  const { r, measure, md, runDirs } = cdnJob(["--measure-cdn", "1"], { shape: "win32", arms, env: { GITHUB_RUN_ATTEMPT: "2" } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual([measure.markerOrder, measure.attempt, measure.order], ["ABAB", 2, "BABA"]);
+  assert.deepEqual(runDirs, ["rep-1-head", "rep-1-pre-29"]);
+  assert.deepEqual(measure.reps.map((x) => x.arm), ["pre-29", "head"], "BABA: pre-29 first");
+  const [b, a] = measure.reps;
+  assert.deepEqual([a.valueMB, a.mode, a.dStart, a.dEnd, a.commitGrowthMB, a.wsGrowthMB, a.gapMB], [65, "high", { footprintMB: 80, rssMB: 77 }, { footprintMB: 145, rssMB: 139 }, 65, 62, 3]);
+  assert.deepEqual([b.valueMB, b.mode, b.gapMB, b.rescan], [49, "low", 1, "no pruner"]);
+  assert.match(measure.reading, /^insufficient: 1 and 1 valid runs/);
+  assert.match(md, /\| 1 \| 1 \| pre-29 \| 49 \| low \| 76 \/ 75 \| 125 \/ 123 \| 49 \/ 48 \| 1 \| no pruner \| 900 \| yes \|/);
+  assert.match(md, /D-start commit \/ WS/);
+});
+
+test("CDN A/B: the marker may name the order; a third attempt keeps it (odd attempts run the marker's order)", () => {
+  const arms = { head: [cdnRun(75, 130)], "pre-29": [cdnRun(75, 128)] };
+  const { r, measure } = cdnJob(["--measure-cdn", "1 BABA"], { arms, env: { GITHUB_RUN_ATTEMPT: "3" } });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual([measure.markerOrder, measure.order, measure.reps.map((x) => x.arm)], ["BABA", "BABA", ["pre-29", "head"]]);
+});
+
+test("CDN A/B: a run whose S2 body did not report the arm it was given (the swap never reached phase D) is invalid, and the A/B exits 2", () => {
+  const arms = { head: [cdnRun(75, 130)], "pre-29": [cdnRun(75, 128)] };
+  const { r, measure, md } = cdnJob(["--measure-cdn", "1"], { arms, env: { FAKE_RUN_CDN_DEAF: "1" } });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(measure.complete, false);
+  assert.deepEqual(measure.reps.map((x) => [x.arm, x.armRan, x.valid]), [["head", null, false], ["pre-29", null, false]]);
+  assert.match(measure.reps[1].problems.join(), /phase D did not report its cache \(given pre-29\)/);
+  assert.deepEqual([measure.head.valid, measure["pre-29"].valid, measure.difference.meanMB], [0, 0, null], "an invalid run never enters an arm's values");
+  assert.match(md, /complete: NO/);
+});
+
+test("CDN A/B: a run without phase D marks or a cdn-cache value, or a harness failure, is invalid", () => {
+  const arms = { head: [cdnRun(75, 130, { noPhaseD: true }), cdnRun(75, 130)], "pre-29": [cdnRun(75, 128), { harness: "timed out" }] };
+  const { r, measure } = cdnJob(["--measure-cdn", "2"], { arms });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.deepEqual(measure.reps.map((x) => x.valid), [false, true, true, false]);
+  assert.match(measure.reps[0].problems.join(), /no cdn-cache:memory-growth value/);
+  assert.match(measure.reps[0].problems.join(), /no D-start \/ D-end marks/);
+  assert.match(measure.reps[3].problems.join(), /harness failure: .*timed out/);
+  assert.deepEqual([measure.head.values, measure["pre-29"].values], [[55], [53]]);
+});
+
+// The S2 body itself (real Bun, phase D only, the real 600 × 256 KiB puts):
+// the arm picks the class phase D constructs, and the marks report the class
+// of the instance it built, not the label it was given.
+async function s2PhaseD(arm) {
+  const tmp = mkdtempSync(join(tmpdir(), "memloop-s2d-"));
+  try {
+    const env = { ...process.env, S2_PHASES: "D", TMPDIR: tmp };
+    delete env.ZCODE_MEMLOOP_CDN_ARM;
+    if (arm !== undefined) env.ZCODE_MEMLOOP_CDN_ARM = arm;
+    const child = spawn(bunPath(), [join(KIT_ROOT, "tests", "memory", "scenarios", "s2-captcha-run.ts")], { cwd: join(KIT_ROOT, "zcode-proxy-src"), env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (b) => { stdout += b; });
+    child.stderr.on("data", (b) => { stderr += b; });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 120_000);
+    const status = await new Promise((done) => child.on("close", (code) => { clearTimeout(timer); done(code); }));
+    const marks = Object.fromEntries(stdout.split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((m) => m?.type === "phase").map((m) => [m.name, m]));
+    return { r: { status, stderr }, marks, left: readdirSync(tmp) };
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+}
+
+test("S2 body: ZCODE_MEMLOOP_CDN_ARM=pre-29 runs phase D on the verbatim pre-29 cache, head on head's; the marks name the class built and the rescan reading", async () => {
+  const [pre, head] = await Promise.all([s2PhaseD("pre-29"), s2PhaseD("head")]);
+  assert.equal(pre.r.status, 0, pre.r.stderr);
+  assert.deepEqual([pre.marks["D-start"].cdnArm, pre.marks["D-end"].cdnArm, pre.marks["D-end"].cdnPhaseD.rescan], ["pre-29", "pre-29", "no pruner"]);
+  assert.equal(head.r.status, 0, head.r.stderr);
+  assert.deepEqual([head.marks["D-start"].cdnArm, head.marks["D-end"].cdnArm, head.marks["D-end"].cdnPhaseD.rescan], ["head", "head", "no"], "600 puts take far less than the 60 s rescan interval");
+  for (const { marks, left } of [pre, head]) {
+    assert.ok(marks["D-end"].cdnPhaseD.putSpanMs >= 0 && marks["D-end"].cdnPhaseD.putSpanMs < 60_000);
+    assert.deepEqual([marks["D-after-600"].entries, left], [600, []], "the same 600 puts, and phase D removes its directory");
+  }
+});
+
+test("S2 body: without the arm, phase D runs head's cache and its marks carry nothing new; an unknown arm fails before phase A instead of measuring head", async () => {
+  const [plain, typo] = await Promise.all([s2PhaseD(undefined), s2PhaseD("pre29")]);
+  assert.equal(plain.r.status, 0, plain.r.stderr);
+  for (const name of ["D-start", "D-end"]) assert.deepEqual(Object.keys(plain.marks[name]).filter((k) => k.startsWith("cdn")), [], name);
+  assert.notEqual(typo.r.status, 0);
+  assert.match(typo.r.stderr, /ZCODE_MEMLOOP_CDN_ARM must be "head" or "pre-29" \(got "pre29"\)/);
+  assert.deepEqual(Object.keys(typo.marks), []);
+});
+
+// cdn-ab-pool.mjs: the pre-registered rule over the jobs' measure-S2-cdn.json reports.
+const POOL = join(dirname(fileURLToPath(import.meta.url)), "cdn-ab-pool.mjs");
+const alternating = (mean, a, n, from = 0) => Array.from({ length: n }, (_, i) => mean + ((from + i) % 2 ? -a : a));
+function poolJobs(jobs, extra = []) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-cdn-pool-"));
+  try {
+    const files = jobs.map((j, k) => {
+      const reps = [];
+      const order = j.order ?? "ABAB";
+      const max = Math.max(j.head.length, j.pre.length);
+      for (let i = 0; i < max; i++) for (const arm of order === "ABAB" ? ["head", "pre-29"] : ["pre-29", "head"]) {
+        const v = (arm === "head" ? j.head : j.pre)[i];
+        if (v === undefined) continue;
+        reps.push({ run: reps.length + 1, rotation: i + 1, arm, armRan: arm, valueMB: v, mode: v <= 54 ? "low" : "high", rescan: arm === "head" ? "no" : "no pruner", valid: !(j.invalid ?? []).includes(reps.length + 1), problems: [] });
+      }
+      const p = join(home, `job-${k + 1}.json`);
+      writeFileSync(p, JSON.stringify({ key: "S2/short", os: j.os ?? "windows", order, attempt: 1, tree: j.tree ?? "abc1234", reps }));
+      return p;
+    });
+    const r = spawnSync(process.execPath, [POOL, ...extra, ...files], { encoding: "utf8", timeout: 30_000 });
+    return { r, json: extra.includes("--json") && r.status === 0 ? JSON.parse(r.stdout) : null };
+  } finally { rmSync(home, { recursive: true, force: true }); }
+}
+
+test("CDN A/B pool: two windows jobs (ABAB, BABA) of 15 per arm, head 58 ± 4 against pre-29 55 ± 4: 3.0 MB, Welch t 2.86 (df 58), attributed", () => {
+  // sd 4·√(30/29) = 4.07 per arm; se √(2 · 16.55 / 30) = 1.05; t = 3 / 1.05 = 2.86.
+  const { r, json } = poolJobs([{ order: "ABAB", head: alternating(58, 4, 15), pre: alternating(55, 4, 15) }, { order: "BABA", head: alternating(58, 4, 15, 15), pre: alternating(55, 4, 15, 15) }], ["--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([json.head.valid, json["pre-29"].valid, json.head.meanMB, json["pre-29"].meanMB, json.head.sdMB], [30, 30, 58, 55, 4.07]);
+  assert.deepEqual(json.difference, { meanMB: 3, welchT: 2.86, df: 58 });
+  assert.equal(json.reading, "attributed");
+  assert.deepEqual(json.jobs.map((j) => j.order), ["ABAB", "BABA"]);
+  const md = poolJobs([{ order: "ABAB", head: alternating(58, 4, 15), pre: alternating(55, 4, 15) }, { order: "BABA", head: alternating(58, 4, 15, 15), pre: alternating(55, 4, 15, 15) }]).r.stdout;
+  assert.match(md, /2 jobs \(ABAB 1, BABA 1\)/);
+  assert.match(md, /: attributed\./);
+});
+
+test("CDN A/B pool: the rule's other outcomes: inconclusive (3.0 MB, t 1.90), inconclusive (1.5 MB), not attributed (0.5 MB), insufficient (29 per arm)", () => {
+  const one = (head, pre) => poolJobs([{ head, pre }], ["--json"]).json;
+  assert.deepEqual([one(alternating(58, 6, 30), alternating(55, 6, 30)).difference.welchT, one(alternating(58, 6, 30), alternating(55, 6, 30)).reading], [1.9, "inconclusive"]);
+  assert.equal(one(alternating(56.5, 1, 30), alternating(55, 1, 30)).reading, "inconclusive", "1.0 ≤ 1.5 < 2.0 MB: neither branch");
+  assert.equal(one(alternating(55.5, 0.1, 30), alternating(55, 0.1, 30)).reading, "not attributed", "below 1.0 MB, however large t is");
+  assert.match(one(alternating(58, 4, 29), alternating(55, 4, 30)).reading, /^insufficient: 29 and 30 valid runs/);
+});
+
+test("CDN A/B pool: invalid runs stay out, a linux pool is recorded without the rule, and linux and windows reports never pool together", () => {
+  const withInvalid = poolJobs([{ head: [60, 99], pre: [50, 51], invalid: [3] }], ["--json"]).json;
+  assert.deepEqual([withInvalid.head.values, withInvalid["pre-29"].values], [[60], [50, 51]]);
+  const linux = poolJobs([{ os: "linux", head: [58, 59], pre: [57, 58] }], ["--json"]).json;
+  assert.equal(linux.reading, null);
+  const mixed = poolJobs([{ os: "linux", head: [58], pre: [57] }, { os: "windows", head: [58], pre: [57] }]);
+  assert.equal(mixed.r.status, 2);
+  assert.match(mixed.r.stderr, /one OS leg per pool \(got linux, windows\)/);
+  const trees = poolJobs([{ head: [58], pre: [57], tree: "aaa" }, { head: [58], pre: [57], tree: "bbb" }]).r.stdout;
+  assert.match(trees, /2 trees \(aaa, bbb\)/);
+});
+
+test("CDN A/B: the 60 s rescan reading from the constructor's and the last put's clocks: yes, no, or unsure in between", async () => {
+  const { rescanInPhaseD } = await import("./lib/measure-cdn.mjs");
+  assert.equal(rescanInPhaseD({ c0: 1000, c1: 1005, p0: 61_005, p1: 61_010 }), "yes", "the last put starts 60 s after the latest possible start scan");
+  assert.equal(rescanInPhaseD({ c0: 1000, c1: 1005, p0: 60_990, p1: 60_999 }), "no", "the last put ends before 60 s after the earliest possible scan");
+  assert.equal(rescanInPhaseD({ c0: 1000, c1: 1005, p0: 60_995, p1: 61_002 }), "unsure");
+});
+
+test("CDN A/B: --measure-cdn takes \"N\", \"N ABAB\" or \"N BABA\" (N from 1 to 50) and runs on its own", () => {
+  for (const [args, why] of [
+    [["--measure-cdn", "0"], /whole number of rotations from 1 to 50/],
+    [["--measure-cdn", "51"], /whole number of rotations from 1 to 50/],
+    [["--measure-cdn", "3 ABBA"], /"N", "N ABAB" or "N BABA"/],
+    [["--measure-cdn", "2", "--measure-stalled", "2"], /runs on its own/],
+    [["--measure-cdn", "2", "--only", "S2/short"], /runs on its own/],
+  ]) {
+    const { r } = cdnJob(args, { arms: {} });
+    assert.equal(r.status, 2, args.join(" "));
+    assert.match(r.stderr, why, args.join(" "));
+  }
 });
 
 test("measurement mode: N fresh sequential S1/burst1 runs on Windows, each with WS gate, sampled WS, ws_peak_kb, commit, proxy count, units and Job Object", () => {
