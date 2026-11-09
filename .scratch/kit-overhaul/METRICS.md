@@ -746,3 +746,25 @@ Copied from ticket 74's branch (eab4ddf, METRICS lines 425-436). Round 29 Q1 wit
 
 ## Windows S4 'Ctrl-C during start' trial (Round 33)
 Until ticket 81 merges, the windows S4/short value of `stale-lock-after-ctrl-c` is a TerminateProcess (crash) result, not a console event (Node maps `child.kill("SIGINT")` to TerminateProcess); it is owned by 81 and never judged as a pass. 81's merge restarts the windows S4/short matching count; 17's windows `flips` floor (proxy-left-after-stop, failed-lifecycle-steps, count:proxy) counts on 81's tree or later.
+
+## Ticket 80: S2/short cdn-cache:memory-growth, CDN cache A/B (Owner Proxy round 31 Q1, stage 1)
+
+Tool: `node tests/memory/job.mjs --measure-cdn "N[ ABAB|BABA]"` (CI: only while the test-loop marker `tests/memory/measure-cdn` exists; it never merges). Each run is a full S2/short run. Its phase D builds head's `CaptchaCdnCache` (arm head) or the verbatim pre-29 cache `zcode-proxy-src/src/__fixtures__/captcha-cdn-cache.7555b87.ts` (arm pre-29); everything else is identical. Value: `cdn-cache:memory-growth` as the run judged it (windows commit, linux RSS; D-end − D-start). Mode: low ≤ 54 MB, high above. Commit = the S2 body's `footprintMB` mark (Bun's memory footprint), WS = its `rssMB` mark. Per-job reports: `measure-S2-cdn.{json,md}`. Pooled reading: `node tests/memory/cdn-ab-pool.mjs [--json] <job reports…>`.
+
+Verdict (pre-registered, windows commit, ≥ 30 valid runs per arm): attributed when head − pre-29 ≥ 2.0 MB with Welch t ≥ 2.5; not attributed when < 1.0 MB or t < 1.5; otherwise inconclusive. **Windows: pending CI** (4 marker runs of "8": attempts or pushes alternating ABAB / BABA, 32 per arm). **Linux CI: pending** (the same 4 runs, 32 per arm; ≥ 10 per arm needed).
+
+Local linux sanity run (labelled, **never counted**; tree c82251d, S2's path identical to 4f4c079; Linux x64, Node 26.7.0, Bun 1.4.2, shared 8-core machine, `--cap systemd` 4G per run; ABAB, 4 rotations; `/home/AgentKit/overhaul-tools/t80-memloop/ab1/measure-S2-cdn.{json,md}`, log `reports/t80-ab-local.log`):
+
+| run | rotation | arm | value (RSS, MB) | mode | D-start footprint / RSS | D-end footprint / RSS | growth footprint / RSS | gap | 60 s rescan in D | put span (ms) | run (s) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 1 | head | 58 | high | 70 / 93 | 129 / 151 | 59 / 58 | 1 | no | 4205 | 221 |
+| 2 | 1 | pre-29 | 57 | high | 88 / 91 | 146 / 148 | 58 / 57 | 1 | no pruner | 3757 | 210 |
+| 3 | 2 | head | 43 | low | 79 / 92 | 121 / 135 | 42 / 43 | −1 | no | 3844 | 211 |
+| 4 | 2 | pre-29 | 57 | high | 89 / 92 | 147 / 149 | 58 / 57 | 1 | no pruner | 3507 | 207 |
+| 5 | 3 | head | 58 | high | 89 / 91 | 147 / 149 | 58 / 58 | 0 | no | 3596 | 197 |
+| 6 | 3 | pre-29 | 57 | high | 90 / 93 | 148 / 150 | 58 / 57 | 1 | no pruner | 3671 | 198 |
+| 7 | 4 | head | 57 | high | 89 / 91 | 147 / 148 | 58 / 57 | 1 | no | 3499 | 196 |
+| 8 | 4 | pre-29 | 58 | high | 89 / 91 | 147 / 149 | 58 / 58 | 0 | no pruner | 3638 | 201 |
+
+- head: 58, 43, 58, 57 (mean 54, sd 7.35; low/high 1/3). pre-29: 57, 57, 57, 58 (mean 57.25, sd 0.5; 0/4). head − pre-29 −3.25 MB, Welch t −0.88 (df 3.03). This proves the tool works; it is no evidence on the windows question (n 4, linux, local).
+- Phase D's puts take 3.5–4.2 s locally, so the head pruner's 60 s rescan never ran in phase D (8 of 8 "no" / "no pruner").
