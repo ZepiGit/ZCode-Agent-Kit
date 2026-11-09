@@ -269,7 +269,7 @@ export class CaptchaTokenPool {
       // the client behind a mint that is almost certain to fail. The refill
       // call runs the probe mint once the backoff has elapsed.
       void this.refill({ urgent: true });
-      throw new Error(STORM_TAKE_ERROR);
+      throw new Error(this.withMintProvenance(STORM_TAKE_ERROR));
     }
     // Re-size immediately from current demand (this take is already in the
     // window) so an empty-pool arrival widens the buffer right away.
@@ -283,14 +283,14 @@ export class CaptchaTokenPool {
       const raceDeadlineMs = Number.isFinite(requestedMs) && requestedMs > 0
         ? Math.min(90_000, Math.max(1_000, Math.floor(requestedMs))) : 25_000;
       const timeout = Promise.withResolvers<never>();
-      const timer = setTimeout(() => timeout.reject(new Error(`captcha take deadline (${raceDeadlineMs}ms)`)), raceDeadlineMs);
+      const timer = setTimeout(() => timeout.reject(new Error(this.withMintProvenance(`captcha take deadline (${raceDeadlineMs}ms)`))), raceDeadlineMs);
       try { param = await Promise.race([this.solveRaced(cfg), timeout.promise]); }
       finally { clearTimeout(timer); }
     } catch (err) {
       if (Date.now() < this.pausedUntil) throw err;
       // Storm began while this take raced: refills are paused, so the grace
       // wait below could only time out.
-      if (this.storm) throw new Error(STORM_TAKE_ERROR);
+      if (this.storm) throw new Error(this.withMintProvenance(STORM_TAKE_ERROR));
       // Mints fail in clusters (pe-stall storms, F008 velocity). Background
       // refill waves keep retrying — give them a short window to land a
       // token before surfacing a failure to the client. This converts most
@@ -575,6 +575,28 @@ export class CaptchaTokenPool {
     if (!ok && !this.storm) this.maybeEnterStorm(now);
   }
 
+  /**
+   * Sanitized provenance of the most recent failed local mint (GitHub issue
+   * 32): the solver chain's host-built refusal text / category sentence only,
+   * bounded, never payload content. A later take that cannot name its own
+   * cause surfaces this instead of failing silently generic.
+   */
+  private lastMintFailure: string | null = null;
+
+  private recordMintFailure(err: unknown): void {
+    if (err instanceof StormAdmissionCancelled) return;
+    const text = err instanceof Error ? err.message : String(err);
+    if (text === STORM_TAKE_ERROR) return; // the breaker itself is not a cause
+    this.lastMintFailure = text.replace(/[\r\n\t]+/g, " ").trim().slice(0, 240) || "unknown";
+  }
+
+  /** Attach the recorded provenance to a generic take failure. */
+  private withMintProvenance(message: string): string {
+    return this.lastMintFailure
+      ? `${message} (last local mint failure: ${this.lastMintFailure})`
+      : message;
+  }
+
   private pruneMintOutcomes(now: number): void {
     const cutoff = now - STORM_WINDOW_MS;
     while (this.mintOutcomes.length > 0 && this.mintOutcomes[0]!.at <= cutoff) this.mintOutcomes.shift();
@@ -621,6 +643,7 @@ export class CaptchaTokenPool {
       if (this.storm !== storm) return;
       storm.level += 1;
       storm.until = this.opts.now() + stormBackoffMs(storm.level);
+      this.recordMintFailure(err);
       console.warn(
         `[captcha] storm probe mint failed — backing off ${stormBackoffMs(storm.level) / 1000}s: ` +
           `${(err instanceof Error ? err.message : String(err)).slice(0, 160)}`,
@@ -685,6 +708,7 @@ export class CaptchaTokenPool {
           if (!mode.probe) this.noteMintOutcome(false);
         }
       }
+      this.recordMintFailure(lastErr);
       throw new Error(`captcha failed after ${mode.attempts} attempts: ${lastErr ?? "unknown"}`);
     } finally {
       this.activeSolves -= 1;

@@ -559,11 +559,11 @@ async function decodeBodyText(resp: Response): Promise<string | null> {
  * response fields, or null when the body is a legitimate message response.
  *
  * Statuses are chosen to match Anthropic client retry semantics:
- * quota/balance exhaustion (1005/1113) and captcha/capability rejections
- * (3006/3007/3012) are deterministic for the current account/window, so they
- * map to non-retryable 400/403 — mirroring Anthropic's own "credit balance
- * too low" 400 — instead of a retryable 429 that only provokes more
- * gateway anti-abuse (captcha) challenges.
+ * quota/balance exhaustion (1005/1113), the captcha rejection (3007) and
+ * model/authorization rejections (3006/3012) are deterministic for the
+ * current account/window, so they map to non-retryable 400/403 — mirroring
+ * Anthropic's own "credit balance too low" 400 — instead of a retryable 429
+ * that only provokes more gateway anti-abuse (captcha) challenges.
  */
 
 export function shouldUseOrderedTransport(config: ProxyConfig, clientSession: ClientSessionResult | undefined, hasCustomFetchImpl: boolean): boolean {

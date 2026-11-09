@@ -34,6 +34,21 @@ export class CaptchaSdkIncompatibleError extends CaptchaSdkError {
   }
 }
 
+/**
+ * Local verification refusal (GitHub issue 32): our own validation rejected a
+ * solver result (degraded SDK output path). The detail is host-built —
+ * literals plus lengths — and never contains refused payload content; control
+ * characters are stripped and the text bounded so the provenance survives
+ * normalization and can surface on a subsequent request failure.
+ */
+export class CaptchaLocalVerificationError extends CaptchaSdkError {
+  constructor(detail: string) {
+    super("other");
+    this.name = "CaptchaLocalVerificationError";
+    this.message = `verify param refused: ${detail.replace(/[\r\n\t]+/g, " ").trim().slice(0, 200)}`;
+  }
+}
+
 // Legacy synthetic errors remain supported, but diagnostics are never evidence.
 function failurePrefix(message: string): string {
   const diagnosticStart = message.search(/\||\b(?:captchaMetadata\s*=|guestErrors\s*\(|sha256\s*=|len\s*=)/);

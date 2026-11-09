@@ -169,6 +169,42 @@ describe("collectQuotaSnapshot fingerprint", () => {
 });
 
 describe("collectQuotaSnapshot response mapping", () => {
+  it("preview code 0 with missing data stays fail-closed — recorded as provider_unknown, not a silent success (issue 32)", async () => {
+    // Incident shape: HTTP 200, business code 0, but the data object absent.
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.includes("/billing/balance")) {
+        return new Response(JSON.stringify({ code: 0, msg: "ok", data: { server_time: 1720000000, balances: [{ show_name: "Free", total_units: 10, used_units: 1, remaining_units: 9, unit_type: "token" }] } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (u.includes("/billing/preview")) {
+        return new Response(JSON.stringify({ code: 0, msg: "ok" }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    const snap = await collectQuotaSnapshot(makeConfig(), fetchImpl, loadFake);
+    expect(snap.errors).toContain("preview: provider_unknown");
+    // Fail-closed: no invented plans, balance data unaffected.
+    expect(snap.claimablePlans).toEqual([]);
+    expect(snap.balances.length).toBe(1);
+  });
+
+  it("a genuinely empty preview (data.plans: []) is still a success, not an error", async () => {
+    const fetchImpl = (async (url: string | URL | Request): Promise<Response> => {
+      const u = typeof url === "string" ? url : url.toString();
+      if (u.includes("/billing/balance")) {
+        return new Response(JSON.stringify({ code: 0, msg: "ok", data: { server_time: 1720000000, balances: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (u.includes("/billing/preview")) {
+        return new Response(JSON.stringify({ code: 0, msg: "ok", data: { plans: [] } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    const snap = await collectQuotaSnapshot(makeConfig(), fetchImpl, loadFake);
+    expect(snap.errors).not.toContain("preview: provider_unknown");
+    expect(snap.errors).toEqual([]);
+    expect(snap.claimablePlans).toEqual([]);
+  });
+
   it("snake_case balance fields map (live-observed shape)", async () => {
     const body = {
       server_time: 1720000100,
