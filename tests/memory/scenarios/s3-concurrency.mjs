@@ -33,21 +33,17 @@ import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
-import { scan, portsOf } from "../lib/sampler.mjs";
+import { sampleIdentity, scan, settled, portsOf } from "../lib/sampler.mjs";
 import { OMP_LEG, PROCESSES, s3Budgets } from "../lib/budgets.mjs";
 import { generateOmpExtension, startOmpHost } from "../lib/omp-host.mjs";
 import { causeLinesOf, ompLegChecks } from "../lib/omp-leg.mjs";
 import { PREFLIGHT_WARNINGS } from "../../../cli/heal.mjs";
 import { osLeg } from "../lib/catalogue.mjs";
-import { resumeProcess, suspendProcess } from "../lib/win-process.mjs";
 import { isAlive, whileFrozen } from "../lib/freeze.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The promise's value, or `fallback` after `ms` (the timer never outlives the race). */
 const within = (promise, ms, fallback = null) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
-// SIGSTOP/SIGCONT; Windows has no stop signal: NtSuspendProcess/NtResumeProcess.
-const freeze = (pid) => (process.platform === "win32" ? suspendProcess(pid) : process.kill(pid, "SIGSTOP"));
-const thaw = (pid) => (process.platform === "win32" ? resumeProcess(pid) : process.kill(pid, "SIGCONT"));
 
 // Preflights live about a second: sample 4 times a second so each one's own
 // peak (VmHWM, read while it is alive) reaches the per-role verdict.
@@ -114,7 +110,7 @@ export function refusedStartCheck(rounds) {
   };
 }
 
-export function makeHungRound({ kit, proxies, portsOf, round, note, freeze, thaw, alive, lockState = () => null, graceMs = 65_000 }) {
+export function makeHungRound({ kit, proxies, portsOf, round, note, freeze, thaw, lockState = () => null, graceMs = 65_000 }) {
   return async (name, { staleLock = false } = {}) => {
     const start = await kit.manager(["start"]);
     if (start.code !== 0) {
@@ -125,12 +121,16 @@ export function makeHungRound({ kit, proxies, portsOf, round, note, freeze, thaw
       return round(name, 10, { kind: "mixed", startRefused: refused });
     }
     await sleep(graceMs); // past the manager's 60 s startup grace (Windows also sees a new process only at its next poll)
-    const target = hungTarget({ startCode: start.code, record: kit.pidRecord(), proxies: proxies(), port: kit.port, portsOf });
+    const ours = proxies();
+    const target = hungTarget({ startCode: start.code, record: kit.pidRecord(), proxies: ours, port: kit.port, portsOf });
     if (target.pid === null) return note(`${name}.skipped`, { startCode: start.code, reason: target.reason });
     note(`${name}.target`, target);
     // Our own proxy, frozen: /health stops answering. It is always thawed, and
-    // a failed thaw ends the run as a harness failure (lib/freeze.mjs).
-    await whileFrozen(target.pid, () => round(name, 10, { kind: "mixed" }), { freeze, thaw, ...(alive ? { alive } : {}) });
+    // a failed thaw ends the run as a harness failure (lib/freeze.mjs). It is
+    // named by the identity the run's scan saw, so neither the freeze nor the
+    // thaw can reach a stranger that took its pid (ticket 73).
+    const id = sampleIdentity(ours.find((p) => p.pid === target.pid));
+    await whileFrozen(id, () => round(name, 10, { kind: "mixed" }), { ...(freeze ? { freeze } : {}), ...(thaw ? { thaw } : {}) });
   };
 }
 
@@ -157,14 +157,20 @@ export async function run(ctx) {
   const lockFile = join(kit.logDir, "manager.lock");
   const rounds = [];
   const proxies = () => scan(ctx.marker).filter((p) => p.role === "proxy");
+  // A count after a step (a stop, a round) is read from the process table as it
+  // is after the step (on Windows the first poll that started after it): a
+  // proxy that exited is never counted, whatever its pid names by then (ticket 73).
+  const settle = () => settled(ctx.marker);
 
   async function stopAll(label) {
     const r = await kit.manager(["stop"], { timeoutMs: 90_000 });
+    await settle();
     const left = proxies();
     return { label, code: r.code, tail: (r.out + r.err).trim().split("\n").slice(-2), proxiesLeft: left.length };
   }
 
   async function round(name, n, { kind = "mixed", adversary = null, startRefused = null } = {}) {
+    await settle();
     const before = proxies().length;
     const seen = new Set();
     let maxSimultaneous = 0, maxListeners = 0;
@@ -189,6 +195,7 @@ export async function run(ctx) {
     await sleep(1500);
     polling = false;
     await poll;
+    await settle();
     const after = proxies();
     const rec = kit.pidRecord();
     const result = {
@@ -211,14 +218,17 @@ export async function run(ctx) {
     return result;
   }
 
-  // The start lock as the next start meets it: its holder, and whether that holder is alive.
+  // The start lock as the next start meets it: its holder, and whether that
+  // holder is alive. The lock records no start time, and the kit judges the
+  // holder by its pid alone (lib/proxy-lifecycle.mjs `pidAlive`); this mirrors
+  // that view as evidence and never signals the holder.
   const lockState = () => {
     if (!existsSync(lockFile)) return null;
     let holderPid = null;
     try { const pid = JSON.parse(readFileSync(lockFile, "utf8")).pid; if (Number.isInteger(pid)) holderPid = pid; } catch {}
     return { path: lockFile, holderPid, holderAlive: holderPid === null ? null : isAlive(holderPid) };
   };
-  const hungRound = makeHungRound({ kit, proxies, portsOf, round, note: ctx.note, freeze, thaw, lockState });
+  const hungRound = makeHungRound({ kit, proxies, portsOf, round, note: ctx.note, lockState });
   const killHolder = async () => {
     await round("kill-holder-10", 10, {
       kind: "preflight",
@@ -249,6 +259,7 @@ export async function run(ctx) {
     // What the next session sees after that round (the lock may be stale now).
     const next = await kit.preflight();
     const nextStop = await kit.manager(["stop"], { timeoutMs: 60_000 });
+    await settle();
     ctx.note("afterKillHolder", { nextPreflight: next.code, nextPreflightTail: (next.out + next.err).trim().split("\n").slice(-1)[0], stopCode: nextStop.code, stopTail: (nextStop.out + nextStop.err).trim().split("\n").slice(-1)[0], proxiesLeft: proxies().length, staleLock: existsSync(lockFile) });
   };
   const clearStaleLock = async (label) => {
