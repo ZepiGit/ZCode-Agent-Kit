@@ -41,7 +41,7 @@
       "flips": ["peak:kit"]
     },
     "S4/short": {
-      "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "count:proxy"] },
+      "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "count:proxy"], "81": ["stale-lock-after-ctrl-c"] },
       "flips": ["proxy-left-after-stop", "failed-lifecycle-steps", "count:proxy"]
     },
     "S5/short": { "ticket": "74", "state": "unstable" },

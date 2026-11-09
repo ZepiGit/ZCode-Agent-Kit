@@ -650,7 +650,7 @@ PROMPT §9, restated with the budgets the rounds tightened. Initial budgets are 
 
 **PROCESSES**
 - Exactly 1 proxy per installation under 10 concurrent launches, with 0 failed launches, including a killed holder. Measurement-rule amendment (Round 27 Q1): in the kill-holder round, the launch the adversary SIGKILLed (its pid equals the adversary's recorded `killed` pid, and it exited non-zero) is reported as `killedByAdversary` and is never a failed launch. Every other launch that does not exit 0 is a failed launch. A round counts as run only with exactly one such launch. Budget 0 is unchanged.
-- 0 stale locks after a race round or after Ctrl-C during start (baseline 5 of 8). The proxy is up after a respawn that met a stale lock.
+- 0 stale locks after a race round or after Ctrl-C during start (baseline 5 of 8). The proxy is up after a respawn that met a stale lock. §18 PROCESSES, second bullet, gains a measurement-rule amendment (Round 33): on windows, the Ctrl-C-during-start trial delivers CTRL_BREAK_EVENT to the trial child's own process group, with proof of delivery. Until ticket 81 merges, the windows value is a TerminateProcess result and is owned, not judged as a pass. The budget and the baseline are unchanged.
 - A takeover race test (N contenders, a kill injected at every protocol step) shows never two holders and never a deleted live lock.
 - 0 orphans or leaked workers after stop, restart, crash and update (S4, 50 cycles). Log-dir files ≤ 8.
 - 0 solver processes after the proxy is SIGKILLed, on Linux and on Windows (Job Object). An idle exit leaves 0 solver processes and releases the cap container. At most 1 solver process per proxy at every sample.
