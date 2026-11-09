@@ -35,6 +35,19 @@ async function doctorKit(t, record) {
   mkdirSync(home);
   mkdirSync(join(root, "lib"));
   writeFileSync(join(root, "lib", "proxy-doctor.mjs"), `export async function managerDoctor() { return ${JSON.stringify(record)}; }\n`);
+  // Harness detection reads PATH and APPDATA of this process: an empty PATH
+  // and the temp home's AppData make every harness "not detected" on any
+  // runner (a claude or codex on the runner's PATH would change the rows).
+  const saved = { PATH: process.env.PATH, APPDATA: process.env.APPDATA };
+  mkdirSync(join(root, "empty-path"));
+  process.env.PATH = join(root, "empty-path");
+  process.env.APPDATA = join(home, "AppData", "Roaming");
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
   const kit = { ...createCtx(root, home), stateDir: root, generated: join(root, "generated"), backupDir: join(root, "backups") };
   return {
     kit,
