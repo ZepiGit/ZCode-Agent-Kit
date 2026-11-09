@@ -7,7 +7,7 @@
  * through BUN_OPTIONS in the environment the solver process inherits, every
  * solver process it spawns.
  */
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -161,6 +161,45 @@ describe("solver process: the proxy's dispatcher", () => {
       }
     });
   }
+});
+
+describe("solver process: compiled proxy", () => {
+  const proxyRoot = fileURLToPath(new URL("../..", import.meta.url));
+  const harness = fileURLToPath(new URL("./__fixtures__/compiled-solver-host.ts", import.meta.url));
+  let dir = "";
+  let binary = "";
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), "t27-compiled-"));
+    binary = join(dir, process.platform === "win32" ? "solver-host.exe" : "solver-host");
+    const build = Bun.spawn([process.execPath, "build", "--compile", "--define", "require.resolve=undefined", harness, "--outfile", binary],
+      { cwd: proxyRoot, stdout: "pipe", stderr: "pipe", env: hermeticEnv() });
+    const [code, stderr] = await Promise.all([build.exited, new Response(build.stderr).text()]);
+    expect({ code, stderr: code === 0 ? "" : stderr }).toEqual({ code: 0, stderr: "" });
+  }, 120_000);
+
+  afterAll(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("starts its solver process by self-exec through the proxy's own CLI route, never with -e", async () => {
+    const plainBackend = new URL("./__fixtures__/plain-backend.ts", import.meta.url).href;
+    const run = Bun.spawn([binary, plainBackend, "argv", "token:compiled", "pid"],
+      { stdout: "pipe", stderr: "pipe", env: { ...hermeticEnv(), ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA: "0" } });
+    const [code, stdout, stderr] = await Promise.all([run.exited, new Response(run.stdout).text(), new Response(run.stderr).text()]);
+    expect({ code, stderr: code === 0 ? "" : stderr }).toEqual({ code: 0, stderr: "" });
+    const report = reported({ code, stdout, stderr: Buffer.from(stderr) });
+    expect(report.command).toEqual([report.execPath, "__captcha-solver-process"]);
+    const started = JSON.parse(report.results[0].slice("argv:".length));
+    expect(started.execPath).toBe(report.execPath);
+    expect(started.argv.slice(-2)).toEqual(["__captcha-solver-process", String(report.pid)]);
+    for (const flag of ["-e", "--eval", "-p", "--print"]) {
+      expect(started.argv).not.toContain(flag);
+      expect(started.execArgv).not.toContain(flag);
+    }
+    expect(report.results[1]).toBe("token:compiled");
+    expect(report.results[2]).not.toBe(`pid:${report.pid}`);
+  }, 60_000);
 });
 
 describe("solver process: lifecycle", () => {
