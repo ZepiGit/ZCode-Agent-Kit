@@ -2,7 +2,7 @@
 
 **Blocked by:** 30 (MCP task retention (500 / 7 days) and the idempotency window)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -136,3 +136,9 @@ Spec stories: 69, 70, 71, 72
     - The 4 tip runs give 40.10–44.34 (mean 42.49) and the 3 branch runs 41.21–43.66 (mean 42.82). The pair differences change sign, so the difference is noise: there is no growth change attributable to this ticket.
     - Every value is ≤ 55, trend is true in all runs, and every other S5 check is GREEN (0 failures, 0 orphans, reboot cost ≤ 2 MB).
     - The ratchet holds: "S5/short: RED on growth:mcp-bridge, owned by ticket 74".
+- 2026-11-09 (merger): Merged 2026-11-09 as 667f967; fast suite: kit 981/999 (0 fail, 18 skipped), proxy 1627/1627 (109 files), mcp 115/116 (0 fail, 1 skipped; includes `task-caps.test.mjs`). Plain `--no-ff` merge of ticket/31-mcp-task-caps (a8ac004) into the tip bd6d328, no conflicts; no earlier merge or revert of 31 on the integration branch, so no revert-of-revert. No lockfile changed (`npm ci` only; the mcp `package.json` change adds `task-caps.test.mjs` to the test script, no version bump); `mcp/zcode-harness-mcp/dist/` unchanged after `test:mcp`'s build (B5). Logs: `reports/merge-31-{npmci,test,test-proxy,test-mcp}.log`.
+  - Pre-merge CI run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42583681662 (staging/31, head c9f386f = e0962b7 + ticket/31 a8ac004), green on all 8 jobs (three jobs re-run after HTTP 504 Bun downloads; the linux memory-budget job is attempt 2). S5 values checked by the merger in that run's memory-budget logs (`/home/AgentKit/overhaul-tools/merge-31-ci/{win,linux}.log`):
+    - windows S5/short growth:mcp-bridge **24.19 %/1k on commit** (WS 32.55; budget 5, bound 30, trend false), in (5, 30]; run GREEN (unstable, ticket 74); procPeak 59.4 MB WS, orphans 0, reboot cost 2 MB, task failures 0: all ok.
+    - linux S5/short growth:mcp-bridge **40.06 %/1k** (trend true), ≤ 55; RED only on growth:mcp-bridge (ticket 74, ratchet holds); procPeak 92.6 MB, orphans 0, reboot cost 1 MB, task failures 0: all ok.
+  - Staged-ticket sanity diff: `git diff staging/31 HEAD` over the 14 ticket files (`staging/31^1..staging/31`, all under `mcp/zcode-harness-mcp/`) is empty.
+  - Whole-tree sanity diff `git diff staging/31 HEAD -- . ':!.scratch'`: 17 files, byte-identical to `git diff e0962b7 bd6d328` outside `.scratch`, all from ticket 61 (merge eb8aaae): `.github/workflows/ci.yml`, `tests/memory/{expected-red.json,fixtures/fake-run.mjs,job.mjs,lib/catalogue.mjs,lib/measure.mjs,loop.test.mjs,scenarios/s1-proxy-steady.mjs}`, `zcode-proxy-src/src/proxy/{handler.ts,response-body.ts,sse-terminal.ts}`, `zcode-proxy-src/src/server/{__fixtures__/client-response-bytes.json,__fixtures__/request-row-tok.json,response-backpressure.test.ts,response-bytes-contract.test.ts,server.ts}`, `zcode-proxy-src/src/translator/sse-translator.ts`. Nothing else differs.
