@@ -140,6 +140,23 @@ describe("solver process: the proxy's dispatcher", () => {
     }
   });
 
+  it("exits on IPC EOF while its parent lives on (ADR-0002 condition 2)", async () => {
+    const { spawn } = await import("node:child_process");
+    const entry = fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url));
+    const child = spawn(process.execPath, [entry, String(process.pid)], { stdio: ["ignore", "ignore", "pipe", "ipc"], serialization: "json", env: hermeticEnv() });
+    try {
+      const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+      await new Promise((resolve) => setTimeout(resolve, 300)); // started and listening
+      expect(child.exitCode).toBeNull();
+      // The parent (this runner) stays alive, so the parent watcher never fires:
+      // only the EOF can end it.
+      child.disconnect();
+      expect(await exited).toEqual({ code: 0, signal: null });
+    } finally {
+      child.kill("SIGKILL");
+    }
+  });
+
   it("never keeps the proxy alive for an idle solver process, which ends when the proxy exits", async () => {
     const run = await expectOk(host(`${REPORT}
       solver.configureCaptchaSolver({ backendModule });
