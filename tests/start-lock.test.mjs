@@ -1162,3 +1162,21 @@ test("a record whose live pid has no start time is not proven gone: it is never 
   assert.ok(untouched(recorded) && untouched(listener), "nothing is signalled");
   assert.deepEqual(adoptionLines(root), []);
 });
+
+test("a record whose process is still there (its start time matches) is never replaced, even while another pid answers", { timeout: 60_000 }, async (t) => {
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  const steady = Date.now() - 60_000;
+  const recorded = harmless(t);
+  const listener = harmless(t);
+  await identityListener(t, port, listener.pid);
+  const record = { pid: recorded.pid, startedMs: steady, startedIso: new Date(steady).toISOString() };
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify(record) + "\n");
+  const kitCommand = { commandLine: `"bun" "run" "${join(root, "zcode-proxy-src", "src", "index.ts")}" "serve"`, executablePath: "bun" };
+  const lifecycle = await lifecycleFor(root, { processCommandLineImpl: () => kitCommand, processStartMsImpl: () => steady });
+  assert.equal((await lifecycle.ensureRunning()).outcome, "already-running");
+  assert.deepEqual(readJson(join(root, "logs", "proxy.pid")), record, "the live record stays");
+  await lifecycle.stop();
+  assert.ok(untouched(listener), "the answering pid is never adopted or signalled in place of the recorded one");
+  assert.deepEqual(adoptionLines(root), []);
+});
