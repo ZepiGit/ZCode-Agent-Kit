@@ -40,6 +40,11 @@ export function classify(result) {
   const stdout = String(result.stdout || '').replace(/\x1b\[[0-9;]*m/g, '').trim();
   return { status: result.timedOut ? 'BLOCKED' : result.code === 0 && stdout === '52' ? 'PASS' : 'FAIL', exitCode: result.code ?? null, exact52: stdout === '52', timedOut: Boolean(result.timedOut), stderrPresent: Boolean(result.stderr), rawOutputPersisted: false };
 }
+// Same start-failure classifier used by the live ritual. Input remains only
+// proxy.log: manager tail-copy markers carry early/native diagnostics here.
+export function classifyStartFailure(raw, timedOut) {
+  return { missingModule: /Cannot find|ModuleNotFound|ENOENT/.test(raw), addressInUse: /EADDRINUSE|address.*in use/i.test(raw), configInvalid: /config|yaml/i.test(raw), credentials: /credential|decrypt/i.test(raw), scriptNotFound: /Script not found|src\/index.ts/i.test(raw), nativeDependency: /native|\.node|bun run/i.test(raw), notLoggedIn: /Not logged in/.test(raw), corruptCredential: /corrupt|stale credential|decrypt/i.test(raw), syntaxError: /SyntaxError|ParseError/.test(raw), referenceError: /ReferenceError/.test(raw), typeError: /TypeError/.test(raw), missingConfig: /config.*not found|ENOENT/i.test(raw), bindingError: /Failed to start server|listen|bind/i.test(raw), exitCode: Number(raw.match(/exited immediately \(code (\d+)/)?.[1] ?? -1), timedOut };
+}
 export async function stopChild(child) {
   if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
   const exited = once(child, 'exit').catch(() => {});
@@ -251,7 +256,7 @@ async function runLifecycle({ root, home, env, kit, omp, key, port, timeoutMs })
           const fragment = m[1].split('${')[0]; if (fragment.length >= 16 && raw.includes(fragment)) result.staticErrorMatches.push({ file: relative, line: index + 1 });
         }
       }
-      result.startFailure = { missingModule: /Cannot find|ModuleNotFound|ENOENT/.test(raw), addressInUse: /EADDRINUSE|address.*in use/i.test(raw), configInvalid: /config|yaml/i.test(raw), credentials: /credential|decrypt/i.test(raw), scriptNotFound: /Script not found|src\/index.ts/i.test(raw), nativeDependency: /native|\.node|bun run/i.test(raw), notLoggedIn: /Not logged in/.test(raw), corruptCredential: /corrupt|stale credential|decrypt/i.test(raw), syntaxError: /SyntaxError|ParseError/.test(raw), referenceError: /ReferenceError/.test(raw), typeError: /TypeError/.test(raw), missingConfig: /config.*not found|ENOENT/i.test(raw), bindingError: /Failed to start server|listen|bind/i.test(raw), exitCode: Number(raw.match(/exited immediately \(code (\d+)/)?.[1] ?? -1), timedOut: start.timedOut };
+      result.startFailure = classifyStartFailure(raw, start.timedOut);
       return result;
     }
     for (const model of MODELS) await prompt('normal', model);

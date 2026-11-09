@@ -784,6 +784,53 @@ test("`proxy logs N` reads across proxy.log.1 and proxy.log: the last N lines of
   assert.equal(run(3).stdout, `(no log file at ${join(logs, "proxy.log")})\n`);
 });
 
+// ---------------------------------------------- early log, per-start (ticket 34)
+test("early log: each start copies only the last 64 KiB behind a marker before truncating, with inherited stdio on the same owner-only file", { timeout: 90_000 }, async (t) => {
+  const root = kitFixture(t, await freePort(), { proxySrc: true });
+  const early = join(root, "logs", "proxy.early.log");
+  const log = join(root, "logs", "proxy.log");
+  const tail = `tail-start\n${"t".repeat(64 * 1024 - 21)}\ntail-end\n`;
+  assert.equal(Buffer.byteLength(tail), 64 * 1024);
+  writeFileSync(early, `discarded-head\n${"h".repeat(2 * 1024 * 1024)}\n${tail}`, { mode: 0o600 });
+  const fake = join(root, "zcode-proxy-src", "src", "index.ts");
+  writeFileSync(fake, `import { writeSync } from "node:fs"; writeSync(1, "native-stdout\\n"); writeSync(2, "native-stderr\\n");\n${FAKE_PROXY}`);
+  const lifecycle = await lifecycleFor(root, { bunResolver: bunOrFail });
+  const started = await lifecycle.ensureRunning({ waitMs: 30_000 });
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  if (record) defer(root, () => killFixtureProxy(root, record.pid));
+  assert.equal(started.code, 0, JSON.stringify(started));
+  assert.equal(readFileSync(early, "utf8"), "native-stdout\nnative-stderr\n");
+  const copied = readFileSync(log, "utf8");
+  assert.match(copied, /^\d{4}-\d\d-\d\dT[\d:.]+Z INFO manager proxy\.early\.log tail copy reason=start sizeBytes=\d+ tailBytes=65536\n/m);
+  assert.ok(copied.includes(tail));
+  assert.ok(!copied.includes("discarded-head"));
+  assert.ok(!copied.includes("native-stdout"), "inherited stdio does not bypass ticket 33's single proxy.log writer");
+  if (process.platform !== "win32") assert.equal(statSync(early).mode & 0o777, 0o600);
+  // A refusal/already-running preflight must not truncate an active early log.
+  assert.equal((await lifecycle.ensureRunning()).outcome, "already-running");
+  assert.equal(readFileSync(early, "utf8"), "native-stdout\nnative-stderr\n");
+  assert.equal((await lifecycle.restart({ waitMs: 30_000 })).code, 0);
+  const next = readJson(join(root, "logs", "proxy.pid"));
+  if (next) defer(root, () => killFixtureProxy(root, next.pid));
+  assert.equal(readFileSync(early, "utf8"), "native-stdout\nnative-stderr\n");
+  assert.ok(readFileSync(log, "utf8").includes("tailBytes=28\nnative-stdout\nnative-stderr\n"));
+});
+
+test("early log: a failed start preserves its native cause in proxy.log immediately, not just on the next attempt", { timeout: 30_000 }, async (t) => {
+  const root = kitFixture(t, await freePort(), { proxySrc: true });
+  writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), 'import { writeSync } from "node:fs"; writeSync(2, "SyntaxError: fixture-native-start-failure\\n"); process.exit(7);');
+  const lifecycle = await lifecycleFor(root, { bunResolver: bunOrFail });
+  const failed = await lifecycle.ensureRunning({ waitMs: 5000 });
+  assert.equal(failed.outcome, "exited");
+  assert.equal(failed.code, 2);
+  const log = readFileSync(join(root, "logs", "proxy.log"), "utf8");
+  assert.match(log, /proxy\.early\.log tail copy reason=exited sizeBytes=42 tailBytes=42\nSyntaxError: fixture-native-start-failure\n/);
+  assert.equal(readFileSync(join(root, "logs", "proxy.early.log"), "utf8"), "SyntaxError: fixture-native-start-failure\n", "failure does not discard the original early log");
+  const { classifyStartFailure } = await import("../scripts/verify-golden-path.mjs");
+  assert.equal(classifyStartFailure(log, false).syntaxError, true, "the actual golden-path classifier sees the cause through the marker in proxy.log only");
+  assert.equal(classifyStartFailure(log, false).exitCode, 7);
+});
+
 // -------------------------------------------- Windows kill guard identity (77)
 // Ticket 77 (found by ticket 21 round 3, run 42500996594): the Windows start
 // time was read as `Number(.NET ticks) / 10000 - epoch`, and the kill guard

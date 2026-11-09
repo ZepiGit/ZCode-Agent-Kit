@@ -160,7 +160,20 @@ function watcherSource(): string {
   return `
 const { workerData } = require("node:worker_threads");
 const { spawn } = require("node:child_process");
-const { writeSync } = require("node:fs");
+const { appendFileSync, mkdirSync, writeSync } = require("node:fs");
+const { join } = require("node:path");
+// The main thread may be hung inside native code: append by path, never
+// rotate here or depend on its writer. Keep inherited stderr byte-identical.
+const log = (line) => {
+  const dir = process.env.ZCODE_KIT_LOG_DIR;
+  if (dir) {
+    try {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      appendFileSync(join(dir, "proxy.log"), line, { mode: 0o600 });
+    } catch {}
+  }
+  try { writeSync(2, line); } catch {}
+};
 const watchdogStep = (${watchdogStep.toString()});
 const respawnHookCommand = (${respawnHookCommand.toString()});
 const launchRespawnHook = (${launchRespawnHook.toString()});
@@ -176,14 +189,14 @@ setInterval(() => {
   state = step.state;
   if (step.stalledMs === null) return;
   firing = true;
-  writeSync(2, "[watchdog] main thread unresponsive for " + step.stalledMs + "ms — requesting restart\\n");
+  log("[watchdog] main thread unresponsive for " + step.stalledMs + "ms — requesting restart\\n");
   const hook = respawnHookCommand(process.env, process.pid, "watchdog");
   if (!hook) return kill();
   // Kill regardless of the outcome — a hung proxy is never recoverable in
   // place — but only after the manager launch is acknowledged or has failed,
   // bounded so a wedged spawn cannot keep the hung process alive.
   launchRespawnHook(spawn, hook, process.env, workerData.hookAckMs).then((result) => {
-    if (!result.ok) writeSync(2, "[watchdog] respawn hook failed: " + result.error + "\\n");
+    if (!result.ok) log("[watchdog] respawn hook failed: " + result.error + "\\n");
     kill();
   }, kill);
 }, workerData.checkIntervalMs);

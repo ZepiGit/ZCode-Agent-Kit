@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -223,6 +223,19 @@ writeFileSync(process.env.WATCHDOG_MARKER, process.argv.slice(2).join(" "));
     expect(result.stderr).toMatch(/\[watchdog\] main thread unresponsive for \d+ms — requesting restart/);
     expect(await waitForFile(marker, 5_000)).toBe(true);
     expect(readFileSync(marker, "utf8")).toBe(`respawn ${result.pid} --reason watchdog`);
+  }, 30_000);
+
+  it("appends watchdog lines by path to a new owner-only proxy.log without the main-thread writer", async () => {
+    const logs = join(dir, "by-path-logs");
+    const result = await runChild({ ZCODE_KIT_LOG_DIR: logs });
+    expect(result.stdout).not.toContain("survived");
+    const file = join(logs, "proxy.log");
+    expect(existsSync(file)).toBe(true);
+    expect(readFileSync(file, "utf8")).toMatch(/\[watchdog\] main thread unresponsive for \d+ms — requesting restart\n/);
+    if (process.platform !== "win32") {
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(statSync(logs).mode & 0o777).toBe(0o700);
+    }
   }, 30_000);
 
   it("the watchdog's hook gets no stop token (proxy-env, ticket 18)", async () => {
