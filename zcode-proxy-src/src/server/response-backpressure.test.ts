@@ -52,11 +52,14 @@ function answerSha(): string {
 /** One upstream answer: what the proxy pulled, and whether it let go. */
 interface Upstream { pulled: number; released: boolean }
 const upstreams: Upstream[] = [];
+/** When set, the next answers are this one chunk (the shape of a late read of an accumulated body). */
+let oneChunk: Uint8Array | null = null;
 
 function upstreamAnswer(signal: AbortSignal | undefined): Response {
   const u: Upstream = { pulled: 0, released: false };
   upstreams.push(u);
-  const frames = function* () { yield* HEAD; for (let i = 0; i < DELTAS; i++) yield DELTA; yield* TAIL; }();
+  const single = oneChunk;
+  const frames = single ? [single][Symbol.iterator]() : function* () { yield* HEAD; for (let i = 0; i < DELTAS; i++) yield DELTA; yield* TAIL; }();
   let ctl: ReadableStreamDefaultController<Uint8Array> | null = null;
   signal?.addEventListener("abort", () => { u.released = true; try { ctl?.error(new DOMException("aborted", "AbortError")); } catch {} }, { once: true });
   const body = new ReadableStream<Uint8Array>({
@@ -181,6 +184,20 @@ function dechunk(raw: Buffer): { head: string; body: Buffer } {
   return { head, body: Buffer.concat(parts) };
 }
 
+/** The sizes of the HTTP/1.1 chunks of a raw response (each one write of the proxy). */
+function chunkSizes(raw: Buffer): number[] {
+  const sizes: number[] = [];
+  let at = raw.indexOf("\r\n\r\n") + 4;
+  for (;;) {
+    const eol = raw.indexOf("\r\n", at);
+    const size = parseInt(raw.subarray(at, eol).toString("latin1"), 16);
+    if (size === 0) break;
+    sizes.push(size);
+    at = eol + 2 + size + 2;
+  }
+  return sizes;
+}
+
 const MESSAGES = JSON.stringify({ model: "glm-5.3", max_tokens: 64, stream: true, messages: [{ role: "user", content: "long answer" }] });
 const CHAT = JSON.stringify({ model: "glm-5.3", stream: true, messages: [{ role: "user", content: "long answer" }] });
 
@@ -220,6 +237,28 @@ describe("a streaming client's reads pace the upstream (ticket 61)", () => {
     expect(pulledAtEnd).toBeLessThan(HELD_BACK_MAX);
     await sleep(100);
     expect(rows.slice(firstRow).filter((r) => r.includes(" ANT ")).length).toBe(1);
+  }, 60_000);
+
+  it("messages: a large upstream chunk is written to the client in pieces of at most 64 KiB (a stalled client holds at most one in the proxy), bytes unchanged", async () => {
+    // A late read of a fetch body returns what accumulated meanwhile, often
+    // hundreds of KB at once; written whole, a stalled client's socket keeps
+    // all of it in the proxy's write buffer (ticket 61: linux RSS +14 MB).
+    const frames = [...HEAD, ...Array<Uint8Array>(160).fill(DELTA), ...TAIL];
+    const big = Buffer.concat(frames);
+    oneChunk = big;
+    try {
+      const before = upstreams.length;
+      const client = stallingClient("/v1/messages", MESSAGES);
+      await client.headSeen;
+      const raw = await client.readToEnd();
+      expect(upstreams.length).toBe(before + 1);
+      expect(Math.max(...chunkSizes(raw))).toBeLessThanOrEqual(64 * 1024);
+      const { body } = dechunk(raw);
+      expect(body.byteLength).toBe(big.byteLength);
+      expect(Buffer.compare(body, big)).toBe(0);
+    } finally {
+      oneChunk = null;
+    }
   }, 60_000);
 
   it("chat (translated): a client that stops reading holds the upstream back, and gets the whole translated answer when it reads again", async () => {

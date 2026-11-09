@@ -42,6 +42,8 @@ export interface ObserveOptions {
 }
 
 const SAMPLE_BYTES = 4096;
+/** The largest piece handed on per pull (ticket 61: linux S1/stalled RSS, METRICS). */
+export const PIECE_BYTES = 64 * 1024;
 
 /** Output tokens of the SSE lines in `text`, folded into `tokens` (usage totals win over counted deltas). */
 function countTokens(text: string, tokens: number): number {
@@ -66,8 +68,8 @@ function countTokens(text: string, tokens: number): number {
 
 /**
  * `source` as the stream the client reads, observed as the client pulls it.
- * The upstream is read one chunk per client pull (high-water mark 0): a
- * client that stops reading stops the upstream reads.
+ * The upstream is read at most one chunk per client pull (high-water mark
+ * 0): a client that stops reading stops the upstream reads.
  */
 export function observeInClientPath(source: ReadableStream<Uint8Array>, opts: ObserveOptions): ReadableStream<Uint8Array> {
   const now = opts.now ?? Date.now;
@@ -111,8 +113,21 @@ export function observeInClientPath(source: ReadableStream<Uint8Array>, opts: Ob
     }
   };
 
+  // A chunk larger than a piece goes on in pieces, one per pull (views, no
+  // copy): a late read of an accumulated upstream body can return hundreds of
+  // KB at once, and every stage after this one (the terminal-frame guard, the
+  // decoders, the socket write) would otherwise copy and hold it whole.
+  let rest: Uint8Array | null = null;
+  const forward = (controller: ReadableStreamDefaultController<Uint8Array>, value: Uint8Array): void => {
+    rest = value.byteLength > PIECE_BYTES ? value.subarray(PIECE_BYTES) : null;
+    const piece = rest ? value.subarray(0, PIECE_BYTES) : value;
+    try { observe(piece); } catch {}
+    controller.enqueue(piece);
+  };
+
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
+      if (rest) { forward(controller, rest); return; }
       let result: Awaited<ReturnType<typeof reader.read>>;
       try {
         result = await reader.read();
@@ -126,8 +141,7 @@ export function observeInClientPath(source: ReadableStream<Uint8Array>, opts: Ob
         controller.close();
         return;
       }
-      try { observe(result.value); } catch {}
-      controller.enqueue(result.value);
+      forward(controller, result.value);
     },
     cancel(reason) {
       end("cancel");
