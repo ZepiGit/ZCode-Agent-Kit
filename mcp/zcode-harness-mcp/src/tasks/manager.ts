@@ -20,8 +20,9 @@ import { WorkspaceAllowlist } from "../security/allowlist.js";
 import { sessionInScope, workspaceIdentity } from "../security/session.js";
 import { safeJsonStringify } from "../security/redact.js";
 import { createLogger } from "../util/log.js";
-import { TaskIngress, type IngressTask, type IngressTaskRecord, type IngressState } from "./ingress.js";
+import { TaskIngress, addError, addWarning, type IngressTask, type IngressTaskRecord, type IngressState } from "./ingress.js";
 import { TaskRelay } from "./relay.js";
+import { ResponseText } from "./response-text.js";
 
 const log = createLogger("tasks");
 
@@ -126,6 +127,13 @@ export interface TaskResultV1 {
   errors: string[];
   warnings: string[];
   eventsRef: { firstSeq: number; lastSeq: number; storage: string };
+  /** Present only when the response text went past the 4 MiB cap (additive). */
+  truncated?: { droppedBytes: number };
+}
+
+/** The completeness note of a truncated response text. */
+function truncationNote(droppedBytes: number): string {
+  return `response text capped at 4 MiB: ${droppedBytes} bytes truncated between the first 1 MiB and the last 3 MiB`;
 }
 
 export interface StartTaskParams {
@@ -299,8 +307,9 @@ export class TaskManager {
       acceptingEvents: false,
       inputPending: false,
       pendingSend: null,
-      accumulatedText: "",
+      responseText: new ResponseText(),
       toolCalls: new Map(),
+      toolCallsCapped: false,
       artifacts: new Map(),
       interactionIds: new Set(),
       warnings: [],
@@ -489,7 +498,7 @@ export class TaskManager {
       if (rec.requestedModel !== null || rec.thoughtLevel !== null) {
         throw new TaskError("SELECTION_VERIFICATION_FAILED", `cannot verify requested model/reasoning before sending prompt: ${err instanceof Error ? err.message : String(err)}`);
       }
-      t.warnings.push(`session read before send failed: ${err instanceof Error ? err.message : String(err)}`);
+      addWarning(t, `session read before send failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     if (rec.requestedModel !== null) {
       const slash = rec.requestedModel.indexOf("/");
@@ -585,7 +594,7 @@ export class TaskManager {
       rec.state = "failed";
       rec.error = err instanceof Error ? err.message : String(err);
       rec.finishedAt = new Date().toISOString();
-      t.errors.push(rec.error);
+      addError(t, rec.error);
       t.persist();
       t.onTerminal();
     }
@@ -626,10 +635,11 @@ export class TaskManager {
       const subscription = await this.runtime.ipcSessionSubscribe(rec.sessionId);
       if (typeof subscription.eventSeq === "number") rec.lastSeq = Math.max(rec.lastSeq, subscription.eventSeq);
       if (!canSend()) throw new TaskError("INTERRUPTED", "task interrupted before input was sent");
-      t.accumulatedText = "";
+      t.responseText = new ResponseText();
       t.errors = [];
       t.warnings = [];
       t.toolCalls.clear();
+      t.toolCallsCapped = false;
       t.artifacts.clear();
       rec.fileChanges = { added: [], modified: [], deleted: [], source: "none", preExistingUncommitted: [] };
       rec.usage = null;
@@ -692,7 +702,7 @@ export class TaskManager {
       await this.verifySessionWorkspace(rec.sessionId, rec.workspacePath);
       await this.runtime.ipcSessionStop(rec.sessionId);
     } catch (err) {
-      t.warnings.push(`stop failed: ${err instanceof Error ? err.message : String(err)}`);
+      addWarning(t, `stop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     let stopped = false;
     for (let i = 0; i < 10 && !stopped; i += 1) {
@@ -712,7 +722,7 @@ export class TaskManager {
     rec.state = stopped ? "cancelled" : "unknown";
     rec.interruptionReason = stopped ? null : "cancel could not be verified against the harness";
     rec.finishedAt = new Date().toISOString();
-    t.warnings.push(stopped ? "cancel verified via session read" : "cancel NOT verified; task state unknown");
+    addWarning(t, stopped ? "cancel verified via session read" : "cancel NOT verified; task state unknown");
     t.persist();
     t.onTerminal();
     return rec;
@@ -735,7 +745,8 @@ export class TaskManager {
     if (rec.sessionId && rec.usage === null && this.runtime.running && TERMINAL_STATES.includes(rec.state)) {
       await this.ingress.captureUsage(t);
     }
-    let responseText = t.accumulatedText;
+    const streamed = t.responseText.read();
+    let { text: responseText, droppedBytes } = streamed;
     let completeness: TaskResultV1["completeness"] = responseText && state === "completed"
       ? { status: "full", explanation: "turn stream captured via session events" }
       : { status: "unknown", explanation: "no completed assistant response has been captured" };
@@ -750,7 +761,10 @@ export class TaskManager {
           if (String(info.role ?? "") === "assistant") {
             const parts = (entry.parts ?? entry.content ?? []) as Array<Record<string, unknown>>;
             const texts = parts.filter((pt) => String(pt.type ?? "") === "text").map((pt) => String(pt.text ?? ""));
-            responseText = texts.join("\n");
+            // The same cap as a streamed text.
+            const recovered = new ResponseText();
+            recovered.append(texts.join("\n"));
+            ({ text: responseText, droppedBytes } = recovered.read());
             if (responseText && state === "completed") completeness = { status: "full", explanation: "response recovered from stored transcript" };
             break;
           }
@@ -765,6 +779,10 @@ export class TaskManager {
     }
     if (["failed", "cancelled", "interrupted", "unknown"].includes(rec.state)) {
       completeness = { status: "partial", explanation: `task ended in state ${rec.state}` };
+    }
+    // After the terminal-state override, so that the override cannot erase the note.
+    if (droppedBytes > 0) {
+      completeness = { status: "partial", explanation: `${completeness.explanation}; ${truncationNote(droppedBytes)}` };
     }
 
     const toolCalls = [...t.toolCalls.entries()].map(([id, name]) => ({ toolName: name, summary: `toolCall ${id}` }));
@@ -807,6 +825,7 @@ export class TaskManager {
       errors: t.errors,
       warnings: t.warnings,
       eventsRef: { firstSeq, lastSeq, storage: `tasks/${taskId}.events.jsonl` },
+      ...(droppedBytes > 0 ? { truncated: { droppedBytes } } : {}),
     };
     if (TERMINAL_STATES.includes(rec.state)) {
       this.store.writeJson(`tasks/${taskId}.result.json`, result);

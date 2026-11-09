@@ -810,7 +810,7 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_task_result",
         title: "Task result",
-        description: "Versioned structured result (schemaVersion 1): ids, status, timestamps, requested/effective model, final response text (clearly marked partial when incomplete), usage (null = missing, not zero), tool calls, file changes, artifacts, interactions, errors, warnings, completeness.",
+        description: "Versioned structured result (schemaVersion 1): ids, status, timestamps, requested/effective model, final response text (clearly marked partial when incomplete), usage (null = missing, not zero), tool calls, file changes, artifacts, interactions, errors, warnings, completeness. The response text is capped at 4 MiB of UTF-8: a longer text keeps its first 1 MiB and its last 3 MiB with one marker line [… N bytes truncated …] between them (N in bytes, cuts on code-point boundaries); such a result is completeness partial with the truncation in the explanation and carries truncated: { droppedBytes }. A task keeps at most 200 warnings, 200 errors and 1,000 tool calls. Results cached before the cap are served as stored.",
         inputSchema: {
             type: "object",
             properties: { taskId: { type: "string" } },
