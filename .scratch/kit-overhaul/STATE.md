@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: confirming pre-merge run for 30 (staging/30t = tip + ticket/30) -> merge; 73 restaged on the tip with 16 (staging/73c, revert-of-revert first); t18 round 2 (merge 16 + 77, stopToken in the one pid-record builder); t17 after a slot. Running: t61, t40. 74, 78, 79 needs-triage.
+- Next action: Owner Proxy round 31 (windows S2 cdn-cache 65 MB post-merge RED, attributed to 29?; ticket 61 row values); merge 18 when staging/18b 42558574831 is green; t73 round 4; 61 measurement branches (staging/61m1, 61m2) running. Running: t40, t17, t73 r4. Next slots: 31, 57, then 22/27/33 (after 18), 34, 35, 37, 39, 41, 43-49, 52-54, 56, 58. 74, 78, 79 needs-triage.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -46,3 +46,4 @@
 - Ticket 75 merged 2026-11-09 as e3ae8d0 (resolved 966a0a3; pre-merge CI 42531830576, 8/8 green).
 - Ticket 38 merged 2026-11-09 as dfb9b43 (resolved 7f0c368; pre-merge CI 42543302875, 8/8 green).
 - Ticket 16 merged 2026-11-09 as b811246 (resolved 2ffeeef; pre-merge CI 42546127654, 8/8 green).
+- Ticket 30 merged 2026-11-09 as c93fa09 (resolved 9160426; confirming CI 42554009659, 8/8 green; pre-registered set staging/30s passed).
