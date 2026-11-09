@@ -18,6 +18,7 @@ import { startProxySession } from "../lib/proxy-session.mjs";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
 import { scan, settled, portsOf } from "../lib/sampler.mjs";
 import { PROCESSES, PROXY_COMMIT_BACKSTOP } from "../lib/budgets.mjs";
+import { DELIVERY_LABELS, findReleaseLine, judgeWindowsTrial, parseSenderOut, parseSpawnerOut, reapAll, senderScript, spawnHelper, spawnerScript, waitForPidLine } from "../lib/win-console-event.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -175,39 +176,137 @@ export async function run(ctx) {
   ctx.note("respawnHistory", (() => { try { return JSON.parse(readFileSync(join(kit.logDir, "respawn.json"), "utf8")).events.length; } catch { return null; } })());
   await kit.manager(["stop"]);
 
-  // Ctrl-C during start: SIGINT the manager once it holds the lock.
+  // Ctrl-C during start: interrupt the manager once it holds the lock. Linux
+  // delivers SIGINT via child.kill, unchanged from ticket 17's trial (round 33
+  // condition 4e: only the additive label differs). Windows delivers a REAL
+  // console control event (ticket 81, Owner Proxy round 33): a helper creates
+  // the trial child with CREATE_NEW_PROCESS_GROUP and a second helper sends
+  // GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, <child pid>) — the child's own
+  // group, never group 0, never CTRL_C_EVENT — with per-trial proof of
+  // delivery (the child's own `start lock released on signal signal=SIGBREAK`
+  // event line, or the console-event death 0xC000013A when no handler ran, as
+  // in the round-33 mutant). A trial whose delivery cannot be proven is a
+  // harness failure, never GREEN, never a fallback to child.kill.
+  const isWindows = process.platform === "win32";
+  const method = isWindows ? DELIVERY_LABELS.windows : DELIVERY_LABELS.linux;
+  const managerPath = join(KIT_ROOT, "proxy", "zcode-proxy-manager.mjs");
   const sigint = [];
   for (let t = 0; t < (ctx.long ? 20 : 8); t++) {
-    const child = spawn(process.execPath, [join(KIT_ROOT, "proxy", "zcode-proxy-manager.mjs"), "start"], { env: kit.env, stdio: "ignore" });
+    const delayMs = (t % 8) * 150;
+    const entry = { trial: t, method, ...(isWindows && t === 0 ? { selfTest: true } : {}) };
+    const trialStartMs = Date.now();
+    const helperPids = []; // reaped at the end of the trial and on every failure path (round 33 condition 4b)
+    let child = null; // linux: the trial child
+    let win = null; // windows: { childPid, spawner, sender, senderReport, childExitCode }
     let sent = false;
-    for (let k = 0; k < 400 && !sent; k++) {
-      // Vary the moment: right after the lock (before spawn) up to ~1 s later
-      // (proxy spawned, health wait running).
-      try { if (JSON.parse(readFileSync(lockFile, "utf8")).pid === child.pid) { await sleep((t % 8) * 150); child.kill("SIGINT"); sent = true; } } catch {}
-      if (!sent) await sleep(10);
-    }
-    await new Promise((r) => (child.exitCode !== null ? r() : child.once("exit", r)));
-    await sleep(500);
-    await settle();
-    const stale = existsSync(lockFile);
-    const orphanedChild = proxies().map((p) => p.pid);
-    const pidRecord = kit.pidRecord();
-    const nextStart = await kit.manager(["start"], { timeoutMs: 60_000 });
-    const nextStop = await kit.manager(["stop"], { timeoutMs: 60_000 });
-    await settle();
-    const entry = { delayMs: (t % 8) * 150, sent, staleLock: stale, childSurvived: orphanedChild.length > 0, pidRecordStartedMs: pidRecord ? pidRecord.startedMs ?? null : "no record", nextStart: nextStart.code, nextStop: nextStop.code, nextStopTail: (nextStop.out + nextStop.err).trim().split("\n").slice(-1)[0]?.slice(0, 200), proxiesAfter: proxies().length };
-    // Clean state for the next trial: our own lock file, then the kit's stop
-    // once more; whatever the kit still cannot stop is ours and is killed here.
-    if (existsSync(lockFile)) unlinkSync(lockFile);
-    if (proxies().length) {
-      const retry = await kit.manager(["stop"], { timeoutMs: 60_000 });
-      entry.stopAfterLockRemoved = retry.code;
+    try {
+      if (isWindows) {
+        win = {};
+        const spawner = spawnHelper(spawnerScript(process.execPath, [managerPath, "start"]), kit.env, { timeoutMs: 180_000 });
+        helperPids.push(spawner.pid);
+        win.spawner = spawner;
+        const withPid = await waitForPidLine(spawner, { timeoutMs: 60_000 });
+        if (withPid.childPid === null) {
+          const reaped = reapAll(helperPids);
+          entry.helpersReaped = reaped.pids;
+          throw new Error(`windows S4 trial ${t}: the spawner helper created no trial child (createError ${withPid.createError}) — spawner out: ${(spawner.state.out() || "(none)").slice(-300)} err: ${(spawner.state.err() || "(none)").slice(-300)}`);
+        }
+        win.childPid = withPid.childPid;
+        entry.childPid = win.childPid;
+        for (let k = 0; k < 400 && !sent; k++) {
+          // Vary the moment exactly as on linux: right after the lock (before
+          // spawn) up to ~1 s later (proxy spawned, health wait running). The
+          // sender's own start-up latency is part of the recorded evidence.
+          try {
+            if (JSON.parse(readFileSync(lockFile, "utf8")).pid === win.childPid) {
+              await sleep(delayMs);
+              const sender = spawnHelper(senderScript(win.childPid), kit.env, { timeoutMs: 60_000 });
+              helperPids.push(sender.pid);
+              win.sender = sender;
+              const senderDone = await sender.done;
+              const parsed = parseSenderOut(senderDone.out);
+              win.senderReport = { sent: parsed.sent, error: parsed.error, timedOut: senderDone.timedOut, code: senderDone.code };
+              entry.sender = win.senderReport;
+              sent = parsed.sent;
+            }
+          } catch {}
+          if (!sent) await sleep(10);
+        }
+        entry.sent = sent;
+        const spawnerDone = await spawner.done;
+        if (spawnerDone.timedOut) {
+          // The helper still holds a handle on the child, so the child's pid
+          // is still the child's: end the child first, then the helper.
+          const reapedChild = reapAll([win.childPid]);
+          const reapedHelpers = reapAll(helperPids);
+          entry.helpersReaped = [...reapedChild.pids, ...reapedHelpers.pids];
+          throw new Error(`windows S4 trial ${t}: the spawner helper did not report the child's exit (child ${win.childPid}, reaped ${entry.helpersReaped.join(", ")})`);
+        }
+        win.childExitCode = parseSpawnerOut(spawnerDone.out).childExitCode;
+        entry.childExitCode = win.childExitCode;
+      } else {
+        child = spawn(process.execPath, [managerPath, "start"], { env: kit.env, stdio: "ignore" });
+        for (let k = 0; k < 400 && !sent; k++) {
+          // Vary the moment: right after the lock (before spawn) up to ~1 s later
+          // (proxy spawned, health wait running).
+          try { if (JSON.parse(readFileSync(lockFile, "utf8")).pid === child.pid) { await sleep(delayMs); child.kill("SIGINT"); sent = true; } } catch {}
+          if (!sent) await sleep(10);
+        }
+        entry.sent = sent;
+        await new Promise((r) => (child.exitCode !== null ? r() : child.once("exit", r)));
+      }
+      await sleep(500);
       await settle();
-      for (const p of proxies()) { try { process.kill(p.pid, "SIGKILL"); entry.killedByHarness = (entry.killedByHarness ?? 0) + 1; } catch {} }
-      try { unlinkSync(join(kit.logDir, "proxy.pid")); } catch {}
+      const stale = existsSync(lockFile);
+      const orphanedChild = proxies().map((p) => p.pid);
+      const pidRecord = kit.pidRecord();
+      const nextStart = await kit.manager(["start"], { timeoutMs: 60_000 });
+      const nextStop = await kit.manager(["stop"], { timeoutMs: 60_000 });
+      await settle();
+      Object.assign(entry, { delayMs, sent, staleLock: stale, childSurvived: orphanedChild.length > 0, pidRecordStartedMs: pidRecord ? pidRecord.startedMs ?? null : "no record", nextStart: nextStart.code, nextStop: nextStop.code, nextStopTail: (nextStop.out + nextStop.err).trim().split("\n").slice(-1)[0]?.slice(0, 200), proxiesAfter: proxies().length });
+      if (isWindows) {
+        const proof = findReleaseLine(kit.logDir, win.childPid, { notBeforeMs: trialStartMs });
+        entry.proof = proof?.line ?? null;
+        entry.proofFile = proof?.file ?? null;
+        const judge = judgeWindowsTrial({ first: t === 0, sender: win.senderReport ?? { sent: false, timedOut: false, error: "the sender never ran (the lock never named the child)" }, childExitCode: win.childExitCode, releaseLine: proof });
+        entry.delivered = judge.delivered;
+        if (judge.proofVia) entry.proofVia = judge.proofVia;
+        if (judge.reason) entry.reason = judge.reason;
+        if (judge.failure) {
+          throw new Error(`windows S4 trial ${t} (ticket 81, round 33 condition 4c): harness failure — ${judge.failure}. Trial evidence: ${JSON.stringify({ ...entry, spawnerErr: (win.spawner?.state.err() ?? "").slice(-200) }).slice(0, 1200)}`);
+        }
+      }
+      // Clean state for the next trial: our own lock file, then the kit's stop
+      // once more; whatever the kit still cannot stop is ours and is killed here.
+      if (existsSync(lockFile)) unlinkSync(lockFile);
+      if (proxies().length) {
+        const retry = await kit.manager(["stop"], { timeoutMs: 60_000 });
+        entry.stopAfterLockRemoved = retry.code;
+        await settle();
+        for (const p of proxies()) { try { process.kill(p.pid, "SIGKILL"); entry.killedByHarness = (entry.killedByHarness ?? 0) + 1; } catch {} }
+        try { unlinkSync(join(kit.logDir, "proxy.pid")); } catch {}
+      }
+      sigint.push(entry);
+    } finally {
+      if (isWindows) {
+        const reap = reapAll(helperPids);
+        if (reap.count) entry.helpersReaped = [...(entry.helpersReaped ?? []), ...reap.pids];
+      }
     }
-    sigint.push(entry);
   }
+  const provenByReleaseLine = sigint.filter((s) => s.proofVia === "release-line").length;
+  const provenByEventExit = sigint.filter((s) => s.proofVia === "event-exit").length;
+  const startCompletedFirst = sigint.filter((s) => !s.delivered && s.reason).length;
+  ctx.note("sigintDelivery", {
+    method,
+    trials: sigint.length,
+    delivered: isWindows ? sigint.filter((s) => s.delivered).length : sigint.filter((s) => s.sent).length,
+    provenByReleaseLine: isWindows ? provenByReleaseLine : null,
+    provenByEventExit: isWindows ? provenByEventExit : null,
+    startCompletedFirst: isWindows ? startCompletedFirst : null,
+    selfTest: isWindows ? "trial 0: delivery must be proven or the run fails (round 33 condition 4c)" : null,
+  });
+  ctx.log(`ctrl-c trials delivered ${method}: ${sigint.filter((s) => s.delivered ?? s.sent).length}/${sigint.length} delivered (release line ${provenByReleaseLine}, event exit ${provenByEventExit}), start completed first ${startCompletedFirst}`);
   ctx.note("sigintDuringStart", sigint);
 
   // The proxy's own restart path with a stale lock present (what a Ctrl-C'd
@@ -255,7 +354,7 @@ export async function run(ctx) {
       extra: [
         { name: "proxy-left-after-stop", red: leftovers > 0, value: leftovers, budget: 0, unit: "cycles" },
         { name: "failed-lifecycle-steps", red: cycles.some((c) => c.failed.length), value: cycles.reduce((a, c) => a + c.failed.length, 0), budget: 0, unit: "steps" },
-        { name: "stale-lock-after-ctrl-c", red: staleAfterSigint > PROCESSES.staleLocks, value: staleAfterSigint, budget: PROCESSES.staleLocks, unit: `of ${sigint.length}` },
+        { name: "stale-lock-after-ctrl-c", red: staleAfterSigint > PROCESSES.staleLocks, value: staleAfterSigint, budget: PROCESSES.staleLocks, unit: `of ${sigint.length} (${method})` },
         { name: "unstoppable-proxy-after-ctrl-c", red: unstoppable > 0, value: unstoppable, budget: 0, unit: `of ${sigint.length}` },
         { name: "respawn-recovers-despite-stale-lock", red: !staleRespawn.healthy, value: staleRespawn.healthy ? 1 : 0, budget: 1, unit: "proxy up" },
         { name: "respawns-in-window", red: respawnsDone > PROCESSES.respawnsPer15Min, value: respawnsDone, budget: PROCESSES.respawnsPer15Min, unit: "restarts/15min" },

@@ -216,6 +216,18 @@ function markdown({ os, cap, ratchet, results, partial }) {
   }
   const onlyCommit = results.filter((r) => r.redOnlyOnCommit);
   if (onlyCommit.length) lines.push("", "RED only on commit (working set within budget) — raised to the owner, never adjusted silently (build-time gate 3):", ...onlyCommit.map((r) => `- ${r.key}: ${r.redChecks.join(", ")} (working set: ${r.workingSetRedChecks.join(", ") || "green"})`));
+  // Ticket 81 (round 33 condition 4d): the job summary prints the event each trial delivered.
+  const deliveries = results.filter((r) => r.sigintDelivery);
+  if (deliveries.length) {
+    lines.push("", "Ctrl-C-during-start trials (ticket 81, Round 33: windows delivers CTRL_BREAK_EVENT to the trial child's own process group; linux SIGINT (kill), unchanged):");
+    for (const r of deliveries) {
+      const d = r.sigintDelivery;
+      const proof = d.provenByReleaseLine !== null && d.provenByReleaseLine !== undefined
+        ? `, proven by the release line in ${d.provenByReleaseLine}, by the event exit in ${d.provenByEventExit}, start completed first in ${d.startCompletedFirst}${d.selfTest ? `; ${d.selfTest}` : ""}`
+        : ", delivery is child.kill(SIGINT) on this platform";
+      lines.push(`- ${r.key}: ${d.method}${d.trials ? `, ${d.trials} trials, ${d.delivered} delivered` : ""}${proof}`);
+    }
+  }
   return lines.join("\n") + "\n";
 }
 
@@ -269,6 +281,8 @@ async function main() {
       // Every growth check with its value, trend and sample count, insufficient ones included:
       // the ratchet judges an unstable growth band on it (lib/ratchet.mjs, Round 13 Q1).
       growthChecks: (summary?.checks ?? []).filter((c) => /^growth:/.test(c.name)).map((c) => ({ name: c.name, red: c.red, value: c.value ?? null, commitValue: c.commitValue ?? null, wsValue: c.wsValue ?? null, gate: c.gate ?? null, budget: c.budget, trend: c.trend === true, insufficient: c.detail?.insufficient === true, samples: c.detail?.samples ?? null, windowMediansMB: c.detail?.windowMediansMB ?? null, risingWindows: c.detail?.risingWindows ?? null, netRisePct: c.detail?.netRisePct ?? null })),
+      // Ticket 81 (round 33 condition 4d): the event the S4 Ctrl-C trials delivered, with their proof counts.
+      sigintDelivery: summary?.notes?.sigintDelivery ?? null,
       error: why ?? summary?.error ?? r.error ?? null };
     return { result, summary };
   }
