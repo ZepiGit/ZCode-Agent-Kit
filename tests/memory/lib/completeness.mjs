@@ -27,9 +27,10 @@ export const EVIDENCE = {
   "S3/omp": { minDurationS: 5, minSamples: 14, roles: ["proxy", "preflight", "omp-host"] },
   S4: { minDurationS: 60, minSamples: 30, roles: ["proxy", "manager"] },
   S5: { minDurationS: 120, minSamples: 60, roles: ["mcp-bridge"] },
-  // S5/restart (ticket 57): 20 short calls; with a restart budget most are
-  // refused at once, so a run takes ~30 s (its proof is the restart round).
-  "S5/restart": { minDurationS: 10, minSamples: 8, roles: ["mcp-bridge"] },
+  // S5/restart (ticket 57): 20 short calls, 12–13 s and 11–12 samples on Linux
+  // with and without the restart budget (half: 6 s, 5 samples); its proof is
+  // the restart round below.
+  "S5/restart": { minDurationS: 6, minSamples: 5, roles: ["mcp-bridge"] },
   S6: { minDurationS: 1, minSamples: 1, roles: [] },
   S7: { minDurationS: 30, minSamples: 15, roles: ["proxy"] },
 };

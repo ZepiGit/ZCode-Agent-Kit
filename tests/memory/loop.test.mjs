@@ -2124,7 +2124,7 @@ test("run evidence: an S5/restart run without its restart round (K calls, a harn
   const run = (rounds, extra = {}) => runEvidence({ key: "S5/restart", platform: "linux", outcome: "GREEN", metric: "rss", durationS: 25, samples: 24, summary: { "mcp-bridge": { maxCount: 1 } }, notes: { sampler: {}, rounds }, ...extra }, { key: "S5/restart", exitCode: 0 });
   assert.deepEqual(run([{ name: "restart-k20", calls: 20, spawns: 4 }]), { ok: true, problems: [] });
   assert.match(run([]).problems.join(), /round restart-k20 never ran/);
-  assert.match(run([{ name: "restart-k20" }], { durationS: 4, samples: 3 }).problems.join(), /3 samples \(need ≥ 8\).*ran 4 s, below the S5\/restart floor of 10 s/);
+  assert.match(run([{ name: "restart-k20" }], { durationS: 4, samples: 3 }).problems.join(), /3 samples \(need ≥ 5\).*ran 4 s, below the S5\/restart floor of 6 s/);
   // S5/short keeps the S5 floor.
   assert.match(runEvidence({ key: "S5/short", platform: "linux", outcome: "GREEN", metric: "rss", durationS: 25, samples: 24, summary: { "mcp-bridge": { maxCount: 1 } }, notes: { sampler: {} } }, { key: "S5/short", exitCode: 0 }).problems.join(), /below the S5 floor of 120 s/);
 });
