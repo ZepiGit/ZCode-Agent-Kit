@@ -1,7 +1,7 @@
 # STATE — resume anchor
 
 - Phase: 4 (implement-spec)
-- Next action: t61 round 3 -> stage 61 -> pre-merge (round 32: criterion 3 both legs incl. windows S1/short; burst4 GREEN) -> merge. Running: t40, t17, t31, t61 r3. Next slots: 33, 27, 57, 80, 79 (table and round), then 22 (after 40), 34, 35, 37, 39, 41, 43-49, 52-54, 56, 58. 74, 78, 79 needs-triage.
+- Next action: merge 31 (staging/31 re-run) and 17 (staging/17s) when green; t40 round 2 (ux-before bun row) at the next slot; after 17 merges create ticket 81 (round 33) and move the windows S4 name. Running: t33, t27, t57 (cap 3 held). Next: t40 r2, 80, 79 table, 22 (after 40), 23 (after 17), 34/35 (after 33), 37, 39, 41, 43-49, 52-54, 56, 58.
 - Ticket 07 merged 2026-11-06 as 5777177 (resolved 964e4d1).
 - Tickets 02 + 60 merged 2026-11-07 from staging/02: revert-of-revert bbd43ef, merge 6236873, resolved d548f33 (pre-merge CI 42326112543, 8/8 green).
 - Ticket 03 merged 2026-11-07 as efab6f1 (resolved 2dae7fc; pre-merge CI 42335478907, 8/8 green).
@@ -49,3 +49,4 @@
 - Ticket 30 merged 2026-11-09 as c93fa09 (resolved 9160426; confirming CI 42554009659, 8/8 green; pre-registered set staging/30s passed).
 - Ticket 18 merged 2026-11-09 as c2691ed (resolved 1a5ae1b; pre-merge CI 42558574831, 8/8 green).
 - Ticket 73 merged 2026-11-09 as 38b3d3e (resolved a5abe10; pre-merge CI 42567882391, 8/8 green).
+- Ticket 61 merged 2026-11-09 as eb8aaae (resolved d5b81a6; pre-merge CI 42585304203, 8/8 green).
