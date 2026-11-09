@@ -535,6 +535,64 @@ What the steps show:
   - sending bytes or a Blob instead of the string: bytes +60 MB at 4 bodies, Blob no gain;
   - Bun `--smol` (`BUN_OPTIONS=--smol`): no gain at 4 or 16 bodies.
 
+### S1/stalled: response-side attribution and backpressure (ticket 61; Round 12 Q3)
+
+**Windows, from the archived `memory-budget-windows` artefacts (shipped `tee()` tree).** 75 distinct S1/stalled runs from 42265988296 on (every `S1-stalled/**/samples.csv` under `/home/AgentKit/overhaul-tools`, deduplicated; `/home/AgentKit/overhaul-tools/t61-scripts/stalled-art.py` and `stalled-art-stats.py`). Proxy rows only; "idle" is the first sample before the load window (`notes.loadWindowMs`); heap is the proxy's `/health` `heapUsedMB` that the sampler records with every sample. Values in MB, min / median / max.
+
+| leg | runs | idle WS (RSS) | idle commit | idle heap | WS gate (procPeak) | commit peak | WS during load, median | heap during load, median | heap during load, peak |
+|---|---|---|---|---|---|---|---|---|---|
+| windows | 75 | 51.0 / 52.5 / 55.0 | 177.2 / 182.2 / 187.4 | 4 / 4 / 5 | 278.3 / 301.5 / 332.5 (without the Round 7 runs 42252896054 and 42265988296, whose 444 and 452.3 are commit-gated values) | 429.9 / 451.1 / 485.1 | 216.1 / 224.6 / 235.7 | 47 / 54 / 60 | 88 / 111 / 140 |
+| linux | 70 | — (no sample before the load) | — | — | 141.7 / 174.1 / 208.2 | — | 113.9 / 135.2 / 164.2 | 15 / 16.5 / 30 | 21 / 25 / 51 |
+
+At the peak the windows proxy's JS heap holds about 107 MB more than at idle (13 MB per stalled reader at 8 readers); the linux heap about 20 MB. A `tee()` branch queue is JS-held bytes (a local probe: 17.2 MB queued in an unread branch raises `heapUsed` by 18 MB and RSS by 36 MB), so the heap is where bucket (i) shows. The split against a drained reference on windows is the attribution mode's job (`job.mjs --measure-stalled`, marker `tests/memory/measure-stalled`): pending CI.
+
+**Mechanism, linux experiments** (Bun 1.4.2, `/home/AgentKit/overhaul-tools/t61-scratch/`): Bun's response writer stops pulling once the kernel send buffer is full. For one paused loopback client it pulled 3.95 MiB of a 4.5 MB answer, all of it in the kernel (`ss`: Send-Q 4,025,344 B, `tcp_wmem` max 4 MiB, client Recv-Q 127,096 B), so on linux only ~0.35 MB per stalled reader stayed in the `tee()` queue. A Bun `fetch` body that JS does not read costs about 1.0–1.1 MB per stream and stops there (the upstream's kernel queues hold the rest; 0.78 MB per stream once drained). Read late, a `fetch` body returns what accumulated meanwhile: 130–330 KB per read against 64 KB when read as it arrives.
+
+**Linux attribution mode, local** (`node tests/memory/job.mjs --measure-stalled N --cap systemd`, port 19614–19617; run dirs `/home/AgentKit/overhaul-tools/t61-memloop/attr-*`). Pre-fix tree: 1495c03 (the integration tip's proxy plus the mode). The pairs of 3 rotations ran side by side, pre against the branch. RSS, MB, medians:
+
+| tree | rotations | stalled peak | drained peak | idle floor | (iii) drained excess | (i) JS-held | (ii) residual | stalled per reader (excess) |
+|---|---|---|---|---|---|---|---|---|
+| 1495c03 (`tee()`) alone | 1 | 169.8 | 149.8 | 59.7 | 89.8 | 5 | 15.3 | 13.8 |
+| 1495c03, beside e540752 | 3 | 174.4 | 166 | 59.7 | 106.1 | 3 | 5.6 | 14.3 |
+| e540752 (backpressure, whole chunks) | 3 | **188.8** | 167.1 | 60.3 | 107 | 5 | 16.5 | 16.1 |
+| 1495c03, beside caf66db | 3 (184.3, 175, 173.4) | 175 | 161.2 | 60.1 | 101.3 | 5 | 8.6 | 14.4 |
+| caf66db (backpressure, 64 KiB pieces) | 3 (147.8, 150.6, 148.5) | **148.5** | 144.1 | 59.8 | 84.4 | 6 | −1.7 | 11.1 |
+
+All rows "accounted" (|residual| ≤ 20 % of the excess). On linux the stalled excess is almost all (iii): the kernel holds what a stalled reader leaves. Backpressure alone (e540752) raised the linux stalled peak by ~14 MB; the cause was the large late reads above, copied and held whole by every stage after the upstream (terminal-frame guard, decoders, socket write). Standalone A/B (`t61-scratch/ab-proxy.ts`: the proxy's `startServer` against the soak mock, 8 stalled readers at 25/s for 60 s, VmHWM): tee() tree 129.9–143.4 MB, e540752 145.9–150, with the 64 KiB pieces 117.1–119.8 (4 rounds).
+
+**Other S1 and S7 runs on caf66db** (`job.mjs --only …`, `t61-memloop/fix2-s1-job`, "ratchet holds"): S1/short GREEN (growth 3.53 %/1k, peak 145.5, steady 114.3); S1/burst1 median 121.3 of 7 (118.1–123.7); burst4 230.8; burst16 327.2; burst32 348.7; bigbody 201.7; S1/stalled 148.9 (growth −0.03 %/1k); S7/short RED only on `proxy.log:bounded-while-running` (ticket 33), heap-at-cap 63, peak 211.7. Paired, alternating with 1495c03 (`t61-memloop/paired-heavy`, `paired-burst4`): bigbody 196.7 / 190 / 193.7 against 195.5 / 172.8 / 187.4; burst4 median 219.9 (206.4–228.6, 9 runs) against 230.6 (214.7–235.8, 9 runs), one-sided permutation p = 0.015. The burst4 path (non-streaming bodies, a "mock-ok" answer) runs none of the changed code except one socket write per answer; the standalone A/B of that shape (4 × 10.8 MB, 12 requests, 5 rounds) gives 189.9–217.7 MB on the tee() tree and 177.4–214.6 on the branch.
+
+**Windows attribution mode, CI (Round 12 Q3 criterion 1; Round 31 Q2 condition 1).** Staging m1 = 1495c03 (shipped `tee()` proxy + the mode), run 42561009557; m2 = branch head ce6d627, run 42561017903; marker `3`, 3 rotations S1/stalled → S1/drained per leg, 8 stalled readers. Artefacts: `/home/AgentKit/overhaul-tools/ci-art/t61m/{m1,m2}-{windows,linux}/measure-S1-stalled.{md,json}`. Buckets as the mode defines them: (iv) the idle floor; (iii) the drained peak above its floor; (i) the JS heap the stalled run holds above the drained run's, above their floors; (ii) the residual of the excess. The rule, fixed in the mode before the run (`tests/memory/lib/measure.mjs` `STALLED_ACCOUNTED_SHARE = 0.2`, ticket 61 Comments 2026-11-09): accounted when the measured buckets (i) + (iii) explain the excess above idle to within ±20 %, i.e. |(ii)| ≤ 20 % of the excess. MB, medians of 3 (per stalled reader in brackets):
+
+| tree | leg | metric | stalled peak | (iv) floor | excess above idle | (iii) drained excess | (i) JS-held | (ii) residual | residual share | accounted |
+|---|---|---|---|---|---|---|---|---|---|---|
+| m1 1495c03 | windows | WS | 293.1 | 54.9 | 238.2 (29.8) | 102.4 (12.8) | 85 (10.6) | 50.8 (6.3) | 21.3 % | **no** |
+| m1 1495c03 | windows | commit | 453.7 | 182.4 | 271.3 (33.9) | 111.7 (14) | 85 (10.6) | 74.6 (9.3) | 27.5 % | **no** |
+| m1 1495c03 | linux | RSS | 181 | 63.4 | 117.6 (14.7) | 84.8 (10.6) | 8 (1) | 24.8 (3.1) | 21.1 % | no |
+| m2 ce6d627 | windows | WS | 132.4 | 54.8 | 77.6 (9.7) | 72.6 (9.1) | 9 (1.1) | −4 (−0.5) | −5.2 % | yes |
+| m2 ce6d627 | windows | commit | 298.1 | 181.8 | 116.3 (14.5) | 111.1 (13.9) | 9 (1.1) | −3.8 (−0.5) | −3.3 % | yes |
+| m2 ce6d627 | linux | RSS | 144.3 | 63.5 | 80.8 (10.1) | 56.5 (7.1) | 9 (1.1) | 15.3 (1.9) | 18.9 % | yes |
+
+m1 windows per rotation (stalled run n paired with drained run n), residual share WS / commit: rotation 1 20.5 % / 26.9 %, rotation 2 19.5 % / 20.6 %, rotation 3 18.4 % / 24.9 %. Commit is outside ±20 % in all three rotations, and WS is outside on the medians and in rotation 1. Drained arm m1 → m2 windows: WS 157.4 → 127.4, commit 298.3 → 294.7.
+
+**Verdict, criterion 1 as written: not met; the attribution is inconclusive.** On the shipped tree (m1) the measured buckets explain 78.7 % of the windows WS excess above idle and 72.5 % of the commit excess. Both are outside ±20 %, and the criterion names both metrics. Bucket (ii) has no measurement of its own here. It is the residual, so it cannot be counted toward the accounting without making the test true by construction. The m2 values are the fix tree's result, not the attribution of the shipped peak. They show that the stage-2 change removes the stalled-specific excess on windows: stalled minus drained WS falls from 135.7 to 5.0, the stalled peak drops 160.7 MB WS and 155.6 MB commit, and (i) falls from 85 to 9. That is causal evidence for a proxy-side lever, but it does not satisfy the pre-registered accounting. One explanation is not part of the rule and is not a verdict: (i) is counted in `heapUsed` MB, and the local probe above saw RSS rise about twice as much as `heapUsed` for queued `tee()` bytes, so the WS cost of (i) could carry the residual. Criterion 4 applies, so the stage-2 commits and Round 31 Q2's acceptance go back to the Owner Proxy with these numbers. Recorded 2026-11-09 (ticket 61 round 2).
+
+**Owner Proxy round 32 records.** m1 is recorded as not accounted under the pre-registered rule (WS 21.3 %, commit 27.5 %; per rotation WS 20.5/19.5/18.4, commit 26.9/20.6/24.9); the rule and its median form are unchanged. The residual (50.8 WS / 74.6 commit MB) is unattributed, stalled-specific; "RSS ≈ 2× heapUsed for queued `tee()` bytes" is an unproven hypothesis. Stage 2 ships on the m2 intervention (round 32 Q1). The local burst4 paired shift above (219.9 → 230.6, p = 0.015) is **flagged, unattributed**.
+
+**Merged head, local linux (ticket 61 round 3, 2026-11-09).** Two trees, both with round 31 Q2's tests, the terminal-frame guard on demand (8d025d4) and the printHeader comment (fb17d71): fb17d71 = ce6d627 + the integration tip 63a704b (tickets 30 and 18); 5a8ad97 = fb17d71 + the tip e0962b7 (ticket 73, memory-loop sampler and runner; no proxy source). `job.mjs --only S1/<variant> --cap systemd`, port 19610, sequential, Node 26.7.0, Bun 1.4.2; run dirs `/home/AgentKit/overhaul-tools/t61-memloop/{r3,r3b}/`, logs `reports/t61-r3-s1-*.log`, `reports/t61-r3b-s1-*.log`; every run's isolation proof (`externalConnections`) is empty.
+
+| run | fb17d71: outcome, procPeak:proxy, growth %/1k (trend) | 5a8ad97 (final merged head): outcome, procPeak:proxy, growth %/1k (trend) |
+|---|---|---|
+| S1/stalled 1 | GREEN, 149, −0.12 (false) | GREEN, 143.5, 0.16 (false) |
+| S1/stalled 2 | GREEN, 144.2, −0.82 (false) | GREEN, 148.7, 0.07 (true) |
+| S1/stalled 3 | GREEN, 152.9, −0.85 (false) | GREEN, 151.8, −0.07 (false) |
+| S1/burst4 1 | GREEN, 227.4 | GREEN, 231.3 |
+| S1/burst4 2 | GREEN, 225.8 | GREEN, 213.6 |
+| S1/burst4 3 | GREEN, 227.9 | GREEN, 226.5 |
+| S1/short 1 | GREEN, 142 (steady 113.2), 3.4 (true) | GREEN, 138.2 (steady 113.1), 3.44 (true) |
+
+count:proxy 1 and orphans 0 in every run. S1/stalled median 148.7 (143.5–151.8) on 5a8ad97 and 149 (144.2–152.9) on fb17d71, against 175 on the `tee()` tree and 148.5 on caf66db (table above). **S1/burst4 beside ticket 20's distribution:** 5a8ad97 median 226.5 (213.6–231.3, n 3); fb17d71 227.4 (225.8–227.9, n 3); all six 226.95 (213.6–231.3); ticket 20's final 225.8 (193.3–241.2, n 10); this ticket's earlier paired run 230.6 (214.7–235.8, n 9). Every value is inside ticket 20's range, and the highest is 18.7 MB under the 250 budget. Local, shared machine; the pre-merge CI run decides (round 32 conditions 4 and 5).
+
 ### S3 kill-holder round: the adversary's victim is not a failed launch (ticket 16; Round 27 Q1)
 
 **The rule (spec §18 PROCESSES, first bullet).** Measurement-rule amendment (Round 27 Q1): in the kill-holder round, the launch the adversary SIGKILLed (its pid equals the adversary's recorded `killed` pid, and it exited non-zero) is reported as `killedByAdversary` and is never a failed launch. Every other launch that does not exit 0 is a failed launch. A round counts as run only with exactly one such launch. Budget 0 is unchanged (`budgets.mjs` `PROCESSES.failedLaunches`, untouched).

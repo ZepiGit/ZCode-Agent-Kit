@@ -67,6 +67,10 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
  * Forward `source` frame by frame and append one terminal `event: error`
  * frame if the stream ends (EOF or read failure) before a `message_stop` or
  * `error` event was seen. A client cancel is propagated to the source.
+ *
+ * It reads only when its reader asks (high-water mark 0): a frame read ahead
+ * would be counted in the request row's Tok without having reached the client
+ * (ticket 61, Owner Proxy round 31 Q2 condition 5 (c)).
  */
 export function ensureAnthropicSseTerminal(source: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
   const reader = source.getReader();
@@ -124,5 +128,5 @@ export function ensureAnthropicSseTerminal(source: ReadableStream<Uint8Array>): 
       cancelled = true;
       return reader.cancel(reason).catch(() => {});
     },
-  });
+  }, { highWaterMark: 0 });
 }
