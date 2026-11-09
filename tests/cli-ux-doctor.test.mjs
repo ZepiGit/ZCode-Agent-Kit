@@ -111,6 +111,13 @@ const FIXTURES = {
     { name: "omp integration", ok: null, detail: "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp" },
     { name: "proxy reachable + identity", ok: false, detail: "health=foreign" },
   ],
+  // CJK data (C3): an upstream answer in Chinese inside a detail; the rows
+  // align and wrap by display width, never mid-character.
+  "cjk": [
+    { name: "proxy reachable + identity", ok: true, detail: "health=ours" },
+    { name: "account auth valid", ok: false, detail: "上游返回：账号额度已用完，请在明天零点之后再试一次 (quota exhausted)" },
+    { name: "start-plan JWT age (info)", ok: true, detail: "5.0h since issue — age is informational, validity is the auth check above" },
+  ],
   // WARN: a passing check that needs attention, with its own why/next; a
   // failing check that also says warn stays FAIL; a skipped one stays SKIP.
   "warn": [

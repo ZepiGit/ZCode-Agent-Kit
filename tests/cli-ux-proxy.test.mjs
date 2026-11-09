@@ -113,6 +113,11 @@ const status = (over) => ({ identity: "ours", pidRecord: PID_RECORD, alive: true
 
 const STATUS_FIXTURES = {
   "running": status({}),
+  // CJK data (C3): a package name in Chinese aligns by display width.
+  "running-cjk-quota": status({ quota: { ok: true, status: 200, bodyError: null, body: { balances: [
+    { showName: "GLM 编程套餐", remainingUnits: 4120, totalUnits: 6000, unitType: "prompts", expiresAt: 1767139200 },
+    { showName: "Start Plan Bonus", remainingUnits: 35, totalUnits: 200, unitType: "prompts", expiresAt: 1764460800 },
+  ] } } }),
   "running-old-proxy": status({ details: null, quota: { fetchError: "The operation was aborted due to timeout" }, connection: { source: "running", facts: { ...FACTS, modelsSource: "config" }, error: null } }),
   "running-captcha-unloaded": status({ details: { ...DETAILS, captcha: null }, quota: { ok: false, status: 503, body: null, bodyError: null } }),
   "down": status({ identity: "down", pidRecord: null, alive: false, details: null, quota: null, connection: { source: "configured", facts: { ...FACTS, source: "configured", modelsSource: "config" }, error: null } }),
