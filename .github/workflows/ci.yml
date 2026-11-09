@@ -185,10 +185,17 @@ jobs:
       # "N" (N runs on the job's Bun) or "N bun=1.4.2,1.4.3,1.4.4" (the paired
       # measurement: N runs per arm, interleaved in rotation, Round 10 Q1; the
       # pinned Bun first, as the reference arm). Each arm named in the marker
-      # must have been kept aside above.
+      # must have been kept aside above. The S1/stalled attribution (ticket 61,
+      # Round 12 Q3 condition 1) is the same kind of one-run switch: while
+      # tests/memory/measure-stalled (content "N") is committed, the ratchet is
+      # replaced by N rotations of S1/stalled and its drained reference.
       - name: Memory loop (short profile) and expected-RED ratchet
-        if: hashFiles('tests/memory/measure-burst1') == ''
+        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') == ''
         run: node tests/memory/job.mjs --out "${{ runner.temp }}/memloop"
+      - name: S1/stalled attribution (only with the tests/memory/measure-stalled marker)
+        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') != ''
+        shell: bash
+        run: node tests/memory/job.mjs --measure-stalled "$(tr -d '\r' < tests/memory/measure-stalled)" --out "${{ runner.temp }}/memloop"
       - name: S1/burst1 measurement (only with the tests/memory/measure-burst1 marker)
         if: hashFiles('tests/memory/measure-burst1') != ''
         shell: bash
@@ -213,6 +220,8 @@ jobs:
             ${{ runner.temp }}/memloop/job-summary.md
             ${{ runner.temp }}/memloop/measure-S1-burst1.json
             ${{ runner.temp }}/memloop/measure-S1-burst1.md
+            ${{ runner.temp }}/memloop/measure-S1-stalled.json
+            ${{ runner.temp }}/memloop/measure-S1-stalled.md
             ${{ runner.temp }}/memloop/**/run.log
             ${{ runner.temp }}/memloop/**/samples.csv
             ${{ runner.temp }}/memloop/**/summary.json

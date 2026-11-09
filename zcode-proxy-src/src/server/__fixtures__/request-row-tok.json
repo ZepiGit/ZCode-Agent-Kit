@@ -1,0 +1,56 @@
+{
+ "messages: complete stream, frames and UTF-8 split across chunks": {
+  "rows": 1,
+  "tok": [
+   "9"
+  ]
+ },
+ "messages: complete stream in one chunk": {
+  "rows": 1,
+  "tok": [
+   "9"
+  ]
+ },
+ "messages: stream cut without message_stop, unfinished last frame": {
+  "rows": 1,
+  "tok": [
+   "9"
+  ]
+ },
+ "messages: upstream read fails mid-stream": {
+  "rows": 1,
+  "tok": [
+   "5"
+  ]
+ },
+ "messages: gzip stream, client takes gzip": {
+  "rows": 1,
+  "tok": [
+   "9"
+  ]
+ },
+ "messages: gzip stream, client does not take gzip": {
+  "rows": 1,
+  "tok": [
+   "9"
+  ]
+ },
+ "chat: translated stream with text and a tool call, split across chunks": {
+  "rows": 1,
+  "tok": [
+   "9"
+  ]
+ },
+ "chat: translated stream cut without message_stop": {
+  "rows": 1,
+  "tok": [
+   "9"
+  ]
+ },
+ "chat: translated stream, upstream read fails mid-stream": {
+  "rows": 1,
+  "tok": [
+   "5"
+  ]
+ }
+}

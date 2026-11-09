@@ -301,3 +301,132 @@ export function measureMarkdown(m) {
   if (m.medianRedProbability) lines.push(`- P(median of n above ${m.budgetMB}) at this p: ${Object.entries(m.medianRedProbability).map(([n, x]) => `n = ${n}: ${x}`).join(", ")}`);
   return lines.join("\n") + "\n";
 }
+
+// ── The S1/stalled attribution (ticket 61, Round 12 Q3 condition 1) ──
+// job.mjs --measure-stalled N (CI: only while the one-run marker
+// tests/memory/measure-stalled exists): N rotations of two arms on the same
+// commit, the stalled run and its drained reference (the same requests and
+// pace, every reader drains its ~4 MB answer). Each run idles 5 s before the
+// load (the idle floor) and samples the proxy's JS heap through /health with
+// every sample. Per arm: the gate peak (WS on Windows, RSS on Linux) and the
+// commit peak above the idle floor, and the JS heap above its idle floor. The
+// buckets, in MB and per stalled reader:
+//   (iv) the Bun baseline: the idle floor itself (WS / commit);
+//   (iii) moving the same bytes with nobody stalled (upstream fetch, response
+//         streaming, allocator churn): drained peak above its floor;
+//   (i) bytes the proxy's JS holds for stalled readers (the tee() branch
+//       queue): stalled heap above its floor minus drained heap above its floor;
+//   (ii) the residual: the stalled excess above the floor that (i) and (iii)
+//        do not explain (send buffering toward a socket that does not drain, or
+//        anything else outside the JS heap).
+// "Accounted" says whether (i) + (iii) explain the stalled excess within
+// ±20 % (Round 12 Q3 condition 1): otherwise the residual carries the rest.
+// A distribution with no verdict and no ratchet.
+
+export const STALLED_ARMS = ["S1/stalled", "S1/drained"];
+export const STALLED_MIN_FLOOR_SAMPLES = 3;
+export const STALLED_ACCOUNTED_SHARE = 0.2;
+
+/** "N" → N, or throws: a whole number of rotations from 1 to MEASURE_MAX_RUNS. */
+export function parseStalledCount(text) {
+  const n = /^\d+$/.test(String(text ?? "").trim()) ? Number(String(text).trim()) : NaN;
+  if (!(n >= 1 && n <= MEASURE_MAX_RUNS)) throw new Error(`--measure-stalled needs a whole number of rotations from 1 to ${MEASURE_MAX_RUNS} (got ${JSON.stringify(text ?? null)})`);
+  return n;
+}
+
+const round1 = (x) => (x === null || x === undefined ? null : Number(x.toFixed(1)));
+
+/** One stalled-attribution run: gate/commit peaks, idle floors and JS heap, from the run's summary and samples. */
+export function stalledObservation({ rep, arm, result, summary, csvText }) {
+  const windows = summary?.platform === "win32" || summary?.metric === "commit";
+  const check = summary?.checks?.find((c) => c.name === "procPeak:proxy") ?? null;
+  const gateMB = typeof check?.value === "number" ? check.value : null;
+  const commitMB = windows && typeof check?.commitValue === "number" ? check.commitValue : null;
+  const [loadStart, loadEnd] = summary?.notes?.loadWindowMs ?? [null, null];
+  const proxy = csvText ? parseSamplesCsv(csvText).filter((s) => s.role === "proxy") : [];
+  const pre = loadStart === null ? [] : proxy.filter((s) => s.t < loadStart);
+  const load = loadStart === null ? [] : proxy.filter((s) => s.t >= loadStart && s.t <= loadEnd);
+  const med = (xs) => (xs.length ? median(xs) : null);
+  const floorMB = round1(med(pre.map((s) => s.rssKb / 1024)));
+  const floorCommitMB = windows ? round1(med(pre.map((s) => s.commitKb).filter((v) => typeof v === "number").map((v) => v / 1024))) : null;
+  const floorHeapMB = med(pre.map((s) => s.heapMB).filter((v) => typeof v === "number"));
+  const loadHeap = load.map((s) => s.heapMB).filter((v) => typeof v === "number");
+  const heapPeakMB = loadHeap.length ? Math.max(...loadHeap) : null;
+  const heapMedianMB = med(loadHeap);
+  const readers = summary?.notes?.readers ?? null;
+  const problems = [];
+  if (result?.exitCode !== 0 && result?.exitCode !== 1) problems.push(`harness failure: ${result?.error ?? `exit ${result?.exitCode}`}`);
+  if (summary?.key && summary.key !== arm) problems.push(`summary is for ${summary.key}, not ${arm}`);
+  if (gateMB === null) problems.push("no procPeak:proxy value");
+  if (pre.length < STALLED_MIN_FLOOR_SAMPLES) problems.push(`${pre.length} proxy samples before the load (need ≥ ${STALLED_MIN_FLOOR_SAMPLES} for the idle floor)`);
+  if (floorHeapMB === null || heapPeakMB === null) problems.push("no JS heap samples (/health) before and during the load");
+  if (!(readers >= 1)) problems.push("no reader count noted");
+  if (windows) {
+    if (summary?.notes?.sampler?.units?.ok !== true) problems.push("units self-test did not pass");
+    if (result?.jobApplied !== true) problems.push("Job Object not applied (no @@JOB applied=1)");
+    if (commitMB === null || floorCommitMB === null) problems.push("no commit values");
+  }
+  return {
+    rep, arm, outcome: OUTCOME[result?.exitCode] ?? "HARNESS FAILURE", gate: check?.gate ?? (summary?.metric === "rss" ? "rss" : null),
+    gateMB, commitMB, floorMB, floorCommitMB, floorHeapMB, heapPeakMB, heapMedianMB, readers, preSamples: pre.length, loadSamples: load.length,
+    durationS: result?.durationS ?? null, valid: problems.length === 0, problems,
+  };
+}
+
+/** The attribution over the valid runs of each arm (medians), with the buckets of the header comment. */
+export function stalledReport(reps, { os, requested }) {
+  const win = os === "windows";
+  const arm = (key) => {
+    const own = reps.filter((r) => r.arm === key);
+    const valid = own.filter((r) => r.valid);
+    const m = (f) => { const xs = valid.map(f).filter((v) => typeof v === "number"); return xs.length ? median(xs) : null; };
+    return { key, requested, runs: own.length, valid: valid.length, gateMB: m((r) => r.gateMB), floorMB: m((r) => r.floorMB), commitMB: win ? m((r) => r.commitMB) : null, floorCommitMB: win ? m((r) => r.floorCommitMB) : null, heapPeakMB: m((r) => r.heapPeakMB), heapMedianMB: m((r) => r.heapMedianMB), floorHeapMB: m((r) => r.floorHeapMB), readers: m((r) => r.readers) };
+  };
+  const [s, d] = STALLED_ARMS.map(arm);
+  const complete = reps.length === requested * STALLED_ARMS.length && s.valid === requested && d.valid === requested;
+  const diff = (a, b) => (a === null || b === null ? null : round1(a - b));
+  const per = (x) => (x === null || !s.readers ? null : round1(x / s.readers));
+  const heapI = diff(diff(s.heapPeakMB, s.floorHeapMB), diff(d.heapPeakMB, d.floorHeapMB));
+  const metric = (peak, floor, dPeak, dFloor) => {
+    const excess = diff(peak, floor);
+    const iii = diff(dPeak, dFloor);
+    const residual = excess === null || iii === null || heapI === null ? null : round1(excess - iii - heapI);
+    const accounted = residual === null || !excess ? null : Math.abs(residual) <= STALLED_ACCOUNTED_SHARE * Math.abs(excess);
+    return { peakMB: peak, floorMB: floor, excessMB: excess, iiiMB: iii, iMB: heapI, residualMB: residual, accounted, perReader: { excessMB: per(excess), iiiMB: per(iii), iMB: per(heapI), residualMB: per(residual) } };
+  };
+  return {
+    key: "S1/stalled", os, requested, arms: STALLED_ARMS, rule: "attribution measurement (ticket 61, Round 12 Q3 condition 1): no verdict, no ratchet",
+    complete, stalled: s, drained: d,
+    buckets: {
+      gate: { metric: win ? "ws" : "rss", ...metric(s.gateMB, s.floorMB, d.gateMB, d.floorMB) },
+      ...(win ? { commit: { metric: "commit", ...metric(s.commitMB, s.floorCommitMB, d.commitMB, d.floorCommitMB) } } : {}),
+      heap: { stalledAboveFloorMB: diff(s.heapPeakMB, s.floorHeapMB), drainedAboveFloorMB: diff(d.heapPeakMB, d.floorHeapMB), iMB: heapI, perReaderMB: per(heapI) },
+    },
+    reps,
+  };
+}
+
+/** The attribution as Markdown (job summary and artefact). */
+export function stalledMarkdown(m) {
+  const win = m.os === "windows";
+  const v = (x) => (x === null || x === undefined ? "—" : x);
+  const gate = win ? "WS (gate: max(sampled WS, PeakWorkingSetSize))" : "RSS (gate: max(sampled RSS, VmHWM))";
+  const lines = [
+    `## S1/stalled attribution (${m.os}, ${m.requested} rotations of ${m.arms.join(" → ")})`, "",
+    `Not a ratchet run (ticket 61, Round 12 Q3 condition 1): the stalled run and its drained reference (same requests and pace, every reader drains its answer) on the same commit, each with 5 s idle before the load. Peak: the procPeak:proxy ${gate}${win ? "; commit beside it" : ""}. Floor: the median proxy sample before the load. Heap: the proxy's JS heap from /health with every sample.`, "",
+    `| arm | valid | peak (MB) | floor (MB) | ${win ? "commit peak / floor (MB) | " : ""}heap peak / median / floor (MB) | readers |`,
+    `|---|---|---|---|${win ? "---|" : ""}---|---|`,
+  ];
+  for (const a of [m.stalled, m.drained]) lines.push(`| ${a.key} | ${a.valid} of ${a.requested} | ${v(a.gateMB)} | ${v(a.floorMB)} | ${win ? `${v(a.commitMB)} / ${v(a.floorCommitMB)} | ` : ""}${v(a.heapPeakMB)} / ${v(a.heapMedianMB)} / ${v(a.floorHeapMB)} | ${v(a.readers)} |`);
+  lines.push("", `Buckets (medians; MB, and MB per stalled reader in brackets). (iv) the floor; (iii) the drained peak above its floor; (i) the JS heap the stalled run holds above the drained run's, above their floors; (ii) the residual of the stalled excess. Accounted: (i) + (iii) explain the excess within ±${STALLED_ACCOUNTED_SHARE * 100} %.`, "",
+    "| metric | stalled peak | (iv) floor | excess above floor | (iii) drained excess | (i) JS-held | (ii) residual | accounted |", "|---|---|---|---|---|---|---|---|");
+  for (const b of [m.buckets.gate, m.buckets.commit].filter(Boolean)) {
+    const p = b.perReader;
+    lines.push(`| ${b.metric === "ws" ? "WS" : b.metric === "rss" ? "RSS" : "commit"} | ${v(b.peakMB)} | ${v(b.floorMB)} | ${v(b.excessMB)} (${v(p.excessMB)}) | ${v(b.iiiMB)} (${v(p.iiiMB)}) | ${v(b.iMB)} (${v(p.iMB)}) | ${v(b.residualMB)} (${v(p.residualMB)}) | ${b.accounted === null ? "—" : b.accounted ? "yes" : "no"} |`);
+  }
+  lines.push("", `JS heap above its floor: stalled ${v(m.buckets.heap.stalledAboveFloorMB)} MB, drained ${v(m.buckets.heap.drainedAboveFloorMB)} MB, so (i) = ${v(m.buckets.heap.iMB)} MB (${v(m.buckets.heap.perReaderMB)} MB per stalled reader).`);
+  lines.push("", `| run | arm | outcome | peak (MB) | floor (MB) | ${win ? "commit / floor (MB) | " : ""}heap peak / floor (MB) | samples before / during load | valid |`, `|---|---|---|---|---|${win ? "---|" : ""}---|---|---|`);
+  for (const r of m.reps) lines.push(`| ${r.rep} | ${r.arm} | ${r.outcome} | ${v(r.gateMB)} | ${v(r.floorMB)} | ${win ? `${v(r.commitMB)} / ${v(r.floorCommitMB)} | ` : ""}${v(r.heapPeakMB)} / ${v(r.floorHeapMB)} | ${r.preSamples} / ${r.loadSamples} | ${r.valid ? "yes" : `no: ${r.problems.join("; ")}`} |`);
+  lines.push("", `- complete: ${m.complete ? "yes" : "NO — invalid or missing runs; the attribution is not usable as it stands"}`);
+  return lines.join("\n") + "\n";
+}
