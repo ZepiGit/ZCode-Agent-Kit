@@ -1,5 +1,5 @@
 // Round36 Q1 only. Never imported by shipping code; no count-policy amendment.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { startOf } from './process-identity.mjs';
 
 export const LIMITS = Object.freeze({ fileBytes: 4 * 1024 * 1024, lineBytes: 8192, records: 4096, helpersPerExecution: 1 });
@@ -19,6 +19,34 @@ export function safeArgv(argv, exe) {
   return null;
 }
 
+// Two overlapping real executions append to the shared raw file concurrently
+// (Round36 Q1 seam 3: two simultaneous harness executions must stay diagnostic
+// RED, not invalidate the diagnostic). A writer waits out a legitimately held
+// lock; the stat+append cap check stays serialized inside the lock. A lock
+// older than LOCK_HOLD_LIMIT_MS belongs to a writer that died mid-append (a
+// SIGKILLed harness between mkdir and rmdir) and is taken over, so one dead
+// writer cannot invalidate every later record. Contention past LOCK_WAIT_MS
+// still invalidates instead of racing stat+append beyond the cap.
+const LOCK_HOLD_LIMIT_MS = 500;
+const LOCK_WAIT_MS = 1000;
+const sleepCell = new Int32Array(new SharedArrayBuffer(4));
+function acquireFileLock(lockPath) {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      mkdirSync(lockPath, { mode: 0o700 });
+      return;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      let heldMs = 0;
+      try { heldMs = Date.now() - statSync(lockPath).mtimeMs; } catch { continue; }
+      if (heldMs > LOCK_HOLD_LIMIT_MS) { try { rmSync(lockPath, { recursive: true, force: true }); } catch { /* another taker released it first */ } continue; }
+      if (Date.now() >= deadline) throw Object.assign(new Error('file lock held beyond the wait deadline'), { code: 'EEXIST' });
+      try { Atomics.wait(sleepCell, 0, 0, 1); } catch { const until = Date.now() + 1; while (Date.now() < until) { /* bounded spin where Atomics.wait is unavailable */ } }
+    }
+  }
+}
+
 export function appendRecord(path, record, { maxBytes = LIMITS.fileBytes } = {}) {
   const clean = {};
   for (const field of FIELDS) if (Object.hasOwn(record, field)) clean[field] = record[field];
@@ -33,9 +61,7 @@ export function appendRecord(path, record, { maxBytes = LIMITS.fileBytes } = {})
   const line = JSON.stringify(clean) + '\n';
   let locked = false;
   try {
-    // Multiple actual fixtures can share the raw file. A contended writer
-    // invalidates diagnostics instead of racing stat+append beyond the cap.
-    mkdirSync(path + '.lock', { mode: 0o700 });
+    acquireFileLock(path + '.lock');
     locked = true;
     if (Buffer.byteLength(line) > LIMITS.lineBytes || (existsSync(path) ? statSync(path).size : 0) + Buffer.byteLength(line) > maxBytes) {
       writeFileSync(path + '.invalid', 'overflow\n', { mode: 0o600 });
@@ -48,7 +74,9 @@ export function appendRecord(path, record, { maxBytes = LIMITS.fileBytes } = {})
     try { writeFileSync(path + '.invalid', 'collection-failed\n', { mode: 0o600 }); } catch {}
     return false;
   } finally {
-    if (locked) rmdirSync(path + '.lock');
+    // Best-effort release: a stale-lock taker may have removed the directory
+    // between our release attempt and its takeover.
+    if (locked) { try { rmdirSync(path + '.lock'); } catch { /* already released */ } }
   }
 }
 
