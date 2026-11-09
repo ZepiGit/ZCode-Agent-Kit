@@ -78,3 +78,28 @@ Expected, for each of the three:
 - `proxy stop` prints `stopped (pid N)` and leaves no `bun.exe … serve` running.
 
 Unblocks: ticket 17's criterion "A2 (real PowerShell/conhost Ctrl-C) listed as an owner action, marked unverified". The seam tests deliver these events through Node's own signal listeners (`process.emit`), not through a real console.
+
+## OA-4 — GitHub issue 32 live re-observation on the owner's machine (ticket 82) — unverified, owner action
+
+The incident (HTTP 405 + business code 3012 on POST /v1/chat/completions, repeated guest-script TypeErrors, code-0 claim preview with no data, kit v0.2.42) is NOT resolved by ticket 82: no reproducer exists and the three earlier investigation reports disagree on the cause. This owner-only run collects the client-visible evidence the new build produces. It is read-only: one "Reply with ok" request, no credential printing, no challenge/tooling changes.
+
+On a machine with your normal kit install and ZCode login, after a build containing ticket 82:
+
+```sh
+zcode-kit proxy start
+KEY="$(zcode-kit models --show-key)"
+curl -s -o /tmp/zk-i32.json -w 'HTTP %{http_code}\n' -H "x-api-key: $KEY" -H 'anthropic-version: 2023-06-01' -H 'content-type: application/json' \
+  -d '{"model":"glm-5.3-flash","max_tokens":16,"messages":[{"role":"user","content":"Reply with ok"}]}' \
+  http://127.0.0.1:8457/v1/messages
+node -e 'const j=JSON.parse(require("fs").readFileSync("/tmp/zk-i32.json","utf8"));console.log(JSON.stringify(j.error??{ok:true,stop:j.stop_reason}),null,1)'
+zcode-kit proxy stop
+rm -f /tmp/zk-i32.json; unset KEY
+```
+
+Expected interpretation:
+- success → inference works on this machine; the incident was environment- or version-specific (state which kit version the reporter ran vs yours);
+- `{"type":"…","message":"[3012] upstream authorization rejected"}` → the gateway is genuinely rejecting authorization for this account/window; the classification is preserved and the cause is upstream of the kit;
+- a 503 `captcha_solver_failed` body containing `(last local mint failure: …)` → the local solver refused degraded results; the provenance line is the diagnostic to attach to the issue;
+- a code-0 preview with no data now surfaces `preview: provider_unknown` in `zcode-kit quota` errors — that is the fail-closed record, not a silent empty success.
+
+Paste the (redacted) output into ticket 82's Comments and only then decide whether GitHub #32 can move. Unblocks: ticket 82's criterion "Do not close GitHub #32 … record the limitation and an exact owner-only verification procedure".
