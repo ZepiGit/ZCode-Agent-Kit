@@ -39,6 +39,10 @@ export async function solveTraceless({ scene, region, prefix }: { scene: string;
         return param(`args:${JSON.stringify({ scene, region, prefix })}`);
       case "pid":
         return param(`pid:${process.pid}`);
+      case "keep-loop":
+        // Leaves work on the generation's event loop, as uncleared guest timers do.
+        setInterval(() => {}, 1000);
+        return param("keep-loop:armed");
       case "egress": {
         // Captcha egress from inside the generation (loopback targets only):
         // the real captchaFetch over http and https, and the sync-XHR path.

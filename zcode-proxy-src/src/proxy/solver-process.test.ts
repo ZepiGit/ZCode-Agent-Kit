@@ -140,13 +140,16 @@ describe("solver process: the proxy's dispatcher", () => {
     }
   });
 
-  it("exits on IPC EOF while its parent lives on (ADR-0002 condition 2)", async () => {
+  it("exits on IPC EOF while its parent lives on, even with guest timers left on its event loop (ADR-0002 condition 2)", async () => {
     const { spawn } = await import("node:child_process");
     const entry = fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url));
     const child = spawn(process.execPath, [entry, String(process.pid)], { stdio: ["ignore", "ignore", "pipe", "ipc"], serialization: "json", env: hermeticEnv() });
     try {
       const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
-      await new Promise((resolve) => setTimeout(resolve, 300)); // started and listening
+      const answered = new Promise<unknown>((resolve) => child.once("message", resolve));
+      child.send({ type: "init", backendModule: fixtureUrl });
+      child.send({ type: "solve", id: 1, scene: "keep-loop", region: "sgp", prefix: "p" });
+      expect(await answered).toMatchObject({ type: "result", id: 1, ok: true });
       expect(child.exitCode).toBeNull();
       // The parent (this runner) stays alive, so the parent watcher never fires:
       // only the EOF can end it.
