@@ -51,3 +51,19 @@ Branch `ticket/82-issue32-safe-diagnostics`, worktree `/home/AgentKit/wt/t82`, b
 Mutation proof for the already-green 3012 pin: committed implementation first, then mutated `upstream-errors.ts` (3012 message → "captcha verify failed") and restored from the commit; test failed under the mutant and passed after restore.
 
 Unverified / left open (matches the ticket's limitations): no live inference recovery claim; the incident's real upstream cause (authorization vs content-inspection vs challenge compatibility — the three earlier reports disagree) remains unverified; requires the owner-only procedure in OWNER-ACTIONS.md. Not exercised here: real vendor SDK solve, Windows/CI legs, the compiled solver child (ticket 27 lifecycle untouched — error text only, coordinated by not touching spawn/recycle paths).
+
+### 2026-11-09 — implementation complete (branch tip 6ff8595)
+
+Commits on `ticket/82-issue32-safe-diagnostics` (base = integration tip 655fb47, contained by ancestry; tip unchanged during the run): `3b4a902` implementation + tests, `6ff8595` tsc typing fix.
+
+RED→GREEN evidence (all offline, isolated HOME, capped, Bun 1.4.2):
+- RED `reports/t82-red.log`: 10 fail / 34 pass — guest message and stack-URL synthetic secret `SYNTHETIC-SECRET-MARKER-7c41ab90` printed verbatim by the old boundary (uncaught AND unhandled child paths), quota preview missing-data silent success.
+- RED `reports/t82-red2.log`: 2 fail — storm take and take-deadline rejections carried no mint-failure provenance ("captcha minting degraded (storm) — retry later", "captcha take deadline (1000ms)").
+- RED `reports/t82-red3.log`: 2 fail — `normalizeCaptchaError` collapsed local verification refusals to "captcha SDK failure" (expected /too short/, /securityToken/).
+- GREEN `reports/t82-green1.log`: 93 pass / 0 fail across the six touched files.
+- Mutation proof for the already-green 3012 pin (`reports/t82-mutant.log`, `t82-mutant2.log`): mutating `upstream-errors.ts` (3012 → "captcha verify failed") fails the message assertions; mutating `captcha-retry.ts` markers (3012 as in-body challenge) fails `mints/upstreamCalls = 1` (received 2 — a captcha re-solve). Both restored from commit `3b4a902` (`git checkout <sha> -- <file>`), `git status` clean after each restore.
+- Full suites after typing fix, integration tip 655fb47 contained: `npm run test` 1002 pass / 0 fail / 20 skip (`t82-full-kit4.log`); proxy `bun test` 1668 pass / 0 fail / 1 skip (`t82-full-proxy.log`); mcp `npm test` 115 pass / 0 fail / 1 skip (`t82-full-mcp.log`); proxy typecheck rc=0 (`t82-full-tc.log`; the first typecheck pass was a false pass from a wrong PATH — reproduced, fixed, re-run clean).
+
+Boundaries honored: B1 — only error text, diagnostics and tests changed in captcha-*/handler files; detection, classification, retry, recycle and identity logic untouched (3012 stays TERMINAL + 403-authorization mapping). B2 — only synthetic markers, fixture secrets (`fixtureSecret`), no real credentials. B5/B6 — no dist changes, no version bumps. Coordination with 27/58: no solver lifecycle (spawn/recycle/cap) code touched, only refusal error construction and pool error surfacing.
+
+Unverified (incident stays open): the real cause of the reporter's 405+3012 and whether the guest TypeErrors correlate — three earlier reports disagree; no live model request, claim or vendor challenge was run (out of scope by ticket). Owner-only verification remains in OWNER-ACTIONS.md.
