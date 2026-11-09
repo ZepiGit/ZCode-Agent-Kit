@@ -577,6 +577,22 @@ m1 windows per rotation (stalled run n paired with drained run n), residual shar
 
 **Verdict, criterion 1 as written: not met; the attribution is inconclusive.** On the shipped tree (m1) the measured buckets explain 78.7 % of the windows WS excess above idle and 72.5 % of the commit excess. Both are outside ±20 %, and the criterion names both metrics. Bucket (ii) has no measurement of its own here. It is the residual, so it cannot be counted toward the accounting without making the test true by construction. The m2 values are the fix tree's result, not the attribution of the shipped peak. They show that the stage-2 change removes the stalled-specific excess on windows: stalled minus drained WS falls from 135.7 to 5.0, the stalled peak drops 160.7 MB WS and 155.6 MB commit, and (i) falls from 85 to 9. That is causal evidence for a proxy-side lever, but it does not satisfy the pre-registered accounting. One explanation is not part of the rule and is not a verdict: (i) is counted in `heapUsed` MB, and the local probe above saw RSS rise about twice as much as `heapUsed` for queued `tee()` bytes, so the WS cost of (i) could carry the residual. Criterion 4 applies, so the stage-2 commits and Round 31 Q2's acceptance go back to the Owner Proxy with these numbers. Recorded 2026-11-09 (ticket 61 round 2).
 
+**Owner Proxy round 32 records.** m1 is recorded as not accounted under the pre-registered rule (WS 21.3 %, commit 27.5 %; per rotation WS 20.5/19.5/18.4, commit 26.9/20.6/24.9); the rule and its median form are unchanged. The residual (50.8 WS / 74.6 commit MB) is unattributed, stalled-specific; "RSS ≈ 2× heapUsed for queued `tee()` bytes" is an unproven hypothesis. Stage 2 ships on the m2 intervention (round 32 Q1). The local burst4 paired shift above (219.9 → 230.6, p = 0.015) is **flagged, unattributed**.
+
+**Merged head, local linux (ticket 61 round 3, 2026-11-09).** Two trees, both with round 31 Q2's tests, the terminal-frame guard on demand (8d025d4) and the printHeader comment (fb17d71): fb17d71 = ce6d627 + the integration tip 63a704b (tickets 30 and 18); 5a8ad97 = fb17d71 + the tip e0962b7 (ticket 73, memory-loop sampler and runner; no proxy source). `job.mjs --only S1/<variant> --cap systemd`, port 19610, sequential, Node 26.7.0, Bun 1.4.2; run dirs `/home/AgentKit/overhaul-tools/t61-memloop/{r3,r3b}/`, logs `reports/t61-r3-s1-*.log`, `reports/t61-r3b-s1-*.log`; every run's isolation proof (`externalConnections`) is empty.
+
+| run | fb17d71: outcome, procPeak:proxy, growth %/1k (trend) | 5a8ad97 (final merged head): outcome, procPeak:proxy, growth %/1k (trend) |
+|---|---|---|
+| S1/stalled 1 | GREEN, 149, −0.12 (false) | GREEN, 143.5, 0.16 (false) |
+| S1/stalled 2 | GREEN, 144.2, −0.82 (false) | GREEN, 148.7, 0.07 (true) |
+| S1/stalled 3 | GREEN, 152.9, −0.85 (false) | GREEN, 151.8, −0.07 (false) |
+| S1/burst4 1 | GREEN, 227.4 | GREEN, 231.3 |
+| S1/burst4 2 | GREEN, 225.8 | GREEN, 213.6 |
+| S1/burst4 3 | GREEN, 227.9 | GREEN, 226.5 |
+| S1/short 1 | GREEN, 142 (steady 113.2), 3.4 (true) | GREEN, 138.2 (steady 113.1), 3.44 (true) |
+
+count:proxy 1 and orphans 0 in every run. S1/stalled median 148.7 (143.5–151.8) on 5a8ad97 and 149 (144.2–152.9) on fb17d71, against 175 on the `tee()` tree and 148.5 on caf66db (table above). **S1/burst4 beside ticket 20's distribution:** 5a8ad97 median 226.5 (213.6–231.3, n 3); fb17d71 227.4 (225.8–227.9, n 3); all six 226.95 (213.6–231.3); ticket 20's final 225.8 (193.3–241.2, n 10); this ticket's earlier paired run 230.6 (214.7–235.8, n 9). Every value is inside ticket 20's range, and the highest is 18.7 MB under the 250 budget. Local, shared machine; the pre-merge CI run decides (round 32 conditions 4 and 5).
+
 ### S3 kill-holder round: the adversary's victim is not a failed launch (ticket 16; Round 27 Q1)
 
 **The rule (spec §18 PROCESSES, first bullet).** Measurement-rule amendment (Round 27 Q1): in the kill-holder round, the launch the adversary SIGKILLed (its pid equals the adversary's recorded `killed` pid, and it exited non-zero) is reported as `killedByAdversary` and is never a failed launch. Every other launch that does not exit 0 is a failed launch. A round counts as run only with exactly one such launch. Budget 0 is unchanged (`budgets.mjs` `PROCESSES.failedLaunches`, untouched).
