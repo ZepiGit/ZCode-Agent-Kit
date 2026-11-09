@@ -4,8 +4,9 @@
 // Regenerates every user-facing output of the kit in every C3 terminal
 // variant, against throwaway fixture kits (the same mechanism the kit's own
 // tests use: tests/harness-consent.test.mjs `fixture()` + `runPty()`), a
-// fixture proxy that answers the kit's identity contract on 127.0.0.1:18458
-// (tests/manager-safety.test.mjs pattern), loopback vendor/GitHub doubles and
+// fixture proxy that answers the kit's identity contract on a loopback port of
+// its own, printed as 127.0.0.1:18458 (tests/manager-safety.test.mjs
+// pattern), loopback vendor/GitHub doubles and
 // synthetic credential/account stores. Nothing here touches the installed kit,
 // a real HOME, port 8457 or the network.
 //
@@ -14,8 +15,9 @@
 // --kit defaults to the checkout this file lives in. --out is required, so a
 // run can never overwrite the committed BEFORE set by accident.
 // Environment: UX_BUN (the Bun binary; default: `bun` on PATH) and
-// UX_CAPTURE_PORT (fixture proxy port, default 18458; written back as 18458
-// in every capture, see normalise()).
+// UX_CAPTURE_PORT (pins the fixture proxy port for the whole run; default: a
+// fresh free port per scenario, ticket 75; written back as 18458 in every
+// capture, see normalise()).
 // Run it under the overhaul's capped runner:
 //   run-capped.sh ux-capture 3G 2400 -- node capture.mjs --out <dir>
 //
@@ -43,6 +45,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { cloneArgs, describeFailure, fakeProxySource as fakeProxySourceFor, fixtureBaseEnv, importBase, swapPath, tarBinary, windowsGitDir } from "./host.mjs";
+import { freePort } from "../../free-port.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -64,16 +67,36 @@ function findBun() {
 const BUN = findBun();
 const BASE_BUN_VERSION = "1.4.2";
 const BUN_VERSION = spawnSync(BUN, ["--version"], { encoding: "utf8" }).stdout?.trim() || BASE_BUN_VERSION;
-// The baseline was captured on 18458. A run on another port (an isolated
-// range, a busy CI host) writes 18458 back in normalise(), so every capture
-// stays comparable byte for byte.
+// The baseline was captured on 18458. A run on another port writes 18458 back
+// in normalise(), so every capture stays comparable byte for byte. Ticket 75:
+// every scenario takes a fresh port from the kernel (bind 127.0.0.1:0,
+// released again; nextPort()), so parallel captures (json-superset and
+// ux-before-capture run at once under `node --test`, two checkouts may run the
+// suite at once) never see each other's fixture proxy, and a "down" scenario
+// checks a port that was just free (portBusy() before every scenario).
+// UX_CAPTURE_PORT pins one port for the whole run instead. A kernel port is
+// taken only from KERNEL_PORT_FLOOR up: the committed captures hold no number
+// that high (pinned in tests/ux-before-capture.test.mjs), so the write-back
+// can only ever touch the port.
 const BASE_PORT = 18458;
-const PORT = Number(process.env.UX_CAPTURE_PORT ?? BASE_PORT);
-if (!Number.isInteger(PORT) || PORT < 1024 || PORT > 65535) throw new Error(`capture: bad UX_CAPTURE_PORT ${process.env.UX_CAPTURE_PORT}`);
+const KERNEL_PORT_FLOOR = 20000;
+const PINNED_PORT = process.env.UX_CAPTURE_PORT === undefined ? null : Number(process.env.UX_CAPTURE_PORT);
+if (PINNED_PORT !== null && (!Number.isInteger(PINNED_PORT) || PINNED_PORT < 1024 || PINNED_PORT > 65535)) throw new Error(`capture: bad UX_CAPTURE_PORT ${process.env.UX_CAPTURE_PORT}`);
+if (PINNED_PORT === 8457) throw new Error("never the production port");
+/** The current scenario's fixture proxy port; null until nextPort() chose one. */
+let PORT = PINNED_PORT;
 // Obviously synthetic local proxy key (base64url charset, like the real one).
 const FAKE_KEY = "UXFIXTURE-not-a-secret-0000000000000000000";
 const STORE_SECRET = "ux-capture-synthetic-store-secret";
-if (PORT === 8457) throw new Error("never the production port");
+/** The fixture proxy port of the next scenario (the pinned one, else a fresh kernel port). */
+async function nextPort() {
+  if (PINNED_PORT !== null) return PORT;
+  for (let tries = 0; tries < 50; tries++) {
+    const port = await freePort();
+    if (port >= KERNEL_PORT_FLOOR) return (PORT = port);
+  }
+  throw new Error(`capture: the kernel handed out no free loopback port >= ${KERNEL_PORT_FLOOR}`);
+}
 
 const VARIANTS = {
   "tty-color-80": { tty: true, cols: 80, rows: 30, env: { TERM: "xterm-256color", LANG: "C.UTF-8", LC_ALL: "C.UTF-8" } },
@@ -105,7 +128,8 @@ function link(target, path) {
 /** Copy the kit members a CLI run needs into `root` (a release-shaped tree, no .git). */
 function writeKitTree(root, { srcLinks = true, version } = {}) {
   for (const rel of KIT_FILES) cpSync(join(KIT, rel), join(root, rel), { recursive: true });
-  // Fixture rule: the template port is 18458 so no code path can reach 8457.
+  // Fixture rule: the template port is the scenario's own port (nextPort()), so
+  // no code path can reach 8457.
   const tpl = join(root, "proxy", "config.example.yaml");
   writeFileSync(tpl, readFileSync(tpl, "utf8").replace(/^  port: 8457$/m, `  port: ${PORT}`));
   if (version) {
@@ -181,7 +205,7 @@ function fakeOpencode(f) {
 
 /**
  * A fresh fixture: base/{kit,home,bin,tmp}. state "fresh" = no runtime files;
- * "configured" = .proxykey + proxy/config.yaml (port 18458) exist, as after a
+ * "configured" = .proxykey + proxy/config.yaml (the scenario's port) exist, as after a
  * first setup.
  */
 function makeFixture({ state = "configured", detect = DETECT_ALL, srcLinks = true, version } = {}) {
@@ -293,7 +317,7 @@ function normalise(text, f) {
   // Tooling additions (ticket 06), no-ops for a run like the original's
   // (port 18458, Bun 1.4.2): the fixture port and the running Bun's version
   // are written back as the baseline's values.
-  if (PORT !== BASE_PORT) s = s.replace(new RegExp(`\\b${PORT}\\b`, "g"), String(BASE_PORT));
+  if (PORT !== null && PORT !== BASE_PORT) s = s.replace(new RegExp(`\\b${PORT}\\b`, "g"), String(BASE_PORT));
   if (BUN_VERSION !== BASE_BUN_VERSION) s = s.split(`<BUN> (${BUN_VERSION})`).join(`<BUN> (${BASE_BUN_VERSION})`);
   return s;
 }
@@ -558,6 +582,7 @@ const manifest = [];
 function save(rel, name, text) { const dir = join(OUT, rel); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, name), text); }
 
 async function runScenario(s, variant) {
+  await nextPort();
   const f = makeFixture(s.fixture ?? {});
   let foreign = null, vendor = null;
   const extraEnv = { ...(s.env ?? {}) };
@@ -628,6 +653,7 @@ async function captureTui() {
   // Live TUI (real app.ts) first frame, logged out, then 'q'. Non-TTY variants
   // capture the refusal message.
   for (const variant of ONLY_VARIANTS) {
+    await nextPort();
     const f = makeFixture({ detect: [] });
     try {
       const v = VARIANTS[variant];
@@ -677,7 +703,7 @@ function writeIndex() {
     "",
     "Normalisation (all files): fixture paths → `<KIT>` `<HOME>` `<BIN>` `<TMP>` `<FIXTURE>`, kit checkout → `<SRC>`/`<PROXY_SRC>`, Bun/Node binaries → `<BUN>`/`<NODE>`, ISO timestamps → `<TS>`, transaction ids → `<TX>`, real pids → `<PID>`. The fixture proxy reports fixed numbers (pid 4242, rss 182 MB …). The local proxy key shown on TTY variants is the synthetic fixture key `UXFIXTURE-not-a-secret-…`; no real secret exists in any fixture.",
     "",
-    "Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), proxy template port rewritten to 18458, `zcode-proxy-src/src/index.ts` replaced by `capture/fake-proxy.ts` (serves the kit's identity contract with fixed data; non-serve argv forwards to the real proxy CLI), synthetic credential/account stores (`capture/seed-store.ts`), loopback vendor double for `--upstream`, loopback GitHub stub for release `update` (`capture/fetch-stub.mjs`), local bare git origin for checkout `update`, fixture `curl` for install.sh. ZCODE_KIT_SKIP_DEPS=1 everywhere (so the setup live smoke reports \"skipped\").",
+    "Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), proxy template port rewritten to a free port per scenario (printed as 18458), `zcode-proxy-src/src/index.ts` replaced by `capture/fake-proxy.ts` (serves the kit's identity contract with fixed data; non-serve argv forwards to the real proxy CLI), synthetic credential/account stores (`capture/seed-store.ts`), loopback vendor double for `--upstream`, loopback GitHub stub for release `update` (`capture/fetch-stub.mjs`), local bare git origin for checkout `update`, fixture `curl` for install.sh. ZCODE_KIT_SKIP_DEPS=1 everywhere (so the setup live smoke reports \"skipped\").",
     "",
     "## Not captured (and why)",
     "",
@@ -715,7 +741,7 @@ async function main() {
     if (tty.length) throw new Error(`capture: TTY variants need a POSIX pty (script); on Windows use --variants pipe,ci (got ${tty.join(",")})`);
   }
   mkdirSync(OUT, { recursive: true });
-  if (await portBusy()) throw new Error(`port ${PORT} is in use; another capture may be running`);
+  if (PINNED_PORT !== null && await portBusy()) throw new Error(`port ${PORT} is in use; another capture may be running`);
   for (const s of S) {
     if (ONLY && !ONLY.test(s.id)) continue;
     if (IS_WIN && WIN32_SKIP.test(s.id)) continue;

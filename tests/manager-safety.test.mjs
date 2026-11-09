@@ -11,11 +11,11 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { createManager } from "../proxy/zcode-proxy-manager.mjs";
+import { freePort } from "./free-port.mjs";
 
 const TMP = join(import.meta.dirname, "fakehome", "manager");
 const KEY = "test-key-abc123";
 let server = null;
-let portCounter = 18600;
 
 function tmpRoot() {
   const root = join(TMP, `case-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -87,7 +87,7 @@ test("manager imports every child_process helper it calls (H2a: darwin spawnSync
 
 test("stop refuses to kill a foreign service on the port", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { mode: "wrong-key" }); // foreign service: 401 for every key
   const dummy = spawnDummy();
@@ -104,7 +104,7 @@ test("stop refuses to kill a foreign service on the port", async () => {
 
 test("stop is fail-closed when the key is missing (identity unverifiable)", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   rmSync(join(root, ".proxykey")); // no key → identity check impossible
   server = await startMockProxy(port, { mode: "ours" }); // would answer as "ours" with any key
@@ -122,7 +122,7 @@ test("stop is fail-closed when the key is missing (identity unverifiable)", asyn
 
 test("stop refuses a reused pid whose start time does not match the pid file", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { mode: "ours" }); // answers the kit identity payload
   const dummy = spawnDummy();
@@ -140,7 +140,7 @@ test("stop refuses a reused pid whose start time does not match the pid file", a
 
 test("stop is fail-closed when the live start time is undeterminable (start-unknown)", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { mode: "ours" });
   const dummy = spawnDummy();
@@ -159,7 +159,7 @@ test("stop is fail-closed when the live start time is undeterminable (start-unkn
 
 test("stop cleanly kills a verified-own process (identity + pid + start time match)", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { withAuth: false });
   const dummy = spawnDummy();

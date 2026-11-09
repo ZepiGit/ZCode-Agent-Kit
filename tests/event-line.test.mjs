@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createManager } from '../proxy/zcode-proxy-manager.mjs';
 import { createEventLogger, formatEventLine, redactLine } from '../lib/event-line.mjs';
+import { freePort } from './free-port.mjs';
 
 const KIT = join(import.meta.dirname, '..');
 
@@ -56,7 +57,7 @@ test('the shared module renders the same event lines under Node as under Bun', (
 });
 
 test('the manager writes new events as event lines to the proxy log, with no secret', async t => {
-  const root = fixture(t, 19140);
+  const root = fixture(t, await freePort());
   const m = createManager({ root, home: root });
   const { lines } = await quiet(async () => {
     m.logEvent('WARN', 'lock takeover', { holderPid: 4242, reason: 'holder dead', note: `key ${KEY}` });
@@ -70,7 +71,7 @@ test('the manager writes new events as event lines to the proxy log, with no sec
 });
 
 test('existing manager lines keep their text but mask the proxy key and stop-token-shaped values', async t => {
-  const root = fixture(t, 19141);
+  const root = fixture(t, await freePort());
   const m = createManager({
     root, home: root,
     bunResolver: () => { throw new Error(`bun rejected Authorization: Bearer ${KEY} with token ${STOP_TOKEN_SHAPED}`); },
@@ -86,11 +87,12 @@ test('existing manager lines keep their text but mask the proxy key and stop-tok
 });
 
 test('proxy logs shows every line, masking secrets the proxy wrote and leaving the rest byte-identical', async t => {
-  const root = fixture(t, 19142);
+  const port = await freePort();
+  const root = fixture(t, port);
   const m = createManager({ root, home: root });
   const clean = [
     '[manager 2026-11-06T00:31:32.688Z] starting zcode-proxy ...',
-    'zcode-proxy listening on http://127.0.0.1:19142',
+    `zcode-proxy listening on http://127.0.0.1:${port}`,
     '#001 ANT glm-5.3-flash 200 batch 948ms',
   ];
   writeFileSync(m.LOG_FILE, [...clean, `[zcode-proxy] upstream echoed x-api-key: ${KEY}`, `stop token ${STOP_TOKEN_SHAPED}`].join('\n') + '\n');
