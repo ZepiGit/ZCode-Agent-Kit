@@ -13,13 +13,16 @@
 // the exit code and print the narration lines as they happen), and status,
 // doctor, logs and the connection details are the manager's own reports. The
 // doctor's checks are a record from lib/proxy-doctor.mjs (which zcode-kit
-// doctor reads too); `doctor` here renders it in the legacy grammar.
-import { existsSync, statSync, openSync, closeSync, readSync } from "node:fs";
+// doctor reads too); `doctor` here renders it in the legacy grammar. Status
+// and the log tail come from lib/proxy-status.mjs and lib/proxy-logs.mjs,
+// which zcode-kit status / proxy logs read too (ticket 40); this file renders
+// them in its own unchanged text.
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { managerDoctor } from "../lib/proxy-doctor.mjs";
 import { readConnectionFacts, readProxyStatus, statusDocument, statusExitCode } from "../lib/proxy-status.mjs";
 import { createLifecycle } from "../lib/proxy-lifecycle.mjs";
+import { readLogTail } from "../lib/proxy-logs.mjs";
 import { connectionDetailsLines, shouldRevealKey } from "../cli/connection-details.mjs";
 
 // ------------------------------------------------------------------ factory
@@ -194,23 +197,11 @@ export function createManager({
   }
 
   // ------------------------------------------------------------------- logs
+  // The tail is lib/proxy-logs.mjs's; the proxy's own lines are shown
+  // redacted too (ADR-0010 rule 4).
   function logs(n = 40) {
-    if (!existsSync(LOG_FILE)) {
-      console.log(`(no log file at ${LOG_FILE})`);
-      return 0;
-    }
-    const size = statSync(LOG_FILE).size;
-    const tailBytes = Math.min(size, 64 * 1024);
-    const fh = openSync(LOG_FILE, "r");
-    try {
-      const buf = Buffer.alloc(tailBytes);
-      readSync(fh, buf, 0, tailBytes, size - tailBytes);
-      const lines = buf.toString("utf8").split("\n").filter(Boolean);
-      // The proxy's own lines are shown redacted too (ADR-0010 rule 4).
-      console.log(redact(lines.slice(-n).join("\n")));
-    } finally {
-      closeSync(fh);
-    }
+    const tail = readLogTail(LOG_FILE, { n, redact });
+    console.log(tail.exists ? tail.lines.join("\n") : `(no log file at ${LOG_FILE})`);
     return 0;
   }
 

@@ -133,22 +133,12 @@ function managerCtx(result, extra = {}) {
 }
 const args = (positional, flags = {}) => ({ positional, flags, passthrough: null });
 
-test("status: the manager's exit code is the command's, with no records (the manager prints)", async () => {
-  const { run } = await load("status");
-  for (const status of [0, 1, 3]) {
-    const { ctx, calls } = managerCtx({ status });
-    assert.deepEqual(await run(args(["status"]), ctx), { exitCode: status, records: [] });
-    assert.deepEqual(calls.map((c) => [c.cmd, c.args, c.opts.stdio]), [["node-under-test", [MANAGER, "status"], "inherit"]]);
-  }
-});
 
-test("status: a manager killed by a signal (no exit status) is exit 1; --json is forwarded", async () => {
-  const { run } = await load("status");
-  const { ctx, calls } = managerCtx({ status: null, signal: "SIGKILL" });
-  assert.deepEqual(await run(args(["status"], { json: true }), ctx), { exitCode: 1, records: [] });
-  assert.deepEqual(calls[0].args, [MANAGER, "status", "--json"]);
-});
 
+// Since ticket 40 status, proxy start|stop|restart|status and proxy logs run
+// the lifecycle and the status record in-process (no manager spawn); their
+// exit codes (0-5, status 0/1), --json and the line count are pinned in
+// tests/cli-ux-proxy.test.mjs at the lifecycle/status module boundary.
 const PROXY_USAGE = "Usage: zcode-kit proxy start|stop|restart|status|logs [n]\n";
 
 test("proxy: a missing or unknown subcommand is a usage error, exit 2 on stderr, and starts nothing", async () => {
@@ -160,44 +150,8 @@ test("proxy: a missing or unknown subcommand is a usage error, exit 2 on stderr,
   }
 });
 
-test("proxy start|stop|restart|status: the manager's exit codes 0-5 pass through; no exit status is 2", async () => {
-  const { run } = await load("proxy");
-  for (const sub of ["start", "stop", "restart", "status"]) {
-    for (const status of [0, 1, 2, 3, 4, 5]) {
-      const { ctx, calls } = managerCtx({ status });
-      assert.deepEqual(await run(args(["proxy", sub]), ctx), { exitCode: status, records: [] });
-      assert.deepEqual(calls.map((c) => [c.args, c.opts.stdio]), [[[MANAGER, sub], "inherit"]]);
-    }
-    const { ctx } = managerCtx({ status: null, error: new Error("spawn failed") });
-    assert.deepEqual(await run(args(["proxy", sub]), ctx), { exitCode: 2, records: [] });
-  }
-});
 
-test("proxy status --json is forwarded; --json on other subcommands is not", async () => {
-  const { run } = await load("proxy");
-  const status = managerCtx({ status: 0 });
-  await run(args(["proxy", "status"], { json: true }), status.ctx);
-  assert.deepEqual(status.calls[0].args, [MANAGER, "status", "--json"]);
-  const start = managerCtx({ status: 0 });
-  await run(args(["proxy", "start"], { json: true }), start.ctx);
-  assert.deepEqual(start.calls[0].args, [MANAGER, "start"]);
-});
 
-test("proxy logs [n]: the line count is forwarded as given and the manager's exit code is kept", async () => {
-  for (const [name, positional, expected] of [
-    ["proxy", ["proxy", "logs"], [MANAGER, "logs"]],
-    ["proxy", ["proxy", "logs", "50"], [MANAGER, "logs", "50"]],
-    ["logs", ["proxy", "logs", "7"], [MANAGER, "logs", "7"]],
-  ]) {
-    const { run } = await load(name);
-    const { ctx, calls } = managerCtx({ status: 1 });
-    assert.deepEqual(await run(args(positional), ctx), { exitCode: 1, records: [] });
-    assert.deepEqual(calls.map((c) => [c.args, c.opts.stdio]), [[expected, "inherit"]]);
-  }
-  const { run } = await load("logs");
-  const { ctx } = managerCtx({ status: null, signal: "SIGTERM" });
-  assert.deepEqual(await run(args(["proxy", "logs"]), ctx), { exitCode: 2, records: [] });
-});
 
 /** A command ctx whose proxy answers (or fails) at the fetch boundary. */
 function proxyCtx(answer, kit = {}) {

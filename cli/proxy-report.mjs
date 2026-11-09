@@ -135,10 +135,10 @@ export function statusRecords(status, { key = null, reveal = false, verbose = fa
         exitCode,
         records: [
           stuck
-            ? { kind: "state", status: "warn", text: `not answering${where}: pid ${status.pidRecord.pid} is alive, but no proxy of this kit answers` }
+            ? { kind: "state", status: "warn", text: `not answering${where} (pid ${status.pidRecord.pid} is alive)` }
             : { kind: "state", status: "stop", text: `stopped${status.port === null ? "" : ` (port ${status.port})`}` },
           { kind: "next", commands: stuck ? ["zcode-kit proxy restart", "zcode-kit doctor"] : ["zcode-kit proxy start"] },
-          { kind: "blank" },
+          ...(status.connection?.facts ? [{ kind: "blank" }] : []),
           ...card(),
         ],
       };
@@ -225,8 +225,8 @@ export function stopFailure(record, lifecycle) {
   const block = (what, next, whyText = why) => ({ what, why: whyText, next, exit: record.code });
   switch (record.outcome) {
     case "foreign":
-      return block(`Port ${port ?? "?"} is answered by another service; nothing was stopped`,
-        ["zcode-kit proxy status"], "it does not prove this kit's identity; the kit never stops a service it did not start");
+      return block(`Port ${port ?? "?"} is answered by another service`,
+        ["zcode-kit proxy status"], "it does not prove this kit's identity, so nothing was stopped; the kit never stops a service it did not start");
     case "no-key":
       return block("The local proxy key is missing; nothing was stopped", ["zcode-kit setup"],
         `${lifecycle.KEY_FILE} not found, so the proxy's identity cannot be proven`);
@@ -237,7 +237,7 @@ export function stopFailure(record, lifecycle) {
       return block("The proxy could not be stopped", ["zcode-kit doctor"]);
     default:
       // unproven-live-record, no-pid-record, recorded-pid-gone, reuse-suspect, start-unknown
-      return block("The proxy was left running: its process is not proven to be this kit's", ["zcode-kit doctor"]);
+      return block("Nothing was stopped: the process is not proven to be this kit's proxy", ["zcode-kit doctor"]);
   }
 }
 
@@ -247,11 +247,11 @@ export function finishStart(progress, record, lifecycle) {
     progress.fail(startFailure(record, lifecycle));
     return false;
   }
-  const port = portOf(lifecycle);
+  // The address follows in the connection details; the row says what happened.
   const pid = record.pid ?? lifecycle.readPidFile()?.pid ?? null;
   const verb = record.outcome === "already-running" ? "already running" : "started";
-  const recovered = record.recovered ? `; replaced hung pid ${record.recovered.pid}` : "";
-  progress.done(`${verb}${port === null ? "" : ` on 127.0.0.1:${port}`}${pid ? ` (pid ${pid})` : ""}${recovered}`);
+  const recovered = record.recovered ? `, replaced hung pid ${record.recovered.pid}` : "";
+  progress.done(`${verb}${pid ? ` (pid ${pid})` : ""}${recovered}`);
   return true;
 }
 
