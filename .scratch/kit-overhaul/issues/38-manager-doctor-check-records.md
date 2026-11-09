@@ -112,3 +112,68 @@ Spec stories: 61, 92
 - `test-kit` ubuntu, Node 24 and 26: the same files.
 - `ux-before` on both legs, byte for byte.
 - `memory-budget` on both legs: unaffected (no scenario runs doctor; the preflight closure is unchanged); the ratchet must still hold with `expected-red.json` unchanged.
+
+### 2026-11-09 — implementer (ticket 38, round 2: the Windows legs)
+
+**Branch:** `ticket/38-doctor-check-records`. The integration tip `de1d550` (ticket 75's free ports, ticket 73) is merged in `f7ce61a`, with no conflicts. The fix is `de77861`. The head SHA is the commit that adds this comment.
+
+**What failed.** Pre-merge CI run 42535337819 (staging/38 `12197ca`) failed on `test-kit` windows, Node 24 and Node 26. The same 7 cases failed on both legs, all in `tests/manager-doctor.test.mjs`. In every case the difference is platform content in the comparison, not changed output: the tip prints the same bytes on Windows. The code is unchanged.
+1. *`zcode-kit doctor --json`: fresh, proxy-down, proxy-running and proxy-running-auth-rejected (line 9).*
+   - Expected `      "detail": "<BUN> (<VERSION>)"`.
+   - Actual `      "detail": "C:\\Users\\runneradmin\\.bun\\bin\\bun.exe (1.4.2)"`.
+
+   `--json` writes the detail through `JSON.stringify`, so every `\` comes out as `\\`. The normaliser looked only for the raw Bun spelling. The text variants of the same states pass on Windows because they print the raw spelling.
+
+   This is the tip's behaviour too. The tip parsed the manager's text row back into the same detail string and printed it through `JSON.stringify`, as the branch does.
+2. *`zcode-kit doctor --json`, foreign-no-bun (line 14).*
+   - Expected `      "detail": "<KIT>/proxy/config.yaml"`.
+   - Actual `      "detail": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\kit-manager-doctor-2vCm5M\\proxy\\config.yaml"`.
+
+   This is the same JSON escaping, here for the fixture root (the 8.3 spelling from `tmpdir()`).
+3. *The manager CLI and `zcode-kit doctor` text, proxy-down (line 5).*
+   - Expected `…(unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE`.
+   - Actual `…(unset them): ZCODE_CLAIM_FIXTURE, ZCODE_PROXY_PORT`.
+
+   The row lists `Object.keys(env)` in order. On Windows, libuv sorts the environment block of every process it spawns, so the child sees the variables in sorted order. Linux keeps insertion order.
+
+   The tip shows the same order on Windows:
+   - The manager CLI read `Object.keys(process.env)` in its own spawned process.
+   - `zcode-kit doctor` spawned the manager through `ctx.spawnSync` with the inherited environment, which was sorted again.
+
+   The branch reads `ctx.env` (`process.env`) of a `zcode-kit` process the test spawned, which is sorted the same way. The `--json` proxy-down case stopped at line 9 first, but its line 29 has the same order difference.
+
+   The record-probe test passes its env as JSON, which keeps insertion order. That is why it passed on Windows.
+
+   Nothing else in the Windows output differs. The text variants of fresh, proxy-running, auth-rejected and foreign-no-bun pass on Windows, and every `--json` detail is one of those text details, JSON-escaped. Proxy-down differs from proxy-running only by its override rows and by the `health=down` and summary rows, which are fixed strings.
+
+**Fix (`tests/manager-doctor.test.mjs` only):**
+- The normaliser maps both the raw and the JSON-escaped spelling of each fixture-root spelling (realpath and as given) and of the Bun path. After `<KIT>` it turns `\\` and `\` into `/`.
+- On win32 only, the snapshot is compared to `windowsExpectation(stored)`: the stored Linux bytes, with the names after `ignored by the kit-managed proxy (unset them): ` sorted. That is the order of the Windows environment block. The comparison is still exact.
+- Everywhere else, `matchSnapshot` compares the stored bytes as they are. The 15 snapshot files are unchanged, so the Linux comparison is byte-exact as before. On Linux the escaped spellings equal the raw ones and paths have no `\`, so the normaliser changes nothing there.
+- The local `freePort` is replaced with ticket 75's `tests/free-port.mjs`. The fixture-port guard reports nothing (binds/ports/stale all empty).
+- New test "Windows spellings meet the Linux snapshots…". It feeds the exact lines from the CI logs, parsed from the logged JSON literals, through the normaliser and the Windows expectation, and checks that each one gives the stored line. It also pins that:
+  - the Windows expectation changes only the override rows (proxy-down: line 5; kit text: lines 5 and 19);
+  - no other snapshot is touched.
+
+**Mutation proofs** (`t38-r2-mutations`). The fix was committed first as `de77861`, and every mutant was restored with `git checkout de77861 -- <file>`. `git status` was clean afterwards. All 5 mutants were killed:
+- m1: the raw spelling only. The vector test fails.
+- m2: the JSON `\\` pair is kept as two separators. The vector test fails.
+- m3: the Windows expectation is the stored bytes unchanged. The vector test fails.
+- m4: the doctor sorts the overrides. The Linux comparison stays strict: 4 fail (the manager CLI, kit text and kit json proxy-down, and the record test).
+- m5: the Bun version is dropped. 13 fail.
+
+**Suites** (Bun 1.4.2, Node 26.7.0, after the merge):
+- `tests/manager-doctor.test.mjs` (`t38-r2-mdoctor`): 19/19 pass.
+- `npm run test`:
+  - `t38-r2-full-test`: 931 tests, 912 pass, 1 fail, 18 skipped. The failure is ticket 73's new live test `tests/memory/loop.test.mjs:832`, "a live child is frozen, thawed and killed by its identity…". It read `/proc/<pid>/stat` 6 ms after `freezeProcess` and saw state `R`, because a SIGSTOP to a running process is not yet visible when `kill()` returns. This is a race, and the test is not from this ticket.
+  - Rerun `t38-r2-full-test2`: 931 tests, 913 pass, 0 fail, 18 skipped.
+- `npm run test:proxy` (`t38-r2-full-proxy`): 1596 pass, 0 fail, 107 files.
+- `npm run test:mcp` (`t38-r2-full-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped.
+- `npm run test:ux-before` (`t38-r2-uxbefore`): 1/1 pass.
+
+**Pending CI (orchestrator verifies after merge+push):**
+- `test-kit` windows-latest, Node 24 and Node 26: the 7 cases above, plus the rest of `manager-doctor.test.mjs`.
+- `test-kit` ubuntu, Node 24 and Node 26.
+- `ux-before` and `memory-budget` on both legs.
+
+**Left for another ticket:** ticket 73's live freeze test should wait until `/proc/<pid>/stat` shows `T` (poll with a bound) before it asserts the state. Its thaw assertion has the same race in the other direction.
