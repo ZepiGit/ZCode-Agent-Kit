@@ -140,3 +140,7 @@ Spec stories: none yet (outside spec.md; recorded in Round 7).
   **Left for others.**
   - The `/v1/responses` stream (`responses-handler.ts` `streamResponse`) and the async bridge still pump eagerly in `start()`, so a stalled client of those routes still queues. They are not in S1/stalled, and they are a follow-up if wanted.
   - Measurements and egress: every run used the loopback soak mock or an injected upstream (B2), and the proxy test suite ran under its egress guard.
+
+- 2026-11-09 (implementer, ticket 61), addendum. The tip moved to 984b45d (tickets 16 and 38, Round 30, ticket 79), and I merged it in 6728f62. The only conflict was METRICS.md: both sides appended a section, and I kept both. Suites on 6728f62: `npm run test` 980 tests, 962 pass, 0 fail, 18 skipped (`t61-full2-kit`); `npm run test:proxy` 1611 pass, 0 fail; proxy typecheck passes; `npm run test:mcp` 100 tests, 99 pass, 0 fail, 1 skipped, `dist/` unchanged.
+  - **Ticket 79 (record only, local runs, not CI).** Linux S1/stalled `growth:proxy` was 1.03 %/1k on the tip 788f2fb (job), 0.47 on e540752 and −0.03 on caf66db (no trend). The pre-merge run's linux S1/stalled value goes to 79, and a RED there comes back under Round 30 Q1.
+  - **The diff touches `zcode-proxy-src/**` and `tests/memory/**`.** So no signature applies to this ticket's runs, including Round 28 (vii).
