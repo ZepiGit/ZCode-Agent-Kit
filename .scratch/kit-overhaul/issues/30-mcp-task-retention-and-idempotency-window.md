@@ -350,3 +350,15 @@ Spec stories: 66, 67, 68, 135
 
   **Left open:**
   - At the 500 bound, each new terminal task still costs one scan and sort, O(n log n), to pick its victim. Lookups stay O(1) (M16). This does not affect S5/short, and S5/long was GREEN with it.
+
+- 2026-11-09 (implementer, round 4 addendum).
+  - **Second merge.** The integration tip moved to 8cfc667 (ticket 75, free ports in kit tests). It is merged at 47169f0, with no conflicts and nothing under `mcp/`.
+  - **One `test:mcp` failure on the merged tree, fixed in db386ed.** The new lookup-work test read the preload's count file while the preload was rewriting it ("Unexpected end of JSON input"). The read now retries until the JSON parses.
+    - The test is still RED on 30's pre-fix dist ("10 with 10 tasks, 400 with 400"; `reports/t30-r4b-red.log`).
+    - It is GREEN 3 of 3 times on the fix (`reports/t30-r4b-lookup-{1,2,3}.log`).
+  - **Suites on db386ed:**
+    - `npm run test`: 901 tests, 883 pass, 0 fail, 18 skipped (`reports/t30-r4b-test.log`, on 47169f0; db386ed only touches the bridge test);
+    - `test:proxy`: 1596 pass, 0 fail (107 files);
+    - `test:proxy-typecheck`: clean;
+    - `test:mcp`: 107 tests, 106 pass, 0 fail, 1 skipped (`reports/t30-r4c-test-mcp.log`);
+    - `git status` is clean after the build.
