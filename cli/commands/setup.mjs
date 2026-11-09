@@ -8,9 +8,15 @@
 // failed smoke check only warns), 20 when at least one harness failed while
 // the others were configured, 130 when the user aborted with Ctrl-C (answers
 // already given were applied), 2 for an unknown harness in the selection.
-// Output is streamed (ctx.progress and cli/setup-output.mjs): questions are
-// asked on the same terminal. Below the Node support floor the entry refuses
-// first (`nodeFloor`, ADR-0006).
+//
+// The report is compact by default (ticket 43, design-language §7): stage
+// rows, one result row per assistant, the connection check, the connection
+// details and the undo command; the full output goes to install.log and to
+// the screen with `--verbose`/ZCODE_KIT_VERBOSE=1 (cli/setup-output.mjs).
+// `--installer` is still accepted: the installers print the banner themselves,
+// so setup suppresses it there (one banner, A-26). Questions are asked on
+// stderr (ADR-0005). Below the Node support floor the entry refuses first
+// (`nodeFloor`, ADR-0006).
 //
 // The command ctx is `cmd`; `ctx` below is the kit context (cmd.kit), the
 // object the adapters, bootstrap and the consent records work on.
@@ -26,6 +32,7 @@ import { BRIDGE_NODE_FLAGS, bridgeArgs, bridgeScriptOf, claudeRegistrationState,
 import { bootstrap } from "../context.mjs";
 import { decideAccountRotator, restartForAccountChange, rotatorChoice } from "../account-setup.mjs";
 import { setupOutput } from "../setup-output.mjs";
+import { installedVersion } from "../../lib/self-update.mjs";
 import {
   ABORTED, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, createPrompter, decideHarness,
   isUnreadableChoice, ownedIntegration, parseSelection, readHarnessChoices,
@@ -55,8 +62,21 @@ export async function run({ flags }, cmd) {
   assertNotCheckoutWrite(ctx, cmd.env);
 
   ensureState(ctx);
-  const compact = flags.installer === true && flags.verbose !== true && cmd.env.ZCODE_KIT_VERBOSE !== "1";
-  const ui = setupOutput(ctx, compact);
+  // Compact by default; `--verbose`/ZCODE_KIT_VERBOSE=1 print the full stream.
+  const verbose = flags.verbose === true || cmd.env.ZCODE_KIT_VERBOSE === "1";
+  // One banner (A-26): the installers print it themselves, so `--installer`
+  // suppresses setup's own.
+  const version = installedVersion(ctx.root);
+  const ui = await setupOutput(ctx, {
+    verbose,
+    banner: flags.installer !== true
+      ? ["  ZCODE  /  AGENT KIT", ...(version ? [`  v${version}  |  Your local AI workspace`] : [])]
+      : [],
+  });
+  // Everything setup prints goes through the ui: install.log always carries
+  // the full output; the screen shows the compact report or the full stream.
+  const progress = (line) => ui.progress(line);
+  const progressError = (line) => ui.progressError(line);
   acquireLock(ctx.backupDir);
   const tx = beginTransaction(ctx.backupDir, `zcode-kit setup ${harnessArg}`);
   ctx.tx = tx;
@@ -67,13 +87,16 @@ export async function run({ flags }, cmd) {
   let abortedByUser = false;
   // One terminal session for every question (harnesses, then the rotator):
   // answers typed ahead stay in order instead of being lost between prompts.
+  // Prompts are diagnostics: they render on stderr (ADR-0005) and appear only
+  // when stdin and stderr are terminals.
   const prompter = createPrompter();
   const mcpBridgeAvailable = !flags["no-mcp"] && existsSync(join(ctx.mcpDir, "dist", "index.js"));
   try {
-    ui.step("Runtime and configuration");
+    const runtimeStep = ui.step("Runtime and configuration");
     bootstrap(ctx, (...args) => ui.detail(...args));
-    ui.ok("Runtime ready");
-    ui.step("Assistant integrations");
+    ui.flush();
+    runtimeStep.done("runtime ready");
+    ui.heading("Assistant integrations");
     const detectedIds = ADAPTER_IDS.filter((id) => detected[id]);
     ui.detail(
       "detected harnesses: " + (detectedIds.join(", ") || "none") +
@@ -83,10 +106,10 @@ export async function run({ flags }, cmd) {
     for (const error of choices.errors) ui.warn(error);
     const interactive = !explicit && prompter.interactive;
     if (!explicit && !interactive && detectedIds.length) {
-      cmd.progress(`  No interactive terminal: harnesses without a saved decision are skipped (select them with --harness <list> or ${HARNESS_SELECTION_ENV}=<list>).`);
+      progress(`  No interactive terminal: harnesses without a saved decision are skipped (select them with --harness <list> or ${HARNESS_SELECTION_ENV}=<list>).`);
     }
     if (!explicit && !detectedIds.length) {
-      cmd.progress("  No supported assistant detected. The connection details below work with any OpenAI- or Anthropic-compatible client.");
+      progress("  No supported assistant detected. The connection details below work with any OpenAI- or Anthropic-compatible client.");
     }
     // `--select`: one numbered list instead of one question per harness.
     // Every detected harness gets a decision (chosen = configured, the rest
@@ -95,18 +118,18 @@ export async function run({ flags }, cmd) {
     let selection = null;
     if (flags.select === true) {
       if (explicit) {
-        cmd.progress(`  note: --select ignored — the explicit selection (${explicit.source === "flag" ? "--harness" : HARNESS_SELECTION_ENV}) decides.`);
+        progress(`  note: --select ignored — the explicit selection (${explicit.source === "flag" ? "--harness" : HARNESS_SELECTION_ENV}) decides.`);
       } else if (!interactive) {
-        cmd.progress("  note: --select needs an interactive terminal — ignored (stored decisions apply).");
+        progress("  note: --select needs an interactive terminal — ignored (stored decisions apply).");
       } else if (detectedIds.length) {
         const labels = await Promise.all(detectedIds.map(async (id) => (await loadAdapter(id)).default.label));
-        cmd.progress("\n  Detected assistants:");
+        progress("\n  Detected assistants:");
         detectedIds.forEach((id, i) => {
           const stored = choices.harnesses[id]?.decision;
-          cmd.progress(`    ${i + 1}) ${labels[i]}${stored ? ` (currently ${stored})` : ""}`);
+          progress(`    ${i + 1}) ${labels[i]}${stored ? ` (currently ${stored})` : ""}`);
         });
         const bridgeFor = detectedIds.filter((id) => mcpBridgeAvailable && (id === "omp" || id === "claude-code"));
-        if (bridgeFor.length) cmd.progress(`  note: selecting ${bridgeFor.map((id) => labels[detectedIds.indexOf(id)]).join(" or ")} also registers the kit's MCP bridge "zcode-harness" there (skip with --no-mcp).`);
+        if (bridgeFor.length) progress(`  note: selecting ${bridgeFor.map((id) => labels[detectedIds.indexOf(id)]).join(" or ")} also registers the kit's MCP bridge "zcode-harness" there (skip with --no-mcp).`);
         try {
           const chosen = await prompter.askLine(
             "  Configure ZCode as a provider with its supported models in which assistants? (numbers, all, none) ",
@@ -136,11 +159,12 @@ export async function run({ flags }, cmd) {
       // the harness was selected explicitly; stored decisions carry it as a flag.
       const mcpOffered = interactive && mcpBridgeAvailable && (id === "omp" || id === "claude-code");
       // The question text is fixed; what a y implies beyond the provider
-      // entry is said before it (existing integration, MCP bridge).
+      // entry is said before it (existing integration, MCP bridge) — as
+      // prompt-context notes on stderr (A-22, ADR-0005).
       const ask = selection ? async () => selection.has(id)
         : interactive ? (question) => {
-          if (owned) cmd.progress(`  note: an existing kit integration for ${adapter.label} was found; y keeps it current, n leaves it untouched.`);
-          if (mcpOffered) cmd.progress(`  note: y also registers the kit's MCP bridge "zcode-harness" for ${adapter.label} (skip with --no-mcp).`);
+          if (owned) ui.note("an existing kit integration for " + adapter.label + " was found; y keeps it current, n leaves it untouched.");
+          if (mcpOffered) ui.note("y also registers the kit's MCP bridge \"zcode-harness\" for " + adapter.label + " (skip with --no-mcp).");
           return prompter.ask(question);
         } : null;
       let decision;
@@ -220,7 +244,7 @@ export async function run({ flags }, cmd) {
     // a y after the MCP note, or a stored decision that recorded it) — never
     // a refresh, an `integrate` decision or a y given without the note.
     await integrateMcp(cmd, flags, tx, detected, mcpIds, (...args) => ui.detail(...args));
-    ui.step("Account Rotator");
+    ui.heading("Account Rotator");
     // Asked once (ticket 42): a stored decision stands unless --reask; the
     // overrides still win. See decideAccountRotator for the order.
     const rotator = await decideAccountRotator({
@@ -231,7 +255,7 @@ export async function run({ flags }, cmd) {
       reask: flags.reask === true,
       prompter,
       aborted: abortedByUser,
-      progress: cmd.progress,
+      progress,
       warn: (line) => ui.warn(line),
       runProxyCli: (cliArgs, opts) => proxyCli(cmd, cliArgs, opts),
     });
@@ -242,30 +266,48 @@ export async function run({ flags }, cmd) {
     let finishErr = null;
     try { txId = tx.finish(); } catch (err) { finishErr = err; }
     releaseLock(join(ctx.backupDir, ".setup-lock"));
-    if (finishErr) cmd.progressError(`WARN: recording the transaction failed (${finishErr.message})`);
+    if (finishErr) progressError(`WARN: recording the transaction failed (${finishErr.message})`);
     if (txId) ui.detail(`\ntransaction ${txId} recorded — undo with: zcode-kit rollback ${txId}`);
   }
   if (accountChange) await restartForAccountChange(ctx);
-  cmd.progress("\n  Configuration saved.");
-  cmd.progress(`  Assistants: ${outcome.configured.length} configured, ${outcome.skipped.length} skipped, ${outcome.failed.length} failed.`);
-  for (const entry of outcome.failed) cmd.progress(`    failed: ${entry.label} — ${entry.error}`);
-  if (undecided) cmd.progress("    Undecided harnesses can be configured later: zcode-kit setup --harness <list>, or zcode-kit integrate <harness>.");
-  if (abortedByUser) cmd.progress("    Aborted by the user: remaining questions were skipped; nothing beyond the answers given was configured.");
-  ui.step("Connection check");
+  const counts = `${outcome.configured.length} configured, ${outcome.skipped.length} skipped, ${outcome.failed.length} failed`;
+  ui.saved(
+    ["Configuration saved.", `Assistants: ${counts}.`],
+    [
+      ["Assistants", counts],
+      ...(txId ? [["Undo", `zcode-kit rollback ${txId}`]] : []),
+      ["Setup log", ui.logPath],
+    ],
+  );
+  for (const entry of outcome.failed) progress(`    failed: ${entry.label} — ${entry.error}`);
+  if (undecided) progress("    Undecided harnesses can be configured later: zcode-kit setup --harness <list>, or zcode-kit integrate <harness>.");
+  if (abortedByUser) progress("    Aborted by the user: remaining questions were skipped; nothing beyond the answers given was configured.");
+  const checkStep = ui.step("Connection check");
   if (abortedByUser) {
-    cmd.progress("  [SKIP] aborted by the user");
+    checkStep.skip("aborted by the user");
+    ui.detail("  [SKIP] aborted by the user");
   } else {
     // Lazy: heal.mjs checks at module scope whether it is the process entry.
     const { setupSmoke } = await import("../heal.mjs");
     const smoke = await setupSmoke(ctx);
-    if (smoke.code) ui.warn(smoke.detail);
-    else cmd.progress(`  [${smoke.cause === "skipped" ? "SKIP" : "OK"}] ${smoke.detail}`);
+    ui.flush();
+    if (smoke.code) {
+      ui.warn(smoke.detail);
+      checkStep.done("finished with a warning — see the warning above");
+    } else {
+      // The old line, verbatim in install.log and --verbose; the compact
+      // screen carries it once, as the step's result row.
+      ui.detail(`  [${smoke.cause === "skipped" ? "SKIP" : "OK"}] ${smoke.detail}`);
+      checkStep.done(smoke.detail);
+    }
   }
   // Connection details for manual client setup: "running" only after the
   // manager's authenticated identity check, model ids from the live instance.
   // A kit layout without the proxy manager (minimal fixtures, tooling
-  // checkouts) has no proxy component to describe.
-  cmd.progress("");
+  // checkouts) has no proxy component to describe. The lines go through the
+  // ui (install.log + screen) instead of the manager's own printer, so the
+  // compact report carries them and install.log keeps the old bytes.
+  progress("");
   const managerPath = join(ctx.root, "proxy", "zcode-proxy-manager.mjs");
   let manager = null;
   if (existsSync(managerPath)) {
@@ -281,11 +323,16 @@ export async function run({ flags }, cmd) {
     // the port → configured values; a foreign service → details withheld
     // (never the key next to a URL that is not ours).
     const { identity } = await manager.readState();
-    if (identity === "ours" || identity === "down") await manager.printConnectionDetails(identity === "ours" ? "running" : "configured");
-    else if (identity === "foreign") cmd.progress("  Connection details withheld: the configured port is answered by a service that is not this kit's proxy (see zcode-kit proxy status).");
-    else cmd.progress(`  Connection details unavailable (${identity}); see zcode-kit proxy status.`);
-  } else cmd.progress("  Connection details unavailable: no proxy manager in this kit layout (see zcode-kit proxy status after a full install).");
-  if (compact) cmd.progress(`\n  Setup log: ${ui.logPath}`);
+    if (identity === "ours" || identity === "down") {
+      try {
+        for (const line of await manager.connectionDetails(identity === "ours" ? "running" : "configured")) ui.dataLine(line);
+      } catch (err) {
+        progress(`  connection details unavailable: ${err.message}`);
+      }
+    }
+    else if (identity === "foreign") progress("  Connection details withheld: the configured port is answered by a service that is not this kit's proxy (see zcode-kit proxy status).");
+    else progress(`  Connection details unavailable (${identity}); see zcode-kit proxy status.`);
+  } else progress("  Connection details unavailable: no proxy manager in this kit layout (see zcode-kit proxy status after a full install).");
   if (abortedByUser) return { exitCode: EXIT_ABORTED, records: [] };
   return { exitCode: outcome.failed.length ? EXIT_HARNESS_FAILED : 0, records: [] };
 }

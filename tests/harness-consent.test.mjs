@@ -42,11 +42,49 @@ test("createPrompter: sequential questions on one terminal, typed-ahead answers 
   assert.equal(await prompter.ask(ACCOUNT_ROTATOR_QUESTION), false);
   prompter.close();
   const text = s.text();
-  assert.ok(text.includes("Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n]"));
-  assert.ok(text.includes("Configure ZCode as a provider with its supported models in pi? [y/n]"));
-  assert.ok(text.includes(`${ACCOUNT_ROTATOR_QUESTION} [y/n]`), "rotator question stays independent");
+  assert.ok(text.includes("? Configure ZCode for OMP / Oh My Pi? [y/n]"));
+  assert.ok(text.includes("? Configure ZCode for pi? [y/n]"));
+  assert.ok(text.includes(`? ${ACCOUNT_ROTATOR_QUESTION} [y/n]`), "rotator question stays independent");
   assert.ok(text.includes("Please answer y or n"));
   s.done();
+});
+
+// ADR-0005 / design-language §4.9: a prompt is a diagnostic — without an
+// explicit stream it is written to stderr, in the `? <question> [y/n]` form,
+// and the kit's harness question is the short copy (`Configure ZCode for …?`).
+// The default-output half is proven through a real spawn: the child fakes TTYs
+// on both streams, asks one question and exits on EOF; the parent checks on
+// which stream the bytes landed.
+test("prompts default to stderr in the `? question [y/n]` form, and the harness question is short", async () => {
+  assert.equal(harnessQuestion("Codex CLI"), "Configure ZCode for Codex CLI?");
+  const child = spawn(process.execPath, [
+    "-e",
+    `
+    process.stdin.isTTY = true; process.stderr.isTTY = true;
+    const { createPrompter, harnessQuestion } = await import(${JSON.stringify(join(KIT, "cli", "harness-consent.mjs"))});
+    const prompter = createPrompter({ env: {} });
+    if (!prompter.interactive) { console.error("NOT-INTERACTIVE"); process.exit(3); }
+    const answer = await prompter.ask(harnessQuestion("Codex CLI"));
+    prompter.close();
+    console.error("ANSWER:" + String(answer));
+    process.exit(0);
+    `,
+  ], { stdio: ["pipe", "pipe", "pipe"] });
+  let stdout = "", stderr = "";
+  child.stdout.on("data", (d) => { stdout += d; });
+  child.stderr.on("data", (d) => { stderr += d; });
+  // EOF must never count as consent: once the question is out, the parent
+  // closes stdin, the ask resolves undefined and the child exits.
+  for (let i = 0; i < 100 && !stderr.includes("[y/n] "); i++) await new Promise((r) => setTimeout(r, 10));
+  child.stdin.end();
+  const code = await new Promise((resolve) => {
+    const timer = setTimeout(() => { child.kill("SIGKILL"); resolve("timeout"); }, 15000);
+    child.on("close", (c) => { clearTimeout(timer); resolve(c); });
+  });
+  assert.equal(code, 0, `child exit ${code}: ${stdout}${stderr}`);
+  assert.equal(stdout, "", "stdout carries no prompt bytes (reports and data only)");
+  assert.ok(stderr.includes("? Configure ZCode for Codex CLI? [y/n] "), `prompt on stderr: ${JSON.stringify(stderr)}`);
+  assert.ok(stderr.includes("ANSWER:undefined"), "EOF is not consent");
 });
 
 test("createPrompter / askYesNo never consent without a terminal, in CI, or on closed input", async () => {
@@ -335,6 +373,11 @@ function fixture(t, { detect = ["omp", "pi"], mcpDist = true } = {}) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "logs")); mkdirSync(join(root, "zcode-proxy-src"));
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(KIT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   // The template's port is a free port of this run (ticket 75): setup, doctor
   // and the manager probe it, and the production port 8457 may be the owner's.
   writeFileSync(join(root, "proxy", "config.example.yaml"), readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8").replace(/^  port: \d+/m, `  port: ${FIXTURE_PORT}`));
@@ -399,9 +442,9 @@ test("setup without a terminal skips every undecided harness, writes nothing, ex
   const r = await run(f, ["setup"]);
   assert.equal(r.code, 0, r.text);
   assert.match(r.stdout, /No interactive terminal: harnesses without a saved decision are skipped/);
-  assert.match(r.stdout, /\[SKIP\] OMP \/ Oh My Pi — no interactive consent/);
-  assert.match(r.stdout, /\[SKIP\] pi — no interactive consent/);
-  assert.match(r.stdout, /Assistants: 0 configured, 2 skipped, 0 failed/);
+  assert.match(r.stdout, /SKIP {2}OMP \/ Oh My Pi — no interactive consent/);
+  assert.match(r.stdout, /SKIP {2}pi — no interactive consent/);
+  assert.match(r.stdout, /Assistants\s+0 configured, 2 skipped, 0 failed/);
   assert.match(r.stdout, /Undecided harnesses can be configured later/);
   assert.match(r.stdout, /Account Rotator setting unchanged \(no interactive answer\)/, "rotator question stays independent");
   assert.doesNotMatch(r.stdout, /Configure ZCode as a provider/, "no question is printed without a terminal");
@@ -419,8 +462,8 @@ test("explicit --harness selection configures only the named harness, records it
   const piBefore = readFileSync(f.pi, "utf8");
   const r1 = await run(f, ["setup", "--harness", "omp"]);
   assert.equal(r1.code, 0, r1.text);
-  assert.match(r1.stdout, /\[OK\]\s+OMP \/ Oh My Pi/);
-  assert.match(r1.stdout, /Assistants: 1 configured, 0 skipped, 0 failed/);
+  assert.match(r1.stdout, /OK {2}OMP \/ Oh My Pi/);
+  assert.match(r1.stdout, /Assistants\s+1 configured, 0 skipped, 0 failed/);
   assert.doesNotMatch(r1.stdout, /No interactive terminal/, "an explicit selection needs no terminal");
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/);
   assert.equal(readFileSync(f.pi, "utf8"), piBefore, "unselected harness untouched");
@@ -429,13 +472,13 @@ test("explicit --harness selection configures only the named harness, records it
   const ompAfter = readFileSync(f.omp, "utf8");
   const r2 = await run(f, ["setup"]);
   assert.equal(r2.code, 0, r2.text);
-  assert.match(r2.stdout, /\[OK\]\s+OMP \/ Oh My Pi\s*$/m, "stored consent is honoured without a refresh note");
-  assert.match(r2.stdout, /\[SKIP\] pi — no interactive consent/);
+  assert.match(r2.stdout, /OK {2}OMP \/ Oh My Pi\s*$/m, "stored consent is honoured without a refresh note");
+  assert.match(r2.stdout, /SKIP {2}pi — no interactive consent/);
   assert.equal(readFileSync(f.omp, "utf8"), ompAfter, "idempotent");
   assert.doesNotMatch(r2.stdout, /transaction \S+ recorded/, "no-op run records no transaction");
   const r3 = await run(f, ["setup"], { [HARNESS_SELECTION_ENV]: "pi" });
   assert.equal(r3.code, 0, r3.text);
-  assert.match(r3.stdout, /\[OK\]\s+pi/);
+  assert.match(r3.stdout, /OK {2}pi/);
   assert.ok(JSON.parse(readFileSync(f.pi, "utf8")).providers.zcode, "env selection configures pi");
   assert.deepEqual(choicesOf(f), { omp: "configured/flag", pi: "configured/env" }, "env selection leaves other decisions alone");
   const bad = await run(f, ["setup", "--harness", "nonsense"]);
@@ -447,11 +490,11 @@ test("`none` records skipped decisions that later runs respect; an explicit sele
   const f = fixture(t);
   const r1 = await run(f, ["setup"], { [HARNESS_SELECTION_ENV]: "none" });
   assert.equal(r1.code, 0, r1.text);
-  assert.match(r1.stdout, new RegExp(`\\[SKIP\\] OMP / Oh My Pi — ${HARNESS_SELECTION_ENV}=none`));
-  assert.match(r1.stdout, /Assistants: 0 configured, 2 skipped, 0 failed/);
+  assert.match(r1.stdout, new RegExp(`SKIP {2}OMP / Oh My Pi — ${HARNESS_SELECTION_ENV}=none`));
+  assert.match(r1.stdout, /Assistants\s+0 configured, 2 skipped, 0 failed/);
   assert.deepEqual(choicesOf(f), { omp: "skipped/env", pi: "skipped/env" });
   const r2 = await run(f, ["setup"]);
-  assert.match(r2.stdout, /\[SKIP\] OMP \/ Oh My Pi — previously skipped \(change with: zcode-kit integrate omp, setup --harness omp, or setup --reask\)/);
+  assert.match(r2.stdout, /SKIP {2}OMP \/ Oh My Pi — previously skipped \(change with: zcode-kit integrate omp, setup --harness omp, or setup --reask\)/);
   assert.doesNotMatch(r2.stdout, /Undecided harnesses/, "a stored n is a decision, not an open question");
   assert.doesNotMatch(readFileSync(f.omp, "utf8"), /zcode-kit/);
   const r3 = await run(f, ["setup", "--harness", "pi"]);
@@ -460,8 +503,8 @@ test("`none` records skipped decisions that later runs respect; an explicit sele
   const configured = readFileSync(f.pi, "utf8");
   const r4 = await run(f, ["setup", "--reask"]);
   assert.equal(r4.code, 0, r4.text);
-  assert.match(r4.stdout, /\[SKIP\] OMP \/ Oh My Pi — previously skipped/, "--reask without a terminal keeps stored decisions");
-  assert.match(r4.stdout, /\[OK\]\s+pi\s*$/m);
+  assert.match(r4.stdout, /SKIP {2}OMP \/ Oh My Pi — previously skipped/, "--reask without a terminal keeps stored decisions");
+  assert.match(r4.stdout, /OK {2}pi\s*$/m);
   assert.deepEqual(choicesOf(f), { omp: "skipped/env", pi: "configured/flag" }, "--reask without an answer changes no decision");
   assert.equal(readFileSync(f.pi, "utf8"), configured, "and deletes nothing");
 });
@@ -474,13 +517,13 @@ test("a kit-owned integration without a stored decision is refreshed (no consent
   rmSync(f.mcp);
   const r = await run(f, ["setup"]);
   assert.equal(r.code, 0, r.text);
-  assert.match(r.stdout, /\[OK\]\s+OMP \/ Oh My Pi — existing kit integration refreshed \(no consent recorded\)/);
+  assert.match(r.stdout, /OK {2}OMP \/ Oh My Pi — existing kit integration refreshed \(no consent recorded\)/);
   assert.equal(choicesOf(f), null, "a refresh never records consent");
   assert.equal(readFileSync(f.omp, "utf8"), configured);
   assert.equal(existsSync(f.mcp), false, "MCP registration follows consent, not a refresh");
   writeChoice(f, "omp", "skipped");
   const r2 = await run(f, ["setup"]);
-  assert.match(r2.stdout, /\[SKIP\] OMP \/ Oh My Pi — previously skipped/);
+  assert.match(r2.stdout, /SKIP {2}OMP \/ Oh My Pi — previously skipped/);
   assert.equal(readFileSync(f.omp, "utf8"), configured, "n leaves the existing block untouched");
 });
 
@@ -490,12 +533,12 @@ test("an unreadable decision file blocks the refresh shortcut and is left alone;
   writeFileSync(f.choice("omp"), "{ broken");
   const r = await run(f, ["setup"]);
   assert.equal(r.code, 0, r.text);
-  assert.match(r.stdout, /\[SKIP\] OMP \/ Oh My Pi — decision file unreadable — fix or remove it/);
+  assert.match(r.stdout, /SKIP {2}OMP \/ Oh My Pi — decision file unreadable — fix or remove it/);
   assert.match(r.text, /omp\.json: .*fix or remove the file/);
   assert.equal(readFileSync(f.choice("omp"), "utf8"), "{ broken", "never overwritten");
   const r2 = await run(f, ["setup", "--harness", "omp"]);
   assert.equal(r2.code, 0, r2.text);
-  assert.match(r2.stdout, /\[OK\]\s+OMP \/ Oh My Pi/, "an explicit selection still applies");
+  assert.match(r2.stdout, /OK {2}OMP \/ Oh My Pi/, "an explicit selection still applies");
   assert.equal(readFileSync(f.choice("omp"), "utf8"), "{ broken", "still never overwritten");
 });
 
@@ -504,9 +547,9 @@ test("one failing harness does not stop the others: its partial writes are undon
   writeFileSync(f.pi, "{ this is not json");
   const r = await run(f, ["setup", "--harness", "omp,pi"]);
   assert.equal(r.code, 20, `exit 20 = kit configured, a harness failed (never 1, which a crash also yields)\n${r.text}`);
-  assert.match(r.stdout, /\[OK\]\s+OMP \/ Oh My Pi/);
-  assert.match(r.stdout, /\[FAIL\] pi — .*not valid JSON/);
-  assert.match(r.stdout, /Assistants: 1 configured, 0 skipped, 1 failed/);
+  assert.match(r.stdout, /OK {2}OMP \/ Oh My Pi/);
+  assert.match(r.stdout, /FAIL {2}pi — .*not valid JSON/);
+  assert.match(r.stdout, /Assistants\s+1 configured, 0 skipped, 1 failed/);
   assert.match(r.stdout, /failed: pi — /);
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/);
   assert.deepEqual(choicesOf(f), { omp: "configured/flag" }, "a failed harness is never recorded as configured");
@@ -518,7 +561,7 @@ test("no detected harness is not an error; integrate records consent; doctor rep
   const r = await run(f, ["setup"]);
   assert.equal(r.code, 0, r.text);
   assert.match(r.stdout, /No supported assistant detected/);
-  assert.match(r.stdout, /Assistants: 0 configured, 0 skipped, 0 failed/);
+  assert.match(r.stdout, /Assistants\s+0 configured, 0 skipped, 0 failed/);
   const g = fixture(t);
   assert.equal((await run(g, ["integrate", "pi"])).code, 0);
   assert.deepEqual(choicesOf(g), { pi: "configured/integrate" });
@@ -547,7 +590,7 @@ test("integrate records provider consent only: a later setup refreshes the harne
   assert.equal(existsSync(f.mcp), false, "integrate never registers the bridge");
   const r2 = await run(f, ["setup"]);
   assert.equal(r2.code, 0, r2.text);
-  assert.match(r2.stdout, /\[OK\]\s+OMP \/ Oh My Pi\s*$/m, "stored consent refreshes the provider integration");
+  assert.match(r2.stdout, /OK {2}OMP \/ Oh My Pi\s*$/m, "stored consent refreshes the provider integration");
   assert.equal(existsSync(f.mcp), false, "a stored decision without MCP consent never registers the bridge");
   assert.equal(JSON.parse(readFileSync(f.choice("omp"), "utf8")).mcp, undefined, "the flag is not invented later");
   const r3 = await run(f, ["setup", "--harness", "omp"]);
@@ -560,7 +603,7 @@ test("--no-mcp with an explicit selection records provider consent only; later r
   const f = fixture(t);
   const r1 = await run(f, ["setup", "--harness", "omp", "--no-mcp"]);
   assert.equal(r1.code, 0, r1.text);
-  assert.match(r1.stdout, /\[OK\]\s+OMP \/ Oh My Pi/);
+  assert.match(r1.stdout, /OK {2}OMP \/ Oh My Pi/);
   assert.equal(existsSync(f.mcp), false, "--no-mcp skips the bridge");
   assert.equal(JSON.parse(readFileSync(f.choice("omp"), "utf8")).mcp, undefined, "a declined bridge is not stored as consent");
   const r2 = await run(f, ["setup"]);
@@ -590,7 +633,7 @@ test("--select without a terminal or next to an explicit selection changes nothi
   const r = await run(f, ["setup", "--select"]);
   assert.equal(r.code, 0, r.text);
   assert.match(r.stdout, /--select needs an interactive terminal — ignored/);
-  assert.match(r.stdout, /\[SKIP\] OMP \/ Oh My Pi — no interactive consent/);
+  assert.match(r.stdout, /SKIP {2}OMP \/ Oh My Pi — no interactive consent/);
   assert.equal(choicesOf(f), null);
   const e = await run(f, ["setup", "--select", "--harness", "pi"]);
   assert.equal(e.code, 0, e.text);
@@ -681,11 +724,11 @@ test("interactive setup asks per harness and applies the answers", { skip: !scri
   const f = fixture(t);
   const r = await runPty(f, ["setup"], "y\nn\nn\n");
   assert.equal(r.code, 0, `${r.out}\n${r.stderr}`);
-  assert.ok(r.out.indexOf("in OMP / Oh My Pi? [y/n]") < r.out.indexOf("in pi? [y/n]"), "questions in detection order");
-  assert.ok(r.out.indexOf("in pi? [y/n]") < r.out.indexOf(`${ACCOUNT_ROTATOR_QUESTION} [y/N]`), "rotator question comes after the harness questions");
-  assert.match(r.out, /note: y also registers the kit's MCP bridge "zcode-harness" for OMP \/ Oh My Pi/);
-  assert.match(r.out, /\[OK\]\s+OMP \/ Oh My Pi/);
-  assert.match(r.out, /\[SKIP\] pi — answered n/);
+  assert.ok(r.out.indexOf("for OMP / Oh My Pi? [y/n]") < r.out.indexOf("for pi? [y/n]"), "questions in detection order");
+  assert.ok(r.out.indexOf("for pi? [y/n]") < r.out.indexOf(`${ACCOUNT_ROTATOR_QUESTION} [y/N]`), "rotator question comes after the harness questions");
+  assert.match(r.out, /INFO {2}y also registers the kit's MCP bridge "zcode-harness" for OMP \/ Oh My Pi/);
+  assert.match(r.out, /OK {2}OMP \/ Oh My Pi/);
+  assert.match(r.out, /SKIP {2}pi — answered n/);
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/);
   assert.ok(!JSON.parse(readFileSync(f.pi, "utf8")).providers.zcode, "n writes nothing");
   assert.ok(existsSync(f.mcp), "MCP registered after y");
@@ -694,16 +737,16 @@ test("interactive setup asks per harness and applies the answers", { skip: !scri
   // A second interactive run neither re-asks the decided harnesses nor changes them.
   const again = await runPty(f, ["setup"], "n\n");
   assert.equal(again.code, 0, `${again.out}\n${again.stderr}`);
-  assert.doesNotMatch(again.out, /in OMP \/ Oh My Pi\? \[y\/n\]/, "stored y is not asked again");
-  assert.doesNotMatch(again.out, /in pi\? \[y\/n\]/, "stored n is not asked again");
-  assert.match(again.out, /\[SKIP\] pi — previously skipped/);
+  assert.doesNotMatch(again.out, /for OMP \/ Oh My Pi\? \[y\/n\]/, "stored y is not asked again");
+  assert.doesNotMatch(again.out, /for pi\? \[y\/n\]/, "stored n is not asked again");
+  assert.match(again.out, /SKIP {2}pi — previously skipped/);
   assert.deepEqual(choicesOf(f), { omp: "configured/interactive", pi: "skipped/interactive" });
   // --reask asks both again; the owned OMP integration is announced before its question.
   const reask = await runPty(f, ["setup", "--reask"], "n\ny\nn\n");
   assert.equal(reask.code, 0, `${reask.out}\n${reask.stderr}`);
-  assert.match(reask.out, /note: an existing kit integration for OMP \/ Oh My Pi was found; y keeps it current, n leaves it untouched/);
-  assert.match(reask.out, /\[SKIP\] OMP \/ Oh My Pi — answered n/);
-  assert.match(reask.out, /\[OK\]\s+pi/);
+  assert.match(reask.out, /INFO {2}an existing kit integration for OMP \/ Oh My Pi was found; y keeps it current, n leaves it untouched/);
+  assert.match(reask.out, /SKIP {2}OMP \/ Oh My Pi — answered n/);
+  assert.match(reask.out, /OK {2}pi/);
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/, "n never deletes an existing integration");
   assert.ok(JSON.parse(readFileSync(f.pi, "utf8")).providers.zcode);
   assert.deepEqual(choicesOf(f), { omp: "skipped/interactive", pi: "configured/interactive" });
@@ -719,9 +762,9 @@ test("setup --select: one numbered list, invalid answers repeat, chosen = config
   assert.equal(r.code, 0, `${r.out}\n${r.stderr}`);
   assert.match(r.out, /1\) OMP \/ Oh My Pi\s*\n\s*2\) pi/);
   assert.match(r.out, /note: selecting OMP \/ Oh My Pi also registers the kit's MCP bridge/);
-  assert.doesNotMatch(r.out, /in OMP \/ Oh My Pi\? \[y\/n\]/, "no per-harness question");
-  assert.match(r.out, /\[SKIP\] OMP \/ Oh My Pi — answered n/);
-  assert.match(r.out, /\[OK\]\s+pi/);
+  assert.doesNotMatch(r.out, /for OMP \/ Oh My Pi\? \[y\/n\]/, "no per-harness question");
+  assert.match(r.out, /SKIP {2}OMP \/ Oh My Pi — answered n/);
+  assert.match(r.out, /OK {2}pi/);
   assert.deepEqual(choicesOf(f), { omp: "skipped/interactive", pi: "configured/interactive" });
   assert.equal(existsSync(f.mcp), false, "the bridge only for a chosen harness");
   const all = await runPty(f, ["setup", "--select"], [{ after: "(numbers, all, none)", send: "all\n" }, { after: "[y/N]", send: "n\n" }]);
@@ -734,12 +777,12 @@ test("setup --select: one numbered list, invalid answers repeat, chosen = config
 test("Ctrl-C during the questions stops setup: answered harnesses stay, the rest is skipped, exit 130", { skip: !script }, async (t) => {
   const f = fixture(t);
   const piBefore = readFileSync(f.pi, "utf8");
-  const r = await runPty(f, ["setup"], [{ after: "in OMP / Oh My Pi? [y/n]", send: "y\n" }, { after: "in pi? [y/n]", send: "\x03" }]);
+  const r = await runPty(f, ["setup"], [{ after: "for OMP / Oh My Pi? [y/n]", send: "y\n" }, { after: "for pi? [y/n]", send: "\x03" }]);
   assert.equal(r.code, 130, `${r.out}\n${r.stderr}`);
-  assert.match(r.out, /\[OK\]\s+OMP \/ Oh My Pi/, "the y given before Ctrl-C is applied");
-  assert.match(r.out, /\[SKIP\] pi — aborted/);
+  assert.match(r.out, /OK {2}OMP \/ Oh My Pi/, "the y given before Ctrl-C is applied");
+  assert.match(r.out, /SKIP {2}pi — aborted/);
   assert.match(r.out, /Aborted by the user: remaining questions were skipped/);
-  assert.match(r.out, /\[SKIP\] aborted by the user/, "no connection check after an abort");
+  assert.match(r.out, /SKIP {2}Connection check.*aborted by the user/, "no connection check after an abort");
   assert.doesNotMatch(r.out, /Account Rotator enabled|Account Rotator disabled/, "the rotator question is not answered by the abort");
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/);
   assert.equal(readFileSync(f.pi, "utf8"), piBefore, "the aborted harness is untouched");
