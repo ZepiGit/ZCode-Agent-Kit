@@ -38,7 +38,7 @@
 - Owner checkout (read-only for this run): /home/AgentKit/ZCode-Agent-Kit
 - Other branches: diagnosis/memory (1B loop, merged into ticket 01), prototype/terminal-ux (d27b890, throwaway, never merged)
 - Briefs: IMPLEMENTER-BRIEF.md, MERGER-BRIEF.md, OWNER-PROXY-BRIEF.md
-- Latest user routing and execution means: work as orchestrator with /workflow; Sol openai/gpt-6.1-sol$high workers/decision proxies, Grok xai/grok-4.7$xhigh independent reviewers, new-provider/gemini-3.8-flash$high read-only scouts. Workflow started through CreateWorkflow with max_concurrency3 and explicit per-agent models. This latest request supersedes earlier sol-subagent-only selector restriction. Do not use GLM/Opus or fixed reviewer-grok high as an xhigh substitute. Earlier selector mismatch is disclosed/logged; do not report the prior launch as compliant retroactively.
+- Latest user routing and execution means (2026-11-09 updated): work as orchestrator with /workflow; main implementation workers GLM-5.3-Flash max (account:zai-start-plan/GLM-5.3-Flash$max, now exposed in ListModels); reviewer/planner GPT-6.1-Sol-Subagent xhigh and grok-4.7 xhigh; scouts grok-4.7 high AND gemini-3.8-flash high. Wayfinder skill read; existing local tracker (spec.md, issues/, STATE.md) is the map, no new charting session. Supersedes the earlier all-Sol routing. In-flight Sol workers finish their asks; all new dispatches use the new routing. Do not use Opus or other fallbacks.
 - Running subagents: see RUNLOG.md (latest "Spawned" lines)
 - Last green SHA: 9e45d05 (baseline); integration tip before Phase 4 = this commit
 - Ticket 15 teardown fix (staging/15b) merged 2026-11-08 as cbe2abb (record 3efcaf2; pre-merge CI 42495987510, 8/8 green).
