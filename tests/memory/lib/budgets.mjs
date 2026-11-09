@@ -105,6 +105,22 @@ export const OMP_LEG = {
   waiterCostMB: 5, // in-host waiter cost per host (build-time gate)
 };
 
+// S5/restart (ticket 57, Owner Proxy round 12 Q1): the real bridge against the
+// fake harness with FAKE_EXIT_ON_SEND=1, K back-to-back tool calls that each
+// make the harness exit, then the bridge stopped. A restart storm is possible
+// (the pre-registered definition) when more than one harness child exists at
+// once, when a child is left after its exit or after the bridge stops, or when
+// respawns are bounded only by the client's call rate: K failing calls give
+// about K spawns. The spawn bound is the bridge's first start plus the restart
+// budget the policy mirrors from the proxy manager (3 per 15 min).
+export const MCP_RESTART = {
+  calls: 20, // K, ≥ 20 (Round 12 Q1 condition 1)
+  harnessChildren: 1, // harness children alive at once, at every moment
+  harnessAfterExit: 0, // harness children alive after a call's harness exited
+  harnessAfterStop: 0, // harness children alive after the bridge stopped
+  maxSpawns: 1 + PROCESSES.respawnsPer15Min, // the first start + 3 restarts, for K = 20 failing calls
+};
+
 // The OMP no-op floor (ticket 03's floor test; Round 17 Q4, ticket 71): n fresh
 // stub hosts charged for a hook that does nothing. The median must be below
 // half the waiter gate (a floor at the gate could not tell a waiter from

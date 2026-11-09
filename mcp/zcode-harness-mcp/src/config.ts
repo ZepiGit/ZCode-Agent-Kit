@@ -46,6 +46,29 @@ export interface BridgeConfig {
   };
   /** Static headers relayed for interaction/requestProviderRuntimeHeaders (operator-provided). */
   providerRuntimeHeaders: Record<string, string> | null;
+  /**
+   * Harness restart budget (ticket 57): how many times the runtime restarts
+   * an exited harness within a rolling window before harness-bound calls
+   * fail with HARNESS_RESTART_BUDGET_EXHAUSTED. The bridge's first harness
+   * start is not a restart. Optional env `ZCODE_HARNESS_RESTART_BUDGET` =
+   * `<restarts>/<window seconds>`, default `3/900` (the proxy manager's 3 per
+   * 15 min); `0/<seconds>` never restarts the harness.
+   */
+  restartBudget: { limit: number; windowSec: number };
+}
+
+export const DEFAULT_RESTART_BUDGET = Object.freeze({ limit: 3, windowSec: 900 });
+
+/** `ZCODE_HARNESS_RESTART_BUDGET`: `<restarts>/<window seconds>`, both integers (restarts ≥ 0, window ≥ 1). */
+export function parseRestartBudget(raw: string | undefined): { limit: number; windowSec: number } {
+  if (raw === undefined) return { ...DEFAULT_RESTART_BUDGET };
+  const m = /^\s*(\d{1,9})\s*\/\s*(\d{1,9})\s*$/.exec(raw);
+  const limit = Number(m?.[1]);
+  const windowSec = Number(m?.[2]);
+  if (!m || windowSec < 1) {
+    throw new Error(`invalid ZCODE_HARNESS_RESTART_BUDGET: ${JSON.stringify(raw)} (use <restarts>/<window seconds>, e.g. 3/900; unset it for the default)`);
+  }
+  return { limit, windowSec };
 }
 
 function defaultDataDir(): string {
@@ -104,6 +127,7 @@ export function parseConfig(argv: string[]): BridgeConfig {
       modelContextBudgetStrategy: "preflight-v1",
     },
     providerRuntimeHeaders: null,
+    restartBudget: parseRestartBudget(process.env.ZCODE_HARNESS_RESTART_BUDGET),
   };
 
   for (let i = 0; i < args.length; i += 1) {

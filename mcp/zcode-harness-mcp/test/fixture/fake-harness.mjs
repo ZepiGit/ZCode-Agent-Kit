@@ -25,6 +25,8 @@
  *                                     <prompt>.transcript.json JSON string: the assistant text of the stored transcript
  *   FAKE_EVENT_GAPS=N               emit N events that each skip one seq number
  *   FAKE_TOOL_CALLS=N               emit N tool.updated events with distinct ids (Read, before the Write)
+ *   FAKE_SPAWN_LOG=...              append {event:"start"|"exit", pid, ppid, t} as JSONL
+ *                                   (app-server processes only, not the --version probe)
  */
 import readline from "node:readline";
 import fs from "node:fs";
@@ -36,6 +38,24 @@ if (process.argv.includes("--version")) {
 }
 
 const env = (k, d) => process.env[k] ?? d;
+
+// Every app-server start and exit, so a test can count the harness children a
+// bridge spawned, their rate and their overlap (S5/restart, ticket 57). A
+// SIGKILLed child writes no exit line.
+const diagnosticRun = env('ZCODE_S5_DIAGNOSTIC_RUN', '');
+const diagnosticRaw = env('ZCODE_S5_DIAGNOSTIC_RAW', '');
+if (diagnosticRun && diagnosticRaw) {
+  const { appendRecord, liveRecord } = await import('../../../../tests/memory/lib/identity-diagnostic.mjs');
+  const identity = liveRecord(process.pid, process.ppid, { event: 'start', run: diagnosticRun, argv: process.argv, exe: process.execPath });
+  appendRecord(diagnosticRaw, identity);
+  process.on('exit', () => appendRecord(diagnosticRaw, { ...identity, event: 'exit', t: Date.now() }));
+}
+const spawnLog = env("FAKE_SPAWN_LOG", "");
+if (spawnLog && spawnLog !== diagnosticRaw) {
+  const record = (event) => fs.appendFileSync(spawnLog, JSON.stringify({ event, pid: process.pid, ppid: process.ppid, t: Date.now() }) + "\n", "utf8");
+  record("start");
+  process.on("exit", () => record("exit"));
+}
 let seq = 0;
 let serverReqCounter = 0;
 let requestCount = 0;

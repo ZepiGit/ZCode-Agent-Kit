@@ -6,6 +6,12 @@ on:
   push:
     branches: [main, feature/account-rotator]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      identity-diagnostic:
+        description: 'Opt-in Round36 S5/restart identity artifacts (shipping verdict unchanged)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -129,6 +135,7 @@ jobs:
     env:
       # Disposable runner: the only place the loop may run without run-capped.sh.
       ZCODE_MEMLOOP_ALLOW: "1"
+      ZCODE_MEMLOOP_IDENTITY_DIAGNOSTIC: ${{ inputs.identity-diagnostic && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -226,5 +233,14 @@ jobs:
             ${{ runner.temp }}/memloop/**/samples.csv
             ${{ runner.temp }}/memloop/**/summary.json
             ${{ runner.temp }}/memloop/**/worker-heap.jsonl
+            # Explicit diagnostic allowlist. Never upload bridge-data/task stores,
+            # environments or credentials; writers cap each JSONL at 4 MiB.
+            ${{ runner.temp }}/memloop/**/harness-spawns.jsonl
+            ${{ runner.temp }}/memloop/**/diagnostic-parent-spawns.jsonl
+            ${{ runner.temp }}/memloop/**/diagnostic-processes.jsonl
+            ${{ runner.temp }}/memloop/**/diagnostic-summary.json
+            ${{ runner.temp }}/memloop/**/diagnostic-controls.tap
+            ${{ runner.temp }}/memloop/**/diagnostic-*.invalid
+            ${{ runner.temp }}/memloop/**/harness-spawns.jsonl.invalid
           if-no-files-found: warn
           retention-days: 14

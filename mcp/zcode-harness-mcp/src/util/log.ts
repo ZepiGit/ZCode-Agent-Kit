@@ -3,6 +3,7 @@
  * the MCP transport in stdio mode.
  */
 import { redactDeep } from "../security/redact.js";
+import { formatEventLine, type EventLevel } from "./event-line.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -19,6 +20,29 @@ export interface Logger {
   info(msg: string, data?: unknown): void;
   warn(msg: string, data?: unknown): void;
   error(msg: string, data?: unknown): void;
+}
+
+/**
+ * Logger for NEW log events (ticket 14): one event line per event
+ * (`ISO-time LEVEL component message key=value…`, util/event-line.ts) on
+ * stderr, under the same level setting as the JSON lines below.
+ */
+export function createEventLogger(component: string): Logger {
+  const emit = (level: LogLevel, msg: string, data?: unknown): void => {
+    if (LEVELS[level] < LEVELS[currentLevel]) return;
+    try {
+      const fields = data !== null && typeof data === "object" ? (data as Record<string, unknown>) : {};
+      process.stderr.write(formatEventLine({ level: level.toUpperCase() as EventLevel, component, message: msg, fields }) + "\n");
+    } catch {
+      /* logging never throws into the caller */
+    }
+  };
+  return {
+    debug: (m, d) => emit("debug", m, d),
+    info: (m, d) => emit("info", m, d),
+    warn: (m, d) => emit("warn", m, d),
+    error: (m, d) => emit("error", m, d),
+  };
 }
 
 export function createLogger(scope: string): Logger {
