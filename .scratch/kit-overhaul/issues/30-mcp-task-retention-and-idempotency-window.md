@@ -265,3 +265,88 @@ Spec stories: 66, 67, 68, 135
     - This is a local value only. It is not part of Round 29's 10-run verdict, which the orchestrator judges from CI (linux ≤ 55 from the printed value).
   - Not pushed. Staging (10 full-CI runs per leg) is the orchestrator's job.
 - 2026-11-08 (orchestrator, Round 29 Q1 verdict): the 10 pre-registered runs per leg on staging/30r (tree b46596a, 42524937233..42525602188) FAIL the windows bound: commit 26.57, 31.22, 32.77, 26.01, 35.5, 20.75, 21.71, 27.82, 25.38, 25.56 (mean 27.33, 3 above 30, one above 35) against the without-30 mean 20.42 (n 19); linux 40.59-44.96 (unchanged from history); every other S5 check GREEN. 30 comes back: the next round diagnoses why 30's code raises windows commit growth of the MCP bridge by ~7 %/1k while linux RSS is unchanged (a C1 regression on the primary platform), and fixes it without changing any bound.
+
+- 2026-11-09 (implementer, round 4, Round 29 Q1 verdict). Branch `ticket/30-mcp-task-retention`. The integration tip 788f2fb is merged at f3c22d1 (only this file conflicted; both sides kept). Fix at d8b34db; tests at 0ea6770 and 4d3552a.
+
+  **Root cause: a full scan of every retained task on every request.**
+  - Before this round, `enforceRetention()` ran on every lookup (get, list, wait, events, result, input, cancel) and on every terminal transition. Its no-op check `retentionExceeded` walked every retained task: a generator over the `tasks` Map, `EVICTABLE_STATES.includes` and a `Date.parse` per record.
+  - S5 makes about 5 such calls per task: `startTask`'s `list()`, `wait`, `result` → `buildResult`, and `onTerminal` plus its own `buildResult`. With n retained tasks, each task costs O(n) work and garbage, so the run costs O(n²). S5/short has 400 tasks and nothing is evicted, so n climbs to 400.
+  - **Linux probe** (`/home/AgentKit/overhaul-tools/t30r4-scripts/`):
+    - Setup: `s5probe.mjs` makes the same calls as `s5-mcp.mjs`, 400 tasks, `--max-semi-space-size=1`. The `gcprobe.mjs` preload counts GCs by kind and samples the heap and CPU. Arms: bridge package copies that differ only in the two dist files, 3 runs per arm side by side (`/home/AgentKit/overhaul-tools/t30r4-runs/`).
+    - Tip (f56c46d dist) vs 30's head (cbce56f dist):
+      - minor GCs at task 400: 322.7 vs 443.0 (+37 %);
+      - extra minor GCs per 100 tasks: +8, +23, +39, +50, so they grow with the number of retained tasks;
+      - CPU: 4.73 vs 5.52 s (+17 %);
+      - major GCs: 8 vs 8;
+      - RSS slope: 37.5 vs 37.3 MB/1k (unchanged, as on CI linux);
+      - heapTotal slope: 25.1 vs 27.0 MB/1k. Tip runs alone spread 24.5 to 29.4, so this is not conclusive.
+    - Microbenchmark of the scan (`scanbench.mjs`): about 100 B per record while it is unoptimised, 2.5 to 6 B once optimised, and 0.1 ms per call at 400 tasks.
+  - **Windows artefacts** (`/home/AgentKit/overhaul-tools/ci-art/t30r4-art/`, scripts `series.py` and `tail.py`):
+    - Compared: the 10 staging/30r runs against 10 runs from Round 25's set (no 30).
+    - Same runner image (20261103.298.1) and Node (v26.13.0). The bridge sources and the S5 harness are identical except for 30's two dist files.
+    - Mean bridge commit medians per 50-task bucket:
+      - tasks 0 to 350: the two arms agree within 0.3 MB;
+      - tasks 350 to 400: 78.26 vs 76.42 MB (+1.84).
+    - In 10-task buckets, the gap grows from about 0 at task 300 to +1.4 to +2.5 MB over tasks 350 to 390.
+    - Without 30, commit falls by 1.5 to 3 MB somewhere in tasks 310 to 360; with 30, it does not.
+    - The extra growth therefore builds up at the end of the window, where the scans are longest.
+  - **Why windows commit and not linux RSS: an inference, not measured on windows.** The scan adds young-generation garbage and scavenges with a 1 MB semi-space, which churns heap pages. Windows commit counts committed pages; linux RSS counts only touched pages, and its S5 value is a noisier ~40 %/1k warm-up.
+  - **Ruled out:**
+    - fs work: no file is deleted or scanned below 500 tasks;
+    - timers and watchers: none added;
+    - retained per-task structures: the index is one boolean per task;
+    - runner image or Node drift: the same image and Node in both arms;
+    - the tool description: built once.
+
+  **Fix (d8b34db, `src/tasks/manager.ts`, `dist/` rebuilt, B5): an O(1) retention index.**
+  - `evictableCount` is the exact number of retained tasks in an evictable state. `oldestEvictableMs` is a lower bound of their finish times. Each task gets a `retentionCounted` flag.
+  - Every record change goes through `persist()`, which updates the index for that task. This covers the terminal transitions, the follow-up rollback to a previous state, and `stopAll`. `restore()` and every scan rebuild the index.
+  - The per-request check is `evictableCount ≤ 500 && oldestEvictableMs ≥ now − 7 d`. Only when it fails does the existing victim scan run, followed by a recount.
+  - A task that leaves an evictable state can leave the bound too low. That costs one scan, never a missed eviction.
+  - `retentionExceeded` is removed.
+  - The retention rules are unchanged: 500 terminal tasks or 7 days, evictable states, file pruning, restore, the idempotency window and the sentence.
+  - No budget, bound, band, window, task count, S5 scenario or `expected-red.json` entry changed (C1, §9).
+
+  **Tests (seam 7, `retention.test.mjs`, now 7):**
+  - New: "a lookup does not visit the retained tasks". The new `test/fixture/scan-count.mjs` preload counts Map elements visited and `Date.parse` calls in the bridge. Per-lookup work with 400 retained tasks, and at the 500 bound after a run-time eviction, must equal the work with 10.
+    - RED on 0ea6770, i.e. 30's head code: "Map elements visited per lookup: 10 with 10 tasks, 400 with 400" (`reports/t30-r4-red.log`).
+    - GREEN on the tip's dist (`reports/t30-r4-tipgreen.log`), and GREEN after the fix (`reports/t30-r4-green{2,3}.log`).
+  - New, adversarial for the index: "a task finished at run time ages out with nothing restored, and a follow-up restarts its age". At +6 d the reopened task gets a follow-up; at +7 d +1 min the other task is gone (files and key too) while the reopened one stays; at +13 d it is gone too.
+    - It also holds on the old full scan, so its proof is mutation (M13, M14).
+  - **Mutations** on committed 4d3552a, in the detached scratch worktree `/home/AgentKit/overhaul-tools/t30r4-mut` (script `t30r4-scripts/mutate.py`, `reports/t30-r4-mutations.log`). All 10 are killed, and every restore with `git checkout 4d3552a -- src/tasks/manager.ts dist` is clean.
+    - M1: count clause removed from the per-request check;
+    - M1b: count bound removed in the victims;
+    - M2: age bound removed in the victims;
+    - M2b: age clause removed from the per-request check;
+    - M8: lookups skip the retention;
+    - M13: `persist` does not update the index;
+    - M14: a record change never lowers the age bound;
+    - M15: restore does not build the index;
+    - M16: no recount after a scan;
+    - M17: back to a full scan per request.
+
+  **Linux after the fix** (3 fix runs beside 3 fresh tip runs, the same probe):
+
+  | arm | minor GCs at task 400 | major GCs | CPU s | RSS slope MB/1k |
+  |---|---|---|---|---|
+  | tip | 319.7 | 8 | 4.97 | 38.1 |
+  | fix | 321.0 | 8 | 4.97 | 38.6 |
+
+  **Local `job.mjs --os linux --only S5/short`** (`--cap none` inside run-capped's 6G systemd scope; `reports/t30-r4-s5-short.log`, `/home/AgentKit/overhaul-tools/t30r4-memloop/`):
+  - growth:mcp-bridge 38.17 %/1k, trend true (≤ 55). Slope 32.56 MB/1k, mean 85.3 MB, window medians 79.6 / 82.4 / 85.9 / 87.8 / 87.8 / 88.5, net rise 11.2 %.
+  - procPeak 90.3 MB.
+  - empty → 400 → reboot: 73 → 87 → 74 MB (reboot cost 1).
+  - 0 failures, 0 orphans.
+  - The ratchet holds: owned by ticket 74.
+
+  **Suites on 4d3552a** (`reports/t30-r4-*.log`):
+  - `npm run test`: 894 tests, 876 pass, 0 fail, 18 skipped;
+  - `test:proxy`: 1596 pass, 0 fail (107 files);
+  - `test:proxy-typecheck`: clean;
+  - `test:mcp`: 107 tests, 106 pass, 0 fail, 1 skipped (+2);
+  - `git status` is clean after the build.
+
+  **Windows: pending CI.** The orchestrator runs a fresh pre-registered set. The expectation is that the windows commit series returns to the without-30 shape, but that is not proven here.
+
+  **Left open:**
+  - At the 500 bound, each new terminal task still costs one scan and sort, O(n log n), to pick its victim. Lookups stay O(1) (M16). This does not affect S5/short, and S5/long was GREEN with it.
