@@ -10,6 +10,11 @@
 //            400 MB at 16, 600 MB at 32, else the 250 MB peak)
 //   bigbody  only concurrent large/image payloads (peak per in-flight bytes)
 //   stalled  only stop-reading-then-disconnect streaming clients
+//   drained  the stalled run's requests and pace, but every client reads its
+//            ~4 MB answer to the end (not in the job: the stalled attribution
+//            measurement's reference arm, job.mjs --measure-stalled, ticket 61)
+// In measurement mode (ZCODE_MEMLOOP_MEASURE_PROBES=1) the stalled and drained
+// runs idle 5 s before the load, so the proxy's idle floor has samples.
 import net from "node:net";
 import { startProxySession } from "../lib/proxy-session.mjs";
 import { MEMORY, PROCESSES, PROXY_COMMIT_BACKSTOP, growthBudget } from "../lib/budgets.mjs";
@@ -55,7 +60,8 @@ export async function run(ctx) {
   // requests; the long run plateaus from there on), so a 3,000-request run is
   // all warm-up and its slope cannot tell warm-up from a leak. Stalled: no
   // warm-up shape, but a ±15 % GC sawtooth, so the slope needs the length.
-  const total = burst ? burst * 3 : ctx.variant === "bigbody" ? (ctx.long ? 1200 : 240) : ctx.variant === "stalled" ? (ctx.long ? 20_000 : 6_000) : (ctx.long ? 30_000 : 6_000);
+  const streamed = ctx.variant === "stalled" || ctx.variant === "drained";
+  const total = burst ? burst * 3 : ctx.variant === "bigbody" ? (ctx.long ? 1200 : 240) : streamed ? (ctx.long ? 20_000 : 6_000) : (ctx.long ? 30_000 : 6_000);
   const concurrency = burst || (ctx.variant === "bigbody" ? 16 : 8);
   const big = imageB64(heavy ? 8 * 1024 : 1024); // 8 MB / 1 MB images
   const largeText = "lorem ipsum dolor sit amet ".repeat(heavy ? 400_000 : 20_000); // ~10.8 MB / ~540 KB
@@ -76,6 +82,22 @@ export async function run(ctx) {
         setTimeout(() => { sock.destroy(); resolveSock(); }, 400);
       });
       sock.on("error", () => resolveSock());
+    });
+  }
+
+  async function drainedReader(i) {
+    // The stalled reader's request on the same raw socket, read to the end of
+    // its chunked answer: the cost of moving the same bytes with nobody stalling.
+    const body = JSON.stringify({ model: "glm-5.3", max_tokens: 64, stream: true, messages: [{ role: "user", content: `[[mock:big:4096]] drained ${i}` }] });
+    await new Promise((resolveSock, rejectSock) => {
+      let tail = "";
+      const sock = net.connect(kit.port, "127.0.0.1", () => {
+        sock.write(`POST /v1/messages HTTP/1.1\r\nhost: 127.0.0.1:${kit.port}\r\nauthorization: Bearer ${kit.key}\r\ncontent-type: application/json\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+      });
+      const timer = setTimeout(() => { sock.destroy(); rejectSock(new Error("drained reader: no end of answer within 30 s")); }, 30_000);
+      sock.on("data", (b) => { tail = (tail + b.toString("latin1")).slice(-16); if (tail.endsWith("\r\n0\r\n\r\n")) { clearTimeout(timer); sock.destroy(); resolveSock(); } });
+      sock.on("end", () => { clearTimeout(timer); resolveSock(); });
+      sock.on("error", (err) => { clearTimeout(timer); rejectSock(err); });
     });
   }
 
@@ -110,6 +132,7 @@ export async function run(ctx) {
         return "";
       }
       case "stalled-reader": return stalledReader(i);
+      case "drained-reader": return drainedReader(i);
       case "upstream-500": return (await post("/v1/messages", { model, max_tokens: 64, messages: [{ role: "user", content: tag("err:500") }] })).text();
       case "upstream-flaky": return (await post("/v1/chat/completions", { model, stream: true, messages: [{ role: "user", content: `[[mock:flaky:529]] unique ${i} ${rand()}` }] })).text();
       case "upstream-429": return (await post("/v1/messages", { model, max_tokens: 64, messages: [{ role: "user", content: tag("err:429") }] })).text();
@@ -119,8 +142,13 @@ export async function run(ctx) {
     }
   }
 
-  const mix = burst ? [["large-text", 1]] : ctx.variant === "bigbody" ? [["large-text", 1], ["image", 1]] : ctx.variant === "stalled" ? [["stalled-reader", 1]] : MIX;
+  const mix = burst ? [["large-text", 1]] : ctx.variant === "bigbody" ? [["large-text", 1], ["image", 1]] : ctx.variant === "stalled" ? [["stalled-reader", 1]] : ctx.variant === "drained" ? [["drained-reader", 1]] : MIX;
   const plan = Array.from({ length: total }, (_, i) => pick(rand, mix));
+  if (streamed) ctx.note("readers", concurrency);
+  if (streamed && process.env.ZCODE_MEMLOOP_MEASURE_PROBES === "1") {
+    ctx.log("measurement mode: 5 s idle before the load (the proxy's idle floor)");
+    await new Promise((r) => setTimeout(r, 5_000));
+  }
   // Paced, so the loop sees enough samples per 1,000 requests to tell a trend
   // from a GC sawtooth (unpaced, 2,400 requests finish in ~8 s).
   const rps = burst ? Infinity : ctx.variant === "bigbody" ? 4 : 25;
@@ -148,7 +176,7 @@ export async function run(ctx) {
   const health = await kit.health();
   ctx.note("healthAfterIdle", health?.details ?? null);
   await session.stop();
-  const window = { fromT: loadStart, untilT: loadEnd, warmupFraction: ctx.long ? 0.2 : ctx.variant === "stalled" ? 0.25 : 0.5 };
+  const window = { fromT: loadStart, untilT: loadEnd, warmupFraction: ctx.long ? 0.2 : streamed ? 0.25 : 0.5 };
   const mixed = !ctx.variant;
   return {
     budgets: {

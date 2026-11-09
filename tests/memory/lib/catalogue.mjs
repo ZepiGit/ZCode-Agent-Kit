@@ -5,7 +5,8 @@
 // for the run without a variant. Keys are what expected-red.json lists.
 
 export const CATALOGUE = {
-  S1: { module: "./scenarios/s1-proxy-steady.mjs", variants: ["burst1", "burst4", "burst16", "burst32", "bigbody", "stalled"] },
+  // drained: the stalled attribution's reference arm (job.mjs --measure-stalled), never in a job.
+  S1: { module: "./scenarios/s1-proxy-steady.mjs", variants: ["burst1", "burst4", "burst16", "burst32", "bigbody", "stalled", "drained"] },
   S2: { module: "./scenarios/s2-captcha.mjs", variants: ["gc"] },
   S3: { module: "./scenarios/s3-concurrency.mjs", variants: ["hung", "omp"] },
   S4: { module: "./scenarios/s4-lifecycle.mjs", variants: [] },

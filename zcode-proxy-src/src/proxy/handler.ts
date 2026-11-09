@@ -47,6 +47,7 @@ import { anthropicSseToOpenaiSse, openaiSseToAnthropicSse } from "../translator/
 import type { OpenAIChatRequest, OpenAIChatResponse, AnthropicMessagesRequest, AnthropicMessagesResponse } from "../translator/types.js";
 import { dumpPhase, dumpHeaders, dumpBody, dumpEnabled, SENSITIVE_HEADERS } from "./dump.js";
 import { ensureAnthropicSseTerminal } from "./sse-terminal.js";
+import { observeInClientPath } from "./response-body.js";
 import { gateStreamPrelude, isGatedStream, type PreludeVerdict } from "./stream-prelude.js";
 import { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 export { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
@@ -478,12 +479,12 @@ export async function proxyRequest(
   }
   const isSSE = upstreamResp.headers.get("content-type")?.includes("text/event-stream") ?? false;
 
+  // Streamed answers are observed in the client's path (ticket 61): the
+  // upstream is read no faster than the client drains it.
   if (translateOpenAIToAnthropic) {
     if (isSSE && upstreamResp.body) {
       const translated = anthropicSseToOpenaiSse(upstreamResp.body, meta.model);
-      const [clientBody, statsBody] = translated.tee();
-      observeStream(reqId, format, meta, upstreamResp.status, started, statsBody, null);
-      return translatedSseResponse(clientBody);
+      return translatedSseResponse(observeStream(reqId, format, meta, upstreamResp.status, started, translated, null));
     }
     return await translatedBatchResponse(clientReq, upstreamResp, meta.model, reqId, format, meta, started, headersAt);
   }
@@ -491,16 +492,13 @@ export async function proxyRequest(
   if (translateAnthropicToOpenAI) {
     if (isSSE && upstreamResp.body) {
       const translated = openaiSseToAnthropicSse(upstreamResp.body, meta.model);
-      const [clientBody, statsBody] = translated.tee();
-      observeStream(reqId, format, meta, upstreamResp.status, started, statsBody, null);
-      return translatedSseResponse(clientBody);
+      return translatedSseResponse(observeStream(reqId, format, meta, upstreamResp.status, started, translated, null));
     }
     return await translatedOpenAIToAnthropicBatchResponse(clientReq, upstreamResp, reqId, format, meta, started, headersAt);
   }
 
   if (isSSE && upstreamResp.body) {
-    const [clientBody, statsBody] = upstreamResp.body.tee();
-    observeStream(reqId, format, meta, upstreamResp.status, started, statsBody, upstreamResp.headers.get("content-encoding"));
+    const clientBody = observeStream(reqId, format, meta, upstreamResp.status, started, upstreamResp.body, upstreamResp.headers.get("content-encoding"));
     // Native Anthropic streams get a terminal `event: error` when the upstream
     // ends without message_stop or the read fails (only where the bytes are
     // readable: an uncompressed stream, or one this proxy decompresses).
@@ -1363,6 +1361,32 @@ function previewBody(body: string): string {
 
 const COMPACT_LOG = process.env.ZCODE_LOG_FORMAT === "compact";
 
+/*
+ * The request row (table, or one line with ZCODE_LOG_FORMAT=compact), printed
+ * once per request of the routes this handler serves: /v1/messages and
+ * /v1/chat/completions. /v1/responses and the /async/v1/* routes print no row.
+ *
+ * - TTFB: from the request reaching the proxy to the first chunk of a streamed
+ *   answer from the upstream (to the upstream's headers for any other answer).
+ * - Tok: for a streamed answer, the upstream's usage total (completion_tokens
+ *   or output_tokens) if a usage event was among the events read, otherwise
+ *   the counted text deltas; for a translated batch answer, the body's usage
+ *   total; "-" for none and for any other answer.
+ * - tok/s: Tok / Total for a streamed answer; "-" otherwise.
+ * - Total: for a streamed answer, from the request reaching the proxy to the
+ *   end of the upstream stream at the proxy (its end, a read failure or the
+ *   client leaving); "-" for any other answer.
+ *
+ * Streamed answers on these two routes are read from the upstream at the
+ * client's pace instead of being buffered ahead of a slow client (ticket 61,
+ * response-body.ts). So for a client that reads slower than the upstream
+ * sends, Total and tok/s include the time the client takes to read the answer;
+ * if such a client disconnects early, Tok reflects only what was read before
+ * it left (the usage total if it arrived by then, otherwise the counted text
+ * deltas). For a client that keeps up the values are what they were before
+ * that change. TTFB, the column names and the compact format are unchanged
+ * (Owner Proxy round 31 Q2; the release-notes line is in ticket 54).
+ */
 function printHeader(): void {
   if (headerPrinted) return;
   headerPrinted = true;
@@ -1424,6 +1448,11 @@ function fmtMs(ms: number): string {
   return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
+/**
+ * The stream the client reads, observed in its path (response-body.ts): the
+ * request row (and the dump summary) is printed once the stream ends, fails
+ * or is cancelled by the client.
+ */
 function observeStream(
   reqId: string,
   format: Format,
@@ -1432,75 +1461,29 @@ function observeStream(
   requestSentAt: number,
   body: ReadableStream<Uint8Array>,
   contentEncoding: string | null,
-): void {
+): ReadableStream<Uint8Array> {
   const compressed = contentEncoding !== null;
   const dumpOn = dumpEnabled();
-  let tokens = 0;
-  let sseBuffer = "";
-  let firstChunkAt = 0;
-  let totalBytes = 0;
-  let firstBytesSample = "";
-
-  function parseSse(text: string): void {
-    for (const line of text.split("\n")) {
-      if (!line.startsWith("data:") || line.includes("[DONE]")) continue;
-      try {
-        const j = JSON.parse(line.slice(5).trim());
-        if (j.usage?.completion_tokens) { tokens = j.usage.completion_tokens; continue; }
-        if (j.usage?.output_tokens) { tokens = j.usage.output_tokens; continue; }
-        // OpenAI content delta: choices[0].delta.content
-        const oai = j.choices?.[0]?.delta?.content;
-        if (typeof oai === "string" && oai.length > 0) { tokens++; continue; }
-        // Anthropic content delta: type=content_block_delta, delta.type=text_delta
-        if (j.type === "content_block_delta" && j.delta?.type === "text_delta") {
-          const t = j.delta?.text;
-          if (typeof t === "string" && t.length > 0) tokens++;
-        }
-      } catch {}
-    }
-  }
-
-  (async () => {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (firstChunkAt === 0) firstChunkAt = Date.now();
-        if (dumpOn && value) {
-          totalBytes += value.byteLength;
-          if (firstBytesSample.length < 4096) {
-            firstBytesSample += decoder.decode(value.slice(0, 4096 - firstBytesSample.length), { stream: true });
-          }
-        }
-        if (!compressed) {
-          sseBuffer += decoder.decode(value, { stream: true });
-          const idx = sseBuffer.lastIndexOf("\n");
-          if (idx >= 0) {
-            parseSse(sseBuffer.slice(0, idx));
-            sseBuffer = sseBuffer.slice(idx + 1);
-          }
-        }
+  return observeInClientPath(body, {
+    compressed,
+    sample: dumpOn,
+    onEnd: ({ firstChunkAt, endAt, tokens, totalBytes, firstBytesSample }) => {
+      const ttfbMs = (firstChunkAt > 0 ? firstChunkAt : endAt) - requestSentAt;
+      const totalMs = endAt - requestSentAt;
+      const avgTps = tokens > 0 && totalMs > 0 ? tokens / (totalMs / 1000) : 0;
+      printRow(reqId, format, meta, status, requestSentAt, requestSentAt + ttfbMs, tokens, avgTps, endAt);
+      if (dumpOn) {
+        dumpPhase(reqId, "upstream_stream_summary", {
+          status,
+          contentEncoding,
+          compressed,
+          totalBytes,
+          tokensObserved: tokens,
+          ttfbMs,
+          totalMs,
+          firstBytesSample: firstBytesSample.length > 0 ? firstBytesSample.slice(0, 4096) : "(empty stream)",
+        });
       }
-      if (!compressed && sseBuffer) parseSse(sseBuffer);
-    } catch {}
-    const endAt = Date.now();
-    const ttfbMs = (firstChunkAt > 0 ? firstChunkAt : endAt) - requestSentAt;
-    const totalMs = endAt - requestSentAt;
-    const avgTps = tokens > 0 && totalMs > 0 ? tokens / (totalMs / 1000) : 0;
-    printRow(reqId, format, meta, status, requestSentAt, requestSentAt + ttfbMs, tokens, avgTps, endAt);
-    if (dumpOn) {
-      dumpPhase(reqId, "upstream_stream_summary", {
-        status,
-        contentEncoding,
-        compressed,
-        totalBytes,
-        tokensObserved: tokens,
-        ttfbMs,
-        totalMs,
-        firstBytesSample: firstBytesSample.length > 0 ? firstBytesSample.slice(0, 4096) : "(empty stream)",
-      });
-    }
-  })().catch(() => {});
+    },
+  });
 }
