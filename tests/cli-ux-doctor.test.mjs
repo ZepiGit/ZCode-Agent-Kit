@@ -26,6 +26,9 @@ const ROOT = join(import.meta.dirname, "..");
 const load = (name) => import(pathToFileURL(join(ROOT, "cli", "commands", `${name}.mjs`)).href);
 const args = (positional, flags = {}) => ({ positional, flags, passthrough: null });
 
+/** This process's own PATH and APPDATA, restored after every test that overrides them. */
+const REAL_ENV = Object.freeze({ PATH: process.env.PATH, APPDATA: process.env.APPDATA });
+
 /** A temp kit (no stored decisions, an empty home) whose manager doctor returns `record`. */
 async function doctorKit(t, record) {
   const { createCtx } = await import(pathToFileURL(join(ROOT, "cli", "context.mjs")).href);
@@ -38,12 +41,11 @@ async function doctorKit(t, record) {
   // Harness detection reads PATH and APPDATA of this process: an empty PATH
   // and the temp home's AppData make every harness "not detected" on any
   // runner (a claude or codex on the runner's PATH would change the rows).
-  const saved = { PATH: process.env.PATH, APPDATA: process.env.APPDATA };
   mkdirSync(join(root, "empty-path"));
   process.env.PATH = join(root, "empty-path");
   process.env.APPDATA = join(home, "AppData", "Roaming");
   t.after(() => {
-    for (const [name, value] of Object.entries(saved)) {
+    for (const [name, value] of Object.entries(REAL_ENV)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
@@ -264,4 +266,9 @@ test("the spawned zcode-kit doctor reports (manager-doctor fixtures) keep the of
     assert.equal(lines.verdicts.length, 1, file);
     assert.equal(new Set(lines.rows.map((r) => r.match(CHECK_ROW)[2])).size, lines.rows.length, `${file}: every check once`);
   }
+});
+
+test("the detection override is undone: PATH and APPDATA are this process's own again", () => {
+  assert.equal(process.env.PATH, REAL_ENV.PATH);
+  assert.equal(process.env.APPDATA, REAL_ENV.APPDATA);
 });
