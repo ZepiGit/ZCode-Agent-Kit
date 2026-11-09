@@ -362,3 +362,12 @@ Spec stories: 66, 67, 68, 135
     - `test:proxy-typecheck`: clean;
     - `test:mcp`: 107 tests, 106 pass, 0 fail, 1 skipped (`reports/t30-r4c-test-mcp.log`);
     - `git status` is clean after the build.
+  - **Third and fourth merges.**
+    - The tip merged ticket 73 (de1d550, merged here at c715e64). On that tree, `npm run test` failed in 2 of 3 runs on 73's new live freeze test in `tests/memory/loop.test.mjs`: "a live child is frozen, thawed and killed by its identity", which read the process state as `R` where it expected `T`. Nothing in 30 touches it.
+    - The tip then reverted 73 (2347fa2, 6d4331d), merged here at ac0dcef. Without 73, the branch again differs from the tip only in 30's 15 files.
+  - **Final suites on ac0dcef** (`reports/t30-r4f-*.log`):
+    - `npm run test`: 901 tests, 883 pass, 0 fail, 18 skipped;
+    - `test:proxy`: 1596 pass, 0 fail (107 files);
+    - `test:proxy-typecheck`: clean;
+    - `test:mcp`: 107 tests, 106 pass, 0 fail, 1 skipped;
+    - `git status` is clean after the build.
