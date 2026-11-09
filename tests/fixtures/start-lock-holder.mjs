@@ -1,4 +1,4 @@
-// A start-lock holder for tests/start-lock-signals.test.mjs (seam 2, real
+// A start-lock holder for tests/start-lock.test.mjs (seam 2, real
 // processes): it acquires the installation's start lock through the lifecycle
 // module and keeps it until the test signals it or tells it what to do.
 //   argv[2]  JSON { kitRoot, root, ownListener }

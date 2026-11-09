@@ -25,8 +25,8 @@ import { tmpdir } from "node:os";
 import { basename, delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { processCommandLine, resolveBun } from "../lib/process.mjs";
-import { freezeProcess } from "./memory/lib/freeze.mjs";
-import { identityOf } from "./memory/lib/process-identity.mjs";
+import { freezeProcess, killProcess } from "./memory/lib/freeze.mjs";
+import { identityOf, isSameProcess, startOf } from "./memory/lib/process-identity.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const KEY = "synthetic-start-lock-key";
@@ -53,9 +53,17 @@ async function stateFixture(t, port = null, { kit = false } = {}) {
   port ??= await freePort();
   const root = mkdtempSync(join(tmpdir(), "kit-start-lock-"));
   cleanups.set(root, []);
-  t.after(() => {
-    for (const fn of cleanups.get(root).splice(0).reverse()) { try { fn(); } catch {} }
-    rmSync(root, { recursive: true, force: true });
+  t.after(async () => {
+    // Every process the test started is stopped and proven gone first (pid +
+    // start time); only then is the directory removed. Windows refuses to
+    // delete a directory a live process runs in or holds a file of (CI run
+    // 42585313129: EPERM on rm, the killed start's proxy still running with
+    // its cwd in the fixture) and completes a delete asynchronously once the
+    // last handle closes: hence the bounded retry, on the rm alone.
+    const failures = [];
+    for (const fn of cleanups.get(root).splice(0).reverse()) { try { await fn(); } catch (err) { failures.push(err); } }
+    if (failures.length) throw new AggregateError(failures, `teardown of ${root}: a process the test started may still run, the directory is kept`);
+    rmSync(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 });
   });
   mkdirSync(join(root, "proxy"), { recursive: true }); mkdirSync(join(root, "logs")); mkdirSync(join(root, "home"));
   writeFileSync(join(root, "proxy", "config.yaml"), `server:\n  host: 127.0.0.1\n  port: ${port}\nauth:\n  proxyApiKey: "${KEY}"\n`);
@@ -421,8 +429,32 @@ function liveProxies(root) {
     return !!info && info.commandLine.toLowerCase().includes(basename(root).toLowerCase());
   });
 }
-function killFixtureProxies(root) {
-  for (const pid of liveProxies(root)) { try { process.kill(pid, "SIGKILL"); } catch {} }
+/** Whether the process `id` names still runs (a Linux zombie holds no file and counts as gone). */
+function stillRuns(id) {
+  if (!isSameProcess(id)) return false;
+  if (process.platform !== "linux") return true;
+  try { const stat = readFileSync(`/proc/${id.pid}/stat`, "utf8"); return stat[stat.lastIndexOf(")") + 2] !== "Z"; } catch { return false; }
+}
+/**
+ * Teardown: kill every proxy the fixture announced (spawned/<pid>) and wait
+ * until each is gone. A pid is signalled only as the identity (pid + start
+ * time) read before its command line proved it this fixture's proxy;
+ * killProcess re-checks that start time (under a held handle on Windows), so a
+ * stranger at a reused pid is never touched (B4). A test whose own proxy may
+ * not have announced itself yet waits for it first.
+ */
+async function stopFixtureProxies(root, { goneWithinMs = 30_000 } = {}) {
+  const dir = join(root, "spawned");
+  if (!existsSync(dir)) return;
+  const killed = [];
+  for (const pid of readdirSync(dir).map(Number)) {
+    const start = startOf(pid); // null: gone; a throw: cannot tell, and the teardown fails loudly
+    if (start === null) continue;
+    const info = processCommandLine(pid);
+    if (!info?.commandLine.toLowerCase().includes(basename(root).toLowerCase())) continue;
+    if (killProcess({ pid, start })) killed.push({ pid, start });
+  }
+  await pollFor(`the fixture's proxies to be gone (${killed.map((id) => `${id.pid}@${id.start}`).join(", ")})`, () => !killed.some(stillRuns), goneWithinMs);
 }
 const readJson = (file) => { try { return JSON.parse(readFileSync(file, "utf8")); } catch { return null; } };
 const manager = (root, args, env) => spawnSync(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), ...args], { env, encoding: "utf8", timeout: 120_000 });
@@ -431,7 +463,7 @@ for (const [i, killAt] of ["spawn:intent-recorded", "spawn:spawned", "spawn:pid-
   test(`a start killed at ${killAt} ends with exactly one proxy, adopted by the next start and stopped by stop`, { timeout: 180_000 }, async (t) => {
     const port = await freePort();
     const root = await stateFixture(t, port, { kit: true });
-    defer(root, () => killFixtureProxies(root));
+    defer(root, () => stopFixtureProxies(root));
     const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
     const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt })], { env, encoding: "utf8", timeout: 120_000 });
     assert.equal(killed.stdout, "", `the start was killed at ${killAt} (${killed.stdout}${killed.stderr})`);
@@ -466,7 +498,7 @@ for (const [i, killAt] of ["spawn:spawned", "spawn:pid-recorded", "spawn:start-r
   test(`a start killed at ${killAt} while its proxy is still coming up: the next start waits for that proxy instead of spawning a second`, { timeout: 180_000 }, async (t) => {
     const port = await freePort();
     const root = await stateFixture(t, port, { kit: true });
-    defer(root, () => killFixtureProxies(root));
+    defer(root, () => stopFixtureProxies(root));
     // Windows: the killed start's own PowerShell probe can take seconds before the kill.
     writeFileSync(join(root, "listen-delay-ms"), process.platform === "win32" ? "6000" : "4000");
     const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
@@ -525,7 +557,7 @@ async function pollFor(what, fn, ms) {
 test("a start killed while its proxy never ran (intent without a pid, proxy frozen before it listens): the next start resumes and adopts that proxy, never a second", { timeout: 180_000 }, async (t) => {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   writeFileSync(join(root, "listen-delay-ms"), process.platform === "win32" ? "8000" : "3000");
   const bun = bunOrFail();
   const env = childEnv(root, { ZCODE_KIT_BUN: bun });
@@ -594,7 +626,7 @@ test("only a dead spawner's single child that is the kit proxy and started after
 test("the spawner itself completes the record when its start-time probe answers only during the health wait", { timeout: 180_000 }, async (t) => {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   const bun = bunOrFail();
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
   const real = createLifecycle({ root, home: join(root, "home") }).processStartMs;
@@ -612,7 +644,7 @@ test("the spawner itself completes the record when its start-time probe answers 
 test("a start whose start-time probe times out (no kill) leaves a proxy the next start completes and stop stops", { timeout: 180_000 }, async (t) => {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   const bun = bunOrFail();
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
   const real = createLifecycle({ root, home: join(root, "home") }).processStartMs;
@@ -640,7 +672,7 @@ test("a start whose start-time probe times out (no kill) leaves a proxy the next
 test("stop completes a record left without a start time and stops its proxy (the probe answers at stop time)", { timeout: 180_000 }, async (t) => {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   const bun = bunOrFail();
   const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
   const real = createLifecycle({ root, home: join(root, "home") }).processStartMs;
@@ -664,7 +696,8 @@ async function identityListener(t, port, pid) {
 /** A harmless child the test owns (killed through its own handle at the end). */
 function harmless(t) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)"], { stdio: "ignore" });
-  t.after(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
+  const closed = new Promise((r) => child.once("close", r));
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await closed; });
   return child;
 }
 const untouched = (child) => child.exitCode === null && child.signalCode === null;
@@ -727,7 +760,7 @@ test("a spawn intent adopts only a proxy that started after it: an older listene
 test("a start waiting on a live holder takes the lock over once that holder dies mid-start, and ends with one proxy", { timeout: 180_000 }, async (t) => {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
   // The holder hangs before its spawn, then dies (a harness closed mid-start).
   const holder = spawn(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt: "spawn:intent-recorded", pauseMs: 3000 })], { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -894,10 +927,11 @@ const windowsOnly = { skip: process.platform !== "win32" && "a Windows console c
 
 function startHolder(root, extra = {}) {
   const child = spawn(process.execPath, [HOLDER, JSON.stringify({ kitRoot: ROOT, root, ...extra })], { env: childEnv(root), stdio: ["pipe", "pipe", "pipe"] });
-  defer(root, () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); });
   let out = "", err = "";
   child.stderr.on("data", (b) => { err += b; });
   const exited = new Promise((r) => child.on("close", (code, signal) => r({ code, signal, out, err })));
+  // Through the test's own child handle, then until it is gone (before the rm).
+  defer(root, async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); await exited; });
   const held = new Promise((resolveHeld, reject) => {
     child.stdout.on("data", (b) => {
       out += b;
@@ -982,7 +1016,7 @@ test("a holder that handles the signal itself keeps its start lock (it keeps run
 test("Ctrl-C (SIGINT) of a manager start during its health wait leaves no stale lock; the next start adopts that proxy, stop stops it, 0 orphans", { ...posixOnly, timeout: 180_000 }, async (t) => {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   writeFileSync(join(root, "listen-delay-ms"), "3000"); // the start sits in its health wait
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
   const start = spawn(process.execPath, [join(root, "proxy", "zcode-proxy-manager.mjs"), "start"], { env, stdio: "ignore" });
@@ -1030,18 +1064,24 @@ const adoptionLines = (root) => { try { return readFileSync(join(root, "logs", "
 test("this kit's start killed right after spawn() leaves its spawn intent, never a proxy without any record (the S3 window is closed by ticket 16)", { timeout: 120_000 }, async (t) => {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
   const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt: "spawn:spawned" })], { env, encoding: "utf8", timeout: 60_000 });
   assert.equal(killed.stdout, "", `killed at spawn:spawned (${killed.stderr})`);
   const record = readJson(join(root, "logs", "proxy.pid"));
   assert.deepEqual({ pid: record?.pid, by: record?.spawning?.by }, { pid: null, by: killed.pid }, `the spawn intent stays (${JSON.stringify(record)})`);
+  // The killed start's proxy runs on (the next start adopts it: the spawn:spawned
+  // case above). It is this test's to stop: wait until it announced its pid, so
+  // the teardown stops it by identity before the directory goes (CI run
+  // 42585313129, windows: it still ran, unannounced, with its cwd in the fixture).
+  const proxy = Number(await pollFor("the killed start's proxy to announce its pid", () => readdirSync(join(root, "spawned"))[0], 30_000));
+  assert.deepEqual(liveProxies(root), [proxy], "the one proxy the killed start spawned");
 });
 
 async function killedBeforeAnyRecord(t) {
   const port = await freePort();
   const root = await stateFixture(t, port, { kit: true });
-  defer(root, () => killFixtureProxies(root));
+  defer(root, () => stopFixtureProxies(root));
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
   const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt: "spawn:spawned", dropRecordAt: "spawn:intent-recorded" })], { env, encoding: "utf8", timeout: 60_000 });
   assert.equal(killed.stdout, "", `the holder was killed after spawn() (${killed.stdout}${killed.stderr})`);
