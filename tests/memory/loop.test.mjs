@@ -19,7 +19,7 @@ import { PREFLIGHT_WARNINGS } from "../../cli/heal.mjs";
 import { resolveBun } from "../../lib/process.mjs";
 import { ROUNDS, runEvidence } from "./lib/completeness.mjs";
 import { isolatedConfig, KIT_ROOT } from "./lib/isolated-kit.mjs";
-import { whileFrozen } from "./lib/freeze.mjs";
+import { freezeProcess, killProcess, thawProcess, whileFrozen } from "./lib/freeze.mjs";
 import { identityOf, isSameProcess, linuxStart, parseWindowsStart, startOf } from "./lib/process-identity.mjs";
 import * as s3Scenario from "./scenarios/s3-concurrency.mjs";
 const { makeHungRound } = s3Scenario;
@@ -244,13 +244,17 @@ test("a detached child whose parent exited is still found as a survivor", linuxO
   parent.stdout.on("data", (b) => { out += b; });
   await new Promise((r) => parent.on("close", r));
   const orphanPid = Number(out.trim());
+  // Its identity while it surely runs (it sleeps 20 s): the cleanup kills that
+  // process, never whatever holds its pid by then (ticket 73).
+  let orphan = null;
   try {
+    orphan = identityOf(orphanPid);
     await sleep(100);
     const found = survivors(marker);
     assert.deepEqual(found.map((s) => s.pid), [orphanPid]);
     assert.notEqual(found[0].ppid, parent.pid);
   } finally {
-    try { process.kill(orphanPid, "SIGKILL"); } catch {}
+    if (orphan) try { killProcess(orphan); } catch {}
   }
 });
 
@@ -346,7 +350,7 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-orphan-"));
   const id = `orphan-${process.pid}-${Date.now()}`;
   const marker = `ZCODE_MEMLOOP_RUN=${id}`;
-  const pids = [];
+  const orphans = []; // identities, recorded while each orphan surely runs (it sleeps 30 s)
   let sampler;
   // The parent starts a detached grandchild and exits; `token` puts the run id in the grandchild's command line.
   const orphanVia = async (token, parentLivesMs) => {
@@ -355,7 +359,7 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
     let out = "";
     parent.stdout.on("data", (b) => { out += b; });
     await new Promise((r) => parent.on("close", r));
-    pids.push(Number(out.trim()));
+    orphans.push(identityOf(Number(out.trim())));
     return { orphan: Number(out.trim()), parent: parent.pid };
   };
   try {
@@ -369,9 +373,11 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
     const after = survivors(marker).filter((s) => !/^conhost\.exe$/i.test(s.comm ?? ""));
     assert.deepEqual(after.map((s) => s.pid).sort((a, b) => a - b), [byToken.orphan, byTree.orphan].sort((a, b) => a - b), "a fresh poll after stop still finds both, and nothing else");
     assert.equal(after.find((s) => s.pid === byTree.orphan).ppid, byTree.parent, "Windows keeps the dead parent's pid");
+    // The cleanup kills each orphan by its identity (TerminateProcess under a held handle, ticket 73).
+    while (orphans.length) { assert.equal(killProcess(orphans[0]), true, `orphan ${orphans[0].pid} is still itself and is terminated`); orphans.shift(); }
   } finally {
     await sampler?.stop();
-    for (const pid of pids) { try { process.kill(pid, "SIGKILL"); } catch {} }
+    for (const o of orphans) { try { killProcess(o); } catch {} }
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -756,14 +762,88 @@ test("the S3/omp scenario runs exactly the rounds the evidence gate demands", as
 // process the loop left frozen is never reported as a kit orphan.
 test("whileFrozen thaws after the work, after a failing work, and a failed thaw fails the run", async () => {
   const calls = [];
-  const freeze = (pid) => calls.push(`freeze ${pid}`);
-  const thaw = (pid) => calls.push(`thaw ${pid}`);
-  // Fake pids: liveness is injected, never asked of the host (Windows and Linux answer differently for pid 7/8).
-  const alive = () => true;
-  assert.equal(await whileFrozen(7, async () => { calls.push("work"); return 42; }, { freeze, thaw, alive }), 42);
-  await assert.rejects(whileFrozen(8, async () => { throw new Error("round failed"); }, { freeze, thaw, alive }), /round failed/);
+  // Fake identities and primitives: nothing is asked of the host's process table.
+  const freeze = (id) => { calls.push(`freeze ${id.pid}`); return true; };
+  const thaw = (id) => { calls.push(`thaw ${id.pid}`); return true; };
+  assert.equal(await whileFrozen({ pid: 7, start: "70" }, async () => { calls.push("work"); return 42; }, { freeze, thaw }), 42);
+  await assert.rejects(whileFrozen({ pid: 8, start: "80" }, async () => { throw new Error("round failed"); }, { freeze, thaw }), /round failed/);
   assert.deepEqual(calls, ["freeze 7", "work", "thaw 7", "freeze 8", "thaw 8"]);
-  await assert.rejects(whileFrozen(9, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); }, alive: () => true }), /could not thaw pid 9 .*0xC000000B/);
+  await assert.rejects(whileFrozen({ pid: 9, start: "90" }, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); } }), /could not thaw pid 9 .*0xC000000B/);
+});
+
+// ── Freeze, thaw and kill by identity (ticket 73) ───────────────────────────
+// The S3 hung proxy is named by its pid AND start time, as the run's scan saw
+// it. Once it is gone its pid may name a stranger (Windows reuses pids quickly,
+// tickets 70, 72): the stranger is never frozen, thawed or killed, and it
+// neither fails the run (a refused resume) nor passes it.
+/** A fake process table: pid → start time; `replace` hands a pid to a stranger, as Windows may at once. */
+function fakeTable(entries) {
+  const table = new Map(Object.entries(entries).map(([pid, start]) => [Number(pid), start]));
+  const signals = [];
+  return {
+    signals,
+    opts: { platform: "linux", start: (pid) => table.get(pid) ?? null, kill: (pid, sig) => { if (!table.has(pid)) throw Object.assign(new Error("kill ESRCH"), { code: "ESRCH" }); signals.push(`${sig} ${pid}:${table.get(pid)}`); } },
+    exit: (pid) => table.delete(pid),
+    replace: (pid, start) => table.set(pid, start),
+  };
+}
+
+test("a process gone during the freeze is never thawed: neither when its pid is free nor when a stranger holds it", async () => {
+  for (const after of ["free", "stranger"]) {
+    const t = fakeTable({ 4242: "1000" });
+    const id = { pid: 4242, start: "1000" };
+    const r = await whileFrozen(id, async () => {
+      t.exit(4242); // the kit's hung-own recovery killed it
+      if (after === "stranger") t.replace(4242, "5000"); // and its pid already names another process
+      return "round";
+    }, { freeze: (x) => freezeProcess(x, t.opts), thaw: (x) => thawProcess(x, t.opts) });
+    assert.equal(r, "round", `${after}: the round's result, no harness failure`);
+    assert.deepEqual(t.signals, ["SIGSTOP 4242:1000"], `${after}: only our process was ever signalled`);
+  }
+});
+
+test("a stranger at the chosen pid is never frozen, and the round does not run on it", async () => {
+  const t = fakeTable({ 4242: "5000" }); // the chosen proxy (start 1000) is gone, a stranger has its pid
+  let worked = false;
+  await assert.rejects(
+    whileFrozen({ pid: 4242, start: "1000" }, async () => { worked = true; }, { freeze: (x) => freezeProcess(x, t.opts), thaw: (x) => thawProcess(x, t.opts) }),
+    /pid 4242 no longer names the process chosen to freeze/,
+  );
+  assert.equal(worked, false);
+  assert.deepEqual(t.signals, []);
+});
+
+test("the process still frozen after the work is thawed; a kill reaches only the process it names", () => {
+  const t = fakeTable({ 4242: "1000" });
+  const id = { pid: 4242, start: "1000" };
+  assert.equal(freezeProcess(id, t.opts), true);
+  assert.equal(thawProcess(id, t.opts), true);
+  assert.equal(killProcess(id, t.opts), true);
+  t.replace(4242, "5000");
+  assert.equal(killProcess(id, t.opts), false, "a stranger at the pid is not killed");
+  t.exit(4242);
+  assert.equal(killProcess(id, t.opts), false, "a gone pid is not killed");
+  assert.deepEqual(t.signals, ["SIGSTOP 4242:1000", "SIGCONT 4242:1000", "SIGKILL 4242:1000"]);
+  // An identity that cannot be told is no reason to signal: the error surfaces (a harness failure).
+  assert.throws(() => thawProcess(id, { ...t.opts, start: () => { throw new Error("start time of pid 4242 unknown"); } }), /unknown/);
+});
+
+// Live, on this OS (on windows-latest through the held-handle PowerShell of lib/win-process.mjs).
+test("a live child is frozen, thawed and killed by its identity; once it is gone nothing is done to its pid", async () => {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  try {
+    await new Promise((r) => child.once("spawn", r));
+    const id = identityOf(child.pid);
+    assert.equal(freezeProcess(id), true);
+    if (process.platform === "linux") assert.match(readFileSync(`/proc/${child.pid}/stat`, "utf8"), /\) T /, "stopped");
+    assert.equal(thawProcess(id), true);
+    if (process.platform === "linux") assert.doesNotMatch(readFileSync(`/proc/${child.pid}/stat`, "utf8"), /\) T /, "running again");
+    const exited = new Promise((r) => child.once("exit", r));
+    assert.equal(killProcess(id), true);
+    await exited; // reaped: from here on the pid is free for anyone
+    assert.equal(thawProcess(id), false, "no thaw for a gone process");
+    assert.equal(killProcess(id), false, "no kill for a gone process");
+  } finally { try { child.kill("SIGKILL"); } catch {} }
 });
 
 // ── CI run 42281731448 (ubuntu, staging/02): S3/hung ran 9 s. The killed start
@@ -773,15 +853,16 @@ test("whileFrozen thaws after the work, after a failing work, and a failed thaw 
 // The hung round freezes the run's own proxy that serves the isolated port;
 // it never freezes a process that is not this run's, and it never guesses.
 function fakeHungRound({ record = null, ours = [], listening = {}, startCode = 0, startErr = "", lock = null } = {}) {
-  const calls = [], notes = {}, roundOpts = {};
+  const calls = [], notes = {}, roundOpts = {}, frozen = [];
   const kit = { port: 19026, manager: async () => ({ code: startCode, out: "", err: startErr }), pidRecord: () => record };
   const hungRound = makeHungRound({
-    kit, proxies: () => ours.map((pid) => ({ pid, role: "proxy", key: `${pid}` })), portsOf: (pid) => listening[pid] ?? [],
+    // Scan rows carry the sample key <pid>:<start time>; here start = 1700<pid>.
+    kit, proxies: () => ours.map((pid) => ({ pid, role: "proxy", key: `${pid}:1700${pid}` })), portsOf: (pid) => listening[pid] ?? [],
     round: async (name, n, opts) => { calls.push(`round ${name}`); roundOpts[name] = { n, ...opts }; }, note: (k, v) => { notes[k] = v; },
-    freeze: (pid) => calls.push(`freeze ${pid}`), thaw: (pid) => calls.push(`thaw ${pid}`), alive: () => true, graceMs: 0,
+    freeze: (id) => { frozen.push(id); calls.push(`freeze ${id.pid}`); return true; }, thaw: (id) => { calls.push(`thaw ${id.pid}`); return true; }, graceMs: 0,
     lockState: () => lock,
   });
-  return { hungRound, calls, notes, roundOpts };
+  return { hungRound, calls, notes, roundOpts, frozen };
 }
 
 test("S3 hung round: a proxy the killed start left without a pid record is frozen and the round runs (CI run 42281731448)", async () => {
@@ -792,10 +873,11 @@ test("S3 hung round: a proxy the killed start left without a pid record is froze
 });
 
 test("S3 hung round: the recorded proxy is frozen as before", async () => {
-  const { hungRound, calls, notes } = fakeHungRound({ record: { pid: 41, startedMs: 1 }, ours: [41], listening: { 41: [19026] } });
+  const { hungRound, calls, notes, frozen } = fakeHungRound({ record: { pid: 41, startedMs: 1 }, ours: [41], listening: { 41: [19026] } });
   await hungRound("hung-10");
   assert.deepEqual(calls, ["freeze 41", "round hung-10", "thaw 41"]);
   assert.deepEqual(notes, { "hung-10.target": { pid: 41, via: "pid-record", recordedPid: 41 } });
+  assert.deepEqual(frozen, [{ pid: 41, start: "170041" }], "frozen by the identity the run's scan saw (ticket 73)");
 });
 
 test("S3 hung round: nothing of this run to freeze is a skipped round, never a guess", async () => {
@@ -959,10 +1041,19 @@ for (const [run, file] of Object.entries(CI_REFUSED)) {
 }
 
 test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery) needs no thaw", async () => {
-  const thawed = [];
-  const r = await whileFrozen(10, async () => "round", { freeze: () => {}, thaw: (pid) => { thawed.push(pid); throw new Error("kill ESRCH"); }, alive: () => false });
-  assert.equal(r, "round");
-  assert.deepEqual(thawed, []);
+  // A real process and the OS primitives (windows-latest: NtSuspendProcess / NtResumeProcess by identity).
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  try {
+    await new Promise((r) => child.once("spawn", r));
+    const id = identityOf(child.pid);
+    const r = await whileFrozen(id, async () => {
+      const exited = new Promise((ok) => child.once("exit", ok));
+      child.kill("SIGKILL"); // as the kit's recovery does; a frozen process dies of SIGKILL / TerminateProcess
+      await exited;
+      return "round";
+    });
+    assert.equal(r, "round", "the round's result, no harness failure");
+  } finally { try { child.kill("SIGKILL"); } catch {} }
 });
 
 // ── S1/burst1 at the job seam: the median rule and the measurement mode (ticket 60) ──
