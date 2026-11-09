@@ -520,3 +520,16 @@ The Node 24 leg passing and Node 26 failing is consistent with timing. I did not
 1. **An exhausted busy budget stays `unavailable`/io, as before; it is not turned into `contended`.** Turning it into `contended` would turn a permanent POSIX EACCES on the lock into a 45 s contention wait and exit code 4 instead of exit code 1 (C2). 2 s covers a delete-pending window, which lasts only while the deleter's handle is open, since a failed open creates no handle.
 2. **`busyMs` is an option of `createStartLock` (default 2000) for the seam test only.** It is not wired to config or env, so there is no new config key.
 3. **ADR-0003 amendment, condition 1:** one sentence states the busy rule.
+
+**Addendum (round 4): the tip moved during the runs.** The tip moved to 8d243c2, which reverts ticket 73 (2347fa2). It is merged as `056f799` with no conflicts. Outside `.scratch` that merge changes only `tests/memory/**`; `lib/`, `proxy/`, `cli/`, `zcode-proxy-src/`, `mcp/`, the start-lock tests and `package.json` are unchanged. The suites and the loop were rerun on 056f799, and these results replace the numbers above:
+- `npm run test` (`t16-r4-final2-test`): 953 tests, 935 pass, 0 fail, 18 skipped. There are 8 fewer tests than before because 73's tests were reverted. All 6 start-lock-busy tests pass.
+- `npm run test:proxy` + typecheck (`t16-r4-final2-proxy`): 1596 pass, 0 fail.
+- `npm run test:mcp` (`t16-r4-final2-mcp`): 100 tests, 99 pass, 0 fail, 1 skipped.
+- Linux S3 loop: `r4-final2-1..3`, logs `t16-r4-final2-mem1–3`, ports 33233/37787/34479.
+  - In 3 of 3 runs, S3/short and S3/hung have `failed-launches`, `stale-lock-after-round`, `exactly-one-proxy-after-round`, `start-over-stale-lock` and `orphans` at 0.
+  - The kill-holder rounds, as (killedByAdversary, failedLaunches; kill at):
+    - run 1: 1, 0 (157 ms) and 1, 0 (146 ms);
+    - run 2: 1, 0 (171 ms) and 1, 0 (217 ms);
+    - run 3: 1, 0 (190 ms) and 1, 0 (248 ms).
+  - The ratchet holds and there was no HARNESS FAILURE.
+  - REDs are 37's only: `peak:kit`, `procPeak:launcher`, plus `procPeak:proxy` 62.4 MB (r2-1 S3/short) and 62.1 MB (r2-2 S3/hung), against a budget of 62.
