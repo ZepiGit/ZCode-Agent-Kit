@@ -17,10 +17,16 @@ import continueAdapter from '../cli/adapters/continue.mjs';
 import { bootstrap, createCtx } from '../cli/context.mjs';
 import { repairManaged } from '../cli/heal.mjs';
 import { mirrorTree } from '../lib/self-update.mjs';
+import { freePort } from './free-port.mjs';
 
 const KIT = path.join(import.meta.dirname, '..');
 const { parse: parseYaml } = createRequire(path.join(KIT, 'zcode-proxy-src', 'package.json'))('yaml');
-const PORT = 19680; // ticket 68's range; written into fixture configs only, nothing listens
+// Free ports of this run (ticket 75). PORT is written into fixture configs only
+// and nothing listens there, but setup probes it; HEAL_PORT is the heal
+// fixtures' config port, which `doctor --fix` binds exclusively while it aligns
+// the key, so a parallel run must never hold it.
+const PORT = await freePort();
+const HEAL_PORT = await freePort();
 const KEY = 'fixture-key-' + 'c'.repeat(32);
 
 const crlf = (text) => text.replace(/\n/g, '\r\n');
@@ -218,7 +224,7 @@ function healFixture(t, eol) {
   fs.writeFileSync(path.join(root, 'proxy', 'config.example.yaml'), template);
   fs.writeFileSync(path.join(root, '.proxykey'), KEY + '\n');
   const ctx = createCtx(root, path.join(root, 'home'));
-  const config = template.replace(/^  port: \d+$/m, '  port: 19681').replace('"GENERATE_ME"', '"older-key"');
+  const config = template.replace(/^  port: \d+$/m, `  port: ${HEAL_PORT}`).replace('"GENERATE_ME"', '"older-key"');
   fs.writeFileSync(ctx.config, eol === 'crlf' ? crlf(config) : config);
   return ctx;
 }

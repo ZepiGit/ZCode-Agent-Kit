@@ -5,13 +5,17 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
+import { freePort } from './free-port.mjs';
 
 const source = join(import.meta.dirname, '..');
+const FIXTURE_PORT = await freePort();
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'kit-cli-'));
   for (const member of ['cli', 'lib']) cpSync(join(source, member), join(root, member), { recursive: true });
   mkdirSync(join(root, 'proxy')); mkdirSync(join(root, 'logs')); mkdirSync(join(root, 'generated'));
-  cpSync(join(source, 'proxy', 'config.example.yaml'), join(root, 'proxy', 'config.example.yaml'));
+  // A free port of this run as the template's port (ticket 75): setup probes it,
+  // and the production port 8457 may be the owner's own proxy.
+  writeFileSync(join(root, 'proxy', 'config.example.yaml'), readFileSync(join(source, 'proxy', 'config.example.yaml'), 'utf8').replace(/^  port: \d+/m, `  port: ${FIXTURE_PORT}`));
   cpSync(join(source, 'proxy', 'zcode-proxy-manager.mjs'), join(root, 'proxy', 'zcode-proxy-manager.mjs'));
   const home = join(root, 'home'); mkdirSync(home);
   const bin = join(root, 'sp ace (bin)'); mkdirSync(bin);

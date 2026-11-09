@@ -8,8 +8,8 @@
 // environment in the baseline step only.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,13 @@ import { VOLATILE, compareCaptures, normaliseVolatile } from "./ux-before/compar
 
 const ROOT = join(import.meta.dirname, "..");
 const TEMPLATE = readFileSync(join(ROOT, "tests", "ux-before", "capture", "fake-proxy.ts"), "utf8");
+const CAPTURE = join(ROOT, "tests", "ux-before", "capture", "capture.mjs");
+/** The host environment without UX_CAPTURE_PORT: every capture scenario takes a free port of its own (ticket 75). */
+function captureEnv() {
+  const env = { ...process.env };
+  delete env.UX_CAPTURE_PORT;
+  return env;
+}
 const literalOf = (source) => source.match(/^const REAL_PROXY_SRC = (.*);$/m)[1];
 
 // ------------------------------------------------------- git progress (ubuntu)
@@ -95,8 +102,8 @@ test("Linux end to end: a kit path with `\\u` in it starts the fixture proxy (th
   const run = spawnSync(process.execPath, [join(ROOT, "tests", "ux-before", "capture", "capture.mjs"), "--kit", kit, "--out", out,
     "--only", "^proxy-status-json-running$", "--variants", "pipe"], {
     encoding: "utf8", timeout: 110_000,
-    // Its own port: tests/json-superset.test.mjs captures on UX_CAPTURE_PORT in parallel (node --test runs files concurrently).
-    env: { ...process.env, UX_CAPTURE_PORT: String(Number(process.env.UX_CAPTURE_PORT ?? 18458) + 1) },
+    // Free ports of its own: tests/json-superset.test.mjs captures in parallel (node --test runs files concurrently).
+    env: captureEnv(),
   });
   assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
   const [m] = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
@@ -250,11 +257,60 @@ test("Linux end to end: a CRLF package.json (as on a windows checkout) changes o
   const run = spawnSync(process.execPath, [join(ROOT, "tests", "ux-before", "capture", "capture.mjs"), "--kit", kit, "--out", out,
     "--only", "^update-checkout$", "--variants", "pipe,ci"], {
     encoding: "utf8", timeout: 110_000,
-    env: { ...process.env, UX_CAPTURE_PORT: String(Number(process.env.UX_CAPTURE_PORT ?? 18458) + 2) },
+    env: captureEnv(),
   });
   assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
   const lines = readFileSync(join(out, "update", "update-checkout", "pipe.txt"), "utf8").split("\n");
   const n = readFileSync(join(ROOT, "package.json"), "utf8").split("\n").length - 1;
   assert.ok(lines.includes(` 1 file changed, ${n} insertions(+), ${n} deletions(-)`), "the CRLF rewrite really changed every line");
   assert.deepEqual(compareCaptures(join(ROOT, "tests", "ux-before", "linux"), out, { only: /^update\/update-checkout$/, variants: ["pipe", "ci"] }), []);
+});
+
+// Ticket 75: captures run in parallel (json-superset and this file under
+// `node --test`, or two checkouts at once). Every scenario takes a free port of
+// its own, so a "down" capture never sees another capture's fixture proxy and
+// a "running" capture never finds its port taken. Both stay byte-identical to
+// the BEFORE baseline because the port is written back as 18458.
+test("Linux end to end: two captures at once, one with the fixture proxy running and one down, both match the baseline", {
+  timeout: 240_000,
+  skip: process.platform === "win32" ? "the linux baseline is compared" : false,
+}, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ux-capture-parallel-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const capture = (name, only) => new Promise((resolve) => {
+    const child = spawn(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, name), "--only", only, "--variants", "pipe,ci"], { env: captureEnv(), stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    child.stdout.on("data", (d) => { output += d; });
+    child.stderr.on("data", (d) => { output += d; });
+    child.on("close", (status) => resolve({ status, output }));
+  });
+  const [running, down] = await Promise.all([
+    capture("running", "^proxy-status-(running|json-running)$"),
+    capture("down", "^proxy-status-(down|json-down)$"),
+  ]);
+  assert.equal(running.status, 0, running.output.slice(-2000));
+  assert.equal(down.status, 0, down.output.slice(-2000));
+  const baseline = join(ROOT, "tests", "ux-before", "linux");
+  assert.deepEqual([
+    ...compareCaptures(baseline, join(dir, "running"), { only: /^proxy\/proxy-status-(running|json-running)$/, variants: ["pipe", "ci"] }),
+    ...compareCaptures(baseline, join(dir, "down"), { only: /^proxy\/proxy-status-(down|json-down)$/, variants: ["pipe", "ci"] }),
+  ], []);
+});
+
+test("the port write-back can only touch the port: no committed capture holds a number from the kernel-port floor (20000) up", () => {
+  const capture = readFileSync(CAPTURE, "utf8");
+  assert.match(capture, /^const KERNEL_PORT_FLOOR = 20000;$/m, "the floor this test pins");
+  const high = [];
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name !== "INDEX.md" && e.name !== "manifest.json") {
+        // Word-bounded, as normalise() matches the port (a digit run inside a hash is no match).
+        for (const [n] of readFileSync(p, "utf8").matchAll(/\b\d{5}\b/g)) if (Number(n) >= 20000 && Number(n) <= 65535) high.push(`${p.slice(ROOT.length + 1)}: ${n}`);
+      }
+    }
+  };
+  for (const set of ["linux", "windows"]) if (existsSync(join(ROOT, "tests", "ux-before", set))) walk(join(ROOT, "tests", "ux-before", set));
+  assert.deepEqual(high, []);
 });
