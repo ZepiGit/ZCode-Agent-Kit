@@ -679,8 +679,7 @@ export class TaskManager {
             await this.ingress.captureUsage(t);
         }
         const streamed = t.responseText.read();
-        let responseText = streamed.text;
-        let droppedBytes = streamed.droppedBytes;
+        let { text: responseText, droppedBytes } = streamed;
         let completeness = responseText && state === "completed"
             ? { status: "full", explanation: "turn stream captured via session events" }
             : { status: "unknown", explanation: "no completed assistant response has been captured" };
@@ -695,7 +694,10 @@ export class TaskManager {
                     if (String(info.role ?? "") === "assistant") {
                         const parts = (entry.parts ?? entry.content ?? []);
                         const texts = parts.filter((pt) => String(pt.type ?? "") === "text").map((pt) => String(pt.text ?? ""));
-                        responseText = texts.join("\n");
+                        // The same cap as a streamed text.
+                        const recovered = new ResponseText();
+                        recovered.append(texts.join("\n"));
+                        ({ text: responseText, droppedBytes } = recovered.read());
                         if (responseText && state === "completed")
                             completeness = { status: "full", explanation: "response recovered from stored transcript" };
                         break;
