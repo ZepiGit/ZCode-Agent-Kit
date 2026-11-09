@@ -510,6 +510,181 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
   }
 });
 
+// ------------------------------------- respawn acknowledgement (ticket 23)
+// ADR-0015: on a memory respawn the proxy drains only after the manager has
+// reserved the restart budget (a respawn.json event with its pid, written
+// after its request). The stand-in proxy below runs the REAL health supervisor
+// and respawn handoff of this checkout under induced memory pressure (its
+// footprint sampler reports FAKE_PRESSURE_MB), and the hook it spawns is the
+// real manager CLI of the fixture. "Draining" is its exit.
+const SUPERVISOR_URL = pathToFileURL(join(ROOT, "zcode-proxy-src", "src", "runtime", "supervisor.ts")).href;
+const SUPERVISED_PROXY = `
+import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { createHealthSupervisor, managerRespawnHandoff } from ${JSON.stringify(SUPERVISOR_URL)};
+const config = readFileSync(process.env.ZCODE_PROXY_CONFIG, "utf8");
+const port = Number(config.match(/^  port:\\s*(\\d+)/m)[1]);
+const key = config.match(/proxyApiKey:\\s*"([^"]+)"/)[1];
+let answeredAt = null;
+const server = createServer((req, res) => {
+  if (req.headers.authorization !== "Bearer " + key) return res.writeHead(401).end("{}");
+  if (req.url === "/health") { answeredAt ??= Date.now(); return res.end(JSON.stringify({ status: "ok", provider: "zai" })); }
+  res.writeHead(404).end("{}");
+}).listen(port, "127.0.0.1");
+// A slow manager (the late acknowledgement): the hook runs FAKE_LATE_MANAGER,
+// which starts the real manager late.
+const env = { ...process.env };
+if (env.FAKE_LATE_MANAGER) { env.FAKE_REAL_MANAGER = env.ZCODE_KIT_RESPAWN_MANAGER; env.ZCODE_KIT_RESPAWN_MANAGER = env.FAKE_LATE_MANAGER; }
+const supervisor = createHealthSupervisor({
+  thresholds: { samples: 1, sampleIntervalMs: 250 },
+  sample: () => ({ mb: Number(process.env.FAKE_PRESSURE_MB), metric: "footprint" }),
+  respawn: managerRespawnHandoff(env, process.env.FAKE_ACK_WAIT_MS ? { ackWaitMs: Number(process.env.FAKE_ACK_WAIT_MS) } : {}),
+  shutdown: async () => { console.log("stand-in drained"); server.close(); process.exit(0); },
+  watchdog: false,
+});
+// The pressure starts once the manager's start has finished: this proxy
+// answered /health and its pid record names it with its start time (or, where
+// the start-time probe is slow, 10 s after the first answer).
+const ready = setInterval(() => {
+  if (answeredAt === null) return;
+  let record = null;
+  try { record = JSON.parse(readFileSync(join(process.env.ZCODE_KIT_LOG_DIR, "proxy.pid"), "utf8")); } catch {}
+  const recorded = record?.pid === process.pid && Number.isFinite(record?.startedMs);
+  if (!recorded && Date.now() - answeredAt < 10_000) return;
+  clearInterval(ready);
+  setTimeout(() => supervisor.start(), 1_000);
+}, 100);
+`;
+
+// The late manager: waits FAKE_LATE_MS, then runs the real manager CLI with
+// the hook's arguments and records how it ended.
+const LATE_MANAGER = `
+import { spawnSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+await new Promise((r) => setTimeout(r, Number(process.env.FAKE_LATE_MS)));
+const r = spawnSync(process.execPath, [process.env.FAKE_REAL_MANAGER, ...process.argv.slice(2)], { encoding: "utf8", env: process.env, timeout: 120_000 });
+writeFileSync(process.env.FAKE_LATE_OUT, JSON.stringify({ argv: process.argv.slice(2), code: r.status, out: (r.stdout ?? "") + (r.stderr ?? "") }));
+process.exit(r.status ?? 1);
+`;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** The fixture's stand-in proxies alive now (by command line), or null when the process table cannot be read. */
+const standIns = (root) => fixtureProcesses(root)?.filter((p) => /zcode-proxy-src[\\/]+src[\\/]+index\.ts\b.*\bserve\b/.test(p.commandLine)) ?? null;
+const countOf = (text, re) => (text.match(re) ?? []).length;
+
+test("induced memory pressure: acknowledged respawns drain, the budget caps them at 3, the refused one keeps its proxy serving with one ERROR and no further hook", { timeout: 240_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port, { proxySrc: true });
+  writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), SUPERVISED_PROXY);
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "4096" });
+  const manager = join(root, "proxy", "zcode-proxy-manager.mjs");
+  const logFile = join(root, "logs", "proxy.log");
+  const log = () => { try { return readFileSync(logFile, "utf8"); } catch { return ""; } };
+  const seen = new Set();
+  const remember = () => { const r = readJson(join(root, "logs", "proxy.pid")); if (Number.isInteger(r?.pid) && !seen.has(r.pid)) { seen.add(r.pid); defer(root, () => killFixtureProxy(root, r.pid)); } };
+  const start = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 90_000 });
+  remember();
+  assert.equal(start.status, 0, start.stdout + start.stderr);
+
+  // Sample until the refusal is logged: never two proxies at once.
+  const refused = / ERROR supervisor respawn refused by the kit manager; keeps serving /;
+  const counts = [];
+  const deadline = Date.now() + 180_000;
+  while (!refused.test(log())) {
+    if (Date.now() > deadline) assert.fail(`no refusal logged; proxy.log tail:\n${log().slice(-3000)}`);
+    remember();
+    const list = standIns(root);
+    if (list) counts.push(list.length);
+    await sleep(100);
+  }
+  remember();
+  const hooksAtRefusal = countOf(log(), /respawn: requested for pid \d+ \(reason memory\)/g);
+  // After the refusal: exactly one proxy at every sample, ours and serving.
+  const after = [];
+  for (let i = 0; i < 12; i++) {
+    after.push({ proxies: standIns(root)?.length ?? null, identity: await identity(port) });
+    await sleep(250);
+  }
+  const text = log();
+  const events = readJson(join(root, "logs", "respawn.json")).events;
+  const record = readJson(join(root, "logs", "proxy.pid"));
+
+  assert.ok(counts.length > 0 && counts.every((n) => n <= 1), `never two proxies (samples: ${counts.join(",")})`);
+  assert.deepEqual(after.filter((s) => s.proxies !== 1 || s.identity !== "ours"), [], `exactly one serving proxy after the refusal: ${JSON.stringify(after)}`);
+  assert.equal(events.length, 3, "three restarts reserved in the window, never more");
+  assert.equal(countOf(text, /stand-in drained/g), 3, "each acknowledged respawn drained its proxy");
+  assert.equal(hooksAtRefusal, 4, "three acknowledged requests and the refused one");
+  assert.equal(countOf(text, /respawn: requested for pid \d+ \(reason memory\)/g), 4, "no further hook within the budget window");
+  assert.equal(countOf(text, / ERROR supervisor /g), 1, "one ERROR line");
+  assert.match(text, / ERROR supervisor respawn refused by the kit manager; keeps serving .*outcome=refused .*hookExit=4 restarts=exhausted retryInS=900\n/);
+  assert.equal(countOf(text, /respawn refused: 3 restarts in 15 min/g), 1);
+  assert.ok(!events.some((e) => e.pid === record.pid), "the serving proxy is the one whose request was refused");
+  await managerStop(t, root, env, record);
+});
+
+test("a late acknowledgement: the proxy keeps serving, the manager ends in 'already running', 0, with exactly one proxy and the slot consumed", { timeout: 180_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port, { proxySrc: true });
+  writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), SUPERVISED_PROXY);
+  const late = join(root, "late-manager.mjs");
+  writeFileSync(late, LATE_MANAGER);
+  const lateOut = join(root, "late-manager.json");
+  // The proxy waits 1.5 s for the acknowledgement; the manager reserves after 3 s.
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "4096", FAKE_ACK_WAIT_MS: "1500", FAKE_LATE_MANAGER: late, FAKE_LATE_MS: "3000", FAKE_LATE_OUT: lateOut });
+  const manager = join(root, "proxy", "zcode-proxy-manager.mjs");
+  const start = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 90_000 });
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  if (record) defer(root, () => killFixtureProxy(root, record.pid));
+  assert.equal(start.status, 0, start.stdout + start.stderr);
+
+  // The late manager waits 30 s for the proxy to exit, which it never does.
+  const counts = [];
+  const deadline = Date.now() + 120_000;
+  while (!existsSync(lateOut)) {
+    if (Date.now() > deadline) assert.fail("the late manager did not finish");
+    const list = standIns(root);
+    if (list) counts.push(list.length);
+    await sleep(250);
+  }
+  const ended = readJson(lateOut);
+  const text = readFileSync(join(root, "logs", "proxy.log"), "utf8");
+  const events = readJson(join(root, "logs", "respawn.json")).events;
+
+  assert.deepEqual(ended.argv, ["respawn", String(record.pid), "--reason", "memory"], "the hook's arguments are unchanged");
+  assert.equal(ended.code, 0, ended.out);
+  assert.equal(ended.out, [
+    `respawn: requested for pid ${record.pid} (reason memory)`,
+    `respawn: waiting up to 30s for pid ${record.pid} to exit`,
+    `respawn: pid ${record.pid} still alive — start() decides via the hung-own proof`,
+    "respawn: starting a fresh proxy",
+    `already running (pid ${record.pid})`,
+    "respawn: start finished with exit code 0",
+    "",
+  ].join("\n"));
+  assert.deepEqual(events.map((e) => ({ pid: e.pid, reason: e.reason })), [{ pid: record.pid, reason: "memory" }], "the budget slot is consumed");
+  assert.match(text, / ERROR supervisor respawn not acknowledged by the kit manager; keeps serving .*outcome=no-acknowledgement .*restarts=exhausted/);
+  assert.doesNotMatch(text, /stand-in drained/);
+  assert.ok(counts.length > 0 && counts.every((n) => n === 1), `exactly one proxy at every sample (samples: ${counts.join(",")})`);
+  assert.equal(readJson(join(root, "logs", "proxy.pid")).pid, record.pid, "the same proxy is still the recorded one");
+  assert.equal(await identity(port), "ours");
+  assert.equal(countOf(text, /respawn: requested for pid/g), 1, "one hook");
+  await managerStop(t, root, env, record);
+});
+
+test("the respawn wait (30 s) is longer than the acknowledgement wait (10 s) + the proxy's stop deadline (10 s) + a margin", async () => {
+  // The proxy's side, read by Bun from the proxy's own modules.
+  const read = spawnSync(bunOrFail(), ["-e", `import { RESPAWN_ACK_WAIT_MS, SHUTDOWN_TIMING } from ${JSON.stringify(SUPERVISOR_URL)}; console.log(JSON.stringify({ ack: RESPAWN_ACK_WAIT_MS, deadline: SHUTDOWN_TIMING.memory.deadlineMs }));`], { encoding: "utf8", timeout: 60_000 });
+  assert.equal(read.status, 0, read.stderr);
+  const proxy = JSON.parse(read.stdout);
+  // The manager's side: the module the manager CLI builds on.
+  const { RESPAWN_WAIT_MS } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
+  assert.deepEqual({ respawnWait: RESPAWN_WAIT_MS, ack: proxy.ack, deadline: proxy.deadline }, { respawnWait: 30_000, ack: 10_000, deadline: 10_000 });
+  // STOP_EXIT_MARGIN_MS (ticket 22) is "a few 300 ms poll intervals, for example 2 s".
+  const MARGIN_MS = 2_000;
+  assert.ok(RESPAWN_WAIT_MS > proxy.ack + proxy.deadline + MARGIN_MS);
+});
+
 /** Run fn with console.log/console.warn recorded per stream (not passed through). */
 async function consoleLines(fn) {
   const lines = [];

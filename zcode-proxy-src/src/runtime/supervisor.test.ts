@@ -4,9 +4,14 @@
  * apart" is checked against the clock, not against real time.
  */
 import { afterEach, describe, expect, it } from "bun:test";
+import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerCaptchaRuntime } from "./health-monitor.js";
 import {
   createHealthSupervisor,
+  managerRespawnHandoff,
   memoryFootprint,
   type FootprintSample,
   type HealthSupervisorOptions,
@@ -44,7 +49,8 @@ const EVENT_LINE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z (DEBUG|INFO|WAR
 /**
  * A supervisor on a fake clock whose sampler reads `footprint` (MB). The
  * respawn handoff records each request; `confirms` says whether the manager
- * hook started. The confirmed respawn's shutdown is recorded, never run.
+ * confirmed it (false: the hook did not start). The confirmed respawn's
+ * shutdown is recorded, never run.
  */
 function harness(opts: { hook?: boolean; confirms?: boolean; thresholds?: HealthSupervisorOptions["thresholds"] } = {}) {
   const clock = fakeClock();
@@ -62,7 +68,11 @@ function harness(opts: { hook?: boolean; confirms?: boolean; thresholds?: Health
     writeLog: (line) => lines.push(line),
     respawn: opts.hook === false ? null : {
       available: () => true,
-      request: async (reason) => { requests.push({ reason, at: clock.now() }); return opts.confirms ?? true; },
+      request: async (reason) => {
+        requests.push({ reason, at: clock.now() });
+        const confirmed = opts.confirms ?? true;
+        return { outcome: confirmed ? "acknowledged" : "hook-failed", confirmed, waitedMs: 0 };
+      },
     },
     shutdown: async (reason) => { shutdowns.push({ reason, at: clock.now() }); },
   });
@@ -187,7 +197,7 @@ describe("health supervisor: memory thresholds (defaults 512 / 1024 MB × 3 samp
     expect(h.shutdowns).toEqual([]);
   });
 
-  it("a respawn hook that does not start leaves the proxy serving and is not retried within the episode", async () => {
+  it("a respawn hook that does not start leaves the proxy serving and is not retried within the budget window, not even in a new episode", async () => {
     const h = harness({ confirms: false });
     h.hold(1_500, 3);
     await settle();
@@ -197,10 +207,147 @@ describe("health supervisor: memory thresholds (defaults 512 / 1024 MB × 3 samp
     h.hold(1_500, 6);
     await settle();
     expect(h.requests).toHaveLength(1);
+    // Ticket 23 (ADR-0015 cond 6): a new episode inside the budget window
+    // spawns no hook either; the first request after the window does.
     h.hold(300, 1);
     h.hold(1_500, 3);
     await settle();
+    expect(h.requests).toHaveLength(1);
+    h.hold(1_500, 60);
+    await settle();
     expect(h.requests).toHaveLength(2);
+    expect(h.requests[1]!.at - h.requests[0]!.at).toBeGreaterThanOrEqual(15 * 60_000);
+  });
+});
+
+// Ticket 23 (ADR-0015): the supervisor behind the REAL manager handoff
+// (`managerRespawnHandoff`), with an injected clock and an injected spawn that
+// counts every hook it is asked to start and answers like the manager would.
+type HookAnswer = "refuse" | "silent" | "ack";
+
+function fakeHookSpawn(answer: () => HookAnswer, ackFile: string, spawned: number[], clock: { now(): number }) {
+  return ((command: string, args: readonly string[]) => {
+    spawned.push(clock.now());
+    const child = new EventEmitter() as EventEmitter & { unref(): void; pid: number };
+    child.unref = () => {};
+    child.pid = 1;
+    const mode = answer();
+    queueMicrotask(() => {
+      if (mode === "refuse") child.emit("exit", 4, null);
+      // The event the manager writes at reservation, stamped with the wall clock.
+      if (mode === "ack") writeFileSync(ackFile, JSON.stringify({ events: [{ at: Date.now() + 1, pid: Number(args[2]), reason: "memory" }] }));
+    });
+    expect(command).toBe("/kit/node");
+    return child;
+  }) as unknown as typeof import("node:child_process").spawn;
+}
+
+function managedHarness(hookAnswer: () => HookAnswer, opts: { ackWaitMs?: number } = {}) {
+  const clock = fakeClock();
+  const dir = mkdtempSync(join(tmpdir(), "t23-supervisor-"));
+  tempDirs.push(dir);
+  const ackFile = join(dir, "respawn.json");
+  const spawned: number[] = [];
+  const lines: string[] = [];
+  const shutdowns: number[] = [];
+  const state = { footprint: 100 };
+  const env = { ZCODE_KIT_RESPAWN_NODE: "/kit/node", ZCODE_KIT_RESPAWN_MANAGER: "/kit/proxy/zcode-proxy-manager.mjs", ZCODE_KIT_LOG_DIR: dir };
+  const supervisor = createHealthSupervisor({
+    sample: () => ({ mb: state.footprint, metric: "footprint" }),
+    clock,
+    watchdog: false,
+    writeLog: (line) => lines.push(line),
+    respawn: managerRespawnHandoff(env, { spawn: fakeHookSpawn(hookAnswer, ackFile, spawned, clock), ackWaitMs: opts.ackWaitMs ?? 50, pollMs: 5 }),
+    shutdown: async () => { shutdowns.push(clock.now()); },
+  });
+  supervisor.start();
+  supervisors.push(supervisor);
+  return {
+    clock, lines, spawned, shutdowns, supervisor,
+    /** Hold `mb` for `ms`, one 15 s sample at a time, letting each answer arrive. */
+    async hold(mb: number, ms: number) {
+      state.footprint = mb;
+      for (let left = ms; left > 0; left -= 15_000) {
+        clock.advance(Math.min(15_000, left));
+        for (let i = 0; i < 100 && supervisor.memory().respawnPending && shutdowns.length === 0; i++) await Bun.sleep(5);
+        await settle();
+      }
+    },
+  };
+}
+
+const tempDirs: string[] = [];
+afterEach(() => { for (const d of tempDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+const WINDOW_MS = 15 * 60_000;
+
+describe("health supervisor: respawn acknowledgement before drain (ticket 23)", () => {
+  it("an acknowledged respawn drains: the graceful shutdown runs once", async () => {
+    const h = managedHarness(() => "ack", { ackWaitMs: 5_000 });
+    await h.hold(1_500, 45_000);
+    expect(h.spawned).toEqual([45_000]);
+    expect(h.shutdowns).toEqual([45_000]);
+    expect(h.lines.some((l) => / INFO supervisor respawn confirmed; draining .*outcome=acknowledged/.test(l))).toBe(true);
+  });
+
+  for (const [answer, message] of [["refuse", "respawn refused by the kit manager; keeps serving"], ["silent", "respawn not acknowledged by the kit manager; keeps serving"]] as const) {
+    it(`${answer === "refuse" ? "hook exit 4" : "no acknowledgement"}: keeps serving, one ERROR event line, restarts reported exhausted`, async () => {
+      const h = managedHarness(() => answer);
+      await h.hold(1_500, 10 * 60_000);
+      expect(h.spawned).toEqual([45_000]);
+      expect(h.shutdowns).toEqual([]);
+      const errors = h.lines.filter((l) => / ERROR /.test(l));
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(EVENT_LINE);
+      expect(errors[0]).toContain(` ERROR supervisor ${message} `);
+      expect(errors[0]).toMatch(/ outcome=(refused|no-acknowledgement) .*restarts=exhausted retryInS=900$/);
+      expect(h.supervisor.memory()).toMatchObject({ restartsExhausted: true, respawnPending: false, respawnOutcome: answer === "refuse" ? "refused" : "no-acknowledgement", respawnRetryAt: 45_000 + WINDOW_MS });
+      // Still sampling: the proxy keeps serving, it was never stopped.
+      expect(h.supervisor.memory().lastAt).toBe(10 * 60_000);
+    });
+  }
+
+  it("the hard condition persisting over two budget windows with every respawn refused spawns exactly one hook per window (Story 50)", async () => {
+    const h = managedHarness(() => "refuse");
+    // Window 1 starts with the first request at 45 s, window 2 with the next
+    // at 945 s; 1830 s is the last sample inside window 2.
+    await h.hold(1_500, 1_830_000);
+    expect(h.spawned).toEqual([45_000, 45_000 + WINDOW_MS]);
+    expect(h.shutdowns).toEqual([]);
+    expect(h.lines.filter((l) => / ERROR supervisor respawn refused /.test(l))).toHaveLength(2);
+    for (let w = 0; w < 2; w++) {
+      const from = 45_000 + w * WINDOW_MS;
+      expect(h.spawned.filter((at) => at >= from && at < from + WINDOW_MS)).toHaveLength(1);
+    }
+    // The third window opens with the third request, not earlier.
+    await h.hold(1_500, 15_000);
+    expect(h.spawned).toEqual([45_000, 45_000 + WINDOW_MS, 45_000 + 2 * WINDOW_MS]);
+  });
+
+  it("adversarial: a condition that comes and goes inside the window spawns no extra hook and logs no extra ERROR", async () => {
+    const h = managedHarness(() => "refuse");
+    for (let round = 0; round < 12; round++) {
+      await h.hold(1_500, 45_000);
+      await h.hold(300, 15_000);
+    }
+    expect(h.clock.now()).toBe(12 * 60_000);
+    expect(h.spawned).toEqual([45_000]);
+    expect(h.lines.filter((l) => / ERROR /.test(l))).toHaveLength(1);
+    // Each later episode says once that the budget is exhausted, as a WARN.
+    expect(h.lines.filter((l) => / WARN supervisor memory above the hard limit; restart budget exhausted, keeps serving .*restarts=exhausted/.test(l))).toHaveLength(11);
+  });
+
+  it("the exhausted report ends with the budget window; an acknowledged retry then drains", async () => {
+    let answer: HookAnswer = "refuse";
+    const h = managedHarness(() => answer, { ackWaitMs: 5_000 });
+    await h.hold(1_500, 60_000);
+    expect(h.supervisor.memory().restartsExhausted).toBe(true);
+    await h.hold(300, WINDOW_MS);
+    expect(h.supervisor.memory()).toMatchObject({ restartsExhausted: false, respawnRetryAt: null });
+    answer = "ack";
+    await h.hold(1_500, 45_000);
+    expect(h.spawned).toHaveLength(2);
+    expect(h.shutdowns).toHaveLength(1);
   });
 });
 
