@@ -1,6 +1,6 @@
 # 83: Setup: curated post-install command overview and multi-select harness consent
 
-**Blocked by:** 40 (UX batch (a)), 42 (Account Rotator decision asked once)
+**Blocked by:** 40 (UX batch (a)), 42 (Account Rotator decision asked once), 43 (compact setup report — controller ruling dwfq-82f6e729-3: 83 builds on 43's ADR-0005-migrated baseline; prompts move to stderr in 43 first, 83's fallback preservation then runs against the post-43 tree)
 
 **Status:** ready-for-agent
 
