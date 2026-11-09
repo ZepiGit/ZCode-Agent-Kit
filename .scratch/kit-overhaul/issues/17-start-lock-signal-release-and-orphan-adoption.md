@@ -2,7 +2,7 @@
 
 **Blocked by:** 16 (Start lock protocol v1 with proven takeover (no judge-then-rename race))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: sol
 
@@ -262,3 +262,11 @@ Branch `ticket/17-signal-release-orphan-adoption`. Fix `baaa34e`, merged with th
 **Pending CI (orchestrator verifies after merge+push):** windows-latest test-kit on Node 24 and 26, `tests/start-lock.test.mjs` GREEN, with the teardown `rm` no longer failing; the other criteria as listed in the round 1 report.
 
 **Interim label (Owner Proxy round 33, condition 5; records only, the scenario is unchanged):** windows S4 `stale-lock-after-ctrl-c` = `child.kill("SIGINT")` = TerminateProcess (crash), not a console event; on 16's tree 6/8 stale in both archived runs, with next start 0, next stop 0 and 0 proxies in 8/8. Merge check status: "moves to N (Round 33); not clearable under a TerminateProcess trial". This answers the round 1 question above.
+
+- 2026-11-09 (merger): Merged 2026-11-09 as 6edf13f; fast suite: kit 995/1015 (0 fail, 20 skipped), proxy 1627/1627 (109 files), mcp 115/116 (0 fail, 1 skipped). Plain `--no-ff` merge of ticket/17-signal-release-orphan-adoption (c26a995) into the tip f516b38, no conflicts (`tests/memory/expected-red.json` auto-merged); no earlier merge or revert of 17 on the integration branch, so no revert-of-revert. No lockfile changed (`npm ci` only); `mcp/zcode-harness-mcp/dist/` unchanged after `test:mcp`'s build (B5). Logs: `reports/merge-17-{npm-ci,test,test-proxy,test-mcp}.log`.
+  - Pre-merge CI run https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42600357562 (staging/17s, head 699cf36 = 9b87c23 + ticket/17 c26a995), green on all 8 jobs (earlier attempt 42585313129 was RED on windows test-kit, teardown EPERM, fixed in round 2). Merged under Owner Proxy round 33 with windows S4 `stale-lock-after-ctrl-c` still listed. Values checked by the merger in that run's memory-budget logs (`/home/AgentKit/overhaul-tools/merge-17-ci/{linux,windows}-memory-budget.log`):
+    - Names 17 removed, all GREEN: linux S4/short `stale-lock-after-ctrl-c` 0 of 8, `respawn-recovers-despite-stale-lock` 1 proxy up; windows S4/short `unstoppable-proxy-after-ctrl-c` 0 of 8, `respawn-recovers-despite-stale-lock` 1 proxy up.
+    - linux S4/short GREEN (still listed for 17 on the flipping `unstoppable-proxy-after-ctrl-c`, 0 of 8). windows S4/short RED only on the listed `stale-lock-after-ctrl-c` (6 of 8, owned by 17); proxy-left-after-stop 0, failed-lifecycle-steps 0, count:proxy 1, orphans 0: all ok.
+    - S3 `orphans` (10-run floor of 17's flips names): linux S3/short 0, S3/hung 0; windows S3/short 0, S3/hung 0 (budget 0, all ok).
+    - Ratchet holds on both legs ("memory-budget (linux|windows, short profile): ratchet holds").
+  - Sanity diffs: the staged-ticket diff over 17's files differs from staging/17s only in `tests/memory/expected-red.json` (windows `S1/stalled` entry removed by ticket 61's 3820c9a, merged in eb8aaae); 17's own hunks are intact. The whole-tree diff (`git diff staging/17s HEAD -- . ':!.scratch'`) comes only from integration commits after staging/17s^1 (9b87c23): ticket 61 (merge eb8aaae; `.github/workflows/ci.yml`, `tests/memory/{expected-red.json,job.mjs,loop.test.mjs,fixtures/fake-run.mjs,lib/catalogue.mjs,lib/measure.mjs,scenarios/s1-proxy-steady.mjs}`, `zcode-proxy-src/src/proxy/{handler,response-body,sse-terminal}.ts`, `zcode-proxy-src/src/server/{server,response-backpressure.test,response-bytes-contract.test}.ts` and its two `__fixtures__` JSON files, `zcode-proxy-src/src/translator/sse-translator.ts`) and ticket 31 (merge 667f967; `mcp/zcode-harness-mcp/{package.json,docs/MCP_API.md}`, `src/mcp/tools.ts`, `src/tasks/{ingress,manager,response-text}.ts`, their `dist/` outputs, `test/fixture/{fake-harness,heap-probe}.mjs`, `test/integration/{security-audit,task-caps}.test.mjs`). Nothing else.
