@@ -23,8 +23,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Induced memory pressure (ticket 23; ADR-0008 cond 1, ADR-0015, spec §18
 // PROCESSES): the real proxy, started by the real manager, with its hard limit
-// at 65 MB held for 3 samples 2 s apart, under a load of ~11 MB request bodies
-// that keeps every fresh proxy above it. Each respawn the manager acknowledges
+// at 65 MB held for 3 samples 2 s apart, under a load of one ~5.4 MB request
+// at a time that keeps every fresh proxy above it (light enough to stay far
+// below the windows leg's 512 MB commit backstop). Each respawn the manager acknowledges
 // drains the proxy and starts a fresh one; it allows 3 per 15 min, so the 4th
 // request is refused, and the proxy that asked must keep serving (before
 // ticket 23 it drained anyway: no proxy at all) and spawn no further hook.
@@ -53,9 +54,9 @@ async function memoryPressure(ctx, kit, proxies, settle) {
   try {
     const started = await kit.manager(["start"]);
     out.startCode = started.code;
-    const body = JSON.stringify({ model: "glm-5.3", max_tokens: 64, messages: [{ role: "user", content: "lorem ipsum dolor sit amet ".repeat(400_000) + "[[mock:ok]] pressure" }] });
+    const body = JSON.stringify({ model: "glm-5.3", max_tokens: 64, messages: [{ role: "user", content: "lorem ipsum dolor sit amet ".repeat(200_000) + "[[mock:ok]] pressure" }] });
     const headers = { authorization: `Bearer ${kit.key}`, "content-type": "application/json" };
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 1; i++) {
       loaders.push((async () => {
         while (active) {
           out.loadRequests++;
