@@ -1040,6 +1040,91 @@ test("the measurement-mode wiring check reads ci.yml the same with LF and CRLF l
   assertMeasurementWiring(crlf);
 });
 
+// ── The S1/stalled attribution at the job seam (ticket 61, Round 12 Q3 condition 1) ──
+function stalledJob(args, { shape = "linux", arms }) {
+  const home = mkdtempSync(join(tmpdir(), "memloop-stalled-"));
+  const stepSummary = join(home, "step-summary.md");
+  writeFileSync(stepSummary, "");
+  const os = shape === "win32" ? "windows" : "linux";
+  const r = runJob(["--os", os, "--cap", "none", "--out", join(home, "job"), "--run-script", FAKE_RUN, ...args], { ZCODE_OVERHAUL_RUN: "1", HOME: home, FAKE_RUN_MODE: "stalled-arms", FAKE_RUN_SHAPE: shape, FAKE_RUN_ARMS: JSON.stringify(arms), GITHUB_STEP_SUMMARY: stepSummary });
+  const read = (p) => { try { return readFileSync(join(home, "job", p), "utf8"); } catch { return null; } };
+  const out = { r, job: read("job-summary.json"), measure: JSON.parse(read("measure-S1-stalled.json") ?? "null"), md: read("measure-S1-stalled.md"), stepSummary: readFileSync(stepSummary, "utf8"), runDirs: (() => { try { return readdirSync(join(home, "job", "measure-S1-stalled")).sort(); } catch { return []; } })() };
+  rmSync(home, { recursive: true, force: true });
+  return out;
+}
+
+test("stalled attribution: N rotations of S1/stalled and S1/drained; the buckets are the floors, the drained excess, the JS-held heap and the residual (worked example, linux)", () => {
+  const arms = {
+    "S1/stalled": [{ peak: 170, floor: 90, heapPeak: 24, heapFloor: 6 }, { peak: 180, floor: 92, heapPeak: 26, heapFloor: 6 }],
+    "S1/drained": [{ peak: 140, floor: 90, heapPeak: 14, heapFloor: 6 }, { peak: 150, floor: 90, heapPeak: 16, heapFloor: 6 }],
+  };
+  const { r, job, measure, md, stepSummary, runDirs } = stalledJob(["--measure-stalled", "2"], { arms });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(job, null, "an attribution run is not a ratchet run");
+  assert.deepEqual(runDirs, ["rep-1-S1-drained", "rep-1-S1-stalled", "rep-2-S1-drained", "rep-2-S1-stalled"]);
+  assert.deepEqual(measure.reps.map((x) => `${x.rep} ${x.arm}`), ["1 S1/stalled", "1 S1/drained", "2 S1/stalled", "2 S1/drained"], "the arms run in rotation");
+  assert.equal(measure.complete, true);
+  assert.deepEqual([measure.stalled.gateMB, measure.stalled.floorMB, measure.stalled.heapPeakMB, measure.stalled.floorHeapMB, measure.stalled.readers], [175, 91, 25, 6, 8]);
+  assert.deepEqual([measure.drained.gateMB, measure.drained.floorMB, measure.drained.heapPeakMB, measure.drained.floorHeapMB], [145, 90, 15, 6]);
+  // Excess 175 − 91 = 84; (iii) 145 − 90 = 55; (i) (25 − 6) − (15 − 6) = 10; residual 84 − 55 − 10 = 19 > 0.2 × 84.
+  const g = measure.buckets.gate;
+  assert.deepEqual({ metric: g.metric, excess: g.excessMB, iii: g.iiiMB, i: g.iMB, residual: g.residualMB, accounted: g.accounted }, { metric: "rss", excess: 84, iii: 55, i: 10, residual: 19, accounted: false });
+  assert.deepEqual(g.perReader, { excessMB: 10.5, iiiMB: 6.9, iMB: 1.3, residualMB: 2.4 });
+  assert.equal(measure.buckets.commit, undefined, "linux has no commit metric");
+  for (const text of [md, stepSummary]) {
+    assert.match(text, /S1\/stalled attribution \(linux, 2 rotations of S1\/stalled → S1\/drained\)/);
+    assert.match(text, /\| RSS \| 175 \| 91 \| 84 \(10\.5\) \| 55 \(6\.9\) \| 10 \(1\.3\) \| 19 \(2\.4\) \| no \|/);
+  }
+});
+
+test("stalled attribution on windows: WS gate and commit buckets side by side; accounted when (i) + (iii) explain the excess within ±20 %", () => {
+  const arms = {
+    "S1/stalled": [{ peak: 300, wsPeak: 300, floor: 53, heapPeak: 104, heapFloor: 4, commit: 440, floorCommit: 180 }],
+    "S1/drained": [{ peak: 180, wsPeak: 180, floor: 53, heapPeak: 14, heapFloor: 4, commit: 300, floorCommit: 180 }],
+  };
+  const { r, measure, md } = stalledJob(["--measure-stalled", "1"], { shape: "win32", arms });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  // WS: excess 247, (iii) 127, (i) 100 − 10 = 90, residual 30 ≤ 49.4 → accounted.
+  assert.deepEqual([measure.buckets.gate.metric, measure.buckets.gate.excessMB, measure.buckets.gate.iiiMB, measure.buckets.gate.iMB, measure.buckets.gate.residualMB, measure.buckets.gate.accounted], ["ws", 247, 127, 90, 30, true]);
+  // Commit: excess 260, (iii) 120, (i) 90, residual 50 ≤ 52 → accounted.
+  assert.deepEqual([measure.buckets.commit.excessMB, measure.buckets.commit.iiiMB, measure.buckets.commit.iMB, measure.buckets.commit.residualMB, measure.buckets.commit.accounted], [260, 120, 90, 50, true]);
+  assert.match(md, /\| WS \| 300 \| 53 \| 247 \(30\.9\) \| 127 \(15\.9\) \| 90 \(11\.3\) \| 30 \(3\.8\) \| yes \|/);
+  assert.match(md, /\| commit \| 440 \| 180 \| 260 \(32\.5\) \| 120 \(15\) \| 90 \(11\.3\) \| 50 \(6\.3\) \| yes \|/);
+});
+
+test("stalled attribution: a run without an idle floor (fewer than 3 samples before the load) is invalid, and the attribution exits 2", () => {
+  const arms = {
+    "S1/stalled": [{ peak: 170, floor: 90, heapPeak: 24, heapFloor: 6, preSamples: 2 }],
+    "S1/drained": [{ peak: 140, floor: 90, heapPeak: 14, heapFloor: 6 }],
+  };
+  const { r, measure, md } = stalledJob(["--measure-stalled", "1"], { arms });
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.equal(measure.complete, false);
+  assert.deepEqual(measure.reps.map((x) => x.valid), [false, true]);
+  assert.match(measure.reps[0].problems.join(), /2 proxy samples before the load \(need ≥ 3 for the idle floor\)/);
+  assert.match(md, /complete: NO/);
+});
+
+test("stalled attribution: --measure-stalled takes a whole number of rotations and runs on its own", () => {
+  for (const [args, why] of [[["--measure-stalled", "0"], /whole number of rotations from 1 to 50/], [["--measure-stalled", "2", "--measure-burst1", "3"], /runs on its own/], [["--measure-stalled", "2", "--only", "S1/stalled"], /runs on its own/]]) {
+    const { r } = stalledJob(args, { arms: {} });
+    assert.equal(r.status, 2, args.join(" "));
+    assert.match(r.stderr, why, args.join(" "));
+  }
+});
+
+test("stalled attribution is off by default: the ratchet step runs unless the marker exists, the attribution step only with it, and the marker is not committed", () => {
+  const ci = lf(ciWorkflow());
+  const job = ci.slice(ci.indexOf("\n  memory-budget:"));
+  const step = (name) => job.slice(job.indexOf(`- name: ${name}`)).split(/\n      - /)[0];
+  assert.match(step("Memory loop (short profile) and expected-RED ratchet"), /if: hashFiles\('tests\/memory\/measure-burst1'\) == '' && hashFiles\('tests\/memory\/measure-stalled'\) == ''/);
+  const attribution = step("S1/stalled attribution");
+  assert.match(attribution, /if: hashFiles\('tests\/memory\/measure-burst1'\) == '' && hashFiles\('tests\/memory\/measure-stalled'\) != ''/);
+  assert.match(attribution, /--measure-stalled "\$\(tr -d '\\r' < tests\/memory\/measure-stalled\)"/);
+  assert.match(step("Upload memory loop artefacts"), /measure-S1-stalled\.json[\s\S]*measure-S1-stalled\.md/);
+  assert.equal(readdirSync(join(KIT_ROOT, "tests", "memory")).includes("measure-stalled"), false, "tests/memory/measure-stalled is a one-run switch: delete it before the pre-merge run");
+});
+
 test("measurement mode: N fresh sequential S1/burst1 runs on Windows, each with WS gate, sampled WS, ws_peak_kb, commit, proxy count, units and Job Object", () => {
   const peaks = [{ ws: 234.3, wsPeak: 255, commit: 422 }, { ws: 222, wsPeak: 222, commit: 365.2 }, { ws: 240, wsPeak: 246, commit: 410 }, { ws: 248.3, wsPeak: 262, commit: 424.5 }];
   const { r, files, job, measure, measureMd, stepSummary, repDirs } = burst1Job(["--measure-burst1", "4"], { shape: "win32", peaks });

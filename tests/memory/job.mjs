@@ -28,6 +28,14 @@
 // and appended to $GITHUB_STEP_SUMMARY. Exit 0 when every run is a valid
 // observation, 2 otherwise. It never decides n or the expected-RED list.
 //
+//   node tests/memory/job.mjs --measure-stalled N [--os …] [--out DIR] [--cap …]
+//
+// The S1/stalled attribution (ticket 61, Round 12 Q3 condition 1; CI: only
+// while the marker tests/memory/measure-stalled exists): N rotations of
+// S1/stalled and S1/drained (the same requests, every reader drains its
+// answer), each with the measurement probes, recorded with the buckets of
+// lib/measure.mjs in <out>/measure-S1-stalled.{json,md}. Same exit codes.
+//
 // Caps (--cap auto picks the first that works; lib/caps.mjs):
 //   systemd    `systemd-run --user --scope -p MemoryMax=… -p MemorySwapMax=0`,
 //              verified by reading the scope's memory.max from inside it;
@@ -64,7 +72,7 @@ import { assertSafeRun, bunPath } from "./lib/isolated-kit.mjs";
 import { bytes, chooseCap, commandFor, parseJobReport } from "./lib/caps.mjs";
 import { runEvidence } from "./lib/completeness.mjs";
 import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
-import { measureMarkdown, measureObservation, measureReport, pairedMarkdown, pairedReport, parseBunArms, parseMeasureSpec } from "./lib/measure.mjs";
+import { measureMarkdown, measureObservation, measureReport, pairedMarkdown, pairedReport, parseBunArms, parseMeasureSpec, parseStalledCount, STALLED_ARMS, stalledMarkdown, stalledObservation, stalledReport } from "./lib/measure.mjs";
 import { heapAtCapLine } from "./lib/retained-heap.mjs";
 
 // Round 17 Q1 condition 3: a retained-heap minimum above this comes back as a question.
@@ -93,8 +101,10 @@ function parseArgs(argv) {
     else if (argv[i] === "--run-script") out.runScript = resolve(argv[++i]); // tests: a stand-in for run.mjs
     else if (argv[i] === "--measure-burst1") out.measure = parseMeasureSpec(argv[++i]);
     else if (argv[i] === "--bun") out.bun = parseBunArms(argv[++i]);
+    else if (argv[i] === "--measure-stalled") out.measureStalled = parseStalledCount(argv[++i]);
     else throw new Error(`unknown argument ${argv[i]}`);
   }
+  if (out.measureStalled && (out.measure || out.bun || out.only)) throw new Error("--measure-stalled runs on its own (no --measure-burst1, --bun or --only)");
   // --bun exists only for the paired measurement, and names exactly its arms (Round 10 Q1 condition 1).
   if (out.bun && !out.measure) throw new Error("--bun exists only in measurement mode (--measure-burst1 \"N bun=<v>,<v>…\")");
   if (out.measure?.arms || out.bun) {
@@ -215,8 +225,7 @@ async function main() {
   const keys = JOB[args.os];
   if (!keys) { console.error(`memory-budget: no job for OS leg ${args.os}`); return 2; }
   const selected = args.only ?? keys;
-  for (const k of selected) if (!keys.includes(k)) { console.error(`memory-budget: ${k} is not a run of the ${args.os} job`); return 2; }
-  try { assertSafeRun(); } catch (err) { console.error(`memory-budget: ${err.message}`); return 2; }
+  for (const k of selected) if (!keys.includes(k)) { console.error(`memory-budget: ${k} is not a run of the ${args.os} job`); return 2; }  try { assertSafeRun(); } catch (err) { console.error(`memory-budget: ${err.message}`); return 2; }
   const capChoice = chooseCap(args.cap);
   if (capChoice.error) { console.error(`memory-budget: ${capChoice.error}`); return 2; }
   let expected, issueIds;
@@ -225,7 +234,9 @@ async function main() {
     issueIds = issueIdsIn(join(ROOT, ".scratch", "kit-overhaul", "issues"));
   } catch (err) { console.error(`memory-budget: cannot read the expected-RED list or the issues: ${err.message}`); return 2; }
   mkdirSync(args.out, { recursive: true });
-  console.log(args.measure?.arms
+  console.log(args.measureStalled
+    ? `memory-budget: S1/stalled attribution, ${args.measureStalled} rotations of ${STALLED_ARMS.join(" → ")} on ${args.os}, cap ${capChoice.cap}, output ${args.out}`
+    : args.measure?.arms
     ? `memory-budget: S1/burst1 paired Bun measurement, ${args.measure.count} runs per arm (${args.measure.arms.join(" → ")} in rotation) on ${args.os}, cap ${capChoice.cap}, output ${args.out}`
     : args.measure ? `memory-budget: S1/burst1 measurement, ${args.measure.count} fresh runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}` : `memory-budget: ${selected.length} runs on ${args.os}, cap ${capChoice.cap}, output ${args.out}`);
 
@@ -260,6 +271,31 @@ async function main() {
       growthChecks: (summary?.checks ?? []).filter((c) => /^growth:/.test(c.name)).map((c) => ({ name: c.name, red: c.red, value: c.value ?? null, commitValue: c.commitValue ?? null, wsValue: c.wsValue ?? null, gate: c.gate ?? null, budget: c.budget, trend: c.trend === true, insufficient: c.detail?.insufficient === true, samples: c.detail?.samples ?? null, windowMediansMB: c.detail?.windowMediansMB ?? null, risingWindows: c.detail?.risingWindows ?? null, netRisePct: c.detail?.netRisePct ?? null })),
       error: why ?? summary?.error ?? r.error ?? null };
     return { result, summary };
+  }
+
+  if (args.measureStalled) {
+    // The S1/stalled attribution (ticket 61, Round 12 Q3 condition 1): the
+    // stalled run and its drained reference in rotation, no verdict, no ratchet.
+    const reps = [];
+    let i = 0;
+    for (let k = 1; k <= args.measureStalled; k++) {
+      for (const arm of STALLED_ARMS) {
+        i += 1;
+        console.log(`\n── S1/stalled attribution run ${i} of ${args.measureStalled * STALLED_ARMS.length} (${arm}) ──`);
+        const dir = join(args.out, "measure-S1-stalled", `rep-${k}-${arm.replace("/", "-")}`);
+        const { result, summary } = await runIn(arm, dir, { ZCODE_MEMLOOP_MEASURE_PROBES: "1" });
+        const obs = stalledObservation({ rep: k, arm, result, summary, csvText: readSamples(dir) });
+        console.log(`${arm} attribution run ${k}: ${obs.outcome}, peak ${obs.gateMB ?? "—"} MB over a floor of ${obs.floorMB ?? "—"}, heap ${obs.heapPeakMB ?? "—"} over ${obs.floorHeapMB ?? "—"}${obs.valid ? "" : ` (invalid: ${obs.problems.join("; ")})`}`);
+        reps.push(obs);
+      }
+    }
+    const report = { ...stalledReport(reps, { os: args.os, requested: args.measureStalled }), cap: capChoice.cap, node: process.version };
+    writeFileSync(join(args.out, "measure-S1-stalled.json"), JSON.stringify(report, null, 2));
+    const md = stalledMarkdown(report);
+    writeFileSync(join(args.out, "measure-S1-stalled.md"), md);
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
+    console.log(`\n${md}`);
+    return report.complete ? 0 : 2;
   }
 
   if (args.measure) {
