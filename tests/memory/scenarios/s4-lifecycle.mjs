@@ -130,7 +130,10 @@ export async function run(ctx) {
   const rr = await respawning;
   await sleep(1000);
   Object.assign(staleRespawn, { respawnCode: rr.code, respawnTail: (rr.out + rr.err).trim().split("\n").slice(-1)[0]?.slice(0, 200), proxiesAfter: proxies().length, healthy: (await kit.health()) !== null });
-  unlinkSync(lockFile);
+  // Since ticket 16 the kit takes this dead holder's lock over (proof: pid
+  // dead), so it may be gone already; remove it only if it is still there.
+  staleRespawn.staleLockLeft = existsSync(lockFile);
+  if (staleRespawn.staleLockLeft) unlinkSync(lockFile);
   ctx.note("respawnWithStaleLock", staleRespawn);
 
   await kit.manager(["stop"]);

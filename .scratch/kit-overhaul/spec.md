@@ -649,7 +649,7 @@ PROMPT §9, restated with the budgets the rounds tightened. Initial budgets are 
 | ≥ 30 % peak rule | wherever the baseline peak exceeded its budget (S1 burst, S2, S3, S6), the peak improves by ≥ 30 % | — | §9 |
 
 **PROCESSES**
-- Exactly 1 proxy per installation under 10 concurrent launches, with 0 failed launches, including a killed holder.
+- Exactly 1 proxy per installation under 10 concurrent launches, with 0 failed launches, including a killed holder. Measurement-rule amendment (Round 27 Q1): in the kill-holder round, the launch the adversary SIGKILLed (its pid equals the adversary's recorded `killed` pid, and it exited non-zero) is reported as `killedByAdversary` and is never a failed launch. Every other launch that does not exit 0 is a failed launch. A round counts as run only with exactly one such launch. Budget 0 is unchanged.
 - 0 stale locks after a race round or after Ctrl-C during start (baseline 5 of 8). The proxy is up after a respawn that met a stale lock.
 - A takeover race test (N contenders, a kill injected at every protocol step) shows never two holders and never a deleted live lock.
 - 0 orphans or leaked workers after stop, restart, crash and update (S4, 50 cycles). Log-dir files ≤ 8.
