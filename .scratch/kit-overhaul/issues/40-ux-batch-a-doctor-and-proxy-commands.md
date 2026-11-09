@@ -37,3 +37,7 @@ Spec stories: 89, 90, 91, 92, 93, 95, 105
 ### 2026-11-09 — resume integration finding
 
 staging/40b run 42608977405 passed all eight jobs, but its tree predates ticket 33's rotated-log reader. A trial integration merge conflicted in proxy/zcode-proxy-manager.mjs; selecting ticket 40's shared reader alone loses lines from proxy.log.1. The trial merge was aborted; integration remains unchanged. Isolated staging/40c now carries the integration repair candidate. Existing seam-2 test at tests/proxy-lifecycle.test.mjs:771 reproduced RED (actual new-1/new-2, expected old-8/old-9/old-10/new-1/new-2) in reports/t40c-log-tail-red.log, then GREEN in reports/t40c-log-tail-green.log and wf-preflight-log-tail.log. These targeted runs are not full acceptance. Workflow dwfrun-40031bfb-6490-4df3-94c3-7594369b3da9 owns candidate completion, central full-suite gate and independent Grok review; fresh both-OS CI must precede merge.
+
+### 2026-11-09 — PR75 windows memory-budget RED, cause pending
+
+staging/40c (PR75): 7 of 8 jobs SUCCESS; windows memory-budget FAILED. Ticket 40 touches no S5 path (lib/term/out.mjs, cli report builders, doctor/proxy UX), so this is likely an unrelated owned RED or a tail; artifact pull pending. No revert, no rerun until-green, no budget change.
