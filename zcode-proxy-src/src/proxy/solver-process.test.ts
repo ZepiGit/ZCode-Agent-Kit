@@ -362,8 +362,9 @@ describe("solver process: lifecycle", () => {
       const starts = Object.fromEntries(readFileSync(log, "utf8").trim().split("\n").map((line) => line.split(" ").map(Number)));
       expect(Object.keys(starts).map(Number).sort()).toEqual([first, second].sort());
       expect(generation).toBe(2);
-      // The stubborn generation outlived SIGTERM until the grace ran out ...
-      expect(deathAt - killedAt).toBeGreaterThanOrEqual(1000);
+      // The stubborn generation outlived SIGTERM until the grace ran out (on
+      // Windows SIGTERM is TerminateProcess, which cannot be ignored) ...
+      if (process.platform !== "win32") expect(deathAt - killedAt).toBeGreaterThanOrEqual(1000);
       // ... and the next one started only after it was gone (10 ms polling).
       expect(starts[second]).toBeGreaterThanOrEqual(deathAt - 15);
     } finally {

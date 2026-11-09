@@ -24,8 +24,8 @@ import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
 export const PARENT_CHECK_MS = 500;
 
 // POSIX reparents an orphan, so a changed ppid is proof; Windows keeps the
-// stale ppid, so liveness is checked there (any error, EPERM included, means
-// the pid no longer names our own parent).
+// stale ppid, so only the parent's liveness is checked there. Only ESRCH
+// counts as gone: an unexpected error must never end a healthy solver.
 const reparented = (parentPid: number): boolean => process.platform !== "win32" && process.ppid !== parentPid;
 
 /** Plain JS for a Worker built from a Blob, so the watcher needs no extra compile entrypoint. */
@@ -34,7 +34,7 @@ function watcherSource(parentPid: number): string {
 const parent = ${JSON.stringify(parentPid)};
 const gone = () => {
   if (${JSON.stringify(process.platform)} !== "win32" && process.ppid !== parent) return true;
-  try { process.kill(parent, 0); return false; } catch { return true; }
+  try { process.kill(parent, 0); return false; } catch (err) { return err?.code === "ESRCH"; }
 };
 setInterval(() => { if (gone()) process.kill(process.pid, "SIGKILL"); }, ${PARENT_CHECK_MS});
 `;
