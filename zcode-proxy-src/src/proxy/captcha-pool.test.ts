@@ -569,6 +569,14 @@ describe("CaptchaTokenPool — sanitized mint-failure provenance on later take f
     solveMock.mockImplementation(async () => "x".repeat(64));
   });
 
+  /** Await a take's rejection as an Error (typed for the pinned tsc run). */
+  const rejection = async (p: Promise<string>): Promise<Error> => {
+    try { await p; } catch (e) {
+      return e instanceof Error ? e : new Error(String(e));
+    }
+    throw new Error("expected the take to reject");
+  };
+
   it("the storm take failure names the last local mint failure (sanitized, bounded)", async () => {
     pool = provenancePool();
     solveMock.mockImplementation(async () => { throw new Error(REFUSAL); });
@@ -577,7 +585,7 @@ describe("CaptchaTokenPool — sanitized mint-failure provenance on later take f
     // The generic storm sentence stays intact (clients match on it), and the
     // recorded LOCAL failure provenance is surfaced alongside it.
     await expect(pool.takeToken(CFG)).rejects.toThrow("captcha minting degraded (storm) — retry later");
-    const err = await pool.takeToken(CFG).catch((e: Error) => e);
+    const err = await rejection(pool.takeToken(CFG));
     expect(err.message).toMatch(/last local mint failure: verify param refused/);
     expect(err.message).toContain("too short (76 chars)");
     expect(err.message.length).toBeLessThan(400);
@@ -593,7 +601,7 @@ describe("CaptchaTokenPool — sanitized mint-failure provenance on later take f
     process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = "1000";
     process.env.CAPTCHA_TAKE_GRACE_MS = "0";
     try {
-      const err = await pool.takeToken(CFG).catch((e: Error) => e);
+      const err = await rejection(pool.takeToken(CFG));
       expect(err.message).toContain("captcha take deadline (1000ms)");
       expect(err.message).toMatch(/last local mint failure: verify param refused/);
     } finally {
