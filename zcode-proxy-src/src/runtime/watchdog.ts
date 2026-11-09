@@ -88,6 +88,10 @@ export function respawnHookCommand(
  * Resolves `{ ok: true }` on the child's `spawn` event; `{ ok: false }` on
  * `error`, a synchronous throw, or no answer within `ackMs`.
  *
+ * The hook gets `env` without the stop token (`ZCODE_KIT_STOP_TOKEN`, any
+ * casing; ADR-0014): it belongs to this spawn only, and the hook is the next
+ * manager, which spawns the next proxy. `env` itself is left unchanged.
+ *
  * Self-contained (spawn is passed in) because its source is also embedded
  * in the watcher worker.
  */
@@ -97,6 +101,10 @@ export function launchRespawnHook(
   env: Record<string, string | undefined>,
   ackMs: number,
 ): Promise<{ ok: boolean; error?: string }> {
+  const hookEnv: Record<string, string | undefined> = {};
+  for (const name of Object.keys(env)) {
+    if (name.toUpperCase() !== "ZCODE_KIT_STOP_TOKEN") hookEnv[name] = env[name];
+  }
   const { promise, resolve } = Promise.withResolvers<{ ok: boolean; error?: string }>();
   const timer = setTimeout(() => resolve({ ok: false, error: `no spawn acknowledgment within ${ackMs}ms` }), ackMs);
   const settle = (result: { ok: boolean; error?: string }) => {
@@ -104,7 +112,7 @@ export function launchRespawnHook(
     resolve(result);
   };
   try {
-    const child = spawnFn(hook.command, hook.args, { detached: true, stdio: "ignore", windowsHide: true, env });
+    const child = spawnFn(hook.command, hook.args, { detached: true, stdio: "ignore", windowsHide: true, env: hookEnv });
     child.once("spawn", () => settle({ ok: true }));
     child.once("error", (err: Error) => settle({ ok: false, error: err.message }));
     child.unref();
