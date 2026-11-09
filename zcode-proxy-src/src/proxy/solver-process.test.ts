@@ -9,6 +9,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import http from "node:http";
+import net from "node:net";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -126,6 +129,33 @@ describe("solver process: the proxy's dispatcher", () => {
     expect(command).toEqual([execPath, fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url))]);
   });
 
+  it("refuses to run without the proxy's IPC channel, from the entry module and through the proxy's CLI, with one event line", async () => {
+    const entry = fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url));
+    const index = fileURLToPath(new URL("../index.ts", import.meta.url));
+    for (const argv of [[entry, "12345"], [index, "__captcha-solver-process", "12345"]]) {
+      const child = Bun.spawn([process.execPath, ...argv], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: hermeticEnv() });
+      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      expect({ code, stdout }).toEqual({ code: 2, stdout: "" });
+      expect(stderr).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z ERROR solver "?solver process started without the proxy's IPC channel; the proxy starts it on the first solve"? command=__captcha-solver-process\n$/);
+    }
+  });
+
+  it("never keeps the proxy alive for an idle solver process, which ends when the proxy exits", async () => {
+    const run = await expectOk(host(`${REPORT}
+      solver.configureCaptchaSolver({ backendModule });
+      report(Number(label(await solver.runCaptchaSolve('pid', 'sgp', 'p')).slice(4)));
+      // No shutdown: the 10 min idle timer and the live generation must not hold the host.
+    `, {}, 8000));
+    const solverPid = reported(run);
+    try {
+      const deadline = Date.now() + 3000;
+      while (alive(solverPid) && Date.now() < deadline) await Bun.sleep(25);
+      expect(alive(solverPid)).toBe(false);
+    } finally {
+      reapLeaked(solverPid);
+    }
+  });
+
   for (const mode of ["idle", "hung"] as const) {
     it(`leaves no solver process once the proxy is SIGKILLed with a ${mode} generation`, async () => {
       const child = Bun.spawn([process.execPath, "--eval", `
@@ -161,6 +191,90 @@ describe("solver process: the proxy's dispatcher", () => {
       }
     });
   }
+});
+
+// Round 19 (from ticket 26): on the pinned Bun 1.4.2 `proxy: false` is
+// ignored and Bun reads the process environment, so the unset case is
+// delivered by the solver process's environment. Plain tests, no version gate.
+// Loopback only: the recording proxies answer absolute-form requests
+// themselves and refuse every CONNECT, so nothing is forwarded or tunnelled.
+describe("solver process: captcha egress (Round 19)", () => {
+  const arrivals: string[] = [];
+  const servers: (http.Server | net.Server)[] = [];
+  let configuredProxy = "";
+  let ambientProxy = "";
+  let target = "";
+  let tlsPort = 0;
+
+  const listen = async (server: http.Server | net.Server): Promise<number> => {
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return (server.address() as AddressInfo).port;
+  };
+  const recordingProxy = async (name: string): Promise<string> => {
+    const server = http.createServer((req, res) => {
+      arrivals.push(`${name} ${req.method} ${req.url}`);
+      res.end(`via ${name}`);
+    });
+    server.on("connect", (req, socket) => {
+      arrivals.push(`${name} CONNECT ${req.url}`);
+      socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
+    });
+    return `http://127.0.0.1:${await listen(server)}`;
+  };
+
+  beforeAll(async () => {
+    configuredProxy = await recordingProxy("configured");
+    ambientProxy = await recordingProxy("ambient");
+    target = `http://127.0.0.1:${await listen(http.createServer((req, res) => {
+      arrivals.push(`target ${req.method} ${req.url}`);
+      res.end("direct");
+    }))}`;
+    tlsPort = await listen(net.createServer((socket) => {
+      arrivals.push("tls-target connection");
+      socket.destroy();
+    }));
+  });
+  afterAll(() => {
+    for (const server of servers) server.close();
+  });
+
+  // The proxy's environment: ambient proxy variables in mixed case.
+  const ambient = () => ({ http_proxy: ambientProxy, Https_Proxy: ambientProxy, ALL_PROXY: ambientProxy, no_proxy: "", NPM_HTTPS_PROXY: ambientProxy });
+
+  async function egressThroughSolverProcess(env: Record<string, string>) {
+    arrivals.length = 0;
+    const scene = `egress:${Buffer.from(JSON.stringify({ target, tlsPort })).toString("base64")}`;
+    const run = await expectOk(host(`${REPORT}
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
+      s.configure({ backendModule, idleMs: 2000 });
+      const results = JSON.parse(label(await s.run(${JSON.stringify(scene)}, 'sgp', 'p')).slice('egress:'.length));
+      const names = label(await s.run('env-names:^(http_proxy|https_proxy|all_proxy|no_proxy|npm_https_proxy)$', 'sgp', 'p'));
+      s.shutdown();
+      report({ results, names });
+    `, env, 30_000));
+    return { ...reported(run), arrivals: [...arrivals].sort() };
+  }
+
+  it("goes direct when the setting is unset, with mixed-case ambient proxy variables in the proxy's environment", async () => {
+    const run = await egressThroughSolverProcess(ambient());
+    expect(run.arrivals).toEqual(["target GET /fetch", "target GET /sync-xhr", "tls-target connection"]);
+    expect(run.results.fetch).toBe("200 direct");
+    expect(run.results.syncXhr).toBe("200 direct");
+    expect(run.names).toBe("env-names:");
+  }, 40_000);
+
+  it("sends all three routes through the configured proxy only when the setting is set", async () => {
+    const run = await egressThroughSolverProcess({ ...ambient(), ZCODE_PROXY_UPSTREAM_PROXY: configuredProxy });
+    expect(run.arrivals).toEqual([
+      `configured CONNECT 127.0.0.1:${tlsPort}`,
+      `configured GET ${target}/fetch`,
+      `configured GET ${target}/sync-xhr`,
+    ]);
+    expect(run.results.fetch).toBe("200 via configured");
+    expect(run.results.syncXhr).toBe("200 via configured");
+    expect(run.names).toBe("env-names:");
+  }, 40_000);
 });
 
 describe("solver process: compiled proxy", () => {

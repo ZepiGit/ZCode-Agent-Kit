@@ -24,6 +24,7 @@ import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
 import { installGuestErrorBoundary } from "./runtime/guest-error.js";
 import { shutdownCaptchaRuntime } from "./runtime/health-monitor.js";
 import { SOLVER_PROCESS_COMMAND } from "./proxy/solver-process-command.js";
+import { createEventLogger } from "./log/event-line.mjs";
 import { createGracefulShutdown, createHealthSupervisor, handleShutdownSignals } from "./runtime/supervisor.js";
 import {
   addAccount,
@@ -86,7 +87,8 @@ function runCli(): void {
     import("./proxy/captcha-solver-process.js")
       .then((m) => m.runSolverProcess(args.slice(1)))
       .catch((err: unknown) => {
-        process.stderr.write(`zcode-proxy: solver process failed to start: ${(err as Error).stack ?? String(err)}\n`);
+        createEventLogger({ component: "solver", write: (line) => process.stderr.write(`${line}\n`) })
+          .error("solver process failed to start", { error: err instanceof Error ? err : String(err) });
         process.exit(1);
       });
     return;

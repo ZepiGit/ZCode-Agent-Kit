@@ -5,9 +5,9 @@
  * otherwise it plays the proxy: the default dispatcher solves the scenes in
  * argv with the backend module in argv[2] and prints one JSON report.
  */
-import { main } from "../../index.ts";
-import { configureCaptchaSolver, runCaptchaSolve, shutdownCaptchaSolver, solverProcessCommand } from "../captcha-solver.ts";
-import { SOLVER_PROCESS_COMMAND } from "../solver-process-command.ts";
+import { main } from "../../index.js";
+import { configureCaptchaSolver, runCaptchaSolve, shutdownCaptchaSolver, solverProcessCommand } from "../captcha-solver.js";
+import { SOLVER_PROCESS_COMMAND } from "../solver-process-command.js";
 
 if (process.argv[2] === SOLVER_PROCESS_COMMAND) {
   main();

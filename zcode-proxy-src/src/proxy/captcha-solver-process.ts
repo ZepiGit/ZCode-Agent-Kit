@@ -16,7 +16,9 @@
  * this process. On Windows the Job Object (ticket 28) is the reaper; the
  * watcher's liveness check is the fallback there.
  */
+import { createEventLogger } from "../log/event-line.mjs";
 import { serveSolverGeneration } from "./captcha-solver-generation.js";
+import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
 
 /** How often the watcher thread checks the parent. */
 export const PARENT_CHECK_MS = 500;
@@ -43,7 +45,8 @@ export function runSolverProcess(args: readonly string[] = process.argv.slice(2)
   const send = typeof process.send === "function" ? process.send.bind(process) : null;
   const parentPid = Number(args[args.length - 1]);
   if (!send || !Number.isSafeInteger(parentPid) || parentPid <= 0) {
-    process.stderr.write("captcha solver process: started without the proxy's IPC channel; the proxy starts it on the first solve\n");
+    createEventLogger({ component: "solver", write: (line) => process.stderr.write(`${line}\n`) })
+      .error("solver process started without the proxy's IPC channel; the proxy starts it on the first solve", { command: SOLVER_PROCESS_COMMAND });
     process.exit(2);
   }
   // A parent that is already gone: nothing would ever end this process.

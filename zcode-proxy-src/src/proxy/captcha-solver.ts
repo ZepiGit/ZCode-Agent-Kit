@@ -314,7 +314,9 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
         });
         relayLines(proc.stdout!, process.stdout);
         relayLines(proc.stderr!, process.stderr);
+        // Neither the process nor its relayed pipes may hold the proxy open.
         proc.unref();
+        for (const pipe of [proc.stdout, proc.stderr]) (pipe as { unref?: () => void } | null)?.unref?.();
         // A process that failed at once reports through "error"/"exit".
         try { for (const message of held.splice(0)) proc.send(message); } catch {}
       };

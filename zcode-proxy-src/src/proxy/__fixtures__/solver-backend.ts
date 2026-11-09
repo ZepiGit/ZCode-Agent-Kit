@@ -3,7 +3,7 @@
  * solver worker via configureCaptchaSolver({ backendModule }); the scene name
  * selects the behavior. Never touches the network.
  */
-import { captchaGenerationResources, solveTraceless as realSolveTraceless } from "../captcha-happy.js";
+import { captchaFetch, captchaGenerationResources, solveTraceless as realSolveTraceless, syncFetchBlocking } from "../captcha-happy.js";
 import { CaptchaSdkIncompatibleError, normalizeCaptchaError } from "../captcha-token.js";
 
 let active = 0;
@@ -39,6 +39,19 @@ export async function solveTraceless({ scene, region, prefix }: { scene: string;
         return param(`args:${JSON.stringify({ scene, region, prefix })}`);
       case "pid":
         return param(`pid:${process.pid}`);
+      case "egress": {
+        // Captcha egress from inside the generation (loopback targets only):
+        // the real captchaFetch over http and https, and the sync-XHR path.
+        const { target, tlsPort } = JSON.parse(Buffer.from(arg!, "base64").toString()) as { target: string; tlsPort: number };
+        const out: Record<string, string> = {};
+        try { const r = await captchaFetch(`${target}/fetch`); out.fetch = `${r.status} ${await r.text()}`; }
+        catch { out.fetch = "error"; }
+        const s = syncFetchBlocking(`${target}/sync-xhr`, { method: "GET", headers: {} }, 5000);
+        out.syncXhr = "error" in s ? "error" : `${s.status} ${s.body.toString()}`;
+        try { const r = await captchaFetch(`https://127.0.0.1:${tlsPort}/tls`); out.tls = String(r.status); await r.body?.cancel(); }
+        catch { out.tls = "error"; }
+        return param(`egress:${JSON.stringify(out)}`);
+      }
       case "stderr-line": {
         // A child log line, as captcha-happy writes its own (e.g. [pe-cache-evict]).
         process.stderr.write(Buffer.from(arg!, "base64"));
