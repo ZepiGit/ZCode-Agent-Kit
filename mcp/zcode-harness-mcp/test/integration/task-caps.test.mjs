@@ -75,3 +75,72 @@ test('text past 4 MiB keeps the first 1 MiB and the last 3 MiB around one marker
     assert.match(result.completeness.explanation, /1048583 bytes truncated/);
   } finally { await c.stop(); }
 });
+
+test('exactly 4 MiB is kept whole, even with a multi-byte character across the 1 MiB mark; one byte more drops that character', async (t) => {
+  const dir = scriptDir(t);
+  const head = filler('head', MiB - 2);
+  const tail = filler('tail', 3 * MiB - 1);
+  const exact = `${head}€${tail}`; // (1 MiB - 2) + 3 + (3 MiB - 1) bytes
+  fs.writeFileSync(path.join(dir, 'exact.json'), JSON.stringify(deltasOf(exact, 100_000)));
+  fs.writeFileSync(path.join(dir, 'over.json'), JSON.stringify(deltasOf(`${exact}!`, 100_000)));
+  const c = await startBridge({ env: { FAKE_STREAM_DIR: dir } });
+  try {
+    const whole = (await runTask(c, 'exact')).result;
+    assertSameText(whole.responseText, exact, 'a 4 MiB text');
+    assert.equal(whole.completeness.status, 'full');
+    assert.equal(whole.partial, false);
+    assert.equal('truncated' in whole, false, 'no truncated field below the cap');
+
+    const over = (await runTask(c, 'over')).result;
+    // The head stops before the "€" (1 MiB - 2 bytes); the tail holds the 3 MiB after it.
+    assertSameText(over.responseText, `${head}\n[… 3 bytes truncated …]\n${tail}!`, 'a 4 MiB + 1 text');
+    assert.deepEqual(over.truncated, { droppedBytes: 3 });
+    assert.equal(over.completeness.status, 'partial');
+  } finally { await c.stop(); }
+});
+
+test('the terminal-state override cannot erase the truncation note', async (t) => {
+  const dir = scriptDir(t);
+  fs.writeFileSync(path.join(dir, 'failing.json'), JSON.stringify(deltasOf(`${filler('x', 4 * MiB)}😀`, 100_000)));
+  const c = await startBridge({ env: { FAKE_STREAM_DIR: dir, FAKE_TURN: 'fail' } });
+  try {
+    const { done, result } = await runTask(c, 'failing');
+    assert.equal(done.state, 'failed');
+    assert.equal(result.completeness.status, 'partial');
+    assert.match(result.completeness.explanation, /^task ended in state failed; /);
+    assert.match(result.completeness.explanation, /\b4 bytes truncated\b/);
+    assert.deepEqual(result.truncated, { droppedBytes: 4 });
+    assert.equal(result.responseText.match(MARKER_RE).length, 1);
+  } finally { await c.stop(); }
+});
+
+test('a task keeps at most 200 warnings and 1,000 tool calls, and says so', async () => {
+  const c = await startBridge({ env: { FAKE_EVENT_GAPS: '250', FAKE_TOOL_CALLS: '1100' } });
+  try {
+    const { done, result } = await runTask(c, 'many events');
+    assert.equal(done.state, 'completed');
+    assert.equal(result.warnings.length, 200);
+    // Each gap event skips one seq number, so the lost numbers go up by 2: the first 199 gaps are kept in order.
+    const first = Number(/^event gap detected: seq (\d+)\.\.\1 missing$/.exec(result.warnings[0])?.[1]);
+    assert.ok(Number.isInteger(first), result.warnings[0]);
+    assert.deepEqual(result.warnings.slice(0, 199), Array.from({ length: 199 }, (_, i) => `event gap detected: seq ${first + 2 * i}..${first + 2 * i} missing`));
+    assert.equal(result.warnings[199], 'warnings capped at 200; later warnings were dropped');
+    assert.equal(result.completeness.status, 'partial', 'lost events still mark the result partial');
+
+    assert.equal(result.toolCalls.length, 1000);
+    assert.deepEqual(result.toolCalls.slice(0, 2), [{ toolName: 'Read', summary: 'toolCall read-0' }, { toolName: 'Read', summary: 'toolCall read-1' }]);
+    assert.deepEqual(result.toolCalls[999], { toolName: 'Read', summary: 'toolCall read-999' });
+    assert.deepEqual(result.fileChanges.modified, ['fixture-output.txt'], 'file changes are still recorded past the tool-call cap');
+  } finally { await c.stop(); }
+});
+
+test('a tool call past the cap is reported in the warnings', async () => {
+  const c = await startBridge({ env: { FAKE_TOOL_CALLS: '1000' } });
+  try {
+    const { result } = await runTask(c, 'one too many');
+    // 1,000 Read calls fill the list; the fixture's Write call is the 1,001st.
+    assert.equal(result.toolCalls.length, 1000);
+    assert.ok(!result.toolCalls.some((call) => call.summary === 'toolCall tc1'));
+    assert.deepEqual(result.warnings, ['tool calls capped at 1000; later tool calls are not listed']);
+  } finally { await c.stop(); }
+});

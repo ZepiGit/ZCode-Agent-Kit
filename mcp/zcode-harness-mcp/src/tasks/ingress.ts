@@ -41,12 +41,31 @@ export interface IngressTask<R extends IngressTaskRecord = IngressTaskRecord> {
   /** Streamed response text, bounded while it is collected. */
   responseText: ResponseText;
   toolCalls: Map<string, string>;
+  /** Set once a tool call was left out of `toolCalls` (the cap is reported once). */
+  toolCallsCapped: boolean;
   artifacts: Map<string, { path: string; bytes: number; sha256: string | null }>;
   interactionIds: Set<string>;
   warnings: string[];
   errors: string[];
   persist(): void;
   onTerminal(): void;
+}
+
+/** Per-task caps (ADR-0009): warnings 200, errors 200, tool calls 1,000. */
+export const TASK_CAPS = Object.freeze({ warnings: 200, errors: 200, toolCalls: 1000 });
+
+/** Append to a capped list; once entries are dropped, its last slot says so. */
+function pushCapped(list: string[], entry: string, cap: number, kind: string): void {
+  if (list.length < cap) list.push(entry);
+  else list[cap - 1] = `${kind} capped at ${cap}; later ${kind} were dropped`;
+}
+
+export function addWarning(t: Pick<IngressTask, "warnings">, warning: string): void {
+  pushCapped(t.warnings, warning, TASK_CAPS.warnings, "warnings");
+}
+
+export function addError(t: Pick<IngressTask, "errors">, error: string): void {
+  pushCapped(t.errors, error, TASK_CAPS.errors, "errors");
 }
 
 export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
@@ -98,7 +117,7 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
         payload: { fromSeq: t.record.lastSeq + 1, toSeq: seq - 1, note: "harness events missing in this range" },
         origin: "bridge",
       });
-      t.warnings.push(`event gap detected: seq ${t.record.lastSeq + 1}..${seq - 1} missing`);
+      addWarning(t, `event gap detected: seq ${t.record.lastSeq + 1}..${seq - 1} missing`);
     }
     t.record.lastSeq = Math.max(t.record.lastSeq, seq);
     this.store.appendLine(`tasks/${taskId}.events.jsonl`, {
@@ -115,7 +134,7 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
     } else if (type === "turn.failed") {
       const err = (payload as { error?: { message?: string } }).error;
       const msg = err?.message ?? "turn failed";
-      t.errors.push(msg);
+      addError(t, msg);
       t.record.error = msg;
       t.record.state = "failed";
       t.record.finishedAt = new Date().toISOString();
@@ -142,7 +161,12 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
       const toolName = typeof p.toolName === "string" ? p.toolName : typeof p.name === "string" ? p.name : "tool";
       const state = String(p.state ?? p.kind ?? "");
       const key = typeof p.toolCallId === "string" ? p.toolCallId : `${toolName}:${t.record.lastSeq}`;
-      t.toolCalls.set(key, toolName);
+      if (t.toolCalls.has(key) || t.toolCalls.size < TASK_CAPS.toolCalls) {
+        t.toolCalls.set(key, toolName);
+      } else if (!t.toolCallsCapped) {
+        t.toolCallsCapped = true;
+        addWarning(t, `tool calls capped at ${TASK_CAPS.toolCalls}; later tool calls are not listed`);
+      }
       const filePath = this.extractFilePath(p);
       if (filePath !== null && ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(toolName) && state !== "error") {
         const fc = t.record.fileChanges;
@@ -187,7 +211,7 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
         const readBack = await this.runtime.ipcSessionRead(rec.sessionId);
         projection = (readBack?.projection ?? {}) as Record<string, unknown>;
       } catch (err) {
-        t.warnings.push(`quiet check failed: ${err instanceof Error ? err.message : String(err)}`);
+        addWarning(t, `quiet check failed: ${err instanceof Error ? err.message : String(err)}`);
         continue;
       }
       if (t.record.state !== "running" || t.turnRevision !== revision) return;
@@ -208,7 +232,7 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
         return;
       }
     }
-    t.warnings.push("turn.completed but projection never became quiet within the confirmation window");
+    addWarning(t, "turn.completed but projection never became quiet within the confirmation window");
     rec.state = "unknown";
     rec.finishedAt = new Date().toISOString();
     t.persist();
@@ -225,7 +249,7 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
         source: "session/usage IPC",
       };
     } catch (err) {
-      t.warnings.push(`usage read failed: ${err instanceof Error ? err.message : String(err)}`);
+      addWarning(t, `usage read failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }
