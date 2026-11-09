@@ -60,7 +60,7 @@ MCP-Modellerfolg.
 | `zcode_task_cancel` | `taskId` | `session/stop` + **Verifikation** via `session/read`; `cancelled` nur nach Bestätigung, sonst `unknown` + Warnung. |
 | `zcode_task_input` | `taskId, content` | Steering im laufenden Turn bzw. Folgeauftrag nach Abschluss (gleiche Session). |
 | `zcode_task_events` | `taskId, afterSeq?, limit?` | Normalisierte + redigierte Events mit Cursor (`nextSeq`, `hasMore`). |
-| `zcode_task_result` | `taskId` | Versioniertes Ergebnis (schemaVersion 1, siehe unten). Terminal-Ergebnisse werden persistiert und überleben Neustarts. |
+| `zcode_task_result` | `taskId` | Versioniertes Ergebnis (schemaVersion 1, siehe unten). Terminal-Ergebnisse werden persistiert und überleben Neustarts. Antworttext höchstens 4 MiB (erstes 1 MiB + letzte 3 MiB, Marker `[… N bytes truncated …]`, Feld `truncated`). |
 | `zcode_artifact_read` | `workspacePath, path, offset?, length?` | Inhaltlicher Lesezugriff (base64, sha256, Größe, truncation, MIME) — Pfad muss im Workspace bleiben. |
 
 ### Task-Ergebnis (schemaVersion 1)
@@ -89,6 +89,25 @@ MCP-Modellerfolg.
 `partial:true`/`completeness.status:"partial"` kennzeichnet Teilergebnisse klar. Usage-Werte sind
 `null` (nicht 0), wenn der Harness keine Daten liefert. Modell behauptete Erfolge werden nicht als
 beobachtet ausgegeben — Testerfolge erscheinen nur aus beobachteten `tool.updated`-Events.
+
+**Grenzen pro Task.** `responseText` ist auf 4 MiB UTF-8 begrenzt, und zwar schon beim Einsammeln
+der Text-Deltas (nicht erst beim Bauen des Ergebnisses). Ein längerer Text behält das erste 1 MiB und
+die letzten 3 MiB (zusammen höchstens 4 MiB); dazwischen steht genau eine Markerzeile
+`[… N bytes truncated …]`, wobei N die verworfenen UTF-8-Bytes zählt. Die Schnitte liegen auf
+Codepoint-Grenzen. Ein so gekürztes Ergebnis hat `completeness.status:"partial"` (und `partial:true`);
+die Erklärung nennt die Kürzung auch dann, wenn der Endzustand (`failed`, `cancelled`, …) die
+Erklärung überschreibt. Zusätzlich trägt es das additive Feld `truncated: { droppedBytes }`; ungekürzte
+Ergebnisse haben das Feld nicht. Der Rückgriff auf das gespeicherte Transkript bekommt dieselbe
+Grenze. Ergebnisse, die vor dieser Grenze gespeichert wurden, werden unverändert ausgeliefert.
+Ein Task behält höchstens 200 Warnungen, 200 Fehler und 1.000 Tool-Aufrufe: bei Warnungen und
+Fehlern sagt der letzte Eintrag, dass spätere verworfen wurden; ein Tool-Aufruf über der Grenze
+erscheint nicht in `toolCalls`, und eine Warnung meldet das einmal.
+
+**Aufbewahrung und Idempotenz.** Beendete Tasks werden gelöscht, sobald es mehr als 500 sind oder
+sie älter als 7 Tage sind (laufende nie); danach liefern sie den bekannten Fehler
+`unknown task: <taskId>`. Wortlaut der Tool-Beschreibung: "Idempotency keys are remembered for as
+long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after
+that the same key starts a new task."
 
 ## Interaktionen
 

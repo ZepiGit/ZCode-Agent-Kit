@@ -1,4 +1,19 @@
 import { redactDeep } from "../security/redact.js";
+/** Per-task caps (ADR-0009): warnings 200, errors 200, tool calls 1,000. */
+export const TASK_CAPS = Object.freeze({ warnings: 200, errors: 200, toolCalls: 1000 });
+/** Append to a capped list; once entries are dropped, its last slot says so. */
+function pushCapped(list, entry, cap, kind) {
+    if (list.length < cap)
+        list.push(entry);
+    else
+        list[cap - 1] = `${kind} capped at ${cap}; later ${kind} were dropped`;
+}
+export function addWarning(t, warning) {
+    pushCapped(t.warnings, warning, TASK_CAPS.warnings, "warnings");
+}
+export function addError(t, error) {
+    pushCapped(t.errors, error, TASK_CAPS.errors, "errors");
+}
 export class TaskIngress {
     runtime;
     store;
@@ -52,7 +67,7 @@ export class TaskIngress {
                 payload: { fromSeq: t.record.lastSeq + 1, toSeq: seq - 1, note: "harness events missing in this range" },
                 origin: "bridge",
             });
-            t.warnings.push(`event gap detected: seq ${t.record.lastSeq + 1}..${seq - 1} missing`);
+            addWarning(t, `event gap detected: seq ${t.record.lastSeq + 1}..${seq - 1} missing`);
         }
         t.record.lastSeq = Math.max(t.record.lastSeq, seq);
         this.store.appendLine(`tasks/${taskId}.events.jsonl`, {
@@ -70,7 +85,7 @@ export class TaskIngress {
         else if (type === "turn.failed") {
             const err = payload.error;
             const msg = err?.message ?? "turn failed";
-            t.errors.push(msg);
+            addError(t, msg);
             t.record.error = msg;
             t.record.state = "failed";
             t.record.finishedAt = new Date().toISOString();
@@ -90,7 +105,7 @@ export class TaskIngress {
         if (type === "model.streaming") {
             const kind = String(p.kind ?? "");
             if (kind === "text_delta" && typeof (p.text ?? p.delta) === "string") {
-                t.accumulatedText += String(p.text ?? p.delta);
+                t.responseText.append(String(p.text ?? p.delta));
             }
             return;
         }
@@ -98,7 +113,13 @@ export class TaskIngress {
             const toolName = typeof p.toolName === "string" ? p.toolName : typeof p.name === "string" ? p.name : "tool";
             const state = String(p.state ?? p.kind ?? "");
             const key = typeof p.toolCallId === "string" ? p.toolCallId : `${toolName}:${t.record.lastSeq}`;
-            t.toolCalls.set(key, toolName);
+            if (t.toolCalls.has(key) || t.toolCalls.size < TASK_CAPS.toolCalls) {
+                t.toolCalls.set(key, toolName);
+            }
+            else if (!t.toolCallsCapped) {
+                t.toolCallsCapped = true;
+                addWarning(t, `tool calls capped at ${TASK_CAPS.toolCalls}; later tool calls are not listed`);
+            }
             const filePath = this.extractFilePath(p);
             if (filePath !== null && ["Write", "Edit", "MultiEdit", "NotebookEdit"].includes(toolName) && state !== "error") {
                 const fc = t.record.fileChanges;
@@ -148,7 +169,7 @@ export class TaskIngress {
                 projection = (readBack?.projection ?? {});
             }
             catch (err) {
-                t.warnings.push(`quiet check failed: ${err instanceof Error ? err.message : String(err)}`);
+                addWarning(t, `quiet check failed: ${err instanceof Error ? err.message : String(err)}`);
                 continue;
             }
             if (t.record.state !== "running" || t.turnRevision !== revision)
@@ -170,7 +191,7 @@ export class TaskIngress {
                 return;
             }
         }
-        t.warnings.push("turn.completed but projection never became quiet within the confirmation window");
+        addWarning(t, "turn.completed but projection never became quiet within the confirmation window");
         rec.state = "unknown";
         rec.finishedAt = new Date().toISOString();
         t.persist();
@@ -187,7 +208,7 @@ export class TaskIngress {
             };
         }
         catch (err) {
-            t.warnings.push(`usage read failed: ${err instanceof Error ? err.message : String(err)}`);
+            addWarning(t, `usage read failed: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 }

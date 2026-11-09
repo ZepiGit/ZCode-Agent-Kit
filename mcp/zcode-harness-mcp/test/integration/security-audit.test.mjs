@@ -170,7 +170,33 @@ test("D-11/V3-04: a turn without streamed text is recovered from transcript mess
     assert.equal(result.responseText, "FAKE-OK");
     assert.equal(result.completeness.status, "full");
     assert.match(result.completeness.explanation, /transcript/);
+    assert.equal(result.partial, false);
+    assert.equal("truncated" in result, false, "a short transcript is not truncated");
   } finally {
     await c.stop();
+  }
+});
+
+test("D-11/V3-04: a transcript fallback past 4 MiB gets the same cap, marker and completeness as a streamed text", async () => {
+  const dir = fs.mkdtempSync(path.join(process.env.TEMP ?? "/tmp", "zh-transcript-"));
+  const MiB = 1024 * 1024;
+  const words = (word, n) => `${word} `.repeat(Math.ceil(n / (word.length + 1))).slice(0, n);
+  // 4 MiB + 3: the "€" straddles the 1 MiB mark, so the head stops before it and exactly it is dropped.
+  const head = words("head", MiB - 1);
+  const tail = words("tail", 3 * MiB + 1);
+  fs.writeFileSync(path.join(dir, "long-transcript.transcript.json"), JSON.stringify(`${head}€${tail}`));
+  const c = await startBridge({ env: { FAKE_NO_STREAM: "1", FAKE_STREAM_DIR: dir } });
+  try {
+    const task = await c.tool("zcode_task_start", { workspacePath: c.workspaceDir, prompt: "long-transcript" });
+    await c.tool("zcode_task_wait", { taskId: task.taskId, timeoutMs: 20000 });
+    const result = await c.tool("zcode_task_result", { taskId: task.taskId });
+    assert.ok(result.responseText === `${head}\n[… 3 bytes truncated …]\n${tail}`, `responseText of ${result.responseText.length} code units`);
+    assert.deepEqual(result.truncated, { droppedBytes: 3 });
+    assert.equal(result.partial, true);
+    assert.equal(result.completeness.status, "partial");
+    assert.match(result.completeness.explanation, /^response recovered from stored transcript; .*\b3 bytes truncated\b/);
+  } finally {
+    await c.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
