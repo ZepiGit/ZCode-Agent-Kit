@@ -12,14 +12,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-/**
- * The PowerShell 5.1 expression for the start time of the Win32_Process `$p`
- * (FILETIME, decimal). Every Windows identity of the loop uses this one
- * expression (also lib/win-process.mjs), so two answers about one process are
- * the same string.
- */
-export const WINDOWS_START_EXPRESSION = "$(if ($p.CreationDate) { $p.CreationDate.ToFileTimeUtc() } else { 0 })";
-
 /** The PowerShell 5.1 script that prints `START <FILETIME>` for the process holding `pid`, or `NONE`. */
 export function windowsStartScript(pid) {
   if (!Number.isInteger(pid) || pid <= 0) throw new Error(`not a pid: ${pid}`);
@@ -27,7 +19,7 @@ export function windowsStartScript(pid) {
     "$ProgressPreference = 'SilentlyContinue'",
     "$ErrorActionPreference = 'Stop'",
     `$p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'`,
-    `if ($p) { [Console]::Out.Write('START ' + ${WINDOWS_START_EXPRESSION}) } else { [Console]::Out.Write('NONE') }`,
+    "if ($p) { [Console]::Out.Write('START ' + $(if ($p.CreationDate) { $p.CreationDate.ToFileTimeUtc() } else { 0 })) } else { [Console]::Out.Write('NONE') }",
   ].join("\n");
 }
 

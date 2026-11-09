@@ -7,7 +7,7 @@ import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { KIT_ROOT } from "../lib/isolated-kit.mjs";
-import { scan, settled } from "../lib/sampler.mjs";
+import { scan } from "../lib/sampler.mjs";
 import { MEMORY, PROCESSES, growthBudget } from "../lib/budgets.mjs";
 
 function dirBytes(dir) {
@@ -26,9 +26,7 @@ export async function run(ctx) {
   mkdirSync(join(dataDir, "workspaces"), { recursive: true });
   // RSS on Linux, commit on Windows (spec §1).
   const bridgeRss = () => scan(ctx.marker).filter((p) => p.role === "mcp-bridge").reduce((a, p) => a + (p.commitKb ?? p.rssKb), 0) / 1024;
-  // After 3 s, from the process table as it is then (Windows: a poll that started
-  // after the wait), so a bridge that already exited is never summed (ticket 73).
-  const settle = async () => { await new Promise((r) => setTimeout(r, 3000)); await settled(ctx.marker); return Math.round(bridgeRss()); };
+  const settle = async () => { await new Promise((r) => setTimeout(r, 3000)); return Math.round(bridgeRss()); };
 
   let c = await startBridge({ reuseDataDir: dataDir, maxConcurrentTasks: "2", interactionTimeoutSec: "2" });
   const emptyRss = await settle();
