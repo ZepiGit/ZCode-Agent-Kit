@@ -18,7 +18,7 @@ import { existsSync, statSync, openSync, closeSync, readSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { managerDoctor } from "../lib/proxy-doctor.mjs";
-import { createLifecycle } from "../lib/proxy-lifecycle.mjs";
+import { createLifecycle, RESPAWN_WAIT_MS } from "../lib/proxy-lifecycle.mjs";
 import { configuredModelIds, configuredServer, connectionDetailsLines, connectionDetailsObject, shouldRevealKey } from "../cli/connection-details.mjs";
 
 // ------------------------------------------------------------------ factory
@@ -28,7 +28,7 @@ export function createManager({
   root, home, processStartMsImpl, processCommandLineImpl, bunResolver,
   // Hung-own proof and respawn timings (contract defaults; tests shorten them).
   startupGraceMs = 60_000, hungProbeCount = 3, hungProbeIntervalMs = 5_000, hungProbeTimeoutMs = 5_000,
-  respawnWaitMs = 30_000,
+  respawnWaitMs = RESPAWN_WAIT_MS,
 } = {}) {
   const lifecycle = createLifecycle({
     root, home, processStartMsImpl, processCommandLineImpl, bunResolver, managerPath: MANAGER_PATH,

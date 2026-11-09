@@ -10,7 +10,8 @@
 //   - Ctrl-C (SIGINT) of a `proxy start` while it holds the start lock;
 //   - a respawn storm: the proxy's own restart hook asked 6 times in a row
 //     (the manager allows 3 per 15 minutes).
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+// Last, induced memory pressure on the real proxy (ticket 23, `pressure:*`).
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { startProxySession } from "../lib/proxy-session.mjs";
@@ -19,6 +20,90 @@ import { scan, settled, portsOf } from "../lib/sampler.mjs";
 import { PROCESSES, PROXY_COMMIT_BACKSTOP } from "../lib/budgets.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Induced memory pressure (ticket 23; ADR-0008 cond 1, ADR-0015, spec §18
+// PROCESSES): the real proxy, started by the real manager, with its hard limit
+// at 65 MB held for 3 samples 2 s apart, under a load of ~11 MB request bodies
+// that keeps every fresh proxy above it. Each respawn the manager acknowledges
+// drains the proxy and starts a fresh one; it allows 3 per 15 min, so the 4th
+// request is refused, and the proxy that asked must keep serving (before
+// ticket 23 it drained anyway: no proxy at all) and spawn no further hook.
+const PRESSURE_CONFIG = "health:\n  memory:\n    softLimitMB: 64\n    hardLimitMB: 65\n    samples: 3\n    sampleIntervalSeconds: 2\n";
+const PRESSURE_OBSERVE_SAMPLES = 40; // × 250 ms after the refusal
+
+async function memoryPressure(ctx, kit, proxies, settle) {
+  const logFile = join(kit.logDir, "proxy.log");
+  // Only this phase's lines: after a marker line, across a rotation (proxy.log.1).
+  const marker = `[s4] memory pressure phase ${Date.now()}`;
+  appendFileSync(logFile, marker + "\n");
+  const logText = () => {
+    let text = "";
+    for (const f of [`${logFile}.1`, logFile]) { try { text += readFileSync(f, "utf8"); } catch {} }
+    const at = text.lastIndexOf(marker);
+    return at === -1 ? "" : text.slice(at);
+  };
+  const count = (re) => (logText().match(re) ?? []).length;
+  const MANAGER_REFUSED = /respawn refused: 3 restarts in 15 min/;
+  const HOOKS = /respawn: requested for pid \d+ \(reason memory\)/g;
+  const original = readFileSync(kit.config, "utf8");
+  const out = { startCode: null, refusalSeen: false, samplesBefore: 0, maxProxiesBefore: 0, after: [], restartsReserved: null, hooksAtRefusal: null, hooksAfterObservation: null, errorLines: null, loadRequests: 0, loadFailures: 0 };
+  writeFileSync(kit.config, original + PRESSURE_CONFIG);
+  let active = true;
+  const loaders = [];
+  try {
+    const started = await kit.manager(["start"]);
+    out.startCode = started.code;
+    const body = JSON.stringify({ model: "glm-5.3", max_tokens: 64, messages: [{ role: "user", content: "lorem ipsum dolor sit amet ".repeat(400_000) + "[[mock:ok]] pressure" }] });
+    const headers = { authorization: `Bearer ${kit.key}`, "content-type": "application/json" };
+    for (let i = 0; i < 4; i++) {
+      loaders.push((async () => {
+        while (active) {
+          out.loadRequests++;
+          try { await (await fetch(`${kit.base}/v1/messages`, { method: "POST", headers, body, signal: AbortSignal.timeout(15_000) })).text(); }
+          catch { out.loadFailures++; await sleep(200); } // the gap between two proxies
+        }
+      })());
+    }
+    const deadline = Date.now() + 240_000;
+    while (!MANAGER_REFUSED.test(logText()) && Date.now() < deadline) {
+      out.samplesBefore++;
+      out.maxProxiesBefore = Math.max(out.maxProxiesBefore, proxies().length);
+      await sleep(250);
+    }
+    out.refusalSeen = MANAGER_REFUSED.test(logText());
+    out.hooksAtRefusal = count(HOOKS);
+    if (out.refusalSeen) {
+      // The proxy whose request was refused, still under the load.
+      await sleep(1_000);
+      for (let i = 0; i < PRESSURE_OBSERVE_SAMPLES; i++) {
+        out.after.push({ proxies: proxies().length, healthy: (await kit.health(2000)) !== null });
+        await sleep(250);
+      }
+    }
+    out.hooksAfterObservation = count(HOOKS);
+    out.errorLines = count(/ ERROR supervisor respawn (?:refused|not acknowledged) by the kit manager; keeps serving [^\n]*restarts=exhausted/g);
+    try { out.restartsReserved = JSON.parse(readFileSync(join(kit.logDir, "respawn.json"), "utf8")).events.length; } catch { out.restartsReserved = null; }
+  } finally {
+    active = false;
+    await Promise.all(loaders);
+    writeFileSync(kit.config, original);
+    await settle();
+  }
+  ctx.log(`memory pressure: refusal ${out.refusalSeen}, restarts ${out.restartsReserved}, after ${out.after.filter((s) => s.proxies === 1 && s.healthy).length}/${out.after.length} serving`);
+  return out;
+}
+
+function pressureChecks(p) {
+  const notOne = p.after.filter((s) => s.proxies !== 1 || !s.healthy).length;
+  return [
+    { name: "pressure:refusal-reached", red: !p.refusalSeen, value: p.refusalSeen ? 1 : 0, budget: 1, unit: "budget refusal under pressure" },
+    { name: "pressure:restarts-in-window", red: p.restartsReserved === null || p.restartsReserved > PROCESSES.respawnsPer15Min, value: p.restartsReserved ?? "unreadable", budget: PROCESSES.respawnsPer15Min, unit: "restarts/15min" },
+    { name: "pressure:max-proxies", red: p.maxProxiesBefore > PROCESSES.proxiesPerInstallation, value: p.maxProxiesBefore, budget: PROCESSES.proxiesPerInstallation, unit: "procs" },
+    { name: "pressure:serving-proxy-after-refusal", red: !p.refusalSeen || notOne > 0, value: p.refusalSeen ? notOne : "not reached", budget: 0, unit: `samples of ${p.after.length} without exactly 1 healthy proxy` },
+    { name: "pressure:hooks-after-refusal", red: p.hooksAtRefusal === null || p.hooksAfterObservation !== p.hooksAtRefusal, value: (p.hooksAfterObservation ?? 0) - (p.hooksAtRefusal ?? 0), budget: 0, unit: "hooks" },
+    { name: "pressure:error-lines", red: p.refusalSeen && p.errorLines !== 1, value: p.errorLines, budget: 1, unit: "lines" },
+  ];
+}
 
 export async function run(ctx) {
   const session = await startProxySession(ctx, { startProxy: false });
@@ -147,6 +232,12 @@ export async function run(ctx) {
   ctx.note("respawnWithStaleLock", staleRespawn);
 
   await kit.manager(["stop"]);
+  // The stale-lock phase used one slot of this run's restart budget.
+  try { unlinkSync(join(kit.logDir, "respawn.json")); } catch {}
+  const pressure = await memoryPressure(ctx, kit, proxies, settle);
+  ctx.note("memoryPressure", pressure);
+
+  await kit.manager(["stop"]);
   await session.stop();
 
   const leftovers = cycles.filter((c) => c.proxiesAfter || c.listenersAfter).length;
@@ -167,6 +258,7 @@ export async function run(ctx) {
         { name: "unstoppable-proxy-after-ctrl-c", red: unstoppable > 0, value: unstoppable, budget: 0, unit: `of ${sigint.length}` },
         { name: "respawn-recovers-despite-stale-lock", red: !staleRespawn.healthy, value: staleRespawn.healthy ? 1 : 0, budget: 1, unit: "proxy up" },
         { name: "respawns-in-window", red: respawnsDone > PROCESSES.respawnsPer15Min, value: respawnsDone, budget: PROCESSES.respawnsPer15Min, unit: "restarts/15min" },
+        ...pressureChecks(pressure),
         { name: "log-dir-files", red: (cycles.at(-1)?.logFiles ?? 0) > PROCESSES.logDirFiles, value: cycles.at(-1)?.logFiles ?? 0, budget: PROCESSES.logDirFiles, unit: "files" },
       ],
     },
