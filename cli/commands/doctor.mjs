@@ -1,7 +1,9 @@
 // `zcode-kit doctor [--fix] [--harness <id>] [--json] [--upstream]` and
-// `doctor --forget <harness>`. The manager's own `doctor` report is passed
-// through verbatim and its FAIL/PASS/SKIP rows are counted with the adapter
-// checks: exit 0 when nothing failed, 1 otherwise, 2 on a usage error.
+// `doctor --forget <harness>`. The manager's checks come as its doctor
+// record (lib/proxy-doctor.mjs, ticket 38), never as parsed text: its own
+// report is shown first, as the manager CLI prints it, and its checks count
+// with the adapter checks: exit 0 when nothing failed, 1 otherwise, 2 on a
+// usage error.
 // `--fix` output that interleaves with the manager start (whose stdio is the
 // terminal's) is streamed through ctx.progress; the report is records.
 import { join } from "node:path";
@@ -105,19 +107,24 @@ async function doctor(flags, ctx, records) {
       if (!flags.json) ctx.progress(code === 0 ? "doctor --fix: proxy started" : `doctor --fix: proxy start failed (exit ${code ?? "timeout"})`);
     }
   }
-  const core = ctx.spawnSync(ctx.execPath, [manager, "doctor"], { encoding: "utf8", timeout: 25000 });
-  if (core.error || core.signal) add("manager doctor completed", false, "manager check failed or timed out");
-  // Parse the manager doctor output in BOTH modes: the text summary and exit
-  // code must count the same FAILs the user is shown, not only adapter checks.
-  const lines = (core.stdout ?? "").split("\n");
-  if (core.status !== 0 && !core.error && !core.signal && !lines.some(line => /^FAIL\s+/.test(line))) {
-    add("manager doctor completed", false, `manager check exited ${core.status ?? "unknown"} without a diagnostic failure result`);
+  // The manager's checks arrive as its doctor record (lib/proxy-doctor.mjs of
+  // this kit) and count with the adapter checks in BOTH modes, so the text
+  // summary and the exit code count the same FAILs the user is shown.
+  let core = null;
+  try {
+    const { managerDoctor } = await import(pathToFileURL(join(kit.root, "lib", "proxy-doctor.mjs")).href);
+    core = await managerDoctor({ root: kit.root, home: kit.home, env });
+  } catch {
+    add("manager doctor completed", false, "manager check failed or timed out");
   }
-  for (const line of lines) {
-    const m = line.match(/^(PASS|FAIL|SKIP)\s+(.+?)(?:\s+—\s+(.*))?$/);
-    if (m) checks.push({ name: m[2], ok: m[1] === "PASS" ? true : m[1] === "FAIL" ? false : null, detail: m[3] ?? "" });
+  if (core) {
+    if (core.code !== 0 && !core.checks.some((c) => c.ok === false)) {
+      add("manager doctor completed", false, `manager check exited ${core.code ?? "unknown"} without a diagnostic failure result`);
+    }
+    for (const c of core.checks) checks.push({ name: c.name, ok: c.ok, detail: c.detail ?? "" });
+    // The manager's own report first, as the manager CLI prints it.
+    if (!flags.json) records.push({ kind: "text", stream: "stdout", text: legacyReport(core.checks).join("") });
   }
-  if (!flags.json) records.push({ kind: "text", stream: "stdout", text: core.stdout ?? "" });
 
   const choices = readHarnessChoices(kit);
   for (const id of ids) {
@@ -149,11 +156,16 @@ async function doctor(flags, ctx, records) {
   if (flags.json) {
     records.push({ kind: "json", value: { ok: failed === 0, failed, skipped, checks } });
   } else {
-    for (const c of checks) {
-      const tag = c.ok === null ? "SKIP" : c.ok ? "PASS" : "FAIL";
-      records.push(stdoutLine(`${tag}  ${c.name}${c.detail ? ` — ${c.detail}` : ""}`));
-    }
-    records.push(stdoutLine(failed === 0 ? `doctor: ${skipped} skipped, ${failed} failed — OK` : `doctor: ${failed} check(s) failed`));
+    for (const line of legacyReport(checks)) records.push(stdoutLine(line.slice(0, -1)));
   }
   return { exitCode: failed === 0 ? 0 : 1, records };
+}
+
+/** Check rows and the summary line in the legacy off-TTY grammar (ADR-0001 rule 1), one "\n"-terminated string each. */
+function legacyReport(checks) {
+  const failed = checks.filter((c) => c.ok === false).length;
+  const skipped = checks.filter((c) => c.ok === null).length;
+  const lines = checks.map((c) => `${c.ok === null ? "SKIP" : c.ok ? "PASS" : "FAIL"}  ${c.name}${c.detail ? ` — ${c.detail}` : ""}\n`);
+  lines.push(failed === 0 ? `doctor: ${skipped} skipped, ${failed} failed — OK\n` : `doctor: ${failed} check(s) failed\n`);
+  return lines;
 }

@@ -17,7 +17,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { processCommandLine, resolveBun } from "../lib/process.mjs";
 
@@ -329,13 +329,15 @@ test("ensure running prints nothing and returns an outcome record per identity o
 test("ensure running reports a lock it may not take as an outcome, leaves the lock untouched and prints nothing", async (t) => {
   const root = kitFixture(t, await freePort());
   const lock = join(root, "logs", "manager.lock");
-  writeFileSync(lock, '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale"}');
+  // Ticket 16: a dead holder's lock is now taken over on proof (ADR-0003), so
+  // the lock it may not take is one of an unknown higher protocol version.
+  writeFileSync(lock, '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale","v":99}');
   const { value, out } = await printed(async () => (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 }));
   assert.deepEqual(out, []);
   assert.equal(value.outcome, "start-lock-unavailable");
   assert.equal(value.code, 1);
-  assert.match(value.error, /refusing automatic takeover/);
-  assert.equal(readFileSync(lock, "utf8"), '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale"}');
+  assert.match(value.error, /so it was left untouched/);
+  assert.equal(readFileSync(lock, "utf8"), '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale","v":99}');
 });
 
 test("stop, restart, the respawn request and read state print nothing and return records", async (t) => {
@@ -470,9 +472,15 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
 
   const asked = await fetch(`http://127.0.0.1:${port}/__test/respawn`).then((r) => r.text());
   assert.equal(asked, "true", "the old hook started the new manager");
+  // The port first, then the record: since ticket 16 the spawner records a
+  // spawn intent (pid null) before the spawn, so a record read before a slow
+  // port check may be that intent while the proxy it spawned already answers
+  // (CI run 42507303528, ubuntu Node 24). Only a record naming a pid is the
+  // respawned proxy's.
   const fresh = await until("the respawned proxy", async () => {
+    if (await identity(port) !== "ours") return null;
     const record = readJson(join(root, "logs", "proxy.pid"));
-    return record && record.pid !== old.pid && await identity(port) === "ours" ? record : null;
+    return record && Number.isInteger(record.pid) && record.pid !== old.pid ? record : null;
   }, 90_000);
   defer(root, () => killFixtureProxy(root, fresh.pid));
   await until("the respawn to finish", () => /respawn: start finished with exit code 0/.test(readFileSync(join(root, "logs", "proxy.log"), "utf8")), 30_000);
@@ -685,4 +693,359 @@ test("manager output masks the recorded stop token exactly, also where the token
   assert.equal(logs().stdout, `[zcode-proxy] echoed ${fixtureToken}\n`, "test premise: without a recorded token the line passes unchanged");
   writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: NEVER_ALLOCATED_PID, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z", stopToken: fixtureToken }) + "\n", { mode: 0o600 });
   assert.equal(logs().stdout, "[zcode-proxy] echoed <redacted>\n");
+});
+
+// -------------------------------------------- Windows kill guard identity (77)
+// Ticket 77 (found by ticket 21 round 3, run 42500996594): the Windows start
+// time was read as `Number(.NET ticks) / 10000 - epoch`, and the kill guard
+// compared the handle's creation time with FromUnixTimeMilliseconds(trunc(…))
+// at 1 ms. The tick count (~6.39e17) is above 2^53, so a start just above a
+// millisecond boundary lost a whole millisecond and every signal to that
+// process was refused. These tests drive the lifecycle module as it runs on
+// Windows: process.platform reads win32 and `powershell` on PATH is a
+// stand-in (tests/fixtures/fake-powershell.mjs) that answers the start-time
+// reader and evaluates the kill guard's identity check against the handle's
+// creation FILETIME. They fake Windows on a POSIX host; the windows-latest leg
+// runs the real PowerShell through the spawned tests above.
+const FAKE_POWERSHELL = join(ROOT, "tests", "fixtures", "fake-powershell.mjs");
+const { identityCheckExit } = await import(pathToFileURL(FAKE_POWERSHELL).href);
+// The worked example: the true start is …240003.0001 ms since the Unix epoch;
+// the pre-77 reader gave …240002.9922 and the guard compared against …240002.
+const WORKED_TICKS = 639297530400030001n;
+const WORKED_FILETIME = 134386298400030001n; // the same instant as a creation FILETIME
+const WORKED_MS = 1794156240003.0001; // as a double: …240003.0 (resolution 0.24 µs at this magnitude)
+const OLD_KIT_WORKED_MS = 1794156240002.9922; // what a pre-77 kit recorded for it
+const TICKS_PER_MS = 10000n;
+const FILETIME_OF = (ticks) => ticks - 504911232000000000n;
+const fakeWindows = { skip: process.platform === "win32" && "fakes Windows on a POSIX host; windows-latest runs the real PowerShell" };
+
+/** Run as Windows with a stand-in PowerShell; `processes` as in the fixture's state file. */
+function asWindows(processes) {
+  const dir = mkdtempSync(join(tmpdir(), "fake-powershell-"));
+  const state = join(dir, "state.json");
+  const log = join(dir, "calls.jsonl");
+  writeFileSync(state, JSON.stringify({ log, processes }));
+  writeFileSync(join(dir, "powershell"), `#!/bin/sh\nFAKE_POWERSHELL_STATE='${state}' exec '${process.execPath}' '${FAKE_POWERSHELL}' "$@"\n`, { mode: 0o755 });
+  const saved = { platform: Object.getOwnPropertyDescriptor(process, "platform"), path: process.env.PATH };
+  Object.defineProperty(process, "platform", { ...saved.platform, value: "win32" });
+  process.env.PATH = dir + delimiter + saved.path;
+  return {
+    calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []),
+    restore() {
+      Object.defineProperty(process, "platform", saved.platform);
+      process.env.PATH = saved.path;
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
+const newKitRecord = (pid, ticks, ms) => ({ pid, startedMs: ms, startedIso: new Date(ms).toISOString(), startTicks: String(ticks) });
+const oldKitRecord = (pid, ms) => ({ pid, startedMs: ms, startedIso: new Date(ms).toISOString() });
+const msOf = (ticks) => Number(ticks - 621355968000000000n) / 10000; // a record's display value only
+const gone = (child) => until(`pid ${child.pid} to exit`, () => child.exitCode !== null || child.signalCode !== null, 10_000);
+
+/**
+ * One healthy-answering installation per case, each with a live stand-in
+ * proxy recorded in proxy.pid (record(pid)) and described to the stand-in
+ * PowerShell (process(pid)); then every stop at once, as Windows.
+ * Returns [{ proxy, root, record, stopped }] in case order, plus the calls.
+ */
+async function stopAsWindows(t, cases) {
+  const fixtures = [];
+  for (const c of cases) {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    await identityServer(t, port, "ours");
+    const proxy = spawn(process.execPath, ["-e", 'setInterval(() => {}, 1e6); process.stdout.write("up\\n");', join(root, "stand-in")], { stdio: ["ignore", "pipe", "ignore"] });
+    defer(root, () => killChild(proxy));
+    await new Promise((r) => proxy.stdout.once("data", r));
+    const record = c.record(proxy.pid);
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify(record) + "\n");
+    fixtures.push({ c, root, proxy, record, lifecycle: await lifecycleFor(root) });
+  }
+  const win = asWindows(Object.fromEntries(fixtures.map((f) => [f.proxy.pid, f.c.process(f.proxy.pid)])));
+  let stopped, calls;
+  try {
+    stopped = await Promise.all(fixtures.map((f) => f.lifecycle.stop()));
+    calls = win.calls();
+  } finally { win.restore(); }
+  return fixtures.map((f, i) => ({ ...f, stopped: stopped[i], calls: calls.filter((call) => call.pid === f.proxy.pid) }));
+}
+
+test("the Windows start-time reader keeps the exact tick count: 639297530400030001 reads as …240003.0001 ms, not a millisecond early", fakeWindows, async (t) => {
+  const root = kitFixture(t, await freePort());
+  const lifecycle = await lifecycleFor(root);
+  const win = asWindows({ 4242: { ticks: String(WORKED_TICKS) } });
+  let ms;
+  try { ms = lifecycle.processStartMs(4242); } finally { win.restore(); }
+  assert.equal(Math.floor(ms), 1794156240003, `read ${ms}: the millisecond the process started in`);
+  assert.ok(Math.abs(ms - WORKED_MS) < 1e-3, `read ${ms}, expected ${WORKED_MS}`);
+});
+
+test("stop terminates a recorded proxy whose start lies just above a millisecond boundary (worked example and boundary sweep)", { ...fakeWindows, timeout: 120_000 }, async (t) => {
+  const boundary = WORKED_TICKS - 1n; // …240003.0000 ms exactly
+  const sweep = [WORKED_TICKS, boundary, boundary + 2n, boundary + 64n, boundary + 127n, boundary + 128n, boundary + 9999n, boundary + 10001n];
+  const results = await stopAsWindows(t, sweep.map((ticks) => ({
+    record: (pid) => newKitRecord(pid, ticks, msOf(ticks)),
+    process: () => ({ ticks: String(ticks) }),
+  })));
+  for (const [i, { proxy, root, stopped }] of results.entries()) {
+    assert.deepEqual({ ticks: String(sweep[i]), code: stopped.code, lines: stopped.lines }, { ticks: String(sweep[i]), code: 0, lines: [`stopped (pid ${proxy.pid})`] });
+    await gone(proxy);
+    assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "the stopped proxy's record is removed");
+  }
+});
+
+test("the kill guard compares the handle's creation FILETIME exactly: the same tick passes, one tick or 1 ms + 1 tick away is refused", async () => {
+  // Pure: the guard script text for every boundary tick value, evaluated by the
+  // stand-in's identity check. The worked example's literal is pinned.
+  const { killGuardScript } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
+  const worked = killGuardScript(4242, String(WORKED_TICKS));
+  assert.match(worked, /if \(\$created -ne \[long\]'134386298400030001'\) \{ exit 4 \}/);
+  assert.doesNotMatch(worked, /FromUnixTimeMilliseconds|TotalMilliseconds/, "no millisecond rounding in the comparison");
+  assert.ok(worked.indexOf("$created -ne") < worked.indexOf("TerminateProcess($handle,0)"), "the identity check precedes the signal");
+  assert.match(worked, /OpenProcess\(0x1001, \$false, 4242\)/);
+  let checked = 0;
+  for (let ms = 0n; ms < 200n; ms++) {
+    for (const sub of [0n, 1n, 2n, 63n, 64n, 65n, 127n, 128n, 129n, 5000n, 9872n, 9998n, 9999n]) {
+      const ticks = WORKED_TICKS - 1n + ms * TICKS_PER_MS + sub;
+      const script = killGuardScript(4242, String(ticks));
+      const created = FILETIME_OF(ticks);
+      assert.equal(identityCheckExit(script, created), 0, `ticks ${ticks}: the matching process passes`);
+      for (const off of [1n, -1n, TICKS_PER_MS + 1n, -(TICKS_PER_MS + 1n)]) {
+        assert.equal(identityCheckExit(script, created + off), 4, `ticks ${ticks}: a handle created ${off} ticks away is refused`);
+      }
+      checked++;
+    }
+  }
+  assert.equal(checked, 2600);
+  assert.equal(FILETIME_OF(WORKED_TICKS), WORKED_FILETIME);
+  assert.throws(() => killGuardScript(4242, "not-ticks"), SyntaxError, "a guard is never built without an exact identity");
+});
+
+test("a reused pid is still refused: a live start one tick or 1 ms + 1 tick from the record, or a handle created 1 ms + 1 tick later", { ...fakeWindows, timeout: 120_000 }, async (t) => {
+  const cases = [
+    ["live start 1 tick later", WORKED_TICKS + 1n, null, { code: 4, outcome: "reuse-suspect", guard: false }],
+    ["live start 1 ms + 1 tick later", WORKED_TICKS + TICKS_PER_MS + 1n, null, { code: 4, outcome: "reuse-suspect", guard: false }],
+    ["handle created 1 ms + 1 tick later", WORKED_TICKS, WORKED_FILETIME + TICKS_PER_MS + 1n, { code: 2, outcome: "kill-failed", guard: true }],
+    ["handle created 1 tick earlier", WORKED_TICKS, WORKED_FILETIME - 1n, { code: 2, outcome: "kill-failed", guard: true }],
+  ];
+  const results = await stopAsWindows(t, cases.map(([, live, created]) => ({
+    record: (pid) => newKitRecord(pid, WORKED_TICKS, WORKED_MS),
+    process: () => ({ ticks: String(live), ...(created === null ? {} : { created: String(created) }) }),
+  })));
+  for (const [i, { proxy, root, record, stopped, calls }] of results.entries()) {
+    const [label, , , want] = cases[i];
+    assert.deepEqual({ label, code: stopped.code, outcome: stopped.outcome }, { label, code: want.code, outcome: want.outcome });
+    const guards = calls.filter((c) => c.kind === "guard");
+    if (want.guard) {
+      assert.ok(guards.length >= 1 && guards.every((g) => g.exit === 4), `${label}: every guard run refused (${JSON.stringify(guards)})`);
+      assert.ok(stopped.lines.includes(`refusing to signal pid ${proxy.pid}: process handle identity could not be confirmed (kill guard exit 4: the handle's creation time differs from the expected start)`), stopped.lines.join("\n"));
+    } else {
+      assert.deepEqual(guards, [], `${label}: no signal attempt at all`);
+    }
+    assert.equal(proxy.exitCode, null, `${label}: the process is never signalled`);
+    assert.equal(proxy.signalCode, null);
+    assert.deepEqual(readJson(join(root, "logs", "proxy.pid")), record, `${label}: the record stays`);
+  }
+});
+
+test("a pid record whose start ticks are present but unreadable proves nothing: stop refuses and never signals", { ...fakeWindows, timeout: 60_000 }, async (t) => {
+  // Its startedMs alone would pass the legacy 1 ms rule; a damaged identity
+  // must not fall back to it (B4: never signal on an unproven identity).
+  const damaged = ["6392975304000300O1", "", "-639297530400030001", "1e18"];
+  const results = await stopAsWindows(t, damaged.map((startTicks) => ({
+    record: (pid) => ({ ...newKitRecord(pid, WORKED_TICKS, WORKED_MS), startTicks }),
+    process: () => ({ ticks: String(WORKED_TICKS) }),
+  })));
+  for (const [i, { proxy, root, record, stopped, calls }] of results.entries()) {
+    assert.deepEqual({ startTicks: damaged[i], code: stopped.code, outcome: stopped.outcome }, { startTicks: damaged[i], code: 4, outcome: "start-unknown" });
+    assert.deepEqual(calls.filter((c) => c.kind === "guard"), []);
+    assert.equal(proxy.exitCode, null);
+    assert.deepEqual(readJson(join(root, "logs", "proxy.pid")), record);
+  }
+});
+
+test("a pid record from an older kit (millisecond startedMs, no ticks) still verifies within 1 ms; one more than 1 ms away is refused", { ...fakeWindows, timeout: 60_000 }, async (t) => {
+  // Legacy tolerance: |live − recorded| ≤ 1 ms (the rule older kits applied).
+  // An older kit's value for this process is …240002.9922 (float error < 0.01 ms).
+  const cases = [[OLD_KIT_WORKED_MS, 0], [WORKED_MS - 0.999, 0], [WORKED_MS + 0.999, 0], [WORKED_MS - 1.01, 4], [WORKED_MS + 1.01, 4]];
+  const results = await stopAsWindows(t, cases.map(([recordedMs]) => ({
+    record: (pid) => oldKitRecord(pid, recordedMs),
+    process: () => ({ ticks: String(WORKED_TICKS) }),
+  })));
+  for (const [i, { proxy, stopped }] of results.entries()) {
+    const [recordedMs, want] = cases[i];
+    assert.deepEqual({ recordedMs, code: stopped.code }, { recordedMs, code: want }, stopped.lines.join("\n"));
+    if (want === 0) await gone(proxy);
+    else {
+      assert.equal(stopped.outcome, "reuse-suspect");
+      assert.equal(proxy.exitCode, null);
+    }
+  }
+});
+
+test("the stop narration records the kill guard's exit code, and each refusal branch reads differently", { ...fakeWindows, timeout: 60_000 }, async (t) => {
+  const exits = [2, 3, 4, 5, 1];
+  const results = await stopAsWindows(t, exits.map((guardExit) => ({
+    record: (pid) => newKitRecord(pid, WORKED_TICKS, WORKED_MS),
+    process: () => ({ ticks: String(WORKED_TICKS), guardExit }),
+  })));
+  const seen = new Map();
+  for (const [i, { proxy, stopped }] of results.entries()) {
+    const exit = exits[i];
+    assert.equal(stopped.code, 2);
+    const line = stopped.lines.find((l) => l.includes(`kill guard exit ${exit}`));
+    assert.ok(line, `exit ${exit}: ${stopped.lines.join(" | ")}`);
+    assert.deepEqual(stopped.lines.slice(-1), [`ERROR killing pid ${proxy.pid}`]);
+    seen.set(exit, line.replace(String(proxy.pid), "<pid>"));
+  }
+  assert.equal(new Set(seen.values()).size, exits.length, [...seen.values()].join("\n"));
+  assert.match(seen.get(2), /OpenProcess failed/);
+  assert.match(seen.get(3), /GetProcessTimes failed/);
+  assert.match(seen.get(4), /creation time differs/);
+  assert.match(seen.get(5), /TerminateProcess failed/);
+  assert.match(seen.get(1), /PowerShell error/);
+});
+
+test("a proxy the manager starts on Windows records its exact start ticks, and stop terminates it through the guard", { ...fakeWindows, timeout: 120_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port, { proxySrc: true });
+  const bun = bunOrFail();
+  const lifecycle = await lifecycleFor(root, { bunResolver: () => bun });
+  const win = asWindows({ "*": { ticks: String(WORKED_TICKS) } });
+  let started, record, stopped;
+  try {
+    started = await lifecycle.ensureRunning({ waitMs: 30_000 });
+    record = readJson(join(root, "logs", "proxy.pid"));
+    if (record) defer(root, () => killFixtureProxy(root, record.pid));
+    stopped = await lifecycle.stop();
+  } finally { win.restore(); }
+  assert.equal(started.code, 0, started.lines.join("\n"));
+  // The record also carries this spawn's stop token (ticket 18; its value is
+  // checked in the section below): compared here without it.
+  const { stopToken, ...identityFields } = record ?? {};
+  assert.ok(typeof stopToken === "string" && stopToken.length > 0, "the record carries a stop token");
+  assert.deepEqual(identityFields, { pid: started.pid, startedMs: WORKED_MS, startedIso: "2026-11-08T16:44:00.003Z", startTicks: "639297530400030001" });
+  assert.deepEqual({ code: stopped.code, lines: stopped.lines }, { code: 0, lines: [`stopped (pid ${started.pid})`] });
+  await until("the proxy to leave the port", async () => await identity(port) === "down", 15_000);
+});
+
+// ------------------------- the stop token in 16's pid record (tickets 16, 18, 77)
+// Every proxy.pid is built by one builder (pidRecord, ticket 16) and written
+// atomically at mode 0600; the stop token (ticket 18) goes through it: the
+// spawn intent, the pid and start-time writes of the spawner, and
+// completeRecord, which rewrites a record another manager wrote and so keeps
+// that record's token for the same spawn and never invents one. startTicks
+// (ticket 77) and the spawn intent stay as they were. Tokens are generated
+// fixtures and are compared without printing them (B2).
+
+// An in-process listener that answers the identity proof naming `pid` as its own.
+async function identityListenerFor(t, port, pid) {
+  const server = http.createServer((req, res) => {
+    if (req.headers.authorization !== `Bearer ${KEY}`) return res.writeHead(401).end();
+    res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pid } }));
+  });
+  await new Promise((r) => server.listen(port, "127.0.0.1", r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+}
+/** A harmless child the test owns (killed through its own handle at the end). */
+function harmlessChild(t) {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)"], { stdio: "ignore" });
+  t.after(() => killChild(child));
+  return child;
+}
+const DEAD_SPAWNER = NEVER_ALLOCATED_PID;
+const modeOf = (file) => statSync(file).mode & 0o777;
+
+test("completeRecord keeps the stop token of the record it completes (a recorded pid or a spawn intent), never invents one, and leaves the record owner-only", { timeout: 60_000 }, async (t) => {
+  const cases = [
+    ["recorded pid with a token", "pid", true],
+    ["spawn intent with a token", "intent", true],
+    ["recorded pid without a token (an older kit)", "pid", false],
+    ["spawn intent without a token (an older kit)", "intent", false],
+  ];
+  for (const [label, kind, withToken] of cases) {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    const proxy = harmlessChild(t);
+    await new Promise((r) => proxy.once("spawn", r));
+    await identityListenerFor(t, port, proxy.pid);
+    const token = randomBytes(32).toString("base64url");
+    const at = Date.now();
+    const unfinished = {
+      pid: kind === "pid" ? proxy.pid : null, startedMs: null, startedIso: null, spawning: { by: DEAD_SPAWNER, at },
+      ...(withToken ? { stopToken: token } : {}),
+    };
+    // Another manager's record, world-readable (an older kit's write mode).
+    const pidFile = join(root, "logs", "proxy.pid");
+    writeFileSync(pidFile, JSON.stringify(unfinished) + "\n");
+    chmodSync(pidFile, 0o644);
+    const started = await (await lifecycleFor(root)).ensureRunning();
+    assert.equal(started.outcome, "already-running", `${label}: ${started.lines.join("\n")}`);
+    const { stopToken, ...rest } = readJson(pidFile) ?? {};
+    assert.equal(rest.pid, proxy.pid, `${label}: completed for the answering pid`);
+    assert.ok(Number.isFinite(rest.startedMs), `${label}: the start time is recorded`);
+    assert.equal(rest.spawning, undefined, `${label}: the spawn intent is gone once complete`);
+    if (withToken) assert.ok(stopToken === token, `${label}: the completed record keeps the token it held`);
+    else assert.equal(stopToken, undefined, `${label}: no token is invented`);
+    if (process.platform !== "win32") assert.equal(modeOf(pidFile), 0o600, `${label}: the completed record is owner-only`);
+    assert.ok(!started.lines.some((l) => l.includes(token)), `${label}: no narration line carries the token`);
+    assert.ok(untouchedChild(proxy), `${label}: the proxy is never signalled`);
+  }
+});
+const untouchedChild = (child) => child.exitCode === null && child.signalCode === null;
+
+test("the manager's reports never return the recorded stop token: readPidFile and readState carry the identity fields only", async (t) => {
+  const root = kitFixture(t, await freePort());
+  const token = randomBytes(32).toString("base64url");
+  const record = { pid: NEVER_ALLOCATED_PID, startedMs: WORKED_MS, startedIso: "2026-11-08T16:44:00.003Z", startTicks: String(WORKED_TICKS), stopToken: token };
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify(record) + "\n", { mode: 0o600 });
+  const lifecycle = await lifecycleFor(root);
+  const { stopToken, ...identityFields } = record;
+  assert.deepEqual(lifecycle.readPidFile(), identityFields);
+  const state = await lifecycle.readState();
+  assert.ok(!JSON.stringify(state).includes(token), "readState carries no stop token");
+  assert.deepEqual(state.pidRecord, identityFields);
+});
+
+test("a spawn's records all carry its stop token next to startTicks: the intent, the pid record and the completed record, as Windows", { ...fakeWindows, timeout: 120_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port, { proxySrc: true });
+  const bun = bunOrFail();
+  const pidFile = join(root, "logs", "proxy.pid");
+  const kitEnvOut = join(root, "kit-env.json");
+  const seenAt = {};
+  const lifecycle = await lifecycleFor(root, { bunResolver: () => bun, stepHook: (step) => { if (step.startsWith("spawn:")) seenAt[step] = readJson(pidFile); } });
+  const win = asWindows({ "*": { ticks: String(WORKED_TICKS) } });
+  const savedOut = process.env.FAKE_PROXY_KIT_ENV_OUT;
+  process.env.FAKE_PROXY_KIT_ENV_OUT = kitEnvOut;
+  let started, record, mode, stopped;
+  try {
+    started = await lifecycle.ensureRunning({ waitMs: 30_000 });
+    record = readJson(pidFile);
+    if (record) defer(root, () => killFixtureProxy(root, record.pid));
+    mode = modeOf(pidFile);
+    stopped = await lifecycle.stop();
+  } finally {
+    win.restore();
+    if (savedOut === undefined) delete process.env.FAKE_PROXY_KIT_ENV_OUT; else process.env.FAKE_PROXY_KIT_ENV_OUT = savedOut;
+  }
+  assert.equal(started.code, 0, started.lines.join("\n"));
+  const seen = readJson(kitEnvOut);
+  assert.equal(seen?.pid, started.pid, "test premise: the proxy recorded its per-spawn environment");
+  const token = seen.stopToken;
+  assert.ok(typeof token === "string" && STOP_TOKEN_SHAPE.test(token), "the proxy received a stop token");
+  const intent = seenAt["spawn:intent-recorded"];
+  assert.deepEqual({ pid: intent?.pid, by: intent?.spawning?.by, startTicks: intent?.startTicks }, { pid: null, by: process.pid, startTicks: undefined }, "the spawn intent is 16's, unchanged");
+  assert.ok(intent.stopToken === token, "the spawn intent carries the spawn's token");
+  assert.ok(seenAt["spawn:pid-recorded"]?.stopToken === token, "the pid record carries it");
+  assert.ok(seenAt["spawn:start-recorded"]?.stopToken === token, "the start-time record carries it");
+  const { stopToken, ...identityFields } = record;
+  assert.ok(stopToken === token, "the final record carries the token the proxy received");
+  assert.deepEqual(identityFields, { pid: started.pid, startedMs: WORKED_MS, startedIso: "2026-11-08T16:44:00.003Z", startTicks: "639297530400030001" }, "77's exact ticks, next to the token");
+  assert.equal(mode, 0o600, "the record is owner-only");
+  assert.ok(!started.lines.concat(stopped.lines).some((l) => l.includes(token)), "no narration line carries the token");
+  assert.deepEqual({ code: stopped.code, lines: stopped.lines }, { code: 0, lines: [`stopped (pid ${started.pid})`] });
+  await until("the proxy to leave the port", async () => await identity(port) === "down", 15_000);
 });

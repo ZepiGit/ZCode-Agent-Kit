@@ -17,6 +17,7 @@ import {
 import { ACCOUNT_ROTATOR_QUESTION, askAccountRotator } from "../cli/account-setup.mjs";
 import { beginTransaction, rollbackTransaction } from "../lib/transaction.mjs";
 import { commitFile } from "../lib/edit.mjs";
+import { freePort } from "./free-port.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 const IDS = ["omp", "pi", "claude-code", "codex", "opencode", "cline", "kilo-code", "aider", "continue", "goose"];
@@ -328,12 +329,15 @@ test("transaction savepoint/restoreSince undoes only the ops of one failed harne
 });
 
 // ------------------------------------------------------------ CLI e2e
+const FIXTURE_PORT = await freePort();
 function fixture(t, { detect = ["omp", "pi"], mcpDist = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), "kit-consent-e2e-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "logs")); mkdirSync(join(root, "zcode-proxy-src"));
-  cpSync(join(KIT, "proxy", "config.example.yaml"), join(root, "proxy", "config.example.yaml"));
+  // The template's port is a free port of this run (ticket 75): setup, doctor
+  // and the manager probe it, and the production port 8457 may be the owner's.
+  writeFileSync(join(root, "proxy", "config.example.yaml"), readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8").replace(/^  port: \d+/m, `  port: ${FIXTURE_PORT}`));
   cpSync(join(KIT, "proxy", "zcode-proxy-manager.mjs"), join(root, "proxy", "zcode-proxy-manager.mjs"));
   cpSync(join(KIT, "proxy", "zcode-proxy-autostart.ts"), join(root, "proxy", "zcode-proxy-autostart.ts"));
   // The OMP adapter validates YAML with the proxy's `yaml` dependency.
@@ -404,8 +408,8 @@ test("setup without a terminal skips every undecided harness, writes nothing, ex
   assert.deepEqual([readFileSync(f.omp, "utf8"), readFileSync(f.pi, "utf8")], before, "harness configs untouched");
   assert.equal(existsSync(f.mcp), false, "no MCP registration without consent");
   assert.equal(choicesOf(f), null, "no answer, no stored decision");
-  assert.match(r.stdout, /OpenAI-compatible base URL:\s+http:\/\/127\.0\.0\.1:8457\/v1/);
-  assert.match(r.stdout, /Anthropic-compatible base URL: http:\/\/127\.0\.0\.1:8457 /);
+  assert.match(r.stdout, new RegExp(`OpenAI-compatible base URL:\\s+http://127\\.0\\.0\\.1:${FIXTURE_PORT}/v1`));
+  assert.match(r.stdout, new RegExp(`Anthropic-compatible base URL: http://127\\.0\\.0\\.1:${FIXTURE_PORT} `));
   assert.match(r.stdout, /proxy not verified running/);
   assert.ok(!r.text.includes(f.key()), "the local proxy key never appears in non-terminal output");
 });

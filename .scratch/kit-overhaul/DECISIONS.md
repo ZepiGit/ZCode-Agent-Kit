@@ -4491,3 +4491,387 @@ Open branches I still see (none blocks ticket 20 once condition 3's run is GREEN
 - **Proxy-touching tickets have no signature for this tail.** Examples are 21, 76 and 77, and any later `zcode-proxy-src/**` ticket. Each one that meets an S1/short RED comes back with its distribution, as 20 did. If that happens often before the triage ticket answers, the answer is due early.
 - **EVIDENCE MISSING: the linux leg of measurement run 42502424683** is not on this host. Condition 3 says how 20's linux burst1 criterion stands either way.
 - **Ticket 77's kill-guard orphan** (about 1 in 3,500 proxies, seen in S1/short repetition 2 of 42500996594) is a separate RED class, not covered by (vii). With 5 repetitions per run it now gets five chances per windows run.
+
+
+# Round 29 (2026-11-08): ticket 74's mutant proof failed, so what happens to 30 and S5/short?
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The decisions of Rounds 1–28 in DECISIONS.md bind these answers. Where an answer departs from one of them, it names that decision.
+
+Evidence read (read-only):
+- `OWNER-PROXY-BRIEF.md` and `rounds/round-29.md`.
+- DECISIONS Rounds 24, 25 and 26 in full, and Round 28's signature (vii) (ineligibility by exact path, the ~4 % per-run tail).
+- On the integration tree (aed28ee): issues 30, 55, 56, 57 and 74, `INDEX.md` rows 30/55/56/57/74, METRICS lines 325–351 (Round 25's set), the RUNLOG tail to 20:03Z, and `spec.md:645`.
+- Ticket 74's branch (`/home/AgentKit/wt/t74`, head eab4ddf on 2c6720c): the issue file's Comments, and METRICS lines 429–436. From 30's branch I read `git diff --stat` and the full diff of `job.mjs`, `lib/ratchet.mjs` and `expected-red.json` (merge base with 7555b87 to 2c6720c), plus the mutation list in 30's issue at 2c6720c.
+- Raw data `/home/AgentKit/overhaul-tools/t74-memloop/{mut,tree}-{1,2,3}`: `samples.csv`, `job-summary.md`, `run.log` and the `bridge-data/tasks` listings. I re-implemented `growth()` independently from `verdict.mjs:70-106` (MB = 1024, linear slope on progress/1000, six window medians, a trailing rising run at 1 %, net rise) and ran it on the bridge role's samples.
+- Windows S5/short lines in the local CI logs written after Round 25 (`ci-art/t20-ev/*-windows.log`, `ci-art/t16-r1/win-memory-job.log`).
+
+**Recomputed facts and corrections to the round.**
+
+1. **Confirmed: the six-run table.**
+   - My recompute over tasks 600–1,199 matches each value within one sample: M1 7.76 / 16.96 / 8.98, tree 2.84 / 5.74 / 5.61 %/1k.
+   - The medians are identical. Rising windows are 2 / 2 / 0 on M1 and 0 / 0 / 0 on the tree. Net rise is 5.4 / 7.7 / 3.9 % on M1 and 1.9 / 2.2 / 3.0 % on the tree.
+   - So the trend flag cannot fire in any of the six runs. Under the pre-registered rule, M1 is GREEN 3 of 3, and the tree is ≤ 5 in only 1 of 3.
+   - **Both halves of Round 24 Q1 condition 5 fail.** So 74's own exit criterion ("≤ 5 whatever the trend flag says") would also fail on the tree.
+2. **"Absolute slope (MB/1k)" is not a different quantity.**
+   - `growthPctPer1k` is slope ÷ mean × 100, and the means are 95.8–103.7 MB. So MB/1k and %/1k rank the six runs identically: tree max 5.56 MB/1k = 5.75 %/1k, M1 min 7.96 MB/1k = 7.77 %/1k.
+   - Either one separates the arms only with a value threshold between about 5.8 and 7.7 %/1k without the trend flag. That is a different rule from §9's "5 %/1k AND trend", and it is not obviously a tightening. Three runs per arm with a gap of 2.4 MB/1k is no basis for one.
+3. **"A longer post-bound window" is not supported by this data either.**
+   - Over tasks 900–1,199, M1 gives 3.79 / 16.79 / **−15.03** %/1k and the tree gives 0.43 / −0.91 / 2.57.
+   - M1's RSS signal comes in steps, not as a steady slope. Two of three mutant runs are flat or falling in the second half.
+   - A longer window may still help, but that is a hypothesis to measure, not the place the evidence points.
+4. **Confirmed, with a note: "3,600 task files against 1,500".**
+   - Each M1 `run.log` prints "data 5.9 MB in 3600 files" at the reboot measurement.
+   - All six `bridge-data/tasks` directories now hold 1,500 files (500 tasks × 3), mutants included. So the reboot path's restore still applies the bound, and M1 removes only the in-run check.
+   - Consequence: `bridge:reboot-cost-of-history` (3–4 MB on M1) cannot see M1 either. Record only.
+5. **M1 is already caught deterministically in CI.** 30's mutation set kills M1 and M1b ("the count bound removed (check or victims)") through `test/integration/retention.test.mjs`, which runs in `npm run test:mcp` (`ci.yml:48`). The bound has a guard whatever 74's later answer is. This matters for item 3 (condition 8).
+6. **Under the current edges, "56/57 unblock as their own blockers allow" is false.**
+   - 57's Blocked-by line names 30, 36 and **74**, and 56's names 13, 30, 31, 36, 57 and **74** (Round 24 Q1 edges; INDEX rows 56 and 57).
+   - With 74 reopened as `needs-triage`, both would wait for an unscheduled round and a re-implementation.
+7. **Round 25's 20-value set is not tabulated.**
+   - METRICS lists values 1–5 only.
+   - The local logs alone hold 11 further windows values on trees with 36: staging/20's ten evidence runs 42502565823–42503373851 (17.4, 23.77, 17.5, 19.92, 25.39, 23.17, 23.34, 18.41, 19.84, 22.2) and t16-r1's 18.93. Earlier 36-tree runs (42493218404, 42494299680, 42495987510, 42500996594, 42506095577, …) come before them in creation order and are not in hand.
+   - **EVIDENCE MISSING: values 6–20 in run-creation order.** The set is very likely complete already, before 30's runs. Round 26 Q1 condition 4 requires it complete and trigger-free for 30's verdict.
+   - Record only: the 15 known values without 30 have mean 20.54, sd 3.04, max 25.39, with none above 30.
+8. **30 is ineligible for signature (vii), Round 28.**
+   - 30's diff touches `tests/memory/lib/ratchet.mjs` (a comment) and `tests/memory/job.mjs` (one label string). Both are label-only, which I checked in the diff. They are still inside (vii)'s exact-path ineligibility.
+   - At Round 28's ~4 % per windows run, the chance of at least one windows S1/short RED is 33.5 % over 10 full-CI runs and 36.2 % over 11. Signature (vi) never applies to 30 either (Round 25 Q1 condition 2).
+9. **`spec.md:645` on the integration tree states Round 24's amendment as in force** ("S5/short runs 1,200 tasks …"). It also still says "owned by ticket 30" in the Round 13 text. Both are now wrong.
+
+---
+
+## Q1 — 74 failed its own proof. Does 30 merge, and what replaces 74's rule?
+
+**DECISION:** REJECTED in part.
+
+Accepted:
+- **Item 1 in full.** 74 does not stage or merge. Its pre-registered rule (1,200 tasks, window 600–1,200, the `warm-up-growth` ceilings of 55 linux / 30 windows) is **withdrawn as failed** under Round 24 Q1 condition 8. Nothing is changed to fit. The branch (eab4ddf) is kept unmerged for reuse; its commits 8c5a947 and d6a17a0 delete both S5/short entries and `UNSTABLE`, and must never merge in part.
+- **The core of item 2.** This is Round 26 Q1 condition 6c exactly: 30 takes exactly 10 full-CI runs per leg on its own staging tree under condition 4, then follows 6b.
+- **The core of item 3.** 74 becomes `needs-triage` with one question for a later round. It measures ≥ 5 runs per arm per leg before any rule is pre-registered. The S5/short entries (owned by 74) and signature (vi) stay as they are.
+
+Rejected or corrected:
+- (i) **"If the verdict holds, 30 merges"** leaves out 6b's confirming pre-merge run (condition 3).
+- (ii) **"56/57 unblock as their own blockers allow"** (correction 6). The edges 57 ← 74 and 56 ← 74 are removed, under a one-rule condition. 55 ← 74 stays (condition 6).
+- (iii) **The pointers "absolute slope (MB/1k)" and "a longer post-bound window"** are not backed by the data (corrections 2 and 3). They do not go into 74's ticket. The question stays open, and that includes the answer "no S5/short quantity separates" (correction 5; condition 8).
+- (iv) **"Windows via an off-by-default staging measurement mode"** for the mutant arm. A mutant on a CI runner needs a pushed mutant commit, and Round 24 Q1 condition 5 says "never committed". Nothing here authorises that. How a windows mutant arm is produced is part of 74's question (condition 8).
+- (v) **Round 25's set must be tabulated** before 30's verdict can be read (correction 7; condition 4).
+- (vi) **The linux ≤ 55 part of 30's verdict is applied by the orchestrator from the recorded value.** The ratchet cannot apply it: on 30's tree linux S5/short is listed under `flips` and passes any value (condition 2).
+
+**This explicitly departs from:**
+- **Round 24 Q1 "Edges"**: the edges 57 ← 74 and 56 ← 74 are removed. The reasons Round 24 gave, the shared `s5-mcp.mjs` and one S5 rule for 56's base comparison, are kept by condition 6 instead of by a block on a ticket with no rule and no schedule.
+- **Round 24 Q1 conditions 3, 7 and 10, and Round 26 Q1 conditions 1–3 and 6a** for 74: they lapse with the withdrawn rule.
+- **Round 25 Q1 condition 5's ceiling round** is moot until a re-decided rule has a warm-up ceiling. Round 25's set and triggers stay in force: they are part of 30's verdict and of the band's come-back rule.
+
+It is consistent with Round 24 Q1 condition 8 (the Fallback), Round 26 Q1 conditions 2, 4, 5, 6b and 6c, Round 25 Q1 conditions 1–4, Round 28's (vii) eligibility, and Round 6 Q2 condition 1 (74 stays an open owner).
+
+**I loosen no bound.** These are all unchanged:
+- the 5 %/1k budget, `MEMORY.growth`, `growth()` and the trend rule;
+- S5/short at 400 tasks with today's quantity;
+- the windows band (5 < v ≤ 30 commit);
+- (vi) with its hard 35;
+- (vii);
+- the S5 budgets (150 MB, 20 MB, 0).
+
+Binding conditions:
+
+1. **74 withdrawn.**
+   - 74 does not stage, and no part of eab4ddf merges.
+   - Its job-seam work (progress windows, the window bounds in `summary.json`, `completeness.mjs`, the fixture tests, the 1,199 fix) stays on `ticket/74-s5-short-post-bound` for reuse. Reuse needs a re-decided rule.
+   - The ubuntu timeout stays at 75. S5/short stays at 400 tasks.
+2. **30's staging (Round 26 Q1 condition 6c, pre-registered).**
+   - Tree: the integration tip at staging time, then `ticket/30` (2c6720c or its successor; no 74 commit). Before the first run, RUNLOG records the tree hash and "10 per leg".
+   - Exactly 10 full-CI runs per leg of that one tree (empty commits). Every run with an S5/short value counts. A run with no S5/short value (an infrastructure failure before S5) is replaced, and the replacement is recorded.
+   - Each run records the windows commit and WS values, trend, slope MB/1k, mean MB and window medians; the linux RSS value with the same fields; and procPeak, reboot cost, task failures, orphans and duration.
+   - 30's verdict is Round 26 Q1 condition 4, unchanged:
+     - every windows value satisfies 5 < v ≤ 30 commit (≤ 5 comes back as an ownership question);
+     - every linux value is ≤ 55 %/1k, judged by the orchestrator from the printed value;
+     - every other S5 check is GREEN in every run;
+     - Round 25's set is complete with no trigger;
+     - (vi) and (vii) never apply.
+   - Any value above 30, a linux value above 55, or any other S5 RED sends 30 back with all values, and nothing is rerun.
+3. **Merge (Round 26 Q1 condition 6b).**
+   - If the verdict holds and the tip has not moved since the tree was built, the 10th windows/linux run serves as the confirming pre-merge run. This is 6a's provision applied to 6b, so no identical 11th run adds risk without information. It serves only if every job of that CI run is GREEN under the normal rules.
+   - If the tip moved, 30 is re-merged onto it and one confirming pre-merge run decides nothing new: band in force, linux listed on growth only, every other S5 check GREEN.
+   - Then 30 merges alone.
+   - Revert: 30 may be reverted on its own. No 74 code exists on the tip.
+4. **Round 25's set (correction 7).**
+   - Before 30's verdict is read, METRICS fills values 6–20 in run-creation order from the windows `memory-budget` job logs of every 36-tree run, any branch. It prints n, mean, sd and max with the "with 30 / without 30" subsets (Round 26 Q1 condition 5).
+   - 30's runs enter only if slots remain. Either way, 30's 10 runs are printed beside the set as the "with 30" comparison that Round 25 Q1 condition 7 asked for.
+   - A trigger comes back under Round 25 Q1 condition 4.
+5. **Failures outside S5 in 30's runs** follow the normal rules and do not remove S5 values (Round 26 Q1 condition 2).
+   - A windows S1/short RED is not covered by (vii) (correction 8). It comes back under Round 28 with its per-repetition distribution.
+   - That round will have the fact that 30's two memory-lib edits are label text only. This round does not pre-judge it.
+6. **Edges (departure above).**
+   - Remove 57 ← 74 and 56 ← 74. Keep 55 ← 74, because 74 owns the two entries and 55 needs an empty list.
+   - Edges 57 ← 30 and 56 ← 30 stay, so 56 and 57 still wait for 30's merge.
+   - Condition carried into 56 and 57: their S5 values and base are measured under one S5/short rule. If a re-decided 74 rule merges while either is in flight, that ticket re-measures its base under the new rule. The later of two `s5-mcp.mjs` changes rebases (Round 24's no-edge-to-71 precedent).
+   - Removing edges cannot create a cycle.
+7. **Records.**
+   - 74's METRICS section ("S5/short after the retention bound", t74 METRICS lines 425–436) is copied to the integration METRICS and labelled "withdrawn rule (Round 29)", with corrections 2–4.
+   - RUNLOG records this round's departures, the pre-registration of condition 2, and that 74 does not merge.
+   - `spec.md:645` is amended (text below).
+8. **74's question (for a later round; no implementer chooses it).**
+   - Is there an S5/short quantity that separates a working retention bound from M1 on both legs? It must be measured on ≥ 5 runs per arm per leg, with the arms on one tree, before any rule is pre-registered.
+   - Any candidate must be checked against §9 (5 %/1k AND trend) as a tightening, never a loosening.
+   - If none separates: how do the two entries end? Options include accepting 30's deterministic `retention.test.mjs` kill of M1 as the bound's guard (C9 "do nothing" for a memory statistic), and what 55's empty-list criterion then does with them.
+   - How a windows mutant arm runs without committing the mutant (Round 24 Q1 condition 5).
+   - Whether linux S5/short gets a value ceiling. Round 17's open branch reopens when the 55 ceiling is withdrawn; between them, 30's 10 runs give the next linux distribution on the merged tree.
+
+**Rationale:** The proof did what it was pre-registered to do. It showed that the 600–1,200 window with the trend rule cannot see M1: net rise 3.9–7.7 % against 10 %, rising run ≤ 2 against 3. It also showed that the bounded tree sits on the 5 %/1k budget in 2 of 3 runs. So the rule fails both as a detector and as an exit, and the Fallback applies with no part merged. 30 is a finished C1 fix: S5/long 238.6 → 111.4 MB peak, and M1 is killed deterministically in `test:mcp`. Round 26 Q1 condition 6c already decided that 30 must not hang on 74's own failure modes, so 30 takes the 10 pre-registered runs on its own tree, judged on the same quantity and at the same 30 bound it has always faced.
+
+The recommendation was right on that core. It was wrong on four facts:
+- 56/57 are still blocked by edges to 74.
+- Its two pointers for 74 point where the data does not: MB/1k is %/1k rescaled, and the second half of the window is flat or falling on two mutant runs.
+- A windows mutant arm in CI needs a committed mutant.
+- 30's verdict depends on a Round 25 set that nobody has tabulated.
+
+The edge change is the smaller blast radius: a ticket with no rule, no schedule and an open question should not block the SDK migration (C5) and the restart budget (C1). The reasons for the edges (one rule, one file) are kept by condition 6.
+
+**Charter:** C1 (the retention bound lands on 10 runs per leg; M1 stays guarded deterministically; no bound is loosened), C2 (no list, flag or output change; the S5/short entries keep their labels), C5 (56 is not held behind an unscheduled ticket), C7 (windows judged on 10 runs at the 30 band beside a complete 20-value set; linux values judged ≤ 55), C9 (stronger measured evidence: six raw runs recomputed, plus a second-half split; smaller blast radius: 74 withdrawn whole, 30 alone, edges replaced by a one-rule condition; "do nothing" stays a valid answer for 74), §9 (5 %/1k, 150 MB, 20 MB, 0 unchanged), Round 6 Q2 condition 1, Round 24 Q1 conditions 5 and 8, Round 25 Q1 conditions 2, 4 and 7, Round 26 Q1 conditions 2, 4, 5, 6b and 6c, Round 28 (vii), PROMPT §7 Phase 4 (no rerun-until-green; no spurious blocks).
+
+**REVERSIBILITY:** Two-way door: a withdrawn rule that was never merged, a staging order, two removed edges, ticket text and records. 30's merge is itself revertible. ADR: no.
+
+### Exact text changes
+
+**`issues/74-s5-short-growth-after-retention-bound.md`.**
+- `**Status:** ready-for-agent` becomes `**Status:** needs-triage`. Blocked by 30 stays. The file name stays, because the ratchet requires `issues/74-*.md`.
+- Replace the title and the `**What to build:**` paragraph with:
+
+```
+# 74: S5/short: which measurement separates a working retention bound from its mutant (needs triage)
+
+**What to build:** Round 24's rule (1,200 tasks, growth:mcp-bridge over tasks 600–1,200 with the trend rule, warm-up-growth ceilings 55 linux / 30 windows) failed its pre-registered mutant proof and is withdrawn (Round 29 Q1): ticket 30's M1 was GREEN in 3 of 3 runs (7.77 / 17.01 / 9.03 %/1k, trend false), the bounded tree ≤ 5 in 1 of 3 (2.85 / 5.75 / 5.62). Open question for an Owner Proxy round: which S5/short quantity, if any, separates a working retention bound from M1 on both legs, measured on ≥ 5 runs per arm per leg on one tree before any rule is pre-registered and checked against §9 as a tightening; if none, how the two S5/short entries end (30's retention.test.mjs already kills M1 in test:mcp), and what ticket 55's empty list does with them; how a windows mutant arm runs without committing the mutant. This ticket keeps owning both S5/short entries; signature (vi) ends only when a rule of this ticket merges.
+```
+
+- Keep the existing Acceptance list and mark it with one line above it: `Acceptance below is Round 24's withdrawn rule (Round 29 Q1); a later round replaces it.`
+- Add under `## Comments`:
+
+```
+- 2026-11-08 (orchestrator, Owner Proxy round 29, binding): mutant proof failed on both arms (implementer comment above; values recomputed from /home/AgentKit/overhaul-tools/t74-memloop). The rule is withdrawn under the Fallback; nothing merges, branch eab4ddf kept unmerged for reuse. Recompute: MB/1k equals %/1k × mean/100 here (means 95.8–103.7 MB), so it is not a separate quantity; over tasks 900–1,199 M1 reads 3.79 / 16.79 / −15.03 and the tree 0.43 / −0.91 / 2.57. M1 removes only the in-run bound (3,600 files at reboot, 1,500 after restore), so reboot cost cannot see it. Edges 57 ← 74 and 56 ← 74 removed (one-rule condition in 56 and 57); 55 ← 74 stays.
+```
+
+**`issues/30-mcp-task-retention-and-idempotency-window.md`**, add under `## Comments`:
+
+```
+- 2026-11-08 (orchestrator, Owner Proxy round 29, binding): 74's mutant proof failed, so Round 26 Q1 condition 6c applies: this ticket takes exactly 10 full-CI runs per leg on its own staging tree (integration tip, then ticket/30; tree hash in RUNLOG before the first run), judged under the Acceptance's S5/short bullet on the band value (windows 5 < v ≤ 30 commit; linux ≤ 55 judged from the printed value; every other S5 check GREEN; Round 25's set tabulated, complete and trigger-free; signatures (vi) and (vii) never apply). Then one confirming pre-merge run (the 10th run serves if the tip has not moved and every job is GREEN), and 30 merges alone. A value above 30 or 55, or any other S5 RED, comes back with all values; nothing is rerun.
+```
+
+**`issues/56-mcp-sdk-2-migration.md` and `issues/57-mcp-runtime-restart-budget.md`.**
+- Remove `74 (S5/short: judge MCP bridge growth after the retention bound)` from the `**Blocked by:**` lines.
+- Add under Comments: `- 2026-11-08 (Owner Proxy round 29): edge to 74 removed; this ticket's S5 values and their base are measured under one S5/short rule; if a re-decided ticket-74 rule merges while this ticket is in flight, its base is re-measured under that rule.`
+
+**`issues/INDEX.md`.**
+- Row 74: title `S5/short: which measurement separates a working retention bound from its mutant (needs triage)`; Blocked-by stays `30`; status `needs-triage`.
+- Row 56's cell becomes `13, 30, 31, 36, 57`. Row 57's becomes `30, 36`. Row 55 is unchanged.
+
+**`spec.md:645`**, append: `Round 29 Q1: Round 24's S5/short amendment is withdrawn (its mutant proof failed); S5/short stays at 400 tasks with the Round 13 quantity and band; both S5/short entries are owned by ticket 74 (needs-triage), not ticket 30.`
+
+**METRICS.** Values 6–20 of Round 25's set, with subsets (condition 4). 74's withdrawn-rule section and corrections 2–4 (condition 7). 30's 10-run table.
+
+---
+
+## Shared understanding
+
+Open branches I still see:
+1. **Round 25's set, values 6–20: EVIDENCE MISSING.** They must be tabulated in creation order before 30's verdict (condition 4).
+2. **By-chance failure of 30's runs.**
+   - S5 band: Round 26's 3.6–31.6 % per 10 runs; the 15 newer known values without 30 (max 25.39) point to the low end.
+   - Windows S1/short: about 34–36 % over 10–11 runs, since 30 is ineligible for (vii). That RED comes back under Round 28.
+3. **The attribution of 34.62** is decided by 30's 10 runs, laid beside the set.
+4. **74's question** (condition 8): a separating quantity, or none (30's deterministic test as the guard). Also how the entries and 55's empty list end, and how a windows mutant arm runs without a committed mutant. The windows post-bound value is still EVIDENCE MISSING.
+5. **Linux S5/short has no value ceiling** again after 30 merges (Round 17's branch reopens), and signature (vi) has no end date until a 74 rule merges. Both are bounded meanwhile by Round 25's triggers and the hard 35.
+
+
+# Round 30 (2026-11-09): ticket 30's round-4 set passed; one linux S1/stalled RED in it
+
+Owner Proxy: claude-opus-5-5, fresh context, Charter v1. The decisions of Rounds 1–29 in DECISIONS.md bind these answers. Where an answer departs from one of them, it names that decision.
+
+Evidence read (read-only):
+- `OWNER-PROXY-BRIEF.md` and `rounds/round-30.md`.
+- DECISIONS Rounds 25, 26, 28 and 29 in full. I also read Round 13 Q1 condition 6 for the "restage on a changed tree" precedent.
+- The integration worktree at 7f0c368: RUNLOG lines 210–224 (both pre-registrations, the b46596a verdict, the round-4 diagnosis), METRICS lines 602–632 (Round 25's set), STATE.md.
+- Ticket 30's issue file at 540752f (`git -C /home/AgentKit/wt/t30 show HEAD:…`): the Round 29 verdict comment and the implementer's round-4 entries (root cause, fix d8b34db, mutations M1–M17, the addendum).
+- Git (read-only): `git diff --stat e84971f c6ead53`, the full diff of `job.mjs`, `lib/ratchet.mjs` and `expected-red.json` on 30's branch, `git diff --stat f56c46d e84971f` (failed-tree base against new-tree base), `git diff e84971f HEAD` (tip since the build), `git diff HEAD...origin/staging/16c`, and the PR merge base of every run.
+- Raw job logs `ci-art/t30s/<run>-{windows,ubuntu}.log` and `ci-art/t30r/` (29-character prefix stripped). I re-extracted every S5/short check line on all 40 legs and did not use `values.txt`.
+- Every archived log under `ci-art/` that contains a linux S1/stalled loop. I deduplicated by the loop id (`S1-short-stalled-<time>-<hex>`) and took the platform from the summary path (`/home/runner/…` against `D:\a\…`).
+- `gh run view --json jobs` for the 10 t30s runs. I streamed the ubuntu `memory-budget` job logs of 11 recent runs not archived (42513423687 … 42543302875) through `grep` and saved nothing.
+
+**Recomputed facts and corrections to the round.**
+
+1. **Confirmed: the S5/short verdict on tree e5b2c50.**
+   - Windows `growth:mcp-bridge` on commit: 17.1, 16.67, 26.04, 18.17, 21.16, 23.53, 19.72, 20.43, 26.59, 20.0. That is n 10, mean 20.94, sd 3.46, min 16.67, max 26.59. Trend is false in 10 of 10, and the windows S5 loop is GREEN outright in all 10.
+   - Linux: 42.52, 44.14, 45.09, 42.81, 38.86, 34.85, 37.78, 40.39, 39.42, 37.67. That is mean 40.35, sd 3.24, all ≤ 55 (listed under 74, as expected).
+   - Every other S5 check is GREEN on all 20 legs:
+     - procPeak: windows WS 59.1–60.3 MB, linux 91.5–93.9 MB;
+     - reboot cost 0–2 MB;
+     - 0 task failures and 0 orphans.
+   - Round 25's set (METRICS 606–632) is complete: n 20, mean 21.13, max 34.62, 1 value above 30, none above 35. No trigger fires.
+2. **The measured tree is e5b2c50 plus one docs line, and it was fixed before any value existed.**
+   - Every run checks out "Merge <staging/30s head> into 8d243c2". 8d243c2 is e84971f plus one RUNLOG line (the pre-registration itself), so it is the same shape as staging/30r (merged into 6875cd3).
+   - All ten heads carry tree e5b2c50.
+   - 8d243c2 was committed at 00:52:51Z. The first run was created at 00:52:59Z.
+3. **The fix is the only S5-relevant difference between the failed tree and the new one.** Between the failed tree's base f56c46d and e84971f, nothing changed under `mcp/`, `lib/mcp-bridge.mjs`, `tests/memory/`, `.github/`, `package.json` or `zcode-proxy-src/`. The only changes were `lib/proxy-lifecycle.mjs` (77), `scripts/fixture-ports.mjs` and kit tests (75).
+   - Windows mean, old tree against new: 27.33 against 20.94, Welch t 3.48. Trend true: 6 of 10 against 0 of 10.
+   - New tree against Round 25's without-30 subset (20.42, n 19): t 0.41.
+   - **This closes Round 25 Q1 condition 7's EVIDENCE MISSING.** The 34.62 of 42483637377 and the b46596a set came from 30's per-request retention scan before the fix. They did not come from 36's base or from the tail.
+4. **How the new set came about (process).**
+   - Round 29 Q1 condition 2 says a failed value "sends 30 back with all values, and nothing is rerun". The orchestrator read "back" as "back to its implementer". It then pre-registered a fresh set on a new tree as its own decision (RUNLOG 00:52Z), and no Owner Proxy round looked at it before the runs.
+   - The failed tree was not rerun. The new tree changes S5-executed code at a diagnosed cause:
+     - the new constant-lookup-work test is RED on the pre-fix dist and GREEN on the fix;
+     - M17 (full scan per request) is killed;
+     - minor GCs match the tip after the fix (321 against 319.7).
+   - The verdict and the count are unchanged. This is Round 13 Q1 condition 6's shape, except that the cause was shown by the implementer and is confirmed here, not decided here beforehand.
+5. **Only one job failed in the 10 runs: ubuntu `memory-budget` of 42542646289.** The other 79 jobs are GREEN. The 10th run 42543167527 is 8/8 GREEN, but it cannot serve as the pre-merge run, because the tip has moved: dfb9b43 (ticket 38) and 7f0c368 (Round 29 Q1 condition 3).
+6. **What the tip changed since e84971f is off S5's path.**
+   - Ticket 38 touches `cli/commands/doctor.mjs`, `lib/proxy-doctor.mjs`, `proxy/zcode-proxy-manager.mjs`, `pack/verify-payload.mjs`, `package.json` (only the `test` script list) and tests.
+   - staging/16c (in flight) touches `tests/memory/lib/completeness.mjs`, the S3/S4 scenarios, the S3 entries of `expected-red.json`, `package.json` (test list) and tests.
+   - None of this is on Round 25 Q1 condition 2's S5 list.
+7. **Confirmed: the S1/stalled RED is the only failure in 42542646289.**
+   - The values: `growth:proxy` 5.5 %/1k, trend true; `procPeak:proxy` 206 MB; `count:proxy` 1; `orphans` 0. The ratchet prints "S1/stalled: RED but not listed in expected-red.json (linux)".
+   - **Correction: S1/stalled has no `steady` check.** Its four checks are `growth:proxy`, `procPeak:proxy`, `count:proxy` and `orphans`. Recommendation 2's clause "and steady GREEN" cannot be checked.
+8. **Correction: 30's diff on `tests/memory/` is five files, not three.** They are `expected-red.json`, `job.mjs`, `lib/ratchet.mjs`, `loop.test.mjs` and `verdict.test.mjs`.
+   - The last two are test files. The memory job does not run them.
+   - The `job.mjs` change is one markdown label string ("ticket 30's ≥ 10 runs" → "ticket 74's"). The `ratchet.mjs` change is a comment. The `expected-red.json` change re-labels both S5/short owners to 74.
+   - None of these can change a measured S1 value.
+9. **Correction: the history is 135 distinct linux S1/stalled executions, not 197.** The archive holds 267 raw occurrences, with copies of the same loop in several directories. I deduplicated by loop id.
+   - The 135: median 1.58 (confirmed), mean 1.41, sd 1.94, min −5.81, max 5.5. Seven are above 4.5 (5.5, 4.95, 4.88, 4.81, 4.81, 4.75, 4.56), and 5.5 is the only one above 5.
+   - The 11 streamed runs (0.45, 4.5, 3.19, 1.62, 4.01, 0.97, 2.14, 2.05, 1.16, 1.64, 0.3) are all GREEN.
+   - **Combined: 1 RED in 146, 0.68 % per run (95 % Clopper–Pearson 0.02–3.8 %).**
+   - A normal fit predicts P(> 5) = 3.2 %, but only 1 of 135 values is above 5, so the upper tail is lighter than normal.
+   - The round's conclusion ("max, first above 5") holds.
+10. **Record only: the spread in the t30s burst.** Its ten S1/stalled values range from −5.81 to 5.5 (sd 3.43). The other 125 values have sd 1.79, and the means are 1.27 against 1.43.
+    - The other trees that contain 77 (8 streamed, plus t73b) read sd 1.38. The staging/30r burst reads sd 1.44.
+    - A spread on both sides with an unchanged mean is what measurement noise looks like, not a leak, which would raise the mean. It is local to one burst of 10 runs started within 7 minutes, not to the tree.
+
+---
+
+## Q1 — does ticket 30 merge, and what about the linux S1/stalled RED in run 42542646289?
+
+**DECISION:** REJECTED in part.
+
+Accepted:
+- **Item 1.** 30 passes its pre-registered verdict on tree e5b2c50, and it merges after one confirming pre-merge run on the current tip (condition 2). I ratify the new-tree pre-registration explicitly here, under condition 1.
+- **Item 2, first half.** The linux S1/stalled RED of 42542646289 is not charged to 30.
+- **Item 2, the triage ticket.** It records values only and comes back on its triggers. I add one trigger and one question (condition 4).
+- **Item 3.** A linux S1/stalled RED in 30's confirming run comes back with both values, and nothing is rerun.
+
+Rejected:
+- (i) **Interim signature (viii)** (condition 5). The measured rate does not support a standing exception: 1 RED in 146 runs, 0.68 % per run. That is below Round 17 Q3's 1 % design bar, against the 1.4–3.7 % that justified (vi) and the about 4 % that justified (vii).
+  - Its 6 %/1k ceiling is the one observed value plus 0.5, with no distribution behind it.
+  - Its "steady GREEN" clause names a check that S1/stalled does not have (correction 7).
+  - Until ticket 79 answers, each linux S1/stalled RED comes back with its values, as 20's S1/short RED did in Round 28.
+- (ii) **"Every other S1 failure in 197 values"** is corrected to 135 + 11 distinct runs (correction 9). No conclusion changes.
+
+Consistency with earlier decisions:
+- Consistent with Round 29 Q1 condition 2 ("nothing is rerun"). The failed tree b46596a was not rerun, and its 10 values stay on record.
+- Consistent with Round 29 Q1 condition 3 (re-merge, one confirming run), Round 26 Q1 condition 2 (failures outside S5 do not remove S5 values) and Round 28 Q1 condition 1 (a RED that a diff cannot reach is decided on its distribution, for the one run only).
+- Round 25 Q1 conditions 2 and 4 and signature (vi) are unchanged. So are Round 28's (vii) and ticket 78.
+- It *clarifies* Round 29 Q1 condition 2. "Sends 30 back" means back to its implementer and to a new pre-registered set on a new tree. It never means a rerun. From now on, a fresh set after a failed verdict needs an Owner Proxy round before its first run (condition 1).
+
+**I loosen no bound.** These are all unchanged:
+- the 5 %/1k budget, the trend rule and `growth()`;
+- the windows band (5 < v ≤ 30 commit) and the linux ≤ 55 judgement;
+- the S5 budgets (150 MB, 20 MB, 0);
+- S1's 250 MB procPeak and count/orphans budgets;
+- (vi) with its hard 35, and (vii).
+
+Binding conditions:
+
+1. **The new set is ratified, once.**
+   - staging/30s (tree e5b2c50, 42542570923 … 42543167527) is ticket 30's pre-registered set under Round 29 Q1 condition 2. It counts because:
+     - it was registered before its first run;
+     - it uses the same verdict and count as the failed set;
+     - on S5-executed code, the tree differs from the failed one only by the fix for the diagnosed cause (correction 3).
+   - b46596a's set stays on record as "failed, pre-fix" in METRICS and in 30's Comments.
+   - If 30's confirming or post-merge run fails S5, it comes back to an Owner Proxy round with all values before any new set is registered. The orchestrator does not pre-register one itself.
+2. **Merge (Round 29 Q1 condition 3).**
+   - Re-merge `ticket/30` (540752f or its successor, with no change under `mcp/`) onto the current tip, then make one pre-merge CI run. It confirms and decides nothing new:
+     - the windows band applies;
+     - linux S5/short is listed on growth only (≤ 55 from the printed value);
+     - every other S5 check is GREEN;
+     - every other job is GREEN under the normal rules.
+   - **Transfer rule.** The 10 runs carry over to the re-merged tree only if the tip since e84971f has merged nothing on Round 25 Q1 condition 2's S5 list:
+     - `mcp/**`, `lib/mcp-bridge.mjs`, `tests/memory/scenarios/s5-mcp.mjs`;
+     - `tests/memory/lib/{verdict,budgets,sampler*,win-*,ratchet}.mjs`;
+     - the Bun pin, or the memory job's Node version.
+   - Today that holds (correction 6). If the tip touches that list before the re-merge, 30 comes back.
+   - A windows S1/short RED in that run comes back under Round 28 (30 is ineligible for (vii); Round 29 Q1 condition 5).
+   - A linux S1/stalled RED comes back with both values (item 3): its value, 5.5, and this round's record. Nothing is rerun. No signature applies.
+   - Then 30 merges alone. Revert: 30 may be reverted on its own.
+3. **Run 42542646289 and ticket 30.**
+   - The run's S5 values count, under Round 26 Q1 condition 2.
+   - Its linux S1/stalled RED is not charged to 30:
+     - 30's S1-reachable edits are one markdown label string and one comment (correction 8);
+     - 5.5 lies inside a 146-run history with 1 RED;
+     - every other S1/stalled check is GREEN.
+   - This covers this run only. It is no standing exception for 30 or for this key.
+4. **Ticket 79 (the next free number), `Status: needs-triage`: "linux S1/stalled growth:proxy: tail and burst spread".**
+   - It owns no name and lists nothing.
+   - **What it records:** for every linux S1/stalled run from now on, in its Comments or a METRICS table:
+     - run id, tree, `growth:proxy` value, trend, `procPeak:proxy`;
+     - the window medians from `summary.json` where the artefact exists;
+     - how many CI runs were created in the 10 minutes before it.
+   - It back-fills the 146 values above, with run ids.
+   - **What it asks:**
+     - (a) Is the upper tail stable, or did any merged tree shift it?
+     - (b) Is the spread in the t30s burst runner contention (correction 10) or a tree effect?
+     - (c) If a rule is needed, which one holds a false-RED rate ≤ 1 % without loosening the 5 %/1k budget or the trend rule?
+   - **When it comes back:**
+     - after 20 more linux runs;
+     - earlier on a second RED within any 20 consecutive linux runs;
+     - earlier on any value above 6 %/1k;
+     - earlier on any linux S1/stalled RED in a ticket's own staged or pre-merge run.
+   - Until then, there is no change to the budget, the trend rule, `growth()` or the list.
+5. **No signature (rejected (viii)).**
+   - Until ticket 79 is answered, a staged or pre-merge run whose only unexcused failure is linux S1/stalled RED comes back to an Owner Proxy round with its value, the diff's paths and the ticket 79 table. Nothing is rerun.
+   - A post-merge run follows PROMPT §7 Phase 4 unchanged.
+   - Departing from the default needs measured evidence of a rate above 1 %. Ticket 79 gathers it.
+6. **Records.**
+   - RUNLOG records:
+     - this round;
+     - the ratification and the rule of condition 1;
+     - the correction of the history count (135 + 11 distinct, not 197);
+     - that run 42542646289's S1/stalled RED is not charged to 30.
+   - METRICS gains:
+     - the staging/30s table (both legs, every S5 field, per run), printed beside the failed b46596a set and Round 25's set, with the Welch figures of correction 3;
+     - the "with 30" subset split into pre-fix (42483637377 and b46596a, n 11) and fixed (e5b2c50, n 10).
+
+**Rationale:** The pre-registered verdict holds on every clause, recomputed from the raw logs. Windows is 16.67–26.59, trend false in all 10, with a mean indistinguishable from the without-30 set (t 0.41). Linux is ≤ 45.09. Every other S5 check is GREEN on all 20 legs, and Round 25's set is complete with no trigger. The change from the failed tree is exactly the fix for a cause that was shown in three ways: the minor-GC excess, the late-window commit gap, and a lookup-work test that is RED before the fix. So the new set is evidence, not a second roll of the same dice, and I can ratify it. I close the door for later sets so that the orchestrator cannot pick its own retries. 30 is a finished C1 fix: S5/long peak 238.6 → 111.4 MB, and M1/M1b/M17 are killed in `test:mcp`. It should merge after the one confirming run Round 29 requires. The linux S1/stalled RED cannot come from 30's edits, which are a label and a comment, and 5.5 is the tail of a 146-run history. Charging it to 30 would be the random block that Rounds 9, 13, 15 and 28 refused. The standing signature fails C9's first test, though. At 0.68 % per run, the default rule rarely blocks anyone and no exception is needed. Its ceiling was fitted to the value it would excuse, and one of its clauses names a check that does not exist. So "do nothing" plus a recording ticket is the stronger-evidence, simpler and smaller-blast-radius answer.
+
+**Charter:** C1 (the retention bound lands on 10 runs per leg plus a confirming run; no bound loosened; the proxy growth gate stays hard), C7 (windows decides the S5 verdict; linux judged ≤ 55; the linux tail recorded), C9 (stronger measured evidence: 40 legs and 146 linux S1/stalled values recomputed; simpler and smaller blast radius: no new signature, a recording ticket, one ratification with a closed door), §9 (5 %/1k, 30, 55, 150 MB, 20 MB and 0 unchanged), Round 13 Q1 condition 6, Round 17 Q3 condition 2 (≤ 1 % design bar), Round 25 Q1 conditions 2, 4 and 7, Round 26 Q1 conditions 2 and 4, Round 28 Q1 conditions 1 and 5, Round 29 Q1 conditions 2, 3 and 5, PROMPT §7 Phase 4 (no rerun-until-green; no merge on an unattributed RED).
+
+**REVERSIBILITY:** Two-way door: a merge that is revertible on its own, a recording ticket, a process rule and records. ADR: no.
+
+### Exact text changes
+
+**`issues/30-mcp-task-retention-and-idempotency-window.md`**, add under `## Comments`:
+
+```
+- 2026-11-09 (orchestrator, Owner Proxy round 30, binding): the round-4 set on staging/30s (tree e5b2c50, 42542570923..42543167527, pre-registered at 00:52Z before the first run) is ratified as this ticket's Round 29 Q1 condition 2 set and PASSES: windows commit 17.1, 16.67, 26.04, 18.17, 21.16, 23.53, 19.72, 20.43, 26.59, 20.0 (mean 20.94, trend false 10/10; t 0.41 against the without-30 mean 20.42, t 3.48 against the failed b46596a set), linux 34.85-45.09 (all <= 55), every other S5 check GREEN on all 20 legs, Round 25's set complete with no trigger. The 34.62 of 42483637377 and the b46596a set are attributed to the pre-fix per-request retention scan (Round 25 Q1 condition 7 closed). Merge: re-merge onto the current tip and one confirming pre-merge run (band in force, linux listed on growth only, every other S5 check and every other job GREEN); the 10 runs transfer only if the tip since e84971f touched nothing on Round 25 Q1 condition 2's S5 list. Run 42542646289's linux S1/stalled RED (growth:proxy 5.5 %/1k, trend true; procPeak 206 MB, count 1, orphans 0) is not charged to this ticket (its S1-reachable edits are a label string in job.mjs and a comment in lib/ratchet.mjs); a linux S1/stalled or windows S1/short RED in the confirming run comes back with its values; nothing is rerun. A further failed S5 set comes back to an Owner Proxy round before any new set is pre-registered.
+```
+
+**New `issues/79-linux-s1-stalled-growth-tail.md`:**
+
+```
+# 79: linux S1/stalled growth:proxy: tail and burst spread (needs triage)
+
+**Status:** needs-triage
+**Blocked by:** none
+
+**What to build:** nothing yet. Record every linux S1/stalled run from 2026-11-09 on (run id, tree, growth:proxy %/1k, trend, procPeak:proxy, window medians from summary.json where the artefact exists, number of CI runs created in the 10 minutes before it) and back-fill the 146 distinct values recomputed in Owner Proxy round 30 (135 archived under ci-art, deduplicated by loop id, plus 11 streamed; 1 RED: 42542646289, 5.5 %/1k, trend true). Questions for an Owner Proxy round: (a) is the upper tail stable or did a merged tree shift it; (b) is the wider spread of the staging/30s burst (sd 3.43 against 1.79, mean unchanged) runner contention or a tree effect; (c) if a rule is needed, which one holds a false-RED rate <= 1 % without loosening the 5 %/1k budget or the trend rule. This ticket owns no name and lists nothing; no signature applies meanwhile.
+
+**Comes back:** after 20 more linux runs; earlier on a second RED within any 20 consecutive linux runs, on any value above 6 %/1k, or on any linux S1/stalled RED in a ticket's own staged or pre-merge run.
+```
+
+**`issues/INDEX.md`:** add row 79 (`linux S1/stalled growth:proxy: tail and burst spread`, blocked by none, `needs-triage`). No other edge or status changes.
+
+**METRICS:** the staging/30s table and the pre-fix/fixed subsets (condition 6).
+
+---
+
+## Shared understanding
+
+Open branches I still see:
+1. **30's confirming run** can still fail by chance on keys 30 cannot reach. Windows S1/short is about 4 % per run (Round 28; 30 is ineligible for (vii)), and linux S1/stalled 0.7 % (up to 3.8 %). Either one comes back with values.
+2. **Linux S1/stalled tail and the t30s burst spread** (ticket 79). Is it contention or a tree effect? Until it answers, each RED comes back to a round.
+3. **74's question (Round 29 Q1 condition 8) is unchanged.** Signature (vi) has no end date until a 74 rule merges, and linux S5/short has no value ceiling once 30 merges (Round 17's branch).
+4. **Record only: at the 500 bound, each new terminal task still costs one scan and sort** (30's implementer, "Left open"). S5/short does not reach the bound, and S5/long was GREEN with it.

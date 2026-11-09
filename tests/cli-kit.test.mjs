@@ -693,12 +693,13 @@ test("auth status reports logged_in true only on a real quota snapshot", async (
 test("doctor --harness text summary counts manager FAIL lines (no false OK, exit 1)", async () => {
   const root = makeMiniKit();
   try {
-    // makeMiniKit ships no manager: install a deterministic stub whose doctor
-    // output contains a FAIL line the text summary must count (and it must
-    // flip the exit code to 1 even when --harness filters the adapter checks).
+    // Install a deterministic stub of the manager's doctor (its check record,
+    // ticket 38; before, a stub manager CLI printing the rows) with a FAIL
+    // check the text summary must count (and it must flip the exit code to 1
+    // even when --harness filters the adapter checks).
     writeFileSync(
-      join(root, "proxy", "zcode-proxy-manager.mjs"),
-      'console.log("FAIL  credentials store — no credentials present");\nconsole.log("PASS  config exists — ok");\n',
+      join(root, "lib", "proxy-doctor.mjs"),
+      'export async function managerDoctor() {\n  return { intent: "doctor", code: 1, outcome: "failed", checks: [\n    { name: "credentials store", ok: false, detail: "no credentials present" },\n    { name: "config exists", ok: true, detail: "ok" },\n  ] };\n}\n',
     );
     let captured;
     try {
