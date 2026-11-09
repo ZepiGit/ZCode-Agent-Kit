@@ -16,6 +16,7 @@ import net from "node:net";
 import { createHash } from "node:crypto";
 import { startServer, type ProxyServer } from "./server.js";
 import { AuthManager } from "../auth/manager.js";
+import { proxyRequest } from "../proxy/handler.js";
 import type { ProxyConfig } from "../config/types.js";
 import { fixtureSecret } from "../test-fixtures.js";
 
@@ -259,6 +260,27 @@ describe("a streaming client's reads pace the upstream (ticket 61)", () => {
     } finally {
       oneChunk = null;
     }
+  }, 60_000);
+
+  it("messages, at the handler: a large upstream chunk leaves the response-body module in pieces, so the terminal-frame guard never copies it whole", async () => {
+    // The socket writer splits writes as well; this pins the earlier bound,
+    // which keeps the guard's frame buffer and decoders at piece size.
+    const big = Buffer.concat([...HEAD, ...Array<Uint8Array>(160).fill(DELTA), ...TAIL]);
+    const fetchImpl = (async (input: Request | string | URL) => {
+      await (input as Request).text();
+      return new Response(new ReadableStream<Uint8Array>({ pull(c) { c.enqueue(new Uint8Array(big)); c.close(); } }), { status: 200, headers: { "content-type": "text/event-stream" } });
+    }) as typeof fetch;
+    const auth = new AuthManager();
+    auth.setOAuthCredential({ apiKey: "testkey", secret: "testsecret", provider: "zai" });
+    const clientReq = new Request("http://127.0.0.1/v1/messages", { method: "POST", headers: { "content-type": "application/json" }, body: MESSAGES });
+    const resp = await proxyRequest(clientReq, "anthropic", { config: makeConfig(), auth, fetchImpl });
+    const reader = resp.body!.getReader();
+    const sizes: number[] = [];
+    const parts: Uint8Array[] = [];
+    for (;;) { const r = await reader.read(); if (r.done) break; sizes.push(r.value.byteLength); parts.push(r.value); }
+    // A piece, plus at most the unfinished frame the guard carried over from the last one.
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(64 * 1024 + DELTA.byteLength);
+    expect(Buffer.compare(Buffer.concat(parts), big)).toBe(0);
   }, 60_000);
 
   it("chat (translated): a client that stops reading holds the upstream back, and gets the whole translated answer when it reads again", async () => {
