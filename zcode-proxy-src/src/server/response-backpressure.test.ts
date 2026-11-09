@@ -22,6 +22,8 @@ import { fixtureSecret } from "../test-fixtures.js";
 const KEY = fixtureSecret("backpressure-proxy-key");
 const DELTAS = 3000;
 const TEXT = "y".repeat(16 * 1024);
+/** The usage total the stream reports; it wins over the counted deltas in the request row. */
+const USAGE_TOKENS = DELTAS + 7;
 /** Well above the loopback socket buffers, well below the 48 MB answer. */
 const HELD_BACK_MAX = 16 * 1024 * 1024;
 
@@ -34,7 +36,7 @@ const HEAD = [
 const DELTA = sse("content_block_delta", { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: TEXT } });
 const TAIL = [
   sse("content_block_stop", { type: "content_block_stop", index: 0 }),
-  sse("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: DELTAS } }),
+  sse("message_delta", { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: USAGE_TOKENS } }),
   sse("message_stop", { type: "message_stop" }),
 ];
 const ANSWER_BYTES = HEAD.concat(TAIL).reduce((n, b) => n + b.byteLength, 0) + DELTAS * DELTA.byteLength;
@@ -196,11 +198,11 @@ describe("a streaming client's reads pace the upstream (ticket 61)", () => {
     const { body } = dechunk(await client.readToEnd());
     expect(body.byteLength).toBe(ANSWER_BYTES);
     expect(createHash("sha256").update(body).digest("hex")).toBe(answerSha());
-    // The request row is printed once the stream ends, with the stream's tokens.
+    // The request row is printed once the stream ends, with the stream's usage total.
     for (let i = 0; i < 100 && !rows.slice(firstRow).some((r) => r.includes(" ANT ")); i++) await sleep(10);
     const row = rows.slice(firstRow).filter((r) => r.includes(" ANT "));
     expect(row.length).toBe(1);
-    expect(row[0]).toMatch(/\| ANT \| glm-5\.3\s+\| stream \|  200 \|\s+\d+ms \|\s+3000 \|/);
+    expect(row[0]).toMatch(/\| ANT \| glm-5\.3\s+\| stream \|  200 \|\s+\d+ms \|\s+3007 \|/);
   }, 60_000);
 
   it("messages: a client that goes away while it stalls releases the upstream, and its row is printed once", async () => {
