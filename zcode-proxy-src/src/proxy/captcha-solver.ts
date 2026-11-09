@@ -1,22 +1,26 @@
 /**
- * Solver dispatch — the happy-dom solver runs on a dedicated worker thread.
+ * Solver dispatch — the happy-dom solver runs in the solver process, a child
+ * OS process of the proxy (ADR-0002).
  *
  * Backend (ZCODE_CAPTCHA_BACKEND): "happy" (default) — captcha-happy.ts,
- * loaded inside captcha-solver-worker.ts. Guest sync XHR parks its thread in
- * Atomics.wait and guest DOM state accumulates, so running it on the HTTP
- * server's thread let one stuck solve freeze /health and every request (the
- * 2026-09-24 incident: 83 s stalls, 11 GB RSS). On the worker, the host loop
- * stays responsive, a solve that outlives its deadline is terminated, and
- * recycling the worker returns its heap.
+ * loaded inside the solver generation (captcha-solver-generation.ts). Guest
+ * sync XHR parks its thread in Atomics.wait and guest DOM state accumulates,
+ * so running it on the HTTP server's thread let one stuck solve freeze /health
+ * and every request (the 2026-09-24 incident: 83 s stalls, 11 GB RSS). Out of
+ * the proxy's thread, the host loop stays responsive, a solve that outlives
+ * its deadline is ended with its generation, and a recycle returns its memory.
  *
  * One solve at a time (happy-dom aliases process-global state inside the
- * worker); callers queue FIFO. `bun build --compile` must list
- * src/proxy/captcha-solver-worker.ts as an extra entrypoint.
+ * generation); callers queue FIFO. `bun build --compile` must list
+ * src/proxy/captcha-solver-worker.ts as an extra entrypoint (thread transport);
+ * a compiled proxy starts the solver process by self-exec (index.ts).
  *
  * Shape (ADR-0002): the dispatcher is an object built by createCaptchaSolver()
  * over a SolverTransport, which starts solver generations and carries the
- * message protocol below unchanged. threadTransport() is the Bun Worker; the
- * module-level functions drive the proxy's own dispatcher over it.
+ * message protocol unchanged. solverProcessTransport() (the default) is the
+ * child-process adapter; threadTransport() is the Bun Worker, kept for tests
+ * and as a fallback. The module-level functions drive the proxy's own
+ * dispatcher over the solver process.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -374,7 +378,7 @@ const realClock: SolverClock = {
 };
 
 export interface CaptchaSolverDeps {
-  /** Default: the thread transport. */
+  /** Default: the child-process adapter (the solver process). */
   transport?: SolverTransport;
   /** Default: the runtime's timers. Tests inject a manual clock. */
   clock?: SolverClock;
@@ -382,7 +386,7 @@ export interface CaptchaSolverDeps {
 
 /** A solver dispatcher that owns all of its state: queue, in-flight solve, generation, timers, stats. */
 export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver {
-  const transport = deps.transport ?? threadTransport();
+  const transport = deps.transport ?? solverProcessTransport();
   const { setTimeout, clearTimeout } = deps.clock ?? realClock;
   const options: Required<CaptchaSolverOptions> = { ...DEFAULT_OPTIONS };
 
@@ -599,7 +603,11 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
   };
 }
 
-/** The proxy's solver dispatcher (thread transport). */
+/**
+ * The proxy's solver dispatcher, over the solver process. Nothing outside
+ * tests selects the thread transport: it is reached only by building a
+ * dispatcher with `createCaptchaSolver({ transport: threadTransport() })`.
+ */
 export const defaultCaptchaSolver: CaptchaSolver = createCaptchaSolver();
 
 export function configureCaptchaSolver(opts: CaptchaSolverOptions): void {

@@ -100,6 +100,69 @@ const FAKE_CLOCK = `
   const settled = () => new Promise(resolve => setTimeout(resolve, 20));
 `;
 
+/** Whether `pid` is alive. */
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+/** Kills a leaked solver process of ours: on Linux only after /proc confirms it is still a captcha solver (B4). */
+function reapLeaked(pid: number): void {
+  if (process.platform !== "linux" || !alive(pid)) return;
+  try {
+    if (readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("captcha-solver")) process.kill(pid, "SIGKILL");
+  } catch {}
+}
+
+describe("solver process: the proxy's dispatcher", () => {
+  it("runs the proxy's solves in a solver process started from the running Bun", async () => {
+    const run = await expectOk(host(`${REPORT}
+      solver.configureCaptchaSolver({ backendModule, idleMs: 2000 });
+      const pid = Number(label(await solver.runCaptchaSolve('pid', 'sgp', 'p')).slice(4));
+      report({ pid, host: process.pid, command: solver.solverProcessCommand(), execPath: process.execPath });
+      solver.shutdownCaptchaSolver();
+    `));
+    const { pid, host: hostPid, command, execPath } = reported(run);
+    expect(pid).not.toBe(hostPid);
+    expect(command).toEqual([execPath, fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url))]);
+  });
+
+  for (const mode of ["idle", "hung"] as const) {
+    it(`leaves no solver process once the proxy is SIGKILLed with a ${mode} generation`, async () => {
+      const child = Bun.spawn([process.execPath, "--eval", `
+        import * as solver from ${JSON.stringify(solverPath)};
+        solver.configureCaptchaSolver({ backendModule: ${JSON.stringify(fixtureUrl)}, deadlineMs: 120000 });
+        const token = await solver.runCaptchaSolve('pid', 'sgp', 'p');
+        console.log('SOLVER ' + JSON.parse(Buffer.from(token, 'base64').toString()).certifyId.slice(4));
+        ${mode === "hung" ? "void solver.runCaptchaSolve('hang', 'sgp', 'p').catch(() => {}); await new Promise(r => setTimeout(r, 300));" : ""}
+        console.log('READY');
+        await new Promise(() => {});
+      `], { stdout: "pipe", stderr: "pipe", env: { ...hermeticEnv(), ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA: "0" } });
+      let solverPid = 0;
+      try {
+        const reader = child.stdout.getReader();
+        let out = "";
+        while (!out.includes("READY")) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          out += new TextDecoder().decode(value);
+        }
+        solverPid = Number(/SOLVER (\d+)/.exec(out)?.[1]);
+        expect(out).toContain("READY");
+        expect(solverPid).not.toBe(child.pid);
+        expect(alive(solverPid)).toBe(true);
+        child.kill("SIGKILL");
+        await child.exited;
+        const deadline = Date.now() + 3000;
+        while (alive(solverPid) && Date.now() < deadline) await Bun.sleep(25);
+        expect(alive(solverPid)).toBe(false);
+      } finally {
+        child.kill("SIGKILL");
+        if (solverPid) reapLeaked(solverPid);
+      }
+    });
+  }
+});
+
 describe("solver process: lifecycle", () => {
   it("spawns the next generation only after the previous one has exited, killing it after the grace when it ignores SIGTERM", async () => {
     const dir = mkdtempSync(join(tmpdir(), "t27-generations-"));
