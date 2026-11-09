@@ -20,8 +20,7 @@
       "owners": { "17": ["stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock"] },
       "flips": ["unstoppable-proxy-after-ctrl-c"]
     },
-    "S5/short": { "owners": { "74": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] },
-    "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }
+    "S5/short": { "owners": { "74": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] }
   },
   "windows": {
     "S1/stalled": { "owners": { "61": ["procPeak:proxy"] } },
@@ -45,7 +44,6 @@
       "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "stale-lock-after-ctrl-c", "unstoppable-proxy-after-ctrl-c", "respawn-recovers-despite-stale-lock", "count:proxy"] },
       "flips": ["proxy-left-after-stop", "failed-lifecycle-steps", "count:proxy"]
     },
-    "S5/short": { "ticket": "74", "state": "unstable" },
-    "S7/short": { "owners": { "33": ["proxy.log:bounded-while-running"] } }
+    "S5/short": { "ticket": "74", "state": "unstable" }
   }
 }
