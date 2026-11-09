@@ -1000,3 +1000,106 @@ test("Ctrl-C (SIGINT) of a manager start during its health wait leaves no stale 
   assert.deepEqual(liveProxies(root), [], "0 orphans");
   assert.deepEqual(lockFiles(root), []);
 });
+
+// ------------------------------- orphan adoption with no pid record (ticket 17)
+// Round 22 Q1: a start lock holder killed after spawn() and before its pid
+// record is written (CI runs 42457112513 and 42542508787, linux S3: orphan
+// role proxy, pidRecordAfterKill null, final stop "proxy healthy but no pid
+// file"). Since ticket 16 this kit records a spawn intent before the spawn, so
+// its own kill there leaves the intent (first test). A start that records
+// nothing first (a kit before ticket 16, or an intent that is gone) leaves a
+// healthy proxy with no proxy.pid at all: the kill is injected at that exact
+// point (the intent dropped, then SIGKILL right after spawn()). The next start
+// or stop adopts it through the identity proof: the authenticated answer
+// names pid P, P's command line is this installation's kit proxy, and P's
+// start time read before and after a second answer is the same. Never on a
+// port or a pid alone.
+const adoptionLines = (root) => { try { return readFileSync(join(root, "logs", "proxy.log"), "utf8").split("\n").filter((l) => / INFO manager orphaned proxy adopted /.test(l)); } catch { return []; } };
+
+test("this kit's start killed right after spawn() leaves its spawn intent, never a proxy without any record (the S3 window is closed by ticket 16)", { timeout: 120_000 }, async (t) => {
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  defer(root, () => killFixtureProxies(root));
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+  const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt: "spawn:spawned" })], { env, encoding: "utf8", timeout: 60_000 });
+  assert.equal(killed.stdout, "", `killed at spawn:spawned (${killed.stderr})`);
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  assert.deepEqual({ pid: record?.pid, by: record?.spawning?.by }, { pid: null, by: killed.pid }, `the spawn intent stays (${JSON.stringify(record)})`);
+});
+
+async function killedBeforeAnyRecord(t) {
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  defer(root, () => killFixtureProxies(root));
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+  const killed = spawnSync(process.execPath, [STARTER, JSON.stringify({ kitRoot: root, root, killAt: "spawn:spawned", dropRecordAt: "spawn:intent-recorded" })], { env, encoding: "utf8", timeout: 60_000 });
+  assert.equal(killed.stdout, "", `the holder was killed after spawn() (${killed.stdout}${killed.stderr})`);
+  const orphan = await pollFor("the orphaned proxy to serve", async () => { const h = await health(port); return h.state === "ours" ? h.pid : null; }, 30_000);
+  assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "test premise: a healthy proxy with no proxy.pid");
+  assert.deepEqual(liveProxies(root), [orphan]);
+  return { root, port, env, orphan };
+}
+
+test("Round 22 Q1: a holder killed after spawn() before any pid record leaves a healthy unrecorded proxy; the next start adopts it by proof, stop stops it: 1 proxy, 0 orphans, no second spawn", { timeout: 180_000 }, async (t) => {
+  const { root, port, env, orphan } = await killedBeforeAnyRecord(t);
+  const start = manager(root, ["start"], env);
+  assert.equal(start.status, 0, start.stdout + start.stderr);
+  assert.deepEqual(readdirSync(join(root, "spawned")), [String(orphan)], "no second proxy was spawned");
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  assert.equal(record?.pid, orphan, `adopted: the record names the orphan (${JSON.stringify(record)})`);
+  assert.ok(Number.isFinite(record.startedMs), "with its start time");
+  assert.equal((await lifecycleFor(root)).verifyOwnProcess(record), "match");
+  assert.deepEqual(lockFiles(root), [], "the killed holder's lock was taken over and released");
+  const adopted = adoptionLines(root);
+  assert.equal(adopted.length, 1, adopted.join("\n"));
+  assert.match(adopted[0], new RegExp(`^\\S+ INFO manager orphaned proxy adopted pid=${orphan}$`));
+  const stop = manager(root, ["stop"], env);
+  assert.equal(stop.stdout, `stopped (pid ${orphan})\n`, stop.stdout + stop.stderr);
+  assert.equal((await health(port)).state, "down");
+  assert.deepEqual(liveProxies(root), [], "0 orphans");
+});
+
+test("Round 22 Q1: stop alone reaps a healthy proxy left without any pid record (adopted by proof first)", { timeout: 180_000 }, async (t) => {
+  const { root, port, env, orphan } = await killedBeforeAnyRecord(t);
+  const stop = manager(root, ["stop"], env);
+  assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+  assert.equal(stop.stdout, `stopped (pid ${orphan})\n`);
+  assert.equal((await health(port)).state, "down");
+  assert.deepEqual(liveProxies(root), [], "0 orphans");
+  assert.deepEqual(readdirSync(join(root, "spawned")), [String(orphan)]);
+  assert.deepEqual(lockFiles(root), []);
+});
+
+test("adoption without a record needs the whole proof: a listener whose pid is not this installation's kit proxy, or whose start changes, is never adopted or signalled", { timeout: 60_000 }, async (t) => {
+  const kitCommand = (root, verb = "serve") => ({ commandLine: `"bun" "run" "${join(root, "zcode-proxy-src", "src", "index.ts")}" "${verb}"`, executablePath: "bun" });
+  const steady = Date.now() - 60_000;
+  const cases = {
+    "a process that is not the kit proxy (real command line)": (root) => ({}),
+    "the proxy's TUI (not the manager's headless serve)": (root) => ({ processCommandLineImpl: () => kitCommand(root, "tui"), processStartMsImpl: () => steady }),
+    "another installation's kit proxy": (root) => ({ processCommandLineImpl: () => kitCommand(join(root, "elsewhere")), processStartMsImpl: () => steady }),
+    "a pid whose start time changes between the two reads": (root) => { let n = 0; return { processCommandLineImpl: () => kitCommand(root), processStartMsImpl: () => steady + (n++) * 1000 }; },
+    "a pid whose start time is unknown": (root) => ({ processCommandLineImpl: () => kitCommand(root), processStartMsImpl: () => null }),
+  };
+  for (const [label, impl] of Object.entries(cases)) {
+    const port = await freePort();
+    const root = await stateFixture(t, port, { kit: true });
+    const decoy = harmless(t);
+    await identityListener(t, port, decoy.pid);
+    const lifecycle = await lifecycleFor(root, impl(root));
+    assert.equal((await lifecycle.ensureRunning()).outcome, "already-running", label);
+    const stopped = await lifecycle.stop();
+    assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 4, outcome: "no-pid-record" }, `${label}: ${stopped.lines.join(" | ")}`);
+    assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, `${label}: no record is written`);
+    assert.ok(untouched(decoy), `${label}: nothing is signalled`);
+    assert.deepEqual(adoptionLines(root), [], label);
+  }
+  // The same listener with the whole proof (its pid is this installation's kit proxy, one start time): adopted.
+  const port = await freePort();
+  const root = await stateFixture(t, port, { kit: true });
+  const proxy = harmless(t);
+  await identityListener(t, port, proxy.pid);
+  const lifecycle = await lifecycleFor(root, { processCommandLineImpl: () => kitCommand(root), processStartMsImpl: () => steady });
+  assert.equal((await lifecycle.stop()).outcome, "stopped");
+  assert.ok(!untouched(proxy) || await pollFor("the adopted proxy to exit", () => !untouched(proxy), 10_000), "the adopted proxy is stopped");
+  assert.equal(adoptionLines(root).length, 1);
+});
