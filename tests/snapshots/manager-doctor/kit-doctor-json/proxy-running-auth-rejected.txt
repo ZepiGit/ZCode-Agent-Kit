@@ -1,0 +1,103 @@
+{
+  "ok": false,
+  "failed": 3,
+  "skipped": 11,
+  "checks": [
+    {
+      "name": "bun available",
+      "ok": true,
+      "detail": "<BUN> (<VERSION>)"
+    },
+    {
+      "name": "config exists",
+      "ok": true,
+      "detail": "<KIT>/proxy/config.yaml"
+    },
+    {
+      "name": "key file exists",
+      "ok": true,
+      "detail": "<KIT>/.proxykey"
+    },
+    {
+      "name": "proxy source installed",
+      "ok": false,
+      "detail": "<KIT>/zcode-proxy-src/node_modules"
+    },
+    {
+      "name": "credentials store",
+      "ok": false,
+      "detail": "ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present but NOT decryptable here — re-run: zcode-kit auth login"
+    },
+    {
+      "name": "omp integration",
+      "ok": null,
+      "detail": "not configured (your choice) — zcode-kit integrate omp to change"
+    },
+    {
+      "name": "proxy reachable + identity",
+      "ok": true,
+      "detail": "health=ours"
+    },
+    {
+      "name": "account auth valid",
+      "ok": false,
+      "detail": "ZCode authentication rejected. Check the local key and Desktop login; use zcode-kit doctor --fix for managed config drift."
+    },
+    {
+      "name": "omp: integration",
+      "ok": null,
+      "detail": "not configured (your choice) — zcode-kit integrate omp to change"
+    },
+    {
+      "name": "pi: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "claude-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "codex: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "opencode: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "cline: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "kilo-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "aider: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "continue: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "goose: integration",
+      "ok": null,
+      "detail": "not detected — skipped"
+    },
+    {
+      "name": "harness decisions",
+      "ok": true,
+      "detail": "1 stored decision(s) readable"
+    }
+  ]
+}
+[exit 1]
