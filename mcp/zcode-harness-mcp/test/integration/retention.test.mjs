@@ -181,7 +181,11 @@ async function lookupWork(t, retained, { runFirst = 0 } = {}) {
   seedCompleted(dataDir, retained);
   const countFile = path.join(dataDir, 'scan-count.json');
   const c = await startBridge({ reuseDataDir: dataDir, nodeArgs: [...BRIDGE_NODE_FLAGS, '--import', scanPreload], env: { ZCODE_TEST_SCAN_COUNT: countFile } });
-  const read = async () => { await new Promise((r) => setTimeout(r, 120)); return JSON.parse(fs.readFileSync(countFile, 'utf8')); };
+  // The preload rewrites the file every 20 ms; a read can land between its truncate and its write.
+  const read = async () => {
+    await new Promise((r) => setTimeout(r, 120));
+    return waitFor(() => { try { return JSON.parse(fs.readFileSync(countFile, 'utf8')); } catch { return null; } }, 2000);
+  };
   try {
     await c.tool('zcode_health', {});
     for (let k = 0; k < runFirst; k++) {
