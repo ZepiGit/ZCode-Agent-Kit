@@ -48,7 +48,6 @@ export async function run(ctx) {
   const heapLog = join(ctx.outDir, "worker-heap.jsonl");
   const marks = [];
   const phaseT = {};
-  const observing = []; // counts taken from inside the body's callbacks, awaited after it
   const main = await runBody(ctx, { S2_HEAP_LOG: heapLog, ...(ctx.variant === "gc" ? { S2_GC: "1", S2_PHASES: "A" } : {}) }, {
     onSample(msg, child) {
       ctx.setProgress(msg.solves);
@@ -59,16 +58,10 @@ export async function run(ctx) {
     onMark(msg) {
       marks.push({ ...msg, tMs: ctx.elapsed() });
       ctx.log(`${msg.name}: rss ${msg.rssMB} MB, main heap ${msg.mainHeapMB} MB, gen ${msg.solver.generation}, recycles ${msg.solver.recycles} (${msg.solver.lastRecycleReason ?? "-"})`);
-      // The body sleeps 3 s after this mark: count solver processes now (from
-      // the first poll after the mark on Windows, well inside those 3 s).
-      if (msg.name === "E-idle-exited") {
-        const counted = ctx.observe("after-idle-exit");
-        counted.catch(() => {}); // a failure surfaces where it is awaited, below
-        observing.push(counted);
-      }
+      // The body sleeps 3 s after this mark: count solver processes now.
+      if (msg.name === "E-idle-exited") ctx.observe("after-idle-exit");
     },
   });
-  await Promise.all(observing);
   if (main.code !== 0) throw new Error(`s2 body exited ${main.code}: ${main.errTail}`);
 
   // K: SIGKILL the host while a generation is alive, then count solvers.
@@ -85,7 +78,7 @@ export async function run(ctx) {
       });
       if (killedAt === null) throw new Error(`s2 kill host (${mode}) never got ready: exit ${k.code} ${k.errTail}`);
       await sleep(2000); // grace for a child to notice its parent is gone
-      const counts = await ctx.observe(`after-proxy-sigkill:${mode}`);
+      const counts = ctx.observe(`after-proxy-sigkill:${mode}`);
       kills.push({ mode, signal: k.signal, solversAfter: counts.solver ?? 0 });
     }
   }
