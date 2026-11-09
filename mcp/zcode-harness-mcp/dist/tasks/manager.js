@@ -17,6 +17,7 @@ import { safeJsonStringify } from "../security/redact.js";
 import { createLogger } from "../util/log.js";
 import { TaskIngress } from "./ingress.js";
 import { TaskRelay } from "./relay.js";
+import { ResponseText } from "./response-text.js";
 const log = createLogger("tasks");
 export const TERMINAL_STATES = ["completed", "failed", "cancelled", "interrupted", "unknown"];
 /**
@@ -49,6 +50,10 @@ function retentionVictims(records, now) {
 /** Every file a task owns in the store; the record goes last, so an interrupted prune is redone at the next start. */
 const TASK_FILE_SUFFIXES = [".result.json", ".events.jsonl", ".events.jsonl.previous", ".json"];
 const READ_ONLY_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "BashOutput", "KillShell"];
+/** The completeness note of a truncated response text. */
+function truncationNote(droppedBytes) {
+    return `response text capped at 4 MiB: ${droppedBytes} bytes truncated between the first 1 MiB and the last 3 MiB`;
+}
 export class TaskError extends Error {
     code;
     constructor(code, message) {
@@ -208,7 +213,7 @@ export class TaskManager {
             acceptingEvents: false,
             inputPending: false,
             pendingSend: null,
-            accumulatedText: "",
+            responseText: new ResponseText(),
             toolCalls: new Map(),
             artifacts: new Map(),
             interactionIds: new Set(),
@@ -549,7 +554,7 @@ export class TaskManager {
                 rec.lastSeq = Math.max(rec.lastSeq, subscription.eventSeq);
             if (!canSend())
                 throw new TaskError("INTERRUPTED", "task interrupted before input was sent");
-            t.accumulatedText = "";
+            t.responseText = new ResponseText();
             t.errors = [];
             t.warnings = [];
             t.toolCalls.clear();
@@ -671,7 +676,9 @@ export class TaskManager {
         if (rec.sessionId && rec.usage === null && this.runtime.running && TERMINAL_STATES.includes(rec.state)) {
             await this.ingress.captureUsage(t);
         }
-        let responseText = t.accumulatedText;
+        const streamed = t.responseText.read();
+        let responseText = streamed.text;
+        let droppedBytes = streamed.droppedBytes;
         let completeness = responseText && state === "completed"
             ? { status: "full", explanation: "turn stream captured via session events" }
             : { status: "unknown", explanation: "no completed assistant response has been captured" };
@@ -704,6 +711,10 @@ export class TaskManager {
         }
         if (["failed", "cancelled", "interrupted", "unknown"].includes(rec.state)) {
             completeness = { status: "partial", explanation: `task ended in state ${rec.state}` };
+        }
+        // After the terminal-state override, so that the override cannot erase the note.
+        if (droppedBytes > 0) {
+            completeness = { status: "partial", explanation: `${completeness.explanation}; ${truncationNote(droppedBytes)}` };
         }
         const toolCalls = [...t.toolCalls.entries()].map(([id, name]) => ({ toolName: name, summary: `toolCall ${id}` }));
         const interactionRecords = this.interactions
@@ -744,6 +755,7 @@ export class TaskManager {
             errors: t.errors,
             warnings: t.warnings,
             eventsRef: { firstSeq, lastSeq, storage: `tasks/${taskId}.events.jsonl` },
+            ...(droppedBytes > 0 ? { truncated: { droppedBytes } } : {}),
         };
         if (TERMINAL_STATES.includes(rec.state)) {
             this.store.writeJson(`tasks/${taskId}.result.json`, result);

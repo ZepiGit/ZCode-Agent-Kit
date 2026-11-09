@@ -22,6 +22,7 @@ import { safeJsonStringify } from "../security/redact.js";
 import { createLogger } from "../util/log.js";
 import { TaskIngress, type IngressTask, type IngressTaskRecord, type IngressState } from "./ingress.js";
 import { TaskRelay } from "./relay.js";
+import { ResponseText } from "./response-text.js";
 
 const log = createLogger("tasks");
 
@@ -126,6 +127,13 @@ export interface TaskResultV1 {
   errors: string[];
   warnings: string[];
   eventsRef: { firstSeq: number; lastSeq: number; storage: string };
+  /** Present only when the response text went past the 4 MiB cap (additive). */
+  truncated?: { droppedBytes: number };
+}
+
+/** The completeness note of a truncated response text. */
+function truncationNote(droppedBytes: number): string {
+  return `response text capped at 4 MiB: ${droppedBytes} bytes truncated between the first 1 MiB and the last 3 MiB`;
 }
 
 export interface StartTaskParams {
@@ -299,7 +307,7 @@ export class TaskManager {
       acceptingEvents: false,
       inputPending: false,
       pendingSend: null,
-      accumulatedText: "",
+      responseText: new ResponseText(),
       toolCalls: new Map(),
       artifacts: new Map(),
       interactionIds: new Set(),
@@ -626,7 +634,7 @@ export class TaskManager {
       const subscription = await this.runtime.ipcSessionSubscribe(rec.sessionId);
       if (typeof subscription.eventSeq === "number") rec.lastSeq = Math.max(rec.lastSeq, subscription.eventSeq);
       if (!canSend()) throw new TaskError("INTERRUPTED", "task interrupted before input was sent");
-      t.accumulatedText = "";
+      t.responseText = new ResponseText();
       t.errors = [];
       t.warnings = [];
       t.toolCalls.clear();
@@ -735,7 +743,9 @@ export class TaskManager {
     if (rec.sessionId && rec.usage === null && this.runtime.running && TERMINAL_STATES.includes(rec.state)) {
       await this.ingress.captureUsage(t);
     }
-    let responseText = t.accumulatedText;
+    const streamed = t.responseText.read();
+    let responseText = streamed.text;
+    let droppedBytes = streamed.droppedBytes;
     let completeness: TaskResultV1["completeness"] = responseText && state === "completed"
       ? { status: "full", explanation: "turn stream captured via session events" }
       : { status: "unknown", explanation: "no completed assistant response has been captured" };
@@ -765,6 +775,10 @@ export class TaskManager {
     }
     if (["failed", "cancelled", "interrupted", "unknown"].includes(rec.state)) {
       completeness = { status: "partial", explanation: `task ended in state ${rec.state}` };
+    }
+    // After the terminal-state override, so that the override cannot erase the note.
+    if (droppedBytes > 0) {
+      completeness = { status: "partial", explanation: `${completeness.explanation}; ${truncationNote(droppedBytes)}` };
     }
 
     const toolCalls = [...t.toolCalls.entries()].map(([id, name]) => ({ toolName: name, summary: `toolCall ${id}` }));
@@ -807,6 +821,7 @@ export class TaskManager {
       errors: t.errors,
       warnings: t.warnings,
       eventsRef: { firstSeq, lastSeq, storage: `tasks/${taskId}.events.jsonl` },
+      ...(droppedBytes > 0 ? { truncated: { droppedBytes } } : {}),
     };
     if (TERMINAL_STATES.includes(rec.state)) {
       this.store.writeJson(`tasks/${taskId}.result.json`, result);

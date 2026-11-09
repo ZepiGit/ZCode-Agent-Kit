@@ -6,6 +6,7 @@
 import type { RuntimeManager } from "../runtime/manager.js";
 import type { JsonStore } from "../store/store.js";
 import { redactDeep } from "../security/redact.js";
+import type { ResponseText } from "./response-text.js";
 
 export type IngressState =
   | "queued"
@@ -37,7 +38,8 @@ export interface IngressTask<R extends IngressTaskRecord = IngressTaskRecord> {
   record: R;
   turnRevision: number;
   acceptingEvents: boolean;
-  accumulatedText: string;
+  /** Streamed response text, bounded while it is collected. */
+  responseText: ResponseText;
   toolCalls: Map<string, string>;
   artifacts: Map<string, { path: string; bytes: number; sha256: string | null }>;
   interactionIds: Set<string>;
@@ -132,7 +134,7 @@ export class TaskIngress<R extends IngressTaskRecord = IngressTaskRecord> {
     if (type === "model.streaming") {
       const kind = String(p.kind ?? "");
       if (kind === "text_delta" && typeof (p.text ?? p.delta) === "string") {
-        t.accumulatedText += String(p.text ?? p.delta);
+        t.responseText.append(String(p.text ?? p.delta));
       }
       return;
     }

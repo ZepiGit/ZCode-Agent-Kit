@@ -90,7 +90,7 @@ export class TaskIngress {
         if (type === "model.streaming") {
             const kind = String(p.kind ?? "");
             if (kind === "text_delta" && typeof (p.text ?? p.delta) === "string") {
-                t.accumulatedText += String(p.text ?? p.delta);
+                t.responseText.append(String(p.text ?? p.delta));
             }
             return;
         }
