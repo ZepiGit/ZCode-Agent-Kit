@@ -177,3 +177,5 @@ Spec stories: 61, 92
 - `ux-before` and `memory-budget` on both legs.
 
 **Left for another ticket:** ticket 73's live freeze test should wait until `/proc/<pid>/stat` shows `T` (poll with a bound) before it asserts the state. Its thaw assertion has the same race in the other direction.
+
+**Addendum (2026-11-09):** the integration tip moved to `8d243c2` while the suites ran: ticket 73 was reverted, plus docs. That tip is merged in `33090a6` with no conflicts. The merge touches only `tests/memory/` and `.scratch/`, so no proxy or MCP code changed. `npm run test` after the merge (`t38-r2-full-test3`): 923 tests, 905 pass, 0 fail, 18 skipped. The live freeze test noted above left with the revert. The head SHA is the commit that adds this addendum.
