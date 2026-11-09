@@ -134,9 +134,12 @@ logging:
 # Health supervisor (optional, ADR-0008): samples the proxy's memory footprint
 # (Pss on Linux, commit charge on Windows; RSS where neither is available).
 # Soft limit: WARN event line only. Hard limit: asks the kit manager for a
-# respawn (budget 3 per 15 min); the proxy then drains: requests already
-# accepted finish, new ones get 503 + Retry-After. Without the kit manager
-# (TUI, standalone proxy) it only logs and keeps serving. Each limit must be
+# respawn (budget 3 per 15 min) and drains only once the manager has
+# acknowledged it (reserved the budget, within 10 s): requests already
+# accepted finish, new ones get 503 + Retry-After. A refused or
+# unacknowledged respawn keeps the proxy serving: one ERROR line, restarts
+# exhausted, no new request until the 15 min window has passed. Without the
+# kit manager (TUI, standalone proxy) it only logs and keeps serving. Each limit must be
 # held for "samples" samples taken "sampleIntervalSeconds" apart.
 # Defaults shown; no env override.
 # health:
