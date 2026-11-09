@@ -37,6 +37,7 @@ import {
   unlockAccountStore,
 } from "./auth/account-store.js";
 import { createAccountRotator } from "./auth/account-rotator.js";
+import { startProxyLog } from "./log/proxy-log-writer.js";
 import { accountIdentity } from "./auth/account-identity.js";
 import { buildHealthReport, parseLiveQuota, parseLiveStatus, renderHealthText, type OfflineAccount } from "./auth/account-health.js";
 
@@ -205,6 +206,9 @@ Examples:
 }
 
 async function serve(configPath: string | undefined, debug: boolean): Promise<void> {
+  // A manager-started proxy (ZCODE_KIT_LOG_DIR) writes proxy.log itself,
+  // through the size-capped writer, before anything else prints (ticket 33).
+  const proxyLog = startProxyLog();
   if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA === "1") installGuestErrorBoundary();
   const path = configPath ?? process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
   if (ensureConfigFile(path)) {
@@ -213,6 +217,7 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     console.log(`Run: zcode-proxy auth login <zai|bigmodel>\n`);
   }
   const config = loadConfig(path);
+  proxyLog?.addSecret(config.auth.proxyApiKey);
 
   let auth = await createStoredAuthManagerWithAccounts(config.plan, {
     ...(config.auth.accounts ?? { enabled: false }),
