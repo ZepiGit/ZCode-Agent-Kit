@@ -184,6 +184,24 @@ test("start lock, a live holder's lock: EPERM/EBUSY/EACCES at any protocol fs ca
   assert.deepEqual(failures, [], `${failures.length} injections broke the protocol`);
 });
 
+test("start lock, release: a lock it cannot read (EPERM/EBUSY/EACCES for good) is never deleted, since it may be a successor's", () => {
+  for (const code of CODES) {
+    const { dir, file } = fixture();
+    try {
+      const lock = lockFor(file, []);
+      const acquired = lock.acquire();
+      assert.equal(acquired.status, "acquired");
+      ORIG.writeFileSync(file, LIVE_LOCK); // a successor's record now (as after a takeover of this holder)
+      scope = dir;
+      hook = (name, paths) => { if (name === "readFileSync" && paths[0] === file) throw fsError(code, name, paths); };
+      try { acquired.release(); } finally { hook = null; scope = null; }
+      assert.equal(ORIG.readFileSync(file, "utf8"), LIVE_LOCK, `${code}: the unreadable lock was deleted on release`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("start lock, a stale lock: EPERM/EBUSY/EACCES for good at any protocol fs call is never two records, never a partial lock, and is reported, not taken as success", () => {
   const prep = SCENARIOS["stale lock"].prep;
   const clean = run(prep);
