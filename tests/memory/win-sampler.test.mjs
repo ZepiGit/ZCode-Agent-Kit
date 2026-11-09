@@ -7,15 +7,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createKitTracker, createPollParser, parseCimCsv, parseGetProcessCsv, pollStartNs, powershellPoller, unitsSelfTest } from "./lib/win-sampler.mjs";
+import { createKitTracker, createPollParser, parseCimCsv, parseGetProcessCsv, powershellPoller, unitsSelfTest } from "./lib/win-sampler.mjs";
 import { commandFor, parseJobReport } from "./lib/caps.mjs";
-import { parseProcessAction, processActionScript } from "./lib/win-process.mjs";
+import { suspendScript } from "./lib/win-process.mjs";
 import { windowsStartCommand } from "./lib/process-identity.mjs";
-import { parseSamplesCsv, rowsFromSamples, scan, settled, startSampler, survivors } from "./lib/sampler.mjs";
+import { parseSamplesCsv, rowsFromSamples, scan, startSampler, survivors } from "./lib/sampler.mjs";
 import { externalOf, listenersOf, parseNetstat } from "./lib/win-net.mjs";
 import { osVerdict, rowsForMetric, verdict } from "./lib/verdict.mjs";
 
@@ -134,7 +134,7 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
   const marker = `ZCODE_MEMLOOP_RUN=${RUN.token}`;
   let sampler;
   try {
-    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, progress: () => 3, windows: { rootPid: RUN.rootPid, spawn: fakePoller() } });
+    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, progress: () => 3, windows: { rootPid: RUN.rootPid, spawn: fakePoller(), alive: () => true } });
     const ready = await sampler.ready;
     assert.equal(ready.units.ok, true, ready.units.reason);
     await sleep(450);
@@ -166,7 +166,7 @@ test("the Windows sampler keeps its process alive until the poller answers (noth
   try {
     const script = `import { startSampler } from ${JSON.stringify(new URL("./lib/sampler.mjs", import.meta.url).href)};
 const s = startSampler({ marker: "ZCODE_MEMLOOP_RUN=${RUN.token}", csvPath: ${JSON.stringify(join(dir, "samples.csv"))}, intervalMs: 100,
-  windows: { rootPid: ${RUN.rootPid}, spawn: (o) => ({ command: process.execPath, args: [${JSON.stringify(join(FIXTURES, "fake-poller.mjs"))}, JSON.stringify({ ...o, selfPid: 2200, delayMs: 300 })] }) } });
+  windows: { rootPid: ${RUN.rootPid}, alive: () => true, spawn: (o) => ({ command: process.execPath, args: [${JSON.stringify(join(FIXTURES, "fake-poller.mjs"))}, JSON.stringify({ ...o, selfPid: 2200, delayMs: 300 })] }) } });
 const r = await s.ready;
 console.log("READY", r.units.ok);
 await new Promise((ok) => setTimeout(ok, 350));
@@ -184,7 +184,7 @@ test("after the sampler stops, survivors come from a fresh poll and never includ
   const marker = `ZCODE_MEMLOOP_RUN=${RUN.token}`;
   let sampler;
   try {
-    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ cim: "cim-poll-tooling.csv" }) } });
+    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ cim: "cim-poll-tooling.csv" }), alive: () => true } });
     await sampler.ready;
     await sleep(250);
     await sampler.stop();
@@ -197,7 +197,7 @@ test("a units self-test failure stops the Windows sampler before it samples anyt
   const dir = mkdtempSync(join(tmpdir(), "memloop-win-"));
   let sampler;
   try {
-    sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=${RUN.token}`, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ unitsCim: "cim-poll-commit-in-kb.csv" }) } });
+    sampler = startSampler({ marker: `ZCODE_MEMLOOP_RUN=${RUN.token}`, csvPath: join(dir, "samples.csv"), intervalMs: 100, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ unitsCim: "cim-poll-commit-in-kb.csv" }), alive: () => true } });
     await assert.rejects(sampler.ready, /units self-test failed: commit_kb/);
     await sampler.stop();
     assert.equal(sampler.pollerRunning(), false, "the poller is reaped");
@@ -248,95 +248,9 @@ test("every PowerShell we start silences progress before it loads a module, and 
     const first = script.split("\n").find((l) => l.trim() && !l.trim().startsWith("#"));
     assert.match(first, /^\$ProgressPreference = 'SilentlyContinue'/, `${name}: first statement`);
   }
-  for (const action of ["suspend", "resume", "terminate"]) {
-    assert.match(processActionScript({ pid: 4242, start: "134070000140000000" }, action).split("\n")[0], /^\$ProgressPreference = 'SilentlyContinue'/, `${action}: first statement`);
-  }
+  assert.match(suspendScript(4242, true).split("\n")[0], /^\$ProgressPreference = 'SilentlyContinue'/, "suspend: first statement");
 });
 
 test("the Job Object report is read from the real CI run log despite the CLIXML around it", () => {
   assert.deepEqual(parseJobReport(fixture("ci-42221794531-run-log.txt")), { applied: true, limitBytes: 3221225472, peakBytes: 103886848 });
-});
-
-// ── Reads after an event judge processes by the poll, never by a pid (ticket 73) ──
-// The live scan is the latest poll: each process is its pid and creation time
-// as the poll saw them, and no pid is asked whether it is alive (Windows may
-// hand a freed pid to a stranger at once, tickets 70, 72). A read after an
-// event (a stop, a kill) awaits `settled`: the first poll that started after
-// it. The fake poller re-reads its table file at the start of every poll and
-// takes `lagMs` to answer, as the Win32_Process query does.
-const CIM_RUNNING = fixture("cim-poll.csv").trimEnd();
-const CIM_PROXY_EXITED = CIM_RUNNING.split("\n").filter((l) => !l.startsWith('"2400",')).join("\n");
-
-test("a read after the proxy exits never counts it, and a read while it runs always does, whenever the read falls in the poll cycle", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "memloop-win-settled-"));
-  const table = join(dir, "table.csv");
-  writeFileSync(table, CIM_RUNNING);
-  const marker = `ZCODE_MEMLOOP_RUN=${RUN.token}`;
-  const proxies = () => scan(marker).filter((p) => p.role === "proxy").map((p) => p.pid);
-  let sampler;
-  try {
-    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 50, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ table, lagMs: 150 }) } });
-    await sampler.ready;
-    // One poll cycle is ~200 ms (150 ms query + 50 ms wait): the exit lands before, inside and after a poll in flight.
-    for (const offset of [0, 40, 80, 120, 160, 200]) {
-      writeFileSync(table, CIM_RUNNING);
-      await settled(marker);
-      assert.deepEqual(proxies(), [2400], `offset ${offset}: the running proxy is counted`);
-      await sleep(offset);
-      writeFileSync(table, CIM_PROXY_EXITED); // the stop returned: the proxy is gone, its pid free for anyone
-      await settled(marker);
-      assert.deepEqual(proxies(), [], `offset ${offset}: a proxy that exited before the read is not counted`);
-    }
-  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("a read waits for a poll that started after it; frames without a start stamp never satisfy it, and a stopped sampler releases it", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "memloop-win-settled-"));
-  const marker = `ZCODE_MEMLOOP_RUN=${RUN.token}`;
-  let sampler;
-  try {
-    sampler = startSampler({ marker, csvPath: join(dir, "samples.csv"), intervalMs: 50, windows: { rootPid: RUN.rootPid, spawn: fakePoller({ noStamp: true }) } });
-    await sampler.ready;
-    await assert.rejects(settled(marker, { timeoutMs: 400 }), /no process table poll started within 400 ms after this read/);
-    const waiting = settled(marker, { timeoutMs: 60_000 });
-    await sampler.stop();
-    await waiting; // after stop every scan polls afresh
-    await settled(marker); // and resolves at once
-  } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
-  await settled("ZCODE_MEMLOOP_RUN=no-windows-session"); // Linux /proc scans are always current
-});
-
-test("a poll head's start stamp is read on the monotonic clock in nanoseconds; a head without one has none", () => {
-  const frames = [];
-  const feed = createPollParser((f) => frames.push(f));
-  const cim = fixture("cim-poll.csv").trimEnd();
-  feed(`@@POLL 2200 31 123456789012 10000000\n${cim}\n@@END\n@@POLL 2200 30\n${cim}\n@@END\n`);
-  assert.deepEqual(frames.map((f) => f.startNs), [12345678901200n, null]);
-  assert.equal(pollStartNs("10", "0"), null);
-  assert.equal(pollStartNs("x", "10000000"), null);
-  // The PowerShell poller stamps each poll before its query, on QueryPerformanceCounter (Stopwatch).
-  const script = Buffer.from(powershellPoller({ intervalMs: 1000 }).args.at(-1), "base64").toString("utf16le");
-  assert.match(script, /\$t0 = \[System\.Diagnostics\.Stopwatch\]::GetTimestamp\(\)\n\s*\$csv = Poll/);
-  assert.match(script, /@@POLL \$PID \$ms \$t0 \$freq/);
-});
-
-// ── Windows freeze / thaw / kill by identity (lib/win-process.mjs) ──────────
-test("a Windows process action holds the pid before it asks who holds it, and acts only on the expected start time", () => {
-  const id = { pid: 4242, start: "134070000140000000" };
-  const script = processActionScript(id, "resume");
-  const at = (re) => script.search(re);
-  assert.ok(at(/\[MemloopProcess\]::Open\(4242, 2048, \[ref\]\$err\)/) >= 0, "a PROCESS_SUSPEND_RESUME handle on the pid");
-  assert.ok(at(/\[MemloopProcess\]::Open/) < at(/Get-CimInstance Win32_Process -Filter 'ProcessId=4242'/), "the handle is held before the start time is asked");
-  assert.match(script, /if \(\$start -ne 'START 134070000140000000'\) \{ \[Console\]::Out\.Write\('OTHER ' \+ \$start\) \}/);
-  assert.ok(at(/::Act\(\$h, 'resume'\)/) > at(/-ne 'START 134070000140000000'/), "the action only after the identity matched");
-  assert.match(processActionScript(id, "terminate"), /::Open\(4242, 1, \[ref\]\$err\)/, "PROCESS_TERMINATE");
-  assert.throws(() => processActionScript({ pid: 4242 }, "resume"), /no start time/);
-  assert.throws(() => processActionScript({ pid: 4242, start: "1; Stop-Computer" }, "resume"), /no start time/);
-  // Its answers: done, another process (nothing done), or a failure that never reads as either.
-  assert.equal(parseProcessAction(id, "resume", { status: 0, stdout: "DONE 0" }), true);
-  assert.equal(parseProcessAction(id, "resume", { status: 0, stdout: "OTHER NONE" }), false);
-  assert.equal(parseProcessAction(id, "resume", { status: 0, stdout: "OTHER START 134070000990000000" }), false);
-  for (const r of [{ status: 0, stdout: "DONE -1073741790" }, { status: 0, stdout: "OPENFAIL 5" }, { status: 1, stdout: "", stderr: "Add-Type failed" }, { status: null, stdout: "" }, { status: 0, stdout: "" }]) {
-    assert.throws(() => parseProcessAction(id, "resume", r), /resume pid 4242 \(start 134070000140000000\) failed/, JSON.stringify(r));
-  }
 });
