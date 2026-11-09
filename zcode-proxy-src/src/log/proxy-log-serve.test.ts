@@ -254,10 +254,27 @@ describe("serve with ZCODE_KIT_LOG_DIR: the proxy.log writer", () => {
     expect(statSync(p.log).mode & 0o777).toBe(0o600);
   }, 60_000);
 
+  it("waits for the holder before exceeding the rotation threshold, even when the proxy writes during holder acquisition", async () => {
+    const p = await spawnProxy();
+    const marker = "output-during-holder-acquisition\n";
+    const holder = await holdFullLog(p.log, "kit", async () => {
+      // Exercise the acquisition window deterministically rather than relying
+      // on a background log line racing PowerShell startup on Windows.
+      p.emit([{ stream: "stdout", text: marker }]);
+      await until(() => read(p.log).includes(marker), 10_000, () => read(p.log).slice(-500));
+    });
+    try {
+      expect(existsSync(`${p.log}.1`)).toBe(false);
+      expect(read(p.log)).toContain(marker);
+      expect(statSync(p.log).size).toBeGreaterThanOrEqual(5 * MiB);
+    } finally {
+      await holder.release();
+    }
+  }, 60_000);
+
   it.skipIf(process.platform !== "win32")("Windows: a foreign handle without FILE_SHARE_DELETE blocks the rename; the writer keeps appending with one WARN line and rotates once the handle is gone", async () => {
     const p = await spawnProxy();
-    fillTo(p.log, 5 * MiB + 1024);
-    const holder = await holdOpen(p.log, "foreign");
+    const holder = await holdFullLog(p.log, "foreign");
     let released = false;
     try {
       const blocked = Array.from({ length: 50 }, (_, i) => `blocked-${String(i).padStart(3, "0")}\n`);
@@ -297,6 +314,18 @@ const warnLines = (text: string) => text.split("\n").filter((l) => / WARN proxy 
 function fillTo(file: string, bytes: number): void {
   const need = bytes - statSync(file).size;
   if (need > 0) appendFileSync(file, `${"#".repeat(1023)}\n`.repeat(Math.ceil(need / 1024)));
+}
+
+/** Shared setup for a full log held by another process; the hook drives the acquisition-race adversary. */
+async function holdFullLog(file: string, kind: "kit" | "foreign", acquiring?: () => Promise<void>): Promise<{ release(): Promise<void> }> {
+  // Keep the file below the threshold until the holder acknowledges its open
+  // handle. Otherwise any proxy output while PowerShell starts can rotate it
+  // first, leaving the foreign handle on a different file (or an existing .1).
+  const holding = holdOpen(file, kind);
+  await acquiring?.();
+  const holder = await holding;
+  fillTo(file, 5 * MiB + 1024);
+  return holder;
 }
 
 /**
