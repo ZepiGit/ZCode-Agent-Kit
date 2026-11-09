@@ -1,0 +1,152 @@
+// Seam 5 spawn tests, ticket 40 (ADR-0005 stream contract, Story 93; A-05,
+// A-09): the real `zcode-kit` entry, spawned in a temp kit copy with its
+// stdout and stderr piped apart, against a stand-in proxy on a free loopback
+// port in this process (an authenticated /health that proves the kit's
+// identity, or a foreign listener that does not). Reports and data land on
+// stdout, progress, results and error blocks on stderr, exit codes as before,
+// and the key never reaches a pipe.
+//
+// The temp kit is its own state directory (no ZCODE_KIT_STATE_DIR, nothing
+// copied from the checkout's state) with a synthetic key: no real credential (B2).
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import http from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { freePort } from "./free-port.mjs";
+
+const ROOT = join(import.meta.dirname, "..");
+const KEY = "synthetic-streams-key-not-a-secret";
+
+async function kitCopy(t, { key = true } = {}) {
+  const port = await freePort();
+  const root = mkdtempSync(join(tmpdir(), "cli-ux-streams-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const member of ["cli", "lib"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
+  mkdirSync(join(root, "proxy"));
+  mkdirSync(join(root, "home"));
+  mkdirSync(join(root, "logs"));
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const file of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", file), join(root, "zcode-proxy-src", "src", "tui", file));
+  for (const member of ["package.json", "proxy/zcode-proxy-manager.mjs"]) cpSync(join(ROOT, member), join(root, member));
+  writeFileSync(join(root, "proxy", "config.yaml"), `server:\n  host: 127.0.0.1\n  port: ${port}\nmodels:\n  - glm-5.3\n  - glm-5.3-flash\n`);
+  if (key) writeFileSync(join(root, ".proxykey"), KEY + "\n");
+  return { root, port };
+}
+
+/** A stand-in proxy: "ours" proves the identity with the kit key; "foreign" answers 401. */
+async function standIn(t, port, mode) {
+  const server = http.createServer((req, res) => {
+    if (mode === "foreign" || req.headers.authorization !== `Bearer ${KEY}`) return res.writeHead(401).end("{}");
+    if (req.url === "/health") return res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pid: 4242, uptimeSec: 3725, rssMB: 182 } }));
+    if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "glm-5.3" }] }));
+    if (req.url === "/quota") return res.end(JSON.stringify({ balances: [{ showName: "GLM Coding Lite", remainingUnits: 4120, totalUnits: 6000, unitType: "prompts", expiresAt: 1767139200 }] }));
+    return res.writeHead(404).end("{}");
+  });
+  await new Promise((r) => server.listen(port, "127.0.0.1", r));
+  t.after(() => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }));
+}
+
+/** zcode-kit spawned with piped stdout and stderr (the stand-in answers from this process). */
+function kit(root, args) {
+  const env = { ...process.env, HOME: join(root, "home"), USERPROFILE: join(root, "home") };
+  for (const name of Object.keys(env)) if (/^(ZCODE_|CI$|FORCE_COLOR$|NO_COLOR$)/.test(name)) delete env[name];
+  return new Promise((resolveRun, reject) => {
+    const child = spawn(process.execPath, [join(root, "cli", "zcode-kit.mjs"), ...args], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (c) => { stdout += c; });
+    child.stderr.setEncoding("utf8").on("data", (c) => { stderr += c; });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+    child.once("error", reject);
+    child.once("close", (code) => { clearTimeout(timer); resolveRun({ code, stdout, stderr }); });
+  });
+}
+
+const ESC = /\x1b/;
+
+test("status and proxy status of the own proxy: the report on stdout, nothing on stderr, exit 0, no key in the pipe", { timeout: 120_000 }, async (t) => {
+  const { root, port } = await kitCopy(t);
+  await standIn(t, port, "ours");
+  for (const args of [["status"], ["proxy", "status"]]) {
+    const run = await kit(root, args);
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.stderr, "", `${args.join(" ")}: nothing on stderr`);
+    assert.equal(run.stdout.split("\n")[0], `running on 127.0.0.1:${port}, up 1 h 02 min (pid 4242)`);
+    assert.equal((run.stdout.match(/^Connection details/gm) ?? []).length, 1);
+    assert.ok(!run.stdout.includes(KEY), "the key never reaches a pipe");
+    assert.doesNotMatch(run.stdout, ESC, "no escape sequences off a TTY");
+  }
+  const json = await kit(root, ["proxy", "status", "--json"]);
+  assert.equal(json.code, 0);
+  assert.equal(json.stderr, "");
+  assert.equal(JSON.parse(json.stdout).health, "ours", "stdout is one JSON document");
+});
+
+test("a foreign listener: status, start and stop write only an error block to stderr, with today's exit codes (1, 3, 3)", { timeout: 120_000 }, async (t) => {
+  const { root, port } = await kitCopy(t);
+  await standIn(t, port, "foreign");
+  for (const [args, code, what] of [
+    [["proxy", "status"], 1, `Port ${port} is answered by another service`],
+    [["proxy", "start"], 3, `Port ${port} is in use by another service`],
+    [["proxy", "stop"], 3, `Port ${port} is answered by another service`],
+  ]) {
+    const run = await kit(root, args);
+    assert.equal(run.code, code, `${args.join(" ")}: ${run.stderr}`);
+    assert.equal(run.stdout, "", `${args.join(" ")}: nothing on stdout`);
+    assert.match(run.stderr, new RegExp(`^FAIL  ${what.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n  why: \\S.*\\n(  next: \\S.*\\n)+  exit: ${code}\\n$`, "m"), args.join(" "));
+  }
+});
+
+test("proxy start on the own running proxy: the result row on stderr, the connection details once on stdout", { timeout: 120_000 }, async (t) => {
+  const { root, port } = await kitCopy(t);
+  await standIn(t, port, "ours");
+  const run = await kit(root, ["proxy", "start"]);
+  assert.equal(run.code, 0, run.stderr);
+  assert.equal(run.stderr, "Proxy start ...\nOK  Proxy start - already running\n");
+  assert.match(run.stdout, /^Connection details \(manual clients\) -+\n/);
+  assert.equal((run.stdout.match(/^Connection details/gm) ?? []).length, 1);
+  assert.match(run.stdout, new RegExp(`^  OpenAI base URL     http://127\\.0\\.0\\.1:${port}/v1$`, "m"));
+  assert.ok(!run.stdout.includes(KEY));
+});
+
+test("a missing key: start (exit 5) and status (exit 1) name zcode-kit setup on stderr, never node setup.mjs", { timeout: 120_000 }, async (t) => {
+  const { root } = await kitCopy(t, { key: false });
+  const start = await kit(root, ["proxy", "start"]);
+  assert.equal(start.code, 5, start.stderr);
+  assert.equal(start.stdout, "");
+  assert.match(start.stderr, /^FAIL {2}The local proxy key is missing\n {2}why: .*\.proxykey not found, .+\n {2}next: zcode-kit setup\n {2}exit: 5\n$/m);
+  const status = await kit(root, ["status"]);
+  assert.equal(status.code, 1);
+  assert.equal(status.stdout, "");
+  assert.match(status.stderr, /^ {2}next: zcode-kit setup$/m);
+  assert.doesNotMatch(start.stderr + status.stderr, /node setup\.mjs/);
+});
+
+test("proxy logs: the lines on stdout as data (filters included), a missing log is a note on stderr", { timeout: 120_000 }, async (t) => {
+  const { root } = await kitCopy(t);
+  const none = await kit(root, ["proxy", "logs"]);
+  assert.deepEqual([none.code, none.stdout], [0, ""]);
+  assert.match(none.stderr, /^INFO {2}no proxy log yet at .+proxy\.log\n$/);
+  writeFileSync(join(root, "logs", "proxy.log"), `r001 ANT glm-5.3 200 stream 812ms\nr002 ANT glm-5.3 429 batch 233ms\n[manager 2026-11-06T10:00:00.000Z] key ${KEY}\n`);
+  const all = await kit(root, ["proxy", "logs"]);
+  assert.deepEqual([all.code, all.stderr], [0, ""]);
+  assert.equal(all.stdout.split("\n").length, 4, "three lines");
+  assert.ok(!all.stdout.includes(KEY), "redacted");
+  const warn = await kit(root, ["proxy", "logs", "--level", "warn"]);
+  assert.deepEqual([warn.code, warn.stdout, warn.stderr], [0, "r002 ANT glm-5.3 429 batch 233ms\n", ""]);
+  const bad = await kit(root, ["proxy", "logs", "--level", "loud"]);
+  assert.deepEqual([bad.code, bad.stdout], [2, ""]);
+  assert.match(bad.stderr, /^FAIL {2}--level takes warn or error\n/);
+});
+
+test("doctor: the report on stdout only (stderr empty), one verdict, exit 1 when a check failed", { timeout: 120_000 }, async (t) => {
+  const { root } = await kitCopy(t);
+  const run = await kit(root, ["doctor"]);
+  assert.equal(run.code, 1);
+  assert.equal(run.stderr, "", "doctor's rows and verdict are a report: stdout (ADR-0005)");
+  assert.equal((run.stdout.match(/^doctor: /gm) ?? []).length, 1);
+  assert.match(run.stdout.trimEnd().split("\n").at(-1), /^doctor: \d+ failed, .* -> exit 1$/);
+  assert.doesNotMatch(run.stdout, ESC);
+});
