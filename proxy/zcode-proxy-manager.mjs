@@ -259,23 +259,33 @@ export function createManager({
   }
 
   // ------------------------------------------------------------------- logs
-  function logs(n = 40) {
-    if (!existsSync(LOG_FILE)) {
-      console.log(`(no log file at ${LOG_FILE})`);
-      return 0;
-    }
-    const size = statSync(LOG_FILE).size;
-    const tailBytes = Math.min(size, 64 * 1024);
-    const fh = openSync(LOG_FILE, "r");
+  /** The lines in the last 64 KB of `file` ([] when it does not exist), and whether that was the whole file. */
+  function tailLines(file) {
+    let fh;
+    try { fh = openSync(file, "r"); } catch (err) { if (err?.code === "ENOENT") return { lines: [], whole: true }; throw err; }
     try {
+      const size = statSync(file).size;
+      const tailBytes = Math.min(size, 64 * 1024);
       const buf = Buffer.alloc(tailBytes);
-      readSync(fh, buf, 0, tailBytes, size - tailBytes);
-      const lines = buf.toString("utf8").split("\n").filter(Boolean);
-      // The proxy's own lines are shown redacted too (ADR-0010 rule 4).
-      console.log(redact(lines.slice(-n).join("\n")));
+      const read = readSync(fh, buf, 0, tailBytes, size - tailBytes);
+      return { lines: buf.subarray(0, read).toString("utf8").split("\n").filter(Boolean), whole: tailBytes === size };
     } finally {
       closeSync(fh);
     }
+  }
+
+  // The last n lines across proxy.log.1 and proxy.log (the proxy rotates
+  // while it runs, so the recent lines may start in the rotated file).
+  function logs(n = 40) {
+    const rotated = `${LOG_FILE}.1`;
+    if (!existsSync(LOG_FILE) && !existsSync(rotated)) {
+      console.log(`(no log file at ${LOG_FILE})`);
+      return 0;
+    }
+    const current = tailLines(LOG_FILE);
+    const lines = current.lines.length < n && current.whole ? [...tailLines(rotated).lines, ...current.lines] : current.lines;
+    // The proxy's own lines are shown redacted too (ADR-0010 rule 4).
+    console.log(redact(lines.slice(-n).join("\n")));
     return 0;
   }
 
