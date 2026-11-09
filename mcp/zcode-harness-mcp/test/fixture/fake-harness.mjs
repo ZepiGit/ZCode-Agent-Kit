@@ -19,6 +19,8 @@
  *   FAKE_REQUIRE_REASONING=0|1      require model.options.reasoningLevel in setModel
  *   FAKE_MODEL_MISMATCH=0|1         acknowledge model selection without applying it
  *   FAKE_THOUGHT_MISMATCH=0|1       acknowledge effort selection without applying it
+ *   FAKE_SPAWN_LOG=...              append {event:"start"|"exit", pid, ppid, t} as JSONL
+ *                                   (app-server processes only, not the --version probe)
  */
 import readline from "node:readline";
 import fs from "node:fs";
@@ -30,6 +32,16 @@ if (process.argv.includes("--version")) {
 }
 
 const env = (k, d) => process.env[k] ?? d;
+
+// Every app-server start and exit, so a test can count the harness children a
+// bridge spawned, their rate and their overlap (S5/restart, ticket 57). A
+// SIGKILLed child writes no exit line.
+const spawnLog = env("FAKE_SPAWN_LOG", "");
+if (spawnLog) {
+  const record = (event) => fs.appendFileSync(spawnLog, JSON.stringify({ event, pid: process.pid, ppid: process.ppid, t: Date.now() }) + "\n", "utf8");
+  record("start");
+  process.on("exit", () => record("exit"));
+}
 let seq = 0;
 let serverReqCounter = 0;
 let requestCount = 0;

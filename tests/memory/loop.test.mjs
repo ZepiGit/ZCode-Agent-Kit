@@ -2085,3 +2085,46 @@ test("run evidence: S3/hung's kill-holder round is gated the same way", () => {
   assert.deepEqual(hung(KILL_HOLDER_ROUND), { ok: true, problems: [] });
   assert.match(hung({ ...KILL_HOLDER_ROUND, adversary: { killed: null, reason: "holder 7 not ours" } }).problems.join(), /round kill-holder-10: the adversary recorded no kill/);
 });
+
+// ── S5/restart (ticket 57, Owner Proxy round 12 Q1) ─────────────────────────
+// The spawn log of fake-harness.mjs is the restart evidence: harness children
+// live ~0.5 s, shorter than a sample, so their count, rate and overlap come
+// from their own start/exit lines, the samples only cross-check.
+test("S5/restart: the spawn log gives the harness spawns, their gaps and the most alive at once", async () => {
+  const { harnessSpawns } = await import("./scenarios/s5-mcp.mjs");
+  const lines = (records) => records.map((r) => JSON.stringify(r)).join("\n");
+  // Three children one after another, each gone before the next starts.
+  const serial = lines([
+    { event: "start", pid: 11, ppid: 1, t: 1_000 }, { event: "exit", pid: 11, t: 1_400 },
+    { event: "start", pid: 12, ppid: 1, t: 1_500 }, { event: "exit", pid: 12, t: 1_900 },
+    { event: "start", pid: 13, ppid: 1, t: 2_100 }, { event: "exit", pid: 13, t: 2_500 },
+  ]);
+  assert.deepEqual(harnessSpawns(serial, { t0: 1_000 }), { spawns: 3, maxAlive: 1, spawnAtMs: [0, 500, 1_100], gapsMs: [500, 600], withoutExit: 0 });
+  // A respawn before the old child exited is two children at once.
+  const overlap = lines([{ event: "start", pid: 21, t: 0 }, { event: "start", pid: 22, t: 100 }, { event: "exit", pid: 21, t: 200 }, { event: "exit", pid: 22, t: 300 }]);
+  assert.equal(harnessSpawns(overlap).maxAlive, 2);
+  // A SIGKILLed child writes no exit line: it stays alive to the end, and a later child overlaps it.
+  const killed = lines([{ event: "start", pid: 31, t: 0 }, { event: "start", pid: 32, t: 5_000 }, { event: "exit", pid: 32, t: 5_400 }]);
+  assert.deepEqual([harnessSpawns(killed).maxAlive, harnessSpawns(killed).withoutExit], [2, 1]);
+  // A truncated last line (a child killed mid-write) and junk are skipped, not counted.
+  assert.equal(harnessSpawns(`${serial}\n{"event":"start","pid":14,"t":`).spawns, 3);
+  assert.equal(harnessSpawns("").spawns, 0);
+});
+
+test("S5/restart is on both legs and judges the pre-registered storm conditions against a 3-restart budget", async () => {
+  const { JOB } = await import("./lib/catalogue.mjs");
+  const { MCP_RESTART, PROCESSES } = await import("./lib/budgets.mjs");
+  assert.ok(JOB.linux.includes("S5/restart") && JOB.windows.includes("S5/restart"));
+  assert.deepEqual(MCP_RESTART, { calls: 20, harnessChildren: 1, harnessAfterExit: 0, harnessAfterStop: 0, maxSpawns: 4 });
+  assert.equal(PROCESSES.respawnsPer15Min, 3, "the bridge's budget mirrors the proxy manager's");
+  assert.deepEqual(ROUNDS["S5/restart"], [`restart-k${MCP_RESTART.calls}`]);
+});
+
+test("run evidence: an S5/restart run without its restart round (K calls, a harness seen in the spawn log) is a harness failure", () => {
+  const run = (rounds, extra = {}) => runEvidence({ key: "S5/restart", platform: "linux", outcome: "GREEN", metric: "rss", durationS: 25, samples: 24, summary: { "mcp-bridge": { maxCount: 1 } }, notes: { sampler: {}, rounds }, ...extra }, { key: "S5/restart", exitCode: 0 });
+  assert.deepEqual(run([{ name: "restart-k20", calls: 20, spawns: 4 }]), { ok: true, problems: [] });
+  assert.match(run([]).problems.join(), /round restart-k20 never ran/);
+  assert.match(run([{ name: "restart-k20" }], { durationS: 4, samples: 3 }).problems.join(), /3 samples \(need ≥ 8\).*ran 4 s, below the S5\/restart floor of 10 s/);
+  // S5/short keeps the S5 floor.
+  assert.match(runEvidence({ key: "S5/short", platform: "linux", outcome: "GREEN", metric: "rss", durationS: 25, samples: 24, summary: { "mcp-bridge": { maxCount: 1 } }, notes: { sampler: {} } }, { key: "S5/short", exitCode: 0 }).problems.join(), /below the S5 floor of 120 s/);
+});

@@ -27,6 +27,9 @@ export const EVIDENCE = {
   "S3/omp": { minDurationS: 5, minSamples: 14, roles: ["proxy", "preflight", "omp-host"] },
   S4: { minDurationS: 60, minSamples: 30, roles: ["proxy", "manager"] },
   S5: { minDurationS: 120, minSamples: 60, roles: ["mcp-bridge"] },
+  // S5/restart (ticket 57): 20 short calls; with a restart budget most are
+  // refused at once, so a run takes ~30 s (its proof is the restart round).
+  "S5/restart": { minDurationS: 10, minSamples: 8, roles: ["mcp-bridge"] },
   S6: { minDurationS: 1, minSamples: 1, roles: [] },
   S7: { minDurationS: 30, minSamples: 15, roles: ["proxy"] },
 };
@@ -42,6 +45,8 @@ export const ROUNDS = {
   "S3/hung": ["kill-holder-10", "hung-10-with-stale-lock", "hung-10"],
   // scenarios/s3-concurrency.mjs OMP_ROUNDS; the second is the killed-starter adversary.
   "S3/omp": ["omp-5", "omp-5-kill-starter"],
+  // scenarios/s5-mcp.mjs runRestart: all K calls ran and a harness was spawned.
+  "S5/restart": ["restart-k20"],
 };
 
 // The rounds where a refused `manager start` is the measured outcome, not a
