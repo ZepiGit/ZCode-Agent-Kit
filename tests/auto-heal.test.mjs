@@ -366,6 +366,182 @@ async function runExtension(ctx, { timeoutMs, runtime, env = runtimeEnv(ctx, '')
   return result.stderr;
 }
 
+test('generated OMP shares one preflight and delivers its cause to every in-host waiter', async t => {
+  const ctx = childPreflight(t, `
+    import { appendFileSync, writeFileSync } from 'node:fs';
+    appendFileSync('attempts', 'x');
+    await new Promise(r => setTimeout(r, 250));
+    console.error('[zcode-preflight] cause=hung');
+    writeFileSync('recovered', 'yes');
+  `);
+  const extension = generateExtension(ctx);
+  const runner = join(ctx.root, 'single-flight-runner.mjs');
+  writeFileSync(runner, `
+    import assert from 'node:assert/strict';
+    import { readFileSync, existsSync, statSync } from 'node:fs';
+    import extension from ${JSON.stringify(pathToFileURL(extension).href)};
+    const root = ${JSON.stringify(ctx.root)};
+    globalThis.fetch = async () => ({ ok: existsSync(root + '/recovered'), json: async () => ({ status: 'ok', provider: 'zai' }) });
+    const hooks = [], warnings = [];
+    console.error = line => warnings.push(line);
+    for (let i = 0; i < 5; i++) extension({ on(_event, handler) { hooks.push(handler); } });
+    await Promise.all(hooks.map(h => h({}, { model: { provider: 'zcode' } })));
+    assert.equal(readFileSync(root + '/attempts', 'utf8'), 'x', 'only the starter spawns');
+    assert.equal(warnings.length, 5, 'all five hosts retain the cause');
+    assert.ok(warnings.every(line => line.startsWith('[zcode-autostart] hung:')));
+    const logs = ${JSON.stringify(join(dirname(ctx.keyFile), 'logs'))};
+    const record = JSON.parse(readFileSync(logs + '/omp-autostart.result', 'utf8'));
+    assert.equal(record.exitCode, 0);
+    assert.deepEqual(record.lines, ['[zcode-preflight] cause=hung']);
+    assert.equal(existsSync(logs + '/omp-autostart.token'), false);
+    if (process.platform !== 'win32') assert.equal(statSync(logs + '/omp-autostart.result').mode & 0o777, 0o600);
+  `);
+  const result = await runNode(runner, [], runtimeEnv(ctx, ''), resolveBun(ROOT));
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout, '');
+});
+
+test('generated OMP rejects corrupt, oversized, stale, mismatched and untrusted result records before serialized recovery', async t => {
+  const ctx = childPreflight(t, `
+    import assert from 'node:assert/strict';
+    import { appendFileSync, existsSync } from 'node:fs';
+    assert.equal(existsSync('released'), true, 'a live starter must not be displaced');
+    appendFileSync('attempts', 'x');
+    await new Promise(r => setTimeout(r, 80));
+    console.error('[zcode-preflight] cause=hung');
+  `);
+  const extension = generateExtension(ctx);
+  const runner = join(ctx.root, 'records-runner.mjs');
+  writeFileSync(runner, `
+    import assert from 'node:assert/strict';
+    import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync, statSync } from 'node:fs';
+    import { randomUUID } from 'node:crypto';
+    import extension from ${JSON.stringify(pathToFileURL(extension).href)};
+    const root = ${JSON.stringify(ctx.root)}, logs = ${JSON.stringify(join(dirname(ctx.keyFile), 'logs'))};
+    mkdirSync(logs, { recursive: true });
+    const token = logs + '/omp-autostart.token', result = logs + '/omp-autostart.result';
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok', provider: 'zai' }) });
+    const warnings = []; console.error = line => warnings.push(line);
+    const invalid = [
+      () => '{partial',
+      r => JSON.stringify(r) + ' '.repeat(4096),
+      r => JSON.stringify({ ...r, at: 1 }),
+      r => JSON.stringify({ ...r, at: Date.now() + 100000 }),
+      r => JSON.stringify({ ...r, identity: { ...r.identity, nonce: randomUUID() } }),
+      r => JSON.stringify({ ...r, identity: { ...r.identity, pid: r.identity.pid + 1 } }),
+      r => JSON.stringify({ ...r, identity: { ...r.identity, startedMs: r.identity.startedMs + 1 } }),
+      r => JSON.stringify({ ...r, lines: ['[zcode-preflight] cause=hung', 'Bearer SECRET'] }),
+      r => JSON.stringify({ ...r, lines: ['[zcode-preflight] cause=not-a-cause'] }),
+      r => JSON.stringify({ ...r, lines: ['[zcode-preflight] cause=hung\\n'] }),
+      r => JSON.stringify({ ...r, lines: Array(17).fill('[zcode-preflight] cause=hung') }),
+      r => JSON.stringify({ ...r, exitCode: '0' }),
+      r => JSON.stringify({ ...r, exitCode: 256 }),
+      () => null,
+    ];
+    for (const corrupt of invalid) {
+      try { unlinkSync(root + '/released'); } catch {}
+      const id = { pid: process.pid, startedMs: Date.now() - 500, at: Date.now(), nonce: randomUUID() };
+      writeFileSync(token, JSON.stringify(id), { mode: 0o600 });
+      let hook; extension({ on(_event, h) { hook = h; } });
+      const work = hook({}, { model: { provider: 'zcode' } });
+      await new Promise(r => setTimeout(r, 80));
+      assert.deepEqual(JSON.parse(readFileSync(token, 'utf8')), id, 'live token is untouched');
+      const raw = corrupt({ identity: id, at: Date.now(), exitCode: 0, lines: ['[zcode-preflight] cause=auth3012'] });
+      if (raw === null) { try { unlinkSync(result); } catch {} }
+      else writeFileSync(result, raw);
+      writeFileSync(root + '/released', 'yes'); unlinkSync(token);
+      await work;
+      const recovered = JSON.parse(readFileSync(result, 'utf8'));
+      assert.notEqual(recovered.identity.nonce, id.nonce, 'bad record requires our own preflight');
+      assert.equal(recovered.exitCode, 0);
+      if (process.platform !== 'win32') assert.equal(statSync(result).mode & 0o777, 0o600);
+    }
+    assert.equal(readFileSync(root + '/attempts', 'utf8'), 'x'.repeat(invalid.length));
+    assert.equal(warnings.length, invalid.length);
+    assert.ok(warnings.every(line => line.startsWith('[zcode-autostart] hung:')), 'no partial printing of invalid records');
+  `);
+  const result = await runNode(runner, [], runtimeEnv(ctx, ''), resolveBun(ROOT));
+  assert.equal(result.code, 0, result.stderr);
+});
+
+test('generated OMP proves dead and expired takeover, preserves partial live tokens, and bounds the wait with an injected clock', async t => {
+  const ctx = childPreflight(t, `
+    import { appendFileSync } from 'node:fs';
+    appendFileSync('attempts', 'x');
+    await new Promise(r => setTimeout(r, 80));
+  `);
+  const extension = generateExtension(ctx);
+  const runner = join(ctx.root, 'takeover-runner.mjs');
+  writeFileSync(runner, `
+    import assert from 'node:assert/strict';
+    import { spawnSync } from 'node:child_process';
+    import { mkdirSync, readFileSync, writeFileSync, unlinkSync, utimesSync } from 'node:fs';
+    import { randomUUID } from 'node:crypto';
+    import extension from ${JSON.stringify(pathToFileURL(extension).href)};
+    const root = ${JSON.stringify(ctx.root)}, logs = ${JSON.stringify(join(dirname(ctx.keyFile), 'logs'))};
+    mkdirSync(logs, { recursive: true });
+    const token = logs + '/omp-autostart.token';
+    const realNow = Date.now; let clock = realNow(); Date.now = () => clock;
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok', provider: 'zai' }) });
+    const warnings = []; console.error = line => warnings.push(line);
+    const request = () => { let hook; extension({ on(_event, h) { hook = h; } }); return hook({}, { model: { provider: 'zcode' } }); };
+    const dead = spawnSync(${JSON.stringify(process.execPath)}, ['-e', '']);
+    assert.equal(dead.status, 0);
+    const id = { pid: dead.pid, startedMs: clock - 1000, at: clock, nonce: randomUUID() };
+    writeFileSync(token, JSON.stringify(id));
+    await Promise.all(Array.from({ length: 5 }, request));
+    assert.equal(readFileSync(root + '/attempts', 'utf8'), 'x', 'dead starter recovered by exactly one contender');
+    writeFileSync(token, JSON.stringify({ ...id, pid: process.pid, at: clock - 120001 }));
+    await request();
+    assert.equal(readFileSync(root + '/attempts', 'utf8'), 'xx', 'expiration is proof even with a live pid');
+    writeFileSync(token, '{partial');
+    const work = request();
+    await new Promise(r => setTimeout(r, 60));
+    assert.equal(readFileSync(token, 'utf8'), '{partial', 'fresh partial write is never proof');
+    clock += 120000;
+    await work;
+    assert.match(warnings.pop(), /timeout:/);
+    assert.equal(readFileSync(root + '/attempts', 'utf8'), 'xx', 'deadline spawns no overlapping preflight');
+    utimesSync(token, new Date(clock - 120001), new Date(clock - 120001));
+    await request();
+    assert.equal(readFileSync(root + '/attempts', 'utf8'), 'xxx', 'aged partial token recovered using filesystem proof');
+    assert.equal(warnings.length, 0);
+  `);
+  const result = await runNode(runner, [], runtimeEnv(ctx, ''), resolveBun(ROOT));
+  assert.equal(result.code, 0, result.stderr);
+});
+
+test('generated OMP never overlaps a live native child when its host token expires', async t => {
+  const ctx = childPreflight(t, `
+    import { appendFileSync, openSync, unlinkSync } from 'node:fs';
+    let fd;
+    try { fd = openSync('native-active', 'wx'); }
+    catch { appendFileSync('overlap', 'x'); }
+    appendFileSync('attempts', 'x');
+    await new Promise(r => setTimeout(r, 600));
+    if (fd !== undefined) unlinkSync('native-active');
+  `);
+  const extension = generateExtension(ctx);
+  const runner = join(ctx.root, 'expiry-runner.mjs');
+  writeFileSync(runner, `
+    import assert from 'node:assert/strict';
+    import { existsSync } from 'node:fs';
+    import extension from ${JSON.stringify(pathToFileURL(extension).href)};
+    const root = ${JSON.stringify(ctx.root)};
+    let clock = Date.now(); Date.now = () => clock;
+    const request = () => { let hook; extension({ on(_event, h) { hook = h; } }); return hook({}, { model: { provider: 'zcode' } }); };
+    const first = request();
+    for (let i = 0; i < 200 && !existsSync(root + '/native-active'); i++) await new Promise(r => setTimeout(r, 5));
+    assert.equal(existsSync(root + '/native-active'), true);
+    clock += 120001;
+    const second = request();
+    await Promise.all([first, second]);
+    assert.equal(existsSync(root + '/overlap'), false, 'age is not proof the native preflight child is gone');
+  `);
+  const result = await runNode(runner, [], runtimeEnv(ctx, ''), resolveBun(ROOT));
+  assert.equal(result.code, 0, result.stderr);
+});
+
 test('generated OMP preflight captures output and forwards only secret-free quota warnings', async t => {
   const ctx = fixture(t); await mock(t, ctx, { quotaBody: snapshot(['balance: 3012 SECRET']) });
   cpSync(join(ROOT, 'cli'), join(ctx.root, 'cli'), { recursive: true });
@@ -408,12 +584,18 @@ for (const [exitCode, category] of [[3, 'foreign'], [5, 'key'], [4, 'startup']])
     `);
     assert.match(await runExtension(ctx), new RegExp(`${category}:`));
     assert.equal(readFileSync(join(ctx.root, 'attempts'), 'utf8'), 'x');
+    const record = JSON.parse(readFileSync(join(dirname(ctx.keyFile), 'logs', 'omp-autostart.result'), 'utf8'));
+    assert.equal(record.exitCode, exitCode);
+    assert.equal(existsSync(join(dirname(ctx.keyFile), 'logs', 'omp-autostart.token')), false);
   });
 }
 
 test('generated OMP bounds hung and noisy children and diagnoses missing files/runtimes', async t => {
   const hung = childPreflight(t, 'setInterval(() => {}, 1000);');
   assert.match(await runExtension(hung, { timeoutMs: 150 }), /timeout:/);
+  const timedOut = JSON.parse(readFileSync(join(dirname(hung.keyFile), 'logs', 'omp-autostart.result'), 'utf8'));
+  assert.equal(timedOut.exitCode, 1);
+  assert.equal(existsSync(join(dirname(hung.keyFile), 'logs', 'omp-autostart.token')), false);
   const noisy = childPreflight(t, `process.stdout.write('SECRET'.repeat(20000));`);
   assert.match(await runExtension(noisy), /output-limit:/);
   rmSync(join(noisy.root, 'cli', 'heal.mjs'));

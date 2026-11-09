@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import omp from "../cli/adapters/omp.mjs";
+import { beginTransaction } from "../lib/transaction.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 const requireFromProxy = createRequire(join(KIT, "zcode-proxy-src", "package.json"));
@@ -180,6 +181,28 @@ test("OMP second apply is byte-identical", () => {
   } finally {
     f.cleanup();
   }
+});
+
+test("OMP extension refresh through a transaction replays twice without writes", () => {
+  const f = fixture("providers:\n", "extensions: []\n");
+  try {
+    const backupDir = join(f.home, "transactions");
+    const apply = () => {
+      const tx = beginTransaction(backupDir, "integrate omp");
+      omp.apply(f.ctx, tx, () => {});
+      tx.finish();
+      return tx;
+    };
+    apply();
+    const extension = join(f.agentDir, "extensions", "zcode-proxy-autostart.ts");
+    const first = readFileSync(extension, "utf8");
+    for (let i = 0; i < 2; i++) {
+      const tx = apply();
+      assert.deepEqual(tx.ops, []);
+      assert.equal(tx.finish(), null, "no-op creates no manifest");
+      assert.equal(readFileSync(extension, "utf8"), first);
+    }
+  } finally { f.cleanup(); }
 });
 
 test("OMP removes only disabledProviders entries and preserves unrelated lists and quoted paths", () => {
