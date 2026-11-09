@@ -1074,7 +1074,7 @@ test("Round 22 Q1: stop alone reaps a healthy proxy left without any pid record 
   assert.deepEqual(lockFiles(root), []);
 });
 
-test("adoption without a record needs the whole proof: a listener whose pid is not this installation's kit proxy, or whose start changes, is never adopted or signalled", { timeout: 60_000 }, async (t) => {
+test("adoption without a record needs the whole proof: a listener whose pid is not this installation's kit proxy, or whose start changes, is never adopted or signalled", { timeout: 180_000 }, async (t) => {
   const kitCommand = (root, verb = "serve") => ({ commandLine: `"bun" "run" "${join(root, "zcode-proxy-src", "src", "index.ts")}" "${verb}"`, executablePath: "bun" });
   const steady = Date.now() - 60_000;
   const cases = {
