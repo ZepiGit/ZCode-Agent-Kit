@@ -101,6 +101,44 @@ describe("safe CAPTCHA failure categories", () => {
     expect(error.message).not.toContain("PRIVATE_MARKER");
   });
 
+  it("rebuilds a hostile mutable incompatible error with its canonical subtype and method types", () => {
+    const error = new CaptchaSdkIncompatibleError("SyntheticMethodCredential", null);
+    error.message = 'rate limit F008 SyntheticMessageCredential';
+    error.stack = 'SyntheticStackCredential';
+    error.name = 'SyntheticNameCredential';
+    error.cause = new Error('SyntheticCauseCredential');
+    Object.assign(error, { category: 'rate-limit', payload: 'SyntheticPayloadCredential' });
+    Object.defineProperty(error, 'toJSON', { value: () => 'SyntheticSerializerCredential' });
+    const safe = normalizeCaptchaError(error);
+    expect(safe).not.toBe(error);
+    expect(safe).toBeInstanceOf(CaptchaSdkIncompatibleError);
+    expect(classifyCaptchaError(error)).toBe('incompatible');
+    expect(classifyCaptchaError(safe)).toBe('incompatible');
+    expect(safe.category).toBe('incompatible');
+    expect(safe.message).toBe('CAPTCHA SDK incompatible: startTracelessVerification non-callable (string); show non-callable (null)');
+    expect(safe.name).toBe('CaptchaSdkError');
+    expect(safe.stack).not.toContain('Synthetic');
+    expect(safe.cause).toBeUndefined();
+    expect(JSON.stringify(safe)).not.toContain('Synthetic');
+    const repeated = normalizeCaptchaError(safe);
+    expect(repeated).not.toBe(safe);
+    expect(repeated).toBeInstanceOf(CaptchaSdkIncompatibleError);
+    expect(repeated.message).toBe(safe.message);
+    expect(classifyCaptchaError(repeated)).toBe('incompatible');
+  });
+
+  it("does not trust an incompatible prototype without host registration", () => {
+    const forged = Object.assign(Object.create(CaptchaSdkIncompatibleError.prototype), {
+      category: 'incompatible', message: 'SyntheticForgedCredential',
+    });
+    const safe = normalizeCaptchaError(forged);
+    expect(safe).not.toBeInstanceOf(CaptchaSdkIncompatibleError);
+    expect(classifyCaptchaError(forged)).toBe('other');
+    expect(classifyCaptchaError(safe)).toBe('other');
+    expect(safe.message).toBe('captcha SDK failure');
+    expect(safe.cause).toBeUndefined();
+  });
+
   it("keeps trailing newlines out of transported local-refusal diagnostics", () => {
     const error = captchaFailureFromTransport('other', 'verify param refused: verify param not base64-JSON\n');
     expect(error.message).not.toMatch(/[\r\n]/);

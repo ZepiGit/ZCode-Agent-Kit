@@ -1,8 +1,13 @@
 import { createHash } from "node:crypto";
 
-// Canonical host-built text is held outside mutable Error objects. Neither an
-// instanceof check nor a readonly TypeScript field makes message/stack safe.
-const hostFailureText = new WeakMap<object, string>();
+// Canonical host-built state is held outside mutable Error objects. Neither an
+// instanceof check nor a readonly TypeScript field makes category/message safe.
+interface HostFailure {
+  readonly category: CaptchaFailureCategory;
+  readonly message: string;
+  readonly kind: "sdk" | "incompatible" | "local-verification";
+}
+const hostFailures = new WeakMap<object, HostFailure>();
 const LOCAL_REFUSAL = /^(solver returned empty param|verify param too short \(\d{1,6} chars\) — degraded result, refused|verify param missing securityToken — degraded result, refused|verify param not base64-JSON)$/;
 
 /** Decode certifyId from a base64 Aliyun verify-param blob. */
@@ -29,7 +34,7 @@ export class CaptchaSdkError extends Error {
       : category === "incompatible" ? "CAPTCHA SDK incompatible"
       : "captcha SDK failure");
     this.name = "CaptchaSdkError";
-    hostFailureText.set(this, this.message);
+    hostFailures.set(this, { category, message: this.message, kind: "sdk" });
   }
 }
 
@@ -39,7 +44,7 @@ export class CaptchaSdkIncompatibleError extends CaptchaSdkError {
     super("incompatible");
     const describe = (value: unknown) => value === undefined ? "missing" : `non-callable (${value === null ? "null" : typeof value})`;
     this.message += `: startTracelessVerification ${describe(primary)}; show ${describe(fallback)}`;
-    hostFailureText.set(this, this.message);
+    hostFailures.set(this, { category: "incompatible", message: this.message, kind: "incompatible" });
   }
 }
 
@@ -55,7 +60,7 @@ export class CaptchaLocalVerificationError extends CaptchaSdkError {
     super("other");
     this.name = "CaptchaLocalVerificationError";
     this.message = `verify param refused: ${LOCAL_REFUSAL.test(detail) ? detail : "local validation failure"}`;
-    hostFailureText.set(this, this.message);
+    hostFailures.set(this, { category: "other", message: this.message, kind: "local-verification" });
   }
 }
 
@@ -90,9 +95,10 @@ function errorField(error: object, key: string): unknown {
  * category/code strings cannot impersonate the trusted incompatible error type.
  */
 export function classifyCaptchaError(error: unknown): CaptchaFailureCategory {
-  if (error instanceof CaptchaSdkError) return error.category;
   if (typeof error === "string") return classifyMessage(error);
   if (!error || typeof error !== "object") return "other";
+  const hostFailure = hostFailures.get(error);
+  if (hostFailure) return hostFailure.category;
   let category: CaptchaFailureCategory = "other";
   for (const key of CAPTCHA_ERROR_FIELDS) {
     const value = errorField(error, key);
@@ -108,12 +114,12 @@ export function classifyCaptchaError(error: unknown): CaptchaFailureCategory {
 
 /** Bounded diagnostic provenance; no raw text or guest serialization survives. */
 export function describeCaptchaFailure(error: unknown): string {
+  const canonical = error && typeof error === "object" ? hostFailures.get(error) : undefined;
+  if (canonical) return canonical.message;
   const category = classifyCaptchaError(error);
   const raw = typeof error === "string" ? error
     : error && typeof error === "object" ? errorField(error, "message") : undefined;
   const message = typeof raw === "string" ? raw : "";
-  const canonical = error && typeof error === "object" ? hostFailureText.get(error) : undefined;
-  if (canonical) return canonical;
   return `${new CaptchaSdkError(category).message} [len=${message.length} sha256=${createHash("sha256").update(message).digest("hex")}]`;
 }
 
@@ -135,17 +141,26 @@ export function captchaFailureFromTransport(category: CaptchaFailureCategory, me
   error.message = /cleanup failed/.test(text) ? "CAPTCHA DOM cleanup failed; runtime unavailable"
     : fixed.has(text) || LOCAL_REFUSAL.test(localDetail) || canonicalSdk.test(text) || incompatible.test(text)
       ? text : describeCaptchaFailure(text);
-  hostFailureText.set(error, error.message);
+  hostFailures.set(error, { category, message: error.message, kind: "sdk" });
   return error;
 }
 
+/**
+ * Preserve the registered host subtype, category and method-type/refusal text,
+ * not object identity. Always rebuild: typed errors can acquire hostile message,
+ * stack, cause, own properties or serializers after construction.
+ */
 export function normalizeCaptchaError(error: unknown): CaptchaSdkError {
-  const normalized = new CaptchaSdkError(classifyCaptchaError(error));
-  // Rebuild instead of trusting mutable message/stack/cause on typed errors.
-  const canonical = error && typeof error === "object" ? hostFailureText.get(error) : undefined;
+  const canonical = error && typeof error === "object" ? hostFailures.get(error) : undefined;
+  const normalized = canonical?.kind === "incompatible"
+    ? new CaptchaSdkIncompatibleError(undefined, undefined)
+    : canonical?.kind === "local-verification"
+      ? new CaptchaLocalVerificationError("")
+      : new CaptchaSdkError(classifyCaptchaError(error));
   if (canonical) {
-    normalized.message = canonical;
-    hostFailureText.set(normalized, canonical);
+    // The registry holds only host-built strings/enums, never guest values.
+    normalized.message = canonical.message;
+    hostFailures.set(normalized, canonical);
   }
   return normalized;
 }
