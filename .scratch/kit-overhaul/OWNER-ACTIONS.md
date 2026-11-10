@@ -89,4 +89,6 @@ Use the existing signed-in ZCode/provider account interface to inspect the curre
 
 No verified safe CLI quota command was found, so none is invented here. The installed UsageStats entitlement method exists, but the known loopback probe requires reading a token and was not executed under B2. Exposed tools and the inspected CLI control interface provided no B2-compatible live quota operation. Evidence: `/home/AgentKit/overhaul-tools/glm-quota-capability-check-20261110.md`.
 
+The signed-in UI path was also checked on2026-11-10: browser-use/control-browser and computer-use skills load, but their required `mcp__node_repl__js` callable is absent from resident tools and both exact/broad deferred discovery. No signed-in account screen was observed, so no quota/reset value can be reported from the UI. This needs a working supported UI bridge or a non-secret owner report, not repeated account/model requests.
+
 Do not automatically resume, amend or restart workflow `dwfrun-658f0456-0734-4f5a-af85-e94e4ee4f5ea`. This owner action supplies quota evidence only, not workflow lifecycle permission or provider-substitution approval. Ticket40's fresh merger handoff is prepared at `/home/AgentKit/overhaul-tools/t40-fresh-merger-ready-20261110.md`; no merger was dispatched.
