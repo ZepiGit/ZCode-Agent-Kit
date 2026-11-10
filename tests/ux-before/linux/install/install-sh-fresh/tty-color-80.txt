@@ -22,53 +22,53 @@ n
 
   [4/4] Configuring your workspace
 
-  Runtime and configuration
-  [WARN] MANUAL STEP REQUIRED (once): log in with your ZCode account:
-  [OK]   Runtime ready
 
-  Assistant integrations
-  note: y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
-Configure ZCode as a provider with its supported models in OMP / Oh My Pi? [y/n] y
+| Runtime and configuration
+! WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+   next  cd <FIXTURE>/install/zcode-proxy-src
+     or  ZCODE_PROXY_CONFIG="<FIXTURE>/install/proxy/config.yaml" bun run src/index.ts auth login zai
+
+  ✓ OK    Runtime and configuration  runtime ready
+Assistant integrations ─────────────────────────────────────────────────────────
+• INFO  y also registers the kit's MCP bridge "zcode-harness" for OMP / Oh My Pi (skip with --no-mcp).
+? Configure ZCode for OMP / Oh My Pi? [y/n] y
 n
 n
 y
 y
 n
 n
-  [OK]   OMP / Oh My Pi
-Configure ZCode as a provider with its supported models in pi? [y/n] n
-  [SKIP] pi — answered n
-  note: y also registers the kit's MCP bridge "zcode-harness" for Claude Code (skip with --no-mcp).
-Configure ZCode as a provider with its supported models in Claude Code? [y/n] n
-  [SKIP] Claude Code — answered n
-Configure ZCode as a provider with its supported models in Codex CLI? [y/n] y
-  [OK]   Codex CLI
-Configure ZCode as a provider with its supported models in OpenCode? [y/n] y
-  [OK]   OpenCode
-Configure ZCode as a provider with its supported models in Continue? [y/n] n
-  [SKIP] Continue — answered n
-
-  Account Rotator
-
+  ✓ OK    OMP / Oh My Pi
+? Configure ZCode for pi? [y/n] n
+  – SKIP  pi — answered n
+• INFO  y also registers the kit's MCP bridge "zcode-harness" for Claude Code (skip with --no-mcp).
+? Configure ZCode for Claude Code? [y/n] n
+  – SKIP  Claude Code — answered n
+? Configure ZCode for Codex CLI? [y/n] y
+  ✓ OK    Codex CLI
+? Configure ZCode for OpenCode? [y/n] y
+  ✓ OK    OpenCode
+? Configure ZCode for Continue? [y/n] n
+  – SKIP  Continue — answered n
+Account Rotator ────────────────────────────────────────────────────────────────
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/N] n
-  [OK] Account Rotator disabled. Saved accounts are kept.
+? Do you want to activate the Account Rotator feature? [y/N] n
+  ✓ OK    Account Rotator disabled. Saved accounts are kept.
 
-  Configuration saved.
-  Assistants: 3 configured, 3 skipped, 0 failed.
+  Assistants  3 configured, 3 skipped, 0 failed
+  Undo        zcode-kit rollback <TX>
+  Setup log   <FIXTURE>/install/logs/install.log
 
-  Connection check
-  [SKIP] Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+| Connection check
+  ✓ OK    Connection check  Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
 
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
     Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
-    API key (Bearer / x-api-key):  RxJGAzCnHXZAeNNVE4hm3Sx4sS49UZdhsjMuqhqsc38
+    API key (Bearer / x-api-key):  H43lqvFtnyODd8oG81T90xAB9rY3eZrPh8Ioehg9NW4
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
-
-  Setup log: <FIXTURE>/install/logs/install.log
   [OK]   zcode-kit command installed
   note: <HOME>/.local/bin is not on your PATH - add it to use zcode-kit from anywhere
 

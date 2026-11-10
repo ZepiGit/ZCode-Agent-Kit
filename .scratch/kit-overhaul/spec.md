@@ -801,6 +801,17 @@ Open, /pr-shaped and not merged.
 
 Windows-only proofs run inside seams 1, 2, 3, 4, 5 and 8 on the windows-latest leg, not as a separate seam: `proxy.log` rename with readers, the stop-request flush, Job Object reaping after the proxy is SIGKILLed (seam 1), the resident launcher's signal and exit-code forwarding (seam 5) and the PowerShell 5.1 stderr gate.
 
+## Onboarding amendment — Round 39 (2026-11-10)
+
+Ticket83's later user-requested checkbox selection and command overview are governed by Round39 Q1–Q4, transcribed verbatim in DECISIONS.md and adopted in ADR-0001. This is Owner Proxy authority under Charterv1, not direct human UX answers, and not implementation acceptance. Ticket83 remains gated on accepted40/42/43 and a valid recorded design ratification.
+
+- Esc/empty editable confirmation/EOF create no harness-choice records and supply undefined through existing decision plumbing. Nonempty Enter uses true/false per editable checkbox. Preserve Q1's exact reasking matrix and pre-arm per-row skip/refresh/unreadable consequences; saved files and locked provenance/MCP remain unchanged. No rotator-policy or consent-schema change.
+- `Next steps` has exactly five paste-safe base commands (doctor, proxy start, proxy status, auth status, --help), plus at most one qualified concrete run-ID after doctor under Q2's success/consent/no-failure rule. No placeholder action rows. Existing command help/login/failure hints remain; stdout/log/installer/JSON guards unchanged. Ticket44owns later whole-installer footer deduplication.
+- `lib/term/caps.mjs` gains only optional measured physical columns/rows and selector-specific capability support. Preserve logical width, global color precedence, lazy renderer topology and no-color/dumb/CI/pipe fallback. Count the actual wrapped frame before raw mode and after resize; unknown/unsafe fit takes the old line path.
+- Q4 requires mutually exclusive input epochs, complete disclosure before arming, bounded marked-paste/text-contamination handling and cleanup/CRLF suffix isolation. Unmarked valid key bytes cannot be distinguished from identical typing; chunk count/timing is not provenance. No perfect arbitrary-paste guarantee, new terminal mode, dependency or unbounded queue is authorized. Native Windows and permanent regression gates remain separate and unexecuted here.
+
+Exact acceptance matrix/copy/input bounds live in Round39 and ADR-0001; ticket83 records the actionable scope and test criteria. The earlier premature V3 ratification attempt is not backdated into compliance. Renewed ratification requires the committed amendments and actual responses to identical final bytes.
+
 ## Out of Scope
 
 - **Anything that changes how anti-abuse code behaves (B1).** This covers solve pass rates, client fingerprints, rotation strategies and quota or rate-limit workarounds. Inside the captcha, signing, identity, trace-header, session-context and rotator modules, only lifecycle, isolation, bounds, error handling, observability, UX and tests change.

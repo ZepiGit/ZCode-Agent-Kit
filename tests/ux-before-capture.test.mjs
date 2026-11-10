@@ -349,6 +349,14 @@ test("Linux end to end: a CRLF package.json (as on a windows checkout) changes o
   cpSync(join(ROOT, "zcode-proxy-src", "package.json"), join(kit, "zcode-proxy-src", "package.json"));
   symlinkSync(join(ROOT, "zcode-proxy-src", "src"), join(kit, "zcode-proxy-src", "src"));
   symlinkSync(join(ROOT, "zcode-proxy-src", "node_modules"), join(kit, "zcode-proxy-src", "node_modules"));
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout. Here the fixture symlinks src/ to this checkout, so the files
+  // are already reachable and a copy would be src == dest.
+  if (!existsSync(join(kit, "zcode-proxy-src", "src", "tui", "tokens.mjs"))) {
+    mkdirSync(join(kit, "zcode-proxy-src", "src", "tui"), { recursive: true });
+    for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", f), join(kit, "zcode-proxy-src", "src", "tui", f));
+  }
   writeFileSync(join(kit, "package.json"), readFileSync(join(ROOT, "package.json"), "utf8").replace(/\r?\n/g, "\r\n"));
   const out = join(dir, "out");
   const run = spawnSync(process.execPath, [join(ROOT, "tests", "ux-before", "capture", "capture.mjs"), "--kit", kit, "--out", out,

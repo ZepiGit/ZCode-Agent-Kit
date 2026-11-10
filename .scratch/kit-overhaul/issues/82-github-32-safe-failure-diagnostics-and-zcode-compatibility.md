@@ -228,3 +228,49 @@ git -C /home/AgentKit/wt/t82 diff --check 829202b..HEAD
 Also executed `git diff --exit-code 829202b HEAD -- <909 actual ticket40 product paths from git diff --name-only deadcbc^2 deadcbc -- . ':!.scratch'>`: all909filesbyte-identical, ticket40staysresolved. SDK callback test, SDK method selection, retry/signing/identity/session/rotator files are unchanged from integration. A separate check of the imported integration delta `git diff --check ccf3331..HEAD -- . ':!.scratch'` reports the pre-existing accepted40snapshot whitespace/EOF diagnostics; no accepted snapshot or product cleanup was performed. Own delta check against829202b is clean. Fresh `ps -eo pid=,ppid=,pgid=,comm=` comparison against all17recorded SDK-check/probe process groups (including the hostile RED run) found0activeprocesses; no process was killed.
 
 **Next gate only:** central controller runs full `npm run test:all` and required MCP build/dist checks; this worker did NOT rerun fullsuite, install, build, soak, nativeWindows/macOS or CI. Independent review/freshCI remain pending. Remaining82gaps unchanged: server and standalone default/custom discovery failures plus precedence/containment/malformed-pointer/multiple-install decisions and permanent seam7/native tests (`research/zcode-current-runtime-20261110.md:104-110`, read, not rerun); official app-server/protocol/runtime compatibility; original Windows405+3012cause/recovery and correlation with guestTypeErrors; OA-4 owner-only re-observation. No blanket82resolution, no release/version/tag/mainmerge or challenge-pass claim. Task-observer: none logged by this worker because the controller owns it.
+
+### 2026-11-10 — returned-certifyId repair evidence, preserved during integration reconciliation
+
+The current controller ask supplies Grok approval and central fullsuite GREEN for exact own tip `c443f337b242006ab62eb7fd598d1c688da9ccb4`. This worker did not run that review or fullsuite. Read the actual commit and the recorded logs below; they are prior-run evidence, not fresh test execution in this reconciliation ask.
+
+Commit `c443f33` repairs a separate returned-token diagnostic path: a decoded duplicate certifyId previously entered `lastErr` without passing through thrown-error normalization. `zcode-proxy-src/src/proxy/captcha-pool.ts:684-689` now keeps the fixed host label `duplicate certifyId` only. Parsing, validation, issued-id deduplication, TTLs, mint outcome accounting, storm/probe scheduling and retry/recycle behavior are unchanged. Permanent public-pool tests at `src/proxy/captcha-pool.test.ts:612-693` seed the issued-id registry by taking an unchanged successful synthetic token, then pin exact storm/probe warnings and the later take-deadline message. The real-listener fixture preserves its original twelve controls and adds returned-token response/warning checks on all three routes; `src/server/solver-error-http.test.ts:6-18` requires all fifteen cases and exact replies/warnings.
+
+Recorded RED/GREEN evidence read in this ask (all log paths relative to `/home/AgentKit/wt/overhaul/.scratch/kit-overhaul/`):
+
+- `reports/t82-returned-certifyid-pool-red-20261110.log:6-40`: two genuine marker-exposure failures, storm and take deadline, EXIT1. `reports/t82-returned-certifyid-http-fixture-red-20261110.log:36,58`: fifteen executed/twelve passed/three returned-certifyId leaks, EXIT1. Repeat RED `reports/t82-returned-certifyid-repeat-red-20261110.log:81-86`: three failed tests across two files, EXIT1.
+- `reports/t82-returned-certifyid-targeted-green-20261110.log:254-258`: 148pass/0fail across twelve files, EXIT0/10s. `reports/t82-returned-certifyid-preservation-green-20261110.log:28-33`: 12pass/0fail/80filtered, EXIT0; this is not the complete three files. `reports/t82-returned-certifyid-typecheck-20261110.log:1-4`: Bun1.4.2 and `tsc --noEmit -p tsconfig.json`, EXIT0.
+- `reports/t82-returned-certifyid-http-fixture-green-20261110.log:21-37`: fifteen executed/fifteen passed, fifteen owned-loopback requests/twelve synthetic upstream calls/zero blocked external fetch attempts/zero live upstream requests, listener closed, EXIT0. Three returned-certifyId cases require exact reply/warnings and expose neither the marker nor the returned parameter; auth controls remain401 and solver failures503.
+- Supplied central fullsuite log `reports/gpt-grok-t82-certify-provenance-full-20261110.log:2-7,1232-1244,3614-3634,3767-3775` records actual `npm run test:all`: kit1129/1149(skip20), proxy1701/1702(skip1), MCP115/116(skip1), zero failures/cancellations, proxy typecheck and MCP build completed, Bun1.4.2(744846f84), EXIT0/284s. Its kit command predates accepted43; it is not evidence for the new combined tree. Review approval is supplied by the current ask, not independently rerun or recovered here.
+
+### 2026-11-10 — merge current accepted integration into own82, next central gate only
+
+Started clean at exact approved own tip `c443f337b242006ab62eb7fd598d1c688da9ccb4`. Executed:
+
+```sh
+bash /home/AgentKit/overhaul-tools/gitc.sh -C /home/AgentKit/wt/t82 merge --no-ff --no-commit 54771fdfde870394236e547394f3330ce518b6e7
+```
+
+Git returned `Automatic merge went well; stopped before committing as requested`. No conflicts, manual resolutions, test-list edits, fixture edits or product/design decisions. Merge base is `829202b32cde3a2285c2c3fc39a5fc0394f1b50b`. A corrected blob/mode comparison of all4443paths found own24changed/incoming269changed/**zero overlapping paths** and an exact independent-parent union. The initial comparison script failed because it compared `ls-tree` metadata including the literal `blob` field to `ls-files` metadata without it; that was a verification-script error, not a merge failure. Comparing `(mode, objectId)` consistently produced the actual EXIT0 result.
+
+Executed staged preservation checks, all empty/EXIT0 before adding this ticket comment:
+
+```sh
+git -C /home/AgentKit/wt/t82 diff --exit-code --cached c443f337b242006ab62eb7fd598d1c688da9ccb4 -- zcode-proxy-src
+git -C /home/AgentKit/wt/t82 diff --exit-code --cached 54771fdfde870394236e547394f3330ce518b6e7 -- mcp/zcode-harness-mcp docs/adr .scratch/kit-overhaul/DECISIONS.md .scratch/kit-overhaul/RUNLOG.md .scratch/kit-overhaul/STATE.md .scratch/kit-overhaul/spec.md .scratch/kit-overhaul/issues/INDEX.md package.json
+git -C /home/AgentKit/wt/t82 diff --exit-code
+git -C /home/AgentKit/wt/t82 diff --name-only --diff-filter=U
+git -C /home/AgentKit/wt/t82 diff --check --cached 54771fdfde870394236e547394f3330ce518b6e7
+```
+
+All271proxy source/test/fixture paths are byte-identical to approvedc443f33; all86MCP paths and all16ADRs equal current integration. Accepted40/43 status and all Round39 ADR0001/DECISIONS/spec/ticket83 documents, STATE/RUNLOG/INDEX and the current package test list are retained exactly. Existing82comments and OA-4 survive. No MCPdist edit or build; no snapshot cleanup or accepted test relaxation.
+
+Although no code resolution was necessary, this worker executed the following bounded merged-tree preservation checks. Both use fresh isolated HOME, systemd1G/no swap, pinnedBun1.4.2 and PID/PGID recording; proxy tests retain the existing fail-on-external-egress preload and synthetic solver/upstream fixtures:
+
+```sh
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-integration54771-targeted-20261110 1G 120 -- bash -c 'set -e; cd /home/AgentKit/wt/t82/zcode-proxy-src; printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; bun test src/proxy/captcha-sdk-contract.test.ts src/proxy/captcha-diagnostics.test.ts src/runtime/guest-error.test.ts src/runtime/guest-error-boundary.test.ts src/tui/guest-error-boundary.test.ts src/proxy/captcha-token.test.ts src/proxy/captcha-pool.test.ts src/proxy/solver-transport.test.ts src/proxy/captcha-solver.test.ts src/proxy/handler-issue32.test.ts src/server/solver-error-http.test.ts src/server/routes-quota.test.ts'
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-integration54771-wiring-20261110 1G 45 -- bash -c 'set -e; cd /home/AgentKit/wt/t82; printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; node --version; node --test tests/test-wiring.test.mjs'
+```
+
+Actual fresh results: `reports/t82-integration54771-targeted-20261110.log:1-3,254-258` **148pass/0fail**, twelve files,10.73s,EXIT0/11s, runnerPID3680615/PGID3680614. This includes the fifteen-case real-HTTP regression, actual uncaught/rejection children, SDK subtype/security contracts, strict TUI handler classification,3012authorization/no-resolve and missing-preview fail-closed controls; no native PTY claim. Wiring `reports/t82-integration54771-wiring-20261110.log:1-22`: Node26.7.0, **10pass/0fail/0skip**, EXIT0, runnerPID3681056/PGID3681055. These are targeted checks, not `npm run test:all`.
+
+**Status remains needs-triage.** Original Windows405+3012 incident/correlation/recovery, server/standalone discovery and current-runtime/protocol/native-platform acceptance remain OPEN. Current ask supplies prior approval only; fresh combined-tree central fullsuite/MCPbuild-dist and required CI/review gates remain controller-owned. No fullsuite/typecheck/build/install/soak/native-platform/CI/live-model/claim run by this worker. No integration/staging worktree edits (apart from wrapper-owned check logs), push, history rewrite, release/version/tag/mainmerge or anti-abuse behavior change. Task-observer: none logged; controller-owned.

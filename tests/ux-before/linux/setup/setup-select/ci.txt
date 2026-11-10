@@ -1,31 +1,24 @@
-== bootstrap ==
-  proxy/config.yaml already present — left untouched
-  proxy dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  mcp bridge dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  MANUAL STEP REQUIRED (once): log in with your ZCode account:
-    cd <KIT>/zcode-proxy-src
-    ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
-detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
+  ZCODE  /  AGENT KIT
+  v0.2.42  |  Your local AI workspace
+
+Assistant integrations ---------------------------------------------------------
   No interactive terminal: harnesses without a saved decision are skipped (select them with --harness <list> or ZCODE_KIT_HARNESSES=<list>).
   note: --select needs an interactive terminal — ignored (stored decisions apply).
-  [SKIP] OMP / Oh My Pi — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
-  [SKIP] pi — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
-  [SKIP] Claude Code — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
-  [SKIP] Codex CLI — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
-  [SKIP] OpenCode — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
-  [SKIP] Continue — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
-== mcp: zcode-harness bridge ==
-  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.
-
+SKIP  OMP / Oh My Pi — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+SKIP  pi — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+SKIP  Claude Code — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+SKIP  Codex CLI — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+SKIP  OpenCode — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+SKIP  Continue — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+Account Rotator ----------------------------------------------------------------
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
   Account Rotator setting unchanged (no interactive answer).
   Enable later: zcode-kit accounts enable
 
-  Configuration saved.
-  Assistants: 0 configured, 6 skipped, 0 failed.
+  Assistants  0 configured, 6 skipped, 0 failed
+  Setup log   <KIT>/logs/install.log
     Undecided harnesses can be configured later: zcode-kit setup --harness <list>, or zcode-kit integrate <harness>.
-  [SKIP] Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
 
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)

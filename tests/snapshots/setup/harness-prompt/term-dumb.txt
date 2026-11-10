@@ -1,1 +1,1 @@
-Configure ZCode as a provider with its supported models in Codex CLI? [y/n] 
+? Configure ZCode for Codex CLI? [y/n] 

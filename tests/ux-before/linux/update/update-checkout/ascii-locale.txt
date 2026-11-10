@@ -16,40 +16,38 @@ remote: Total 3 (delta 2), reused 0 (delta 0), pack-reused 0
 Unpacking objects:  33% (1/3)
 Unpacking objects:  66% (2/3)
 Unpacking objects: 100% (3/3)
-Unpacking objects: 100% (3/3), 271 bytes | 271.00 KiB/s, done.
+Unpacking objects: 100% (3/3), 270 bytes | 270.00 KiB/s, done.
 From <FIXTURE>/origin
-   7a3dd0a..5e339c4  main       -> origin/main
+   09eab08..d26bcba  main       -> origin/main
 not running
-Updating 7a3dd0a..5e339c4
+Updating 09eab08..d26bcba
 Fast-forward
  package.json | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 update: refreshing consented integrations (stored answers are respected; new harnesses are asked only on a terminal)...
-== bootstrap ==
-  proxy/config.yaml already present — left untouched
-  proxy dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  mcp bridge dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  MANUAL STEP REQUIRED (once): log in with your ZCode account:
-    cd <KIT>/zcode-proxy-src
-    ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
-detected harnesses: omp — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
-== omp: OMP / Oh My Pi (previously configured) ==
-  extension already current
-  models.yml already up to date
-  config.yml already up to date
-  [OK]   OMP / Oh My Pi
-== mcp: zcode-harness bridge ==
-  omp: "zcode-harness" already registered
-  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.
+  ZCODE  /  AGENT KIT
+  v0.2.43  |  Your local AI workspace
 
+
+| Runtime and configuration
+! WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+   next  cd <KIT>/zcode-proxy-src
+     or  ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
+
+  + OK    Runtime and configuration  runtime ready
+Assistant integrations ---------------------------------------------------------
+  + OK    OMP / Oh My Pi
+Account Rotator ----------------------------------------------------------------
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-  [INFO] Account Rotator disabled (saved choice; not asked again).
+  * INFO  Account Rotator disabled (saved choice; not asked again).
   Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
-  Configuration saved.
-  Assistants: 1 configured, 0 skipped, 0 failed.
-  [SKIP] Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+  Assistants  1 configured, 0 skipped, 0 failed
+  Setup log   <KIT>/logs/install.log
+
+| Connection check
+  + OK    Connection check  Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
 
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)

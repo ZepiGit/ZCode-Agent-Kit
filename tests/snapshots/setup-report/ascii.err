@@ -1,0 +1,7 @@
+| Runtime and configuration
+[33m! WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:[0m
+   [2mnext[0m  [1mcd <KIT>/zcode-proxy-src[0m
+     [2mor[0m  [1mZCODE_PROXY_CONFIG="<STATE>/proxy/config.yaml" bun run src/index.ts auth login zai[0m
+[K  [32m+ OK[0m    Runtime and configuration  [2mruntime ready[0m
+[36m* INFO[0m  an existing kit integration for OMP / Oh My Pi was found; y keeps it current, n leaves it untouched.
+| Connection check[K  [32m+ OK[0m    Connection check  [2mSetup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).[0m

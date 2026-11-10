@@ -144,11 +144,15 @@ function writeKitTree(root, { srcLinks = true, version } = {}) {
   }
   mkdirSync(join(root, "zcode-proxy-src", "src"), { recursive: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), fakeProxySource());
+  // The release payload ships the shared token set and width core (pack
+  // allowlist zcode-proxy-src/src/, verify-payload requires them); the CLI
+  // output module re-exports them (ticket 43). Always present, never faked.
+  link(join(KIT, "zcode-proxy-src", "src", "tui"), join(root, "zcode-proxy-src", "src", "tui"));
   link(join(KIT, "zcode-proxy-src", "node_modules"), join(root, "zcode-proxy-src", "node_modules"));
   if (srcLinks) {
     // The doctor's credential probe imports ./src/auth/store.ts relative to the proxy dir.
     for (const entry of readdirSync(join(KIT, "zcode-proxy-src", "src"))) {
-      if (entry === "index.ts") continue;
+      if (entry === "index.ts" || entry === "tui") continue;
       link(join(KIT, "zcode-proxy-src", "src", entry), join(root, "zcode-proxy-src", "src", entry));
     }
   }

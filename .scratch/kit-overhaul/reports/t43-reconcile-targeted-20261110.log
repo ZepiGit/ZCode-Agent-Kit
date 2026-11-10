@@ -1,0 +1,973 @@
+OWNED_RUN 3533890 3533889 3533889 bash -c printf "OWNED_RUN "; ps -o pid=,ppid=,pgid=,args= -p $$; export CI=true TERM=xterm-256color ZCODE_KIT_STATE_DIR="$HOME/t43-runtime-state"; mkdir -p "$ZCODE_KIT_STATE_DIR"; printf "{\"root\":\"/home/AgentKit/wt/t43\"}\n" > "$ZCODE_KIT_STATE_DIR/.owner.json"; exec node --test tests/test-wiring.test.mjs tests/setup-report-snapshots.test.mjs tests/install-log-lines.test.mjs tests/setup-regressions.test.mjs tests/harness-consent.test.mjs tests/account-setup.test.mjs tests/cli-commands.test.mjs tests/cli-kit.test.mjs tests/manager-doctor.test.mjs tests/cli-ux-doctor.test.mjs tests/cli-ux-proxy.test.mjs tests/cli-ux-streams.test.mjs tests/connection-details.test.mjs tests/term-output.test.mjs tests/ux-before-capture.test.mjs
+✔ installer opts in only on an explicit y, repeats invalid answers, and Enter takes the default n (55.29001ms)
+✔ terminal redraw keeps the y/n question visible before and during input (41.133979ms)
+✔ headless install and closed terminal never silently opt in (4.74358ms)
+✔ activation imports before changing config and preserves policies/comments; failed import is non-destructive (138.456038ms)
+✖ rotator asked once: a terminal answer is stored; setup, doctor --fix and a checkout update never ask again; --reask asks; Enter means no (2714.893038ms)
+✔ rotator: Ctrl-C at the question leaves the config and the stored decision untouched (fresh and under --reask) (797.109211ms)
+✔ rotator: without a terminal, or under CI, nothing prompts and nothing hangs (stdin left open) (2238.840773ms)
+✔ update never blocks without a usable TTY on stdin and stderr: stderr redirected on a terminal, undecided rotator (761.52446ms)
+✔ rotator migration, in-tree state of a pre-consent kit (no generated/): enabled: true is recorded as yes without asking, once; replayed it changes nothing; rollback undoes it and the next run migrates again (675.539802ms)
+✔ rotator migration, in-tree state with stored harness choices: enabled: true is recorded as yes without asking, once; replayed it changes nothing; rollback undoes it and the next run migrates again (644.472962ms)
+✔ rotator migration, npm install with its state still in the package root: enabled: true is recorded as yes without asking, once; replayed it changes nothing; rollback undoes it and the next run migrates again (618.620032ms)
+✔ rotator migration, enabled: false: stays undecided without a terminal (replayed twice), then asked once on the next terminal setup (755.911271ms)
+✔ rotator migration, a pre-rotator config without auth.accounts: stays undecided without a terminal (replayed twice), then asked once on the next terminal setup (816.93746ms)
+✔ rotator on a CRLF proxy/config.yaml (enabled: true): the migration decides as on LF, and every rewrite keeps CRLF with nothing duplicated (1592.044591ms)
+✔ rotator on a CRLF proxy/config.yaml (enabled: false): the migration decides as on LF, and every rewrite keeps CRLF with nothing duplicated (1527.871401ms)
+✔ rotator on a CRLF proxy/config.yaml (auth.accounts absent): the migration decides as on LF, and every rewrite keeps CRLF with nothing duplicated (1535.878891ms)
+✔ rotator overrides win over the stored decision and are recorded: --account-rotator y, then ZCODE_KIT_ACCOUNT_ROTATOR=n (829.80344ms)
+✔ accounts enable|disable update the stored decision through their transaction; rollback restores the previous decision (890.426099ms)
+✔ rotator: an unreadable decision file fails closed: reported, never overwritten, the setting is left alone (360.566896ms)
+✔ update spawns its setup with stdin attached only when stdin and stderr are terminals (and not CI) (4.38748ms)
+✔ snapshot: the Account Rotator question in tty-color-80, whatever the process TERM (26.50851ms)
+✔ snapshot: the per-harness question in tty-color-80, whatever the process TERM (18.78568ms)
+✔ snapshot: the Account Rotator question in tty-color-120, whatever the process TERM (24.6048ms)
+✔ snapshot: the per-harness question in tty-color-120, whatever the process TERM (18.877839ms)
+✔ snapshot: the Account Rotator question in no-color, whatever the process TERM (23.736391ms)
+✔ snapshot: the per-harness question in no-color, whatever the process TERM (19.494479ms)
+✔ snapshot: the Account Rotator question in term-dumb, whatever the process TERM (22.8716ms)
+✔ snapshot: the per-harness question in term-dumb, whatever the process TERM (19.988479ms)
+✔ snapshot: the Account Rotator question in ascii, whatever the process TERM (22.998569ms)
+✔ snapshot: the per-harness question in ascii, whatever the process TERM (19.49948ms)
+✔ snapshot: the Account Rotator question in wgl4, whatever the process TERM (21.52797ms)
+✔ snapshot: the per-harness question in wgl4, whatever the process TERM (19.83081ms)
+✔ no escape sequence in the rotator question under no-color, with a resize and a backspace, whatever the process TERM (20.700609ms)
+✔ no escape sequence in the harness question under no-color, with a resize and a backspace, whatever the process TERM (17.31395ms)
+✔ no escape sequence in the rotator question under term-dumb, with a resize and a backspace, whatever the process TERM (22.35867ms)
+✔ no escape sequence in the harness question under term-dumb, with a resize and a backspace, whatever the process TERM (18.750689ms)
+✔ the import probe is not vacuous: each side-effect channel at module scope is caught, transitively too (730.771561ms)
+✔ importing cli/commands/status.mjs has no side effects (78.536989ms)
+✔ importing cli/commands/proxy.mjs has no side effects (93.219429ms)
+✔ importing cli/commands/logs.mjs has no side effects (87.33915ms)
+✔ importing cli/commands/models.mjs has no side effects (74.11985ms)
+✔ importing cli/commands/doctor.mjs has no side effects (97.135958ms)
+✔ proxy: a missing or unknown subcommand is a usage error, exit 2 on stderr, and starts nothing (16.51678ms)
+✔ models: the running proxy's list, one id per line, exit 0, asked with the kit key (2.60834ms)
+✔ models: a down or failing proxy falls back to the registry snapshot, still exit 0 (1.76739ms)
+✔ models --json names where the list came from (3.07147ms)
+✔ models --show-key: the warning goes to stderr and the key alone to stdout, after the list (0.97181ms)
+✔ models --show-key with an unreadable key fails after the list: the error carries what was already printed (1.16274ms)
+✔ doctor: unknown --harness ids are a usage error, exit 2 on stderr, before anything runs (17.94313ms)
+✔ doctor: a clean manager and only unconsented harnesses is exit 0; each check once, no lead, one verdict (25.345119ms)
+✔ doctor: a FAIL from the manager is exit 1, led by the problem count and counted in the verdict (4.885559ms)
+✔ doctor: a manager doctor that throws, or fails without a failed check, still fails the report (exit 1) (11.94626ms)
+✔ doctor: a check detail spanning lines is one check, never a row of its own (3.30572ms)
+✔ doctor --harness codex verifies a requested harness without consent: its missing artifact fails, exit 1 (2.61783ms)
+✔ doctor --json: one JSON record (no text report), exit code as in text mode (2.63729ms)
+✔ doctor reads the manager's check records: no text parsing and no manager doctor spawn remain in the CLI (grep) (3.92441ms)
+✔ doctor --forget: a missing or unknown id is a usage error (exit 2); an id with nothing stored is exit 0 (1.42753ms)
+✔ entry: usage errors from command modules go to stderr only, exit 2 (327.010686ms)
+✔ entry: a command that throws after collecting records prints them first, then the error, exit 2 (106.249949ms)
+✔ importing cli/commands/index.mjs has no side effects (114.782998ms)
+✔ importing cli/commands/help.mjs has no side effects (87.861958ms)
+✔ importing cli/commands/usage.mjs has no side effects (77.151958ms)
+✔ importing cli/commands/auth.mjs has no side effects (71.012959ms)
+✔ importing cli/commands/accounts.mjs has no side effects (85.428939ms)
+✔ importing cli/commands/rollback.mjs has no side effects (74.857319ms)
+✔ importing cli/commands/uninstall.mjs has no side effects (60.793059ms)
+✔ importing cli/commands/integrate.mjs has no side effects (93.775869ms)
+✔ importing cli/commands/run.mjs has no side effects (74.420769ms)
+✔ importing cli/commands/update.mjs has no side effects (82.057899ms)
+✔ importing cli/commands/setup.mjs has no side effects (98.040259ms)
+✔ help: the usage text on stdout, exit 0, naming every harness (2.16249ms)
+✔ an unknown command: the error on stderr, then the usage text on stdout, exit 2 (0.57155ms)
+✔ usage --json: the proxy's /quota body as JSON, exit 0 when it answers 2xx and 1 otherwise (2.27896ms)
+✔ usage --json: a proxy that does not answer is a quota_unavailable JSON error, exit 1 (0.48298ms)
+✔ auth status: the quota answer decides logged_in, exit 0; a proxy that does not answer is logged_in false, exit 1 (2.16824ms)
+✔ auth login: the proxy CLI's exit code passes through (no exit status is 1); a blank --account is exit 2 (2.076591ms)
+✔ auth logout: without --yes it explains and exits 2; with --yes it removes only the proxy credential, exit 0; unknown subcommands are exit 2 (0.88074ms)
+✔ accounts: the proxy CLI's exit code passes through for every forwarded subcommand (no exit status is 1) (6.28875ms)
+✔ accounts: a missing account id and an unknown subcommand are usage errors, exit 2, and start nothing (0.56ms)
+✔ accounts disable with the rotator already off: exit 0, nothing spawned, no restart (51.52376ms)
+✔ accounts enable whose account import fails: the error ends the command (exit 2 at the entry) and the setup lock is released (5.49107ms)
+✔ rollback: nothing recorded is exit 0; a transaction whose external step needs a manual undo is exit 1 (5.68197ms)
+✔ rollback <tx-id> of a fully undone transaction is exit 0 (3.73691ms)
+✔ uninstall: undoes the claude MCP registration of this copy and removes the kit's own shim, exit 0 (3.27891ms)
+✔ uninstall: an external step it cannot undo, or a claude entry of another kit copy, leaves it incomplete or untouched (2.11169ms)
+✔ integrate: a missing or unknown harness is a usage error, exit 2, before anything is loaded or written (1.682659ms)
+✔ integrate --dry-run: what would be written is streamed, nothing is written, exit 0 (4.20243ms)
+✔ integrate from a source checkout without the opt-in is refused before any write (exit 2 at the entry) (2.58286ms)
+✔ run: a missing or unknown harness is a usage error, exit 2; a harness without a launcher fails (exit 2 at the entry) (1.88598ms)
+  ZCODE  /  AGENT KIT
+
+✔ entry: run passes the preflight's refusal (3) and the harness's exit code (0, 7, 130) through (727.360271ms)
+✔ update --version: anything but a release tag is a usage error, exit 2, before git, npm or the network (8.23766ms)
+✔ update (checkout): git missing, a dirty tree, a failed fetch, an unknown tag or a diverged history stop it before setup (2.16778ms)
+✔ update (checkout): stop, fast-forward, setup, start; setup's 20 and 130 still restart the proxy and are the exit code (2.21437ms)
+✔ update (checkout): a failed setup is its exit code with no proxy start; a failed start is the manager's exit code (3, 4, 5) (1.69019ms)
+✔ update (checkout) in a kit layout without the proxy manager skips the proxy start, exit 0 (1.395079ms)
+✔ update (release): an unresolvable latest release is exit 2; already at the latest release is exit 0 with nothing changed (2.53687ms)
+✔ setup: an unknown harness in --harness or ZCODE_KIT_HARNESSES is a usage error, exit 2, before anything is written (9.774579ms)
+✔ setup: a bad --account-rotator answer and a source checkout without the opt-in are refused before any write (exit 2 at the entry) (12.60228ms)
+✔ setup and update declare the Node support floor; no other command does (1.45327ms)
+✔ every command dispatches through its module in cli/commands/, and every command the help text names is in the table (3.84778ms)
+✔ the CLI entry has no command bodies left: it imports only parsing, the floor check, the dispatch table and rendering (0.83978ms)
+✔ entry: help, --help on any command and an unknown command keep their streams and exit codes (287.244357ms)
+✔ entry: usage errors of the migrated commands go to stderr only, exit 2 (566.646343ms)
+✔ uninstall on Windows removes the installer's zcode-kit.cmd + .ps1 pair only when the .ps1 points at this kit (3.80028ms)
+unknown harness "nonsense". Known: omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose
+✔ parseJsonc tolerates comments and trailing commas (4.613541ms)
+✔ setTopLevelKey replaces a value subtree and keeps comments elsewhere (1.27618ms)
+✔ setTopLevelKey inserts a missing key with correct commas (0.76907ms)
+✔ setTopLevelKey replaces an existing key and is byte-idempotent (0.762089ms)
+✔ opencode adapter refuses a foreign provider.zcode byte-identically (6.80689ms)
+✔ pi adapter merges additively and is idempotent (9.129361ms)
+✔ pi adapter refuses to overwrite a foreign zcode entry (1.612371ms)
+✔ pi adapter takes over legacy kit zcode entry (2.59774ms)
+✔ codex dry-run creates no directories (4.8606ms)
+✔ opencode adapter writes JSONC-config and preserves comments (3.95943ms)
+✔ continue adapter appends managed models block, keeps existing models (4.16627ms)
+✔ goose adapter writes custom provider file with auth helper (4.0978ms)
+✔ aider adapter writes env file with the key (never logged) (3.19119ms)
+✔ cline/kilo adapters produce manual-confirmation sheets, no VS Code state touched (7.68307ms)
+✔ CLI: unknown harness name is an error, not a silent no-op (106.749169ms)
+✔ CLI: integrate --dry-run writes nothing (86.899098ms)
+✔ integrate --dry-run lists every file a real run writes, with the undo command (temp-HOME comparison) (381.674625ms)
+✔ codex adapter prints the POSIX launcher on POSIX and the .cmd on Windows (2.72546ms)
+✔ dry-run matrix: no adapter mutates the fake home (zero-mutation proof) (116.847689ms)
+✔ dry-run leaves preexisting staging sentinels untouched (10.206001ms)
+✔ continue adapter fails closed on inline models value, appends after commented header (2.07181ms)
+✔ opencode adapter is byte-idempotent on a commented config (2.19113ms)
+✔ shipped proxy configs enable Builder Event auto-claiming (17.36972ms)
+✖ models --json reports source proxy only when the proxy actually answers (198.078008ms)
+✔ models --json admits the registry fallback when the proxy is down (no fake 'source: proxy') (167.821098ms)
+✖ auth status must not claim logged_in on a proxy auth error (401) (186.420867ms)
+✖ auth status reports logged_in false when z.ai answers with code 3012 (148.025129ms)
+✖ auth status reports logged_in true only on a real quota snapshot (181.221399ms)
+✔ doctor --harness text summary counts manager FAIL lines (no false OK, exit 1) (109.841398ms)
+✔ omp adapter writes literal key (omp 18+ ignores !node), self-checks staleness, integrates repair it (12.7032ms)
+✖ integrate continue skips cleanly when ~/.continue/config.yaml is absent (110.528099ms)
+✔ doctor, fresh: the report in every C3 variant (snapshots) (65.924079ms)
+✔ doctor, fresh: off a TTY each check is one grammar row, once, with one verdict and a lead only on failure (10.76731ms)
+✔ doctor, fresh: every FAIL row carries why and next lines (7.55555ms)
+✔ doctor, proxy-down: the report in every C3 variant (snapshots) (13.93031ms)
+✔ doctor, proxy-down: off a TTY each check is one grammar row, once, with one verdict and a lead only on failure (7.99611ms)
+✔ doctor, proxy-down: every FAIL row carries why and next lines (4.95686ms)
+✔ doctor, proxy-running: the report in every C3 variant (snapshots) (10.12736ms)
+✔ doctor, proxy-running: off a TTY each check is one grammar row, once, with one verdict and a lead only on failure (6.816099ms)
+✔ doctor, proxy-running: every FAIL row carries why and next lines (7.28183ms)
+✔ doctor, foreign-no-bun: the report in every C3 variant (snapshots) (10.774751ms)
+✔ doctor, foreign-no-bun: off a TTY each check is one grammar row, once, with one verdict and a lead only on failure (4.72399ms)
+✔ doctor, foreign-no-bun: every FAIL row carries why and next lines (5.02457ms)
+✔ doctor, cjk: the report in every C3 variant (snapshots) (10.35618ms)
+✔ doctor, cjk: off a TTY each check is one grammar row, once, with one verdict and a lead only on failure (4.93591ms)
+✔ doctor, cjk: every FAIL row carries why and next lines (3.66723ms)
+✔ doctor, warn: the report in every C3 variant (snapshots) (8.35243ms)
+✔ doctor, warn: off a TTY each check is one grammar row, once, with one verdict and a lead only on failure (4.33678ms)
+✔ doctor, warn: every FAIL row carries why and next lines (4.17838ms)
+✔ doctor: WARN never changes the exit code, and a check that fails is never WARN (fixture matrix) (50.510629ms)
+✔ doctor --json: today's keys and values, plus warned and a status per check (superset) (3.78772ms)
+✔ the spawned zcode-kit doctor reports (manager-doctor fixtures) keep the off-TTY grammar (1.10517ms)
+✔ the detection override is undone: PATH and APPDATA are this process's own again (0.21456ms)
+✔ status, running: the report in every C3 variant (snapshots); proxy status is the same (108.831159ms)
+✔ status, running-cjk-quota: the report in every C3 variant (snapshots); proxy status is the same (62.269499ms)
+✔ status, running-old-proxy: the report in every C3 variant (snapshots); proxy status is the same (44.37025ms)
+✔ status, running-captcha-unloaded: the report in every C3 variant (snapshots); proxy status is the same (59.40979ms)
+✔ status, down: the report in every C3 variant (snapshots); proxy status is the same (45.048459ms)
+✔ status, down-not-answering: the report in every C3 variant (snapshots); proxy status is the same (53.887999ms)
+✔ status, down-no-config: the report in every C3 variant (snapshots); proxy status is the same (42.87218ms)
+✔ status, foreign: the report in every C3 variant (snapshots); proxy status is the same (64.420019ms)
+✔ status, no-key: the report in every C3 variant (snapshots); proxy status is the same (49.96444ms)
+✔ status: the state line comes first, in words and human units; nothing on stderr for the own proxy (12.246079ms)
+✔ status: the connection details once per command; routes only with --verbose (A-12) (17.49363ms)
+✔ status: a foreign listener or a missing key is an error block on stderr with what/why/next, exit 1 (6.63177ms)
+✔ status --json: the status document only (unchanged), exit code as the text status (49.36814ms)
+✔ connection details reveal rule: the key only on an interactive terminal outside CI, never in a pipe or JSON (54.320759ms)
+✔ proxy start, start-started: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (29.75329ms)
+✔ proxy start, start-already-running: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (37.557719ms)
+✔ proxy start, start-recovered-hung: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (57.870509ms)
+✔ proxy start, start-foreign: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (17.92307ms)
+✔ proxy start, start-no-key: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (17.80008ms)
+✔ proxy start, start-unhealthy: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (16.12155ms)
+✔ proxy start, start-lock-unavailable: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (14.15718ms)
+✔ proxy start, start-throws: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (15.769929ms)
+✔ proxy stop, stop-stopped: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (20.15946ms)
+✔ proxy stop, stop-not-running: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (22.72414ms)
+✔ proxy stop, stop-foreign: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (20.246529ms)
+✔ proxy stop, stop-reuse-suspect: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (18.77956ms)
+✔ proxy restart, restart-ok: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (31.62949ms)
+✔ proxy restart, restart-stop-refused: progress and result on stderr, the card on stdout, every C3 variant (snapshots) (16.61463ms)
+✔ proxy start|stop|restart: the lifecycle's exit codes 0-5 pass through; a throwing intent is exit 1, as the manager's (33.681399ms)
+✔ proxy start: errors name the public commands, never the retired setup entry point (A-09) (3.81339ms)
+✔ proxy restart: a refused stop ends it before any start (1.84974ms)
+✔ proxy start: the lifecycle runs for this kit, with this kit's manager as the respawn hook target (3.44022ms)
+✔ proxy logs [n]: raw lines on stdout, redacted, the last n (6.58921ms)
+✔ proxy logs --level warn|error and --grep <text> filter the lines (A-23, additive) (16.61057ms)
+✔ proxy logs: a bad --level or an empty --grep is a usage error (exit 2, stderr); no log file is a note, exit 0 (8.84655ms)
+✔ status and proxy status of the own proxy: the report on stdout, nothing on stderr, exit 0, no key in the pipe (790.73472ms)
+✔ a foreign listener: status, start and stop write only an error block to stderr, with today's exit codes (1, 3, 3) (616.395632ms)
+✔ proxy start on the own running proxy: the result row on stderr, the connection details once on stdout (243.796327ms)
+✔ a missing key: start (exit 5) and status (exit 1) name zcode-kit setup on stderr, never node setup.mjs (247.627707ms)
+✔ proxy logs: the lines on stdout as data (filters included), a missing log is a note on stderr (455.101025ms)
+✔ proxy logs filters span rotation before taking N, in order, with redaction before grep (546.479923ms)
+✔ proxy logs reads a rotated-only log as data, filtered or unfiltered, not as a missing-log note (429.089165ms)
+▶ bounded log tails never expose a secret fragment cut by the byte window
+  ✔ proxy.log, cut=19, manager (106.488279ms)
+  ✔ proxy.log, cut=19, kit (119.163228ms)
+  ✔ proxy.log, cut=19, grep (148.070089ms)
+  ✔ proxy.log, cut=19, warn (130.953818ms)
+  ✔ proxy.log, cut=19, error (141.135218ms)
+  ✔ proxy.log, cut=17, manager (80.744709ms)
+  ✔ proxy.log, cut=17, kit (123.899429ms)
+  ✔ proxy.log, cut=17, grep (130.651698ms)
+  ✔ proxy.log, cut=17, warn (134.233619ms)
+  ✔ proxy.log, cut=17, error (141.386198ms)
+  ✔ proxy.log.1, cut=19, manager (74.104769ms)
+  ✔ proxy.log.1, cut=19, kit (107.853989ms)
+  ✔ proxy.log.1, cut=19, grep (127.746518ms)
+  ✔ proxy.log.1, cut=19, warn (129.811189ms)
+  ✔ proxy.log.1, cut=19, error (151.279828ms)
+  ✔ proxy.log.1, cut=17, manager (77.607369ms)
+  ✔ proxy.log.1, cut=17, kit (94.833579ms)
+  ✔ proxy.log.1, cut=17, grep (121.662798ms)
+  ✔ proxy.log.1, cut=17, warn (124.787809ms)
+  ✔ proxy.log.1, cut=17, error (142.063609ms)
+✔ bounded log tails never expose a secret fragment cut by the byte window (2428.296271ms)
+▶ bounded log tails omit newline-free cut windows but preserve the first line at byte zero
+  ✔ proxy.log, truncated=false, manager (68.465659ms)
+  ✔ proxy.log, truncated=false, kit (88.848299ms)
+  ✔ proxy.log, truncated=false, grep (94.626349ms)
+  ✔ proxy.log, truncated=true, manager (78.508569ms)
+  ✔ proxy.log, truncated=true, kit (110.467248ms)
+  ✔ proxy.log, truncated=true, grep (88.198028ms)
+  ✔ proxy.log.1, truncated=false, manager (77.599489ms)
+  ✔ proxy.log.1, truncated=false, kit (118.318799ms)
+  ✔ proxy.log.1, truncated=false, grep (101.451409ms)
+  ✔ proxy.log.1, truncated=true, manager (85.009719ms)
+  ✔ proxy.log.1, truncated=true, kit (88.432169ms)
+  ✔ proxy.log.1, truncated=true, grep (92.09844ms)
+✔ bounded log tails omit newline-free cut windows but preserve the first line at byte zero (1105.519526ms)
+▶ log tail reads the opened file even if rotation replaces or removes its path
+  ✔ renamed path absent (72.971619ms)
+  ✔ renamed path replaced (96.671219ms)
+✔ log tail reads the opened file even if rotation replaces or removes its path (178.534227ms)
+✔ doctor: the report on stdout only (stderr empty), one verdict, exit 1 when a check failed (175.297488ms)
+✔ formatter: URLs derive from the port, the key is shown only when reveal is true, output is plain text (2.92606ms)
+✔ shouldRevealKey: both stdin and stdout on a terminal, not in CI, never for JSON (0.60811ms)
+✔ formatter: Responses route follows the config switch, a non-loopback host is shown with a warning (6.229619ms)
+✔ formatter: a verified proxy says when the model list came from configuration; an IPv6 loopback listener keeps its URL (1.83896ms)
+✔ configuredServer reads host and the Responses switch, with template defaults when absent (4.39532ms)
+✔ configuredModelIds reads the config list and falls back to the registry snapshot (3.1078ms)
+✖ status on the own running proxy prints verified details with live model ids and never the key (no terminal) (42.73001ms)
+✖ status --json: one parseable object, redacted connection block for the own proxy, never the key (10.920959ms)
+✖ status --json: a stopped proxy reports configured values, a foreign port reports no connection (13.60935ms)
+✔ status on a stopped proxy labels configured values and never claims a running proxy (7.59627ms)
+✖ status withholds details when the port is answered by a foreign service (6.04232ms)
+✖ start on an already running own proxy exits 0 and the details are re-verified before printing (17.86251ms)
+✖ manager status text is byte for byte as before ticket 40: details, quota and connection details of the own proxy (7.30872ms)
+✖ manager status text is byte for byte as before ticket 40: a foreign listener (8.418799ms)
+✔ createPrompter: sequential questions on one terminal, typed-ahead answers stay in order, invalid answers repeat (34.68082ms)
+✔ prompts default to stderr in the `? question [y/n]` form, and the harness question is short (89.111589ms)
+✔ createPrompter / askYesNo never consent without a terminal, in CI, or on closed input (3.38633ms)
+✔ createPrompter: Ctrl-C rejects the pending question with ABORTED and every later question (3.226931ms)
+✔ resolveHarnessSelection: auto is detection, lists are explicit, flag beats env, unknown ids fail (4.422581ms)
+✔ decideHarness: explicit lists win, stored decisions stand, answers decide, no answer never consents (1.34549ms)
+✔ decideHarness: a kit-owned integration is refreshed without consent, asked about on a terminal, and never wins over a stored n (0.68042ms)
+✔ decideHarness: an unreadable decision file leaves the harness undecided and is never overwritten (0.547919ms)
+✔ harness choices: one file per harness, malformed files fail closed and are never overwritten, writes go through the transaction, dry-run writes nothing (13.950749ms)
+✔ an unreadable choices directory marks every harness unreadable (2.24646ms)
+✔ consentedForRepair and consentStatus keep repairs and checks inside stored consent or kit-owned integrations (3.29895ms)
+✔ transaction savepoint/restoreSince undoes only the ops of one failed harness and keeps foreign edits (12.55357ms)
+✔ setup without a terminal skips every undecided harness, writes nothing, exits 0 and redacts the key (292.330037ms)
+✔ explicit --harness selection configures only the named harness, records it, and later auto runs keep it without re-asking (951.957549ms)
+✔ `none` records skipped decisions that later runs respect; an explicit selection or --reask changes them, n never deletes (998.719138ms)
+✔ a kit-owned integration without a stored decision is refreshed (no consent recorded, no MCP); a stored n never deletes it (748.981961ms)
+✔ an unreadable decision file blocks the refresh shortcut and is left alone; the run still succeeds (740.578811ms)
+✔ one failing harness does not stop the others: its partial writes are undone, summary distinguishes configured and failed, exit 20 (219.298587ms)
+✔ no detected harness is not an error; integrate records consent; doctor reports declined harnesses as SKIP and --fix repairs only consented ones (608.536373ms)
+✔ integrate records provider consent only: a later setup refreshes the harness but never registers MCP from it (552.518643ms)
+✔ --no-mcp with an explicit selection records provider consent only; later runs never register the declined bridge; integrate keeps a recorded MCP consent (798.412411ms)
+✔ parseSelection: numbers, all, none; anything else is asked again (0.92202ms)
+✔ --select without a terminal or next to an explicit selection changes nothing (420.243195ms)
+✔ doctor reports decision files (unreadable = FAIL with the way out, undetected/unknown = SKIP); --forget removes one through a transaction (643.422973ms)
+✔ rolling back a setup removes the decisions it recorded together with the integration (291.679466ms)
+✔ interactive setup asks per harness and applies the answers (2576.368969ms)
+✔ setup --select: one numbered list, invalid answers repeat, chosen = configured, the rest = skipped, no per-harness question (487.291014ms)
+✔ Ctrl-C during the questions stops setup: answered harnesses stay, the rest is skipped, exit 130 (255.900107ms)
+Runtime and configuration ...
+
+WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+  next: cd /home/AgentKit/wt/t43/zcode-proxy-src
+  next: ZCODE_PROXY_CONFIG="/home/AgentKit/wt/t43/tests/fakehome/install-log/home-1794307644381-77bb6e192b41b-state/proxy/config.yaml" bun run src/index.ts auth login zai
+OK  Runtime and configuration - runtime ready
+Connection check ...
+OK  Connection check - Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+✔ install.log comparison preserves line content while matching the three Windows fixture paths (2.50475ms)
+✔ install.log keeps every line the old verbose output had (line-set comparison) (377.268616ms)
+✖ the manager's doctor returns its checks as records, reads the injected environment and prints nothing (23.110149ms)
+✖ the manager's doctor record for a passing installation is code 0, outcome ok, with the JWT age as an info check (12.50148ms)
+✖ zcode-kit doctor --json counts checks, not lines: a Bun version string with a FAIL-looking line stays one passing check (13.328519ms)
+✔ Windows spellings meet the Linux snapshots: JSON-escaped root and Bun paths, the sorted environment block (4.72937ms)
+✖ manager CLI doctor, fresh kit (no config, no key, nothing installed): the legacy rows and exit code, byte for byte (9.50926ms)
+✖ zcode-kit doctor, fresh kit (no config, no key, nothing installed): output and exit code as in the snapshot (10.14822ms)
+✖ zcode-kit doctor --json, fresh kit (no config, no key, nothing installed): output and exit code as in the snapshot (10.45588ms)
+✖ manager CLI doctor, configured with the proxy down, env overrides set and a decryptable store: the legacy rows and exit code, byte for byte (11.78955ms)
+✖ zcode-kit doctor, configured with the proxy down, env overrides set and a decryptable store: output and exit code as in the snapshot (11.61638ms)
+✖ zcode-kit doctor --json, configured with the proxy down, env overrides set and a decryptable store: output and exit code as in the snapshot (12.55628ms)
+✖ manager CLI doctor, own proxy running and every manager check passing: the legacy rows and exit code, byte for byte (11.554251ms)
+✖ zcode-kit doctor, own proxy running and every manager check passing: output and exit code as in the snapshot (11.5174ms)
+✖ zcode-kit doctor --json, own proxy running and every manager check passing: output and exit code as in the snapshot (11.30368ms)
+✖ manager CLI doctor, own proxy running, rejected auth, an undecryptable store and OMP skipped: the legacy rows and exit code, byte for byte (9.99697ms)
+✖ zcode-kit doctor, own proxy running, rejected auth, an undecryptable store and OMP skipped: output and exit code as in the snapshot (11.43458ms)
+✖ zcode-kit doctor --json, own proxy running, rejected auth, an undecryptable store and OMP skipped: output and exit code as in the snapshot (14.55603ms)
+✖ manager CLI doctor, a foreign listener, no Bun and OMP never asked: the legacy rows and exit code, byte for byte (11.13585ms)
+✖ zcode-kit doctor, a foreign listener, no Bun and OMP never asked: output and exit code as in the snapshot (11.683339ms)
+✖ zcode-kit doctor --json, a foreign listener, no Bun and OMP never asked: output and exit code as in the snapshot (11.30047ms)
+zcode-kit: refusing to write user configs from a source checkout (/home/AgentKit/wt/t43) — run the installed copy instead, or set ZCODE_KIT_ALLOW_CHECKOUT=1 to proceed intentionally
+To /home/AgentKit/wt/t43/tests/fakehome/setup/update-1794307646235-c3de3bf4352218/origin.git
+ * [new branch]      main -> main
+zcode-kit: state directory belongs to a different kit installation
+✔ setup applies, is idempotent, and rolls back exactly (799.98621ms)
+✔ setup refuses to write user configs from a checkout without opt-in (156.440088ms)
+✖ update from a checkout completes — re-setup implies the checkout opt-in (H3) (324.772316ms)
+✔ omp adapter takes over legacy zcode-omp-integration managed block (560.068253ms)
+✔ omp adapter fails closed on hand-written zcode entry outside managed blocks (311.203826ms)
+✔ compact setup by default: report on the screen, full output in install.log (312.633346ms)
+✔ snapshot: the compact setup report in tty-color-80 (12.575179ms)
+✔ snapshot: the compact setup report in tty-color-120 (1.18572ms)
+✔ snapshot: the compact setup report in no-color (0.80737ms)
+✔ snapshot: the compact setup report in pipe (2.01682ms)
+✔ snapshot: the compact setup report in term-dumb (1.20955ms)
+✔ snapshot: the compact setup report in ci (0.80019ms)
+✔ snapshot: the compact setup report in ascii (0.56113ms)
+✔ snapshot: the compact setup report in wgl4 (0.63841ms)
+✔ no escape sequence in any colourless variant of the compact report (Story 107) (2.12822ms)
+✔ the install.log sink keeps the old verbose shapes for every rendered row (1.15935ms)
+✔ check() off a TTY keeps the legacy grammar byte for byte: pipe (ascii) (4.263959ms)
+✔ check() off a TTY keeps the legacy grammar byte for byte: pipe + ZCODE_KIT_UNICODE=1 (full) (2.8438ms)
+✔ check() off a TTY keeps the legacy grammar byte for byte: pipe + FORCE_COLOR=1 (ascii) (0.64654ms)
+✔ check() off a TTY keeps the legacy grammar byte for byte: TERM=dumb on a TTY (ascii) (0.35119ms)
+✔ check() off a TTY keeps the legacy grammar byte for byte: CI on a TTY (full) (0.517599ms)
+✔ check() off a TTY keeps the legacy grammar byte for byte: CI on a conhost TTY (wgl4) (0.351071ms)
+✔ check() off a TTY keeps the legacy grammar byte for byte: CI with a C locale on a TTY (ascii) (0.504619ms)
+✔ check() off a TTY never maps the separator or the verdict word down in the ascii tier (0.491001ms)
+✔ streams (ADR-0005): reports and data on stdout, diagnostics and progress on stderr (3.54929ms)
+✔ json mode: stdout carries only the JSON document (and explicit data); diagnostics stay on stderr (2.605701ms)
+✔ connection(): the key is shown only on an interactive terminal, never on a pipe, whatever the caller asks (2.64831ms)
+✔ renderRecords validates every record before writing anything (1.197829ms)
+✔ progress: motion only when animating; otherwise one start line and one result line, no carriage return (1.59622ms)
+✔ verdict(): counts carry their word; the exit code is named only when non-zero (0.370431ms)
+✔ plain result rows map kit punctuation down on the ascii tier; check rows never do (0.279241ms)
+✔ lead(): the problem count only, before the rows; a glyph and its colour only on a TTY (0.460301ms)
+✔ state(): the state word in the text, the glyph before it on a TTY only (0.490119ms)
+✔ blank(): one empty report line, none in JSON mode (0.75261ms)
+✔ connection(): the card fits 80 columns in every variant, redacted or revealed, configured or running (5.93899ms)
+✔ connection(): routes only with verbose; a verified proxy says when its model list came from the configuration (0.5286ms)
+✔ prose without spaces in a wide script (CJK) wraps between characters on a TTY; a long path stays whole (0.82161ms)
+✔ a scratch test file wired into no test script is reported unwired (6.03269ms)
+✔ only a whole-argument reference in a test script wires a file (2.12134ms)
+✔ a package without test scripts leaves every test file unwired (1.64553ms)
+✔ every kit test file in this repository is wired into a test script (1.12295ms)
+✔ npm run test:proxy loads the egress guard preload, in CI too (3.44222ms)
+✔ fixture-port guard: every literal bind form is reported, a kernel-assigned port is not (3.464729ms)
+✔ fixture-port guard: a literal in a port position or in the fixture range needs a recorded entry for its file (0.99386ms)
+✔ fixture-port guard: a recorded entry no file needs any more is reported stale; data trees and manual tools are not scanned (2.53703ms)
+✔ fixture-port guard: no test and no package script runs a manual tool the guard skips (188.202458ms)
+✔ no kit test binds a literal port or pins one outside the recorded data (102.703259ms)
+✔ git's transfer progress normalises to one marker whatever the git version (3.55714ms)
+✔ the git progress rule touches no kit line: indented, mid-line or other wording stays (0.37902ms)
+✔ the fixture proxy's source literal keeps a Windows path: a file URL, every backslash intact (4.118199ms)
+✔ the original raw substitution is what broke: `\u` and `\a` inside quotes are escapes (0.66247ms)
+✔ POSIX: the fixture proxy imports from a file URL of the same directory (0.763781ms)
+✔ Linux end to end: a kit path with `\u` in it starts the fixture proxy (the class of the Windows failure) (1915.568136ms)
+✔ POSIX: the fixtures run Bun through a fixed-length path, whatever the host's Bun directory (1.200129ms)
+✔ Windows: the host's Bun as found (no symlink rights; the pipe/ci rows never wrap) (0.352801ms)
+✔ capture.mjs runs the fixtures with the pinned Bun and writes both spellings back as <BUN> (wiring) (0.722821ms)
+✔ Linux end to end: Bun under a short or a long directory captures the doctor's rows as the BEFORE baseline (1670.926569ms)
+✔ tar: System32's bsdtar on Windows (GNU tar reads `C:` as a host); `tar` elsewhere (0.3292ms)
+✔ clone: --no-local on Windows only (0.26998ms)
+✔ a failed prep step reports status, signal, error and both streams (the silent `git clone` of run 42236936458) (0.31874ms)
+✔ Windows path normalisation covers the long name, JSON escaping, forward slashes and a lower-case drive (0.6338ms)
+✔ compare: a failed baseline capture fails loudly; volatile values never hide a kit change (3.54523ms)
+✔ windows git: any git.exe of a Git for Windows tree maps to its cmd launcher (0.78201ms)
+✔ windows fixture env: Git Bash state and the fixture's own variables are dropped, the Windows runtime is kept (0.731ms)
+✔ POSIX fixture env: exactly the original Phase 1C filter (0.2033ms)
+✔ CI: the Windows baseline is captured under the same shell as the equivalence step (pwsh) (0.30954ms)
+✔ capture.mjs builds the fixture env and the Windows git dir through host.mjs (wiring of the Windows-only branch) (0.37433ms)
+✔ git's diffstat of the fixture update normalises whatever the checkout's line endings or package.json length (0.27768ms)
+✔ the step's spinner frames and elapsed time normalise whatever the start or stop took (0.60756ms)
+✔ the spinner rules touch no other line: other labels, list items and kit text stay (0.12121ms)
+✔ the diffstat rules leave kit lines strict: indentation, trailing text and other wording stay (0.1436ms)
+✔ Linux end to end: a CRLF package.json (as on a windows checkout) changes only git's diffstat (4291.401478ms)
+✔ Linux end to end: two captures at once, one with the fixture proxy running and one down, both match the baseline (6663.56185ms)
+✔ the port write-back can only touch the port: no committed capture holds a number from the kernel-port floor (20000) up (291.184096ms)
+ℹ tests 374
+ℹ suites 0
+ℹ pass 342
+ℹ fail 32
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 17470.007728
+
+✖ failing tests:
+
+test at tests/account-setup.test.mjs:272:1
+✖ rotator asked once: a terminal answer is stored; setup, doctor --fix and a checkout update never ask again; --reask asks; Enter means no (2714.893038ms)
+  AssertionError [ERR_ASSERTION]: a no never imports an account
+  + actual - expected
+  
+  + [
+  +   'serve'
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/account-setup.test.mjs:296:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: [ 'serve' ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/cli-kit.test.mjs:704:1
+✖ models --json reports source proxy only when the proxy actually answers (198.078008ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'registry'
+  - 'proxy'
+  
+      at file:///home/AgentKit/wt/t43/tests/cli-kit.test.mjs:715:16
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/cli-kit.test.mjs:707:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'registry',
+    expected: 'proxy',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/cli-kit.test.mjs:741:1
+✖ auth status must not claim logged_in on a proxy auth error (401) (186.420867ms)
+  Error: Command failed: /usr/local/bin/node /tmp/zk-mini-iG9ENj/cli/zcode-kit.mjs auth status
+  
+      at genericNodeError (node:internal/errors:999:15)
+      at wrappedFn (node:internal/errors:544:14)
+      at ChildProcess.exithandler (node:child_process:417:12)
+      at ChildProcess.emit (node:events:514:20)
+      at maybeClose (node:internal/child_process:1125:16)
+      at ChildProcess._handle.onexit (node:internal/child_process:305:5) {
+    code: 1,
+    killed: false,
+    signal: null,
+    cmd: '/usr/local/bin/node /tmp/zk-mini-iG9ENj/cli/zcode-kit.mjs auth status',
+    stdout: '{\n  "logged_in": false,\n  "error": "fetch failed"\n}\n',
+    stderr: ''
+  }
+
+test at tests/cli-kit.test.mjs:761:1
+✖ auth status reports logged_in false when z.ai answers with code 3012 (148.025129ms)
+  Error: Command failed: /usr/local/bin/node /tmp/zk-mini-XAFcEZ/cli/zcode-kit.mjs auth status
+  
+      at genericNodeError (node:internal/errors:999:15)
+      at wrappedFn (node:internal/errors:544:14)
+      at ChildProcess.exithandler (node:child_process:417:12)
+      at ChildProcess.emit (node:events:514:20)
+      at maybeClose (node:internal/child_process:1125:16)
+      at ChildProcess._handle.onexit (node:internal/child_process:305:5) {
+    code: 1,
+    killed: false,
+    signal: null,
+    cmd: '/usr/local/bin/node /tmp/zk-mini-XAFcEZ/cli/zcode-kit.mjs auth status',
+    stdout: '{\n  "logged_in": false,\n  "error": "fetch failed"\n}\n',
+    stderr: ''
+  }
+
+test at tests/cli-kit.test.mjs:781:1
+✖ auth status reports logged_in true only on a real quota snapshot (181.221399ms)
+  Error: Command failed: /usr/local/bin/node /tmp/zk-mini-cVdU17/cli/zcode-kit.mjs auth status
+  
+      at genericNodeError (node:internal/errors:999:15)
+      at wrappedFn (node:internal/errors:544:14)
+      at ChildProcess.exithandler (node:child_process:417:12)
+      at ChildProcess.emit (node:events:514:20)
+      at maybeClose (node:internal/child_process:1125:16)
+      at ChildProcess._handle.onexit (node:internal/child_process:305:5) {
+    code: 1,
+    killed: false,
+    signal: null,
+    cmd: '/usr/local/bin/node /tmp/zk-mini-cVdU17/cli/zcode-kit.mjs auth status',
+    stdout: '{\n  "logged_in": false,\n  "error": "fetch failed"\n}\n',
+    stderr: ''
+  }
+
+test at tests/cli-kit.test.mjs:861:1
+✖ integrate continue skips cleanly when ~/.continue/config.yaml is absent (110.528099ms)
+  AssertionError [ERR_ASSERTION]: absent config must be a clean skip, not a crash
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/cli-kit.test.mjs:885:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: '\nzcode-kit: state directory belongs to a different kit installation\n',
+    expected: /skipped \(no .*\.continue[\\/]config\.yaml\)/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/connection-details.test.mjs:132:1
+✖ status on the own running proxy prints verified details with live model ids and never the key (no terminal) (42.73001ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/connection-details.test.mjs:140:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/connection-details.test.mjs:152:1
+✖ status --json: one parseable object, redacted connection block for the own proxy, never the key (10.920959ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/connection-details.test.mjs:158:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/connection-details.test.mjs:173:1
+✖ status --json: a stopped proxy reports configured values, a foreign port reports no connection (13.60935ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'down' !== 'foreign'
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/connection-details.test.mjs:191:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'down',
+    expected: 'foreign',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/connection-details.test.mjs:209:1
+✖ status withholds details when the port is answered by a foreign service (6.04232ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /health:\s+foreign/. Input:
+  
+  'port:      8457\n' +
+    'pid file:  none\n' +
+    'health:    down\n' +
+    '\n' +
+    '  Connection details (local ZCode proxy, from configuration; proxy not verified running)\n' +
+    '    OpenAI-compatible base URL:    http://127.0.0.1:8457/v1   (POST /chat/completions, POST /responses, GET /models)\n' +
+    '    Anthropic-compatible base URL: http://127.0.0.1:8457      (POST /v1/messages)\n' +
+    '    API key (Bearer / x-api-key):  (redacted: not an interactive terminal — print it with: zcode-kit models --show-key)\n' +
+    '    Model IDs:                     glm-5.3, glm-5.3-flash\n' +
+    '    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start'
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/connection-details.test.mjs:215:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'port:      8457\npid file:  none\nhealth:    down\n\n  Connection details (local ZCode proxy, from configuration; proxy not verified running)\n    OpenAI-compatible base URL:    http://127.0.0.1:8457/v1   (POST /chat/completions, POST /responses, GET /models)\n    Anthropic-compatible base URL: http://127.0.0.1:8457      (POST /v1/messages)\n    API key (Bearer / x-api-key):  (redacted: not an interactive terminal — print it with: zcode-kit models --show-key)\n    Model IDs:                     glm-5.3, glm-5.3-flash\n    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start',
+    expected: /health:\s+foreign/,
+    operator: 'match',
+    diff: 'simple'
+  }
+
+test at tests/connection-details.test.mjs:220:1
+✖ start on an already running own proxy exits 0 and the details are re-verified before printing (17.86251ms)
+  AssertionError [ERR_ASSERTION]: ERROR: proxy dependencies missing. Run: cd zcode-proxy-src && bun install --frozen-lockfile
+  
+  4 !== 0
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/connection-details.test.mjs:226:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 4,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/connection-details.test.mjs:242:1
+✖ manager status text is byte for byte as before ticket 40: details, quota and connection details of the own proxy (7.30872ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/connection-details.test.mjs:256:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/connection-details.test.mjs:276:1
+✖ manager status text is byte for byte as before ticket 40: a foreign listener (8.418799ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'port:      8457\n' +
+  - 'port:      35939\n' +
+      'pid file:  none\n' +
+  +   'health:    down\n' +
+  +   '\n' +
+  +   '  Connection details (local ZCode proxy, from configuration; proxy not verified running)\n' +
+  +   '    OpenAI-compatible base URL:    http://127.0.0.1:8457/v1   (POST /chat/completions, POST /responses, GET /models)\n' +
+  +   '    Anthropic-compatible base URL: http://127.0.0.1:8457      (POST /v1/messages)\n' +
+  +   '    API key (Bearer / x-api-key):  (redacted: not an interactive terminal — print it with: zcode-kit models --show-key)\n' +
+  +   '    Model IDs:                     glm-5.3, glm-5.3-flash\n' +
+  +   '    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start'
+  -   'health:    foreign\n' +
+  -   "  connection details withheld: port 35939 is answered by a service that is not this kit's proxy"
+  
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/connection-details.test.mjs:283:10)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'port:      8457\npid file:  none\nhealth:    down\n\n  Connection details (local ZCode proxy, from configuration; proxy not verified running)\n    OpenAI-compatible base URL:    http://127.0.0.1:8457/v1   (POST /chat/completions, POST /responses, GET /models)\n    Anthropic-compatible base URL: http://127.0.0.1:8457      (POST /v1/messages)\n    API key (Bearer / x-api-key):  (redacted: not an interactive terminal — print it with: zcode-kit models --show-key)\n    Model IDs:                     glm-5.3, glm-5.3-flash\n    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start',
+    expected: "port:      35939\npid file:  none\nhealth:    foreign\n  connection details withheld: port 35939 is answered by a service that is not this kit's proxy",
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/manager-doctor.test.mjs:245:1
+✖ the manager's doctor returns its checks as records, reads the injected environment and prints nothing (23.110149ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-6dWatP/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:247:25)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-6dWatP/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:286:1
+✖ the manager's doctor record for a passing installation is code 0, outcome ok, with the JWT age as an info check (12.50148ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-I5Gk2I/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:287:25)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-I5Gk2I/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:295:1
+✖ zcode-kit doctor --json counts checks, not lines: a Bun version string with a FAIL-looking line stays one passing check (13.328519ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-6Gfja2/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:301:25)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-6Gfja2/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:355:3
+✖ manager CLI doctor, fresh kit (no config, no key, nothing installed): the legacy rows and exit code, byte for byte (9.50926ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-7gRIBr/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:356:27)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-7gRIBr/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor, fresh kit (no config, no key, nothing installed): output and exit code as in the snapshot (10.14822ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-JOFSbn/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-JOFSbn/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor --json, fresh kit (no config, no key, nothing installed): output and exit code as in the snapshot (10.45588ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-Lho2nb/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-Lho2nb/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:355:3
+✖ manager CLI doctor, configured with the proxy down, env overrides set and a decryptable store: the legacy rows and exit code, byte for byte (11.78955ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-DBEpEc/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:356:27)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-DBEpEc/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor, configured with the proxy down, env overrides set and a decryptable store: output and exit code as in the snapshot (11.61638ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-DPK0iD/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-DPK0iD/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor --json, configured with the proxy down, env overrides set and a decryptable store: output and exit code as in the snapshot (12.55628ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-CMewzd/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-CMewzd/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:355:3
+✖ manager CLI doctor, own proxy running and every manager check passing: the legacy rows and exit code, byte for byte (11.554251ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-0oBgV3/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:356:27)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-0oBgV3/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor, own proxy running and every manager check passing: output and exit code as in the snapshot (11.5174ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-W3RPNN/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-W3RPNN/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor --json, own proxy running and every manager check passing: output and exit code as in the snapshot (11.30368ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-QP2DNX/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-QP2DNX/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:355:3
+✖ manager CLI doctor, own proxy running, rejected auth, an undecryptable store and OMP skipped: the legacy rows and exit code, byte for byte (9.99697ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-2HBtnV/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:356:27)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-2HBtnV/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor, own proxy running, rejected auth, an undecryptable store and OMP skipped: output and exit code as in the snapshot (11.43458ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-kIZP3B/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-kIZP3B/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor --json, own proxy running, rejected auth, an undecryptable store and OMP skipped: output and exit code as in the snapshot (14.55603ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-Gnwkpj/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-Gnwkpj/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:355:3
+✖ manager CLI doctor, a foreign listener, no Bun and OMP never asked: the legacy rows and exit code, byte for byte (11.13585ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-iC8UdW/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:356:27)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-iC8UdW/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor, a foreign listener, no Bun and OMP never asked: output and exit code as in the snapshot (11.683339ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-ilFiMO/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-ilFiMO/zcode-proxy-src/src/tui'
+  }
+
+test at tests/manager-doctor.test.mjs:364:5
+✖ zcode-kit doctor --json, a foreign listener, no Bun and OMP never asked: output and exit code as in the snapshot (11.30047ms)
+  Error: EEXIST: file already exists, mkdir '/tmp/kit-manager-doctor-5SlFdC/zcode-proxy-src/src/tui'
+      at mkdirSync (node:fs:1651:26)
+      at kitFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:82:3)
+      at stateFixture (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:227:16)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/manager-doctor.test.mjs:365:29)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    errno: -17,
+    code: 'EEXIST',
+    syscall: 'mkdir',
+    path: '/tmp/kit-manager-doctor-5SlFdC/zcode-proxy-src/src/tui'
+  }
+
+test at tests/setup-regressions.test.mjs:182:1
+✖ update from a checkout completes — re-setup implies the checkout opt-in (H3) (324.772316ms)
+  Error: Command failed: /usr/local/bin/node /home/AgentKit/wt/t43/tests/fakehome/setup/update-1794307646235-c3de3bf4352218/checkout/cli/zcode-kit.mjs update
+  zcode-kit: state directory belongs to a different kit installation
+  
+      at genericNodeError (node:internal/errors:999:15)
+      at wrappedFn (node:internal/errors:544:14)
+      at checkExecSyncError (node:child_process:942:11)
+      at execFileSync (node:child_process:978:15)
+      at TestContext.<anonymous> (file:///home/AgentKit/wt/t43/tests/setup-regressions.test.mjs:217:17)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1404:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:969:7) {
+    status: 2,
+    signal: null,
+    output: [ null, '', 'zcode-kit: state directory belongs to a different kit installation\n' ],
+    pid: 3534700,
+    stdout: '',
+    stderr: 'zcode-kit: state directory belongs to a different kit installation\n'
+  }
+EXIT rc=1 duration_s=18
