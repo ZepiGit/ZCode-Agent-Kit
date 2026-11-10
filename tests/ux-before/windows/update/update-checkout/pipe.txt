@@ -1,35 +1,23 @@
 not running
-Updating 8e2de21..99f3e61
+Updating b1ec07e..9828c98
 Fast-forward
- package.json | 68 ++++++++++++++++++++++++++++++------------------------------
- 1 file changed, 34 insertions(+), 34 deletions(-)
+ package.json | 72 ++++++++++++++++++++++++++++++------------------------------
+ 1 file changed, 36 insertions(+), 36 deletions(-)
 update: refreshing consented integrations (stored answers are respected; new harnesses are asked only on a terminal)...
-== bootstrap ==
-  proxy/config.yaml already present — left untouched
-  proxy dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  mcp bridge dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  MANUAL STEP REQUIRED (once): log in with your ZCode account:
-    cd <KIT>\zcode-proxy-src
-    ZCODE_PROXY_CONFIG="<KIT>\proxy\config.yaml" bun run src/index.ts auth login zai
-detected harnesses: omp — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
-  No interactive terminal: harnesses without a saved decision are skipped (select them with --harness <list> or ZCODE_KIT_HARNESSES=<list>).
-== omp: OMP / Oh My Pi (previously configured) ==
-  extension already current
-  models.yml already up to date
-  config.yml already up to date
-  [OK]   OMP / Oh My Pi
-== mcp: zcode-harness bridge ==
-  omp: "zcode-harness" already registered
-  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.
+  ZCODE  /  AGENT KIT
+  v0.2.43  |  Your local AI workspace
 
+Assistant integrations ---------------------------------------------------------
+  No interactive terminal: harnesses without a saved decision are skipped (select them with --harness <list> or ZCODE_KIT_HARNESSES=<list>).
+OK  OMP / Oh My Pi
+Account Rotator ----------------------------------------------------------------
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-  [INFO] Account Rotator disabled (saved choice; not asked again).
+INFO  Account Rotator disabled (saved choice; not asked again).
   Change it: zcode-kit accounts enable, or zcode-kit setup --reask
 
-  Configuration saved.
-  Assistants: 1 configured, 0 skipped, 0 failed.
-  [SKIP] Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+  Assistants  1 configured, 0 skipped, 0 failed
+  Setup log   <KIT>\logs\install.log
 
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)

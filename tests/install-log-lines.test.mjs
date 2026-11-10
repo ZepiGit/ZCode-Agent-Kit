@@ -52,6 +52,39 @@ async function stateFor(home) {
 
 const TX_RE = /\b\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}-\d{3}-[0-9a-f]{6}\b/g;
 
+function normaliseLogLine(text, { home, kit = KIT }) {
+  return text
+    // State first: the state dir shares the home path as its prefix.
+    .replaceAll(`${home}-state`, "<STATE>").replaceAll(home, "<HOME>").replaceAll(kit, "<KIT>")
+    // Only these known fixture paths differ by separator across platforms.
+    // Do not rewrite arbitrary log content or accept another destination.
+    .replaceAll("<KIT>\\zcode-proxy-src", "<KIT>/zcode-proxy-src")
+    .replaceAll("<STATE>\\proxy\\config.yaml", "<STATE>/proxy/config.yaml")
+    .replaceAll("<HOME>\\.omp\\agent\\extensions\\zcode-proxy-autostart.ts", "<HOME>/.omp/agent/extensions/zcode-proxy-autostart.ts")
+    .replace(/\b127\.0\.0\.1:\d{2,5}\b/g, "127.0.0.1:<PORT>")
+    .replace(TX_RE, "<TX>");
+}
+
+test("install.log comparison preserves line content while matching the three Windows fixture paths", () => {
+  const roots = { kit: "D:\\fixture\\kit", home: "D:\\fixture\\home" };
+  const expected = [
+    "    cd <KIT>/zcode-proxy-src",
+    '    ZCODE_PROXY_CONFIG="<STATE>/proxy/config.yaml" bun run src/index.ts auth login zai',
+    "  wrote <HOME>/.omp/agent/extensions/zcode-proxy-autostart.ts",
+  ];
+  const windows = [
+    "    cd D:\\fixture\\kit\\zcode-proxy-src",
+    '    ZCODE_PROXY_CONFIG="D:\\fixture\\home-state\\proxy\\config.yaml" bun run src/index.ts auth login zai',
+    "  wrote D:\\fixture\\home\\.omp\\agent\\extensions\\zcode-proxy-autostart.ts",
+  ];
+  assert.deepEqual(windows.map(line => normaliseLogLine(line, roots)), expected);
+  assert.notEqual(normaliseLogLine(windows[0].replace("zcode-proxy-src", "wrong-proxy"), roots), expected[0]);
+  assert.notEqual(normaliseLogLine(windows[1].replace("config.yaml", "other.yaml"), roots), expected[1]);
+  assert.notEqual(normaliseLogLine(windows[2].replace("wrote", "skipped"), roots), expected[2]);
+  assert.notEqual(normaliseLogLine(windows[2].replace("zcode-proxy-autostart.ts", "other.ts"), roots), expected[2]);
+  assert.equal(normaliseLogLine("  unrelated text \\must\\stay", roots), "  unrelated text \\must\\stay");
+});
+
 test("install.log keeps every line the old verbose output had (line-set comparison)", async () => {
   const home = fixtureHome();
   const state = await stateFor(home);
@@ -66,12 +99,7 @@ test("install.log keeps every line the old verbose output had (line-set comparis
   });
   assert.ok(existsSync(join(state, "logs", "install.log")), "install.log is written in every mode");
   const log = readFileSync(join(state, "logs", "install.log"), "utf8");
-  const normalise = (s) => s
-    // state first: the state dir shares the home path as its prefix
-    .replaceAll(`${home}-state`, "<STATE>").replaceAll(home, "<HOME>").replaceAll(KIT, "<KIT>")
-    .replace(/\b127\.0\.0\.1:\d{2,5}\b/g, "127.0.0.1:<PORT>")
-    .replace(TX_RE, "<TX>");
-  const logLines = new Set(log.split("\n").map(normalise));
+  const logLines = new Set(log.split("\n").map(line => normaliseLogLine(line, { home })));
   // The header and the compact-only rows are additive; every OLD line must be there.
   const missing = FIXTURE.filter((line) => !logLines.has(line));
   assert.deepEqual(missing, [], "every line of the old verbose output must be in install.log");
