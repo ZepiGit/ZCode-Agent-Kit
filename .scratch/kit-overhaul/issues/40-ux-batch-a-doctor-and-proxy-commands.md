@@ -2,7 +2,7 @@
 
 **Blocked by:** 38 (Manager `doctor` returns check records; `zcode-kit doctor` stops parsing text), 06 (CLI output module, capability record and the snapshot harness (no visible change))
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 Model: glm
 
@@ -334,4 +334,16 @@ Merged ONLY `staging/40c` exact `d2ae4d4327aa30e535d282d065c034ef397bb79f` as `0
 Independently rechecked [PR75/run42760280311](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42760280311) through exact PR/run/jobs API commands at09:06:03Z and immediately before commit09:11:26Z: exactd2ae4d4,8unique required named jobs and rollup allSUCCESS, no missing/pending/duplicates. Recovered reader review was read, not rerun; approved=true/model=null, with script-declared Grok attribution qualified per external handoff:21. Executed staged909-file sanity and whole-product diff against staging/40c: both empty/exit0; merge-time MCPdist diff empty/exit0. Both complete parent ticket texts retained in order; all1599 other integration scratch files preserved at merge, including newer82 findings. Exact commands/output summaries and routing provenance: RUNLOG.md latest entries; external recovered review `/home/AgentKit/overhaul-tools/t40-completed-security-review-recovered-20261110.json`.
 
 By explicit ask NO tests, builds, installs/npm ci or memory/S7 runs here. Central controller next runs merged-tree full `test:all` and S7 once, then verifies regenerated dist unchanged. Status stays `ready-for-agent`, NOT resolved;43/83 prerequisites and unrelated82/incident gates remain open. No push/revert. Ready means candidate ready for central gates only.
+
+### 2026-11-10 — resolved after central merged-tree gates (only ticket40)
+
+Merged 2026-11-10 as `0caa61887831e8eaf2dda40bdadf045f942f65c1` from ONLY `staging/40c` at `d2ae4d4327aa30e535d282d065c034ef397bb79f`; [exact-head premerge CI42760280311](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42760280311) was independently checked8/8SUCCESS immediately before the merge, as recorded above and in RUNLOG.md. The current controller ask reports central merged-tree fullsuite and S7 completion. This resolver READ and validated the actual evidence; it did NOT rerun any test, build, installation or memory scenario. At resolution start, `git rev-parse HEAD` returned `b42c3e95a59669fe59aba67f7e01446b552f6347` and `git status --porcelain=v1 --untracked-files=all` returned empty/exit0.
+
+- **Central full `npm run test:all`, EXIT0/301s:** kit1129/1149,20skipped,0failed; proxy1651/1652,1skipped,0failed; MCP115/116,1skipped,0failed. Proxy typecheck (`tsc --noEmit -p tsconfig.json`) and MCP build (`tsc -p tsconfig.json`) executed within that central command. Actual log `reports/gpt-grok-merge40-full-20261110.log:1-3,1232-1239,3654-3674,3807-3815`; Bun1.4.2 is recorded at1244. These are centrally executed results read by the resolver, not freshly executed suites here.
+- **Central S7/short Linux only, EXIT0/133s:**132samples,systemd3G,5non-RED checks; proxy206MB<=250,orphans0,proxy.log0.08MB<=6 while running,earlylog0MB<=1(+64KBovershoot),responses-store retainedheap63MB<=96 from30readings1sapart. Actual log `reports/gpt-grok-merge40-s7-20261110.log:1-31`; external `/home/AgentKit/overhaul-tools/gpt-grok-merge40-memory-20261110/job-summary.json:2-40` reports `partial:true,ok:true,failures:[]`,oneS7result; scenario `S7-short/S7-short-2026-11-10T0932-116eba/summary.json:2-95,216-299` records isolation/noexternalconnections,2000logrequests,1500storeentries and cleanstop. The early log was absent (`notes.earlyLog.exists:false`), so its zero-byte result is not a fresh exercised writer/cap proof. This is NOT fullS1-S7/all-memory/native-platform acceptance; unrelated ownedREDs/unstable cases remain open.
+- **Post-gate sanity EXECUTED here:** `mapfile -t ticket_files < <(git diff --name-only deadcbc^2 deadcbc -- . ':!.scratch')` ->909files; `git diff --exit-code staging/40c HEAD -- "${ticket_files[@]}"` and `git diff --exit-code staging/40c HEAD -- . ':!.scratch'` ->empty/exit0. `git diff --exit-code HEAD -- . ':!.scratch'`, corresponding `--cached` check, `git diff --exit-code HEAD -- mcp/zcode-harness-mcp/dist`, corresponding `--cached` check and `git diff --exit-code staging/40c HEAD -- mcp/zcode-harness-mcp/dist` ->all empty/exit0. Product remains exactly approved staging and regenerated MCPdist unchanged; no hand edits or rebuild here.
+
+Evidence retained in place, with SHA256 integrity anchors computed by this resolver: full log `b284e5338f82b0df041fcb9d6e40af3b5c9d4d6fbf1e6f5c4a1400b0d97ae61c`; S7 log `5e2edb4d31700ee29f2bd1109c42178eb3634dc4b024569d25739e4075338825`; external job-summary `86f12bbfc7e94df772ccc7f6a856e30080c413aec5753c1b139fe3d9f5a09550`; scenario summary `ee6525b506dc67b49d1f70a0264b1a5c6eb0c5e2788f280044e25c2100069b62`.
+
+Status is now `resolved`, superseding older pending/unresolved40 statements without deleting them. ONLY40 and its index row are resolved; ticket43 is not accepted/merged, ticket82 is not fixed, unrelated incident/memory/owner-action gates remain open. No revert, push, history rewrite, release or installed-config change.
 
