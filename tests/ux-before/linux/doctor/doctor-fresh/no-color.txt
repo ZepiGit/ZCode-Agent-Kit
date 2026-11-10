@@ -1,30 +1,46 @@
-PASS  bun available — <BUN> (1.4.2)
-FAIL  config exists — <KIT>/proxy/config.yaml
-FAIL  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
-SKIP  omp integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-SKIP  proxy reachable + identity — no config — skipped
-doctor: 3 check(s) failed
-PASS  bun available — <BUN> (1.4.2)
-FAIL  config exists — <KIT>/proxy/config.yaml
-FAIL  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no credential store — run: zcode-kit auth login
-SKIP  omp integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-SKIP  proxy reachable + identity — no config — skipped
-SKIP  omp: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp
-SKIP  pi: integration — not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate pi
-SKIP  claude-code: integration — not detected — skipped
-SKIP  codex: integration — not detected — skipped
-SKIP  opencode: integration — not detected — skipped
-SKIP  cline: integration — not detected — skipped
-SKIP  kilo-code: integration — not detected — skipped
-SKIP  aider: integration — not detected — skipped
-SKIP  continue: integration — not detected — skipped
-SKIP  goose: integration — not detected — skipped
-doctor: 3 check(s) failed
+✗ 3 problems: 3 failed
+
+Runtime ────────────────────────────────────────────────────────────────────────
+  ✓ PASS  bun available           <BUN> (1.4.2)
+  ✗ FAIL  config exists           <KIT>/proxy/config.yaml
+                                  why   setup has not run here, or its files
+                                        were removed
+                                  next  zcode-kit setup
+  ✗ FAIL  key file exists         <KIT>/.proxykey
+                                  why   setup has not run here, or its files
+                                        were removed
+                                  next  zcode-kit setup
+  ✓ PASS  proxy source installed  <KIT>/zcode-proxy-src/node_modules
+  ✓ PASS  mcp bridge installed    <KIT>/mcp/zcode-harness-mcp/dist/index.js
+  ✓ PASS  mcp bridge deps         <KIT>/mcp/zcode-harness-mcp/node_modules
+
+Proxy ──────────────────────────────────────────────────────────────────────────
+  – SKIP  proxy reachable + identity  no config — skipped
+
+Account ────────────────────────────────────────────────────────────────────────
+  ✗ FAIL  credentials store  ZCODE_PROXY_CREDENTIALS_PATH (explicit store): no
+                             credential store — run: zcode-kit auth login
+                             why   no ZCode login is stored, or this machine
+                                   cannot decrypt it
+                             next  zcode-kit auth login zai
+
+Integrations ───────────────────────────────────────────────────────────────────
+  – SKIP  omp integration           not configured (no consent yet) — answer y
+                                    in zcode-kit setup or run zcode-kit
+                                    integrate omp
+  – SKIP  omp: integration          not configured (no consent yet) — answer y
+                                    in zcode-kit setup or run zcode-kit
+                                    integrate omp
+  – SKIP  pi: integration           not configured (no consent yet) — answer y
+                                    in zcode-kit setup or run zcode-kit
+                                    integrate pi
+  – SKIP  claude-code: integration  not detected — skipped
+  – SKIP  codex: integration        not detected — skipped
+  – SKIP  opencode: integration     not detected — skipped
+  – SKIP  cline: integration        not detected — skipped
+  – SKIP  kilo-code: integration    not detected — skipped
+  – SKIP  aider: integration        not detected — skipped
+  – SKIP  continue: integration     not detected — skipped
+  – SKIP  goose: integration        not detected — skipped
+
+doctor: 3 failed, 4 passed, 12 skipped → exit 1

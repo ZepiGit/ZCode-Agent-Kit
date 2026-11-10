@@ -54,6 +54,7 @@ export const RECORDED_PORTS = Object.freeze({
   "tests/bench/tui-frame-time.ts": { ports: [18458], why: `${DATA} (serverUrl of a rendered TUI frame)` },
   "tests/cli-commands.test.mjs": { ports: [19071, 19081, 19082], why: `${DATA} (fake fetch records, and the tempKit config of the in-process accounts commands)` },
   "tests/cli-kit.test.mjs": { ports: [9999, 11434], why: `${DATA} (foreign providers' base URLs in user harness configs)` },
+  "tests/cli-ux-proxy.test.mjs": { ports: [18458], why: `${DATA} (the faked lifecycle's and status records' port; byte-pinned renders)` },
   "tests/connection-details.test.mjs": { ports: [18457], why: `${DATA} (connection-details lines rendered from facts)` },
   "tests/continue-compatibility.test.mjs": { ports: [18457, 18458, 18459], why: `${DATA} (ctx.port of the in-process Continue adapter)` },
   "tests/crlf-writers.test.mjs": { ports: [19682, 19689], why: `${DATA} (an earlier Goose entry, a mirrored config's content)` },

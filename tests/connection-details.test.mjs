@@ -233,3 +233,52 @@ test("start on an already running own proxy exits 0 and the details are re-verif
   assert.match(gone.text, /proxy not verified running/, "a proxy that stopped meanwhile is not shown as verified");
   assert.doesNotMatch(gone.text, /running and verified/);
 });
+
+// Ticket 40: the manager CLI's status text renders from lib/proxy-status.mjs's
+// record (zcode-kit status renders the same record through the output
+// module). Its bytes stay as before: the expected text is the pre-change
+// manager's output for this fixture (captured at the integration tip
+// 7f0c368 before the refactor), the port substituted.
+test("manager status text is byte for byte as before ticket 40: details, quota and connection details of the own proxy", async (t) => {
+  server = http.createServer((req, res) => {
+    if (req.headers.authorization !== `Bearer ${KEY}`) { res.writeHead(401).end(); return; }
+    const json = (body) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+    if (req.url === "/health") return json({ status: "ok", provider: "zai", details: { pid: 4242, uptimeSec: 3725, rssMB: 182, heapUsedMB: 64, eventLoopLagMs: 2, captcha: { ready: 2, target: 2, activeSolves: 0, storm: false, mintSuccessRate10m: 0.96, solver: { generation: 3, recycles: 2, lastRecycleReason: "rss-budget", lastRecycleAt: 1762423872000, totalSolves: 118, totalFailures: 3, busy: false, lastSdkScripts: [{ filename: "sdk.js", sha256: "a".repeat(64) }] } } } });
+    if (req.url === "/v1/models") return json({ data: [{ id: "m-a" }, { id: "m-b" }] });
+    if (req.url === "/quota") return json({ balances: [{ showName: "GLM Coding Lite", remainingUnits: 4120, totalUnits: 6000, unitType: "prompts", expiresAt: 1767139200 }] });
+    res.writeHead(404).end();
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+  const root = kitRoot(port);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = await capture(() => createManager({ root, home: root }).status());
+  assert.equal(r.code, 0);
+  assert.equal(r.text, [
+    `port:      ${port}`,
+    "pid file:  none",
+    "health:    ours",
+    "process:   pid 4242, up 3725s, rss 182 MB, heap 64 MB, event-loop lag 2 ms",
+    "captcha:   ready 2/2, active solves 0, storm no, mint success 96% (10 min)",
+    "solver:    generation 3, recycles 2 (last: rss-budget at 2025-11-06T10:11:12.000Z), solves 118, failures 3, idle",
+    "sdk:       sdk.js sha256=aaaaaaaaaaaa (diagnostics, not compatibility proof)",
+    "  quota: GLM Coding Lite 4120/6000 prompts (expires 2025-12-31T00:00:00.000Z)",
+    "",
+    "  Connection details (local ZCode proxy, running and verified)",
+    `    OpenAI-compatible base URL:    http://127.0.0.1:${port}/v1   (POST /chat/completions, POST /responses, GET /models)`,
+    `    Anthropic-compatible base URL: http://127.0.0.1:${port}      (POST /v1/messages)`,
+    `    API key (Bearer / x-api-key):  ${REDACTED_KEY}`,
+    "    Model IDs:                     m-a, m-b",
+    "    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required.",
+  ].join("\n"));
+});
+
+test("manager status text is byte for byte as before ticket 40: a foreign listener", async (t) => {
+  server = await mockProxy({ mode: "wrong-key" });
+  const port = server.address().port;
+  const root = kitRoot(port);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const r = await capture(() => createManager({ root, home: root }).status());
+  assert.equal(r.code, 1);
+  assert.equal(r.text, `port:      ${port}\npid file:  none\nhealth:    foreign\n  connection details withheld: port ${port} is answered by a service that is not this kit's proxy`);
+});

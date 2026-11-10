@@ -1,0 +1,10 @@
+! not answering on 127.0.0.1:<PORT> (pid <PID> is alive)
+  next  zcode-kit proxy restart
+    or  zcode-kit doctor
+
+Connection details (manual clients) ────────────────────────────────────────────
+  OpenAI base URL     http://127.0.0.1:<PORT>/v1
+  Anthropic base URL  http://127.0.0.1:<PORT>
+  API key             UXFIXTURE-not-a-secret-0000000000000000000
+  Models              glm-5.3, glm-5.3-flash
+  State               ○ not verified running

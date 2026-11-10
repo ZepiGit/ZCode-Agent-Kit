@@ -1,0 +1,30 @@
+Runtime ────────────────────────────────────────────────────────────────────────
+  ✓ PASS  bun available           /opt/bun/bin/bun (<VERSION>)
+  ✓ PASS  config exists           /kit/proxy/config.yaml
+  ✓ PASS  key file exists         /kit/.proxykey
+  ✓ PASS  proxy source installed  /kit/zcode-proxy-src/node_modules
+
+Proxy ──────────────────────────────────────────────────────────────────────────
+  ✓ PASS  proxy reachable + identity  health=ours
+
+Account ────────────────────────────────────────────────────────────────────────
+  ✓ PASS  credentials store          ~/.zcode-proxy/credentials.json: present
+                                     and decryptable on this machine
+  ✓ PASS  account auth valid         valid
+  ✓ PASS  start-plan JWT age (info)  5.0h since issue — age is informational,
+                                     validity is the auth check above
+
+Integrations ───────────────────────────────────────────────────────────────────
+  – SKIP  omp integration           OMP not installed — skipped
+  – SKIP  omp: integration          not detected — skipped
+  – SKIP  pi: integration           not detected — skipped
+  – SKIP  claude-code: integration  not detected — skipped
+  – SKIP  codex: integration        not detected — skipped
+  – SKIP  opencode: integration     not detected — skipped
+  – SKIP  cline: integration        not detected — skipped
+  – SKIP  kilo-code: integration    not detected — skipped
+  – SKIP  aider: integration        not detected — skipped
+  – SKIP  continue: integration     not detected — skipped
+  – SKIP  goose: integration        not detected — skipped
+
+doctor: 8 passed, 11 skipped

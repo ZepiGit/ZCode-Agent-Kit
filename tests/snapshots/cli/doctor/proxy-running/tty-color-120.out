@@ -1,0 +1,28 @@
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  bun available           [2m/opt/bun/bin/bun (<VERSION>)[0m
+  [32m✓ PASS[0m  config exists           [2m/kit/proxy/config.yaml[0m
+  [32m✓ PASS[0m  key file exists         [2m/kit/.proxykey[0m
+  [32m✓ PASS[0m  proxy source installed  [2m/kit/zcode-proxy-src/node_modules[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  proxy reachable + identity  [2mhealth=ours[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  credentials store          [2m~/.zcode-proxy/credentials.json: present and decryptable on this machine[0m
+  [32m✓ PASS[0m  account auth valid         [2mvalid[0m
+  [32m✓ PASS[0m  start-plan JWT age (info)  [2m5.0h since issue — age is informational, validity is the auth check above[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  omp integration           [2mOMP not installed — skipped[0m
+  [2m– SKIP[0m  omp: integration          [2mnot detected — skipped[0m
+  [2m– SKIP[0m  pi: integration           [2mnot detected — skipped[0m
+  [2m– SKIP[0m  claude-code: integration  [2mnot detected — skipped[0m
+  [2m– SKIP[0m  codex: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  opencode: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  cline: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration    [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  goose: integration        [2mnot detected — skipped[0m
+
+doctor: [32m8 passed[0m, [2m11 skipped[0m

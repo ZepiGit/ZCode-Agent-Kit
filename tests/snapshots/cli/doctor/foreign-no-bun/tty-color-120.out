@@ -1,0 +1,38 @@
+[31m✗[0m 3 problems: 3 failed
+
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [31m✗ FAIL[0m  bun available           [2mBun native executable not found; install Bun or set ZCODE_KIT_BUN to its executable[0m
+                                  [2mpath[0m
+                                  [2mwhy[0m   the local proxy runs on Bun and none could be started: install Bun, or set
+                                        ZCODE_KIT_BUN to its executable path
+                                  [2mnext[0m  [1mzcode-kit doctor[0m
+  [32m✓ PASS[0m  config exists           [2m/kit/proxy/config.yaml[0m
+  [32m✓ PASS[0m  key file exists         [2m/kit/.proxykey[0m
+  [32m✓ PASS[0m  proxy source installed  [2m/kit/zcode-proxy-src/node_modules[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [31m✗ FAIL[0m  proxy reachable + identity  [2mhealth=foreign[0m
+                                      [2mwhy[0m   another service answers on the configured port; the kit never stops a
+                                            service it did not start
+                                      [2mnext[0m  [1mzcode-kit proxy status[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [31m✗ FAIL[0m  credentials store  [2m~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login[0m
+                             [2mwhy[0m   no ZCode login is stored, or this machine cannot decrypt it
+                             [2mnext[0m  [1mzcode-kit auth login zai[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  omp integration           [2mnot configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit[0m
+                                    [2mintegrate omp[0m
+  [2m– SKIP[0m  omp: integration          [2mnot detected — skipped[0m
+  [2m– SKIP[0m  pi: integration           [2mnot detected — skipped[0m
+  [2m– SKIP[0m  claude-code: integration  [2mnot detected — skipped[0m
+  [2m– SKIP[0m  codex: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  opencode: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  cline: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration    [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  goose: integration        [2mnot detected — skipped[0m
+
+doctor: [31m3 failed[0m, [32m3 passed[0m, [2m11 skipped[0m → exit 1
