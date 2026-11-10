@@ -216,9 +216,9 @@ export function createPrompter({ input = process.stdin, output = process.stderr,
       let caps = selectorCaps(output, { env, platform });
       const maximum = frame(caps, "Saved choice is locked; use zcode-kit setup --reask");
       if (!maximum || maximum.length + 1 > caps.rows) return null;
-      selectorSession = createSelectorSession({ input, output, getClosed: () => closed,
+      selectorSession = createSelectorSession({ input, output,
         onClosed: () => { closed = true; }, onAborted: () => { aborted = true; closed = true; },
-        getCaps: () => selectorCaps(output, { env, platform }), frame, maximum, reset, inventory, editable, offers,
+        getCaps: () => selectorCaps(output, { env, platform }), frame, reset, inventory, editable, offers,
         getFocus: () => focus, setFocus: (value) => { focus = value; hint = ""; },
         setHint: (value) => { hint = value; },
       });
@@ -269,7 +269,7 @@ export function createPrompter({ input = process.stdin, output = process.stderr,
 
 // Owns only the selector epoch and its subsequent fresh line transport. The
 // legacy path never constructs this session, so its typed-ahead queue is intact.
-function createSelectorSession({ input, output, onClosed, onAborted, getCaps, frame, maximum, reset, inventory, editable, offers, getFocus, setFocus, setHint }) {
+function createSelectorSession({ input, output, onClosed, onAborted, getCaps, frame, reset, inventory, editable, offers, getFocus, setFocus, setHint }) {
   let phase = "disclosing", ended = false, settled = false, pendingCR = false;
   let prefix = "", paste = false, pasteMatch = 0, quarantine = false;
   let controlString = false, stringEscape = false;
@@ -310,12 +310,14 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
   }
   function restore() {
     disposeDecoder();
-    input.setRawMode(priorRaw);
-    output.removeListener("resize", resize);
+    try { input.setRawMode(priorRaw); }
+    catch (err) { return err; }
+    finally { output.removeListener("resize", resize); }
   }
   function cleanup() {
+    if (phase === "closed") return;
     phase = "closed";
-    restore();
+    const restoreError = restore();
     input.removeListener("data", onData);
     input.removeListener("end", eof);
     input.removeListener("close", eof);
@@ -327,11 +329,12 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
     process.removeListener("SIGINT", interrupt);
     for (const [signal, handler] of signals) process.removeListener(signal, handler);
     line?.end();
+    return restoreError;
   }
   function fail(err) {
     if (phase === "closed") return;
     cleanup();
-    if (!settled) { settled = true; reject(err); }
+    settled = true; reject(err);
   }
   function outputClosed() { fail(new Error("selector output closed")); }
   function interrupt() { onAborted(); fail(abortError()); }
@@ -348,8 +351,10 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
   }
   function finish(reason) {
     if (settled) return;
-    settled = true; phase = "leaving";
-    restore();
+    phase = "leaving";
+    const restoreError = restore();
+    if (restoreError) { fail(restoreError); return; }
+    settled = true;
     const nonempty = reason === "confirm" && editable.some((row) => row.checked);
     const answers = new Map(editable.map((row) => [row.id, nonempty ? row.checked : undefined]));
     // Still own input while the newline drains and adapters run; no old key
@@ -358,7 +363,10 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
   }
   function fallback() {
     if (settled) return;
-    settled = true; phase = "leaving"; reset(); restore();
+    phase = "leaving"; reset();
+    const restoreError = restore();
+    if (restoreError) { fail(restoreError); return; }
+    settled = true;
     // Geometry changed: append, since the old physical region is uncertain.
     write("\nTerminal too small for the selector; continuing with individual questions.\n")
       .then(() => resolve({ fallback: true }), (err) => { cleanup(); reject(err); });
@@ -417,7 +425,10 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
       const checked = !editable.every((row) => row.checked);
       for (const row of editable) row.checked = checked;
       setHint("");
-    } else if (key.name === "return" || key.name === "enter") { finish("confirm"); return; }
+    } else if (key.name === "return" || key.name === "enter") {
+      if (!fits(getCaps())) fallback(); else finish("confirm");
+      return;
+    }
     else return;
     void paint();
   }
@@ -439,8 +450,10 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
       if (ch !== "\x1b" && !prefix) return;
     }
     if (prefix || ch === "\x1b") {
+      // Node holds ESC + introducer while this guard holds the remainder.
+      // Check before appending: combined undecided state never exceeds 32.
+      if (Buffer.byteLength(prefix) + Buffer.byteLength(ch) > 30) { contaminate(); return; }
       prefix += ch;
-      if (Buffer.byteLength(prefix) > 32) { contaminate(); return; }
       if (prefix === "\x1b") { decoder.write(ch); return; }
       if (["\x1b]", "\x1bP", "\x1b^", "\x1b_"].includes(prefix)) {
         reset(); controlString = true; stringEscape = false; freshDecoder(); return;
@@ -480,7 +493,8 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
         output.on("resize", resize); output.on("error", fail); output.on("close", outputClosed);
         process.on("SIGINT", interrupt);
         for (const [signal, handler] of signals) process.on(signal, handler);
-        input.setRawMode(true); input.resume();
+        try { input.setRawMode(true); input.resume(); }
+        catch (err) { fail(err); return; }
         void paint(true);
       });
     },
@@ -493,7 +507,15 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
       return line;
     },
     armLine() { if (!ended && phase !== "closed") phase = "line"; },
-    close: cleanup,
+    close() {
+      const pending = !settled;
+      const err = cleanup();
+      if (pending) {
+        settled = true;
+        if (err) reject(err);
+        else resolve({ answers: new Map(editable.map((row) => [row.id, undefined])), mcpIds: offers, reason: "eof" });
+      }
+    },
   };
 }
 

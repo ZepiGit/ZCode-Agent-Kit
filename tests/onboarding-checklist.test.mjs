@@ -9,9 +9,9 @@ import { emitKeypressEvents } from "node:readline";
 import { createOutput, renderRecords } from "../lib/term/out.mjs";
 import { setupUi } from "../cli/setup-output.mjs";
 import { C3_VARIANTS, matchSnapshot } from "./snapshot-harness.mjs";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { freePort } from "./free-port.mjs";
@@ -55,16 +55,28 @@ import { beginTransaction } from "../lib/transaction.mjs";
 import { displayWidth } from "../lib/term/width.mjs";
 
 const UTF8 = { TERM: "xterm-256color", LANG: "C.UTF-8" };
-async function interactiveSetup(context, keys) {
+async function interactiveSetup(context, keys, { reask = false, seed, noMcp = false, lockedMcp = false } = {}) {
   const fixture = fixtureSetup(context);
   mkdirSync(join(fixture.home, ".codex"));
+  if (seed) {
+    mkdirSync(join(fixture.state, "generated/harness-choices"), { recursive: true });
+    writeFileSync(join(fixture.state, "generated/harness-choices/codex.json"), seed);
+  }
+  if (lockedMcp) {
+    mkdirSync(join(fixture.home, ".omp/agent"), { recursive: true });
+    writeFileSync(join(fixture.home, ".omp/agent/models.yml"), "providers:\n  openai:\n    name: OpenAI\n");
+    writeFileSync(join(fixture.home, ".omp/agent/config.yml"), "extensions: []\n");
+    mkdirSync(join(fixture.state, "generated/harness-choices"), { recursive: true });
+    writeFileSync(join(fixture.state, "generated/harness-choices/omp.json"), JSON.stringify({ schema: 1, harness: "omp", decision: "configured", source: "fixture", decidedAt: "old", mcp: true }));
+  }
+  const extraArgs = [...(reask ? ["--reask"] : []), ...(noMcp ? ["--no-mcp"] : [])];
   const entry = pathToFileURL(join(fixture.kit, "cli/zcode-kit.mjs")).href;
   const child = spawn(process.execPath, ["--input-type=module", "-e", `
     process.stdin.isTTY = true; process.stderr.isTTY = true;
     process.stderr.columns = 120; process.stderr.rows = 150;
     process.stdin.isRaw = false;
     process.stdin.setRawMode = function(raw) { this.isRaw = raw; return this; };
-    process.argv = [process.execPath, ${JSON.stringify(join(fixture.kit, "cli/zcode-kit.mjs"))}, "setup", "--harness", "auto", "--account-rotator", "n"];
+    process.argv = [process.execPath, ${JSON.stringify(join(fixture.kit, "cli/zcode-kit.mjs"))}, "setup", "--harness", "auto", "--account-rotator", "n", ...${JSON.stringify(extraArgs)}];
     await import(${JSON.stringify(entry)});
   `], { detached: process.platform !== "win32", env: { ...process.env, HOME: fixture.home, USERPROFILE: fixture.home, XDG_CONFIG_HOME: join(fixture.home, ".config"),
     ZCODE_KIT_STATE_DIR: fixture.state, ZCODE_KIT_ALLOW_CHECKOUT: "1", ZCODE_KIT_SKIP_DEPS: "1", ZCODE_KIT_SKIP_SMOKE: "1",
@@ -94,6 +106,64 @@ test("actual setup selector applies only confirmed batch and Ctrl-C writes no pr
   assert.equal(readHarnessChoices({ generated: join(abort.state, "generated") }).harnesses.codex, undefined);
   assert.doesNotMatch(abort.stdout, /Next steps/);
   assert.doesNotMatch(abort.log, /Next steps/);
+});
+
+test("setup reask none preserves saved yes but skips unowned this run; unreadable yes is run-only; no-mcp veto keeps locked bytes", async (context) => {
+  const seed = JSON.stringify({ schema: 1, harness: "codex", decision: "configured", source: "fixture", decidedAt: "old", mcp: true }) + "\n";
+  const absent = await interactiveSetup(context, "\x1b", { reask: true, seed });
+  assert.equal(absent.code, 0, absent.stderr);
+  assert.equal(readFileSync(join(absent.state, "generated/harness-choices/codex.json"), "utf8"), seed);
+  assert.equal(existsSync(join(absent.state, "generated/codex-home/config.toml")), false);
+  assert.doesNotMatch(absent.stdout, /^  zcode-kit run /m);
+  const bad = await interactiveSetup(context, " \r", { seed: "{unsupported" });
+  assert.equal(bad.code, 0, bad.stderr);
+  assert.equal(readFileSync(join(bad.state, "generated/harness-choices/codex.json"), "utf8"), "{unsupported");
+  assert.match(bad.stdout, /zcode-kit run codex/);
+  const veto = await interactiveSetup(context, " \r", { lockedMcp: true, noMcp: true });
+  assert.equal(veto.code, 0, veto.stderr);
+  assert.equal(existsSync(join(veto.home, ".omp/agent/mcp.json")), false);
+  assert.equal(readHarnessChoices({ generated: join(veto.state, "generated") }).harnesses.omp.mcp, true);
+  assert.doesNotMatch(veto.stderr, /Selecting OMP/);
+});
+
+test("completed setup stdout/stderr/log match accepted43 byte-for-byte apart from the exact additive suffix", (t) => {
+  const fixture = fixtureSetup(t);
+  const absoluteImports = (source, base) => source.replace(/(from\s+|import\s*\()(["'])(\.{1,2}\/[^"']+)\2/g, (_, lead, quote, path) => `${lead}${JSON.stringify(new URL(path, base).href)}`);
+  const data = (source) => `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
+  const oldConsent = data(absoluteImports(readFileSync(new URL("./fixtures/onboarding-accepted43-consent.mjs.txt", import.meta.url), "utf8"), new URL("../cli/harness-consent.mjs", import.meta.url)));
+  const oldOutput = data(absoluteImports(readFileSync(new URL("./fixtures/onboarding-accepted43-output.mjs.txt", import.meta.url), "utf8"), new URL("../cli/setup-output.mjs", import.meta.url)));
+  const setupBase = new URL("../cli/commands/setup.mjs", import.meta.url);
+  const oldSetup = data(absoluteImports(readFileSync(new URL("./fixtures/onboarding-accepted43-setup.mjs.txt", import.meta.url), "utf8"), setupBase)
+    .replace(JSON.stringify(new URL("../harness-consent.mjs", setupBase).href), JSON.stringify(oldConsent))
+    .replace(JSON.stringify(new URL("../setup-output.mjs", setupBase).href), JSON.stringify(oldOutput)));
+  for (const scenario of [{ flags: {}, selection: "none" }, { flags: { harness: "codex" }, selection: "none" }, { flags: { select: true }, selection: "auto" }, { flags: { verbose: true, installer: true }, selection: "none" }]) {
+    const run = (entry) => {
+      for (const name of ["generated", "backups", "logs"]) rmSync(join(fixture.state, name), { recursive: true, force: true });
+      const script = `
+        import crypto from 'node:crypto'; import { syncBuiltinESMExports } from 'node:module';
+        crypto.randomBytes = (n) => Buffer.alloc(n, 1); syncBuiltinESMExports();
+        const RealDate = Date; globalThis.Date = class extends RealDate { constructor(...a) { super(...(a.length ? a : ['2026-11-10T00:00:00.000Z'])); } static now() { return 1794268800000; } };
+        const { createCtx } = await import(${JSON.stringify(new URL("../cli/context.mjs", import.meta.url).href)});
+        const { runCommandSync } = await import(${JSON.stringify(new URL("../lib/process.mjs", import.meta.url).href)});
+        const { run } = await import(${JSON.stringify(entry)});
+        const result = await run({flags: ${JSON.stringify({ ...scenario.flags, "account-rotator": "n" })}}, {kit:createCtx(${JSON.stringify(fixture.kit)}), env:process.env, execPath:process.execPath, platform:process.platform, runCommandSync, fetch:() => { throw new Error('offline fixture'); }});
+        process.exitCode = result.exitCode;
+      `;
+      // A file avoids Windows' command-line length limit for the pinned source.
+      const driver = join(fixture.home, "preservation-driver.mjs"); writeFileSync(driver, script);
+      const result = spawnSync(process.execPath, [driver], { encoding: "utf8", env: { ...process.env, HOME: fixture.home, USERPROFILE: fixture.home, XDG_CONFIG_HOME: join(fixture.home, ".config"), ZCODE_KIT_STATE_DIR: fixture.state, ZCODE_KIT_SKIP_DEPS: "1", ZCODE_KIT_SKIP_SMOKE: "1", ZCODE_KIT_ALLOW_CHECKOUT: "1", ZCODE_KIT_HARNESSES: scenario.selection, CI: "true", NO_COLOR: "1", PATH: process.platform === "win32" ? "C:\\Windows\\System32" : "/usr/bin:/bin" } });
+      assert.equal(result.status, 0, result.stderr);
+      return { stdout: result.stdout, stderr: result.stderr, log: readFileSync(join(fixture.state, "logs/install.log"), "utf8") };
+    };
+    const baseline = run(oldSetup), current = run(setupBase.href);
+    const rows = [...BASE];
+    if (scenario.flags.harness === "codex") rows.splice(1, 0, { command: "zcode-kit run codex", description: "Launch Codex CLI wired to ZCode" });
+    const suffix = createOutput({ stdout: capture(), stderr: capture(), env: {} }).commandsText(rows, { title: "Next steps" });
+    assert.ok(current.stdout.endsWith(suffix)); assert.ok(current.log.endsWith(suffix));
+    assert.equal(current.stdout.slice(0, -suffix.length), baseline.stdout);
+    assert.equal(current.stderr, baseline.stderr);
+    assert.equal(current.log.slice(0, -suffix.length), baseline.log);
+  }
 });
 
 test("launch overview uses real successful consented outcomes only, and any failure suppresses launch", (t) => {
@@ -226,6 +296,68 @@ test("automatic checklist discloses consequences before fast Space+Enter and ret
   } finally { t.close(); }
 });
 
+test("nonempty reask matrix records only readable answers; undisclosed MCP and unknown records remain unchanged", async () => {
+  for (const stored of [undefined, "configured", "skipped"]) for (const owned of [false, true]) for (const unreadable of [false, true]) for (const checked of [false, true]) {
+    const t = terminal(), root = mkdtempSync(join(tmpdir(), "t83-confirmed-"));
+    const ctx = { generated: join(root, "generated"), backupDir: join(root, "backups"), dryRun: false };
+    mkdirSync(join(ctx.generated, "harness-choices"), { recursive: true }); mkdirSync(ctx.backupDir);
+    const file = join(ctx.generated, "harness-choices/codex.json"), unknown = join(ctx.generated, "harness-choices/unknown.json");
+    const bytes = unreadable ? "{unreadable" : stored ? JSON.stringify({ schema: 1, decision: stored, source: "old", decidedAt: "old", mcp: true }) : null;
+    if (bytes !== null) writeFileSync(file, bytes);
+    writeFileSync(unknown, "unknown fixture bytes");
+    try {
+      const pending = t.prompter.selectHarnesses({ rows: [{ id: "codex", label: "Codex CLI", stored, owned, unreadable }, { id: "aider", label: "Aider" }], reask: true });
+      await t.ready();
+      const seeded = !unreadable && stored === "configured";
+      t.input.write(`${seeded !== checked ? " " : ""}\x1b[B \r`);
+      const batch = await pending;
+      assert.deepEqual([...batch.answers.values()], [checked, true]);
+      const choices = readHarnessChoices(ctx);
+      const decision = await decideHarness({ id: "codex", label: "Codex CLI", detected: true, stored, unreadable, owned, storedMcp: true, reask: true, ask: async () => batch.answers.get("codex") });
+      assert.equal(decision.action, checked ? "configure" : "skip");
+      assert.equal(decision.record, !unreadable);
+      assert.notEqual(decision.mcp, true);
+      const tx = beginTransaction(ctx.backupDir, "confirmed fixture");
+      if (decision.record) recordHarnessChoice(ctx, tx, choices, "codex", checked ? "configured" : "skipped", decision.source, () => "fixture-now", { mcp: decision.mcp === true });
+      tx.finish();
+      if (unreadable) assert.equal(readFileSync(file, "utf8"), bytes);
+      else { const saved = readHarnessChoices(ctx).harnesses.codex; assert.equal(saved.decision, checked ? "configured" : "skipped"); assert.equal(saved.source, "interactive"); assert.equal(saved.decidedAt, "fixture-now"); assert.equal(saved.mcp, false); }
+      assert.equal(readFileSync(unknown, "utf8"), "unknown fixture bytes");
+    } finally { t.close(); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("all arrows visit locked context; a twice from partial is empty across delivery partitions", async () => {
+  for (const chunks of [["\x1b[A \x1b[D \x1b[B\x1b[Caa\r"], ["\x1b", "[A", " ", "\x1b[D", " ", "\x1b[B", "\x1b[C", "a", "a", "\r"]]) {
+    const t = terminal();
+    try {
+      const pending = t.prompter.selectHarnesses({ rows: [{ id: "pi", label: "pi", stored: "configured" }, { id: "codex", label: "Codex CLI" }, { id: "aider", label: "Aider" }] });
+      await t.ready();
+      // Let the persistent locked hint paint before the next navigation clears it.
+      t.input.write("\x1b[A "); await turn(); await turn();
+      assert.match(t.text(), /Saved choice is locked; use zcode-kit setup --reask/);
+      t.input.write("\x1b[B"); await turn();
+      for (const chunk of chunks) { t.input.write(chunk); await turn(); }
+      const batch = await pending;
+      assert.deepEqual([...batch.answers], [["codex", undefined], ["aider", undefined]]);
+    } finally { t.close(); }
+  }
+});
+
+test("MCP offers name only eligible editable rows, never a locked bit or another row", async () => {
+  const t = terminal();
+  try {
+    const pending = t.prompter.selectHarnesses({ rows: [{ id: "omp", label: "OMP", stored: "configured" }, { id: "claude-code", label: "Claude Code", unreadable: true }, { id: "codex", label: "Codex CLI" }], mcpIds: ["omp", "claude-code"] });
+    await t.ready();
+    assert.match(t.text(), /Selecting Claude Code also registers the kit's MCP bridge "zcode-harness"/);
+    assert.doesNotMatch(t.text(), /Selecting OMP/);
+    t.input.write(" \r"); const batch = await pending;
+    assert.deepEqual([...batch.mcpIds], ["claude-code"]);
+    const result = await decideHarness({ id: "claude-code", label: "Claude Code", detected: true, unreadable: true, ask: async () => batch.answers.get("claude-code"), mcpOffered: batch.mcpIds.has("claude-code") });
+    assert.equal(result.mcp, true); assert.equal(result.record, false);
+  } finally { t.close(); }
+});
+
 test("reask absent-answer matrix preserves decision bytes across saved directions, ownership and unreadability", async (context) => {
   for (const mode of ["empty", "escape", "eof"]) for (const stored of [undefined, "configured", "skipped"]) for (const owned of [false, true]) for (const unreadable of [false, true]) {
     const t = terminal();
@@ -267,6 +399,35 @@ test("Ctrl-C aborts unconfirmed batch; marked ETX is payload and real SIGINT sti
   }
 });
 
+test("maximum inventory counts all disclosure/feedback lines and spare margins with measured sub-40 width", async () => {
+  const rows = Array.from({ length: 10 }, (_, i) => ({ id: i === 0 ? "omp" : `fixture-${i}`, label: `Assistant ${i}`, stored: i % 3 === 0 ? "configured" : "skipped", owned: i % 2 === 0, unreadable: i % 3 === 1 }));
+  const full = terminal(); full.output.columns = 32; full.output.rows = 1000;
+  let count;
+  try {
+    const pending = full.prompter.selectHarnesses({ rows, reask: true, mcpIds: ["omp"] });
+    await full.ready();
+    const lines = full.text().split("\n").slice(0, -1); count = lines.length;
+    for (const line of lines) assert.ok(displayWidth(line) <= 31, line);
+    assert.ok(count > 100, "all wrapped prose, not just data rows, is measured");
+    full.input.end(); await pending;
+  } finally { full.close(); }
+  const tooShort = terminal(); tooShort.output.columns = 32; tooShort.output.rows = count;
+  try { assert.equal(await tooShort.prompter.selectHarnesses({ rows, reask: true, mcpIds: ["omp"] }), null); assert.equal(tooShort.text(), ""); assert.equal(tooShort.input.isRaw, false); }
+  finally { tooShort.close(); }
+});
+
+test("unterminated marked paste remains discard-only through EOF and never logs payload", async () => {
+  const t = terminal();
+  try {
+    const pending = t.prompter.selectHarnesses({ rows: [{ id: "codex", label: "Codex CLI" }] });
+    await t.ready(); t.input.write("a\x1b[200~");
+    for (let i = 0; i < 100; i++) t.input.write("PAYLOAD a\r\x03\x1b".repeat(100));
+    t.input.end();
+    assert.equal((await pending).answers.get("codex"), undefined);
+    assert.doesNotMatch(t.text(), /PAYLOAD/); assert.equal(t.input.isRaw, false);
+  } finally { t.close(); }
+});
+
 test("fit rejection is before raw/draw; safe resize retains checks and unsafe resize abandons them", async () => {
   for (const rows of [undefined, 1, NaN]) {
     const t = terminal(); t.output.rows = rows;
@@ -291,6 +452,11 @@ for (const [name, v] of Object.entries(C3_VARIANTS)) test(`Next steps C3 bytes: 
   const out = createOutput({ stdout, stderr, env: v.env, platform: v.platform });
   out.commands(BASE, { title: "Next steps" });
   matchSnapshot(`onboarding/${name}.out`, stdout.text());
+  const six = [...BASE]; six.splice(1, 0, { command: "zcode-kit run codex", description: "Launch Codex CLI wired to ZCode" });
+  const launched = capture(v.tty, v.columns);
+  createOutput({ stdout: launched, stderr, env: v.env, platform: v.platform }).commands(six, { title: "Next steps" });
+  matchSnapshot(`onboarding/${name}-launch.out`, launched.text());
+  if (["pipe", "ci", "term-dumb", "no-color"].includes(name)) assert.equal(launched.text().match(/^  zcode-kit /gm).length, 6);
   assert.equal(stderr.text(), "");
   if (["pipe", "ci", "term-dumb", "no-color"].includes(name)) assert.doesNotMatch(stdout.text(), /\x1b/);
 });
@@ -336,6 +502,37 @@ test("complete disclosure drains before arming; pre-arm input is discarded and w
   }
 });
 
+test("selector close/raw exceptions clean owned listeners; geometry is checked at confirmation", async () => {
+  for (const mode of ["close", "raw-error", "geometry"]) {
+    const t = terminal();
+    const foreign = () => {};
+    t.input.on("data", foreign); t.output.on("resize", foreign);
+    const baseline = process.listenerCount("SIGINT");
+    if (mode === "raw-error") t.input.setRawMode = (raw) => { if (raw) throw new Error("fixture raw failure"); t.input.isRaw = raw; };
+    try {
+      const pending = t.prompter.selectHarnesses({ rows: [{ id: "codex", label: "Codex CLI" }] });
+      if (mode === "raw-error") await assert.rejects(pending, /fixture raw failure/);
+      else {
+        await t.ready(); t.input.write(" ");
+        if (mode === "close") t.prompter.close();
+        else { t.output.rows = undefined; t.input.write("\r"); }
+        const controller = new AbortController();
+        const timeout = delay(1000, undefined, { signal: controller.signal }).then(() => { throw new Error(`selector ${mode} did not settle`); });
+        let result;
+        try { result = await Promise.race([pending, timeout]); }
+        finally { controller.abort(); }
+        if (mode === "geometry") assert.equal(result.fallback, true);
+        else assert.equal(result.answers.get("codex"), undefined);
+      }
+      t.prompter.close(); await turn();
+      assert.equal(t.input.isRaw, false);
+      assert.equal(process.listenerCount("SIGINT"), baseline);
+      assert.deepEqual(t.input.listeners("data"), [foreign]);
+      assert.deepEqual(t.output.listeners("resize"), [foreign]);
+    } finally { t.close(); }
+  }
+});
+
 test("only decoded bare Escape acts; split arrows, modified/meta and malformed controls never become consent", async () => {
   for (const chunks of [["\x1b", "[", "B"], ["\x1bO", "C"], ["\x1b[1;5A"], ["\x1ba"], ["\x1b]title a \r\x07"], ["\x1b] a\r\x07"]]) {
     const t = terminal();
@@ -354,7 +551,7 @@ test("only decoded bare Escape acts; split arrows, modified/meta and malformed c
 });
 
 test("accepted43 legacy prompt, queue, retry, default, CI and resolver bytes/results remain exact", async () => {
-  const baselineSource = execFileSync("git", ["show", "54771fdfde870394236e547394f3330ce518b6e7:cli/harness-consent.mjs"], { cwd: join(import.meta.dirname, ".."), encoding: "utf8" });
+  const baselineSource = readFileSync(new URL("./fixtures/onboarding-accepted43-consent.mjs.txt", import.meta.url), "utf8");
   const source = baselineSource.replaceAll('"../lib/edit.mjs"', JSON.stringify(new URL("../lib/edit.mjs", import.meta.url).href))
     .replaceAll('"../lib/term/load.mjs"', JSON.stringify(new URL("../lib/term/load.mjs", import.meta.url).href));
   const old = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
@@ -462,6 +659,9 @@ for (const chunks of [
   ["a\x1b[2", "00~ a\r\x03\x1b[20", "1~a\r"],
   ["\x1b[" + "1".repeat(10000) + "a\r"],
   [Buffer.from([0xf0]), Buffer.from([0x9f, 0x98]), Buffer.from([0x80, 13])],
+  ["ahello\r"],
+  [Buffer.from([0xf0, 0x28, 0x8c, 0x28, 13])],
+  ["a\x1b[200~", " a\r\x1b\x03".repeat(20000), "\x1b[201~a\r"],
 ]) test(`contamination/marked paste resets without accepting buffered suffix (${chunks.length} deliveries, ${chunks.map(c => c.length).join("/")})`, async () => {
   const t = terminal();
   try {

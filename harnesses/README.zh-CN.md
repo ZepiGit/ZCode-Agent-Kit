@@ -19,7 +19,27 @@ kit 的核心与具体 harness 无关：一个提供三种标准格式的本地 
 
 ## 由 `zcode-kit setup` 配置（检测到的 harness，仅在同意后）
 
-`zcode-kit setup --harness auto` 检测已安装的 harness，并对每个没有已保存决定的 harness 提问："Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"。回答 `y` 才配置该 harness；`n` 会跳过它且不触碰其文件，没有终端时所有未决定的 harness 都会被跳过。按 Ctrl-C 会停止提问（退出码 130）；已经回答 `y` 的仍保持配置。如果只装了 OMP，就不会创建 Claude/Codex 的配置或生成包装器文件。决定以每个 harness 一个文件的形式保存在 `generated/harness-choices/` 中，并属于设置事务的一部分（回滚会再次删除它们）；`zcode-kit update` 和 `zcode-kit doctor --fix` 只重新应用已同意的集成（回答 `y`、明确选择或 `zcode-kit integrate <harness>`），已保存的 `n` 会一直被遵守，直到通过 `--harness`、`integrate` 或 `zcode-kit setup --reask`（在终端中重新提问）更改。Kit 在提问之前创建的集成会在无人值守运行时刷新，但绝不会被视为同意。无人值守运行时用 `--harness omp,codex` 或 `ZCODE_KIT_HARNESSES=omp,codex` 选择 harness（`none` 跳过所有检测到的 harness）；未知 id 视为错误。Kit 的 MCP 桥接只有在单独同意后才会注册：明确选择，或在设置于提问前显示 MCP 提示后回答 `y`（`--no-mcp` 可关闭）；`integrate`、刷新或没有该提示的已保存决定绝不会注册它。某个 harness 失败不会阻止其他 harness：它自身的部分写入会被撤销，汇总中将其列为失败，设置以退出码 20 结束（安装器会带着警告继续）。
+`zcode-kit setup --harness auto` detects installed harnesses and collects
+consent in a fitting-terminal checkbox list. Arrows move, Space toggles,
+`a` toggles all editable rows, and nonempty Enter confirms checked yes and
+unchecked no. Saved choices stay locked unless `--reask`. Esc, empty Enter
+and EOF save no new decision: readable owned integrations may refresh;
+unowned or unreadable choices skip. The full per-row consequence is shown
+before input arms. Ctrl-C aborts an unconfirmed batch with exit 130 and no
+provisional apply. No-color/dumb/small/unknown-size terminals retain
+individual "Configure ZCode for <HARNESS>? [y/n]" questions; already applied
+line answers remain on later abort. CI/pipes ask nothing. A user with only
+OMP gets no Claude/Codex configuration or generated wrapper files.
+
+Marked paste/text contamination resets provisional edits; identical valid
+unmarked key bytes cannot be distinguished from typing. The one lexical CR
+bit consumes an immediately adjacent LF even across the next-question
+handoff: an indistinguishable fresh LF-only key can be consumed once; CR or
+a later LF works. Completed setup prints five Next steps commands and at
+most one concrete qualified launch row, with one plain install.log copy.
+The launch row certifies configuration, not sign-in or a model reply.
+
+决定以每个 harness 一个文件的形式保存在 `generated/harness-choices/` 中，并属于设置事务的一部分（回滚会再次删除它们）；`zcode-kit update` 和 `zcode-kit doctor --fix` 只重新应用已同意的集成（回答 `y`、明确选择或 `zcode-kit integrate <harness>`），已保存的 `n` 会一直被遵守，直到通过 `--harness`、`integrate` 或 `zcode-kit setup --reask`（在终端中重新提问）更改。Kit 在提问之前创建的集成会在无人值守运行时刷新，但绝不会被视为同意。无人值守运行时用 `--harness omp,codex` 或 `ZCODE_KIT_HARNESSES=omp,codex` 选择 harness（`none` 跳过所有检测到的 harness）；未知 id 视为错误。Kit 的 MCP 桥接只有在单独同意后才会注册：明确选择，或在设置于提问前显示 MCP 提示后回答 `y`（`--no-mcp` 可关闭）；`integrate`、刷新或没有该提示的已保存决定绝不会注册它。某个 harness 失败不会阻止其他 harness：它自身的部分写入会被撤销，汇总中将其列为失败，设置以退出码 20 结束（安装器会带着警告继续）。
 
 | Harness | 机制 | 对现有配置的影响 |
 |---|---|---|
