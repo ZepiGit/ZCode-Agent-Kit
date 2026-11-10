@@ -157,3 +157,74 @@ Typecheck EXIT0 (`:1-2`). Preservation12pass/0fail/80filtered (`:26-31`), includ
 Read integration's `.scratch/kit-overhaul/research/zcode-current-runtime-20261110.md:1-110` as supplied source/evidence, not as tests rerun in this ask. Source pinned at public commit a9fe401 and releasev3.17.2; agentpackage0.17.1 is a separate version domain. The note records server fixtures5/3/2 (default/custom `ZCODE_DATA_BASE_DIR` current.json not discovered; legacy/explicit/missing-explicit controls pass) and standalone fixtures4/2/2 (default/custom `ZCODE_DIST_HOME/current/agent/zcode.cjs` not discovered; explicit controls pass). These are Linux synthetic MCP health findings, not native/runtime/protocol success. No discovery/MCP source/dist change in this repair. Explicit override precedence, pointer containment/malformed metadata and multi-distribution selection require separate scoping/review plus permanent seam7 tests/native evidence. Do not merge moving integration here; the merger/controller will reconcile afterward.
 
 Original GitHub#32 Windows405+3012 cause and correlation with guest TypeErrors remain OPEN; OA-4 owner-only re-observation remains necessary. No real inference recovery, challenge compatibility or latest official app-server protocol compatibility proved. Native Windows/macOS TUI/PTY and current-runtime discovery acceptance remain unverified. This commit is only a **candidate for central review/validation**, never entire82 resolved. Controller owns task-observer; no observation files written by this subagent.
+
+### 2026-11-10 — reconcile the diagnostics security repair with SDK error semantics
+
+Started clean at `362b099d7eedff25913b87b1e3c2af0dcfb1fe95`, own worktree/branch only. Loaded tdd and diagnosing-bugs and read their open observations without writing observation logs (controller-owned). Reused approved solver/listener seams3/4 and existing public normalization/formatter/process/TUI seams; no discovery implementation. Read actual original assertions before editing: `src/proxy/captcha-sdk-contract.test.ts:35-38` requires the incompatible subtype through the actual offline DOM callback; `src/proxy/captcha-diagnostics.test.ts:134-145` additionally required object identity after normalization. Read `git show 362b099d^:zcode-proxy-src/src/proxy/captcha-token.ts`: original normalization returned every SDK instance unchanged. The supplied central fullsuite log was READ, not rerun: `reports/gpt-grok-t82-full-20261110.log:3538-3547` records1695pass/1skip/2fail, exiting before proxy typecheck/MCP. Its two failures are genuine contract regressions, not obsolete tests.
+
+**Cause and explicit contract.** Repair `362b099d` rebuilt every typed error as the base `CaptchaSdkError`. Fix commit `ccf333173f8c80cc64ce085d8c8d371af44ac21c` preserves the host-registered concrete subtype (`CaptchaSdkIncompatibleError` or `CaptchaLocalVerificationError`), category and canonical method-type/refusal text. It deliberately does **not** preserve object identity: normalization always constructs a clean Error with a fresh host stack and no copied cause, arbitrary own properties or serializers. Returning the original instance can retain hostile mutations/nonconfigurable properties even when its current message appears safe; in-place cleanup cannot safely guarantee both canonical diagnostics and identity for arbitrary mutable/frozen typed errors. The one identity assertion is therefore replaced with nonidentity plus concrete subtype, literal host-built method metadata, category, no-marker and no-cause assertions. The original SDK callback subtype test is unchanged byte-for-byte. No test was deleted or broadly relaxed.
+
+Canonical kind/category/message now live together in a private WeakMap. Classification consumes registered category rather than a mutable public TypeScript `readonly` field; a forged prototype alone is not trusted. Re-normalization preserves semantic subtype/metadata without guest values. New hostile regression mutates message (including misleading rate-limit/F008 text), stack, name, cause, category, payload and a nonconfigurable `toJSON`; only canonical subtype/category/type metadata survive. A separate forged-prototype negative control fails closed. No SDK start/show selection, challenge behavior, retry/recycle scheduling, identity/signing, rotation or quota policy change.
+
+#### Actual RED and GREEN commands in this ask
+
+All commands use the wrapper below: hard1G/no swap, finite timeout, fresh isolated HOME, pinned Bun1.4.2. Wrapper-owned logs are in `/home/AgentKit/wt/overhaul/.scratch/kit-overhaul/reports/`; this worker did not edit integration files. Each test runner prints its actual root/PID/PGID and Bun version.
+
+Exact original cases, before implementation or test changes:
+
+```sh
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-sdk-contract-exact-red-20261110 1G 60 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; bun test src/proxy/captcha-sdk-contract.test.ts src/proxy/captcha-diagnostics.test.ts --test-name-pattern "rejects incompatible SDK instances with a trusted local category|rejects missing and noncallable methods with trusted diagnostics but no guest values"'
+```
+
+RED **0pass/2fail/17filtered**,2files,EXIT1/1s: `t82-sdk-contract-exact-red-20261110.log:9-38,40-73`. The actual failing assertions are subtype at SDK line37 and identity at diagnostics line143; this is not a test-discovery/infrastructure failure.
+
+New hostile tests, written and executed before the fix:
+
+```sh
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-sdk-hostile-red-20261110 1G 45 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; bun test src/proxy/captcha-token.test.ts --test-name-pattern "rebuilds a hostile mutable incompatible error|does not trust an incompatible prototype"'
+```
+
+RED **0pass/2fail/12filtered**,EXIT1: `t82-sdk-hostile-red-20261110.log:6-52`, wrong rebuilt subtype/mutable rate-limit category and trusted forged incompatible prototype. After the fix, the two original scenarios (with only the justified identity contract change) plus both hostile tests ran GREEN **4pass/0fail/29filtered**,3files,EXIT0: `t82-sdk-contract-exact-green-premerge-20261110.log:5-20`, using the original command with `src/proxy/captcha-token.test.ts` added and pattern `rejects incompatible SDK instances with a trusted local category|rejects missing and noncallable methods with trusted diagnostics but no guest values|rebuilds a hostile mutable incompatible error|does not trust an incompatible prototype`.
+
+Complete requested targeted set, executed both before and after merging current integration:
+
+```sh
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-sdk-contract-merged-targeted-green-20261110 1G 120 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; bun test src/proxy/captcha-sdk-contract.test.ts src/proxy/captcha-diagnostics.test.ts src/runtime/guest-error.test.ts src/runtime/guest-error-boundary.test.ts src/tui/guest-error-boundary.test.ts src/proxy/captcha-token.test.ts src/proxy/captcha-pool.test.ts src/proxy/solver-transport.test.ts src/proxy/captcha-solver.test.ts src/proxy/handler-issue32.test.ts src/server/solver-error-http.test.ts src/server/routes-quota.test.ts'
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-sdk-contract-merged-preservation-20261110 1G 60 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; bun test src/proxy/captcha-happy.test.ts src/proxy/captcha-diagnostics.test.ts src/proxy/credential-recovery.test.ts --test-name-pattern "local verification refusals|provenance|metadata|incompatible|never recovers or duplicates after SSE output"'
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-sdk-contract-merged-typecheck-20261110 1G 60 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; bun run typecheck'
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-sdk-contract-merged-wiring-20261110 1G 45 -- bash -c 'cd /home/AgentKit/wt/t82 && printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; node --version; node --test tests/test-wiring.test.mjs'
+```
+
+Actual merged candidate `421280856d395cbcbbe8968c37bda8fbe67944aa` results:
+- `t82-sdk-contract-merged-targeted-green-20261110.log:252-256`: **146pass/0fail**,12files,8.64s,EXIT0. Before merge the same146tests passed (`t82-sdk-contract-targeted-green-20261110.log:252-256`). Includes SDK/metadata/pool/dispatcher/worker, real HTTP child/listener across all three routes and real TUI handler controls. At merged-log:11-12 claim-preview missing data fails closed while genuine empty plans succeed; :73 preserves HTTP405+3012 authorization and exactly one mint/one upstream call, no captcha re-solve; :248-250 strict guest/host TUI classification. Not a native PTY claim.
+- `t82-sdk-contract-merged-preservation-20261110.log:28-33`: **12pass/0fail/80filtered**,3files,EXIT0, including local verification refusals and no retry/import after SSE output. This is a filtered preservation set, not the full three files.
+- `t82-sdk-contract-merged-typecheck-20261110.log:1-4`: actual `tsc --noEmit -p tsconfig.json`,EXIT0; premerge typecheck alsoEXIT0.
+- `t82-sdk-contract-merged-wiring-20261110.log:1-22`: Node26.7.0, **10pass/0fail/0skip**,EXIT0. No proxy/fullsuite substitute is claimed.
+
+All four unchanged original external security probes reran on the merged tree:
+
+```sh
+for item in 'metadata-boundary 30' 'real-error-boundary 90' 'review-followup 60' 'http-provenance-boundary 90'; do
+  set -- $item; name=$1; limit=$2
+  BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh "t82-sdk-contract-merged-rooted-external-$name-20261110" 1G "$limit" -- bash -c 'cd /home/AgentKit/wt/t82 && printf "runner_root=%s runner_pid=%s runner_pgid=%s\n" "$PWD" "$$" "$(ps -o pgid= -p $$)"; bun --version; bun "$1" & owned=$!; printf "owned_probe_pid=%s owned_probe_pgid=%s\n" "$owned" "$(ps -o pgid= -p "$owned")"; wait "$owned"' bash "/home/AgentKit/overhaul-tools/t82-$name-probe-20261110.ts" || exit $?
+done
+```
+
+Rooted external logs with that prefix: metadata**5/5** (`:9-10`), actual uncaught/unhandled boundary**12/12** (`:16-17`), classification+pool**3/3** (`:7-8`), HTTP**12/12** (`:30-31`), all0fail/EXIT0. HTTP retains12ownedlocalrequests/9syntheticupstreamcalls/0unexpectedexternalfetches,401authcontrols,503solvererrors,5mints/storm,noresend,listenerClosed=true. Earlier same-ask `merged-external-` runs also passed but their shell cwd was the read-only owner checkout; imports were absolute ticket-worktree paths. They are not the rooted evidence quoted here. No vendor/model/claim call or real secret/account-store read occurred.
+
+#### Integration and preservation
+
+After targeted GREEN, merged **exact current integration `829202b32cde3a2285c2c3fc39a5fc0394f1b50b`**, via `gitc.sh merge --no-ff --no-commit` and `gitc.sh commit`, into the own branch as `421280856d395cbcbbe8968c37bda8fbe67944aa` (parents `ccf3331` / `829202b`). Sole conflict: OWNER-ACTIONS additions; retained entire OA1-4 from own parent plus entire OA5 from integration, verified by exact parent-text comparison. Automatic82merge retains both complete parent comment bodies, also verified exactly. All other integration `.scratch` files, including accepted40resolution/INDEX/STATE/RUNLOG/DECISIONS/research, byte-identical to829202b. No other worktree was edited, no push.
+
+Executed preservation commands, all empty/EXIT0:
+
+```sh
+git -C /home/AgentKit/wt/t82 merge-base --is-ancestor 829202b HEAD
+git -C /home/AgentKit/wt/t82 diff --exit-code 829202b HEAD -- .scratch ':!.scratch/kit-overhaul/OWNER-ACTIONS.md' ':!.scratch/kit-overhaul/issues/82-github-32-safe-failure-diagnostics-and-zcode-compatibility.md'
+git -C /home/AgentKit/wt/t82 diff --exit-code 829202b HEAD -- mcp/zcode-harness-mcp
+git -C /home/AgentKit/wt/t82 diff --check 829202b..HEAD
+```
+
+Also executed `git diff --exit-code 829202b HEAD -- <909 actual ticket40 product paths from git diff --name-only deadcbc^2 deadcbc -- . ':!.scratch'>`: all909filesbyte-identical, ticket40staysresolved. SDK callback test, SDK method selection, retry/signing/identity/session/rotator files are unchanged from integration. A separate check of the imported integration delta `git diff --check ccf3331..HEAD -- . ':!.scratch'` reports the pre-existing accepted40snapshot whitespace/EOF diagnostics; no accepted snapshot or product cleanup was performed. Own delta check against829202b is clean. Fresh `ps -eo pid=,ppid=,pgid=,comm=` comparison against all17recorded SDK-check/probe process groups (including the hostile RED run) found0activeprocesses; no process was killed.
+
+**Next gate only:** central controller runs full `npm run test:all` and required MCP build/dist checks; this worker did NOT rerun fullsuite, install, build, soak, nativeWindows/macOS or CI. Independent review/freshCI remain pending. Remaining82gaps unchanged: server and standalone default/custom discovery failures plus precedence/containment/malformed-pointer/multiple-install decisions and permanent seam7/native tests (`research/zcode-current-runtime-20261110.md:104-110`, read, not rerun); official app-server/protocol/runtime compatibility; original Windows405+3012cause/recovery and correlation with guestTypeErrors; OA-4 owner-only re-observation. No blanket82resolution, no release/version/tag/mainmerge or challenge-pass claim. Task-observer: none logged by this worker because the controller owns it.
