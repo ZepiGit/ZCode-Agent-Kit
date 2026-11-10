@@ -19,8 +19,13 @@ const KIT = join(import.meta.dirname, "..");
 const TMP = join(import.meta.dirname, "fakehome", "install-log");
 ensureRuntimeFiles(createCtx(KIT));
 
+// split(/\r?\n/): the fixture is a plain text file (no -text attribute in
+// .gitattributes), so a Windows checkout may hand it CRLF endings — every
+// fixture line then carried a trailing \r and matched nothing (CI win24,
+// run 42725722962). The comparison is about line content; install.log itself
+// is written with LF only.
 const FIXTURE = readFileSync(join(import.meta.dirname, "fixtures", "install-log-old-verbose.txt"), "utf8")
-  .split("\n")
+  .split(/\r?\n/)
   .filter((line, i, all) => line !== "" || i < all.length - 1);
 
 function fixtureHome() {

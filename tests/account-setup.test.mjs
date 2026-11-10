@@ -288,7 +288,10 @@ test("rotator asked once: a terminal answer is stored; setup, doctor --fix and a
   const reask = await runPty(f, ["setup", "--reask"], [{ after: ROTATOR_PROMPT, send: "\r" }]);
   assert.equal(reask.code, 0, reask.out);
   assert.equal(asked(reask.out), 1, "--reask asks again");
-  assert.match(reask.out, /OK {2}Account Rotator disabled\. Saved accounts are kept\./, "Enter takes the capitalised default N");
+  // Result-row grammar (design-language §4.3): a pty renders the status
+  // column as `✓ OK    ` (glyph, space, the word padded to 4); a pipe keeps
+  // `OK  `. This pty proof pins the status word and the label, not the pad.
+  assert.match(reask.out, /(?:✓ )?OK {2,4}Account Rotator disabled\. Saved accounts are kept\./, "Enter takes the capitalised default N");
   assert.equal(f.decisionBytes(), stored, "the same answer again rewrites nothing");
   assert.deepEqual(f.proxyCliCalls(), [], "a no never imports an account");
 });

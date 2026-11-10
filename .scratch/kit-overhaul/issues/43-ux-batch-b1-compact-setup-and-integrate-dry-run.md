@@ -83,3 +83,22 @@ Spec stories: 95, 97, 111, 115
 - FINAL full `npm run test` on head 7bdaf7a: 1037 tests, 1017 pass, 0 fail, 0 cancelled, 20 skipped (platform gates) — reports/t43-kit-final.log. `npm run test:proxy` 1652 tests, 0 fail (t43-testproxy.log); `npm run test:mcp` 115 pass, 1 skipped, tsc clean (t43-testmcp.log). dist/ untouched (B5).
 - ux-before (linux) equivalence after the refresh: compareCaptures(committed baseline, fresh capture of this branch) → 0 diffs (capture t43-uxcap-full2.log; the ux-before CI job runs the same comparison). Windows baseline for the 12 scenarios: pending CI.
 - Head: 7bdaf7a. Pending CI: windows ux-before baseline for the 12 changed scenarios, ADR-0005's PowerShell 5.1 stderr gate, the memory-budget job, the snapshot-update refusal (ticket 55).
+
+### 2026-11-10 — preserve the quota-interrupted CI repair as a candidate
+
+The GLM worker stopped on provider quota code1005 after editing six test files. The controller did not modify those edits, switch providers, resume the workflow or change product code. Before committing, the exact patch was compared to the previously verified binary patch (SHA256 `2385638c216df0e8d20993a9687c96118e645a94cf5e48c8fb5afcc3383a28ff`), with exactly these six files changed:
+
+- `account-setup.test.mjs` and `harness-consent.test.mjs`: narrowly accept the designed TTY result-row OK padding (2–4 spaces and optional check glyph). Stored-choice bytes, prompt order, MCP consent, replay, existing integrations, Ctrl-C exit130 and prior-answer preservation assertions remain. Off-TTY output is not normalized or relaxed.
+- `harness-consent.test.mjs`: use `pathToFileURL` for the spawned module import, since Windows drive paths are not ESM specifiers.
+- `adapter-audit.test.mjs`: correct the Windows display-path expectation to one literal backslash; the generated comment is not a doubly escaped data value.
+- `cli-audit.test.mjs`: assert the foreign-registration warning on stderr and in install.log rather than compact stdout, preserving refusal visibility and behavior.
+- `cli-kit.test.mjs`: create the synthetic state owner using the same resolved, Windows-case-folded installation identity as the state implementation. No real state is read/copied.
+- `install-log-lines.test.mjs`: split the checked-in text fixture on CRLF or LF so the line-content comparison remains effective on Windows. The log output contract itself is unchanged.
+
+**Executed before this commit**, from `/home/AgentKit/wt/t43`, Bun1.4.2, isolated HOME, `run-capped.sh`:
+
+1. Earlier RED: `t43-controller-ci-pty-red` ran the exact four affected PTY tests with `CI=true TERM=xterm-256color`: 4 executed, 0 pass, 4 fail, 0 skips, exit1. The actual assertion failures match CI42725722962; not discovery/infrastructure errors.
+2. `t43-preserved-edits-ci-validation-20261110` (`3G`,360s), `env CI=true TERM=xterm-256color node --test tests/account-setup.test.mjs tests/harness-consent.test.mjs tests/adapter-audit.test.mjs tests/cli-audit.test.mjs tests/cli-kit.test.mjs tests/install-log-lines.test.mjs`: 127 tests,125 pass,0 fail,2 platform skips,exit0,18s.
+3. `t43-preserved-edits-full-ci-20261110` (`3G`,2400s), `env CI=true TERM=xterm-256color npm run test:all`: kit1017/1037 (20 skips),proxy1651 pass (1 skip),proxy typecheck clean,MCP build+115/116 (1 skip),zero failures,exit0,284s. Regenerated MCPdist unchanged; `git diff --check` clean.
+
+Logs are in `.scratch/kit-overhaul/reports/`; the exact tested patch and detailed controller verification are preserved outside the repo at `/home/AgentKit/overhaul-tools/t43-preserved-edits-tested-20261110.patch` and `t43-preserved-edits-verification-20261110.md`. The quota-interrupted worker's HEAD before preservation was4172766. This commit is a candidate preservation, NOT independent review or merge acceptance. Fresh Windows/OS CI remains required; the old PR79 result remains FAILED. Ticket40 is still unmerged, so ticket43's prerequisite and ticket83's post43 baseline are not satisfied. No version/tag/release/main merge or live upstream action occurred.

@@ -9,6 +9,7 @@ import { PassThrough } from "node:stream";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFile, spawn, spawnSync } from "node:child_process";
 import {
   ABORTED, HARNESS_CHOICES_DIR, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, askYesNo, consentStatus, consentedForRepair,
@@ -54,14 +55,16 @@ test("createPrompter: sequential questions on one terminal, typed-ahead answers 
 // and the kit's harness question is the short copy (`Configure ZCode for …?`).
 // The default-output half is proven through a real spawn: the child fakes TTYs
 // on both streams, asks one question and exits on EOF; the parent checks on
-// which stream the bytes landed.
+// which stream the bytes landed. The child imports the module through
+// pathToFileURL: a bare Windows path is not an ESM specifier
+// (ERR_UNSUPPORTED_ESM_URL_SCHEME, "Received protocol 'd:'" on CI win24).
 test("prompts default to stderr in the `? question [y/n]` form, and the harness question is short", async () => {
   assert.equal(harnessQuestion("Codex CLI"), "Configure ZCode for Codex CLI?");
   const child = spawn(process.execPath, [
     "-e",
     `
     process.stdin.isTTY = true; process.stderr.isTTY = true;
-    const { createPrompter, harnessQuestion } = await import(${JSON.stringify(join(KIT, "cli", "harness-consent.mjs"))});
+    const { createPrompter, harnessQuestion } = await import(${JSON.stringify(pathToFileURL(join(KIT, "cli", "harness-consent.mjs")).href)});
     const prompter = createPrompter({ env: {} });
     if (!prompter.interactive) { console.error("NOT-INTERACTIVE"); process.exit(3); }
     const answer = await prompter.ask(harnessQuestion("Codex CLI"));
@@ -727,7 +730,10 @@ test("interactive setup asks per harness and applies the answers", { skip: !scri
   assert.ok(r.out.indexOf("for OMP / Oh My Pi? [y/n]") < r.out.indexOf("for pi? [y/n]"), "questions in detection order");
   assert.ok(r.out.indexOf("for pi? [y/n]") < r.out.indexOf(`${ACCOUNT_ROTATOR_QUESTION} [y/N]`), "rotator question comes after the harness questions");
   assert.match(r.out, /INFO {2}y also registers the kit's MCP bridge "zcode-harness" for OMP \/ Oh My Pi/);
-  assert.match(r.out, /OK {2}OMP \/ Oh My Pi/);
+  // Result-row grammar (design-language §4.3): on the pty the status column
+  // is `✓ OK    ` (glyph, space, the word padded to 4); a pipe keeps `OK  `.
+  // These pty proofs pin the status word and the label text, not the pad.
+  assert.match(r.out, /(?:✓ )?OK {2,4}OMP \/ Oh My Pi/);
   assert.match(r.out, /SKIP {2}pi — answered n/);
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/);
   assert.ok(!JSON.parse(readFileSync(f.pi, "utf8")).providers.zcode, "n writes nothing");
@@ -746,7 +752,7 @@ test("interactive setup asks per harness and applies the answers", { skip: !scri
   assert.equal(reask.code, 0, `${reask.out}\n${reask.stderr}`);
   assert.match(reask.out, /INFO {2}an existing kit integration for OMP \/ Oh My Pi was found; y keeps it current, n leaves it untouched/);
   assert.match(reask.out, /SKIP {2}OMP \/ Oh My Pi — answered n/);
-  assert.match(reask.out, /OK {2}pi/);
+  assert.match(reask.out, /(?:✓ )?OK {2,4}pi/);
   assert.match(readFileSync(f.omp, "utf8"), /# >>> zcode-kit \(managed block\)/, "n never deletes an existing integration");
   assert.ok(JSON.parse(readFileSync(f.pi, "utf8")).providers.zcode);
   assert.deepEqual(choicesOf(f), { omp: "skipped/interactive", pi: "configured/interactive" });
@@ -764,7 +770,7 @@ test("setup --select: one numbered list, invalid answers repeat, chosen = config
   assert.match(r.out, /note: selecting OMP \/ Oh My Pi also registers the kit's MCP bridge/);
   assert.doesNotMatch(r.out, /for OMP \/ Oh My Pi\? \[y\/n\]/, "no per-harness question");
   assert.match(r.out, /SKIP {2}OMP \/ Oh My Pi — answered n/);
-  assert.match(r.out, /OK {2}pi/);
+  assert.match(r.out, /(?:✓ )?OK {2,4}pi/);
   assert.deepEqual(choicesOf(f), { omp: "skipped/interactive", pi: "configured/interactive" });
   assert.equal(existsSync(f.mcp), false, "the bridge only for a chosen harness");
   const all = await runPty(f, ["setup", "--select"], [{ after: "(numbers, all, none)", send: "all\n" }, { after: "[y/N]", send: "n\n" }]);
@@ -779,7 +785,7 @@ test("Ctrl-C during the questions stops setup: answered harnesses stay, the rest
   const piBefore = readFileSync(f.pi, "utf8");
   const r = await runPty(f, ["setup"], [{ after: "for OMP / Oh My Pi? [y/n]", send: "y\n" }, { after: "for pi? [y/n]", send: "\x03" }]);
   assert.equal(r.code, 130, `${r.out}\n${r.stderr}`);
-  assert.match(r.out, /OK {2}OMP \/ Oh My Pi/, "the y given before Ctrl-C is applied");
+  assert.match(r.out, /(?:✓ )?OK {2,4}OMP \/ Oh My Pi/, "the y given before Ctrl-C is applied");
   assert.match(r.out, /SKIP {2}pi — aborted/);
   assert.match(r.out, /Aborted by the user: remaining questions were skipped/);
   assert.match(r.out, /SKIP {2}Connection check.*aborted by the user/, "no connection check after an abort");
