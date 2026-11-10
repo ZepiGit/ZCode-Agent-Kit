@@ -78,3 +78,15 @@ Expected, for each of the three:
 - `proxy stop` prints `stopped (pid N)` and leaves no `bun.exe … serve` running.
 
 Unblocks: ticket 17's criterion "A2 (real PowerShell/conhost Ctrl-C) listed as an owner action, marked unverified". The seam tests deliver these events through Node's own signal listeners (`process.emit`), not through a real console.
+
+## OA-5 — Confirm GLM account quota availability — unverified, owner action
+
+OA-4 is reserved by the unmerged ticket82 branch for GitHub issue32 live re-observation; this entry does not replace it.
+
+Target: `account:zai-start-plan/GLM-5.3-Flash`, effort `max`. Last known provider result is quota error1005; no reset or restored availability has been confirmed. An automatic continuation reminder is not account-state evidence or permission to buy quota/change provider.
+
+Use the existing signed-in ZCode/provider account interface to inspect the current plan/quota and any stated reset time. If restoration needs a purchase, plan change or reauthentication, that remains the owner's decision. Do not paste credentials, tokens or account-store contents into chat. A non-secret status, reset timestamp and selected provider/model are sufficient for an initial report; a later successful authorized worker must still establish actual execution availability.
+
+No verified safe CLI quota command was found, so none is invented here. The installed UsageStats entitlement method exists, but the known loopback probe requires reading a token and was not executed under B2. Exposed tools and the inspected CLI control interface provided no B2-compatible live quota operation. Evidence: `/home/AgentKit/overhaul-tools/glm-quota-capability-check-20261110.md`.
+
+Do not automatically resume, amend or restart workflow `dwfrun-658f0456-0734-4f5a-af85-e94e4ee4f5ea`. This owner action supplies quota evidence only, not workflow lifecycle permission or provider-substitution approval. Ticket40's fresh merger handoff is prepared at `/home/AgentKit/overhaul-tools/t40-fresh-merger-ready-20261110.md`; no merger was dispatched.
