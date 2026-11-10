@@ -1,0 +1,27 @@
+[31m×[0m 1 problem: 1 failed
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [32m√ PASS[0m  proxy reachable + identity  [2mhealth=ours[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [31m× FAIL[0m  account auth valid         [2m上游返回：账号额度已用完，请在明天零点之后[0m
+                                     [2m再试一次 (quota exhausted)[0m
+                                     [2mwhy[0m   the account endpoint did not accept
+                                           the stored login
+                                     [2mnext[0m  [1mzcode-kit auth login zai[0m
+  [32m√ PASS[0m  start-plan JWT age (info)  [2m5.0h since issue — age is informational,[0m
+                                     [2mvalidity is the auth check above[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  omp: integration          [2mnot detected — skipped[0m
+  [2m– SKIP[0m  pi: integration           [2mnot detected — skipped[0m
+  [2m– SKIP[0m  claude-code: integration  [2mnot detected — skipped[0m
+  [2m– SKIP[0m  codex: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  opencode: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  cline: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration    [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  goose: integration        [2mnot detected — skipped[0m
+
+doctor: [31m1 failed[0m, [32m2 passed[0m, [2m10 skipped[0m → exit 1

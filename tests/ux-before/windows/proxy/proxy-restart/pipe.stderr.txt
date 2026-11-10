@@ -1,0 +1,5 @@
+Proxy stop ...
+FAIL  Nothing was stopped: the process is not proven to be this kit's proxy
+  why: start time of pid <PID> is not determinable — PID reuse cannot be ruled out, refusing to kill. Find the process manually: netstat -ano | findstr :18458
+  next: zcode-kit doctor
+  exit: 4

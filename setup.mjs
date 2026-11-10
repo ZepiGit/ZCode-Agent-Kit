@@ -35,6 +35,9 @@ if (mode === "--postinstall-hint") {
   // is not a harness id itself.
   const harnesses = only ? only.slice(7).split(",").map((s) => s.trim()).filter((s) => s && s !== "mcp") : null;
   if (only && harnesses.length) args.push(`--harness=${harnesses.join(",")}`);
+  // Flags the shim does not interpret (--verbose, --installer, --reask, …)
+  // belong to the kit command and are forwarded unchanged.
+  args.push(...argv.filter((a) => a.startsWith("--") && a !== only && !["--rollback", "--list-transactions", "--postinstall-hint"].includes(a)));
   const res = spawnSync(process.execPath, [kit, ...args], { stdio: "inherit" });
   process.exit(res.status ?? 1);
 }

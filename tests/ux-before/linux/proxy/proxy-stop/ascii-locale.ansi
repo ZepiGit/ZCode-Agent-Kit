@@ -1,1 +1,6 @@
-stopped (pid <PID>)
+
+| Proxy stop
+[K/ Proxy stop
+[K- Proxy stop
+[K\ Proxy stop
+[K  [32m+ OK[0m    Proxy stop  [2mstopped (pid <PID>)[0m

@@ -61,3 +61,11 @@ Spec stories: none
 
 ---
 - 2026-11-08 (Owner Proxy round 29): edge to 74 removed; this ticket's S5 values and their base are measured under one S5/short rule; if a re-decided ticket-74 rule merges while this ticket is in flight, its base is re-measured under that rule.
+
+### 2026-11-09 — PR78 Windows memory-budget RED by gate conflict
+
+staging/57d run 42695237859 (PR78): 7 of 8 jobs SUCCESS; windows memory-budget FAILED on `S5/restart: RED but not listed in expected-red.json (windows)`, red check `count:fake-harness` 2 (node harness + its conhost), budget 1. Artifacts /home/AgentKit/overhaul-tools/pr78-windows-mem-JaUuuD/. This is the Round 36 Q1 issue resurfacing: the diagnostic candidate added S5/restart to the loop; the shipping count still maps conhost to its fixture role (tests/memory/lib/win-sampler.mjs:142-169), and Round 12 prohibits a ticket-57 expected-RED entry. The diagnostic classifier records a separate execution count, but the ratchet judges the shipping count. Until a Charter round decides how the Windows S5/restart leg is judged (interim unlisted-known signature, gating the diagnostic leg off Windows, or the identity-based count amendment with its required evidence), the Windows identity evidence cannot be collected from CI. Ticket 57 stays not-ready; Linux leg GREEN; no budget, owner, schema or verdict change made here.
+
+### 2026-11-10 — Round38 correction: RED collection is permitted, acceptance is not
+
+Round38 explicitly rejects the earlier inference that CI evidence cannot be collected because the gate is RED. Preserve the Windows scenario and original failure; opt-in diagnostic artifacts are written/uploaded before/independently of shipping verdict success. One registered Windows/Linux attempt on a verified capped/isolated candidate may collect the Round36 package, then returns to a fresh decision. No skip, known-RED tolerance, expected-RED entry, owner/budget/count-policy amendment or retrospective GREEN is authorized. Answers: DECISIONS.md Round38 and /home/AgentKit/overhaul-tools/rounds/round-38-answers.md. The Linux-only run-capped.sh is not evidence of Windows containment. Inspect actual diagnostic artifacts and runner/input metadata before claiming prospective evidence is complete.

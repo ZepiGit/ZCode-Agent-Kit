@@ -1,14 +1,16 @@
 1,4
 n
-== bootstrap ==
-  proxy/config.yaml already present — left untouched
-  proxy dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  mcp bridge dependencies: check skipped (ZCODE_KIT_SKIP_DEPS=1)
-  MANUAL STEP REQUIRED (once): log in with your ZCode account:
-    cd <KIT>/zcode-proxy-src
-    ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
-detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters run only after consent (y answer, stored decision, explicit selection) or to refresh a kit-owned integration
+  ZCODE  /  AGENT KIT
+  v0.2.42  |  Your local AI workspace
 
+
+| Runtime and configuration
+! WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+   next  cd <KIT>/zcode-proxy-src
+     or  ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
+
+  + OK    Runtime and configuration  runtime ready
+Assistant integrations ---------------------------------------------------------
   Detected assistants:
     1) OMP / Oh My Pi
     2) pi
@@ -19,35 +21,24 @@ detected harnesses: omp, pi, claude-code, codex, opencode, continue — adapters
   note: selecting OMP / Oh My Pi or Claude Code also registers the kit's MCP bridge "zcode-harness" there (skip with --no-mcp).
   Configure ZCode as a provider with its supported models in which assistants? (numbers, all, none) 1,4
 n
-== omp: OMP / Oh My Pi (answered y) ==
-  wrote <HOME>/.omp/agent/extensions/zcode-proxy-autostart.ts
-  extension installed/updated: ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-  models.yml updated (zcode provider)
-  config.yml updated (disabledProviders cleaned / extension registered)
-  [OK]   OMP / Oh My Pi
-  [SKIP] pi — answered n
-  [SKIP] Claude Code — answered n
-== codex: Codex CLI (answered y) ==
-  created <KIT>/generated/codex-home
-  wrote <KIT>/generated/codex-home/config.toml (model provider + zcode-harness MCP)
-  use via: bin\zcode-codex.cmd  (e.g. bin\zcode-codex.cmd exec "task")
-  [OK]   Codex CLI
-  [SKIP] OpenCode — answered n
-  [SKIP] Continue — answered n
-== mcp: zcode-harness bridge ==
-  omp: created mcp.json with zcode-harness bridge
-  NOTE: the bridge defaults to its dedicated workspace allowlist and denied permission requests; standalone model turns may be rejected by the provider independently of Desktop availability.
-
+  + OK    OMP / Oh My Pi
+  - SKIP  pi — answered n
+  - SKIP  Claude Code — answered n
+  + OK    Codex CLI
+  - SKIP  OpenCode — answered n
+  - SKIP  Continue — answered n
+Account Rotator ----------------------------------------------------------------
   Keep authorized logins as separate encrypted accounts.
   New logins are saved automatically while the feature is enabled.
-Do you want to activate the Account Rotator feature? [y/N] n
-  [OK] Account Rotator disabled. Saved accounts are kept.
+? Do you want to activate the Account Rotator feature? [y/N] n
+  + OK    Account Rotator disabled. Saved accounts are kept.
 
-transaction <TX> recorded — undo with: zcode-kit rollback <TX>
+  Assistants  2 configured, 4 skipped, 0 failed
+  Undo        zcode-kit rollback <TX>
+  Setup log   <KIT>/logs/install.log
 
-  Configuration saved.
-  Assistants: 2 configured, 4 skipped, 0 failed.
-  [SKIP] Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+| Connection check
+  + OK    Connection check  Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
 
   Connection details (local ZCode proxy, from configuration; proxy not verified running)
     OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)

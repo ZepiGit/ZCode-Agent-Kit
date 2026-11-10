@@ -1,7 +1,8 @@
 // `zcode-kit integrate <harness> [--dry-run]`: explicit consent for one
 // harness; its adapter applies the integration through a transaction and the
-// decision is recorded. `--dry-run` shows what would be written and writes
-// nothing. Exit 0; an unknown harness is exit 2. Output is streamed
+// decision is recorded. `--dry-run` writes nothing and lists every file the
+// real run would write and every registration with the undo command (A-16).
+// Exit 0; an unknown harness is exit 2. Output is streamed
 // (ctx.progress): the adapter and bootstrap log as they work.
 import { join } from "node:path";
 import { acquireLock, beginTransaction, releaseLock } from "../../lib/transaction.mjs";
@@ -24,8 +25,19 @@ export async function run({ positional, flags }, ctx) {
     progress(`  detected: ${detected[id] ? "yes" : "no"}`);
     kit.dryRun = true;
     kit.tx = null;
-    const txNoop = { touch: (f) => progress(`  would record: ${f}`), external: (d, h) => progress(`  would register: ${d} (undo: ${h})`) };
+    // A-16 / story 111: list every file the real run would write and every
+    // registration with its undo command. commitFile and recordHarnessChoice
+    // report their would-writes through tx.touch; an adapter's own
+    // registration reports through tx.external.
+    const txNoop = {
+      touch: (f) => progress(`  would write  ${f}`),
+      external: (d, undo) => progress(`  would register  ${d}  (undo: ${undo})`),
+    };
     adapter.apply(kit, txNoop, (m) => progress("  " + m));
+    // The decision the real run records (and writes) is part of the plan.
+    const choices = readHarnessChoices(kit);
+    recordHarnessChoice(kit, txNoop, choices, id, "configured", "integrate", undefined, { mcp: choices.harnesses[id]?.mcp === true });
+    progress("  Undo  zcode-kit rollback  (the real run records the transaction; this command undoes it)");
     return { exitCode: 0, records: [] };
   }
   assertNotCheckoutWrite(kit, env);

@@ -1,0 +1,31 @@
+[31m×[0m 2 problems: 1 failed, 1 warning
+
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m√ PASS[0m  bun available  [2m/opt/bun/bin/bun (<VERSION>)[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [32m√ PASS[0m  proxy reachable + identity  [2mhealth=ours[0m
+  [33m! WARN[0m  solver memory               [2mfail-fast since 10:02 (2 abnormal exits in[0m
+                                      [2m15 min)[0m
+                                      [2mwhy[0m   the solver was killed at its cap
+                                            twice
+                                      [2mnext[0m  [1mzcode-kit proxy logs 50[0m
+                                        [2mor[0m  [1mzcode-kit proxy restart[0m
+  [31m× FAIL[0m  restart budget              [2m3 of 3 restarts used in 15 min[0m
+                                      [2mwhy[0m   this check did not pass
+                                      [2mnext[0m  [1mzcode-kit doctor --fix[0m
+  [2m– SKIP[0m  cap enforcement             [2mnot applicable here[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  omp: integration          [2mnot detected — skipped[0m
+  [2m– SKIP[0m  pi: integration           [2mnot detected — skipped[0m
+  [2m– SKIP[0m  claude-code: integration  [2mnot detected — skipped[0m
+  [2m– SKIP[0m  codex: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  opencode: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  cline: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration    [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  goose: integration        [2mnot detected — skipped[0m
+
+doctor: [31m1 failed[0m, [33m1 warning[0m, [32m2 passed[0m, [2m11 skipped[0m → exit 1

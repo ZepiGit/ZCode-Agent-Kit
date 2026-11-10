@@ -54,14 +54,9 @@ function* errorChain(err: unknown, depth = 4): Generator<object> {
  * strict (fatal) treatment.
  */
 export function isGuestOriginError(err: unknown): boolean {
-  for (const link of errorChain(err)) {
-    const e = link as { stack?: unknown; sourceURL?: unknown; message?: unknown };
-    if (typeof e.stack === "string" && GUEST_SCRIPT_HOST.test(e.stack)) return true;
-    // Bun/JSC attach the throwing script's URL directly on the error.
-    if (typeof e.sourceURL === "string" && GUEST_SCRIPT_HOST.test(e.sourceURL)) return true;
-    if (typeof e.message === "string" && GUEST_SCRIPT_HOST.test(e.message)) return true;
-  }
-  return false;
+  // Compatibility export: fatality decisions must use the same actual-frame
+  // evidence in TUI, headless and solver entry points, never message text.
+  return hasGuestSourceFrame(err);
 }
 
 /**
@@ -96,23 +91,36 @@ export function installGuestErrorBoundary(): void {
   process.on("unhandledRejection", handle);
 }
 
-/** One-line render of a guest error for the log pane / stderr. */
+const ERROR_CLASSES = new Set(["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "URIError", "EvalError", "AggregateError"]);
+
+/** Only validated bundle identifiers, never arbitrary filenames or callbacks. */
+function guestBundleId(raw: string): string {
+  try {
+    const url = new URL(raw.replace(/:\d+(?::\d+)?$/, ""));
+    const basename = (url.pathname.split("/").pop() ?? "").replace(/:\d+(?::\d+)?$/, "");
+    const known = /^(AliyunCaptcha|feilin\d{0,3}|pe\.\d{1,3})(?:\.[0-9a-f]{64})?\.js$/i.exec(basename);
+    // Rebuild from validated tokens; even known resources omit query/fragment.
+    if (known) return `${known[1]}.js`;
+    return `resource-${createHash("sha256").update(url.origin + url.pathname).digest("hex").slice(0, 16)}`;
+  } catch { return "unknown"; }
+}
+
+/** One bounded metadata-only line for the log pane / stderr (GitHub issue 32). */
 export function describeGuestError(err: unknown): string {
-  // Metadata-only (GitHub issue 32): a guest message, name or stack URL can
-  // echo page content, tokens or account data. Record the error class (only
-  // when it is a plain identifier), the message's length and digest, and the
-  // serving bundle's filename — never the text itself.
-  const e = err as { name?: unknown; message?: unknown; stack?: unknown } | null;
-  const rawName = typeof e?.name === "string" ? e.name : "";
-  const name = /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(rawName) ? rawName : "Error";
+  const e = err as { name?: unknown; message?: unknown } | null;
+  const name = typeof e?.name === "string" && ERROR_CLASSES.has(e.name) ? e.name : "Error";
   const message = typeof e?.message === "string" ? e.message : "";
   const digest = createHash("sha256").update(message).digest("hex");
-  const frame =
-    typeof e?.stack === "string"
-      ? (e.stack.slice(0, 8192).split("\n").find((line) => GUEST_SCRIPT_HOST.test(line)) ?? "").trim()
-      : "";
-  // Bundle URLs carry a 64-char content hash and may carry query strings
-  // (which themselves can hold tokens) — keep the readable filename only.
-  const source = frame.replace(/^at\s+/, "").replace(/\?[^)\s]*/, "").replace(/https?:\/\/[^\s)]*\/([^/\s)]+)/, "$1");
-  return source ? `${name} [len=${message.length} sha256=${digest}] (${source})` : `${name} [len=${message.length} sha256=${digest}]`;
+  let source = "";
+  for (const link of errorChain(err)) {
+    const frame = link as { stack?: unknown; sourceURL?: unknown };
+    const lines = typeof frame.stack === "string" ? frame.stack.slice(0, 8192).split("\n") : [];
+    // Never select the error's message line. Strip every callback/prefix/remainder.
+    const location = lines.find(line => /^\s*at\s/.test(line) && GUEST_SCRIPT_HOST.test(line));
+    const raw = location?.match(/https?:\/\/[^\s)]+/i)?.[0]
+      ?? (typeof frame.sourceURL === "string" && GUEST_SCRIPT_HOST.test(frame.sourceURL) ? frame.sourceURL.slice(0, 8192) : "");
+    if (raw) { source = guestBundleId(raw); break; }
+  }
+  const metadata = `${name} [len=${message.length} sha256=${digest}]`;
+  return source ? `${metadata} (${source})` : metadata;
 }

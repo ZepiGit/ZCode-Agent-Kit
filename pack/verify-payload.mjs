@@ -39,6 +39,12 @@ const REQUIRED_FILES = [
   // Ticket 38: the manager's doctor checks, which the manager CLI and
   // zcode-kit doctor both read as a check record.
   "lib/proxy-doctor.mjs",
+  // Ticket 40: the status record and the log tail the manager CLI and
+  // zcode-kit status / proxy logs both read, and the CLI's report builders.
+  "lib/proxy-status.mjs",
+  "lib/proxy-logs.mjs",
+  "cli/doctor-report.mjs",
+  "cli/proxy-report.mjs",
   "proxy/resolve-zcode-proxy-key.mjs",
   "proxy/config.example.yaml",
   "mcp/zcode-harness-mcp/dist/index.js",

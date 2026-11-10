@@ -13,13 +13,17 @@
 // the exit code and print the narration lines as they happen), and status,
 // doctor, logs and the connection details are the manager's own reports. The
 // doctor's checks are a record from lib/proxy-doctor.mjs (which zcode-kit
-// doctor reads too); `doctor` here renders it in the legacy grammar.
-import { existsSync, statSync, openSync, closeSync, readSync } from "node:fs";
+// doctor reads too); `doctor` here renders it in the legacy grammar. Status
+// and the log tail come from lib/proxy-status.mjs and lib/proxy-logs.mjs,
+// which zcode-kit status / proxy logs read too (ticket 40); this file renders
+// them in its own unchanged text.
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { managerDoctor } from "../lib/proxy-doctor.mjs";
+import { readConnectionFacts, readProxyStatus, statusDocument, statusExitCode } from "../lib/proxy-status.mjs";
 import { createLifecycle, RESPAWN_WAIT_MS } from "../lib/proxy-lifecycle.mjs";
-import { configuredModelIds, configuredServer, connectionDetailsLines, connectionDetailsObject, shouldRevealKey } from "../cli/connection-details.mjs";
+import { readLogTail } from "../lib/proxy-logs.mjs";
+import { connectionDetailsLines, shouldRevealKey } from "../cli/connection-details.mjs";
 
 // ------------------------------------------------------------------ factory
 const MANAGER_PATH = fileURLToPath(import.meta.url);
@@ -35,8 +39,7 @@ export function createManager({
     startupGraceMs, hungProbeCount, hungProbeIntervalMs, hungProbeTimeoutMs, respawnWaitMs,
   });
   const { CONFIG, KEY_FILE, LOG_FILE, PID_FILE, LOG_DIR, RESPAWN_FILE } = lifecycle;
-  const { healthIdentify, readPidFile, pidAlive, readKey, loadPort, redact } = lifecycle;
-  const base = () => `http://127.0.0.1:${loadPort()}`;
+  const { healthIdentify, readPidFile, pidAlive, readKey, redact } = lifecycle;
 
   // The manager prints each narration line the moment the intent produces it
   // (stdout, as console.log always did).
@@ -58,105 +61,55 @@ export function createManager({
   const logEvent = (level, message, fields) => lifecycle.logEvent(level, message, fields, { observe: print });
 
   // ----------------------------------------------------------------- status
+  // The status is lib/proxy-status.mjs's record; this renders it in the
+  // manager CLI's own text (unchanged) or as the shared --json document.
   async function status({ json = false } = {}) {
-    if (json) return statusJson();
-    const { pidRecord: pidInfo, identity: state, alive } = await readState();
-    console.log(`port:      ${portOrNull()}`);
+    const record = await readProxyStatus({ lifecycle, fetch });
+    if (json) {
+      // One object on stdout and nothing else; never the key.
+      console.log(JSON.stringify(statusDocument(record), null, 2));
+      return statusExitCode(record);
+    }
+    const { pidRecord: pidInfo, identity: state, alive } = record;
+    console.log(`port:      ${record.port ?? "(config missing)"}`);
     console.log(`pid file:  ${pidInfo ? `${pidInfo.pid} (started ${pidInfo.startedIso ?? "unknown"})` : "none"}`);
     console.log(`health:    ${state}`);
     if (state === "down" && pidInfo && alive) {
       console.log(`  pid ${pidInfo.pid} is alive but not answering — next: zcode-kit proxy restart, then zcode-kit doctor`);
     }
     if (state === "ours") {
-      for (const line of detailLines(await healthDetails())) console.log(line);
-      const key = readKey();
-      try {
-        const q = await fetch(`${base()}/quota`, { headers: { Authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000) });
-        const j = await q.json();
-        if (q.ok) {
-          for (const b of j.balances ?? []) {
-            console.log(`  quota: ${b.showName} ${b.remainingUnits}/${b.totalUnits} ${b.unitType} (expires ${new Date(b.expiresAt * 1000).toISOString()})`);
-          }
-        } else {
-          console.log(`  quota: HTTP ${q.status}`);
+      for (const line of detailLines(record.details)) console.log(line);
+      const q = record.quota;
+      if (q.fetchError !== undefined) console.log(`  quota: unavailable (${q.fetchError})`);
+      else if (q.bodyError !== null) console.log(`  quota: unavailable (${q.bodyError})`);
+      else if (q.ok) {
+        for (const b of q.body.balances ?? []) {
+          console.log(`  quota: ${b.showName} ${b.remainingUnits}/${b.totalUnits} ${b.unitType} (expires ${new Date(b.expiresAt * 1000).toISOString()})`);
         }
-      } catch (err) {
-        console.log(`  quota: unavailable (${err.message})`);
-      }
-      console.log("");
-      await printConnectionDetails("running");
-    } else if (state === "down") {
+      } else console.log(`  quota: HTTP ${q.status}`);
+    }
+    if (record.connection) {
       // Not running: configured values are still useful for manual client
       // setup, but they are labelled as unverified — never as "running".
       console.log("");
-      await printConnectionDetails("configured");
+      const { facts, error } = record.connection;
+      let lines = null;
+      try {
+        if (error !== null) throw new Error(error);
+        lines = connectionDetailsLines({ ...facts, key: readKey(), reveal: shouldRevealKey() });
+      } catch (err) {
+        console.log(`  connection details unavailable: ${err.message}`);
+      }
+      for (const line of lines ?? []) console.log(line);
     } else if (state === "foreign") {
-      console.log(`  connection details withheld: port ${portOrNull()} is answered by a service that is not this kit's proxy`);
+      console.log(`  connection details withheld: port ${record.port ?? "(config missing)"} is answered by a service that is not this kit's proxy`);
     } else if (state === "nokey") {
       console.log(`  connection details unavailable: ${KEY_FILE} missing — run setup first`);
     }
-    return state === "ours" ? 0 : 1;
+    return statusExitCode(record);
   }
 
-  /**
-   * `status --json`: one object on stdout and nothing else. Connection
-   * details only for the own proxy (running) or a stopped one (configured);
-   * a foreign listener or a missing key yields none. The key itself is never
-   * part of the JSON. Exit code as the text status: 0 only when ours.
-   */
-  async function statusJson() {
-    const { pidRecord: pidInfo, identity: state, alive } = await readState();
-    const out = {
-      schemaVersion: 1,
-      port: portOrNull(),
-      pid: pidInfo ? { pid: pidInfo.pid, startedAt: pidInfo.startedIso ?? null, alive } : null,
-      health: state,
-      connection: null,
-      quota: null,
-    };
-    if (state === "ours" || state === "down") {
-      let source = state === "ours" ? "running" : "configured";
-      // Re-proven right before reporting, like the text output.
-      if (source === "running" && await healthIdentify(2500) !== "ours") source = "configured";
-      try {
-        out.connection = connectionDetailsObject(await connectionFacts(source));
-      } catch (err) {
-        out.connection = null;
-        out.connectionError = String(err?.message ?? err).slice(0, 200);
-      }
-    }
-    if (state === "ours") {
-      try {
-        const q = await fetch(`${base()}/quota`, { headers: { Authorization: `Bearer ${readKey()}` }, signal: AbortSignal.timeout(8000) });
-        const j = await q.json().catch(() => null);
-        out.quota = q.ok && Array.isArray(j?.balances)
-          ? j.balances.map((b) => ({ name: String(b.showName ?? ""), remaining: b.remainingUnits ?? null, total: b.totalUnits ?? null, unit: b.unitType ?? null, expiresAt: Number.isFinite(b.expiresAt) ? new Date(b.expiresAt * 1000).toISOString() : null }))
-          : { error: `HTTP ${q.status}` };
-      } catch {
-        out.quota = { error: "unavailable" };
-      }
-    }
-    console.log(JSON.stringify(out, null, 2));
-    return state === "ours" ? 0 : 1;
-  }
-
-  /** Port, models (live list when the own proxy answers) and listener facts; never the key. */
-  async function connectionFacts(source) {
-    let models = configuredModelIds(CONFIG);
-    let modelsSource = "config";
-    if (source === "running") {
-      try {
-        const res = await fetch(`${base()}/v1/models`, { headers: { Authorization: `Bearer ${readKey()}` }, signal: AbortSignal.timeout(5000) });
-        const j = await res.json();
-        const ids = (j?.data ?? []).map((m) => m?.id).filter((id) => typeof id === "string" && id.length > 0);
-        if (res.ok && ids.length) { models = ids; modelsSource = "live"; }
-      } catch {
-        // config list stays, labelled as such
-      }
-    }
-    const server = configuredServer(CONFIG);
-    return { port: loadPort(), models, modelsSource, source, host: server.host, responsesEnabled: server.responsesEnabled };
-  }
+  const connectionFacts = (source) => readConnectionFacts({ lifecycle, fetch, source });
 
   /**
    * Connection details for manual client setup. `source` "running" is only
@@ -181,17 +134,6 @@ export function createManager({
       return;
     }
     for (const line of lines) console.log(line);
-  }
-
-  /** /health `details` (newer proxies only); null when absent or unreadable. */
-  async function healthDetails() {
-    try {
-      const res = await fetch(`${base()}/health`, { headers: { Authorization: `Bearer ${readKey()}` }, signal: AbortSignal.timeout(5000) });
-      const j = await res.json();
-      return j?.details && typeof j.details === "object" ? j.details : null;
-    } catch {
-      return null;
-    }
   }
 
   function detailLines(d) {
@@ -238,10 +180,6 @@ export function createManager({
     return lines;
   }
 
-  function portOrNull() {
-    try { return loadPort(); } catch { return "(config missing)"; }
-  }
-
   // ----------------------------------------------------------------- doctor
   // The checks are lib/proxy-doctor.mjs's record; this renders it in the
   // legacy off-TTY grammar (ADR-0001 rule 1), which the manager CLI keeps.
@@ -259,33 +197,11 @@ export function createManager({
   }
 
   // ------------------------------------------------------------------- logs
-  /** The lines in the last 64 KB of `file` ([] when it does not exist), and whether that was the whole file. */
-  function tailLines(file) {
-    let fh;
-    try { fh = openSync(file, "r"); } catch (err) { if (err?.code === "ENOENT") return { lines: [], whole: true }; throw err; }
-    try {
-      const size = statSync(file).size;
-      const tailBytes = Math.min(size, 64 * 1024);
-      const buf = Buffer.alloc(tailBytes);
-      const read = readSync(fh, buf, 0, tailBytes, size - tailBytes);
-      return { lines: buf.subarray(0, read).toString("utf8").split("\n").filter(Boolean), whole: tailBytes === size };
-    } finally {
-      closeSync(fh);
-    }
-  }
-
-  // The last n lines across proxy.log.1 and proxy.log (the proxy rotates
-  // while it runs, so the recent lines may start in the rotated file).
+  // The tail is lib/proxy-logs.mjs's; the proxy's own lines are shown
+  // redacted too (ADR-0010 rule 4).
   function logs(n = 40) {
-    const rotated = `${LOG_FILE}.1`;
-    if (!existsSync(LOG_FILE) && !existsSync(rotated)) {
-      console.log(`(no log file at ${LOG_FILE})`);
-      return 0;
-    }
-    const current = tailLines(LOG_FILE);
-    const lines = current.lines.length < n && current.whole ? [...tailLines(rotated).lines, ...current.lines] : current.lines;
-    // The proxy's own lines are shown redacted too (ADR-0010 rule 4).
-    console.log(redact(lines.slice(-n).join("\n")));
+    const tail = readLogTail(LOG_FILE, { n, redact });
+    console.log(tail.exists ? tail.lines.join("\n") : `(no log file at ${LOG_FILE})`);
     return 0;
   }
 

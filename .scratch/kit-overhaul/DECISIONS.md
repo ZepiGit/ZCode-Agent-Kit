@@ -5684,7 +5684,7 @@ Open branches: prospective S5/restart identity/lifecycle diagnostics under the u
 
 ## Round 37 (2026-11-09) — Prove native-preflight death before replacement
 
-Answers copied verbatim from /home/AgentKit/overhaul-tools/rounds/round-37-answers.md; Sol-subagent xhigh decision proxy under current routing.
+Answers copied verbatim from /home/AgentKit/overhaul-tools/rounds/round-37-answers.md. Attribution correction2026-11-10: the actual workflow selector for this ask was openai/gpt-6.1-sol$high, not the later Sol-subagent xhigh routing. The answers below remain verbatim; later model routing does not change execution identity retroactively.
 
 # Round 37 — Prove native-preflight death before replacement
 
@@ -5754,3 +5754,286 @@ The next design package must choose one supported lifetime mechanism per platfor
 ## Shared understanding
 
 Open branches: the exact per-platform pending-spawn/lifetime resolution primitive; a measured handshake/registration prototype proving literal max1 and bounded killed-starter recovery; versioned mixed-extension compatibility; the resulting ADR-0013/spec/ticket amendment and fresh design decision; eventual Windows waiter/margin evidence and full candidate acceptance. Ticket 35 stays blocked. Next: the controller assigns a decision-brief/prototype task focused first on host death between spawn and durable child registration, without changing shipping code or gates.
+
+
+## Round 38 (2026-11-10) — Collect RED-run identity evidence without changing acceptance
+
+Answers copied verbatim from /home/AgentKit/overhaul-tools/rounds/round-38-answers.md. No green gate waiver.
+
+# Round 38 — Collect identity evidence from a RED diagnostic run; retain the acceptance gate
+
+Collect the opt-in Windows identity artifacts without requiring that diagnostic CI run to be GREEN. Ticket 57 stays blocked for acceptance.
+
+Citation roots: `I` = `/home/AgentKit/wt/overhaul`; `T57` = `/home/AgentKit/wt/t57`; `X` = `/home/AgentKit/overhaul-tools`; `P` = `X/pr78-windows-mem-JaUuuD`; `W` = `P/memory-budget-windows/S5-restart/S5-short-restart-2026-11-09T2142-7ebae2`; `L` = `P/memory-budget-linux/S5-restart/S5-short-restart-2026-11-09T2118-40e168`. References below use these roots. Archived outcomes are evidence read here, not checks executed here.
+
+This is a Charter decision about evidence collection and acceptance policy, not code review, implementation approval, merge approval or user confirmation. An automated escalation supplies none of those permissions (`X/workflow-policy-escalations-2026-11-09.md:3-7,23`; `I/.scratch/kit-overhaul/OWNER-PROXY-BRIEF.md:3-11`).
+
+## Q1 — Windows S5/restart diagnostic collection versus shipping acceptance
+
+**DECISION:** **Choose C: keep the Windows S5/restart leg enabled and its existing RED/failing ratchet intact; collect the prospective diagnostic package from an explicitly opted-in, potentially failing CI run.** Evidence acquisition does not require acceptance GREEN. Do not introduce A's known-unlisted tolerance or B's Windows omission. Do not amend count semantics, add an expected-RED entry or owner for 57, alter a budget, or reinterpret either historical Windows RED.
+
+The candidate already provides an opt-in `workflow_dispatch` input named `identity-diagnostic`, default `false`, mapped to `ZCODE_MEMLOOP_IDENTITY_DIAGNOSTIC` (`T57/.github/workflows/ci.yml:9-14,135-138`). Its runner writes identity classification and control artifacts before evaluating the unchanged shipping verdict, and still returns 1 on RED (`T57/tests/memory/run.mjs:174-186,194-202`). The artifact upload uses `if: always()` and explicitly includes raw spawn, parent-spawn, process, classification and control records (`T57/.github/workflows/ci.yml:220-244`). Use that collection path for a new, declared measurement attempt, subject to the execution safeguards below. A failed gate remains a failed gate; downloading and assessing its artifacts is not a waiver.
+
+**Rationale:** PR78's preserved Windows job is `ok: false` with the single ratchet failure `S5/restart: RED but not listed in expected-red.json (windows)` (`P/memory-budget-windows/job-summary.json:2-9`). Its scenario records count 2 against 1, bridge peak 58.8 MB WS / 68.7 MB commit against 150 MB, four starts for 20 calls, and zero reported cleanup leftovers (`W/summary.json:20-115`). The samples show bridge 5792 → Node harness 8868 → conhost 6104 at 2493 ms, and bridge 5792 → Node harness 7888 → conhost 6404 at 9497 ms (`W/samples.csv:4-6,13-15`). Fixture consoles inherit the fixture role, and role counting counts process rows (`I/tests/memory/lib/win-sampler.mjs:154-169`; `I/tests/memory/lib/verdict.mjs:45-59`). That explains the sampled collision, not full lifecycle safety. Crucially, this failed job nevertheless preserved `harness-spawns.jsonl` and its summary/samples/log; the raw log has eight PID/parent/timestamp records but lacks run-bound creation identities (`W/harness-spawns.jsonl:1-8`). Thus the ticket comment's claim that the gate prevents CI evidence collection is not established (`I/.scratch/kit-overhaul/issues/57-mcp-runtime-restart-budget.md:65-67`). The opt-in artifact mechanism can collect evidence while leaving the gate RED. This avoids both an exception that could mask a real second execution and removal of primary-platform coverage. Linux's archived GREEN, count 1 and 77.3 MB peak remain Linux-only evidence (`L/summary.json:7-26`).
+
+**Charter:** C1 requires actual bounded executions, support-process accounting and complete reaping; C2 favors additive diagnostic records over changed field meanings; C6 requires sanitized fixture-only evidence; C7 keeps Windows coverage; C9 favors this smaller, reversible evidence path over an unnecessary tolerance (`I/.scratch/kit-overhaul/OWNER-PROXY-BRIEF.md:18-32,53-66`). B1–B6, resource safety and fixed budgets remain binding (`I/.scratch/kit-overhaul/PROMPT.md:215-255,550-561`). Relevant prior decisions remain unchanged:
+
+- **Round 12:** K ≥ 20, both platform legs, bounded respawns/reaping, no ticket-57 expected-RED entry, and GREEN on both legs before merge. A ticket unable to achieve GREEN returns with numbers (`I/.scratch/kit-overhaul/DECISIONS.md:1915-1922,2013-2014`). This round is that return, not a replacement of its acceptance criterion.
+- **Rounds 14/15:** an observed RED does not silently acquire ownership; owners/flips cannot be widened to absorb it. No new listing, owner or flip is created (`I/.scratch/kit-overhaul/DECISIONS.md:2175-2179,2341-2344,2384-2391`). Round 31's signature (ix) is specific to S2/CDN and has explicit ineligibility and exit rules; it is not a general permission to excuse S5 (`I/.scratch/kit-overhaul/DECISIONS.md:5000-5021`).
+- **Round 29:** 57's S5 values and base use one S5/short rule; a later re-decided 74 rule requires remeasurement of the base. No S5/short ownership or rule is changed here (`I/.scratch/kit-overhaul/DECISIONS.md:4603-4606`).
+- **Round 36 Q1:** preserve the shipping verdict, collect reconstructible prospective identities and controls, and return before any future-only count-method decision. Round 37 likewise distinguishes literal process existence from execution and requires evidence rather than relabeling (`X/rounds/round-36-answers.md:7-24`; `I/.scratch/kit-overhaul/DECISIONS.md:5697-5699,5733-5745`).
+
+**REVERSIBILITY:** Two-way door. ADR: no for this collection/hold decision. No prior acceptance clause is superseded. An opt-in diagnostic attempt can be stopped without changing the product or shipping gate. If a later round accepts a measurement-method amendment, it must explicitly version and record it in spec §1/§18, ticket 57 and DECISIONS, apply only to runs started afterward, and retain historical REDs (`X/rounds/round-36-answers.md:17`). This answer does not prejudge that later decision.
+
+### Exact scope, exit conditions and failure handling
+
+1. **Register one matching prospective diagnostic attempt per leg.** Before execution, the controller records the exact candidate SHA, tested merge SHA and any workspace changes, intended Windows/Linux runs, K ≥ 20 workload, diagnostic opt-in, commands, Node/Bun versions, runner image, caps, isolated HOME and timeouts. Both runs use one exact candidate tree and the unchanged S5/restart workload and shipping verdict. Capture 150 MB bridge peak accounting, max-one execution evidence, zero cleanup leftovers and the existing 3-per-900-second restart policy; the current workload permits the initial start plus three restarts, not four restarts (`X/rounds/round-36-answers.md:19-24`; `T57/tests/memory/lib/budgets.mjs:108-121`). This is a planned new measurement, not rerun-until-green or replacement of run 42695237859. All later test/install/build execution must satisfy the required `run-capped.sh`, Bun 1.4.2, isolated HOME and explicit timeout rules, with verified Windows hard containment. The present Linux wrapper uses `systemd-run` and is not proof of a usable Windows invocation (`X/run-capped.sh:2-14`). This decision does not revive the candidate workflow comment's wrapper bypass (`T57/.github/workflows/ci.yml:135-138`). If the controller cannot satisfy the execution requirements, it escalates that runner blocker before running; no uncapped or noncompliant substitute is authorized.
+
+2. **Keep collection independent of success, not acceptance independent of failure.** Explicitly enable the existing diagnostic input on the chosen diagnostic tree. Preserve the workload's original return code, count check, full ratchet result and every process row. The full Windows job may remain FAILED solely on the known count collision; that does not prevent artifact assessment. Other errors remain errors too. Upload on failure/cancellation where the runner can do so, and require an artifact manifest before calling the collection complete. Never use blanket `continue-on-error`, `|| true`, a GREEN summary rewrite, a skipped completeness check or deletion of the Windows scenario to manufacture acceptance. A partial/targeted run must be labelled as such and cannot replace the central full job (`T57/tests/memory/run.mjs:194-202`; `T57/tests/memory/job.mjs:365-378`; `T57/.github/workflows/ci.yml:220-244`). No diagnostic outcome permits merging ticket 57.
+
+3. **Evidence completion requires the entire Round 36 Q1 package, not just a favorable classifier.** Preserve sanitized raw fixture start/exit records, independent parent-observed spawn/exit records and process observations, joined by run token, PID plus OS creation identity, parent creation identity, sufficient fixture argv/executable identity and timestamps. Include commit/WS and all original ownership/footprint rows, console ownership after parent death, separately reported execution/support counts, a finite helper rule, and helper-sensitive after-exit/after-stop/orphan accounting. Missing, contradictory, malformed or overflowed records invalidate a favorable classification; they never remove a process. Include actual Windows proof and Linux controls for two real overlapping executions, including between ordinary polls, surviving consoles, kit-console footprint, PID reuse and missing/malformed evidence. Preserve control logs and all invalid markers. Do not upload task stores, environments or credentials. These are the required proofs from `X/rounds/round-36-answers.md:21-24`, not a statement that the candidate instrumentation already satisfies them.
+
+4. **End the collection stage at the evidence return, with no automatic policy transition.** After that registered attempt, return all raw artifacts, both accounting views, all controls and every failure to a fresh Charter round. If the package is complete, that round decides whether any precisely stated, future-only count amendment is justified. If collection is invalid/incomplete, a control fails, a real overlap/helper leak is found, a cap/timeout prevents completion, or another shipping check is RED, return the attempt as blocked with its exact cause. Retain every attempt; do not repeat the unchanged tree merely to obtain a cleaner verdict. A corrective attempt must identify the corrected collection defect and its tree before execution. The diagnostic collection task ends either with the complete package submitted or an explicit blocked report; neither outcome marks 57 accepted (`X/rounds/round-36-answers.md:9-24`).
+
+5. **Exit the acceptance hold only through fresh, ordinary acceptance.** First obtain the identity evidence and a fresh decision. If that decision rejects an amendment, the implementation/measurement conflict remains blocked until a compliant solution is separately decided; a proposed amendment is not inevitable. If it accepts one, record its exact prospective scope/version before any affected acceptance run. Then remove diagnostic-only acceptance machinery/markers, keep the diagnostic mode off for ordinary acceptance, and run fresh centrally owned full suite/memory gates on the final tested candidate. S5/restart must be genuinely GREEN on Windows and Linux under the then-authorized rule, with no 57 expected-RED entry, interim signature, skipped Windows leg or budget change. Actual Windows regressions and all other ticket criteria still apply. The old Windows REDs, including PR78 run 42695237859, remain RED permanently; later diagnostic reinterpretation or success cannot satisfy their historical verdicts (`I/.scratch/kit-overhaul/issues/57-mcp-runtime-restart-budget.md:19-25,40-47`; `X/rounds/round-36-answers.md:17,24-26`).
+
+### Evidence limits and checks executed during this ask
+
+- **Answers absence check, executed immediately before writing:** `if test -e /home/AgentKit/overhaul-tools/rounds/round-38-answers.md || test -L /home/AgentKit/overhaul-tools/rounds/round-38-answers.md; then printf 'CONFLICT: answers path exists\n'; exit 1; else printf 'ABSENT: answers path does not exist\n'; fi`. Output: `ABSENT: answers path does not exist`; successful exit. No existing answers file was read or overwritten.
+- **Revision lookups, executed:** `git -C /home/AgentKit/wt/overhaul rev-parse HEAD` → `4f2139600bac31d90b31e017a704567dac4a69f1`; `git -C /home/AgentKit/wt/t57 rev-parse HEAD` → `888a1278492632c17b600b1d4ec060584e87c4d9`; `git -C /home/AgentKit/wt/overhaul rev-parse --verify refs/remotes/origin/staging/57d` → `1ef4eecc9c4c745591fbe4996ca89626eae71133`. These identify locally available revisions, not a live CI-SHA verification or a clean-worktree assertion.
+- **Candidate comparison, executed:** `git -C /home/AgentKit/wt/t57 diff origin/staging/57d -- .github/workflows/ci.yml tests/memory/run.mjs tests/memory/lib/identity-diagnostic.mjs tests/memory/lib/identity-preload.mjs tests/memory/scenarios/s5-mcp.mjs tests/memory/identity-diagnostic.test.mjs`. Output: none. These cited candidate files match the local staging ref; this is not code approval.
+- **Diagnostic artifact lookup, executed:** `find /home/AgentKit/overhaul-tools/pr78-windows-mem-JaUuuD -type f \( -name 'diagnostic-*' -o -name '*.invalid' \) -printf '%P\n'`. Output: none. The supplied archive therefore does not supply the prospective diagnostic package. Its basic Windows raw spawn log is present and was read (`W/harness-spawns.jsonl:1-8`). The PR78 run/branch association comes from this ask's supplied PR78 evidence and ticket 57's comment (`I/.scratch/kit-overhaul/issues/57-mcp-runtime-restart-budget.md:65-67`). No live run metadata, workflow event/input values or current GitHub status were fetched; absence of diagnostic artifacts is not proof that the opt-in was enabled or why it was absent.
+- **Not run:** tests, builds, installations, CI dispatch/reruns, Windows experiments, live/network calls or full acceptance gates. No identity sensitivity control is claimed passed here. The separate Windows log/full-gate obligation identified in Round 36 is not waived; current satisfaction was not independently verified (`X/rounds/round-36-answers.md:26`). Only this external answers file was written; repositories, installed harnesses and global configuration remain unchanged.
+
+## Task-observer notes
+
+None logged: the controller owns task-observer for this subagent. The startup skill probe returned `Skill not found: task-observer`; no Session Start Protocol, observer-state change or observation-log write ran here.
+
+## Shared understanding
+
+Open branches: a compliant prospective Windows/Linux identity/control package; a fresh count-method decision if the evidence warrants one; and final candidate acceptance on both platforms. The gate remains intact and ticket 57 remains not ready. Next action: the controller registers the opt-in diagnostic attempt and verifies its capped runner setup, without waiting for or manufacturing a GREEN shipping verdict.
+
+## Round 39 (2026-11-10) — Onboarding consent, commands, geometry and input boundary
+
+# Round 39 — Onboarding decisions under Charter v1
+
+**Record the explicit ticket amendments below before ratifying a revised design. All four policy questions are decided; V2 is not jointly ratified and implementation remains gated.**
+
+Decision authority: **Owner Proxy under the existing Charter v1, on behalf of the owner. These are not direct human UX answers.** This is a decision record, not implementation, code review, test acceptance or permission to change a workflow. Canonical document/copy language is English.
+
+Citation roots for document references: **I** = `/home/AgentKit/wt/overhaul`; **X** = `/home/AgentKit/overhaul-tools`. Code citations use absolute paths. **P** = `X/t83-proposed-gpt-grok-v2-20261110.md`, read in full and freshly hashed as `210fbd6ffc2790547b3b3e79f4e4a5989b1bd99acb5dee45cb6aa97d17d67d07`.
+
+The full Owner Proxy brief, including its verbatim Charter, PROMPT/B1–B6, current STATE, applicable DECISIONS entries, tickets 83/44, shared packet, all four historical briefs, original and V2 proposals, both initial responses and both V2 responses were read. Relevant spec/seams, design language, ADR-0001/0005/0011 and the actual consent/command source were also read. The failed three-line agreement artifact was read, not repaired. Historical GLM/Sonnet contributions are evidence inputs only; no new approval by them is inferred (`X/t83-agreed-design.md:1-3`; `X/t83-gpt-grok-ratification-packet-20261110.md:11-28,71-79`).
+
+## Q1 — Esc, empty Enter and EOF: no new decision records, with exact existing per-run effects
+
+**DECISION:** **ACCEPT the lower-persistence recommendation as an explicit amendment U1 to ticket 83, not as an interpretation of its current wording.** Decoded Esc and Enter with zero editable checks supply `undefined` for every editable row. EOF/close before confirmation discards provisional checks and supplies the same absent answers, while keeping input closed. None creates or replaces a harness-choice record. A nonempty Enter confirmation supplies `true` for checked editable rows and `false` for unchecked editable rows. Locked rows are outside that answer map.
+
+Ticket 83 currently says “Esc/empty confirm selects none” and separately preserves saved choices; it does not settle this persistence dispute. Replace/extend its What-to-build and acceptance wording with this decision, including the reask matrix and disclosure. Do not implement against unchanged acceptance text. This expressly replaces the original proposal's recorded-none recommendation, not an earlier binding Charter decision (`I/.scratch/kit-overhaul/issues/83-setup-command-overview-and-multi-select-harness.md:17,23,38-46`; `X/t83-proposed-design-20261110.md:103-125`; P:169-186,459-465).
+
+### Required mapping
+
+| Input / row class | Action in this run | Harness-choice persistence / MCP |
+|---|---|---|
+| Nonempty Enter, readable editable row checked | Existing interactive `true`: configure through normal apply/savepoint handling | Existing configured-record rules; MCP only if this editable ID received the eligible disclosure. A failed apply is not successful configuration. |
+| Nonempty Enter, readable editable row unchecked | Existing interactive `false`: skip; do not refresh its provider integration, even if owned | Existing skipped-record rules. This is a real decline, unlike Esc/empty Enter. |
+| Nonempty Enter, unreadable editable row | Checked: configure for this run; unchecked: skip without refresh | `record:false`; unreadable file never overwritten. Existing MCP-offer/veto rules still apply to an actual yes. |
+| Esc / empty Enter / EOF, `--reask`, readable **unowned** row, including old `configured` | **Skip this run.** Do not reapply the saved configured direction | `record:false`; saved file, source, timestamp and MCP bit unchanged. Old skipped and missing decisions likewise skip. |
+| Esc / empty Enter / EOF, `--reask`, readable **owned** row, whether old `configured`, old `skipped` or missing | **Existing owned-integration refresh path**, subject to normal adapter success/failure handling | `record:false`, `consent:false`; no new MCP grant. Existing decision bytes stay unchanged. A saved no does not prevent this reasking/no-answer refresh. |
+| Esc / empty Enter / EOF, unreadable row, owned or unowned | **Skip, no refresh** | `record:false`; file unchanged. Unreadability is checked before ownership shortcuts. |
+| Esc / empty Enter / EOF, ordinary editable row with no saved decision | Readable owned: existing refresh path. Readable unowned: skip. Unreadable: skip, no refresh | No new harness-choice record or MCP grant. Ownership alone never prechecks a checkbox. |
+| Any selector outcome, ordinary readable **locked** row | Saved configured: existing stored configure path. Saved skipped: existing stored skip path | No new record or changed provenance/MCP bit. Do not pass a batch answer or reask bit for locked context. |
+
+These are source facts about the existing policy, not a proposed rewrite of `decideHarness`: `/home/AgentKit/wt/t43/cli/harness-consent.mjs:340-369`, independently consistent with `/home/AgentKit/wt/overhaul/cli/harness-consent.mjs:326-355`. In particular, `reasking` depends on an answer **function**, not whether that function returns a boolean. Keep `reask:true` and the function returning `undefined` for editable reask results; replacing it with `ask:null` would silently reinstate saved short-circuits. Ordinary locked rows retain those short-circuits. Existing transaction/file protection remains `/home/AgentKit/wt/t43/cli/harness-consent.mjs:276-304`; apply/failure handling remains `/home/AgentKit/wt/t43/cli/commands/setup.mjs:195-241`.
+
+Ctrl-C/SIGINT before batch confirmation remains `ABORTED`, exit 130, zero provisional batch decision/apply writes, no later interactive rotator question and no overview. EOF is not a recorded decline or abort; no later interactive question may consume closed input. Other exceptions clean up and propagate the existing error/signal contract. This changes neither explicit harness flag/env/`--select` paths nor the rotator's already-explicit flag/env precedence, which still wins even after an earlier abort (`/home/AgentKit/wt/t43/cli/harness-consent.mjs:43-47,146-172,220-235`; `/home/AgentKit/wt/overhaul/cli/account-setup.mjs:82-93,114-142`; P:175-200).
+
+### Required English consequence copy, before input arms
+
+The following replaces P's vague “unanswered and unsaved” presentation. Render conditional lines only for their displayed row classes, wrapping them and counting them for fit. `LABEL` is replaced by the actual adapter label, not displayed as a placeholder.
+
+```text
+Configure ZCode as a provider in these assistants?
+Enter with editable checks answers yes for checked rows and no for unchecked rows.
+Esc or Enter with no editable checks saves no harness decision.
+A nonempty confirmation saves readable editable choices; unreadable choices apply only to this run.
+```
+
+For ordinary locked context:
+
+```text
+Saved choices are locked. Change them with: zcode-kit setup --reask
+```
+
+For `--reask`:
+
+```text
+--reask: saved choices are editable. Esc, an empty confirmation or input closing keeps their saved decision files unchanged.
+```
+
+Per readable **unowned editable** row:
+
+```text
+Esc, an empty confirmation or input closing skips LABEL for this run, even if its saved choice is yes. No harness decision is saved.
+```
+
+Per readable **owned editable** row:
+
+```text
+Esc, an empty confirmation or input closing refreshes the existing kit integration for LABEL, even if its saved choice is no. No harness decision is saved.
+In a nonempty confirmation, an unchecked LABEL is skipped without refreshing its integration and its readable choice is saved as no.
+```
+
+Per **unreadable editable** row:
+
+```text
+Esc, an empty confirmation or input closing skips LABEL without refreshing it. Its unreadable decision file is never overwritten.
+```
+
+Retain the eligible MCP notice before arming and the locked-row recovery hint. Do not use “none configures nothing”, “all files unchanged”, “saved answers still apply under --reask”, or “Esc records no”. No-answer is a valid input classification, but it must not replace disclosure of the resulting skip/refresh actions. Empty Enter deliberately does **not** record an all-no batch; that asymmetry is part of U1, not a hidden default.
+
+**Rationale:** A stray Esc or an empty confirmation should not create durable locked declines. C2 protects the existing stored files and per-run decision policy; the smaller persistent effect wins under C9. Keeping the real reasking path avoids inventing a second policy in the selector. The owned-refresh consequence is material and must be stated, including refresh of a previously skipped owned row under `--reask`. Neither the Charter nor the inspected prior decisions requires the original recorded-none preference. The original GPT preference and historical Sonnet's different empty-Enter preference remain preserved dissent, not retroactive support for this choice (`X/t83-ratify-initial-gpt-20261110.md:130-155`; `X/t83-design-sonnet.md:251-268`; `I/.scratch/kit-overhaul/DECISIONS.md:131-158`; P:184-186).
+
+**Charter:** C2, C3, C6, C9; B2/B3. Keep Round 1 Q8/Q9 and ticket 83's locked-row ruling unchanged (`I/.scratch/kit-overhaul/OWNER-PROXY-BRIEF.md:27-42,53-66`; `I/.scratch/kit-overhaul/DECISIONS.md:131-158`).
+
+**REVERSIBILITY:** Two-way before delivery; hard to reverse after people rely on the consent/write meaning, even without a schema migration. **ADR: yes.** Record a narrow onboarding/consent amendment to ADR-0001 before adoption, with the exact matrix, copy obligations and attribution: “Decided by Owner Proxy under Charter v1 on behalf of the owner.” Do not amend ADR-0005's stream contract or the rotator policy.
+
+## Q2 — Useful, paste-safe commands: retain V2's five base rows and one qualified launch row
+
+**DECISION:** **ACCEPT U2 with the actual V2 inventory: `doctor`, `proxy start`, `proxy status`, `auth status`, `--help`, plus at most one concrete qualified `run ID`.** Choose `auth status` over the suggested `proxy logs` base row. Do not claim V2 already contains `proxy logs`: it does not. No placeholder action rows, unconditional launch row or new login/launcher strategy.
+
+This resolves the ask's permitted auth-status alternative rather than mechanically preserving eight rows or changing V2 to an unexamined inventory. The exact base copy/order is:
+
+```text
+Next steps
+  zcode-kit doctor          Check the installation
+  zcode-kit proxy start     Start the proxy for manual clients
+  zcode-kit proxy status    Check proxy health and connection details
+  zcode-kit auth status     Check sign-in status
+  zcode-kit --help          Browse all commands
+```
+
+Insert at most one `zcode-kit run ID` after `doctor`, described as `Launch LABEL wired to ZCode`. Choose the first qualifying ID in existing adapter order, restricted to **claude-code, codex, opencode, aider**. It must be successfully present in this run's `outcome.configured`, not manual, not a no-consent refresh, backed by saved yes or deliberate this-run provider consent. **Any harness failure suppresses the launch row**, including when another harness succeeded. Do not infer success from detection, abandoned checks, a filename or an old saved yes alone (P:251-290; `/home/AgentKit/wt/overhaul/cli/commands/common.mjs:36`; `/home/AgentKit/wt/t43/cli/commands/setup.mjs:195-241`).
+
+The four launchers and their first-use constraints are real: Claude requires generated settings, Codex requires generated `codex-home/config.toml`, Aider requires its generated env artifact; OpenCode has a direct launcher. Those adapter apply paths create/update the corresponding configuration. Use the already-observed successful outcome, not new config/credential reads, executable scans, launcher calls or proxy probes. The row does **not** certify an installed external executable, successful sign-in, available quota or a working model reply (`/home/AgentKit/wt/overhaul/cli/launch.mjs:12-33`; `/home/AgentKit/wt/overhaul/cli/adapters/claude-code.mjs:16-44`; `/home/AgentKit/wt/overhaul/cli/adapters/codex.mjs:16-45`; `/home/AgentKit/wt/overhaul/cli/adapters/aider.mjs:15-27`; `/home/AgentKit/wt/overhaul/cli/adapters/opencode.mjs:61-96`; `/home/AgentKit/wt/overhaul/README.md:85,105-109`).
+
+Zero detection, no selected/standing consent, explicit none, only skipped/undecided, only non-launchable/manual/unconsented-refresh outcomes, and exit 20 get **five base rows**. A qualifying successful outcome without harness failures gets **six**. A smoke warning or withheld/unavailable connection does not become proof of live access and does not remove applicable recovery hints. Abort 130 or an early fatal incomplete report gets no generic overview (P:282-296).
+
+Amend ticket 83:19 and its inventory/count expectations explicitly: five base rows plus zero/one qualified concrete launch row; grep count is the actual 5/6 rows, never hardcoded eight. `proxy logs`, `integrate` and all other existing commands remain in full help. Preserve existing login/manual-action and failure hints. Keep one final normal stdout overview after connection information/explanation, one canonical plain log copy, JSON renderer suppression without inventing a setup JSON document, and setup's overview under `--installer`. Ticket 83 verifies its setup invocation only; ticket 44 later removes duplicate general footer rows and verifies whole-installer uniqueness, retaining login/completion/exit/PowerShell behavior. The `44 <- 83` edge already exists; no installer edits or new reverse edge belong to 83 (`I/.scratch/kit-overhaul/issues/83-setup-command-overview-and-multi-select-harness.md:19,26-29,41-46`; `I/.scratch/kit-overhaul/issues/44-ux-batch-b2-installers-and-powershell-gate.md:3,17-19,36-38`; P:292-329).
+
+**Rationale:** The shipped command forms are verified by source, not assumed. V2 already chose `auth status`; it returns focused sign-in diagnostics as JSON today, including an unreachable result, and must not be advertised as a future human format. Doctor also checks authentication when its own proxy is reachable, so its omission is not claimed; local proxy health/configuration success alone still does not establish sign-in or a model reply. A direct sign-in inspection is more useful in this first-use block than a general recent-log row; logs remain available through help and specific failure guidance. This is an editorial choice under C3/C9, not a measured usage-frequency claim. `proxy start` is accurately labeled for manual clients because harness launch performs its own preflight. All base commands are syntactically complete, but no claim is made that every one returns success on an incomplete installation (`/home/AgentKit/wt/overhaul/cli/commands/help.mjs:10-16`; `/home/AgentKit/wt/overhaul/cli/commands/auth.mjs:21-35`; `/home/AgentKit/wt/overhaul/lib/proxy-doctor.mjs:89-109,158-170`; `/home/AgentKit/wt/overhaul/cli/commands/logs.mjs:1-4,24-29`; `/home/AgentKit/wt/overhaul/README.md:69-85,105-109`). No shell parse or command execution is claimed.
+
+**Charter:** C2, C3, C6, C8, C9. Round 1 Q11's later auth presentation decision remains unchanged; this inventory neither implements it nor depends on it (`I/.scratch/kit-overhaul/DECISIONS.md:177-185`). ADR-0001's copyability/no-box rules and ADR-0005's stdout/stderr split remain intact.
+
+**REVERSIBILITY:** Two-way door; this is a curated presentation inventory, not command removal, new stored state or changed launcher behavior. **ADR: no additional hard-to-reverse decision.** Record U2 in ticket/spec/design and snapshots; keep full help intact as an inventory, with affected onboarding documentation updated under C8.
+
+## Q3 — Additive measured geometry at the existing capability seam only
+
+**DECISION:** **ACCEPT U3. Add `lib/term/caps.mjs` explicitly to ticket 83's scope for optional measured physical columns/rows and the selector-specific capability gate.** Keep existing logical width, global color precedence, old callers and legacy fallback behavior unchanged. Geometry is from the actual prompt stream, post-43 stderr, as positive finite integers; `COLUMNS`, `LINES`, default 80, the minimum logical 40 or an assumed 24 rows are not physical-fit evidence (`/home/AgentKit/wt/overhaul/lib/term/caps.mjs:1-17,27-45,62-98`; P:212-218,333-349).
+
+1. Before raw mode/drawing, require existing stdin/stderr interactivity, permitted redraw, raw-mode support, editable rows, and known physical fit. Unknown/invalid geometry, insufficient fit or absent raw support takes the **existing line path**, not a degraded raw selector. Forced color cannot create interactivity or animation.
+2. Use at most measured columns minus one and the shared logical design width. Count every physical wrapped question/consequence/MCP/owned/unreadable/reask line, row metadata, blank, count and maximum locked-row feedback; require one spare row. Do not drop material state or truncate labels/commands to force fit.
+3. A fitting resize reflows and retains provisional focus/checks within the owned region; revalidate geometry before accepting confirmation. Unsafe shrink or newly unknown geometry disarms, discards provisional edits, restores prior raw mode and enters a fresh legacy line phase without replay. If old-region erasure is uncertain, append rather than erase above ownership. Use P's exact stderr notice: `Terminal too small for the selector; continuing with individual questions.`
+4. Preserve the ticket's no-selector policy for nonempty `NO_COLOR`, effective color-off and dumb terminals; pipes/CI ask nothing. A selector-specific opt-out may be exposed centrally even if an explicit color flag would otherwise win globally. Do not change the old line renderer's override precedence or bytes. No second env/geometry reader in setup, terminal query/mode, viewport, dependency or new environment flag.
+5. Require portable forced-capability/geometry and raw-input fixtures, all eight C3 variants, asymmetric streams, real sub-40 widths, unknown/invalid dimensions, fully wrapped maximum notices and resize/cleanup cases. Separately require native Windows conhost/Windows Terminal input/rendering proof and ticket 44's actual PowerShell 5.1 stderr gate. Linux fixtures/PTYs are not native Windows evidence. These are future acceptance gates, not checks passed here (P:228-247,359-375; `I/.scratch/kit-overhaul/seams.md:41-59,74-83`).
+
+**Rationale:** Existing caps deliberately clamps logical width and has no measured row count, so it cannot certify physical fit. An optional additive value at the current seam avoids both a global renderer regression and duplicated policy. Falling back on unknown dimensions is smaller and safer than claiming an unmeasured console size. The centralized/lazy topology, shared tokens/width and old `[y/n]` empty-retry fallback remain unchanged (`I/.scratch/kit-overhaul/spec.md:420-446`; `I/docs/adr/0011-shared-output-code-two-renderers-one-token-set.md:7-15`; `/home/AgentKit/wt/t43/cli/harness-consent.mjs:146-156`; P:239-241). No present Windows correctness or API implementation is inferred.
+
+**Charter:** C1, C2, C3, C4, C7, C9; B3. Preserve Round 2 Q6–Q8's topology, byte snapshots and distinct native Windows gate (`I/.scratch/kit-overhaul/DECISIONS.md:452-494`).
+
+**REVERSIBILITY:** Two-way door; the optional selector-only seam can be removed without migrating state or changing legacy layout policy. **ADR: no additional architecture amendment is required** while ADR-0011's topology and ADR-0005's streams remain unchanged. Record U3 in ticket scope/spec/design; include selector geometry/fallback guarantees in the narrow ADR-0001 onboarding amendment from Q1/Q4.
+
+## Q4 — Bounded input grammar, honest provenance limits, and corrected dissent
+
+**DECISION:** **ACCEPT the bounded grammar/ownership contract in V2 §§1.5–1.8, with Q1's exact consequence copy and the clarification below. REJECT perfect unmarked-paste protection and any chunk-count substitute.** This is a design requirement, not proof that a particular implementation or Node API already meets it. No new terminal mode, dependency, timer-based provenance heuristic or consent-policy rewrite is authorized (P:125-165).
+
+### Required implementable boundary
+
+1. **One owner and a disclosure barrier.** `createPrompter` owns mutually exclusive selector/line phases. Install owned cleanup before disclosure, but accept no action until the complete question, Q1's relevant consequences and editable MCP notices have finished writing/draining. Drop pre-arm input rather than replaying it. Failed disclosure cannot arm. Within an armed epoch, ordered valid keys, including fast Space+Enter or two `a`s in one delivery, act once. The untouched legacy path keeps its typed-ahead semantics (`/home/AgentKit/wt/t43/cli/harness-consent.mjs:39-77,99-137`; P:125-131).
+2. **Whole marked paste and text contamination.** Recognize received bracketed-paste start/end markers even when split; do not enable the terminal's paste mode. On a start marker reset provisional state to initial seeds and discard the whole payload, including valid-looking keys and Ctrl-C bytes. Real process SIGINT still aborts. Hold only constant delimiter state; an unterminated paste stays discard-only until end/EOF/abort. A printable token outside the key grammar resets provisional state and quarantines input until a logical newline or decoded bare Esc; that delimiter resets, never confirms/selects none. Drop already-buffered suffix, redisclose and arm a fresh epoch. Never extract useful consent characters selectively from contaminated text (P:133-147).
+3. **Finite parser state.** Retain V2's local bound of at most 32 undecided escape/control-prefix bytes, bounded UTF-8/delimiter state, one CR bit and at most ten row states, not arbitrary paste/line buffers or an unbounded action queue. Malformed/overlong sequences contaminate; never replay their suffix as consent. Supported CSI/SS3 arrows use complete key decoding within the supported escape window; only decoded bare Esc is none. Unsupported/meta/modified sequences are consumed whole. No additional custom 200-ms timer or asserted Windows 500-ms guarantee. An implementation unable to honor these bounds must return the concrete feasibility blocker, not silently weaken the contract. This local input bound does not amend an existing resource budget or lifecycle decision (P:137-145; `X/t83-design-grok.md:171-199` is historical Linux evidence only).
+4. **CRLF handoff and cleanup.** Normalize CR, LF and adjacent CRLF once. Keep ownership through the accepted terminator and already-buffered old-epoch keys; discard selector suffix/partial parser state, restore the previous raw state and only then disclose/arm the next line question. During adapter work input remains unarmed. Carry only the lexical pending-CR bit: consume the immediately next LF as its tail, even if delayed; any intervening byte clears the bit. A fresh LF-only physical key identical to that tail is indistinguishable and may be consumed under this rule; do not claim physical-key provenance or ignore every first rotator Enter. No indefinite wait. Idempotently clean up only owned listeners/decoder timers on confirmation, Esc, EOF, Ctrl-C/SIGINT, exception, output failure and handled termination. Preserve existing signal/error semantics; SIGKILL/machine death cannot promise restoration (P:149-165).
+5. **Acceptance evidence stays specific.** Require equivalent armed-epoch key partitions, whole/split markers, large/unterminated/malformed paste, valid prefix then text reset, disclosure/write failure, complete/split arrows, whole/split CRLF, delayed-tail limitation, queued suffix isolation, later fresh line answers, prior raw true/false and cleanup. Assert actions, decision files/MCP and rotator isolation, not pictures alone. Marked-paste/text handling must not be labeled proof against unmarked valid-only paste. None of these tests ran here (P:359-367).
+
+**Unavoidable limit:** Unmarked valid key bytes are indistinguishable from the same typed bytes. A valid prefix can confirm before a later invalid suffix arrives; no future reset can undo that accepted confirmation. Chunk count and timing are not provenance. Q4 accepts this disclosed limit, not a guarantee against every arbitrary unmarked paste. Requiring stronger provenance later needs a separate input-policy/scope decision; it cannot be slipped into this ticket or established by favorable fixtures. The existing y/n path is not advertised as perfect paste protection either (P:135,147,157; `X/t83-ratify-initial-gpt-20261110.md:43-57`).
+
+### Correct the Grok response's factual B1 wording before any new ratification
+
+Here **B1 means the review heading**, not hard boundary PROMPT B1. Preserve the original `approved:false` record. Publish a separate correction/addendum or a new versioned response; do not overwrite or turn disagreement into approval.
+
+The required factual correction is:
+
+> V2 correctly maps no answer to `undefined` while retaining the reasking function. “No answer” describes input; its resulting action can be skip or owned refresh. V2 already says that saved answers do not apply this run under reask at line 105 and explicitly enumerates the unowned-skip/owned-refresh distinction at line 184. Its ordinary owned-refresh sentence is about owned rows, not an unowned saved-yes row. The remaining objection is whether the displayed consequence copy communicates the per-row outcomes clearly enough before arming, not that an undefined/no-answer input cannot result in skip. Round 39 Q1 requires explicit replacement copy for that clarity.
+
+This is grounded in P:93,105-107,173-186 and `/home/AgentKit/wt/t43/cli/harness-consent.mjs:342-369`. The Grok record's contrary semantic opposition and ordinary-owned/unowned attribution are at `X/t83-ratify-v2-grok-20261110.md:15-32`. Its request for explicit readable-unowned/readable-owned/unreadable disclosure is accepted; its factual description must be corrected. Do not demand a changed approval verdict as the price of correction. GPT's V2 approval is real but covers the old exact bytes only (`X/t83-ratify-v2-gpt-20261110.md:3-14`). Neither response approves a later revised file.
+
+**Rationale:** Single ownership and disclosure-first acceptance preserve consent scope and keep selector input from answering the separate rotator question. Constant-sized parsing and fail-closed contamination are enforceable requirements; perfect origin detection from identical bytes is not. The distinction prevents both unsafe selective consent and false security claims. Correcting a factual rationale while preserving a reviewer’s verdict is necessary evidence hygiene, not consensus manufacture. Existing MCP checks remain editable-ID-specific, saved MCP bits unchanged and `--no-mcp` an absolute registration veto (P:202-208; `/home/AgentKit/wt/t43/cli/commands/setup.mjs:157-185,243-246`; `X/t83-ratify-v2-grok-20261110.md:82-84`).
+
+**Charter:** C1, C2, C3, C4, C6, C7, C8, C9; B1–B6 unchanged. Reports remain stdout and questions stderr. No anti-abuse challenge success, identity imitation, rotation strategy, quota/rate behavior, account-store access or live model/claim work follows from this decision (`I/.scratch/kit-overhaul/PROMPT.md:215-233`).
+
+**REVERSIBILITY:** Two-way before delivery; the consent/disclosure/input handoff guarantee is hard to reverse once relied upon. **ADR: yes**, a narrow ADR-0001 onboarding amendment recording this boundary and its explicit limitations, alongside Q1. **No extra runtime/file scope beyond Q3 and the already listed prompter/setup/output/tests is approved.** No separate ADR-0005 stream change or ADR-0011 topology change is needed. Any later proposal for a terminal-mode change, dependency, stronger provenance policy or modified stored/rotator policy requires a fresh decision instead.
+
+## Evidence checks and limits of this round
+
+Only read-only file/location/hash/revision inspections were performed. The exact relevant checks actually executed are below; historical test/CI results in the inputs were read, not rerun.
+
+Initial target absence check, before substantive work:
+
+```sh
+if [ -e /home/AgentKit/overhaul-tools/rounds/round-39-onboarding-answers-20261110.md ] || [ -L /home/AgentKit/overhaul-tools/rounds/round-39-onboarding-answers-20261110.md ]; then printf '%s\n' 'EXISTS: stop; output file must not be overwritten'; exit 10; fi; printf '%s\n' 'ABSENT: /home/AgentKit/overhaul-tools/rounds/round-39-onboarding-answers-20261110.md'
+```
+
+Output:
+
+```text
+ABSENT: /home/AgentKit/overhaul-tools/rounds/round-39-onboarding-answers-20261110.md
+```
+
+Immediately before file creation:
+
+```sh
+if test -e /home/AgentKit/overhaul-tools/rounds/round-39-onboarding-answers-20261110.md || test -L /home/AgentKit/overhaul-tools/rounds/round-39-onboarding-answers-20261110.md; then printf 'ANSWERS_EXISTS_STOP\n'; exit 10; else printf 'ANSWERS_ABSENT\n'; fi; sha256sum /home/AgentKit/overhaul-tools/t83-proposed-gpt-grok-v2-20261110.md
+```
+
+Output:
+
+```text
+ANSWERS_ABSENT
+210fbd6ffc2790547b3b3e79f4e4a5989b1bd99acb5dee45cb6aa97d17d67d07  /home/AgentKit/overhaul-tools/t83-proposed-gpt-grok-v2-20261110.md
+```
+
+The proposal digest was also checked earlier with the same `sha256sum` command and matched. Source baselines were freshly identified:
+
+```sh
+git -C /home/AgentKit/wt/overhaul log -1 --format='%H %s'
+git -C /home/AgentKit/wt/t43 log -1 --format='%H %s'
+git -C /home/AgentKit/wt/overhaul merge-base --is-ancestor ee15ea2c7a9bb65932a60310df82395be3420fc2 HEAD; printf 'RECONCILED43_IN_INTEGRATION_RC=%s\n' "$?"
+```
+
+Output:
+
+```text
+829202b32cde3a2285c2c3fc39a5fc0394f1b50b docs(overhaul): resolve ticket 40 after central merged-tree gates
+c27965a6fffe744996c59b9d9b7c2def00470f85 docs(overhaul): preserve ticket 43 reconciliation test logs
+RECONCILED43_IN_INTEGRATION_RC=1
+```
+
+That ancestry result is not a product test failure; it establishes only that the named reconciliation commit is not an ancestor of the inspected integration HEAD. Ticket 40's resolved state and ticket 42's recorded resolution come from `I/.scratch/kit-overhaul/STATE.md:5-9,68`; current candidate-43 acceptance gaps are explicitly stated in `/home/AgentKit/wt/t43/.scratch/kit-overhaul/issues/43-ux-batch-b1-compact-setup-and-integrate-dry-run.md:138-167`. Do not rerun unchanged 40 gates to repair obsolete proposal prose. This record grants no acceptance of 43.
+
+**NOT RUN:** any test, build, install, soak, snapshot/mutation/log-line-set check, Node key probe, native Windows/macOS experiment, CI query/dispatch or live endpoint/model/claim call. In particular, `node --test tests/setup-regressions.test.mjs tests/cli-kit.test.mjs`, `npm run test:all`, the portable selector checks and PowerShell 5.1/conhost/Windows Terminal gates remain not run in this round. No advisor-model verification call was made; a skill load is not such a check. Future execution retains the required capped wrapper, pinned Bun 1.4.2, hard cap/timeout, isolated HOME/mock fixtures and owned PID/process-group tracking. No existing budget, quota decision, lifecycle decision, routing/concurrency setting or workflow lifecycle was changed.
+
+Only this absent-checked external answers file is written. Repositories, preserved proposals/reviews, tickets, installed kit/proxies, real harness configs and observation logs remain untouched. Source was read for decision facts, not reviewed for code approval; no delegation occurred.
+
+## Shared understanding
+
+**CONFIRMED for the four policy questions.** `decided:true` means Q1–Q4 have explicit actionable choices and no missing policy evidence; it does not mean ratified, implemented, tested, Windows-proven or ready to merge. There are no unanswered decision branches in this round.
+
+Remaining execution gates: record U1/U2/U3 and the narrow ADR-0001 amendment; preserve/correct Grok's factual B1 rationale without fabricating approval; produce one complete revised version with these decisions and actual same-hash GPT/Grok responses within the existing bounded ratification process; pin accepted merged 43 before implementation. V2 currently has GPT approval and Grok rejection, not consensus (`X/t83-ratify-v2-gpt-20261110.md:3-14`; `X/t83-ratify-v2-grok-20261110.md:3-9`; shared packet:24-28,77-79). Future implementation/platform/central gates remain intact. No new GLM, Fable, Sonnet, Anthropic or Gemini dispatch, workflow amendment/resume/restart, push or merge permission is created.
+
+Next controller action: record Round 39's U1–U3 amendments and required consequence copy in ticket 83 before constructing the next versioned ratification input.
+
+## Task-observer notes
+
+No observation records or skill-load checkpoints were written by this subagent; the controller owns task-observer. Its protocol/log were not repeated or inspected here.
+
+<!-- End of verbatim Round39 source; transcription does not backdate ratification. -->

@@ -14,7 +14,8 @@
 //   node capture.mjs --out <dir> [--kit <kit checkout>] [--only <regex>] [--variants a,b]
 // --kit defaults to the checkout this file lives in. --out is required, so a
 // run can never overwrite the committed BEFORE set by accident.
-// Environment: UX_BUN (the Bun binary; default: `bun` on PATH) and
+// Environment: UX_BUN (the Bun binary; default: `bun` on PATH; on POSIX the
+// fixtures run it through a fixed-length symlink, host.mjs pinBun) and
 // UX_CAPTURE_PORT (pins the fixture proxy port for the whole run; default: a
 // fresh free port per scenario, ticket 75; written back as 18458 in every
 // capture, see normalise()).
@@ -44,7 +45,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { cloneArgs, describeFailure, fakeProxySource as fakeProxySourceFor, fixtureBaseEnv, importBase, swapPath, tarBinary, windowsGitDir } from "./host.mjs";
+import { cloneArgs, describeFailure, fakeProxySource as fakeProxySourceFor, fixtureBaseEnv, importBase, pinBun, swapPath, tarBinary, windowsGitDir } from "./host.mjs";
 import { freePort } from "../../free-port.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -64,7 +65,11 @@ function findBun() {
   }
   throw new Error("capture: no bun on PATH; set UX_BUN");
 }
-const BUN = findBun();
+const BUN_HOST = findBun();
+// POSIX: the fixtures run Bun through a fixed-length symlink, so the host's
+// Bun directory never changes where a TTY row wraps (host.mjs pinBun).
+const BUN = pinBun(BUN_HOST, { windows: IS_WIN, tmp: tmpdir(), mkdtemp: mkdtempSync, symlink: symlinkSync });
+if (BUN !== BUN_HOST) process.on("exit", () => rmSync(dirname(BUN), { recursive: true, force: true }));
 const BASE_BUN_VERSION = "1.4.2";
 const BUN_VERSION = spawnSync(BUN, ["--version"], { encoding: "utf8" }).stdout?.trim() || BASE_BUN_VERSION;
 // The baseline was captured on 18458. A run on another port writes 18458 back
@@ -139,11 +144,15 @@ function writeKitTree(root, { srcLinks = true, version } = {}) {
   }
   mkdirSync(join(root, "zcode-proxy-src", "src"), { recursive: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), fakeProxySource());
+  // The release payload ships the shared token set and width core (pack
+  // allowlist zcode-proxy-src/src/, verify-payload requires them); the CLI
+  // output module re-exports them (ticket 43). Always present, never faked.
+  link(join(KIT, "zcode-proxy-src", "src", "tui"), join(root, "zcode-proxy-src", "src", "tui"));
   link(join(KIT, "zcode-proxy-src", "node_modules"), join(root, "zcode-proxy-src", "node_modules"));
   if (srcLinks) {
     // The doctor's credential probe imports ./src/auth/store.ts relative to the proxy dir.
     for (const entry of readdirSync(join(KIT, "zcode-proxy-src", "src"))) {
-      if (entry === "index.ts") continue;
+      if (entry === "index.ts" || entry === "tui") continue;
       link(join(KIT, "zcode-proxy-src", "src", entry), join(root, "zcode-proxy-src", "src", entry));
     }
   }
@@ -308,7 +317,9 @@ function normalise(text, f) {
   if (f) {
     s = swap(swap(swap(swap(swap(s, f.root, "<KIT>"), f.home, "<HOME>"), f.bin, "<BIN>"), f.tmp, "<TMP>"), f.base, "<FIXTURE>");
   }
-  s = swap(swap(swap(swap(s, join(KIT, "zcode-proxy-src"), "<PROXY_SRC>"), KIT, "<SRC>"), BUN, "<BUN>"), process.execPath, "<NODE>");
+  s = swap(swap(s, join(KIT, "zcode-proxy-src"), "<PROXY_SRC>"), KIT, "<SRC>");
+  // The pinned Bun, and the host's spelling too (a Bun process naming its own executable resolves the pin).
+  s = swap(swap(swap(s, BUN, "<BUN>"), BUN_HOST, "<BUN>"), process.execPath, "<NODE>");
   s = s.replace(/\/tmp\/ux-kit-[A-Za-z0-9]+/g, "<FIXTURE>").replace(/\/tmp\/zcode-kit-update-[A-Za-z0-9]+/g, "<TMP>/zcode-kit-update-XXXX");
   s = s.replace(/\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}-\d{3}-[0-9a-f]{6}/g, "<TX>");
   s = s.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g, "<TS>");

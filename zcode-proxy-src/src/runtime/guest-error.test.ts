@@ -17,6 +17,37 @@ function withStack(message: string, stack: string): Error {
   return err;
 }
 
+describe("guest metadata counterexamples (issue 32)", () => {
+  const source = "https://g.alicdn.com/captcha/feilin071.js:1:1";
+  for (const [id, name, callback, url, marker] of [
+    ["function", "TypeError", "SyntheticFunctionCredential", source, "SyntheticFunctionCredential"],
+    ["class identifier", "SyntheticClassCredential", "callback", source, "SyntheticClassCredential"],
+    ["fragment", "TypeError", "callback", "https://g.alicdn.com/captcha/feilin071.js#SyntheticFragmentCredential:1:1", "SyntheticFragmentCredential"],
+    ["filename", "TypeError", "callback", "https://g.alicdn.com/captcha/SyntheticFilenameCredential.js:1:1", "SyntheticFilenameCredential"],
+    ["path", "TypeError", "callback", "https://g.alicdn.com/SyntheticPathCredential/feilin071.js:1:1", "SyntheticPathCredential"],
+    ["query", "TypeError", "callback", "https://g.alicdn.com/captcha/feilin071.js?token=SyntheticQueryCredential:1:1", "SyntheticQueryCredential"],
+    ["controls", "TypeError", "SyntheticControlCredential\u001b[31m", source, "SyntheticControlCredential"],
+    ["long selected frame", "TypeError", "SyntheticCallback".repeat(200), source, "SyntheticCallback"],
+  ]) {
+    test(`never echoes guest ${id}`, () => {
+      const err = withStack("synthetic diagnostic message", `Error: synthetic diagnostic message\n    at ${callback} (${url})`);
+      err.name = name!;
+      const rendered = describeGuestError(err);
+      expect(rendered).not.toContain(marker!);
+      expect(rendered).not.toMatch(/[\r\n\u001b]/);
+      expect(rendered.length).toBeLessThan(300);
+      expect(rendered).toMatch(/len=28 sha256=[0-9a-f]{64}/);
+    });
+  }
+  test("the message line is never rendered as a source frame", () => {
+    const message = "prefix https://g.alicdn.com/x.js suffix SyntheticHostFrameCredential";
+    const err = withStack(message, `Error: ${message}\n    at host (/app/host.ts:1:1)`);
+    expect(isGuestOriginError(err)).toBe(false);
+    expect(describeGuestError(err)).not.toContain("SyntheticHostFrameCredential");
+    expect(describeGuestError(err)).not.toContain("resource-");
+  });
+});
+
 describe("guest-origin classification", () => {
   test("the captcha SDK crash that killed the TUI is attributed to the guest", () => {
     expect(isGuestOriginError(fieldCrash())).toBe(true);

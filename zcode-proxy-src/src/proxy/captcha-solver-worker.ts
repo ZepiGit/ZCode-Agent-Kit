@@ -20,7 +20,7 @@
  */
 import fs from "node:fs";
 import { describeGuestError, hasGuestSourceFrame } from "../runtime/guest-error.js";
-import { classifyCaptchaError } from "./captcha-token.js";
+import { classifyCaptchaError, describeCaptchaFailure } from "./captcha-token.js";
 
 interface SolverBackend {
   solveTraceless(opts: { scene: string; region: string; prefix: string }): Promise<string>;
@@ -79,7 +79,10 @@ async function solve(id: number, scene: string, region: string, prefix: string):
       type: "result", id, ok: false, scripts: report(),
       error: {
         category: classifyCaptchaError(err),
-        message: err instanceof Error && typeof err.message === "string" ? err.message.slice(0, 4096) : "captcha solver failure",
+        // Keep exactly the old cleanup recycle predicate, but only its fixed
+        // host category, never the matching raw text or diagnostic suffix.
+        message: err instanceof Error && /cleanup failed/.test(err.message.slice(0, 4096))
+          ? "CAPTCHA DOM cleanup failed; runtime unavailable" : describeCaptchaFailure(err),
       },
       heapUsedMB: Math.round(process.memoryUsage().heapUsed / 1048576),
     });

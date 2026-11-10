@@ -1,2 +1,5 @@
 == integrate codex: DRY RUN (no changes written) ==
   detected: yes
+  would write  <KIT>/generated/codex-home/config.toml
+  would write  <KIT>/generated/harness-choices/codex.json
+  Undo  zcode-kit rollback  (the real run records the transaction; this command undoes it)
