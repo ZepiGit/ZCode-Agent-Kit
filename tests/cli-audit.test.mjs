@@ -143,7 +143,13 @@ test('Claude MCP registration refuses a foreign path containing the managed path
   writeFileSync(join(f.bin, 'claude.cmd'), '@ECHO off\r\nSET dp0=%~dp0\r\n"' + process.execPath + '" "%dp0%\\entry.cjs" %*\r\n');
   const result = await run(f, ['setup', '--harness', 'claude-code']);
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /registered by another kit copy/);
+  // The refusal is a WARN (F-09): stderr on the compact screen and the full
+  // line in install.log (the bridge diagnostics sink, as in the migration
+  // test above). ADR-0005/spec §Streams put report rows on stdout only —
+  // asserting stdout there was the wrong sink (CI win24 42725722962).
+  const logText = () => readFileSync(join(f.root, 'logs', 'install.log'), 'utf8');
+  assert.match(logText(), /registered by another kit copy/, 'the foreign registration is refused');
+  assert.match(result.stderr, /registered by another kit copy/, 'the refusal surfaces on screen (stderr)');
 });
 
 test('uninstall preserves unrecorded Codex sessions and history', async t => {

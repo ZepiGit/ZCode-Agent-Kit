@@ -2,7 +2,7 @@
 // dry-run semantics, idempotency, unknown-harness errors.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync, realpathSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, execFile } from "node:child_process";
@@ -391,7 +391,13 @@ function dryRunOmpFixture(home) {
 function dryRunState(home) {
   const state = `${home}-state`;
   mkdirSync(join(state, "proxy"), { recursive: true });
-  writeFileSync(join(state, ".owner.json"), JSON.stringify({ root: KIT }) + "\n");
+  // The owner root must match lib/state.mjs's identity(): resolved, and
+  // case-folded on Windows. A raw KIT here failed ensureState's ownership
+  // check on the CI win24 leg ("state directory belongs to a different kit
+  // installation", run 42725722962) — the same recipe install-log-lines uses.
+  let owner = realpathSync(KIT);
+  if (process.platform === "win32") owner = owner.toLowerCase();
+  writeFileSync(join(state, ".owner.json"), JSON.stringify({ root: owner }) + "\n");
   writeFileSync(join(state, ".proxykey"), "synthetic-dry-run-key\n");
   writeFileSync(join(state, "proxy", "config.yaml"), "server:\n  port: 19439\n  proxyApiKey: \"synthetic-dry-run-key\"\n");
   return state;
