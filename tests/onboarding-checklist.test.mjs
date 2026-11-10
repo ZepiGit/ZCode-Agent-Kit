@@ -353,6 +353,41 @@ test("only decoded bare Escape acts; split arrows, modified/meta and malformed c
   }
 });
 
+test("accepted43 legacy prompt, queue, retry, default, CI and resolver bytes/results remain exact", async () => {
+  const baselineSource = execFileSync("git", ["show", "54771fdfde870394236e547394f3330ce518b6e7:cli/harness-consent.mjs"], { cwd: join(import.meta.dirname, ".."), encoding: "utf8" });
+  const source = baselineSource.replaceAll('"../lib/edit.mjs"', JSON.stringify(new URL("../lib/edit.mjs", import.meta.url).href))
+    .replaceAll('"../lib/term/load.mjs"', JSON.stringify(new URL("../lib/term/load.mjs", import.meta.url).href));
+  const old = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+  for (const env of [{ ...UTF8, NO_COLOR: "1" }, { TERM: "dumb" }, { CI: "true" }, UTF8]) {
+    const run = async (create) => {
+      const t = terminal(); const prompter = create({ input: t.input, output: t.output, env });
+      try {
+        const pending = prompter.ask("Configure fixture?");
+        t.input.write("\nmaybe\ny\nn\n");
+        const values = [await pending, await prompter.ask("rotator?", { defaultAnswer: false })];
+        return { text: t.text(), values };
+      } finally { prompter.close(); t.close(); }
+    };
+    assert.deepEqual(await run(createPrompter), await run(old.createPrompter));
+  }
+  for (const [flag, env] of [[undefined, undefined], ["auto", "codex"], ["none", "codex"], ["", "codex"], ["codex,codex", "pi"]])
+    assert.deepEqual(capabilities && (await import("../cli/harness-consent.mjs")).resolveHarnessSelection(flag, env, ["codex", "pi"]), old.resolveHarnessSelection(flag, env, ["codex", "pi"]));
+  const args = { id: "codex", label: "Codex CLI", detected: true, stored: "configured", owned: false, reask: true, ask: async () => undefined };
+  assert.deepEqual(await decideHarness(args), await old.decideHarness(args));
+});
+
+test("bounded decoder does not reinterpret an expired partial escape as a toggle", async () => {
+  const t = terminal();
+  try {
+    const pending = t.prompter.selectHarnesses({ rows: [{ id: "codex", label: "Codex CLI" }, { id: "aider", label: "Aider" }] });
+    await t.ready(); t.input.write("\x1b[");
+    await delay(550);
+    t.input.write("A\r");
+    const batch = await pending;
+    assert.deepEqual([...batch.answers.values()], [undefined, undefined], "expired navigation is not an a key");
+  } finally { t.close(); }
+});
+
 test("lexical delayed LF tail is consumed once, not every first rotator Enter", async () => {
   for (const intervening of [false, true]) {
     const t = terminal();
