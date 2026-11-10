@@ -19,7 +19,7 @@ test("installer opts in only on an explicit y, repeats invalid answers, and Ente
     const pending = askAccountRotator({ input, output, env: {} });
     input.write(typed);
     assert.equal(await pending, expected);
-    assert.ok(transcript.includes(`${ACCOUNT_ROTATOR_QUESTION} [y/N]`));
+    assert.ok(transcript.includes(`? ${ACCOUNT_ROTATOR_QUESTION} [y/N]`));
     assert.ok(transcript.includes("Please answer y or n"));
     input.destroy(); output.destroy();
   }
@@ -34,7 +34,7 @@ test("terminal redraw keeps the y/n question visible before and during input", a
     output.on("data", chunk => transcript += chunk);
     const pending = askAccountRotator({ input, output, env: {} });
     try {
-      const question = `${ACCOUNT_ROTATOR_QUESTION} [y/N] `;
+      const question = `? ${ACCOUNT_ROTATOR_QUESTION} [y/N] `;
       // Round 2: the question is drawn once the capability record has loaded (one async step).
       for (let i = 0; i < 200 && !transcript.includes(question); i++) await new Promise((r) => setTimeout(r, 5));
       assert.ok(transcript.includes(question));
@@ -116,7 +116,7 @@ import { freePort } from "./free-port.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 const FIXTURE_PORT = await freePort();
-const ROTATOR_PROMPT = `${ACCOUNT_ROTATOR_QUESTION} [y/N] `;
+const ROTATOR_PROMPT = `? ${ACCOUNT_ROTATOR_QUESTION} [y/N] `; // A-22: the `? ` prefix (ticket 43)
 const loadAccountSetup = () => import(pathToFileURL(join(KIT, "cli", "account-setup.mjs")).href);
 
 /**
@@ -142,6 +142,11 @@ function kitFixture(t, { layout = "in-tree", accounts = false, generated = "none
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "zcode-proxy-src"));
   cpSync(join(KIT, "proxy", "config.example.yaml"), join(root, "proxy", "config.example.yaml"));
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(KIT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   if (layout !== "checkout") {
     cpSync(join(KIT, "proxy", "zcode-proxy-manager.mjs"), join(root, "proxy", "zcode-proxy-manager.mjs"));
     cpSync(join(KIT, "proxy", "zcode-proxy-autostart.ts"), join(root, "proxy", "zcode-proxy-autostart.ts"));
@@ -259,7 +264,10 @@ function runPty(f, args, steps = [], { env = {}, timeout = 60000, redirect = "" 
   });
 }
 const asked = (text) => text.split(ACCOUNT_ROTATOR_QUESTION).length - 1;
-const txIdOf = (text) => text.match(/transaction (\S+) recorded/)?.[1];
+// Ticket 43: on the compact screen the verbatim transaction line lives in
+// install.log; --verbose keeps it on stdout. Reads both.
+const txIdOf = (text, f) => text.match(/transaction (\S+) recorded/)?.[1]
+  ?? (f ? (() => { try { return readFileSync(join(f.stateDir(), "logs", "install.log"), "utf8").match(/transaction (\S+) recorded/)?.[1]; } catch { return undefined; } })() : undefined);
 
 test("rotator asked once: a terminal answer is stored; setup, doctor --fix and a checkout update never ask again; --reask asks; Enter means no", { skip: !script, timeout: 300000 }, async (t) => {
   const f = kitFixture(t, { layout: "checkout" });
@@ -275,14 +283,20 @@ test("rotator asked once: a terminal answer is stored; setup, doctor --fix and a
     assert.equal(f.decisionBytes(), stored, `${args.join(" ")} left the stored decision byte-identical`);
   }
   const quiet = await runPty(f, ["setup"]);
-  assert.match(quiet.out, /\[INFO\] Account Rotator disabled \(saved choice; not asked again\)\./);
+  assert.match(quiet.out, /INFO {2}Account Rotator disabled \(saved choice; not asked again\)\./);
   assert.match(quiet.out, /Change it: zcode-kit accounts enable, or zcode-kit setup --reask/);
   const reask = await runPty(f, ["setup", "--reask"], [{ after: ROTATOR_PROMPT, send: "\r" }]);
   assert.equal(reask.code, 0, reask.out);
   assert.equal(asked(reask.out), 1, "--reask asks again");
-  assert.match(reask.out, /\[OK\] Account Rotator disabled\. Saved accounts are kept\./, "Enter takes the capitalised default N");
+  // Result-row grammar (design-language §4.3): a pty renders the status
+  // column as `✓ OK    ` (glyph, space, the word padded to 4); a pipe keeps
+  // `OK  `. This pty proof pins the status word and the label, not the pad.
+  assert.match(reask.out, /(?:✓ )?OK {2,4}Account Rotator disabled\. Saved accounts are kept\./, "Enter takes the capitalised default N");
   assert.equal(f.decisionBytes(), stored, "the same answer again rewrites nothing");
-  assert.deepEqual(f.proxyCliCalls(), [], "a no never imports an account");
+  // Ticket 40 starts a down proxy through the lifecycle during doctor --fix,
+  // even in this manager-less fixture. Its stand-in records `serve` and fails
+  // closed; no account import (or any other proxy CLI call) is permitted.
+  assert.deepEqual(f.proxyCliCalls(), ["serve"], "doctor --fix attempts only a proxy start; a no never imports an account");
 });
 
 test("rotator: Ctrl-C at the question leaves the config and the stored decision untouched (fresh and under --reask)", { skip: !script, timeout: 120000 }, async (t) => {
@@ -344,7 +358,7 @@ for (const [name, opts] of [
     assert.equal(one.code, 0, one.text);
     assert.equal(asked(one.text), 0);
     assert.equal(f.decision(), "yes/migration");
-    assert.match(one.stdout, /\[INFO\] Account Rotator enabled \(saved choice; not asked again\)\./);
+    assert.match(one.stdout, /INFO {2}Account Rotator enabled \(saved choice; not asked again\)\./);
     assert.match(one.stdout, /Change it: zcode-kit accounts disable, or zcode-kit setup --reask/);
     const configAfter = f.config();
     assert.match(configAfter, /^    enabled: true$/m, "the migration never touches the config");
@@ -353,14 +367,14 @@ for (const [name, opts] of [
     const bytes = f.decisionBytes();
     const manifests = () => readdirSync(join(f.stateDir(), "backups")).filter((n) => n.endsWith(".manifest.json")).sort();
     const recorded = manifests();
-    const firstTx = txIdOf(one.stdout);
+    const firstTx = txIdOf(one.stdout, f);
     assert.deepEqual(recorded, [`tx-${firstTx}.manifest.json`], "the migration is one recorded transaction");
     assert.ok(JSON.parse(readFileSync(join(f.stateDir(), "backups", recorded[0]), "utf8")).ops.some((op) => String(op.target).endsWith("account-rotator.json")));
     const two = await runPlain(f, ["setup"]);
     assert.equal(two.code, 0, two.text);
     assert.equal(f.decisionBytes(), bytes, "replay: decision byte-identical");
     assert.equal(f.config(), configAfter, "replay: config byte-identical");
-    assert.equal(txIdOf(two.stdout), undefined, "replay: nothing to record");
+    assert.equal(txIdOf(two.stdout, f), undefined, "replay: nothing to record");
     assert.deepEqual(manifests(), recorded, "replay: no new transaction");
     assert.ok(firstTx, one.stdout);
     const rb = await runPlain(f, ["rollback", firstTx]);
@@ -436,7 +450,7 @@ test("rotator overrides win over the stored decision and are recorded: --account
   assert.equal(f.decision(), "no/accounts");
   const y = await runPlain(f, ["setup", "--account-rotator", "y", "--reask"]);
   assert.equal(y.code, 0, y.text);
-  assert.match(y.stdout, /\[OK\] Account Rotator enabled \(0 saved accounts\)\./);
+  assert.match(y.stdout, /OK {2}Account Rotator enabled \(0 saved accounts\)\./);
   assert.equal(f.decision(), "yes/flag");
   assert.match(f.config(), /^    enabled: true$/m);
   assert.deepEqual(f.proxyCliCalls(), ["auth accounts import-current"]);
@@ -449,7 +463,7 @@ test("rotator overrides win over the stored decision and are recorded: --account
   const again = await runPlain(f, ["setup"], { env: { ZCODE_KIT_ACCOUNT_ROTATOR: "n" } });
   assert.equal(again.code, 0, again.text);
   assert.equal(f.decisionBytes(), bytes, "replayed override: decision byte-identical");
-  assert.equal(txIdOf(again.stdout), undefined, "replayed override: no transaction");
+  assert.equal(txIdOf(again.stdout, f), undefined, "replayed override: no transaction");
   const bad = await runPlain(f, ["setup", "--account-rotator", "maybe"]);
   assert.equal(bad.code, 2, bad.text);
   assert.equal(f.decision(), "no/env", "a bad override writes nothing");
@@ -464,13 +478,13 @@ test("accounts enable|disable update the stored decision through their transacti
   assert.equal(off.code, 0, off.text);
   assert.equal(f.decision(), "no/accounts");
   const setup = await runPlain(f, ["setup"]);
-  assert.match(setup.stdout, /\[INFO\] Account Rotator disabled \(saved choice; not asked again\)\./, "one meaning: setup reads what accounts disable stored");
-  assert.equal(txIdOf(setup.stdout), undefined, "that setup changed nothing");
+  assert.match(setup.stdout, /INFO {2}Account Rotator disabled \(saved choice; not asked again\)\./, "one meaning: setup reads what accounts disable stored");
+  assert.equal(txIdOf(setup.stdout, f), undefined, "that setup changed nothing");
   assert.equal((await runPlain(f, ["rollback"])).code, 0, "undo accounts disable");
   assert.equal(f.decisionBytes(), yes, "the decision accounts enable stored is back");
   assert.match(f.config(), /^    enabled: true$/m);
   const after = await runPlain(f, ["setup"]);
-  assert.match(after.stdout, /\[INFO\] Account Rotator enabled \(saved choice; not asked again\)\./);
+  assert.match(after.stdout, /INFO {2}Account Rotator enabled \(saved choice; not asked again\)\./);
 });
 
 test("rotator: an unreadable decision file fails closed: reported, never overwritten, the setting is left alone", { timeout: 120000 }, async (t) => {

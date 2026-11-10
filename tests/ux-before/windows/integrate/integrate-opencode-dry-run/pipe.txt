@@ -1,3 +1,6 @@
 == integrate opencode: DRY RUN (no changes written) ==
   detected: yes
+  would write  <HOME>\.config\opencode\opencode.json
     use via: zcode-kit run opencode -- <args>  |  openai-compatible chat/completions only
+  would write  <KIT>\generated\harness-choices\opencode.json
+  Undo  zcode-kit rollback  (the real run records the transaction; this command undoes it)

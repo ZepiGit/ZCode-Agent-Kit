@@ -1,8 +1,8 @@
 // Per-harness consent for `zcode-kit setup`.
 //
 // Setup never configures a harness silently: each detected harness gets its
-// own question ("Configure ZCode as a provider with its supported models in
-// <HARNESS>? [y/n]"), an explicit selection (`--harness a,b`,
+// own question ("? Configure ZCode for <HARNESS>? [y/n]", on stderr), an
+// explicit selection (`--harness a,b`,
 // `ZCODE_KIT_HARNESSES=a,b`, `none`) counts as consent for exactly those ids,
 // and a missing terminal is never consent. Decisions are stored one file per
 // harness under `<state>/generated/harness-choices/` through the setup
@@ -22,7 +22,7 @@ export const NO_CONSENT_HINT = `no interactive consent (select explicitly: --har
 export const ABORTED = "ABORTED";
 
 export function harnessQuestion(label) {
-  return `Configure ZCode as a provider with its supported models in ${label}?`;
+  return `Configure ZCode for ${label}?`;
 }
 
 export function isInteractive({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
@@ -41,10 +41,15 @@ function abortError() {
  * interface owns stdin for the whole setup: lines typed ahead are queued and
  * answer the following questions in order instead of being swallowed by a
  * closed interface. `ask` resolves true/false for an explicit answer, or
- * undefined when no interactive answer is possible: no TTY on either side,
- * CI, or input closed before an answer (EOF must never count as consent).
- * Ctrl-C rejects with an error whose `code` is ABORTED so the caller can stop
- * asking instead of treating it as "no answer".
+ * undefined when no interactive answer is possible: no TTY on stdin or the
+ * prompt stream, CI, or input closed before an answer (EOF must never count
+ * as consent). Ctrl-C rejects with an error whose `code` is ABORTED so the
+ * caller can stop asking instead of treating it as "no answer".
+ *
+ * A prompt is a diagnostic (ADR-0005, design-language §4.9): without an
+ * explicit stream it is written to stderr, in the `? <question> [y/n]` form,
+ * and questions appear only when stdin AND stderr are terminals — with
+ * stderr redirected the question would be invisible, so nothing is asked.
  *
  * How a question is drawn is the capability record's decision
  * (lib/term/out.mjs promptStyle, from `output`, `env` and `platform`), never
@@ -61,7 +66,7 @@ function abortError() {
  * first question, loading the capability record lazily: the proxy manager
  * imports this module and never loads presentation code.
  */
-export function createPrompter({ input = process.stdin, output = process.stdout, env = process.env, platform = process.platform, redraw } = {}) {
+export function createPrompter({ input = process.stdin, output = process.stderr, env = process.env, platform = process.platform, redraw } = {}) {
   const interactive = isInteractive({ input, output, env });
   const queue = [];
   const waiters = [];
@@ -142,7 +147,7 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
       if (!interactive) return undefined;
       await ensure();
       const defaultNo = defaultAnswer === false;
-      const promptText = `${question} ${defaultNo ? "[y/N]" : "[y/n]"} `;
+      const promptText = `? ${question} ${defaultNo ? "[y/N]" : "[y/n]"} `;
       for (;;) {
         const line = await nextLine(promptText);
         if (line === undefined) return undefined; // Closed input must never count as consent.
@@ -276,12 +281,21 @@ export function isUnreadableChoice(choices, id) {
  * Record one decision through the transaction (rollback of that setup removes
  * it again). `mcp` records consent for the kit's MCP bridge separately from
  * the provider consent; it is never inferred from a stored decision.
+ * In a dry run nothing is written: a decision file the real run WOULD write
+ * is reported through `tx.touch` (the `integrate --dry-run` would-write list),
+ * with the same would-change predicate as the real write.
  * Returns false when nothing could be recorded (unreadable decision file).
  */
 export function recordHarnessChoice(ctx, tx, choices, id, decision, source, now = () => new Date().toISOString(), { mcp = false } = {}) {
-  if (ctx.dryRun) return true;
-  if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
   const previous = choices.harnesses[id];
+  if (ctx.dryRun) {
+    if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
+    if (!(previous && previous.decision === decision && previous.source === source && previous.mcp === mcp)) {
+      tx?.touch?.(join(harnessChoicesDir(ctx), `${id}.json`));
+    }
+    return true;
+  }
+  if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
   if (previous && previous.decision === decision && previous.source === source && previous.mcp === mcp) return true;
   const entry = { schema: 1, harness: id, decision, source, decidedAt: now(), ...(mcp ? { mcp: true } : {}) };
   ensureDir(ctx, harnessChoicesDir(ctx));

@@ -27,6 +27,7 @@ export function createCtx(root = kitRoot(), home = homeDir()) {
     root,
     home,
     stateDir,
+    platform: process.platform,
     logDir: join(stateDir, "logs"),
     keyFile: join(stateDir, ".proxykey"),
     config: join(stateDir, "proxy", "config.yaml"),
