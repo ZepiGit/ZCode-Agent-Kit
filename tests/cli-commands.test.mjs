@@ -133,22 +133,12 @@ function managerCtx(result, extra = {}) {
 }
 const args = (positional, flags = {}) => ({ positional, flags, passthrough: null });
 
-test("status: the manager's exit code is the command's, with no records (the manager prints)", async () => {
-  const { run } = await load("status");
-  for (const status of [0, 1, 3]) {
-    const { ctx, calls } = managerCtx({ status });
-    assert.deepEqual(await run(args(["status"]), ctx), { exitCode: status, records: [] });
-    assert.deepEqual(calls.map((c) => [c.cmd, c.args, c.opts.stdio]), [["node-under-test", [MANAGER, "status"], "inherit"]]);
-  }
-});
 
-test("status: a manager killed by a signal (no exit status) is exit 1; --json is forwarded", async () => {
-  const { run } = await load("status");
-  const { ctx, calls } = managerCtx({ status: null, signal: "SIGKILL" });
-  assert.deepEqual(await run(args(["status"], { json: true }), ctx), { exitCode: 1, records: [] });
-  assert.deepEqual(calls[0].args, [MANAGER, "status", "--json"]);
-});
 
+// Since ticket 40 status, proxy start|stop|restart|status and proxy logs run
+// the lifecycle and the status record in-process (no manager spawn); their
+// exit codes (0-5, status 0/1), --json and the line count are pinned in
+// tests/cli-ux-proxy.test.mjs at the lifecycle/status module boundary.
 const PROXY_USAGE = "Usage: zcode-kit proxy start|stop|restart|status|logs [n]\n";
 
 test("proxy: a missing or unknown subcommand is a usage error, exit 2 on stderr, and starts nothing", async () => {
@@ -160,44 +150,8 @@ test("proxy: a missing or unknown subcommand is a usage error, exit 2 on stderr,
   }
 });
 
-test("proxy start|stop|restart|status: the manager's exit codes 0-5 pass through; no exit status is 2", async () => {
-  const { run } = await load("proxy");
-  for (const sub of ["start", "stop", "restart", "status"]) {
-    for (const status of [0, 1, 2, 3, 4, 5]) {
-      const { ctx, calls } = managerCtx({ status });
-      assert.deepEqual(await run(args(["proxy", sub]), ctx), { exitCode: status, records: [] });
-      assert.deepEqual(calls.map((c) => [c.args, c.opts.stdio]), [[[MANAGER, sub], "inherit"]]);
-    }
-    const { ctx } = managerCtx({ status: null, error: new Error("spawn failed") });
-    assert.deepEqual(await run(args(["proxy", sub]), ctx), { exitCode: 2, records: [] });
-  }
-});
 
-test("proxy status --json is forwarded; --json on other subcommands is not", async () => {
-  const { run } = await load("proxy");
-  const status = managerCtx({ status: 0 });
-  await run(args(["proxy", "status"], { json: true }), status.ctx);
-  assert.deepEqual(status.calls[0].args, [MANAGER, "status", "--json"]);
-  const start = managerCtx({ status: 0 });
-  await run(args(["proxy", "start"], { json: true }), start.ctx);
-  assert.deepEqual(start.calls[0].args, [MANAGER, "start"]);
-});
 
-test("proxy logs [n]: the line count is forwarded as given and the manager's exit code is kept", async () => {
-  for (const [name, positional, expected] of [
-    ["proxy", ["proxy", "logs"], [MANAGER, "logs"]],
-    ["proxy", ["proxy", "logs", "50"], [MANAGER, "logs", "50"]],
-    ["logs", ["proxy", "logs", "7"], [MANAGER, "logs", "7"]],
-  ]) {
-    const { run } = await load(name);
-    const { ctx, calls } = managerCtx({ status: 1 });
-    assert.deepEqual(await run(args(positional), ctx), { exitCode: 1, records: [] });
-    assert.deepEqual(calls.map((c) => [c.args, c.opts.stdio]), [[expected, "inherit"]]);
-  }
-  const { run } = await load("logs");
-  const { ctx } = managerCtx({ status: null, signal: "SIGTERM" });
-  assert.deepEqual(await run(args(["proxy", "logs"]), ctx), { exitCode: 2, records: [] });
-});
 
 /** A command ctx whose proxy answers (or fails) at the fetch boundary. */
 function proxyCtx(answer, kit = {}) {
@@ -302,6 +256,10 @@ async function doctorCtx(manager) {
 }
 const texts = (records) => records.map((r) => { assert.equal(r.kind, "text"); return `${r.stream}:${r.text}`; });
 const doctorRecord = (checks) => ({ intent: "doctor", code: checks.some((c) => c.ok === false) ? 1 : 0, outcome: checks.some((c) => c.ok === false) ? "failed" : "ok", checks });
+// Since ticket 40 the text report is output-module records (cli/doctor-report.mjs):
+// one check record per check, a lead record when something failed, one verdict.
+const checkRows = (records) => records.filter((r) => r.kind === "check").map((r) => `${r.status.toUpperCase()}  ${r.name}${r.detail ? ` — ${r.detail}` : ""}`);
+const verdictOf = (records) => { const v = records.filter((r) => r.kind === "verdict"); assert.equal(v.length, 1, "one verdict"); assert.equal(records.at(-1), v[0], "the verdict is last"); return v[0]; };
 
 test("doctor: unknown --harness ids are a usage error, exit 2 on stderr, before anything runs", async () => {
   const { run } = await load("doctor");
@@ -315,7 +273,7 @@ test("doctor: unknown --harness ids are a usage error, exit 2 on stderr, before 
   } finally { d.cleanup(); }
 });
 
-test("doctor: a clean manager and only unconsented harnesses is exit 0; the manager's report comes first, in the legacy grammar", async () => {
+test("doctor: a clean manager and only unconsented harnesses is exit 0; each check once, no lead, one verdict", async () => {
   const { run } = await load("doctor");
   const d = await doctorCtx(doctorRecord([
     { name: "proxy running", ok: true, detail: "pid 4242" },
@@ -325,24 +283,26 @@ test("doctor: a clean manager and only unconsented harnesses is exit 0; the mana
   try {
     const { exitCode, records } = await run(args(["doctor"]), d.ctx);
     assert.equal(exitCode, 0);
-    const lines = texts(records);
-    assert.equal(lines[0], "stdout:PASS  proxy running — pid 4242\nPASS  key file — present\nSKIP  omp integration — OMP not installed — skipped\ndoctor: 1 skipped, 0 failed — OK\n");
-    assert.deepEqual(lines.slice(1, 4), ["stdout:PASS  proxy running — pid 4242\n", "stdout:PASS  key file — present\n", "stdout:SKIP  omp integration — OMP not installed — skipped\n"]);
-    assert.equal(lines.length, 4 + 10 + 1, "one row per harness, then the summary");
-    for (const line of lines.slice(4, 14)) assert.match(line, /^stdout:SKIP {2}[a-z-]+: integration — /);
-    assert.equal(lines.at(-1), "stdout:doctor: 11 skipped, 0 failed — OK\n");
+    assert.equal(records.filter((r) => r.kind === "lead").length, 0, "no lead line without a failure");
+    const rows = checkRows(records);
+    assert.deepEqual(rows.filter((r) => !/: integration — /.test(r)), ["PASS  proxy running — pid 4242", "PASS  key file — present", "SKIP  omp integration — OMP not installed — skipped"]);
+    assert.equal(rows.length, 3 + 10, "one row per manager check and per harness, each once");
+    for (const row of rows.slice(3)) assert.match(row, /^SKIP {2}[a-z-]+: integration — /);
+    assert.deepEqual(verdictOf(records), { kind: "verdict", label: "doctor", counts: { pass: 2, fail: 0, warn: 0, skip: 11 }, exit: 0 });
     assert.deepEqual(d.calls(), [{ root: d.ctx.kit.root, home: d.ctx.kit.home, env: d.ctx.env }], "the manager's doctor runs once, for this kit, with the command's env");
   } finally { d.cleanup(); }
 });
 
-test("doctor: a FAIL from the manager is exit 1 and counted in the summary", async () => {
+test("doctor: a FAIL from the manager is exit 1, led by the problem count and counted in the verdict", async () => {
   const { run } = await load("doctor");
   const d = await doctorCtx(doctorRecord([{ name: "proxy running", ok: false, detail: "not running" }]));
   try {
     const { exitCode, records } = await run(args(["doctor"]), d.ctx);
     assert.equal(exitCode, 1);
-    assert.equal(texts(records)[0], "stdout:FAIL  proxy running — not running\ndoctor: 1 check(s) failed\n");
-    assert.equal(texts(records).at(-1), "stdout:doctor: 1 check(s) failed\n");
+    assert.deepEqual(records[0], { kind: "lead", counts: { fail: 1, warn: 0 } });
+    assert.deepEqual(checkRows(records).filter((r) => r.startsWith("FAIL")), ["FAIL  proxy running — not running"]);
+    assert.deepEqual(verdictOf(records).counts, { pass: 0, fail: 1, warn: 0, skip: 10 });
+    assert.equal(verdictOf(records).exit, 1);
   } finally { d.cleanup(); }
 });
 
@@ -356,7 +316,7 @@ test("doctor: a manager doctor that throws, or fails without a failed check, sti
     try {
       const { exitCode, records } = await run(args(["doctor"]), d.ctx);
       assert.equal(exitCode, 1);
-      assert.ok(texts(records).includes(`stdout:FAIL  manager doctor completed — ${detail}\n`), detail);
+      assert.ok(checkRows(records).includes(`FAIL  manager doctor completed — ${detail}`), detail);
     } finally { d.cleanup(); }
   }
 });
@@ -369,7 +329,7 @@ test("doctor: a check detail spanning lines is one check, never a row of its own
   try {
     const { exitCode, records } = await run(args(["doctor"], { json: true }), d.ctx);
     assert.equal(exitCode, 0);
-    assert.deepEqual(records[0].value.checks[0], { name: "bun available", ok: true, detail: "/opt/bun (1.4.2\nFAIL  injected — from a version string)" });
+    assert.deepEqual(records[0].value.checks[0], { name: "bun available", ok: true, detail: "/opt/bun (1.4.2\nFAIL  injected — from a version string)", status: "pass" });
     assert.deepEqual([records[0].value.ok, records[0].value.failed], [true, 0]);
     assert.equal(records[0].value.checks.filter((c) => c.name.startsWith("injected")).length, 0);
   } finally { d.cleanup(); }
@@ -381,15 +341,15 @@ test("doctor --harness codex verifies a requested harness without consent: its m
   try {
     const { exitCode, records } = await run(args(["doctor"], { harness: "codex" }), d.ctx);
     assert.equal(exitCode, 1);
-    assert.deepEqual(texts(records).slice(1), [
-      "stdout:PASS  proxy running — pid 1\n",
-      "stdout:FAIL  codex: codex adapter artifact — generated/codex-home/config.toml\n",
-      "stdout:doctor: 1 check(s) failed\n",
+    assert.deepEqual(checkRows(records), [
+      "PASS  proxy running — pid 1",
+      "FAIL  codex: codex adapter artifact — generated/codex-home/config.toml",
     ]);
+    assert.deepEqual(verdictOf(records).counts, { pass: 1, fail: 1, warn: 0, skip: 0 });
   } finally { d.cleanup(); }
 });
 
-test("doctor --json: one JSON record (the manager's report is not echoed), exit code as in text mode", async () => {
+test("doctor --json: one JSON record (no text report), exit code as in text mode", async () => {
   const { run } = await load("doctor");
   const d = await doctorCtx(doctorRecord([{ name: "proxy running", ok: false, detail: "not running" }, { name: "solver", ok: null, detail: "idle" }]));
   try {
@@ -400,8 +360,8 @@ test("doctor --json: one JSON record (the manager's report is not echoed), exit 
     const { ok, failed, skipped, checks } = records[0].value;
     assert.deepEqual([ok, failed, skipped], [false, 1, 11]);
     assert.deepEqual(checks.slice(0, 2), [
-      { name: "proxy running", ok: false, detail: "not running" },
-      { name: "solver", ok: null, detail: "idle" },
+      { name: "proxy running", ok: false, detail: "not running", status: "fail" },
+      { name: "solver", ok: null, detail: "idle", status: "skip" },
     ]);
   } finally { d.cleanup(); }
 });

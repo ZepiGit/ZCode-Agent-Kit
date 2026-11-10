@@ -43,11 +43,11 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 37 | [`process.execve` handover in `zcode-kit run` and the `ZCODE_KIT_RESIDENT_LAUNCHER=1` opt-out](37-execve-handover-and-resident-launcher-opt-out.md) | sol | high | 15, 35, 36, 17 | ready-for-agent |
 | 38 | [Manager `doctor` returns check records; `zcode-kit doctor` stops parsing text](38-manager-doctor-check-records.md) | glm | medium | 15 | resolved |
 | 39 | [Observability fields in `/health` details, `proxy status` and `--json`](39-observability-fields.md) | glm | medium | 19, 21, 23, 40, 58 | ready-for-agent |
-| 40 | [UX batch (a): `doctor`, `proxy start/status/stop/restart/logs`, connection details](40-ux-batch-a-doctor-and-proxy-commands.md) | glm | medium | 38, 06 | ready-for-agent |
+| 40 | [UX batch (a): `doctor`, `proxy start/status/stop/restart/logs`, connection details](40-ux-batch-a-doctor-and-proxy-commands.md) | glm | medium | 38, 06 | resolved |
 | 41 | [`doctor` memory checks: proxy memory, solver memory, cap enforcement, restart budget](41-doctor-memory-checks.md) | glm | medium | 39, 40 | ready-for-agent |
 | 42 | [Account Rotator decision asked once, with migration](42-account-rotator-asked-once.md) | sol | medium | 08 | resolved |
 | 43 | [UX batch (b1): compact `setup` report and `integrate --dry-run`](43-ux-batch-b1-compact-setup-and-integrate-dry-run.md) | glm | medium | 40, 42 | ready-for-agent |
-| 44 | [UX batch (b2): installer stages, `install.sh`/`install.ps1` text and the PowerShell 5.1 stderr gate](44-ux-batch-b2-installers-and-powershell-gate.md) | glm | medium | 43, 11 | ready-for-agent |
+| 44 | [UX batch (b2): installer stages, `install.sh`/`install.ps1` text and the PowerShell 5.1 stderr gate](44-ux-batch-b2-installers-and-powershell-gate.md) | glm | medium | 43, 11, 83 | ready-for-agent |
 | 45 | [UX batch (c1): grouped help, per-command `--help`, usage errors, output overrides](45-ux-batch-c1-help-usage-errors-overrides.md) | glm | low | 37, 40, 42 | ready-for-agent |
 | 46 | [UX batch (c2): `accounts` (+health), `auth status`, `models`](46-ux-batch-c2-accounts-auth-status-models.md) | glm | low | 40 | ready-for-agent |
 | 47 | [UX batch (c3): `run`, `update`, `rollback`, `uninstall`](47-ux-batch-c3-run-update-rollback-uninstall.md) | glm | medium | 40, 37 | ready-for-agent |
@@ -86,6 +86,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 80 | [windows S2/short cdn-cache:memory-growth after ticket 29: A/B attribution](80-windows-s2-cdn-memory-after-29.md) | sol | medium | — | ready-for-agent |
 | 81 | [windows S4: deliver a real console control event in the Ctrl-C-during-start trial](81-windows-s4-console-event-ctrl-c-trial.md) | sol | medium | 17 | ready-for-agent |
 | 82 | [GitHub issue #32: safe failure diagnostics and latest-ZCode compatibility evidence](82-github-32-safe-failure-diagnostics-and-zcode-compatibility.md) | sol | high | — | needs-triage |
+| 83 | [Setup: curated post-install command overview and multi-select harness consent](83-setup-command-overview-and-multi-select-harness.md) | glm | medium | 40, 42, 43 | needs-triage |
 
 ## Initial frontier
 

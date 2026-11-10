@@ -103,3 +103,19 @@ Expected interpretation:
 - a code-0 preview with no data now surfaces `preview: provider_unknown` in `zcode-kit quota` errors — that is the fail-closed record, not a silent empty success.
 
 Paste the (redacted) output into ticket 82's Comments and only then decide whether GitHub #32 can move. Unblocks: ticket 82's criterion "Do not close GitHub #32 … record the limitation and an exact owner-only verification procedure".
+
+## OA-5 — Confirm GLM account quota availability — unverified, owner action
+
+**Execution-block superseded on 2026-11-10:** the user's explicit fresh-merger instruction authorizes GPT/Grok and says go. OA-5 is now a GLM account-information follow-up only; it does NOT block the authorized GPT/Grok work. This does not restore GLM quota or establish a reset time. Historical no-provider-authorization and prepared/not-dispatched statements below describe the earlier state, not the current routing. This fresh merger used `openai/gpt-6.1-sol-subagent`, with no GLM/Anthropic/Gemini, delegation, additional model request or change to user concurrency. It did not resume/amend/restart the historical stopped workflow. Current merge/gate evidence is in STATE.md and RUNLOG.md.
+
+OA-4 is reserved by the unmerged ticket82 branch for GitHub issue32 live re-observation; this entry does not replace it.
+
+Target: `account:zai-start-plan/GLM-5.3-Flash`, effort `max`. Last known provider result is quota error1005; no reset or restored availability has been confirmed. An automatic continuation reminder is not account-state evidence or permission to buy quota/change provider.
+
+Use the existing signed-in ZCode/provider account interface to inspect the current plan/quota and any stated reset time. If restoration needs a purchase, plan change or reauthentication, that remains the owner's decision. Do not paste credentials, tokens or account-store contents into chat. A non-secret status, reset timestamp and selected provider/model are sufficient for an initial report; a later successful authorized worker must still establish actual execution availability.
+
+No verified safe CLI quota command was found, so none is invented here. The installed UsageStats entitlement method exists, but the known loopback probe requires reading a token and was not executed under B2. Exposed tools and the inspected CLI control interface provided no B2-compatible live quota operation. Evidence: `/home/AgentKit/overhaul-tools/glm-quota-capability-check-20261110.md`.
+
+The signed-in UI path was also checked on2026-11-10: browser-use/control-browser and computer-use skills load, but their required `mcp__node_repl__js` callable is absent from resident tools and both exact/broad deferred discovery. No signed-in account screen was observed, so no quota/reset value can be reported from the UI. This needs a working supported UI bridge or a non-secret owner report, not repeated account/model requests.
+
+Do not automatically resume, amend or restart workflow `dwfrun-658f0456-0734-4f5a-af85-e94e4ee4f5ea`. This owner action supplies quota evidence only, not workflow lifecycle permission or provider-substitution approval. Ticket40's fresh merger handoff is prepared at `/home/AgentKit/overhaul-tools/t40-fresh-merger-ready-20261110.md`; no merger was dispatched.

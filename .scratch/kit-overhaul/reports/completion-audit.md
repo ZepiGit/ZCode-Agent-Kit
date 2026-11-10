@@ -8,6 +8,10 @@ Implement every accepted overhaul story/ticket; satisfy memory/process/compatibi
 
 Individual numbered stories: [story-evidence-map.md](story-evidence-map.md) maps all 144 stories to ticket files and current statuses. All final-evidence cells remain pending audit; no missing ticket reference was found, which does not establish implementation or acceptance.
 
+## Added onboarding requirement — not achieved
+
+Ticket83 tracks the user's requested English-first coherent post-install onboarding, Space-toggle harness multiselect and useful command overview, collaboratively designed by the four named models with unavailable participants disclosed. It depends on40/42/43;40and43 remain unmerged. Four briefs exist, but the supposedly agreed artifact was inspected2026-11-10 and contains[object Object], not a design. New proposed-file recovery, actual model ratification, consent/cancel/nonTTY/stderr preservation, terminalC3/Windowsproof and installer overview dedup in44 are still required. No claim of consensus or implementation completion from the existing artifact/ticket comment is valid.
+
 ## Prompt-to-artifact checklist
 
 | Requirement | Required evidence | Current evidence / gap |
@@ -46,13 +50,23 @@ Individual numbered stories: [story-evidence-map.md](story-evidence-map.md) maps
 | Phase8 environment ticket | Cheap improvements implemented, diff independently reviewed, pushed | Not done |
 | §10 German final | reports/final.md and user report: five-line summary, causes/MB, table,3screens,versions,decisions/ADRs,unverified/actions,PR/followups | Missing |
 | GitHub issue32 | Exact safe-scope regression/recovery evidence, separate local82; no static/models/doctor proxy completion | Incident cause/recovery unverified. Source https://github.com/ZepiGit/ZCode-Agent-Kit/issues/32 |
-| Latest ZCode | Primary-source pinned release/runtime/distribution evidence, actual compatibility tests, recheck latest at final gate | Release v3.17.2 verified2026-11-09; https://github.com/zai-org/ZCode/releases/tag/v3.17.2 . Node24 already addressed; broader runtime/discovery gaps not yet verified/fixed |
-| Current model routing | Explicit workflow selectors Solhigh/Grokxhigh/Geminihigh read-only; no unrequested fallback | Active workflow dwfrun-40031bfb-6490-4df3-94c3-7594369b3da9; earlier mismatch retained in RUNLOG/observation20 |
+| Latest ZCode | Primary-source pinned release/runtime/distribution evidence, actual compatibility tests, recheck latest at final gate | Latest releasev3.17.2 rechecked live2026-11-10; https://github.com/zai-org/ZCode/releases/tag/v3.17.2 . Pinned source/layout and separate agent0.17.1/engines24.14.0 metadata in research/zcode-current-runtime-20261110.md. RealMCPhealth fixtures reproduced current-server/default+customdata discovery gap: two runs each5executed/3PASS/2FAIL, no vendor execution/product edits. Discovery fix/independent review/nativeWindows/macOS/standalone/app-server acceptance still missing; version probe is not model compatibility |
+| Current model routing | GLM max preferred workers/scouts; independent Grok-build-fast xhigh/Sol-subagent xhigh reviews; named4modelUXcooperation with unavailable participants disclosed | User-managed current workflow658f0456 has GLM max default and GUIdefault/noexplicitconcurrencylimit; do not restart/amend. Old run IDs and earlier model attribution are historical, not current compliance |
 
 ## Current evidence additions, 2026-11-09
 
 - Ticket23 pre-merge CI42634889797:8/8SUCCESS, candidate0badcae. Artifacts /home/AgentKit/overhaul-tools/t23-ci-yUPAQx/. Windows pressure:3restarts, <=1proxy,40/40serving after refusal,0furtherhooks,1errorline,0orphans. Existing expected-RED ratchet still contains other owners. Merged as a413614, resolved282557f: fresh local fast suites and proxytypecheck passed, dist unchanged, staged/wholeproduct sanitydiffs empty. Merger reused exactpremerge memory evidence under explicit ask permission; no freshpostmerge memoryrun.
 - Ticket80 attempt1 CI42635373819: both measurement legsSUCCESS, marker guards intentionallyFAIL. Artifacts /home/AgentKit/overhaul-tools/t80-attempt1-X4kZ0t/. Windows8/8valid each arm, head mean54.13/pre29 51.38MB, difference2.75,t0.76. Linux8/8each, difference-1.75,t-1.18. These are insufficient for >=30Windows/>=10Linux per arm; no attribution verdict. Attempt2 launched via rerun, order reverses. Source commit03e20a6/tree50fdff58; reports identify CI merge commit d619ad8. GitHub commit API confirms parents542749b/03e20a6 and tree50fdff58b751d4c6f894fd84f80e8133ef2d1d78, exactly matching the staged tree. The report field named tree actually contains a commit SHA; preserve this distinction when pooling.
+
+## Evidence corrections, 2026-11-10
+
+- Ticket81 PR76/run42691497644 is FAILURE7/8 with WindowsCreateProcess123/harnessfailure; no merge occurred. Earlier8/8statusclaims invalid.
+- Ticket82 PR77 exacte22c921 verified8namedCIjobsSUCCESS, but recovered independent review approved=false. Controller confirmed metadata/classification/publicpool blockers and now actual HTTP provenance: two capped offline real-listener runs each12executed/6controlPASS/6securityFAIL, raw and mutable typed markers visible in503 responses on chat/messages/responses and warnings. Logs reports/t82-http-provenance-boundary-{red,repeat-red}-20261110.log. Productunchanged883f566; keepUNMERGED. ActualfullTUI, repair/permanentregressions/newreview/newCI/latest-runtime/originalincident acceptance remain incomplete.
+- Ticket43: prior PR79runs42725722962/42739064329 remainFAILED. Corrected stagedcandidate02bd817/run42750466098 is VERIFIED8/8SUCCESSatmatchinghead,includingactualWindows24/26logtests,fullWindowsUX1/1andbothcompleteholdingmemoryratchets. Productbranch1f9e26c and staging areclean. Independentreviewandticket40prerequisiteOPEN;nointegrationmerge or full-goalcompletion. Evidencegatefile t43-ci42750466098-verified-gates.json, artifacts t43-ci42750466098-artifacts-yvHJAP. SeeMETRICSTicket43section.
+- Ticket83 purported agreedartifact is[object Object], not design;4briefs only, recoveryandratificationpending. No consensus/multiselectimplementationclaim.
+- Ticket57 Round38 permits prospectiveoptinartifactsfromREDdiagnosticrun; currentgateunchanged, not evidenceblockedbyRED. Windowsrunner/completemanifestunverified.
+- Ticket40 provenance corrected: old PR75run42673615246 failed before jobs (0jobs/artifacts); the mislabeled pr75-windows-mem archive belongs to staging/75, not PR75. Recovered reader review approved=true. The single registered new run42760280311 at documentation-only head d2ae4d4 is now VERIFIED8/8SUCCESS. Actual synthetic merge85b76ed has exact staging tree b9c7b7c; product equals reviewed deadcbc. Direct job-API logs confirm four kit/proxy/MCP suites, named reader/doctor/connection regressions and both UX comparisons; both complete memory ratchets hold with owned REDs/WindowsS5unstable intact. Evidence t40-ci42760280311-{verified-gates,inspected-evidence}.json and artifacts-OgQYak under overhaul-tools. Old failure retained; fresh merger and merged-tree suites/sanity/dist still missing, so ticket40 remains UNMERGED and43/83 dependencies remain open.
+- Ticket80 final32/armnot-attributedstatisticalrule result is not proof of no effect; decisionreturn stillneeded. No budgetrelaxation/stage2fixautomaticallyauthorized.
 
 ## Final audit rule
 

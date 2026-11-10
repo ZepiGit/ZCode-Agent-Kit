@@ -1,0 +1,6 @@
+| Proxy start[K[31m✗ FAIL  The proxy start lock is unavailable[0m
+   [2mwhy[0m   stale or unreadable manager start lock at /kit/logs/manager.lock —
+         refusing automatic takeover. If no start is actually running, remove
+         /kit/logs/manager.lock manually and retry.
+   [2mnext[0m  [1mzcode-kit doctor[0m
+   [2mexit[0m 1

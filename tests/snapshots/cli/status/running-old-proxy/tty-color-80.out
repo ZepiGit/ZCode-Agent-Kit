@@ -1,0 +1,11 @@
+[32m●[0m running on 127.0.0.1:<PORT> (pid <PID>)
+
+[1mQuota[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [2mquota[0m  unavailable (The operation was aborted due to timeout)
+
+[1mConnection details (manual clients)[0m [2m────────────────────────────────────────────[0m
+  [2mOpenAI base URL   [0m  http://127.0.0.1:<PORT>/v1
+  [2mAnthropic base URL[0m  http://127.0.0.1:<PORT>
+  [2mAPI key           [0m  UXFIXTURE-not-a-secret-0000000000000000000
+  [2mModels            [0m  glm-5.3, glm-5.3-flash (configured; live list unavailable)
+  [2mState             [0m  ● running, identity verified

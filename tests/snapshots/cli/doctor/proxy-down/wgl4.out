@@ -1,0 +1,43 @@
+[31m×[0m 2 problems: 2 failed
+
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m√ PASS[0m  bun available           [2m/opt/bun/bin/bun (<VERSION>)[0m
+  [32m√ PASS[0m  config exists           [2m/kit/proxy/config.yaml[0m
+  [32m√ PASS[0m  key file exists         [2m/kit/.proxykey[0m
+  [32m√ PASS[0m  proxy source installed  [2m/kit/zcode-proxy-src/node_modules[0m
+  [31m× FAIL[0m  proxy env overrides     [2mignored by the kit-managed proxy (unset them):[0m
+                                  [2mZCODE_PROXY_PORT[0m
+                                  [2mwhy[0m   the kit-managed proxy ignores these
+                                        variables, so they do not do what they
+                                        seem to: unset them
+                                  [2mnext[0m  [1mzcode-kit doctor[0m
+  [32m√ PASS[0m  mcp bridge installed    [2m/kit/mcp/zcode-harness-mcp/dist/index.js[0m
+  [32m√ PASS[0m  mcp bridge deps         [2m/kit/mcp/zcode-harness-mcp/node_modules[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [31m× FAIL[0m  proxy reachable + identity  [2mhealth=down[0m
+                                      [2mwhy[0m   no proxy of this kit answers on the
+                                            configured port
+                                      [2mnext[0m  [1mzcode-kit proxy start[0m
+                                        [2mor[0m  [1mzcode-kit doctor --fix[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m√ PASS[0m  credentials store  [2m~/.zcode-proxy/credentials.json: present and[0m
+                             [2mdecryptable on this machine[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [32m√ PASS[0m  omp provider registered   [2mzcode block in ~/.omp/agent/models.yml[0m
+  [32m√ PASS[0m  extension installed       [2m~/.omp/agent/extensions/zcode-proxy-autostart.ts[0m
+  [32m√ PASS[0m  codex adapter artifact    [2mgenerated/codex-home/config.toml[0m
+  [2m– SKIP[0m  omp: integration          [2mnot detected — skipped[0m
+  [2m– SKIP[0m  pi: integration           [2mnot detected — skipped[0m
+  [2m– SKIP[0m  claude-code: integration  [2mnot detected — skipped[0m
+  [2m– SKIP[0m  codex: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  opencode: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  cline: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration    [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  goose: integration        [2mnot detected — skipped[0m
+
+doctor: [31m2 failed[0m, [32m10 passed[0m, [2m10 skipped[0m → exit 1

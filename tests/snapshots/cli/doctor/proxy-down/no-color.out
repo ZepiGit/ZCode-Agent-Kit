@@ -1,0 +1,43 @@
+✗ 2 problems: 2 failed
+
+Runtime ────────────────────────────────────────────────────────────────────────
+  ✓ PASS  bun available           /opt/bun/bin/bun (<VERSION>)
+  ✓ PASS  config exists           /kit/proxy/config.yaml
+  ✓ PASS  key file exists         /kit/.proxykey
+  ✓ PASS  proxy source installed  /kit/zcode-proxy-src/node_modules
+  ✗ FAIL  proxy env overrides     ignored by the kit-managed proxy (unset them):
+                                  ZCODE_PROXY_PORT
+                                  why   the kit-managed proxy ignores these
+                                        variables, so they do not do what they
+                                        seem to: unset them
+                                  next  zcode-kit doctor
+  ✓ PASS  mcp bridge installed    /kit/mcp/zcode-harness-mcp/dist/index.js
+  ✓ PASS  mcp bridge deps         /kit/mcp/zcode-harness-mcp/node_modules
+
+Proxy ──────────────────────────────────────────────────────────────────────────
+  ✗ FAIL  proxy reachable + identity  health=down
+                                      why   no proxy of this kit answers on the
+                                            configured port
+                                      next  zcode-kit proxy start
+                                        or  zcode-kit doctor --fix
+
+Account ────────────────────────────────────────────────────────────────────────
+  ✓ PASS  credentials store  ~/.zcode-proxy/credentials.json: present and
+                             decryptable on this machine
+
+Integrations ───────────────────────────────────────────────────────────────────
+  ✓ PASS  omp provider registered   zcode block in ~/.omp/agent/models.yml
+  ✓ PASS  extension installed       ~/.omp/agent/extensions/zcode-proxy-autostart.ts
+  ✓ PASS  codex adapter artifact    generated/codex-home/config.toml
+  – SKIP  omp: integration          not detected — skipped
+  – SKIP  pi: integration           not detected — skipped
+  – SKIP  claude-code: integration  not detected — skipped
+  – SKIP  codex: integration        not detected — skipped
+  – SKIP  opencode: integration     not detected — skipped
+  – SKIP  cline: integration        not detected — skipped
+  – SKIP  kilo-code: integration    not detected — skipped
+  – SKIP  aider: integration        not detected — skipped
+  – SKIP  continue: integration     not detected — skipped
+  – SKIP  goose: integration        not detected — skipped
+
+doctor: 2 failed, 10 passed, 10 skipped → exit 1
