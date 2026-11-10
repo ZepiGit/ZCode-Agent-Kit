@@ -18,7 +18,7 @@
  * message protocol below unchanged. threadTransport() is the Bun Worker; the
  * module-level functions drive the proxy's own dispatcher over it.
  */
-import { CaptchaSdkError, type CaptchaFailureCategory } from "./captcha-token.js";
+import { CaptchaSdkError, captchaFailureFromTransport, type CaptchaFailureCategory } from "./captcha-token.js";
 
 const BACKEND = process.env.ZCODE_CAPTCHA_BACKEND?.trim().toLowerCase() || "happy";
 
@@ -188,11 +188,8 @@ export function threadTransport(): SolverTransport {
 }
 
 function solverError(category: CaptchaFailureCategory, message?: string): CaptchaSdkError {
-  const err = new CaptchaSdkError(category);
-  // The worker already redacted guest payloads; keep its diagnostic suffix
-  // (stall timings, captchaMetadata, incompatible method types) for the log.
-  if (message) err.message = message;
-  return err;
+  // A worker runs untrusted code: its type/category does not sanitize text.
+  return message ? captchaFailureFromTransport(category, message) : new CaptchaSdkError(category);
 }
 
 /** The dispatcher interface, as the token pool, the captcha module and the health supervisor consume it. */
