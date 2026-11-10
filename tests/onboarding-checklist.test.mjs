@@ -362,6 +362,7 @@ test("accepted43 legacy prompt, queue, retry, default, CI and resolver bytes/res
     const run = async (create) => {
       const t = terminal(); const prompter = create({ input: t.input, output: t.output, env });
       try {
+        assert.equal(prompter.interactive, env.CI !== "true", "CI bypass must be rejected before waiting for input");
         const pending = prompter.ask("Configure fixture?");
         t.input.write("\nmaybe\ny\nn\n");
         const values = [await pending, await prompter.ask("rotator?", { defaultAnswer: false })];
