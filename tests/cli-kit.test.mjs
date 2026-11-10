@@ -659,6 +659,10 @@ function makeMiniKit() {
   mkdirSync(join(root, "zcode-proxy-src", "src", "provider"), { recursive: true });
   cpSync(join(KIT, "cli"), join(root, "cli"), { recursive: true });
   cpSync(join(KIT, "lib"), join(root, "lib"), { recursive: true });
+  // The output module's shared token set and width core (ADR-0011; every
+  // payload ships them): the commands render through it since ticket 40.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const file of ["tokens.mjs", "width-core.mjs"]) cpSync(join(KIT, "zcode-proxy-src", "src", "tui", file), join(root, "zcode-proxy-src", "src", "tui", file));
   writeFileSync(join(root, ".proxykey"), "kit-test-proxy-key\n");
   writeFileSync(join(root, "proxy", "config.yaml"), "provider: zai\nserver:\n  port: 1\n");
   writeFileSync(
@@ -816,7 +820,8 @@ test("doctor --harness text summary counts manager FAIL lines (no false OK, exit
     }
     const text = `${captured.stdout}\n${captured.stderr}`;
     assert.doesNotMatch(text, /0 failed — OK/, "summary must not say OK while FAIL lines are printed");
-    assert.match(text, /check\(s\) failed/, "summary must report the failing checks");
+    // The verdict line (ticket 40; before: "doctor: N check(s) failed").
+    assert.match(text, /^doctor: [1-9]\d* failed, .* -> exit 1$/m, "summary must report the failing checks");
     assert.equal(captured.code, 1, "doctor must exit 1 when checks failed");
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -1,0 +1,6 @@
+| Proxy start[K[31mx FAIL  Port 18458 is in use by another service[0m
+   [2mwhy[0m   it answered /health without this kit's identity; the kit never stops a
+         service it did not start
+   [2mnext[0m  [1mzcode-kit proxy status[0m
+     [2mor[0m  [1mchange server.port in proxy/config.yaml, then zcode-kit proxy start[0m
+   [2mexit[0m 3

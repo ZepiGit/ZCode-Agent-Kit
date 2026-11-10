@@ -293,7 +293,10 @@ test("rotator asked once: a terminal answer is stored; setup, doctor --fix and a
   // `OK  `. This pty proof pins the status word and the label, not the pad.
   assert.match(reask.out, /(?:✓ )?OK {2,4}Account Rotator disabled\. Saved accounts are kept\./, "Enter takes the capitalised default N");
   assert.equal(f.decisionBytes(), stored, "the same answer again rewrites nothing");
-  assert.deepEqual(f.proxyCliCalls(), [], "a no never imports an account");
+  // Ticket 40 starts a down proxy through the lifecycle during doctor --fix,
+  // even in this manager-less fixture. Its stand-in records `serve` and fails
+  // closed; no account import (or any other proxy CLI call) is permitted.
+  assert.deepEqual(f.proxyCliCalls(), ["serve"], "doctor --fix attempts only a proxy start; a no never imports an account");
 });
 
 test("rotator: Ctrl-C at the question leaves the config and the stored decision untouched (fresh and under --reask)", { skip: !script, timeout: 120000 }, async (t) => {

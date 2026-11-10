@@ -15,7 +15,12 @@ const ROOT = join(import.meta.dirname, "..");
 const rel = (file) => relative(ROOT, file).split(sep).join("/");
 
 /** Code added by ticket 06 (and later tickets that build on it). caps.mjs is the reader. */
-const NEW_CODE = readdirSync(join(ROOT, "lib", "term")).filter((f) => f.endsWith(".mjs") && f !== "caps.mjs").map((f) => `lib/term/${f}`);
+const NEW_CODE = [
+  ...readdirSync(join(ROOT, "lib", "term")).filter((f) => f.endsWith(".mjs") && f !== "caps.mjs").map((f) => `lib/term/${f}`),
+  // Ticket 40: the commands migrated onto the output module and their report builders.
+  "cli/doctor-report.mjs", "cli/proxy-report.mjs",
+  ...["doctor", "proxy", "status", "logs"].map((name) => `cli/commands/${name}.mjs`),
+];
 const GUARDED = /\b(isTTY|NO_COLOR|TERM|CI|columns)\b/;
 
 const stripComments = (source) => source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1");

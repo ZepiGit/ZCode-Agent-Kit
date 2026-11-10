@@ -1,0 +1,27 @@
+✗ 1 problem: 1 failed
+
+Proxy ──────────────────────────────────────────────────────────────────────────
+  ✓ PASS  proxy reachable + identity  health=ours
+
+Account ────────────────────────────────────────────────────────────────────────
+  ✗ FAIL  account auth valid         上游返回：账号额度已用完，请在明天零点之后
+                                     再试一次 (quota exhausted)
+                                     why   the account endpoint did not accept
+                                           the stored login
+                                     next  zcode-kit auth login zai
+  ✓ PASS  start-plan JWT age (info)  5.0h since issue — age is informational,
+                                     validity is the auth check above
+
+Integrations ───────────────────────────────────────────────────────────────────
+  – SKIP  omp: integration          not detected — skipped
+  – SKIP  pi: integration           not detected — skipped
+  – SKIP  claude-code: integration  not detected — skipped
+  – SKIP  codex: integration        not detected — skipped
+  – SKIP  opencode: integration     not detected — skipped
+  – SKIP  cline: integration        not detected — skipped
+  – SKIP  kilo-code: integration    not detected — skipped
+  – SKIP  aider: integration        not detected — skipped
+  – SKIP  continue: integration     not detected — skipped
+  – SKIP  goose: integration        not detected — skipped
+
+doctor: 1 failed, 2 passed, 10 skipped → exit 1

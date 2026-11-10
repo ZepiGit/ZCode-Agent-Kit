@@ -13,7 +13,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { cloneArgs, describeFailure, fakeProxySource, fixtureBaseEnv, importBase, pathForms, swapPath, tarBinary, windowsGitDir } from "./ux-before/capture/host.mjs";
+import { cloneArgs, describeFailure, fakeProxySource, fixtureBaseEnv, importBase, pathForms, pinBun, swapPath, tarBinary, windowsGitDir } from "./ux-before/capture/host.mjs";
 import { VOLATILE, compareCaptures, normaliseVolatile } from "./ux-before/compare.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -110,6 +110,64 @@ test("Linux end to end: a kit path with `\\u` in it starts the fixture proxy (th
   assert.equal(m.error, undefined, m.error);
   assert.equal(m.exit, 0);
   assert.equal(JSON.parse(readFileSync(join(out, "proxy", "proxy-status-json-running", "pipe.txt"), "utf8").replace(/<PID>/g, "0")).health, "ours", "the fixture proxy answered as this kit's own");
+});
+
+// ------------------------------------------- the Bun path (ubuntu, run 42590699086)
+// The kit prints the Bun it runs (doctor's `bun available` row) and an
+// 80-column TTY wraps that row by the path's real length before `<BUN>`
+// replaces it: a baseline captured with Bun under a long directory had
+// `(1.4.2)` on a continuation line, the CI runner (~/.bun/bin/bun) one line.
+test("POSIX: the fixtures run Bun through a fixed-length path, whatever the host's Bun directory", () => {
+  const made = [];
+  const deps = { windows: false, tmp: "/tmp", mkdtemp: (prefix) => `${prefix}Ab12Cd`, symlink: (target, path) => made.push([target, path]) };
+  const longHost = `/home/${"x".repeat(80)}/node_modules/.bin/bun`;
+  const short = pinBun("/home/runner/.bun/bin/bun", deps);
+  assert.equal(short, "/tmp/ux-bun-Ab12Cd/bun");
+  assert.equal(pinBun(longHost, deps), short, "the host's directory never reaches the fixtures");
+  assert.deepEqual(made, [["/home/runner/.bun/bin/bun", short], [longHost, short]]);
+});
+
+test("Windows: the host's Bun as found (no symlink rights; the pipe/ci rows never wrap)", () => {
+  const made = [];
+  const host = "C:\\Users\\runneradmin\\.bun\\bin\\bun.exe";
+  assert.equal(pinBun(host, { windows: true, tmp: "C:\\T", mkdtemp: () => { throw new Error("no temp dir on Windows"); }, symlink: (...a) => made.push(a) }), host);
+  assert.deepEqual(made, []);
+});
+
+test("capture.mjs runs the fixtures with the pinned Bun and writes both spellings back as <BUN> (wiring)", () => {
+  const src = readFileSync(CAPTURE, "utf8");
+  assert.match(src, /const BUN = pinBun\(BUN_HOST, \{ windows: IS_WIN, tmp: tmpdir\(\), mkdtemp: mkdtempSync, symlink: symlinkSync \}\);/);
+  assert.match(src, /swap\(swap\(s, BUN, "<BUN>"\), BUN_HOST, "<BUN>"\)/);
+  assert.doesNotMatch(src, /spawnSync\(BUN_HOST/, "nothing runs the host's spelling");
+});
+
+/** The first `bun` on PATH, or null. */
+function hostBun() {
+  for (const dir of (process.env.PATH ?? "").split(process.platform === "win32" ? ";" : ":")) {
+    if (dir && existsSync(join(dir, "bun"))) return join(dir, "bun");
+  }
+  return null;
+}
+
+test("Linux end to end: Bun under a short or a long directory captures the doctor's rows as the BEFORE baseline", {
+  timeout: 300_000,
+  skip: process.platform !== "linux" ? "the 80-column variants need the Linux pty runner" : hostBun() ? false : "no bun on PATH",
+}, (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ux-capture-bun-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const variants = ["tty-color-80", "no-color", "ascii-locale"];
+  for (const [label, sub] of [["short", "b"], ["long", join("a".repeat(40), "node_modules", ".bin")]]) {
+    mkdirSync(join(dir, label, sub), { recursive: true });
+    const bun = join(dir, label, sub, "bun");
+    symlinkSync(hostBun(), bun);
+    const out = join(dir, label, "out");
+    const run = spawnSync(process.execPath, [CAPTURE, "--out", out, "--only", "^doctor-fresh$", "--variants", variants.join(",")], {
+      encoding: "utf8", timeout: 140_000, env: { ...captureEnv(), UX_BUN: bun },
+    });
+    assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
+    const diffs = compareCaptures(join(ROOT, "tests", "ux-before", "linux"), out, { variants, only: /^doctor\/doctor-fresh$/ });
+    assert.deepEqual(diffs, [], `Bun under a ${label} directory (${bun.length} chars):\n${diffs.join("\n")}`);
+  }
 });
 
 // ----------------------------------------------------------- tar, git, paths
@@ -225,6 +283,45 @@ test("git's diffstat of the fixture update normalises whatever the checkout's li
   for (const stat of [DIFFSTAT_LF_TTY, DIFFSTAT_CRLF(34), DIFFSTAT_CRLF(35)]) assert.equal(normaliseVolatile(ffwd(stat)), want);
   assert.equal(want, "Updating <SHA>..<SHA>\nFast-forward\n package.json | <N> <GRAPH>\n <N> file(s) changed, <N> insertion(s)(+), <N> deletion(s)(-)\nupdate: refreshing consented integrations\n");
   assert.notEqual(normaliseVolatile(ffwd([" cli/zcode-kit.mjs | 2 +-", DIFFSTAT_LF[1]])), want, "the path stays: a different file is a difference");
+});
+
+// Ticket 40: the TTY progress of `proxy start|stop|restart` and `doctor --fix`
+// as the capture stores it (\r turned into \n): one line per spinner frame
+// (colour: ESC[K before every redraw; NO_COLOR: a line of spaces after each).
+const frames = (label, n, { colour = true, elapsedFrom = Infinity } = {}) => {
+  const lines = [""];
+  for (let i = 0; i < n; i++) {
+    const text = `${"|/-\\"[i % 4]} ${label}${i >= elapsedFrom ? ` (${2 + Math.floor((i - elapsedFrom) / 10)} s)` : ""}`;
+    lines.push(colour && i > 0 ? `\x1b[K${text}` : text);
+    if (!colour) lines.push(" ".repeat(text.length));
+  }
+  return lines.join("\n") + "\n";
+};
+
+test("the step's spinner frames and elapsed time normalise whatever the start or stop took", () => {
+  for (const colour of [true, false]) {
+    for (const label of ["Proxy start", "Proxy stop", "Proxy start (--fix)"]) {
+      const result = `${colour ? "\x1b[K" : ""}  ✓ OK    ${label}  started (pid <PID>)\n`;
+      const quick = normaliseVolatile(frames(label, 3, { colour }) + result);
+      const slow = normaliseVolatile(frames(label, 47, { colour, elapsedFrom: 20 }) + result.replace(label, `${label} (5 s)`));
+      assert.equal(quick, slow, `${label} colour=${colour}`);
+      assert.equal(quick, `\n<SPINNER> ${label}\n${result}`);
+    }
+  }
+  assert.equal(normaliseVolatile("OK  Proxy start (3 s) - started (pid <PID>)\n"), "OK  Proxy start - started (pid <PID>)\n", "the plain result row too");
+});
+
+test("the spinner rules touch no other line: other labels, list items and kit text stay", () => {
+  const kit = [
+    "- Proxy started by hand",
+    "| Proxy dependencies",
+    "  - Proxy start",
+    "- skipped: Proxy start is not needed",
+    "Proxy start took (3 seconds)",
+    "doctor: 1 failed (2 s)",
+    "",
+  ].join("\n");
+  assert.equal(normaliseVolatile(kit), kit);
 });
 
 test("the diffstat rules leave kit lines strict: indentation, trailing text and other wording stay", () => {

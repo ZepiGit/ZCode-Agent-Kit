@@ -1,4 +1,5 @@
-port:      (config missing)
-pid file:  none
-health:    nokey
-  connection details unavailable: <KIT>/.proxykey missing — run setup first
+✗ FAIL  The local proxy key is missing
+   why   <KIT>/.proxykey not found, so the proxy's identity
+         cannot be proven
+   next  zcode-kit setup
+   exit 1

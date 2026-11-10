@@ -40,6 +40,15 @@ export const VOLATILE = Object.freeze([
   ["generated proxy key", /(API key \(Bearer \/ x-api-key\): {2})(?!UXFIXTURE-)[A-Za-z0-9_-]{43}\b/g, "$1<GENERATED_KEY>"],
   // Size of the fixture release tree, which grows with every kit file added under cli/ or lib/.
   ["fixture release size", /\(\d+ files updated, \d+ removed\)/g, "(<N> files updated, <N> removed)"],
+  // The TTY progress of a lifecycle step (ticket 40, design-language §4.10):
+  // its spinner redraws the line at 10 Hz for as long as the start or stop
+  // takes, so the number of frames (one line each once the capture turns \r
+  // into \n, each followed by a line of spaces under NO_COLOR) differs per
+  // run, and so does the elapsed time shown after 2 s. A run of frames of one
+  // label becomes one marker line; the elapsed time is dropped. Only the
+  // kit's own step labels match.
+  ["spinner frames", /^(?:(?:\x1b\[K)?[|/\\-] (Proxy (?:start|stop)(?: \(--fix\))?)(?: \(\d+ s\))?\n(?: +\n)?)(?:(?:\x1b\[K)?[|/\\-] \1(?: \(\d+ s\))?\n(?: +\n)?)*/gm, "<SPINNER> $1\n"],
+  ["step elapsed", /(Proxy (?:start|stop)(?: \(--fix\))?) \(\d+ s\)/g, "$1"],
 ]);
 
 export const normaliseVolatile = (text) => VOLATILE.reduce((s, [, re, to]) => s.replace(re, to), text);

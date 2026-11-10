@@ -1,1 +1,6 @@
-ERROR: <KIT>/.proxykey missing — cannot verify identity. Run setup first (node setup.mjs).
+
+| Proxy start
+✗ FAIL  The local proxy key is missing
+   why   <KIT>/.proxykey not found, so the proxy's identity cannot be proven
+   next  zcode-kit setup
+   exit 5

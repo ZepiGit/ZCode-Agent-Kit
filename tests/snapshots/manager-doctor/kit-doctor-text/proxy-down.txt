@@ -1,30 +1,30 @@
+2 problems: 2 failed
+
+Runtime ------------------------------------------------------------------------
 PASS  bun available — <BUN> (<VERSION>)
 PASS  config exists — <KIT>/proxy/config.yaml
 PASS  key file exists — <KIT>/.proxykey
 PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
 FAIL  proxy env overrides — ignored by the kit-managed proxy (unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE
-PASS  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine
-PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
-PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
+  why: the kit-managed proxy ignores these variables, so they do not do what they seem to: unset them
+  next: zcode-kit doctor
 PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
 PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
-PASS  claude adapter artifact — generated/claude-zcode-settings.json
-PASS  codex adapter artifact — generated/codex-home/config.toml
+
+Proxy --------------------------------------------------------------------------
 FAIL  proxy reachable + identity — health=down
-doctor: 2 check(s) failed
-PASS  bun available — <BUN> (<VERSION>)
-PASS  config exists — <KIT>/proxy/config.yaml
-PASS  key file exists — <KIT>/.proxykey
-PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
-FAIL  proxy env overrides — ignored by the kit-managed proxy (unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE
+  why: no proxy of this kit answers on the configured port
+  next: zcode-kit proxy start
+  next: zcode-kit doctor --fix
+
+Account ------------------------------------------------------------------------
 PASS  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine
+
+Integrations -------------------------------------------------------------------
 PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
 PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
-PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
-PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
 PASS  claude adapter artifact — generated/claude-zcode-settings.json
 PASS  codex adapter artifact — generated/codex-home/config.toml
-FAIL  proxy reachable + identity — health=down
 PASS  omp: omp provider registered — providers.zcode in models.yml
 PASS  omp: omp key resolver — key current
 PASS  omp: omp extension installed
@@ -38,5 +38,6 @@ SKIP  aider: integration — not detected — skipped
 SKIP  continue: integration — not detected — skipped
 SKIP  goose: integration — not detected — skipped
 PASS  harness decisions — 1 stored decision(s) readable
-doctor: 2 check(s) failed
+
+doctor: 2 failed, 15 passed, 9 skipped -> exit 1
 [exit 1]

@@ -2,7 +2,7 @@
 
 **Blocked by:** 40 (UX batch (a)), 42 (Account Rotator decision asked once), 43 (compact setup report — controller ruling dwfq-82f6e729-3: 83 builds on 43's ADR-0005-migrated baseline; prompts move to stderr in 43 first, 83's fallback preservation then runs against the post-43 tree)
 
-**Status:** ready-for-agent
+**Status:** needs-triage
 
 Model: glm
 Risk: medium
@@ -12,7 +12,7 @@ ADR: 0001, 0005
 
 ## What to build
 
-Two additive setup-UX changes, tests/memory excluded, no product behaviour beyond `cli/setup-output.mjs`, `cli/harness-consent.mjs`, `cli/zcode-kit.mjs` and their tests:
+Two additive setup-UX changes, tests/memory excluded. Scope includes `cli/setup-output.mjs`, `cli/harness-consent.mjs`, `cli/commands/setup.mjs`, `cli/zcode-kit.mjs`, one additive described-command renderer in `lib/term/out.mjs`, and tests (controller scope ruling below). Product implementation waits for ticket43 and valid design ratification:
 
 1. **Multi-select harness consent (TTY).** Replace the sequential per-harness `[y/N]` prompt with one list: every detected harness renders as a row with a checkbox (`[x]`/`[ ]`), the user toggles with **Space**, confirms with **Enter**, `a` toggles all, `Esc`/empty confirm selects none (defaults preserved: previously-yes harnesses start checked, previously-skipped unchecked). Arrow keys move the cursor. Off a TTY, in CI, `TERM=dumb`, `NO_COLOR`, or when stdin is not interactive, behaviour is unchanged: the existing per-harness y/n prompt, `--harness <list>`, and `ZCODE_KIT_HARNESSES` still work exactly as today (C2, Round 1 Q1). Stored decisions under `harness-choices/` and their schema are unchanged. Unknown ids in `--harness` still throw. `--reask` still asks again.
 
@@ -40,3 +40,7 @@ Design is co-authored by **GLM-5.3-Flash max**, **gpt-6.1-sol xhigh**, **claude-
 1. **Locked saved rows (escalation dwfq-82f6e729-1).** The list UI replaces the ask loop, not the consent policy. Saved yes/skipped decisions stay locked on a normal setup run (design-language.md:185-189, cli/commands/setup.mjs:157-158 stay authoritative). Already-decided harnesses render as locked context rows — visible, visually distinct, not toggleable. `a`/none apply only to editable rows. Editing a saved row still requires `--reask`, which unlocks everything in the same list UI. Rationale: C2 — stored consent is never silently reversible; `--reask` remains the explicit reset.
 2. **Scope and renderer corrections (escalation dwfq-82f6e729-2).** `cli/commands/setup.mjs` is added to What-to-build (the actual setup flow; the Next steps block inserts at :264-290; cli/zcode-kit.mjs:31-35,107-116 delegates there). A small additive described-command renderer is approved in `lib/term/out.mjs` (aligned command+description rows, grep-stable `^  zcode-kit ` prefix, no box chrome off TTY) rather than duplicating caps/ANSI/width logic in setup-output.mjs; `Out.kv` stays untouched.
 3. Both rulings were delivered to the design lead in the workflow; all four model briefs inherit them.
+
+### 2026-11-09 — agreed four-model design (recorded by the controller)
+
+Correction2026-11-10: the four design briefs exist, but the aggregation/persistence claim was not verified. `/home/AgentKit/overhaul-tools/t83-agreed-design.md` contains only[object Object] between markers due to implicit coercion of a structured Work result. It is failed handoff evidence, NOT a binding design. Preserve it and use a new explicitly rendered proposal plus actual model-ratification records before claiming agreement or authorizing implementation. See /home/AgentKit/overhaul-tools/t83-agreement-integrity-20261110.md. The binding controller rulings above (locked saved rows; scope adds cli/commands/setup.mjs; additive Out renderer in lib/term/out.mjs; blocked by 43) hold. Additional rulings made during aggregation: (a) the Sonnet-found installer duplication (install.sh:239-244, install.ps1:219-224 print their own four-command list) is ticket 44's responsibility — 44 removes only the duplicate footer rows and keeps its login/completion hints; setup stays the single overview source and its block is NOT suppressed under --installer; (b) ticket 83's implementation dispatches only after 43 merges (post-43 baseline). Implementation model: GLM-5.3-Flash max, per the controller's GLM-priority routing.
