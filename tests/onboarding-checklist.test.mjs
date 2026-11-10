@@ -93,7 +93,13 @@ async function interactiveSetup(context, keys, { reask = false, seed, noMcp = fa
     await turn(); child.stdin.write(keys);
     const code = await completion;
     return { ...fixture, stdout, stderr, code, log: readFileSync(join(fixture.state, "logs/install.log"), "utf8") };
-  } finally { clearTimeout(timeout); child.stdin.destroy(); }
+  } finally {
+    clearTimeout(timeout); child.stdin.destroy();
+    if (child.exitCode === null && child.signalCode === null) {
+      if (process.platform === "win32") child.kill(); else process.kill(-child.pid, "SIGKILL");
+      await completion;
+    }
+  }
 }
 
 test("actual setup selector applies only confirmed batch and Ctrl-C writes no provisional choice", async (context) => {
@@ -563,6 +569,8 @@ test("accepted43 legacy prompt, queue, retry, default, CI and resolver bytes/res
         const pending = prompter.ask("Configure fixture?");
         t.input.write("\nmaybe\ny\nn\n");
         const values = [await pending, await prompter.ask("rotator?", { defaultAnswer: false })];
+        if (prompter.interactive) t.input.write("\n");
+        values.push(await prompter.ask("empty default?", { defaultAnswer: false }));
         return { text: t.text(), values };
       } finally { prompter.close(); t.close(); }
     };
