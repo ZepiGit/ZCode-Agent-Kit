@@ -4,7 +4,7 @@ n
 update: downloading v9.9.9 ...
 update: verified v9.9.9 (sha256) — updating v0.2.42 → v9.9.9
 not running
-update: applied v9.9.9 (66 files updated, 0 removed)
+update: applied v9.9.9 (70 files updated, 0 removed)
 update: refreshing consented integrations (stored answers are respected; new harnesses are asked only on a terminal)...
   ZCODE  /  AGENT KIT
   v9.9.9  |  Your local AI workspace
@@ -36,6 +36,13 @@ update: refreshing consented integrations (stored answers are respected; new har
     API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+
+[1mNext steps[0m [2m---------------------------------------------------------------------[0m
+  [1mzcode-kit doctor      [0m  [2mCheck the installation[0m
+  [1mzcode-kit proxy start [0m  [2mStart the proxy for manual clients[0m
+  [1mzcode-kit proxy status[0m  [2mCheck proxy health and connection details[0m
+  [1mzcode-kit auth status [0m  [2mCheck sign-in status[0m
+  [1mzcode-kit --help      [0m  [2mBrowse all commands[0m
 update: starting the proxy on the updated code...
 starting zcode-proxy ...
 started (pid <PID>) — healthy on http://127.0.0.1:18458

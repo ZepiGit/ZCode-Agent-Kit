@@ -461,6 +461,13 @@ function createSelectorSession({ input, output, onClosed, onAborted, getCaps, fr
       if (prefix === "\x1b[" || prefix === "\x1bO") { decoder.write(ch); return; }
       const csi = prefix.startsWith("\x1b[");
       const ss3 = prefix.startsWith("\x1bO");
+      if ((csi || ss3) && !/^[\x20-\x7e]$/.test(ch)) {
+        contaminate();
+        if (ch === "\r" || ch === "\n") redisclose();
+        return;
+      }
+      // readline also supports Linux-console ESC [[ function-key sequences.
+      if (prefix === "\x1b[[") return;
       if ((csi || ss3) && !/[\x40-\x7e]$/.test(ch)) return;
       if (prefix === "\x1b[200~") { reset(); paste = true; pasteMatch = 0; freshDecoder(); return; }
       const complete = prefix;

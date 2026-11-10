@@ -55,8 +55,9 @@ import { beginTransaction } from "../lib/transaction.mjs";
 import { displayWidth } from "../lib/term/width.mjs";
 
 const UTF8 = { TERM: "xterm-256color", LANG: "C.UTF-8" };
-async function interactiveSetup(context, keys, { reask = false, seed, noMcp = false, lockedMcp = false } = {}) {
-  const fixture = fixtureSetup(context);
+async function interactiveSetup(context, keys, { reask = false, seed, noMcp = false, lockedMcp = false, owned = false } = {}) {
+  const fixture = fixtureSetup(context, [], owned ? "codex" : "none");
+  rmSync(join(fixture.state, "generated/harness-choices/codex.json"), { force: true });
   mkdirSync(join(fixture.home, ".codex"));
   if (seed) {
     mkdirSync(join(fixture.state, "generated/harness-choices"), { recursive: true });
@@ -90,7 +91,7 @@ async function interactiveSetup(context, keys, { reask = false, seed, noMcp = fa
   try {
     for (let i = 0; i < 500 && !stderr.includes("editable checked"); i++) await delay(5);
     assert.match(stderr, /editable checked/);
-    await turn(); child.stdin.write(keys);
+    await turn(); if (keys === "") child.stdin.end(); else child.stdin.write(keys);
     const code = await completion;
     return { ...fixture, stdout, stderr, code, log: readFileSync(join(fixture.state, "logs/install.log"), "utf8") };
   } finally {
@@ -130,6 +131,22 @@ test("setup reask none preserves saved yes but skips unowned this run; unreadabl
   assert.equal(existsSync(join(veto.home, ".omp/agent/mcp.json")), false);
   assert.equal(readHarnessChoices({ generated: join(veto.state, "generated") }).harnesses.omp.mcp, true);
   assert.doesNotMatch(veto.stderr, /Selecting OMP/);
+});
+
+test("real setup absent reask actions preserve owned/unowned/unreadable choice bytes", async (context) => {
+  for (const ending of ["\x1b", "\r", ""]) for (const owned of [false, true]) for (const stored of [undefined, "configured", "skipped", "unreadable"]) {
+    const seed = stored === "unreadable" ? "{unsupported" : stored ? JSON.stringify({ schema: 1, decision: stored, source: "fixture", decidedAt: "old", mcp: true }) + "\n" : undefined;
+    // A saved yes is prechecked under reask: clear it for an empty Enter.
+    const keys = ending === "\r" && stored === "configured" ? " \r" : ending;
+    const r = await interactiveSetup(context, keys, { reask: true, seed, owned });
+    assert.equal(r.code, 0, r.stderr);
+    const file = join(r.state, "generated/harness-choices/codex.json");
+    assert.equal(existsSync(file), seed !== undefined);
+    if (seed !== undefined) assert.equal(readFileSync(file, "utf8"), seed);
+    if (owned && stored !== "unreadable") assert.match(r.stdout, /Codex CLI — existing kit integration refreshed/);
+    else assert.match(r.stdout, /SKIP +Codex CLI/);
+    assert.doesNotMatch(r.stdout, /^  zcode-kit run /m);
+  }
 });
 
 test("completed setup stdout/stderr/log match accepted43 byte-for-byte apart from the exact additive suffix", (t) => {
@@ -179,6 +196,12 @@ test("launch overview uses real successful consented outcomes only, and any fail
     assert.equal(r.stdout.match(/^  zcode-kit /gm).length, 6);
     assert.match(r.stdout, new RegExp(`^  zcode-kit run ${id} +Launch .+ wired to ZCode$`, "m"));
     assert.doesNotMatch(r.stdout, /synthetic-t83-key/);
+  }
+  for (const id of ["omp", "pi", "continue", "goose", "cline", "kilo-code"]) {
+    const r = fixtureSetup(t, [], id);
+    assert.equal(r.code, 0);
+    assert.equal(r.stdout.match(/^  zcode-kit /gm).length, 5, id);
+    assert.doesNotMatch(r.stdout, /^  zcode-kit run /m);
   }
   const first = fixtureSetup(t, [], "aider,codex,claude-code,opencode");
   assert.match(first.stdout, /^  zcode-kit run claude-code /m);
@@ -540,7 +563,7 @@ test("selector close/raw exceptions clean owned listeners; geometry is checked a
 });
 
 test("only decoded bare Escape acts; split arrows, modified/meta and malformed controls never become consent", async () => {
-  for (const chunks of [["\x1b", "[", "B"], ["\x1bO", "C"], ["\x1b[1;5A"], ["\x1ba"], ["\x1b]title a \r\x07"], ["\x1b] a\r\x07"]]) {
+  for (const chunks of [["\x1b", "[", "B"], ["\x1bO", "C"], ["\x1b[1;5A"], ["\x1ba"], ["\x1b]title a \r\x07"], ["\x1b] a\r\x07"], ["\x1b[ \ra\r"], ["\x1b[[A"], ["\x1b", "[", "[", "A"]]) {
     const t = terminal();
     try {
       let done = false;
@@ -610,6 +633,18 @@ test("lexical delayed LF tail is consumed once, not every first rotator Enter", 
       assert.equal(await line, false);
     } finally { t.close(); }
   }
+});
+
+test("SIGINT during the fresh line phase restores prior raw true after readline closes", async () => {
+  const t = terminal(); t.input.isRaw = true;
+  try {
+    const pending = t.prompter.selectHarnesses({ rows: [{ id: "codex", label: "Codex CLI" }] });
+    await t.ready(); t.input.write(" \r"); await pending;
+    const line = t.prompter.ask("fresh abort?");
+    for (let i = 0; i < 100 && !t.text().includes("fresh abort?"); i++) await turn();
+    t.input.write("\x03"); await assert.rejects(line, (err) => err.code === ABORTED);
+    t.prompter.close(); assert.equal(t.input.isRaw, true);
+  } finally { t.close(); }
 });
 
 test("raw true is restored after selector and subsequent line close", async () => {
