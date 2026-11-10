@@ -14,7 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
@@ -589,7 +589,7 @@ process.exit(r.status ?? 1);
 
 // Only a successful exit of the real fixture manager may arm its next proxy.
 // This wrapper changes no manager lifecycle code, timings, or exit statuses.
-function completionManager(root, { managerNodeArgs = [], lifecycleModule = pathToFileURL(join(root, "lib", "proxy-lifecycle.mjs")).href } = {}) {
+function completionManager(root, { managerNodeArgs = [], managerAfterObserverArgs = [], lifecycleModule = pathToFileURL(join(root, "lib", "proxy-lifecycle.mjs")).href } = {}) {
   const entry = join(root, "completion-manager.mjs");
   const adapter = join(root, "completion-lifecycle.mjs");
   const preload = join(root, "completion-observer.mjs");
@@ -599,12 +599,19 @@ function completionManager(root, { managerNodeArgs = [], lifecycleModule = pathT
   writeFileSync(adapter, `
 export * from ${JSON.stringify(lifecycleModule)};
 import { createLifecycle as realLifecycle } from ${JSON.stringify(lifecycleModule)};
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+const traceFile = ${JSON.stringify(join(root, "logs"))} + "/completion-observer-" + process.pid + ".json";
+const trace = (fields) => {
+  let previous = {};
+  try { previous = JSON.parse(readFileSync(traceFile, "utf8")); } catch {}
+  writeFileSync(traceFile, JSON.stringify({ ...previous, ...fields }), { mode: 0o600 });
+};
 const snapshot = () => {
   const r = JSON.parse(readFileSync(${JSON.stringify(join(root, "logs", "proxy.pid"))}, "utf8"));
   return { pid: r.pid, startedMs: r.startedMs, ...(r.startTicks === undefined ? {} : { startTicks: r.startTicks }) };
 };
 export function createLifecycle(options) {
+  trace({ adapterInvoked: true, managerPid: process.pid });
   let spawned = null;
   const lifecycle = realLifecycle({ ...options, stepHook(step) {
     options.stepHook?.(step);
@@ -614,7 +621,11 @@ export function createLifecycle(options) {
     const result = await lifecycle[intent](...args);
     if (result.code === 0) {
       const identity = spawned ?? snapshot(); // late acknowledgement: existing serving generation
-      await new Promise((resolve, reject) => process.send({ type: "fixture-manager-generation", identity }, (err) => err ? reject(err) : resolve()));
+      trace({ intent, intentCode: result.code, identity, sendCalled: true });
+      await new Promise((resolve, reject) => process.send({ type: "fixture-manager-generation", identity }, (err) => {
+        trace({ sendCallback: true, sendErrorCode: err?.code ?? null });
+        err ? reject(err) : resolve();
+      }));
     }
     return result;
   };
@@ -623,9 +634,27 @@ export function createLifecycle(options) {
 `);
   writeFileSync(preload, `
 import { registerHooks } from "node:module";
+import { realpathSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+// Canonicalize BOTH operands: Node's parentURL spelling need not equal the
+// native realpath URL (Windows short names/case, or equivalent URL encoding).
+// Scope stays this fixture's exact manager file and exact lifecycle import.
+const canonical = (url) => {
+  if (!url?.startsWith("file:")) return null;
+  try {
+    const path = realpathSync.native(fileURLToPath(url));
+    return process.platform === "win32" ? path.toLowerCase() : path;
+  } catch { return null; }
+};
+const manager = canonical(${JSON.stringify(pathToFileURL(join(root, "proxy", "zcode-proxy-manager.mjs")).href)});
 registerHooks({ resolve(spec, context, next) {
-  if (context.parentURL === ${JSON.stringify(pathToFileURL(realpathSync.native(join(root, "proxy", "zcode-proxy-manager.mjs"))).href)} && spec === "../lib/proxy-lifecycle.mjs")
-    return { url: ${JSON.stringify(pathToFileURL(adapter).href)}, shortCircuit: true };
+  if (spec === "../lib/proxy-lifecycle.mjs") {
+    const parent = canonical(context.parentURL);
+    const matched = manager !== null && parent === manager;
+    // Only fixture file identity/URL facts; never env, config, key or pid-record contents.
+    if (matched || context.parentURL?.endsWith("/proxy/zcode-proxy-manager.mjs")) writeFileSync(${JSON.stringify(join(root, "logs"))} + "/completion-resolve-" + process.pid + ".json", JSON.stringify({ parentURL: context.parentURL, canonicalParent: parent, canonicalManager: manager, matched }), { mode: 0o600 });
+    if (matched) return { url: ${JSON.stringify(pathToFileURL(adapter).href)}, shortCircuit: true };
+  }
   return next(spec, context);
 } });
 `);
@@ -633,19 +662,25 @@ registerHooks({ resolve(spec, context, next) {
 import { spawn } from "node:child_process";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-const child = spawn(process.execPath, [...${JSON.stringify(managerNodeArgs)}, "--import", ${JSON.stringify(pathToFileURL(preload).href)}, ${JSON.stringify(join(root, "proxy", "zcode-proxy-manager.mjs"))}, ...process.argv.slice(2)], { env: process.env, stdio: ["inherit", "inherit", "inherit", "ipc"] });
+const child = spawn(process.execPath, [...${JSON.stringify(managerNodeArgs)}, "--import", ${JSON.stringify(pathToFileURL(preload).href)}, ...${JSON.stringify(managerAfterObserverArgs)}, ${JSON.stringify(join(root, "proxy", "zcode-proxy-manager.mjs"))}, ...process.argv.slice(2)], { env: process.env, stdio: ["inherit", "inherit", "inherit", "ipc"] });
 let generation = null;
-child.on("message", (message) => { if (message?.type === "fixture-manager-generation") generation = message.identity; });
+let messages = 0;
+const receiptFile = ${JSON.stringify(join(root, "logs"))} + "/completion-receipt-" + child.pid + ".json";
+const receipt = (fields = {}) => writeFileSync(receiptFile, JSON.stringify({ wrapperPid: process.pid, managerPid: child.pid, messages, generation, ...fields }), { mode: 0o600 });
+child.on("message", (message) => {
+  if (message?.type === "fixture-manager-generation") { generation = message.identity; messages++; receipt(); }
+});
 const timer = setTimeout(() => { child.kill("SIGKILL"); process.exitCode = 124; }, 90_000);
 child.once("error", (err) => { clearTimeout(timer); console.error(err.message); process.exitCode = 1; });
 child.once("close", (code) => {
   clearTimeout(timer);
+  receipt({ closeCode: code });
   if (process.exitCode === 124) return;
   process.exitCode = code ?? 1;
   if (code !== 0) return;
   const logDir = ${JSON.stringify(join(root, "logs"))};
   const record = JSON.parse(readFileSync(join(logDir, "proxy.pid"), "utf8"));
-  if (!generation || !Number.isInteger(generation.pid) || !Number.isFinite(generation.startedMs)) throw new Error("completed manager left no started proxy generation");
+  if (!generation || !Number.isInteger(generation.pid) || !Number.isFinite(generation.startedMs)) throw new Error("completed manager left no started proxy generation: " + JSON.stringify({ messages, generationPresent: generation !== null, pidInteger: Number.isInteger(generation?.pid), startedMsFinite: Number.isFinite(generation?.startedMs) }));
   if (record.pid !== generation.pid || record.startedMs !== generation.startedMs || record.startTicks !== generation.startTicks) throw new Error("completed manager proxy generation changed before completion");
   const marker = join(logDir, "fixture-manager-complete-" + record.pid);
   const temp = marker + "." + process.pid + ".tmp";
@@ -656,6 +691,85 @@ child.once("close", (code) => {
   return entry;
 }
 
+// Exercise the generated wrapper and real CLI, not a hand-built successful
+// marker. Percent-encoding an unreserved character keeps the same file but
+// changes the raw parentURL string, portably exposing representation matching.
+// This is a controlled URL-shape counterexample, NOT native Windows evidence.
+test("the completion observer follows an equivalent file URL through the actual wrapper and CLI", { timeout: 60_000 }, async (t) => {
+  const root = kitFixture(t, await freePort(), { proxySrc: true });
+  const control = join(root, "parent-url-control.mjs");
+  const trace = join(root, "parent-url-control.json");
+  writeFileSync(control, `
+import { registerHooks } from "node:module";
+import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+registerHooks({ resolve(spec, context, next) {
+  if (spec === "../lib/proxy-lifecycle.mjs" && context.parentURL?.endsWith("/proxy/zcode-proxy-manager.mjs")) {
+    const shaped = context.parentURL.replace("zcode-proxy-manager.mjs", "%7Acode-proxy-manager.mjs");
+    writeFileSync(${JSON.stringify(trace)}, JSON.stringify({ original: context.parentURL, shaped, sameFile: fileURLToPath(shaped) === fileURLToPath(context.parentURL) }));
+    return next(spec, { ...context, parentURL: shaped });
+  }
+  return next(spec, context);
+} });
+`);
+  const manager = completionManager(root, { managerAfterObserverArgs: ["--import", pathToFileURL(control).href] });
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+  const result = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024 });
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  if (record) defer(root, () => killFixtureProxy(root, record.pid));
+  const evidence = readJson(trace);
+  assert.equal(evidence?.sameFile, true, "the control changes URL spelling, never the imported file");
+  assert.notEqual(evidence.original, evidence.shaped);
+  assert.equal(result.status, 0, completionEvidence(root, result.stdout + result.stderr));
+  const observers = readdirSync(join(root, "logs")).filter((name) => /^completion-observer-\d+\.json$/.test(name));
+  assert.equal(observers.length, 1, "one actual manager adapter invocation");
+  const observed = readJson(join(root, "logs", observers[0]));
+  assert.equal(observed.adapterInvoked, true);
+  assert.equal(observed.intent, "ensureRunning");
+  assert.equal(observed.intentCode, 0);
+  assert.equal(observed.sendCalled, true);
+  assert.equal(observed.sendCallback, true, "the real IPC send callback ran before CLI exit");
+  assert.equal(observed.sendErrorCode, null);
+  const receipt = readJson(join(root, "logs", `completion-receipt-${observed.managerPid}.json`));
+  assert.equal(receipt.messages, 1, "the actual wrapper received the generation message");
+  assert.equal(receipt.closeCode, 0, "the real CLI closed successfully");
+  assert.deepEqual(receipt.generation, observed.identity);
+  assert.deepEqual(readJson(join(root, "logs", `fixture-manager-complete-${record.pid}`)), {
+    pid: record.pid, startedMs: record.startedMs, ...(record.startTicks === undefined ? {} : { startTicks: record.startTicks }),
+  }, "only the actual wrapper publishes after its real manager closes 0");
+  assert.equal(receipt.wrapperPid, result.pid, "receipt belongs to the actual spawned wrapper");
+  if (process.platform !== "win32") {
+    const groups = spawnSync("ps", ["-o", "pid=,pgid=", "-p", [process.pid, record.pid].join(",")], { encoding: "utf8", timeout: 5000 });
+    assert.equal(groups.status, 0, groups.stderr);
+    t.diagnostic(`owned PID/PGID (runner, proxy): ${groups.stdout.trim().replace(/\s*\n\s*/g, "; ")}`);
+  }
+  t.diagnostic(`equivalent-parentURL=${JSON.stringify(evidence)}; wrapper=${result.pid} manager=${observed.managerPid} proxy=${record.pid}; adapterInvoked=${observed.adapterInvoked} sendCallback=${observed.sendCallback} sendError=${observed.sendErrorCode} receivedMessages=${receipt.messages} CLIclose=${receipt.closeCode} wrapperExit=${result.status}`);
+});
+
+// Failure evidence is limited to owned fixture output and explicitly named
+// fixture logs/traces. Never read proxy.pid, config, keys, env or account stores.
+const fixtureOutput = (text) => String(text).replaceAll(KEY, "<fixture-key-redacted>")
+  .replace(/\b[a-f0-9]{64}\b/gi, "<fixture-token-redacted>")
+  .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").slice(-8192);
+function fixtureTail(file, limit = 6000) {
+  let fd;
+  try {
+    fd = openSync(file, "r");
+    const size = fstatSync(fd).size;
+    const bytes = Buffer.alloc(Math.min(size, limit));
+    readSync(fd, bytes, 0, bytes.length, Math.max(0, size - bytes.length));
+    return fixtureOutput(bytes.toString("utf8"));
+  } catch { return "<absent>"; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
+function completionEvidence(root, output = "") {
+  const dir = join(root, "logs");
+  const traces = readdirSync(dir).filter((name) => /^completion-(?:resolve|observer|receipt)-\d+\.json$/.test(name)).sort().slice(-12);
+  return fixtureOutput(output) + "\nfixture proxy.log tail:\n" + fixtureTail(join(dir, "proxy.log")) +
+    "\nfixture early-log tail:\n" + fixtureTail(join(dir, "proxy.early.log")) +
+    traces.map((name) => `\n${name}: ${fixtureTail(join(dir, name), 2000)}`).join("");
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The fixture's stand-in proxies alive now (by command line), or null when the process table cannot be read. */
 const standIns = (root) => fixtureProcesses(root)?.filter((p) => /zcode-proxy-src[\\/]+src[\\/]+index\.ts\b.*\bserve\b/.test(p.commandLine)) ?? null;
@@ -664,7 +778,7 @@ const countOf = (text, re) => (text.match(re) ?? []).length;
 // Instrument only the fixture manager's lifecycle import. The actual CLI entry,
 // completion wrapper, stand-in and supervisor are unchanged; stepHook is the
 // existing lifecycle seam. No production file is rewritten, even in the copy.
-function heldCompletionFixture(t, port, { onExit = "none", windowsTicks = false } = {}) {
+function heldCompletionFixture(t, port, { onExit = "none", windowsTicks = false, missObserver = false } = {}) {
   const root = kitFixture(t, port, { proxySrc: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), SUPERVISED_PROXY);
   const held = join(root, "manager-held.json");
@@ -727,24 +841,39 @@ process.exit = (code) => {
 };
 `);
   const entry = completionManager(root, { managerNodeArgs: ["--import", pathToFileURL(preload).href], lifecycleModule: pathToFileURL(adapter).href });
+  // Diagnostic negative control only: omit the generated observation hook
+  // before spawn, leaving the SAME wrapper, real CLI and stand-in untouched.
+  if (missObserver) writeFileSync(join(root, "completion-observer.mjs"), "// Deliberately missing fixture observer.\n");
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "0", FAKE_COMPLETION_MANAGER: entry });
   const child = spawn(process.execPath, [entry, "start"], { env, stdio: ["ignore", "pipe", "pipe"] });
   defer(root, () => killChild(child));
   let output = "";
-  child.stdout.on("data", (d) => { output += d; });
-  child.stderr.on("data", (d) => { output += d; });
-  const exited = new Promise((r) => child.once("close", (code) => r(code)));
+  child.stdout.on("data", (d) => { output = (output + d).slice(-8192); });
+  child.stderr.on("data", (d) => { output = (output + d).slice(-8192); });
+  let closed;
+  const exited = new Promise((r) => child.once("close", (code) => { closed = code; r(code); }));
   // Cleanup releases both handshakes even when an assertion fails. The wrapper
   // owns its real manager child; fixture teardown waits for both and the proxy.
   defer(root, async () => {
     writeFileSync(release, "release"); writeFileSync(exitRelease, "release");
     await exited;
   });
-  return { t, root, child, env, held, release, exiting, exitRelease, exited, output: () => output };
+  return { t, root, child, env, held, release, exiting, exitRelease, exited, closed: () => closed, output: () => fixtureOutput(output) };
 }
 
 async function heldProxy(f) {
-  const held = await until("the actual wrapper's manager held at spawn:start-recorded", () => readJson(f.held), 20_000);
+  let held;
+  try {
+    held = await until("the actual wrapper's manager held at spawn:start-recorded", () => {
+      const record = readJson(f.held);
+      if (record) return record;
+      if (f.closed() !== undefined) assert.fail(`actual wrapper closed early: code=${f.closed()} signal=${f.child.signalCode}`);
+      return null;
+    }, 20_000);
+  } catch (err) {
+    err.message += "\n" + completionEvidence(f.root, f.output());
+    throw err;
+  }
   assert.ok(Number.isInteger(held.managerPid) && held.managerPid !== f.child.pid, "the wrapper spawned the held real manager child");
   defer(f.root, () => killFixtureProxy(f.root, held.pid));
   if (process.platform !== "win32") {
@@ -763,6 +892,31 @@ async function pressureDetails(port) {
 const pressureState = async (port) => (await pressureDetails(port))?.pressureState ?? null;
 const pressurePoll = async (port) => (await pressureDetails(port))?.readinessPolls ?? -1;
 const fixtureLog = (root) => { try { return readFileSync(join(root, "logs", "proxy.log"), "utf8"); } catch { return ""; } };
+
+test("a missed completion observer reports bounded fixture evidence on actual wrapper early exit", { timeout: 60_000 }, async (t) => {
+  const f = heldCompletionFixture(t, await freePort(), { missObserver: true });
+  writeFileSync(f.release, "release");
+  writeFileSync(f.exitRelease, "release");
+  await assert.rejects(() => heldProxy(f), (err) => {
+    assert.match(err.message, /actual wrapper closed early: code=1/);
+    assert.match(err.message, /completed manager left no started proxy generation/);
+    assert.match(err.message, /"messages":0,"generationPresent":false/);
+    assert.match(err.message, /completion-receipt-\d+\.json/);
+    assert.match(err.message, /fixture proxy\.log tail:/);
+    assert.doesNotMatch(err.message, new RegExp(KEY));
+    assert.ok(err.message.length < 48_000, "failure evidence stays bounded");
+    t.diagnostic(`missing-observer early-exit evidence: ${err.message}`);
+    return true;
+  });
+  writeFileSync(f.exitRelease, "release");
+  assert.equal(await f.exited, 1);
+  const record = readJson(join(f.root, "logs", "proxy.pid"));
+  defer(f.root, () => killFixtureProxy(f.root, record.pid));
+  assert.equal(existsSync(join(f.root, "logs", `fixture-manager-complete-${record.pid}`)), false);
+  writeFileSync(join(f.root, "logs", "proxy.early.log"), KEY + " " + "a".repeat(64) + " " + "x".repeat(12_000));
+  assert.doesNotMatch(completionEvidence(f.root, KEY), new RegExp(KEY));
+  assert.ok(fixtureTail(join(f.root, "logs", "proxy.early.log")).length <= 6000);
+});
 
 // This is the SAME wrapper and stand-in as the induced-pressure test below.
 // Only the actual wrapper publishes a successful completion; this test writes
@@ -848,14 +1002,14 @@ test("induced memory pressure: acknowledged respawns drain, the budget caps them
   const remember = () => { const r = readJson(join(root, "logs", "proxy.pid")); if (Number.isInteger(r?.pid) && !seen.has(r.pid)) { seen.add(r.pid); defer(root, () => killFixtureProxy(root, r.pid)); } };
   const start = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 90_000 });
   remember();
-  assert.equal(start.status, 0, start.stdout + start.stderr);
+  assert.equal(start.status, 0, completionEvidence(root, start.stdout + start.stderr));
 
   // Sample until the refusal is logged: never two proxies at once.
   const refused = / ERROR supervisor respawn refused by the kit manager; keeps serving /;
   const counts = [];
   const deadline = Date.now() + 180_000;
   while (!refused.test(log())) {
-    if (Date.now() > deadline) assert.fail(`no refusal logged; proxy.log tail:\n${log().slice(-3000)}`);
+    if (Date.now() > deadline) assert.fail(`no refusal logged; ${completionEvidence(root)}`);
     remember();
     const list = standIns(root);
     if (list) counts.push(list.length);
@@ -899,13 +1053,13 @@ test("a late acknowledgement: the proxy keeps serving, the manager ends in 'alre
   const start = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 90_000 });
   const record = readJson(join(root, "logs", "proxy.pid"));
   if (record) defer(root, () => killFixtureProxy(root, record.pid));
-  assert.equal(start.status, 0, start.stdout + start.stderr);
+  assert.equal(start.status, 0, completionEvidence(root, start.stdout + start.stderr));
 
   // The late manager waits 30 s for the proxy to exit, which it never does.
   const counts = [];
   const deadline = Date.now() + 120_000;
   while (!existsSync(lateOut)) {
-    if (Date.now() > deadline) assert.fail("the late manager did not finish");
+    if (Date.now() > deadline) assert.fail(`the late manager did not finish; ${completionEvidence(root)}`);
     const list = standIns(root);
     if (list) counts.push(list.length);
     await sleep(250);
