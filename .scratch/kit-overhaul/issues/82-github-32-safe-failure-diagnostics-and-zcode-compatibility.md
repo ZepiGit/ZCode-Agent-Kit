@@ -10,7 +10,7 @@ ADR: no (any proposed protocol change requires separate boundary review)
 
 **Source:** https://github.com/ZepiGit/ZCode-Agent-Kit/issues/32 . This is GitHub issue 32, not local overhaul ticket 32 (TUI log pane caps, already merged).
 
-**User requirement:** Include the issue's fix in the overhaul task list and aim for compatibility with the newest official ZCode. The latest release verified through GitHub's release API on 2026-11-09 is v3.17.2, published 2026-11-04, target commit a9fe401eede6e6e5e01be9048679c206fe6f02d9: https://github.com/zai-org/ZCode/releases/tag/v3.17.2 . Recheck this at implementation/verification time.
+**User requirement:** Include the issue's fix in the overhaul task list and aim for compatibility with the newest official ZCode. The latest release re-verified through GitHub's live release API on 2026-11-10 is v3.17.2, published 2026-11-04T10:41:06Z, target commit a9fe401eede6e6e5e01be9048679c206fe6f02d9: https://github.com/zai-org/ZCode/releases/tag/v3.17.2 . Recheck this at implementation/verification time.
 
 ## Incident evidence and uncertainty
 
@@ -34,6 +34,16 @@ PROMPT.md B1-B6 remain binding. Work may improve error handling, secret-safe obs
 - [ ] Do not close GitHub #32 or claim restored live inference from a green static inspector, doctor, models listing, fixture token or memory suite. If original failure recovery cannot be established safely without private artifacts/credentials or prohibited anti-abuse changes, record that limitation and an exact owner-only verification procedure in OWNER-ACTIONS.md, leaving the incident unresolved.
 
 ## Comments
+
+### 2026-11-10 — current official server layout is not auto-discovered
+
+Primary-source/runtime evidence and exact source URLs: `research/zcode-current-runtime-20261110.md`. Live release API still latestv3.17.2/app, public targeta9fe401; release body separately names buildsourcee6b675b. Agent package at public target is0.17.1 with engines.node24.14.0; local server manifest names bundledNode22.16.0. These are separate version/context facts, not a proven minimum-runtime requirement or an identity-change instruction.
+
+Pinned official manifest/paths/releaseManager source defines `(ZCODE_DATA_BASE_DIR || HOME)/.zcode/server/current.json` selecting a releases directory with `runtime/zcode.cjs`; current kit discovery.ts:34-44 considers only seven legacy Windows desktop paths. Existing13/36/56/57/53 scopes do not implement current distribution discovery; this remains an uncovered safe82scope item pending triage/independent review, not an authorized protocol or anti-abuse change.
+
+Controller ran the real MCP initialize/zcode_health boundary with temp-HOME version-only fixtures: two finite1G90s runs, Node26.7.0, each5executed/3controlPASS/2discoveryFAIL, EXIT1/2s. Legacy desktop and explicit current-server path work; default current-server and customZCODE_DATA_BASE_DIR layouts degrade before any version probe; missing explicit override still fails closed. Five owned bridge children plus two version-probe children perrun exited with PID/PGID records; temporary fixtures removed. No vendor execution/model/network/credential/account-store use or product/dist edit. Logs `reports/t82-zcode-discovery-boundary-{red,repeat-red}-20261110.log`. Final externalprobe `/home/AgentKit/overhaul-tools/t82-zcode-discovery-boundary-probe-20261110.mjs`, SHA256f5a5b36c4ad204ce4a93be1df92eb8ba692b15119d5cd08c656514094bf0038c. Probe was made green-capable between runs by removing a red-only assertion, with unchanged semantic outcome.
+
+This proves a Linux fixture discovery gap, not official app-server compatibility or original3012incident recovery. StandaloneCLI internal layout, actual nativeWindows/macOS layouts, safe pointer precedence/containment and permanent wired regressions/fullsuite/freshCI remain open. No fix/merge/approval or workflow change; quota/reset still unknown.
 
 ### 2026-11-10 — raw provenance reproduced over the real HTTP listener
 
