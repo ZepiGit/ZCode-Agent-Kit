@@ -1,0 +1,5 @@
+Proxy start ...
+FAIL  The proxy did not start
+  why: EACCES: permission denied, open '/kit/logs/proxy.log'
+  next: zcode-kit doctor
+  exit: 1

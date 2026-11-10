@@ -2,7 +2,7 @@
 
 **Blocked by:** 40 (UX batch (a)), 42 (Account Rotator decision asked once), 43 (compact setup report — controller ruling dwfq-82f6e729-3: 83 builds on 43's ADR-0005-migrated baseline; prompts move to stderr in 43 first, 83's fallback preservation then runs against the post-43 tree)
 
-**Status:** ready-for-agent
+**Status:** needs-triage
 
 Model: glm
 Risk: medium
@@ -12,7 +12,7 @@ ADR: 0001, 0005
 
 ## What to build
 
-Two additive setup-UX changes, tests/memory excluded, no product behaviour beyond `cli/setup-output.mjs`, `cli/harness-consent.mjs`, `cli/zcode-kit.mjs` and their tests:
+Two additive setup-UX changes, tests/memory excluded. Scope includes `cli/setup-output.mjs`, `cli/harness-consent.mjs`, `cli/commands/setup.mjs`, `cli/zcode-kit.mjs`, one additive described-command renderer in `lib/term/out.mjs`, and tests (controller scope ruling below). Product implementation waits for ticket43 and valid design ratification:
 
 1. **Multi-select harness consent (TTY).** Replace the sequential per-harness `[y/N]` prompt with one list: every detected harness renders as a row with a checkbox (`[x]`/`[ ]`), the user toggles with **Space**, confirms with **Enter**, `a` toggles all, `Esc`/empty confirm selects none (defaults preserved: previously-yes harnesses start checked, previously-skipped unchecked). Arrow keys move the cursor. Off a TTY, in CI, `TERM=dumb`, `NO_COLOR`, or when stdin is not interactive, behaviour is unchanged: the existing per-harness y/n prompt, `--harness <list>`, and `ZCODE_KIT_HARNESSES` still work exactly as today (C2, Round 1 Q1). Stored decisions under `harness-choices/` and their schema are unchanged. Unknown ids in `--harness` still throw. `--reask` still asks again.
 
@@ -43,4 +43,4 @@ Design is co-authored by **GLM-5.3-Flash max**, **gpt-6.1-sol xhigh**, **claude-
 
 ### 2026-11-09 — agreed four-model design (recorded by the controller)
 
-The four design briefs (Sol xhigh `t83-design-sol.md`, GLM max `t83-design-glm.md`, Grok-build-fast xhigh `t83-design-grok.md`, Sonnet high `t83-design-sonnet.md`) were aggregated by a Sol-subagent xhigh aggregator into ONE agreed design; the verbatim text is persisted at `/home/AgentKit/overhaul-tools/t83-agreed-design.md` and is the binding implementation contract for this ticket. The binding controller rulings above (locked saved rows; scope adds cli/commands/setup.mjs; additive Out renderer in lib/term/out.mjs; blocked by 43) hold. Additional rulings made during aggregation: (a) the Sonnet-found installer duplication (install.sh:239-244, install.ps1:219-224 print their own four-command list) is ticket 44's responsibility — 44 removes only the duplicate footer rows and keeps its login/completion hints; setup stays the single overview source and its block is NOT suppressed under --installer; (b) ticket 83's implementation dispatches only after 43 merges (post-43 baseline). Implementation model: GLM-5.3-Flash max, per the controller's GLM-priority routing.
+Correction2026-11-10: the four design briefs exist, but the aggregation/persistence claim was not verified. `/home/AgentKit/overhaul-tools/t83-agreed-design.md` contains only[object Object] between markers due to implicit coercion of a structured Work result. It is failed handoff evidence, NOT a binding design. Preserve it and use a new explicitly rendered proposal plus actual model-ratification records before claiming agreement or authorizing implementation. See /home/AgentKit/overhaul-tools/t83-agreement-integrity-20261110.md. The binding controller rulings above (locked saved rows; scope adds cli/commands/setup.mjs; additive Out renderer in lib/term/out.mjs; blocked by 43) hold. Additional rulings made during aggregation: (a) the Sonnet-found installer duplication (install.sh:239-244, install.ps1:219-224 print their own four-command list) is ticket 44's responsibility — 44 removes only the duplicate footer rows and keeps its login/completion hints; setup stays the single overview source and its block is NOT suppressed under --installer; (b) ticket 83's implementation dispatches only after 43 merges (post-43 baseline). Implementation model: GLM-5.3-Flash max, per the controller's GLM-priority routing.

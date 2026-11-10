@@ -1,0 +1,11 @@
+running on 127.0.0.1:<PORT> (pid <PID>)
+
+Quota --------------------------------------------------------------------------
+  quota  unavailable (The operation was aborted due to timeout)
+
+Connection details (manual clients) --------------------------------------------
+  OpenAI base URL     http://127.0.0.1:<PORT>/v1
+  Anthropic base URL  http://127.0.0.1:<PORT>
+  API key             UXFIXTURE-not-a-secret-0000000000000000000
+  Models              glm-5.3, glm-5.3-flash (configured; live list unavailable)
+  State               * running, identity verified

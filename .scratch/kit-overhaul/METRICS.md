@@ -746,3 +746,34 @@ Copied from ticket 74's branch (eab4ddf, METRICS lines 425-436). Round 29 Q1 wit
 
 ## Windows S4 'Ctrl-C during start' trial (Round 33)
 Until ticket 81 merges, the windows S4/short value of `stale-lock-after-ctrl-c` is a TerminateProcess (crash) result, not a console event (Node maps `child.kill("SIGINT")` to TerminateProcess); it is owned by 81 and never judged as a pass. 81's merge restarts the windows S4/short matching count; 17's windows `flips` floor (proxy-left-after-stop, failed-lifecycle-steps, count:proxy) counts on 81's tree or later.
+
+## Ticket 43: corrected Windows fixture and snapshot gates (2026-11-10)
+
+Candidate branch commit `1f9e26c`, staged head `02bd817474978613d8449a499622041a0b5d9e57`, [CI42750466098](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42750466098): all eight required jobs completed SUCCESS. This is ticket-level pre-merge evidence, not final integration acceptance or independent review.
+
+| Scope | Kit | Proxy | MCP | UX |
+|---|---|---|---|---|
+| Local full CI-like suite (`CI=true TERM=xterm-256color`) |1018pass/1038total,20skip|1651pass,1skip|115pass/116total,1skip|Native captured Windows baseline separately reviewed|
+| Windows Node24 |988pass/1038total,50skip|1649pass/1652total,3skip|116pass/116total,0skip|Full Windows pipe/ci comparison1/1pass|
+| Windows Node26 |988pass/1038total,50skip|1649pass/1652total,3skip|116pass/116total,0skip|Same separately executed Windows UXjob|
+
+Both native Windows jobs executed the exact known-path normalizer test and old-verbose install.log superset comparison successfully. Typecheck/build stages passed. No extra acceptance inferred from platform skips.
+
+Both archived memory job summaries are complete and ratchet-acceptable (`partial=false,ok=true,failures=[]`). S1 variants and S7 GREEN on both platforms; Linux S6 GREEN. Owned S2/S3/LinuxS5 and WindowsS4 remain RED, WindowsS5 remains unstable; do not report all budgets met. Windows S1/burst1 working-set median117.7MB (seven values113.9–121.3; budget250), commit median254.4MB; Linux median124.2MB (budget250). No memory budget, owner or metric changed by the setup test/snapshot corrections.
+
+Artifacts: `/home/AgentKit/overhaul-tools/t43-ci42750466098-artifacts-yvHJAP/`; exact-head gate metadata `t43-ci42750466098-verified-gates.json`; native logs `t43-ci42750466098-windows{24,26}.log` and `windows-ux.log`. Ticket40 prerequisite and independent ticket43review still open; no integration merge.
+
+## Ticket 40: repaired reader, exact-head platform gate (2026-11-10)
+
+[CI42760280311](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42760280311) passed all eight required jobs for head `d2ae4d4327aa30e535d282d065c034ef397bb79f`. Actual CI merge `85b76ed3158844df4b5c99ae6396c25f67538184` has the exact staging tree `b9c7b7c4c58a517439d39a7acd077fcdbd6421c0`; product unchanged from independently approved deadcbc. This is pre-merge evidence, not final acceptance.
+
+| Scope | Kit | Proxy | MCP | UX baseline equivalence |
+|---|---|---|---|---|
+| Ubuntu Node24 and Node26, each |1129pass/1149total,20skip|1651pass/1652total,1skip|115pass/116total,1skip|1/1pass, seven terminal modes|
+| Windows Node24 and Node26, each |1098pass/1149total,51skip|1649pass/1652total,3skip|116pass/116total,0skip|1/1pass, pipe/ci|
+
+Zero test failures; all eight named doctor/connection/log-reader security and preservation regressions executed on all four test legs, including cut-secret fragments, byte-zero/no-newline and opened-fd rotation. Typecheck and MCP build stages passed. Counts come from direct job-API logs: the gh combined log export was incomplete and one job export empty, neither used as count evidence.
+
+Both memory summaries: partial=false, ok=true, failures=[]; Linux systemd and Windows JobObject caps reported. Linux REDs S2/short, S3/short,hung,omp and S5/short; Windows REDs S2/short, S3/short,hung,omp and S4/short; WindowsS5 remains unstable (26.1%/1k commit, registered bound30, trend=false). This does NOT satisfy all memory budgets. Windows burst1 WSmedian115.7MB, commitmedian255.5MB; Linux RSSmedian126.1MB. No policy, metric, owner or budget change.
+
+Artifacts `/home/AgentKit/overhaul-tools/t40-ci42760280311-artifacts-OgQYak/`; metadata/inspection `t40-ci42760280311-{verified-gates,inspected-evidence}.json`; direct logs `t40-ci42760280311-{linux24,linux26,windows24,windows26,linux-ux,windows-ux}-api.log`. Fresh merger and merged-tree suites/sanity/dist gates remain OPEN. No integration merge or model workflow restart.

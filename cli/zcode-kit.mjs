@@ -39,7 +39,7 @@ import { pathToFileURL } from "node:url";
 import { createCtx, kitRoot } from "./context.mjs";
 import { runCommandSync } from "../lib/process.mjs";
 import { nodeFloorRefusal } from "../lib/node-floor.mjs";
-import { loadOutput } from "../lib/term/load.mjs";
+import { loadOutput, loadRenderRecords } from "../lib/term/load.mjs";
 import { COMMANDS, UNKNOWN_COMMAND } from "./commands/index.mjs";
 
 function parseArgs(argv) {
@@ -75,12 +75,18 @@ async function main() {
   if (module.nodeFloor === true) {
     const refusal = nodeFloorRefusal(command);
     if (refusal) {
-      (await loadOutput()).error(refusal);
+      (await output()).error(refusal);
       return refusal.exit;
     }
   }
   return dispatch(module, createCtx(ROOT));
 }
+
+// The output module (lib/term/out.mjs) over the process streams, loaded on
+// first use only: a command that returns no output-module records (`run`,
+// whose preflight is memory-bound) never loads the renderer (ADR-0011 cond 3).
+let outputPromise = null;
+const output = () => (outputPromise ??= loadOutput());
 
 /** The command ctx a command module runs with (cli/commands/common.mjs). */
 function commandCtx(kit) {
@@ -89,13 +95,16 @@ function commandCtx(kit) {
     env: process.env,
     execPath: process.execPath,
     platform: process.platform,
-    // Lazy: touching process.stdin creates its handle; only update reads it.
-    terminal: { get stdin() { return process.stdin; }, get stderr() { return process.stderr; } },
+    // Lazy: touching process.stdin creates its handle; only update and the
+    // connection details' reveal rule read it.
+    terminal: { get stdin() { return process.stdin; }, get stdout() { return process.stdout; }, get stderr() { return process.stderr; } },
     spawnSync,
     runCommandSync,
     fetch: (...args) => fetch(...args),
     progress: (line) => console.log(line),
     progressError: (line) => console.error(line),
+    // A Progress on stderr (design-language §4.10): animated on a TTY only.
+    step: async (label, total) => (await output()).step(label, total),
   };
 }
 
@@ -109,19 +118,32 @@ async function dispatch(module, kit) {
   try {
     result = await module.run({ positional, flags, passthrough }, commandCtx(kit));
   } catch (err) {
-    if (Array.isArray(err?.records)) render(err.records);
+    if (Array.isArray(err?.records)) await render(err.records);
     throw err;
   }
-  render(result.records);
+  await render(result.records);
   return result.exitCode;
 }
 
-function render(records) {
+/**
+ * Text records are written verbatim and JSON records as one document; every
+ * other kind goes through the output module, consecutive ones as one list so
+ * check groups align (lib/term/out.mjs renderRecords).
+ */
+async function render(records) {
+  let batch = [];
+  const flush = async () => {
+    if (!batch.length) return;
+    const list = batch;
+    batch = [];
+    (await loadRenderRecords())(await output(), list);
+  };
   for (const record of records) {
-    if (record.kind === "text") (record.stream === "stderr" ? process.stderr : process.stdout).write(record.text);
-    else if (record.kind === "json") process.stdout.write(JSON.stringify(record.value, null, 2) + "\n");
-    else throw new TypeError(`unknown record kind ${JSON.stringify(record.kind)}`);
+    if (record.kind === "text") { await flush(); (record.stream === "stderr" ? process.stderr : process.stdout).write(record.text); }
+    else if (record.kind === "json") { await flush(); process.stdout.write(JSON.stringify(record.value, null, 2) + "\n"); }
+    else batch.push(record);
   }
+  await flush();
 }
 
 // Entry check, realpath-canonical: npm exposes global bins as symlinks

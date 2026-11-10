@@ -57,6 +57,21 @@ export function renderVariant(variant, drive, { json = false } = {}) {
 }
 
 /**
+ * renderVariant for a driver that awaits (a command module streaming its
+ * progress through `out.step` before its records are rendered).
+ */
+export async function renderVariantAsync(variant, drive, { json = false } = {}) {
+  const v = C3_VARIANTS[variant];
+  if (!v) throw new Error(`unknown C3 variant ${variant}`);
+  const stdout = fakeStream(v.tty, v.columns);
+  const stderr = fakeStream(v.tty, v.columns);
+  const clock = fakeClock();
+  const out = createOutput({ stdout, stderr, env: v.env, platform: v.platform, json, clock });
+  await drive(out, clock);
+  return { stdout: stdout.text(), stderr: stderr.text() };
+}
+
+/**
  * Explicit normalisation list: [name, pattern, replacement]. Only values that
  * differ per machine or run; status words, exit codes and the check grammar
  * are never touched (pinned by tests/term-snapshots.test.mjs).

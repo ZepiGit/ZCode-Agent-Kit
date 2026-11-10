@@ -1,6 +1,6 @@
 # 44: UX batch (b2): installer stages, `install.sh`/`install.ps1` text and the PowerShell 5.1 stderr gate
 
-**Blocked by:** 43 (UX batch (b1): compact `setup` report and `integrate --dry-run`), 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs)
+**Blocked by:** 43 (UX batch (b1): compact `setup` report and `integrate --dry-run`), 11 (Batch 1c — Bun 1.4.4 bootstrap in the installers, pinned proxy typecheck, 1.4.4 attribution runs), 83 (setup command overview; controller ruling dwfq-658f0456-2: remove duplicate installer command footers only after setup provides the overview)
 
 **Status:** ready-for-agent
 
@@ -32,6 +32,10 @@ ADR: 0005
 Spec stories: 94, 95, 96, 116
 
 ## Comments
+
+### 2026-11-10 — installer overview deduplication belongs here
+
+Controller ruling dwfq-658f0456-2 accepted the proposal from the Sonnet onboarding brief: setup is the single source of its English command overview, including under --installer. After83 provides that output,44 removes only the duplicate four-command footer rows in install.sh/install.ps1. Preserve login/manual-action hints, installation-completion messages, exit handling and stderr/PowerShell gates. Ticket83 does not edit installers. Edge44<-83 is acyclic through83<-43<-40; no footer removal before83 is verified. The proposed83design is not yet ratified (the previous artifact contained[object Object]); this ownership ruling remains valid, not proof of delivered UX.
 
 - 2026-11-07 (orchestrator, from ticket 10): install.sh and install.ps1 now refuse Node < 24 before any download; reshape that error text with the rest of the installer UX. PowerShell 7 for Linux (digest-verified download, see ticket 10 Comments) gives a real parse check and early-path runtime proof of install.ps1 locally.
 

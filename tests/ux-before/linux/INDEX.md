@@ -12,6 +12,8 @@ The before-equivalence test proves "no visible change" for tickets 06–08. A la
 - **Ticket 42** (Account Rotator asked once, prompt `[y/N]`): 108 files from `t42-before1`. The rotator prompt reads `[y/N]` in every TTY variant of `setup/setup-interactive`, `setup-installer-compact`, `setup-select`, `setup-none-detected`, `install/install-sh-fresh` and `install-sh-update`; `setup/setup-none-detected` gains its undo line (the answer is now recorded). Where the fixture's prep already answered (`setup/setup-proxy-running`, `update/update-checkout`, `update/update-release`) the question is no longer asked (A-04) and every variant prints `[INFO] Account Rotator disabled (saved choice; not asked again).` and `Change it: zcode-kit accounts enable, or zcode-kit setup --reask`. `uninstall/uninstall-after-setup` removes one more kit-created file (`generated/account-rotator.json`): `5 removed` → `6 removed`.
 - **Ticket 42, round 2** (questions drawn from the capability record): 49 files from `t42-r2-before1`, in the 7 prompting scenarios (`setup/setup-interactive`, `setup-installer-compact`, `setup-select`, `setup-none-detected`, `setup-proxy-running`, `install/install-sh-fresh`, `install-sh-update`). In `tty-color-80`, `tty-color-120` and `ascii-locale` only the `.ansi` files change: the question is written as text, without readline's `ESC[1G ESC[0J … ESC[<n>G` redraw (the `.txt` files are unchanged). In `no-color` and `term-dumb` (`.txt` and `.ansi`) the questions carry no escape sequence at all, and readline no longer echoes the answers itself (the terminal's line discipline does, cooked mode): the answers typed ahead appear once, where they were typed, at the top of the capture, instead of a second time after each question.
 - **Ticket 43** (compact `setup` report by default, prompts on stderr, one banner, `integrate --dry-run` listing): 146 refreshed files + 4 new `install/install-sh-{fresh,update}/{pipe,ci}.stderr.txt` from the ticket's own capture run (kit at the ticket-43 branch, commits 478a768/833edb1/d1e5e37). Changed scenarios: `setup/setup-{interactive,installer-compact,explicit,select,none-detected,proxy-running}` (the compact report: banner, Out-rendered stage/result rows, summary kv with the undo command, connection check as a step row; questions read `? Configure ZCode for <label>? [y/n]` and the prompt-context notes are stderr INFO rows), `integrate/integrate-{codex,opencode}-dry-run` (the `would write` listing plus the undo line), `update/update-{checkout,release}` and `install/install-sh-{fresh,update}` (the re-setup inside them renders the compact report; exit codes unchanged). Every scenario's exit code is byte-checked identical; the full-output lines survive in `install.log` (tests/install-log-lines.test.mjs pins the old verbose line set). The Windows baseline's pipe/ci captures of these scenarios still need a windows capture (pending CI; the linux baseline above is the compared one for `ux-before` on ubuntu).
+- **Ticket 40** (UX batch a: `doctor`, `status`, `proxy start|stop|restart|status|logs`, connection details): 154 captures (288 files) from `t40-capture1`, in 22 scenarios: `doctor/doctor-fresh`, `doctor-proxy-down`, `doctor-proxy-running`, `doctor-harness-omp`, `doctor-upstream`, `doctor-upstream-unreachable`, `doctor-json`, `doctor-fix-nothing-to-do`, `doctor-fix-starts-proxy`; `proxy/proxy-start`, `proxy-start-already-running`, `proxy-start-foreign`, `proxy-start-nokey`, `proxy-stop`, `proxy-stop-not-running`, `proxy-restart`, `proxy-status-running`, `proxy-status-down`, `proxy-status-foreign`, `proxy-status-fresh`, `proxy-logs-none`; `status/status-running`. `doctor` prints each check once, grouped under section headers, with a problem-count lead line when something failed and one verdict line (A-02); off a TTY the rows keep the `PASS|FAIL|SKIP|WARN  <name> — <detail>` grammar with why/next lines under every FAIL; `doctor --json` gains `warned` and a per-check `status` (additive; its pre-change pipe output stays in `../json-before/` for the JSON shape baseline); `doctor --fix` writes its repairs and the proxy start progress to stderr and no connection details. `status` / `proxy status` open with a state line in human units, then Memory, Quota, Captcha and the connection details once (unboxed, 80 columns, routes only with `--verbose`); a foreign listener or a missing key is an error block on stderr. `proxy start|stop|restart` show progress and a result row or an error block (what/why/next) on stderr and the connection details on stdout after a start; `proxy logs` without a log file is an INFO note on stderr. Exit codes and every other `--json` output are unchanged. The TTY captures of the lifecycle steps hold spinner frames, normalised by `compare.mjs` ("spinner frames", "step elapsed").
+- **Ticket 40, round 2** (Bun path pinned, CI run 42590699086): 48 files from `t40-recapture`, the 80-column variants (`tty-color-80`, `no-color`, `ascii-locale`, `.txt` and `.ansi`) of the 8 doctor scenarios with a `bun available` row. The round-1 set was captured with Bun under a long host directory, so the row wrapped `(1.4.2)` onto a continuation line that the CI runner never prints; the row is now one line, `<BUN> (1.4.2)`, as in every other variant and in the BEFORE set. The capture runs the fixtures through a fixed-length Bun symlink (`capture/host.mjs` `pinBun`), so the host's Bun directory no longer moves a wrap. No kit output changed.
 
 ## Variants
 
@@ -142,69 +144,69 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | setup | setup-bad-harness | ascii-locale | 2 | no | 152 | 1 |  | [setup/setup-bad-harness/ascii-locale.txt](setup/setup-bad-harness/ascii-locale.txt) |
 | setup | setup-bad-harness | pipe | 2 | no | 152 | 1 |  | [setup/setup-bad-harness/pipe.txt](setup/setup-bad-harness/pipe.txt) |
 | setup | setup-bad-harness | ci | 2 | no | 152 | 1 |  | [setup/setup-bad-harness/ci.txt](setup/setup-bad-harness/ci.txt) |
-| doctor | doctor-fresh | tty-color-80 | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/tty-color-80.txt](doctor/doctor-fresh/tty-color-80.txt) |
-| doctor | doctor-fresh | tty-color-120 | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/tty-color-120.txt](doctor/doctor-fresh/tty-color-120.txt) |
-| doctor | doctor-fresh | no-color | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/no-color.txt](doctor/doctor-fresh/no-color.txt) |
-| doctor | doctor-fresh | term-dumb | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/term-dumb.txt](doctor/doctor-fresh/term-dumb.txt) |
-| doctor | doctor-fresh | ascii-locale | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/ascii-locale.txt](doctor/doctor-fresh/ascii-locale.txt) |
-| doctor | doctor-fresh | pipe | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/pipe.txt](doctor/doctor-fresh/pipe.txt) |
-| doctor | doctor-fresh | ci | 1 | no | 120 | 6 | `—` | [doctor/doctor-fresh/ci.txt](doctor/doctor-fresh/ci.txt) |
-| doctor | doctor-proxy-down | tty-color-80 | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/tty-color-80.txt](doctor/doctor-proxy-down/tty-color-80.txt) |
-| doctor | doctor-proxy-down | tty-color-120 | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/tty-color-120.txt](doctor/doctor-proxy-down/tty-color-120.txt) |
-| doctor | doctor-proxy-down | no-color | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/no-color.txt](doctor/doctor-proxy-down/no-color.txt) |
-| doctor | doctor-proxy-down | term-dumb | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/term-dumb.txt](doctor/doctor-proxy-down/term-dumb.txt) |
-| doctor | doctor-proxy-down | ascii-locale | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/ascii-locale.txt](doctor/doctor-proxy-down/ascii-locale.txt) |
-| doctor | doctor-proxy-down | pipe | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/pipe.txt](doctor/doctor-proxy-down/pipe.txt) |
-| doctor | doctor-proxy-down | ci | 1 | no | 133 | 6 | `—` | [doctor/doctor-proxy-down/ci.txt](doctor/doctor-proxy-down/ci.txt) |
-| doctor | doctor-proxy-running | tty-color-80 | 0 | no | 133 | 8 | `—` | [doctor/doctor-proxy-running/tty-color-80.txt](doctor/doctor-proxy-running/tty-color-80.txt) |
-| doctor | doctor-proxy-running | tty-color-120 | 0 | no | 133 | 8 | `—` | [doctor/doctor-proxy-running/tty-color-120.txt](doctor/doctor-proxy-running/tty-color-120.txt) |
-| doctor | doctor-proxy-running | no-color | 0 | no | 133 | 8 | `—` | [doctor/doctor-proxy-running/no-color.txt](doctor/doctor-proxy-running/no-color.txt) |
-| doctor | doctor-proxy-running | term-dumb | 0 | no | 133 | 8 | `—` | [doctor/doctor-proxy-running/term-dumb.txt](doctor/doctor-proxy-running/term-dumb.txt) |
-| doctor | doctor-proxy-running | ascii-locale | 0 | no | 133 | 8 | `—` | [doctor/doctor-proxy-running/ascii-locale.txt](doctor/doctor-proxy-running/ascii-locale.txt) |
-| doctor | doctor-proxy-running | pipe | 0 | no | 133 | 8 | `—` | [doctor/doctor-proxy-running/pipe.txt](doctor/doctor-proxy-running/pipe.txt) |
-| doctor | doctor-proxy-running | ci | 0 | no | 133 | 8 | `—` | [doctor/doctor-proxy-running/ci.txt](doctor/doctor-proxy-running/ci.txt) |
-| doctor | doctor-json | tty-color-80 | 0 | no | 118 | 6 | `—` | [doctor/doctor-json/tty-color-80.txt](doctor/doctor-json/tty-color-80.txt) |
-| doctor | doctor-json | tty-color-120 | 0 | no | 118 | 6 | `—` | [doctor/doctor-json/tty-color-120.txt](doctor/doctor-json/tty-color-120.txt) |
-| doctor | doctor-json | no-color | 0 | no | 118 | 6 | `—` | [doctor/doctor-json/no-color.txt](doctor/doctor-json/no-color.txt) |
-| doctor | doctor-json | term-dumb | 0 | no | 118 | 6 | `—` | [doctor/doctor-json/term-dumb.txt](doctor/doctor-json/term-dumb.txt) |
-| doctor | doctor-json | ascii-locale | 0 | no | 118 | 6 | `—` | [doctor/doctor-json/ascii-locale.txt](doctor/doctor-json/ascii-locale.txt) |
-| doctor | doctor-json | pipe | 0 | no | 118 | 6 | `—` | [doctor/doctor-json/pipe.txt](doctor/doctor-json/pipe.txt) |
-| doctor | doctor-json | ci | 0 | no | 118 | 6 | `—` | [doctor/doctor-json/ci.txt](doctor/doctor-json/ci.txt) |
-| doctor | doctor-fix-starts-proxy | tty-color-80 | 0 | no | 133 | 11 | `—` | [doctor/doctor-fix-starts-proxy/tty-color-80.txt](doctor/doctor-fix-starts-proxy/tty-color-80.txt) |
-| doctor | doctor-fix-starts-proxy | tty-color-120 | 0 | no | 133 | 11 | `—` | [doctor/doctor-fix-starts-proxy/tty-color-120.txt](doctor/doctor-fix-starts-proxy/tty-color-120.txt) |
-| doctor | doctor-fix-starts-proxy | no-color | 0 | no | 133 | 11 | `—` | [doctor/doctor-fix-starts-proxy/no-color.txt](doctor/doctor-fix-starts-proxy/no-color.txt) |
-| doctor | doctor-fix-starts-proxy | term-dumb | 0 | no | 133 | 11 | `—` | [doctor/doctor-fix-starts-proxy/term-dumb.txt](doctor/doctor-fix-starts-proxy/term-dumb.txt) |
-| doctor | doctor-fix-starts-proxy | ascii-locale | 0 | no | 133 | 11 | `—` | [doctor/doctor-fix-starts-proxy/ascii-locale.txt](doctor/doctor-fix-starts-proxy/ascii-locale.txt) |
-| doctor | doctor-fix-starts-proxy | pipe | 0 | no | 133 | 12 | `—` | [doctor/doctor-fix-starts-proxy/pipe.txt](doctor/doctor-fix-starts-proxy/pipe.txt) |
-| doctor | doctor-fix-starts-proxy | ci | 0 | no | 133 | 12 | `—` | [doctor/doctor-fix-starts-proxy/ci.txt](doctor/doctor-fix-starts-proxy/ci.txt) |
-| doctor | doctor-fix-nothing-to-do | tty-color-80 | 0 | no | 133 | 8 | `—` | [doctor/doctor-fix-nothing-to-do/tty-color-80.txt](doctor/doctor-fix-nothing-to-do/tty-color-80.txt) |
-| doctor | doctor-fix-nothing-to-do | tty-color-120 | 0 | no | 133 | 8 | `—` | [doctor/doctor-fix-nothing-to-do/tty-color-120.txt](doctor/doctor-fix-nothing-to-do/tty-color-120.txt) |
-| doctor | doctor-fix-nothing-to-do | no-color | 0 | no | 133 | 8 | `—` | [doctor/doctor-fix-nothing-to-do/no-color.txt](doctor/doctor-fix-nothing-to-do/no-color.txt) |
-| doctor | doctor-fix-nothing-to-do | term-dumb | 0 | no | 133 | 8 | `—` | [doctor/doctor-fix-nothing-to-do/term-dumb.txt](doctor/doctor-fix-nothing-to-do/term-dumb.txt) |
-| doctor | doctor-fix-nothing-to-do | ascii-locale | 0 | no | 133 | 8 | `—` | [doctor/doctor-fix-nothing-to-do/ascii-locale.txt](doctor/doctor-fix-nothing-to-do/ascii-locale.txt) |
-| doctor | doctor-fix-nothing-to-do | pipe | 0 | no | 133 | 8 | `—` | [doctor/doctor-fix-nothing-to-do/pipe.txt](doctor/doctor-fix-nothing-to-do/pipe.txt) |
-| doctor | doctor-fix-nothing-to-do | ci | 0 | no | 133 | 8 | `—` | [doctor/doctor-fix-nothing-to-do/ci.txt](doctor/doctor-fix-nothing-to-do/ci.txt) |
-| doctor | doctor-harness-omp | tty-color-80 | 1 | no | 120 | 2 | `—` | [doctor/doctor-harness-omp/tty-color-80.txt](doctor/doctor-harness-omp/tty-color-80.txt) |
-| doctor | doctor-harness-omp | tty-color-120 | 1 | no | 120 | 2 | `—` | [doctor/doctor-harness-omp/tty-color-120.txt](doctor/doctor-harness-omp/tty-color-120.txt) |
-| doctor | doctor-harness-omp | no-color | 1 | no | 120 | 2 | `—` | [doctor/doctor-harness-omp/no-color.txt](doctor/doctor-harness-omp/no-color.txt) |
-| doctor | doctor-harness-omp | term-dumb | 1 | no | 120 | 2 | `—` | [doctor/doctor-harness-omp/term-dumb.txt](doctor/doctor-harness-omp/term-dumb.txt) |
-| doctor | doctor-harness-omp | ascii-locale | 1 | no | 120 | 2 | `—` | [doctor/doctor-harness-omp/ascii-locale.txt](doctor/doctor-harness-omp/ascii-locale.txt) |
-| doctor | doctor-harness-omp | pipe | 1 | no | 120 | 2 | `—` | [doctor/doctor-harness-omp/pipe.txt](doctor/doctor-harness-omp/pipe.txt) |
-| doctor | doctor-harness-omp | ci | 1 | no | 120 | 2 | `—` | [doctor/doctor-harness-omp/ci.txt](doctor/doctor-harness-omp/ci.txt) |
-| doctor | doctor-upstream | tty-color-80 | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/tty-color-80.txt](doctor/doctor-upstream/tty-color-80.txt) |
-| doctor | doctor-upstream | tty-color-120 | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/tty-color-120.txt](doctor/doctor-upstream/tty-color-120.txt) |
-| doctor | doctor-upstream | no-color | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/no-color.txt](doctor/doctor-upstream/no-color.txt) |
-| doctor | doctor-upstream | term-dumb | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/term-dumb.txt](doctor/doctor-upstream/term-dumb.txt) |
-| doctor | doctor-upstream | ascii-locale | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/ascii-locale.txt](doctor/doctor-upstream/ascii-locale.txt) |
-| doctor | doctor-upstream | pipe | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/pipe.txt](doctor/doctor-upstream/pipe.txt) |
-| doctor | doctor-upstream | ci | 1 | no | 172 | 8 | `—` | [doctor/doctor-upstream/ci.txt](doctor/doctor-upstream/ci.txt) |
-| doctor | doctor-upstream-unreachable | tty-color-80 | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/tty-color-80.txt](doctor/doctor-upstream-unreachable/tty-color-80.txt) |
-| doctor | doctor-upstream-unreachable | tty-color-120 | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/tty-color-120.txt](doctor/doctor-upstream-unreachable/tty-color-120.txt) |
-| doctor | doctor-upstream-unreachable | no-color | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/no-color.txt](doctor/doctor-upstream-unreachable/no-color.txt) |
-| doctor | doctor-upstream-unreachable | term-dumb | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/term-dumb.txt](doctor/doctor-upstream-unreachable/term-dumb.txt) |
-| doctor | doctor-upstream-unreachable | ascii-locale | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/ascii-locale.txt](doctor/doctor-upstream-unreachable/ascii-locale.txt) |
-| doctor | doctor-upstream-unreachable | pipe | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/pipe.txt](doctor/doctor-upstream-unreachable/pipe.txt) |
-| doctor | doctor-upstream-unreachable | ci | 1 | no | 133 | 7 | `—` | [doctor/doctor-upstream-unreachable/ci.txt](doctor/doctor-upstream-unreachable/ci.txt) |
+| doctor | doctor-fresh | tty-color-80 | 1 | yes | 80 | 0 | `✗─✓–—→` | [doctor/doctor-fresh/tty-color-80.txt](doctor/doctor-fresh/tty-color-80.txt) |
+| doctor | doctor-fresh | tty-color-120 | 1 | yes | 117 | 7 | `✗─✓–—→` | [doctor/doctor-fresh/tty-color-120.txt](doctor/doctor-fresh/tty-color-120.txt) |
+| doctor | doctor-fresh | no-color | 1 | no | 80 | 0 | `✗─✓–—→` | [doctor/doctor-fresh/no-color.txt](doctor/doctor-fresh/no-color.txt) |
+| doctor | doctor-fresh | term-dumb | 1 | no | 120 | 4 | `—` | [doctor/doctor-fresh/term-dumb.txt](doctor/doctor-fresh/term-dumb.txt) |
+| doctor | doctor-fresh | ascii-locale | 1 | yes | 80 | 0 | `—` | [doctor/doctor-fresh/ascii-locale.txt](doctor/doctor-fresh/ascii-locale.txt) |
+| doctor | doctor-fresh | pipe | 1 | no | 120 | 4 | `—` | [doctor/doctor-fresh/pipe.txt](doctor/doctor-fresh/pipe.txt) |
+| doctor | doctor-fresh | ci | 1 | no | 120 | 4 | `—` | [doctor/doctor-fresh/ci.txt](doctor/doctor-fresh/ci.txt) |
+| doctor | doctor-proxy-down | tty-color-80 | 1 | yes | 89 | 1 | `✗─✓–—→` | [doctor/doctor-proxy-down/tty-color-80.txt](doctor/doctor-proxy-down/tty-color-80.txt) |
+| doctor | doctor-proxy-down | tty-color-120 | 1 | yes | 119 | 7 | `✗─✓–—→` | [doctor/doctor-proxy-down/tty-color-120.txt](doctor/doctor-proxy-down/tty-color-120.txt) |
+| doctor | doctor-proxy-down | no-color | 1 | no | 89 | 1 | `✗─✓–—→` | [doctor/doctor-proxy-down/no-color.txt](doctor/doctor-proxy-down/no-color.txt) |
+| doctor | doctor-proxy-down | term-dumb | 1 | no | 133 | 5 | `—` | [doctor/doctor-proxy-down/term-dumb.txt](doctor/doctor-proxy-down/term-dumb.txt) |
+| doctor | doctor-proxy-down | ascii-locale | 1 | yes | 89 | 1 | `—` | [doctor/doctor-proxy-down/ascii-locale.txt](doctor/doctor-proxy-down/ascii-locale.txt) |
+| doctor | doctor-proxy-down | pipe | 1 | no | 133 | 5 | `—` | [doctor/doctor-proxy-down/pipe.txt](doctor/doctor-proxy-down/pipe.txt) |
+| doctor | doctor-proxy-down | ci | 1 | no | 133 | 5 | `—` | [doctor/doctor-proxy-down/ci.txt](doctor/doctor-proxy-down/ci.txt) |
+| doctor | doctor-proxy-running | tty-color-80 | 0 | yes | 89 | 1 | `─✓—–` | [doctor/doctor-proxy-running/tty-color-80.txt](doctor/doctor-proxy-running/tty-color-80.txt) |
+| doctor | doctor-proxy-running | tty-color-120 | 0 | yes | 119 | 7 | `─✓—–` | [doctor/doctor-proxy-running/tty-color-120.txt](doctor/doctor-proxy-running/tty-color-120.txt) |
+| doctor | doctor-proxy-running | no-color | 0 | no | 89 | 1 | `─✓—–` | [doctor/doctor-proxy-running/no-color.txt](doctor/doctor-proxy-running/no-color.txt) |
+| doctor | doctor-proxy-running | term-dumb | 0 | no | 133 | 6 | `—` | [doctor/doctor-proxy-running/term-dumb.txt](doctor/doctor-proxy-running/term-dumb.txt) |
+| doctor | doctor-proxy-running | ascii-locale | 0 | yes | 89 | 1 | `—` | [doctor/doctor-proxy-running/ascii-locale.txt](doctor/doctor-proxy-running/ascii-locale.txt) |
+| doctor | doctor-proxy-running | pipe | 0 | no | 133 | 6 | `—` | [doctor/doctor-proxy-running/pipe.txt](doctor/doctor-proxy-running/pipe.txt) |
+| doctor | doctor-proxy-running | ci | 0 | no | 133 | 6 | `—` | [doctor/doctor-proxy-running/ci.txt](doctor/doctor-proxy-running/ci.txt) |
+| doctor | doctor-json | tty-color-80 | 0 | no | 119 | 6 | `—` | [doctor/doctor-json/tty-color-80.txt](doctor/doctor-json/tty-color-80.txt) |
+| doctor | doctor-json | tty-color-120 | 0 | no | 119 | 6 | `—` | [doctor/doctor-json/tty-color-120.txt](doctor/doctor-json/tty-color-120.txt) |
+| doctor | doctor-json | no-color | 0 | no | 119 | 6 | `—` | [doctor/doctor-json/no-color.txt](doctor/doctor-json/no-color.txt) |
+| doctor | doctor-json | term-dumb | 0 | no | 119 | 6 | `—` | [doctor/doctor-json/term-dumb.txt](doctor/doctor-json/term-dumb.txt) |
+| doctor | doctor-json | ascii-locale | 0 | no | 119 | 6 | `—` | [doctor/doctor-json/ascii-locale.txt](doctor/doctor-json/ascii-locale.txt) |
+| doctor | doctor-json | pipe | 0 | no | 119 | 6 | `—` | [doctor/doctor-json/pipe.txt](doctor/doctor-json/pipe.txt) |
+| doctor | doctor-json | ci | 0 | no | 119 | 6 | `—` | [doctor/doctor-json/ci.txt](doctor/doctor-json/ci.txt) |
+| doctor | doctor-fix-starts-proxy | tty-color-80 | 0 | yes | 89 | 1 | `✓─—–` | [doctor/doctor-fix-starts-proxy/tty-color-80.txt](doctor/doctor-fix-starts-proxy/tty-color-80.txt) |
+| doctor | doctor-fix-starts-proxy | tty-color-120 | 0 | yes | 119 | 7 | `✓─—–` | [doctor/doctor-fix-starts-proxy/tty-color-120.txt](doctor/doctor-fix-starts-proxy/tty-color-120.txt) |
+| doctor | doctor-fix-starts-proxy | no-color | 0 | no | 89 | 1 | `✓─—–` | [doctor/doctor-fix-starts-proxy/no-color.txt](doctor/doctor-fix-starts-proxy/no-color.txt) |
+| doctor | doctor-fix-starts-proxy | term-dumb | 0 | no | 133 | 6 | `—` | [doctor/doctor-fix-starts-proxy/term-dumb.txt](doctor/doctor-fix-starts-proxy/term-dumb.txt) |
+| doctor | doctor-fix-starts-proxy | ascii-locale | 0 | yes | 89 | 1 | `—` | [doctor/doctor-fix-starts-proxy/ascii-locale.txt](doctor/doctor-fix-starts-proxy/ascii-locale.txt) |
+| doctor | doctor-fix-starts-proxy | pipe | 0 | no | 133 | 6 | `—` | [doctor/doctor-fix-starts-proxy/pipe.txt](doctor/doctor-fix-starts-proxy/pipe.txt) |
+| doctor | doctor-fix-starts-proxy | ci | 0 | no | 133 | 6 | `—` | [doctor/doctor-fix-starts-proxy/ci.txt](doctor/doctor-fix-starts-proxy/ci.txt) |
+| doctor | doctor-fix-nothing-to-do | tty-color-80 | 0 | yes | 89 | 1 | `─✓—–` | [doctor/doctor-fix-nothing-to-do/tty-color-80.txt](doctor/doctor-fix-nothing-to-do/tty-color-80.txt) |
+| doctor | doctor-fix-nothing-to-do | tty-color-120 | 0 | yes | 119 | 7 | `─✓—–` | [doctor/doctor-fix-nothing-to-do/tty-color-120.txt](doctor/doctor-fix-nothing-to-do/tty-color-120.txt) |
+| doctor | doctor-fix-nothing-to-do | no-color | 0 | no | 89 | 1 | `─✓—–` | [doctor/doctor-fix-nothing-to-do/no-color.txt](doctor/doctor-fix-nothing-to-do/no-color.txt) |
+| doctor | doctor-fix-nothing-to-do | term-dumb | 0 | no | 133 | 6 | `—` | [doctor/doctor-fix-nothing-to-do/term-dumb.txt](doctor/doctor-fix-nothing-to-do/term-dumb.txt) |
+| doctor | doctor-fix-nothing-to-do | ascii-locale | 0 | yes | 89 | 1 | `—` | [doctor/doctor-fix-nothing-to-do/ascii-locale.txt](doctor/doctor-fix-nothing-to-do/ascii-locale.txt) |
+| doctor | doctor-fix-nothing-to-do | pipe | 0 | no | 133 | 6 | `—` | [doctor/doctor-fix-nothing-to-do/pipe.txt](doctor/doctor-fix-nothing-to-do/pipe.txt) |
+| doctor | doctor-fix-nothing-to-do | ci | 0 | no | 133 | 6 | `—` | [doctor/doctor-fix-nothing-to-do/ci.txt](doctor/doctor-fix-nothing-to-do/ci.txt) |
+| doctor | doctor-harness-omp | tty-color-80 | 1 | yes | 88 | 1 | `✗─✓—→` | [doctor/doctor-harness-omp/tty-color-80.txt](doctor/doctor-harness-omp/tty-color-80.txt) |
+| doctor | doctor-harness-omp | tty-color-120 | 1 | yes | 117 | 4 | `✗─✓—→` | [doctor/doctor-harness-omp/tty-color-120.txt](doctor/doctor-harness-omp/tty-color-120.txt) |
+| doctor | doctor-harness-omp | no-color | 1 | no | 88 | 1 | `✗─✓—→` | [doctor/doctor-harness-omp/no-color.txt](doctor/doctor-harness-omp/no-color.txt) |
+| doctor | doctor-harness-omp | term-dumb | 1 | no | 120 | 1 | `—` | [doctor/doctor-harness-omp/term-dumb.txt](doctor/doctor-harness-omp/term-dumb.txt) |
+| doctor | doctor-harness-omp | ascii-locale | 1 | yes | 88 | 1 | `—` | [doctor/doctor-harness-omp/ascii-locale.txt](doctor/doctor-harness-omp/ascii-locale.txt) |
+| doctor | doctor-harness-omp | pipe | 1 | no | 120 | 1 | `—` | [doctor/doctor-harness-omp/pipe.txt](doctor/doctor-harness-omp/pipe.txt) |
+| doctor | doctor-harness-omp | ci | 1 | no | 120 | 1 | `—` | [doctor/doctor-harness-omp/ci.txt](doctor/doctor-harness-omp/ci.txt) |
+| doctor | doctor-upstream | tty-color-80 | 1 | yes | 92 | 2 | `✗─✓—–→` | [doctor/doctor-upstream/tty-color-80.txt](doctor/doctor-upstream/tty-color-80.txt) |
+| doctor | doctor-upstream | tty-color-120 | 1 | yes | 120 | 11 | `✗─✓—–→` | [doctor/doctor-upstream/tty-color-120.txt](doctor/doctor-upstream/tty-color-120.txt) |
+| doctor | doctor-upstream | no-color | 1 | no | 92 | 2 | `✗─✓—–→` | [doctor/doctor-upstream/no-color.txt](doctor/doctor-upstream/no-color.txt) |
+| doctor | doctor-upstream | term-dumb | 1 | no | 172 | 7 | `—` | [doctor/doctor-upstream/term-dumb.txt](doctor/doctor-upstream/term-dumb.txt) |
+| doctor | doctor-upstream | ascii-locale | 1 | yes | 92 | 2 | `—` | [doctor/doctor-upstream/ascii-locale.txt](doctor/doctor-upstream/ascii-locale.txt) |
+| doctor | doctor-upstream | pipe | 1 | no | 172 | 7 | `—` | [doctor/doctor-upstream/pipe.txt](doctor/doctor-upstream/pipe.txt) |
+| doctor | doctor-upstream | ci | 1 | no | 172 | 7 | `—` | [doctor/doctor-upstream/ci.txt](doctor/doctor-upstream/ci.txt) |
+| doctor | doctor-upstream-unreachable | tty-color-80 | 1 | yes | 89 | 1 | `✗─✓—–→` | [doctor/doctor-upstream-unreachable/tty-color-80.txt](doctor/doctor-upstream-unreachable/tty-color-80.txt) |
+| doctor | doctor-upstream-unreachable | tty-color-120 | 1 | yes | 119 | 9 | `✗─✓—–→` | [doctor/doctor-upstream-unreachable/tty-color-120.txt](doctor/doctor-upstream-unreachable/tty-color-120.txt) |
+| doctor | doctor-upstream-unreachable | no-color | 1 | no | 89 | 1 | `✗─✓—–→` | [doctor/doctor-upstream-unreachable/no-color.txt](doctor/doctor-upstream-unreachable/no-color.txt) |
+| doctor | doctor-upstream-unreachable | term-dumb | 1 | no | 133 | 6 | `—` | [doctor/doctor-upstream-unreachable/term-dumb.txt](doctor/doctor-upstream-unreachable/term-dumb.txt) |
+| doctor | doctor-upstream-unreachable | ascii-locale | 1 | yes | 89 | 1 | `—` | [doctor/doctor-upstream-unreachable/ascii-locale.txt](doctor/doctor-upstream-unreachable/ascii-locale.txt) |
+| doctor | doctor-upstream-unreachable | pipe | 1 | no | 133 | 6 | `—` | [doctor/doctor-upstream-unreachable/pipe.txt](doctor/doctor-upstream-unreachable/pipe.txt) |
+| doctor | doctor-upstream-unreachable | ci | 1 | no | 133 | 6 | `—` | [doctor/doctor-upstream-unreachable/ci.txt](doctor/doctor-upstream-unreachable/ci.txt) |
 | doctor | doctor-forget | tty-color-80 | 0 | no | 92 | 1 | `—` | [doctor/doctor-forget/tty-color-80.txt](doctor/doctor-forget/tty-color-80.txt) |
 | doctor | doctor-forget | tty-color-120 | 0 | no | 92 | 1 | `—` | [doctor/doctor-forget/tty-color-120.txt](doctor/doctor-forget/tty-color-120.txt) |
 | doctor | doctor-forget | no-color | 0 | no | 92 | 1 | `—` | [doctor/doctor-forget/no-color.txt](doctor/doctor-forget/no-color.txt) |
@@ -226,62 +228,62 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | doctor | doctor-forget-usage | ascii-locale | 2 | no | 151 | 1 |  | [doctor/doctor-forget-usage/ascii-locale.txt](doctor/doctor-forget-usage/ascii-locale.txt) |
 | doctor | doctor-forget-usage | pipe | 2 | no | 151 | 1 |  | [doctor/doctor-forget-usage/pipe.txt](doctor/doctor-forget-usage/pipe.txt) |
 | doctor | doctor-forget-usage | ci | 2 | no | 151 | 1 |  | [doctor/doctor-forget-usage/ci.txt](doctor/doctor-forget-usage/ci.txt) |
-| proxy | proxy-start | tty-color-80 | 0 | no | 117 | 3 | `—` | [proxy/proxy-start/tty-color-80.txt](proxy/proxy-start/tty-color-80.txt) |
-| proxy | proxy-start | tty-color-120 | 0 | no | 117 | 3 | `—` | [proxy/proxy-start/tty-color-120.txt](proxy/proxy-start/tty-color-120.txt) |
-| proxy | proxy-start | no-color | 0 | no | 117 | 3 | `—` | [proxy/proxy-start/no-color.txt](proxy/proxy-start/no-color.txt) |
-| proxy | proxy-start | term-dumb | 0 | no | 117 | 3 | `—` | [proxy/proxy-start/term-dumb.txt](proxy/proxy-start/term-dumb.txt) |
-| proxy | proxy-start | ascii-locale | 0 | no | 117 | 3 | `—` | [proxy/proxy-start/ascii-locale.txt](proxy/proxy-start/ascii-locale.txt) |
-| proxy | proxy-start | pipe | 0 | no | 119 | 4 | `—` | [proxy/proxy-start/pipe.txt](proxy/proxy-start/pipe.txt) |
-| proxy | proxy-start | ci | 0 | no | 119 | 4 | `—` | [proxy/proxy-start/ci.txt](proxy/proxy-start/ci.txt) |
-| proxy | proxy-start-already-running | tty-color-80 | 0 | no | 117 | 3 |  | [proxy/proxy-start-already-running/tty-color-80.txt](proxy/proxy-start-already-running/tty-color-80.txt) |
-| proxy | proxy-start-already-running | tty-color-120 | 0 | no | 117 | 3 |  | [proxy/proxy-start-already-running/tty-color-120.txt](proxy/proxy-start-already-running/tty-color-120.txt) |
-| proxy | proxy-start-already-running | no-color | 0 | no | 117 | 3 |  | [proxy/proxy-start-already-running/no-color.txt](proxy/proxy-start-already-running/no-color.txt) |
-| proxy | proxy-start-already-running | term-dumb | 0 | no | 117 | 3 |  | [proxy/proxy-start-already-running/term-dumb.txt](proxy/proxy-start-already-running/term-dumb.txt) |
-| proxy | proxy-start-already-running | ascii-locale | 0 | no | 117 | 3 |  | [proxy/proxy-start-already-running/ascii-locale.txt](proxy/proxy-start-already-running/ascii-locale.txt) |
-| proxy | proxy-start-already-running | pipe | 0 | no | 119 | 4 | `—` | [proxy/proxy-start-already-running/pipe.txt](proxy/proxy-start-already-running/pipe.txt) |
-| proxy | proxy-start-already-running | ci | 0 | no | 119 | 4 | `—` | [proxy/proxy-start-already-running/ci.txt](proxy/proxy-start-already-running/ci.txt) |
-| proxy | proxy-start-nokey | tty-color-80 | 5 | no | 90 | 1 | `—` | [proxy/proxy-start-nokey/tty-color-80.txt](proxy/proxy-start-nokey/tty-color-80.txt) |
-| proxy | proxy-start-nokey | tty-color-120 | 5 | no | 90 | 1 | `—` | [proxy/proxy-start-nokey/tty-color-120.txt](proxy/proxy-start-nokey/tty-color-120.txt) |
-| proxy | proxy-start-nokey | no-color | 5 | no | 90 | 1 | `—` | [proxy/proxy-start-nokey/no-color.txt](proxy/proxy-start-nokey/no-color.txt) |
-| proxy | proxy-start-nokey | term-dumb | 5 | no | 90 | 1 | `—` | [proxy/proxy-start-nokey/term-dumb.txt](proxy/proxy-start-nokey/term-dumb.txt) |
-| proxy | proxy-start-nokey | ascii-locale | 5 | no | 90 | 1 | `—` | [proxy/proxy-start-nokey/ascii-locale.txt](proxy/proxy-start-nokey/ascii-locale.txt) |
-| proxy | proxy-start-nokey | pipe | 5 | no | 90 | 1 | `—` | [proxy/proxy-start-nokey/pipe.txt](proxy/proxy-start-nokey/pipe.txt) |
-| proxy | proxy-start-nokey | ci | 5 | no | 90 | 1 | `—` | [proxy/proxy-start-nokey/ci.txt](proxy/proxy-start-nokey/ci.txt) |
-| proxy | proxy-start-foreign | tty-color-80 | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/tty-color-80.txt](proxy/proxy-start-foreign/tty-color-80.txt) |
-| proxy | proxy-start-foreign | tty-color-120 | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/tty-color-120.txt](proxy/proxy-start-foreign/tty-color-120.txt) |
-| proxy | proxy-start-foreign | no-color | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/no-color.txt](proxy/proxy-start-foreign/no-color.txt) |
-| proxy | proxy-start-foreign | term-dumb | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/term-dumb.txt](proxy/proxy-start-foreign/term-dumb.txt) |
-| proxy | proxy-start-foreign | ascii-locale | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/ascii-locale.txt](proxy/proxy-start-foreign/ascii-locale.txt) |
-| proxy | proxy-start-foreign | pipe | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/pipe.txt](proxy/proxy-start-foreign/pipe.txt) |
-| proxy | proxy-start-foreign | ci | 3 | no | 82 | 1 |  | [proxy/proxy-start-foreign/ci.txt](proxy/proxy-start-foreign/ci.txt) |
-| proxy | proxy-status-running | tty-color-80 | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/tty-color-80.txt](proxy/proxy-status-running/tty-color-80.txt) |
-| proxy | proxy-status-running | tty-color-120 | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/tty-color-120.txt](proxy/proxy-status-running/tty-color-120.txt) |
-| proxy | proxy-status-running | no-color | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/no-color.txt](proxy/proxy-status-running/no-color.txt) |
-| proxy | proxy-status-running | term-dumb | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/term-dumb.txt](proxy/proxy-status-running/term-dumb.txt) |
-| proxy | proxy-status-running | ascii-locale | 0 | no | 117 | 4 |  | [proxy/proxy-status-running/ascii-locale.txt](proxy/proxy-status-running/ascii-locale.txt) |
-| proxy | proxy-status-running | pipe | 0 | no | 119 | 5 | `—` | [proxy/proxy-status-running/pipe.txt](proxy/proxy-status-running/pipe.txt) |
-| proxy | proxy-status-running | ci | 0 | no | 119 | 5 | `—` | [proxy/proxy-status-running/ci.txt](proxy/proxy-status-running/ci.txt) |
-| proxy | proxy-status-down | tty-color-80 | 1 | no | 143 | 4 |  | [proxy/proxy-status-down/tty-color-80.txt](proxy/proxy-status-down/tty-color-80.txt) |
-| proxy | proxy-status-down | tty-color-120 | 1 | no | 143 | 4 |  | [proxy/proxy-status-down/tty-color-120.txt](proxy/proxy-status-down/tty-color-120.txt) |
-| proxy | proxy-status-down | no-color | 1 | no | 143 | 4 |  | [proxy/proxy-status-down/no-color.txt](proxy/proxy-status-down/no-color.txt) |
-| proxy | proxy-status-down | term-dumb | 1 | no | 143 | 4 |  | [proxy/proxy-status-down/term-dumb.txt](proxy/proxy-status-down/term-dumb.txt) |
-| proxy | proxy-status-down | ascii-locale | 1 | no | 143 | 4 |  | [proxy/proxy-status-down/ascii-locale.txt](proxy/proxy-status-down/ascii-locale.txt) |
-| proxy | proxy-status-down | pipe | 1 | no | 143 | 5 | `—` | [proxy/proxy-status-down/pipe.txt](proxy/proxy-status-down/pipe.txt) |
-| proxy | proxy-status-down | ci | 1 | no | 143 | 5 | `—` | [proxy/proxy-status-down/ci.txt](proxy/proxy-status-down/ci.txt) |
-| proxy | proxy-status-foreign | tty-color-80 | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/tty-color-80.txt](proxy/proxy-status-foreign/tty-color-80.txt) |
-| proxy | proxy-status-foreign | tty-color-120 | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/tty-color-120.txt](proxy/proxy-status-foreign/tty-color-120.txt) |
-| proxy | proxy-status-foreign | no-color | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/no-color.txt](proxy/proxy-status-foreign/no-color.txt) |
-| proxy | proxy-status-foreign | term-dumb | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/term-dumb.txt](proxy/proxy-status-foreign/term-dumb.txt) |
-| proxy | proxy-status-foreign | ascii-locale | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/ascii-locale.txt](proxy/proxy-status-foreign/ascii-locale.txt) |
-| proxy | proxy-status-foreign | pipe | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/pipe.txt](proxy/proxy-status-foreign/pipe.txt) |
-| proxy | proxy-status-foreign | ci | 1 | no | 95 | 1 |  | [proxy/proxy-status-foreign/ci.txt](proxy/proxy-status-foreign/ci.txt) |
-| proxy | proxy-status-fresh | tty-color-80 | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/tty-color-80.txt](proxy/proxy-status-fresh/tty-color-80.txt) |
-| proxy | proxy-status-fresh | tty-color-120 | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/tty-color-120.txt](proxy/proxy-status-fresh/tty-color-120.txt) |
-| proxy | proxy-status-fresh | no-color | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/no-color.txt](proxy/proxy-status-fresh/no-color.txt) |
-| proxy | proxy-status-fresh | term-dumb | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/term-dumb.txt](proxy/proxy-status-fresh/term-dumb.txt) |
-| proxy | proxy-status-fresh | ascii-locale | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/ascii-locale.txt](proxy/proxy-status-fresh/ascii-locale.txt) |
-| proxy | proxy-status-fresh | pipe | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/pipe.txt](proxy/proxy-status-fresh/pipe.txt) |
-| proxy | proxy-status-fresh | ci | 1 | no | 75 | 0 | `—` | [proxy/proxy-status-fresh/ci.txt](proxy/proxy-status-fresh/ci.txt) |
+| proxy | proxy-start | tty-color-80 | 0 | yes | 80 | 0 | `✓─●` | [proxy/proxy-start/tty-color-80.txt](proxy/proxy-start/tty-color-80.txt) |
+| proxy | proxy-start | tty-color-120 | 0 | yes | 80 | 0 | `✓─●` | [proxy/proxy-start/tty-color-120.txt](proxy/proxy-start/tty-color-120.txt) |
+| proxy | proxy-start | no-color | 0 | no | 80 | 0 | `✓─●` | [proxy/proxy-start/no-color.txt](proxy/proxy-start/no-color.txt) |
+| proxy | proxy-start | term-dumb | 0 | no | 80 | 0 |  | [proxy/proxy-start/term-dumb.txt](proxy/proxy-start/term-dumb.txt) |
+| proxy | proxy-start | ascii-locale | 0 | yes | 80 | 0 |  | [proxy/proxy-start/ascii-locale.txt](proxy/proxy-start/ascii-locale.txt) |
+| proxy | proxy-start | pipe | 0 | no | 80 | 0 |  | [proxy/proxy-start/pipe.txt](proxy/proxy-start/pipe.txt) |
+| proxy | proxy-start | ci | 0 | no | 80 | 0 |  | [proxy/proxy-start/ci.txt](proxy/proxy-start/ci.txt) |
+| proxy | proxy-start-already-running | tty-color-80 | 0 | yes | 80 | 0 | `✓─●` | [proxy/proxy-start-already-running/tty-color-80.txt](proxy/proxy-start-already-running/tty-color-80.txt) |
+| proxy | proxy-start-already-running | tty-color-120 | 0 | yes | 80 | 0 | `✓─●` | [proxy/proxy-start-already-running/tty-color-120.txt](proxy/proxy-start-already-running/tty-color-120.txt) |
+| proxy | proxy-start-already-running | no-color | 0 | no | 80 | 0 | `✓─●` | [proxy/proxy-start-already-running/no-color.txt](proxy/proxy-start-already-running/no-color.txt) |
+| proxy | proxy-start-already-running | term-dumb | 0 | no | 80 | 0 |  | [proxy/proxy-start-already-running/term-dumb.txt](proxy/proxy-start-already-running/term-dumb.txt) |
+| proxy | proxy-start-already-running | ascii-locale | 0 | yes | 80 | 0 |  | [proxy/proxy-start-already-running/ascii-locale.txt](proxy/proxy-start-already-running/ascii-locale.txt) |
+| proxy | proxy-start-already-running | pipe | 0 | no | 80 | 0 |  | [proxy/proxy-start-already-running/pipe.txt](proxy/proxy-start-already-running/pipe.txt) |
+| proxy | proxy-start-already-running | ci | 0 | no | 80 | 0 |  | [proxy/proxy-start-already-running/ci.txt](proxy/proxy-start-already-running/ci.txt) |
+| proxy | proxy-start-nokey | tty-color-80 | 5 | yes | 59 | 0 | `✗` | [proxy/proxy-start-nokey/tty-color-80.txt](proxy/proxy-start-nokey/tty-color-80.txt) |
+| proxy | proxy-start-nokey | tty-color-120 | 5 | yes | 76 | 0 | `✗` | [proxy/proxy-start-nokey/tty-color-120.txt](proxy/proxy-start-nokey/tty-color-120.txt) |
+| proxy | proxy-start-nokey | no-color | 5 | no | 59 | 0 | `✗` | [proxy/proxy-start-nokey/no-color.txt](proxy/proxy-start-nokey/no-color.txt) |
+| proxy | proxy-start-nokey | term-dumb | 5 | no | 74 | 0 |  | [proxy/proxy-start-nokey/term-dumb.txt](proxy/proxy-start-nokey/term-dumb.txt) |
+| proxy | proxy-start-nokey | ascii-locale | 5 | yes | 59 | 0 |  | [proxy/proxy-start-nokey/ascii-locale.txt](proxy/proxy-start-nokey/ascii-locale.txt) |
+| proxy | proxy-start-nokey | pipe | 5 | no | 74 | 0 |  | [proxy/proxy-start-nokey/pipe.txt](proxy/proxy-start-nokey/pipe.txt) |
+| proxy | proxy-start-nokey | ci | 5 | no | 74 | 0 |  | [proxy/proxy-start-nokey/ci.txt](proxy/proxy-start-nokey/ci.txt) |
+| proxy | proxy-start-foreign | tty-color-80 | 3 | yes | 79 | 0 | `✗` | [proxy/proxy-start-foreign/tty-color-80.txt](proxy/proxy-start-foreign/tty-color-80.txt) |
+| proxy | proxy-start-foreign | tty-color-120 | 3 | yes | 104 | 1 | `✗` | [proxy/proxy-start-foreign/tty-color-120.txt](proxy/proxy-start-foreign/tty-color-120.txt) |
+| proxy | proxy-start-foreign | no-color | 3 | no | 79 | 0 | `✗` | [proxy/proxy-start-foreign/no-color.txt](proxy/proxy-start-foreign/no-color.txt) |
+| proxy | proxy-start-foreign | term-dumb | 3 | no | 102 | 1 |  | [proxy/proxy-start-foreign/term-dumb.txt](proxy/proxy-start-foreign/term-dumb.txt) |
+| proxy | proxy-start-foreign | ascii-locale | 3 | yes | 79 | 0 |  | [proxy/proxy-start-foreign/ascii-locale.txt](proxy/proxy-start-foreign/ascii-locale.txt) |
+| proxy | proxy-start-foreign | pipe | 3 | no | 102 | 1 |  | [proxy/proxy-start-foreign/pipe.txt](proxy/proxy-start-foreign/pipe.txt) |
+| proxy | proxy-start-foreign | ci | 3 | no | 102 | 1 |  | [proxy/proxy-start-foreign/ci.txt](proxy/proxy-start-foreign/ci.txt) |
+| proxy | proxy-status-running | tty-color-80 | 0 | yes | 80 | 0 | `●─` | [proxy/proxy-status-running/tty-color-80.txt](proxy/proxy-status-running/tty-color-80.txt) |
+| proxy | proxy-status-running | tty-color-120 | 0 | yes | 111 | 1 | `●─` | [proxy/proxy-status-running/tty-color-120.txt](proxy/proxy-status-running/tty-color-120.txt) |
+| proxy | proxy-status-running | no-color | 0 | no | 80 | 0 | `●─` | [proxy/proxy-status-running/no-color.txt](proxy/proxy-status-running/no-color.txt) |
+| proxy | proxy-status-running | term-dumb | 0 | no | 80 | 0 |  | [proxy/proxy-status-running/term-dumb.txt](proxy/proxy-status-running/term-dumb.txt) |
+| proxy | proxy-status-running | ascii-locale | 0 | yes | 80 | 0 |  | [proxy/proxy-status-running/ascii-locale.txt](proxy/proxy-status-running/ascii-locale.txt) |
+| proxy | proxy-status-running | pipe | 0 | no | 111 | 1 |  | [proxy/proxy-status-running/pipe.txt](proxy/proxy-status-running/pipe.txt) |
+| proxy | proxy-status-running | ci | 0 | no | 111 | 1 |  | [proxy/proxy-status-running/ci.txt](proxy/proxy-status-running/ci.txt) |
+| proxy | proxy-status-down | tty-color-80 | 1 | yes | 80 | 0 | `○─` | [proxy/proxy-status-down/tty-color-80.txt](proxy/proxy-status-down/tty-color-80.txt) |
+| proxy | proxy-status-down | tty-color-120 | 1 | yes | 80 | 0 | `○─` | [proxy/proxy-status-down/tty-color-120.txt](proxy/proxy-status-down/tty-color-120.txt) |
+| proxy | proxy-status-down | no-color | 1 | no | 80 | 0 | `○─` | [proxy/proxy-status-down/no-color.txt](proxy/proxy-status-down/no-color.txt) |
+| proxy | proxy-status-down | term-dumb | 1 | no | 80 | 0 |  | [proxy/proxy-status-down/term-dumb.txt](proxy/proxy-status-down/term-dumb.txt) |
+| proxy | proxy-status-down | ascii-locale | 1 | yes | 80 | 0 |  | [proxy/proxy-status-down/ascii-locale.txt](proxy/proxy-status-down/ascii-locale.txt) |
+| proxy | proxy-status-down | pipe | 1 | no | 80 | 0 |  | [proxy/proxy-status-down/pipe.txt](proxy/proxy-status-down/pipe.txt) |
+| proxy | proxy-status-down | ci | 1 | no | 80 | 0 |  | [proxy/proxy-status-down/ci.txt](proxy/proxy-status-down/ci.txt) |
+| proxy | proxy-status-foreign | tty-color-80 | 1 | yes | 76 | 0 | `✗` | [proxy/proxy-status-foreign/tty-color-80.txt](proxy/proxy-status-foreign/tty-color-80.txt) |
+| proxy | proxy-status-foreign | tty-color-120 | 1 | yes | 120 | 1 | `✗` | [proxy/proxy-status-foreign/tty-color-120.txt](proxy/proxy-status-foreign/tty-color-120.txt) |
+| proxy | proxy-status-foreign | no-color | 1 | no | 76 | 0 | `✗` | [proxy/proxy-status-foreign/no-color.txt](proxy/proxy-status-foreign/no-color.txt) |
+| proxy | proxy-status-foreign | term-dumb | 1 | no | 128 | 1 |  | [proxy/proxy-status-foreign/term-dumb.txt](proxy/proxy-status-foreign/term-dumb.txt) |
+| proxy | proxy-status-foreign | ascii-locale | 1 | yes | 76 | 0 |  | [proxy/proxy-status-foreign/ascii-locale.txt](proxy/proxy-status-foreign/ascii-locale.txt) |
+| proxy | proxy-status-foreign | pipe | 1 | no | 128 | 1 |  | [proxy/proxy-status-foreign/pipe.txt](proxy/proxy-status-foreign/pipe.txt) |
+| proxy | proxy-status-foreign | ci | 1 | no | 128 | 1 |  | [proxy/proxy-status-foreign/ci.txt](proxy/proxy-status-foreign/ci.txt) |
+| proxy | proxy-status-fresh | tty-color-80 | 1 | yes | 59 | 0 | `✗` | [proxy/proxy-status-fresh/tty-color-80.txt](proxy/proxy-status-fresh/tty-color-80.txt) |
+| proxy | proxy-status-fresh | tty-color-120 | 1 | yes | 76 | 0 | `✗` | [proxy/proxy-status-fresh/tty-color-120.txt](proxy/proxy-status-fresh/tty-color-120.txt) |
+| proxy | proxy-status-fresh | no-color | 1 | no | 59 | 0 | `✗` | [proxy/proxy-status-fresh/no-color.txt](proxy/proxy-status-fresh/no-color.txt) |
+| proxy | proxy-status-fresh | term-dumb | 1 | no | 74 | 0 |  | [proxy/proxy-status-fresh/term-dumb.txt](proxy/proxy-status-fresh/term-dumb.txt) |
+| proxy | proxy-status-fresh | ascii-locale | 1 | yes | 59 | 0 |  | [proxy/proxy-status-fresh/ascii-locale.txt](proxy/proxy-status-fresh/ascii-locale.txt) |
+| proxy | proxy-status-fresh | pipe | 1 | no | 74 | 0 |  | [proxy/proxy-status-fresh/pipe.txt](proxy/proxy-status-fresh/pipe.txt) |
+| proxy | proxy-status-fresh | ci | 1 | no | 74 | 0 |  | [proxy/proxy-status-fresh/ci.txt](proxy/proxy-status-fresh/ci.txt) |
 | proxy | proxy-status-json-running | tty-color-80 | 0 | no | 49 | 0 |  | [proxy/proxy-status-json-running/tty-color-80.txt](proxy/proxy-status-json-running/tty-color-80.txt) |
 | proxy | proxy-status-json-running | tty-color-120 | 0 | no | 49 | 0 |  | [proxy/proxy-status-json-running/tty-color-120.txt](proxy/proxy-status-json-running/tty-color-120.txt) |
 | proxy | proxy-status-json-running | no-color | 0 | no | 49 | 0 |  | [proxy/proxy-status-json-running/no-color.txt](proxy/proxy-status-json-running/no-color.txt) |
@@ -310,41 +312,41 @@ Fixtures: throwaway kit trees under $TMPDIR/ux-kit-* (HOME next to the kit), pro
 | proxy | proxy-logs-5 | ascii-locale | 0 | no | 70 | 0 | `→—` | [proxy/proxy-logs-5/ascii-locale.txt](proxy/proxy-logs-5/ascii-locale.txt) |
 | proxy | proxy-logs-5 | pipe | 0 | no | 70 | 0 | `→—` | [proxy/proxy-logs-5/pipe.txt](proxy/proxy-logs-5/pipe.txt) |
 | proxy | proxy-logs-5 | ci | 0 | no | 70 | 0 | `→—` | [proxy/proxy-logs-5/ci.txt](proxy/proxy-logs-5/ci.txt) |
-| proxy | proxy-logs-none | tty-color-80 | 0 | no | 37 | 0 |  | [proxy/proxy-logs-none/tty-color-80.txt](proxy/proxy-logs-none/tty-color-80.txt) |
-| proxy | proxy-logs-none | tty-color-120 | 0 | no | 37 | 0 |  | [proxy/proxy-logs-none/tty-color-120.txt](proxy/proxy-logs-none/tty-color-120.txt) |
-| proxy | proxy-logs-none | no-color | 0 | no | 37 | 0 |  | [proxy/proxy-logs-none/no-color.txt](proxy/proxy-logs-none/no-color.txt) |
-| proxy | proxy-logs-none | term-dumb | 0 | no | 37 | 0 |  | [proxy/proxy-logs-none/term-dumb.txt](proxy/proxy-logs-none/term-dumb.txt) |
-| proxy | proxy-logs-none | ascii-locale | 0 | no | 37 | 0 |  | [proxy/proxy-logs-none/ascii-locale.txt](proxy/proxy-logs-none/ascii-locale.txt) |
-| proxy | proxy-logs-none | pipe | 0 | no | 37 | 0 |  | [proxy/proxy-logs-none/pipe.txt](proxy/proxy-logs-none/pipe.txt) |
-| proxy | proxy-logs-none | ci | 0 | no | 37 | 0 |  | [proxy/proxy-logs-none/ci.txt](proxy/proxy-logs-none/ci.txt) |
-| proxy | proxy-restart | tty-color-80 | 0 | no | 117 | 3 | `—` | [proxy/proxy-restart/tty-color-80.txt](proxy/proxy-restart/tty-color-80.txt) |
-| proxy | proxy-restart | tty-color-120 | 0 | no | 117 | 3 | `—` | [proxy/proxy-restart/tty-color-120.txt](proxy/proxy-restart/tty-color-120.txt) |
-| proxy | proxy-restart | no-color | 0 | no | 117 | 3 | `—` | [proxy/proxy-restart/no-color.txt](proxy/proxy-restart/no-color.txt) |
-| proxy | proxy-restart | term-dumb | 0 | no | 117 | 3 | `—` | [proxy/proxy-restart/term-dumb.txt](proxy/proxy-restart/term-dumb.txt) |
-| proxy | proxy-restart | ascii-locale | 0 | no | 117 | 3 | `—` | [proxy/proxy-restart/ascii-locale.txt](proxy/proxy-restart/ascii-locale.txt) |
-| proxy | proxy-restart | pipe | 0 | no | 119 | 4 | `—` | [proxy/proxy-restart/pipe.txt](proxy/proxy-restart/pipe.txt) |
-| proxy | proxy-restart | ci | 0 | no | 119 | 4 | `—` | [proxy/proxy-restart/ci.txt](proxy/proxy-restart/ci.txt) |
-| proxy | proxy-stop | tty-color-80 | 0 | no | 19 | 0 |  | [proxy/proxy-stop/tty-color-80.txt](proxy/proxy-stop/tty-color-80.txt) |
-| proxy | proxy-stop | tty-color-120 | 0 | no | 19 | 0 |  | [proxy/proxy-stop/tty-color-120.txt](proxy/proxy-stop/tty-color-120.txt) |
-| proxy | proxy-stop | no-color | 0 | no | 19 | 0 |  | [proxy/proxy-stop/no-color.txt](proxy/proxy-stop/no-color.txt) |
-| proxy | proxy-stop | term-dumb | 0 | no | 19 | 0 |  | [proxy/proxy-stop/term-dumb.txt](proxy/proxy-stop/term-dumb.txt) |
-| proxy | proxy-stop | ascii-locale | 0 | no | 19 | 0 |  | [proxy/proxy-stop/ascii-locale.txt](proxy/proxy-stop/ascii-locale.txt) |
-| proxy | proxy-stop | pipe | 0 | no | 19 | 0 |  | [proxy/proxy-stop/pipe.txt](proxy/proxy-stop/pipe.txt) |
-| proxy | proxy-stop | ci | 0 | no | 19 | 0 |  | [proxy/proxy-stop/ci.txt](proxy/proxy-stop/ci.txt) |
-| proxy | proxy-stop-not-running | tty-color-80 | 0 | no | 11 | 0 |  | [proxy/proxy-stop-not-running/tty-color-80.txt](proxy/proxy-stop-not-running/tty-color-80.txt) |
-| proxy | proxy-stop-not-running | tty-color-120 | 0 | no | 11 | 0 |  | [proxy/proxy-stop-not-running/tty-color-120.txt](proxy/proxy-stop-not-running/tty-color-120.txt) |
-| proxy | proxy-stop-not-running | no-color | 0 | no | 11 | 0 |  | [proxy/proxy-stop-not-running/no-color.txt](proxy/proxy-stop-not-running/no-color.txt) |
-| proxy | proxy-stop-not-running | term-dumb | 0 | no | 11 | 0 |  | [proxy/proxy-stop-not-running/term-dumb.txt](proxy/proxy-stop-not-running/term-dumb.txt) |
-| proxy | proxy-stop-not-running | ascii-locale | 0 | no | 11 | 0 |  | [proxy/proxy-stop-not-running/ascii-locale.txt](proxy/proxy-stop-not-running/ascii-locale.txt) |
-| proxy | proxy-stop-not-running | pipe | 0 | no | 11 | 0 |  | [proxy/proxy-stop-not-running/pipe.txt](proxy/proxy-stop-not-running/pipe.txt) |
-| proxy | proxy-stop-not-running | ci | 0 | no | 11 | 0 |  | [proxy/proxy-stop-not-running/ci.txt](proxy/proxy-stop-not-running/ci.txt) |
-| status | status-running | tty-color-80 | 0 | no | 117 | 4 |  | [status/status-running/tty-color-80.txt](status/status-running/tty-color-80.txt) |
-| status | status-running | tty-color-120 | 0 | no | 117 | 4 |  | [status/status-running/tty-color-120.txt](status/status-running/tty-color-120.txt) |
-| status | status-running | no-color | 0 | no | 117 | 4 |  | [status/status-running/no-color.txt](status/status-running/no-color.txt) |
-| status | status-running | term-dumb | 0 | no | 117 | 4 |  | [status/status-running/term-dumb.txt](status/status-running/term-dumb.txt) |
-| status | status-running | ascii-locale | 0 | no | 117 | 4 |  | [status/status-running/ascii-locale.txt](status/status-running/ascii-locale.txt) |
-| status | status-running | pipe | 0 | no | 119 | 5 | `—` | [status/status-running/pipe.txt](status/status-running/pipe.txt) |
-| status | status-running | ci | 0 | no | 119 | 5 | `—` | [status/status-running/ci.txt](status/status-running/ci.txt) |
+| proxy | proxy-logs-none | tty-color-80 | 0 | yes | 48 | 0 | `•` | [proxy/proxy-logs-none/tty-color-80.txt](proxy/proxy-logs-none/tty-color-80.txt) |
+| proxy | proxy-logs-none | tty-color-120 | 0 | yes | 48 | 0 | `•` | [proxy/proxy-logs-none/tty-color-120.txt](proxy/proxy-logs-none/tty-color-120.txt) |
+| proxy | proxy-logs-none | no-color | 0 | no | 48 | 0 | `•` | [proxy/proxy-logs-none/no-color.txt](proxy/proxy-logs-none/no-color.txt) |
+| proxy | proxy-logs-none | term-dumb | 0 | no | 46 | 0 |  | [proxy/proxy-logs-none/term-dumb.txt](proxy/proxy-logs-none/term-dumb.txt) |
+| proxy | proxy-logs-none | ascii-locale | 0 | yes | 48 | 0 |  | [proxy/proxy-logs-none/ascii-locale.txt](proxy/proxy-logs-none/ascii-locale.txt) |
+| proxy | proxy-logs-none | pipe | 0 | no | 46 | 0 |  | [proxy/proxy-logs-none/pipe.txt](proxy/proxy-logs-none/pipe.txt) |
+| proxy | proxy-logs-none | ci | 0 | no | 46 | 0 |  | [proxy/proxy-logs-none/ci.txt](proxy/proxy-logs-none/ci.txt) |
+| proxy | proxy-restart | tty-color-80 | 0 | yes | 80 | 0 | `✓─●` | [proxy/proxy-restart/tty-color-80.txt](proxy/proxy-restart/tty-color-80.txt) |
+| proxy | proxy-restart | tty-color-120 | 0 | yes | 80 | 0 | `✓─●` | [proxy/proxy-restart/tty-color-120.txt](proxy/proxy-restart/tty-color-120.txt) |
+| proxy | proxy-restart | no-color | 0 | no | 80 | 0 | `✓─●` | [proxy/proxy-restart/no-color.txt](proxy/proxy-restart/no-color.txt) |
+| proxy | proxy-restart | term-dumb | 0 | no | 80 | 0 |  | [proxy/proxy-restart/term-dumb.txt](proxy/proxy-restart/term-dumb.txt) |
+| proxy | proxy-restart | ascii-locale | 0 | yes | 80 | 0 |  | [proxy/proxy-restart/ascii-locale.txt](proxy/proxy-restart/ascii-locale.txt) |
+| proxy | proxy-restart | pipe | 0 | no | 80 | 0 |  | [proxy/proxy-restart/pipe.txt](proxy/proxy-restart/pipe.txt) |
+| proxy | proxy-restart | ci | 0 | no | 80 | 0 |  | [proxy/proxy-restart/ci.txt](proxy/proxy-restart/ci.txt) |
+| proxy | proxy-stop | tty-color-80 | 0 | yes | 41 | 0 | `✓` | [proxy/proxy-stop/tty-color-80.txt](proxy/proxy-stop/tty-color-80.txt) |
+| proxy | proxy-stop | tty-color-120 | 0 | yes | 41 | 0 | `✓` | [proxy/proxy-stop/tty-color-120.txt](proxy/proxy-stop/tty-color-120.txt) |
+| proxy | proxy-stop | no-color | 0 | no | 41 | 0 | `✓` | [proxy/proxy-stop/no-color.txt](proxy/proxy-stop/no-color.txt) |
+| proxy | proxy-stop | term-dumb | 0 | no | 36 | 0 |  | [proxy/proxy-stop/term-dumb.txt](proxy/proxy-stop/term-dumb.txt) |
+| proxy | proxy-stop | ascii-locale | 0 | yes | 41 | 0 |  | [proxy/proxy-stop/ascii-locale.txt](proxy/proxy-stop/ascii-locale.txt) |
+| proxy | proxy-stop | pipe | 0 | no | 36 | 0 |  | [proxy/proxy-stop/pipe.txt](proxy/proxy-stop/pipe.txt) |
+| proxy | proxy-stop | ci | 0 | no | 36 | 0 |  | [proxy/proxy-stop/ci.txt](proxy/proxy-stop/ci.txt) |
+| proxy | proxy-stop-not-running | tty-color-80 | 0 | yes | 33 | 0 | `–` | [proxy/proxy-stop-not-running/tty-color-80.txt](proxy/proxy-stop-not-running/tty-color-80.txt) |
+| proxy | proxy-stop-not-running | tty-color-120 | 0 | yes | 33 | 0 | `–` | [proxy/proxy-stop-not-running/tty-color-120.txt](proxy/proxy-stop-not-running/tty-color-120.txt) |
+| proxy | proxy-stop-not-running | no-color | 0 | no | 33 | 0 | `–` | [proxy/proxy-stop-not-running/no-color.txt](proxy/proxy-stop-not-running/no-color.txt) |
+| proxy | proxy-stop-not-running | term-dumb | 0 | no | 30 | 0 |  | [proxy/proxy-stop-not-running/term-dumb.txt](proxy/proxy-stop-not-running/term-dumb.txt) |
+| proxy | proxy-stop-not-running | ascii-locale | 0 | yes | 33 | 0 |  | [proxy/proxy-stop-not-running/ascii-locale.txt](proxy/proxy-stop-not-running/ascii-locale.txt) |
+| proxy | proxy-stop-not-running | pipe | 0 | no | 30 | 0 |  | [proxy/proxy-stop-not-running/pipe.txt](proxy/proxy-stop-not-running/pipe.txt) |
+| proxy | proxy-stop-not-running | ci | 0 | no | 30 | 0 |  | [proxy/proxy-stop-not-running/ci.txt](proxy/proxy-stop-not-running/ci.txt) |
+| status | status-running | tty-color-80 | 0 | yes | 80 | 0 | `●─` | [status/status-running/tty-color-80.txt](status/status-running/tty-color-80.txt) |
+| status | status-running | tty-color-120 | 0 | yes | 111 | 1 | `●─` | [status/status-running/tty-color-120.txt](status/status-running/tty-color-120.txt) |
+| status | status-running | no-color | 0 | no | 80 | 0 | `●─` | [status/status-running/no-color.txt](status/status-running/no-color.txt) |
+| status | status-running | term-dumb | 0 | no | 80 | 0 |  | [status/status-running/term-dumb.txt](status/status-running/term-dumb.txt) |
+| status | status-running | ascii-locale | 0 | yes | 80 | 0 |  | [status/status-running/ascii-locale.txt](status/status-running/ascii-locale.txt) |
+| status | status-running | pipe | 0 | no | 111 | 1 |  | [status/status-running/pipe.txt](status/status-running/pipe.txt) |
+| status | status-running | ci | 0 | no | 111 | 1 |  | [status/status-running/ci.txt](status/status-running/ci.txt) |
 | status | status-json-running | tty-color-80 | 0 | no | 49 | 0 |  | [status/status-json-running/tty-color-80.txt](status/status-json-running/tty-color-80.txt) |
 | status | status-json-running | tty-color-120 | 0 | no | 49 | 0 |  | [status/status-json-running/tty-color-120.txt](status/status-json-running/tty-color-120.txt) |
 | status | status-json-running | no-color | 0 | no | 49 | 0 |  | [status/status-json-running/no-color.txt](status/status-json-running/no-color.txt) |
