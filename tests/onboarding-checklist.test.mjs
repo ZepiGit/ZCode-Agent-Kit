@@ -636,15 +636,18 @@ test("lexical delayed LF tail is consumed once, not every first rotator Enter", 
 });
 
 test("SIGINT during the fresh line phase restores prior raw true after readline closes", async () => {
-  const t = terminal(); t.input.isRaw = true;
-  try {
-    const pending = t.prompter.selectHarnesses({ rows: [{ id: "codex", label: "Codex CLI" }] });
-    await t.ready(); t.input.write(" \r"); await pending;
-    const line = t.prompter.ask("fresh abort?");
-    for (let i = 0; i < 100 && !t.text().includes("fresh abort?"); i++) await turn();
-    t.input.write("\x03"); await assert.rejects(line, (err) => err.code === ABORTED);
-    t.prompter.close(); assert.equal(t.input.isRaw, true);
-  } finally { t.close(); }
+  for (const signal of [false, true]) {
+    const t = terminal(); t.input.isRaw = true;
+    try {
+      const pending = t.prompter.selectHarnesses({ rows: [{ id: "codex", label: "Codex CLI" }] });
+      await t.ready(); t.input.write(" \r"); await pending;
+      const line = t.prompter.ask("fresh abort?");
+      for (let i = 0; i < 100 && !t.text().includes("fresh abort?"); i++) await turn();
+      if (signal) process.emit("SIGINT"); else t.input.write("\x03");
+      await assert.rejects(line, (err) => err.code === ABORTED);
+      t.prompter.close(); assert.equal(t.input.isRaw, true);
+    } finally { t.close(); }
+  }
 });
 
 test("raw true is restored after selector and subsequent line close", async () => {

@@ -217,7 +217,13 @@ export function createPrompter({ input = process.stdin, output = process.stderr,
       const maximum = frame(caps, "Saved choice is locked; use zcode-kit setup --reask");
       if (!maximum || maximum.length + 1 > caps.rows) return null;
       selectorSession = createSelectorSession({ input, output,
-        onClosed: () => { closed = true; }, onAborted: () => { aborted = true; closed = true; },
+        onClosed: () => { closed = true; }, onAborted: () => {
+          aborted = true; closed = true; queue.length = 0;
+          // Close the later readline owner before session cleanup restores the
+          // original raw state; a process SIGINT may arrive in either phase.
+          if (rl) { const current = rl; rl = null; current.close(); }
+          detachSignal(); settleWaiters();
+        },
         getCaps: () => selectorCaps(output, { env, platform }), frame, reset, inventory, editable, offers,
         getFocus: () => focus, setFocus: (value) => { focus = value; hint = ""; },
         setHint: (value) => { hint = value; },
