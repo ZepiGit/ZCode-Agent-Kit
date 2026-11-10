@@ -32,6 +32,14 @@ Spec stories: 95, 97, 111, 115
 
 ## Comments
 
+### 2026-11-10 — exact-head platform CI verified 8/8 GREEN, review still open
+
+Run [42750466098](https://github.com/ZepiGit/ZCode-Agent-Kit/actions/runs/42750466098), exact head `02bd817474978613d8449a499622041a0b5d9e57` (PR79), completed SUCCESS on all eight required named jobs: kit Ubuntu/Windows × Node24/26, UX Ubuntu/Windows, memory Ubuntu/Windows. Controller checked each job's name/status/conclusion and exact run/PR/local staging head rather than relying on watcher exit0 alone. Saved gate metadata `/home/AgentKit/overhaul-tools/t43-ci42750466098-verified-gates.json`.
+
+Native Windows24/26 logs confirm BOTH the new narrow fixture-path normalization test and the full old-verbose install.log line-set test executed and passed. Each leg: kit988/1038 (50platform skips),proxy1649/1652 (3skips),MCP116/116 (0skips),zero failures; typecheck and MCPbuild stages passed. Windows UX's full pipe/ci byte comparison passed1/1, not a skip or baseline generation. Logs `t43-ci42750466098-windows24.log`, `windows26.log`, `windows-ux.log` under overhaul-tools.
+
+Downloaded both memory artifact sets to `/home/AgentKit/overhaul-tools/t43-ci42750466098-artifacts-yvHJAP/`; each job-summary.json has `partial:false,ok:true,failures:[]`. Existing ownedREDs/Windowsunstable remain, so this is a holding ratchet, NOT final all-budget acceptance. Previous FAILED runs remain unchanged. Candidate product/staging worktrees are clean. No merge performed; ticket status remains ready-for-agent with independent review and unresolved ticket40 prerequisite. GLMworkflow658f0456 remains STOPPED1005, not resumed; no provider/billing/model change.
+
 ### 2026-11-10 — Windows fixture corrections and reviewed native snapshot refresh
 
 CI42739064329/head2018c5dFAILED5/8:Windowskit24/26soleinstall-logcomparisonfailureonthreeknownfixturepathseparators;WindowsUX36intendedoutputdiffs. BothLinuxkitjobs/LinuxUXandBOTHmemoryjobsSUCCESS (archivedsummariesok=true/partial=false/failures=[]). Controlleraddedalways-runnableWindowsliteralnormalizationtestRED1fail/1passthenGREEN2pass,narrowlycanonicalizesONLYthreeexactfixturepathsuffixes,negativecontrolsretainwrongpath/filename/verb/unrelatedbackslashes. No productruntime/logsemantics or oldverbosefixture changed. NativeUXcapture193uniqueentries,zeroerrors/everyexitunchanged;all36nonvolatilechangesin10ticket43scenariosreviewedagainst942linediff/designlanguage,thenONLY36outputfiles(14newstderr)+20manifestrows+INDEXupdated. Comparator/volatile/static/unrelatedsnapshotsunchanged. Fullnativecaptureequivalenceafterrefreshzero;hashmanifest /home/AgentKit/overhaul-tools/t43-reviewed-windows-refresh-record-20261110.json.
