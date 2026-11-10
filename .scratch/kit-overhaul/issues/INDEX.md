@@ -86,7 +86,7 @@ Published from `../tickets-draft.md` after the Round 5 changes (DECISIONS.md, Ro
 | 80 | [windows S2/short cdn-cache:memory-growth after ticket 29: A/B attribution](80-windows-s2-cdn-memory-after-29.md) | sol | medium | — | ready-for-agent |
 | 81 | [windows S4: deliver a real console control event in the Ctrl-C-during-start trial](81-windows-s4-console-event-ctrl-c-trial.md) | sol | medium | 17 | ready-for-agent |
 | 82 | [GitHub issue #32: safe failure diagnostics and latest-ZCode compatibility evidence](82-github-32-safe-failure-diagnostics-and-zcode-compatibility.md) | sol | high | — | needs-triage |
-| 83 | [Setup: curated post-install command overview and multi-select harness consent](83-setup-command-overview-and-multi-select-harness.md) | glm | medium | 40, 42, 43 | needs-triage |
+| 83 | [Setup: curated post-install command overview and multi-select harness consent](83-setup-command-overview-and-multi-select-harness.md) | sol | medium | 40, 42, 43 | ready-for-agent |
 
 ## Initial frontier
 
