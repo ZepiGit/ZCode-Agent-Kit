@@ -65,7 +65,7 @@ Ticket83 tracks the user's requested English-first coherent post-install onboard
 - Ticket43: prior PR79runs42725722962/42739064329 remainFAILED. Corrected stagedcandidate02bd817/run42750466098 is VERIFIED8/8SUCCESSatmatchinghead,includingactualWindows24/26logtests,fullWindowsUX1/1andbothcompleteholdingmemoryratchets. Productbranch1f9e26c and staging areclean. Independentreviewandticket40prerequisiteOPEN;nointegrationmerge or full-goalcompletion. Evidencegatefile t43-ci42750466098-verified-gates.json, artifacts t43-ci42750466098-artifacts-yvHJAP. SeeMETRICSTicket43section.
 - Ticket83 purported agreedartifact is[object Object], not design;4briefs only, recoveryandratificationpending. No consensus/multiselectimplementationclaim.
 - Ticket57 Round38 permits prospectiveoptinartifactsfromREDdiagnosticrun; currentgateunchanged, not evidenceblockedbyRED. Windowsrunner/completemanifestunverified.
-- Ticket40 PR75runrecordFAILUREbutemptyrollup/jobsandok=truememorysummarynotreconciled; exactfailurestep/provenancemissing. No proof from emptymetadata.
+- Ticket40 provenancecorrected:PR75run42673615246had0executedjobs/artifactsandFAILUREbeforejobs;specificparsererrornotavailableandCIdefinitionbyteidenticalt43green. pr75-windows-memarchivebelongsstaging/75(otherbranch),NOTPR75. Actualcompletedreaderreviewapproved=true recovered. Documentation-onlystagingd2ae4d4(productunchangedvsrevieweddeadcbc)publishedforONEregisterednewCI42760280311,all8jobsRUNNINGmatchinghead. Old0jobfailureretained;noautomaticretry/acceptance/merge. Seet40-ci-provenance-validation-20261110.md.
 - Ticket80 final32/armnot-attributedstatisticalrule result is not proof of no effect; decisionreturn stillneeded. No budgetrelaxation/stage2fixautomaticallyauthorized.
 
 ## Final audit rule
