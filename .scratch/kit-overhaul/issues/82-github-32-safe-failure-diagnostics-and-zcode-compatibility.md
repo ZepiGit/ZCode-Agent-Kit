@@ -35,6 +35,14 @@ PROMPT.md B1-B6 remain binding. Work may improve error handling, secret-safe obs
 
 ## Comments
 
+### 2026-11-10 — standalone CLI distribution also misses automatic discovery
+
+Pinned official builder/runner/installer source at a9fe401 now establishes `~/.zcode/runtime/releases/<version>/agent/zcode.cjs`, selected by the installation's `current` symlink, with `ZCODE_DIST_HOME` override. Exact source URLs, line references and verified Git blobs are in `research/zcode-current-runtime-20261110.md`. The official installer/runner was read only, never executed; launcher3.17.2 and agent0.17.1 versions must remain distinct.
+
+Additional external seam7 probe `/home/AgentKit/overhaul-tools/t82-standalone-discovery-boundary-probe-20261110.mjs`, SHA256de8aca201b4b9fe709ee137b128f7c69c9548525b3078ba5ca184ccb3efbc953, runs realMCPinitialize/zcode_health against temporary release/current-symlink fixtures. One capped1G90sNode26.7.0 run:4executed/2PASS/2FAIL,0unexpectedErrors,EXIT1/1s. Default standalone and customZCODE_DIST_HOME are not found and execute zero version probes; explicit agent path succeeds and missing explicit path still fails closed. Log `reports/t82-standalone-discovery-boundary-red-20261110.log`, SHA256eb4f14106a4db863b9501d0567fb19af97c521c281f80584a7f8e49744242dc1. Four owned bridge children plus one version probe exited, temp root removed. Product/dist unchanged, no vendor/model/network/credential access.
+
+This supersedes the earlier 'standalone internal layout unmapped' limitation only. NativeWindows/macOS, live app-server/protocol compatibility, supported-path precedence/containment decisions, implementation/permanent tests/fullsuite/newreview/freshCI remain open. No product fix/merge, quota evidence or workflow change.
+
 ### 2026-11-10 — current official server layout is not auto-discovered
 
 Primary-source/runtime evidence and exact source URLs: `research/zcode-current-runtime-20261110.md`. Live release API still latestv3.17.2/app, public targeta9fe401; release body separately names buildsourcee6b675b. Agent package at public target is0.17.1 with engines.node24.14.0; local server manifest names bundledNode22.16.0. These are separate version/context facts, not a proven minimum-runtime requirement or an identity-change instruction.

@@ -32,7 +32,7 @@ Pinned source, not guessed filenames:
 2. `runtime/paths.ts` sets serverRoot to `(ZCODE_DATA_BASE_DIR || homedir())/.zcode/server`, releasesDir to serverRoot/releases and currentFile to serverRoot/current.json. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/packages/zcode-server-cli/src/runtime/paths.ts
 3. `contracts.ts` defines releaseDir/version and optional releaseId/appVersion/target/nodeVersion. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/packages/zcode-server-cli/src/contracts.ts
 4. `ReleaseManager.readCurrentForExecution()` validates the current release, including canonical containment inside releasesDir and directory existence. A future kit-discovery change must not turn arbitrary pointer contents into permission to execute an out-of-root bundle. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/packages/zcode-server-cli/src/runtime/releaseManager.ts
-5. The pinned README separately documents standalone CLI installation at ~/.zcode/runtime, command shim ~/.local/bin/zcode, and ZCODE_DIST_HOME/ZCODE_DIST_BIN_DIR overrides. This is not the server releases layout and its internal agent-bundle placement was not yet mapped or fixture-tested here. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/README.en.md
+5. The pinned README separately documents standalone CLI installation at ~/.zcode/runtime, command shim ~/.local/bin/zcode, and ZCODE_DIST_HOME/ZCODE_DIST_BIN_DIR overrides. This is not the server releases layout. Its agent-bundle placement and a separate four-case fixture are now mapped below; native platform/runtime compatibility remains unverified. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/README.en.md
 
 ## Existing kit behavior and ownership
 
@@ -74,10 +74,37 @@ Logs, under integration `.scratch/kit-overhaul/reports/`:
 
 Both summary lines report5executed/3PASS/2FAIL/0unexpectedErrors, five owned bridge processes and two version probes, with PID/PPID/PGID evidence. Every owned child exited; fixture root removed. Product and generated dist remain clean. This was run on Linux only, not native Windows/macOS.
 
+## Standalone distribution: source-pinned layout and additional executed fixture
+
+The standalone paths were subsequently resolved from these three files at the same public commit a9fe401. Their Git blobs were verified from downloaded base64 data using Git's blob-header SHA1 calculation; source was not executed:
+
+- Builder `scripts/build-zcode.mjs`, blob `b1384443c72a47f2cfe5847bef8c25d937470398`, lines186-188 copies the agent into `agent/zcode.cjs` and its companion `agent/provider` directory. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/scripts/build-zcode.mjs
+- Runner `scripts/zcode-distribution/runner.mjs`, blob `07edbd7d4dbed052d90b310fce39f0add453bff6`, line14 sets agentEntry to `<packageRoot>/agent/zcode.cjs`; lines254-255 report the distribution's own version for --version, while line266 sets argv[1] to the agent entry before delegation. A launcher version alone is not evidence of the agent's version/protocol. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/scripts/zcode-distribution/runner.mjs
+- Installer `scripts/zcode-distribution/installer.mjs`, blob `2e77e350efe3b06d0b24633c8343da6b661732e6`, line8 selects `${ZCODE_DIST_HOME:-$HOME/.zcode/runtime}`, line36 installs under `releases/<VERSION>`, line43 points `current` at that release, and line47 creates a shim invoking `current/bin/zcode.mjs`. https://github.com/zai-org/ZCode/blob/a9fe401eede6e6e5e01be9048679c206fe6f02d9/scripts/zcode-distribution/installer.mjs
+
+Public source data retained externally as zcode-pinned-standalone-{builder,runner,installer}-source-20261110.json; recursive pinned index zcode-pinned-standalone-source-index-20261110.json has truncated=false. No official installer, downloader or packager was run.
+
+External probe `/home/AgentKit/overhaul-tools/t82-standalone-discovery-boundary-probe-20261110.mjs`, SHA256 `de8aca201b4b9fe709ee137b128f7c69c9548525b3078ba5ca184ccb3efbc953`, creates exactly that release/current-symlink/agent layout in temporary HOME fixtures, including a synthetic adjacent provider file. It uses the real MCP initialize/zcode_health interface, version-only fixture agent0.17.1, and existing isolated integration client. It does not execute the official launcher and cannot establish its protocol behavior.
+
+```sh
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-standalone-discovery-boundary-red-20261110 1G 90 -- node /home/AgentKit/overhaul-tools/t82-standalone-discovery-boundary-probe-20261110.mjs
+```
+
+One bounded Linux run: Nodev26.7.0,1G/no-swap,90s timeout, EXIT1/duration1s,4executed/2PASS/2FAIL/0unexpectedErrors.
+
+| Standalone case | Result | Public MCP health |
+|---|---|---|
+| Default ~/.zcode/runtime/current/agent/zcode.cjs |FAIL|degraded=true, no-default-candidate, zero version probes|
+| Custom ZCODE_DIST_HOME/current/agent/zcode.cjs |FAIL|degraded=true, no-default-candidate, zero version probes|
+| Explicit runtime path to the same current/agent file |PASS|degraded=false, expected realpath selected, version0.17.1, one version probe|
+| Missing explicit runtime path |PASS|degraded=true, explicit-missing, zero version probes, no fallback|
+
+Log `reports/t82-standalone-discovery-boundary-red-20261110.log`, SHA256 `eb4f14106a4db863b9501d0567fb19af97c521c281f80584a7f8e49744242dc1`. Four owned bridge children and one version probe have PID/PGID records and exited; temp fixture root removed. No vendor/model/network execution, credential read, source/dist or installed-system modification. Product remains clean at883f566. This adds two uncovered standalone discovery cases to the server-layout evidence; it is not an approved implementation decision about default precedence or promised platform support. The existing explicit override is a demonstrated fixture workaround, not a confirmed live-inference fix.
+
 ## Remaining work, not acceptance
 
 - Scope and independently review an additive discovery change for supported current distributions. Keep explicit overrides authoritative and retain verified --version selection, argument-array spawning and pointer containment; define malformed/missing current metadata and multiple-installed-distribution precedence before implementation.
 - Add permanent wired seam7 fixtures; regenerate MCP dist by build only; full suites and fresh native Windows/Linux CI required. Do not copy this Linux-only PID-check helper as portable test code.
-- Map the standalone ~/.zcode/runtime layout and Windows/macOS desktop layouts at pinned source; do not imply they were covered by the five-case server fixture.
+- Native Windows/macOS desktop layouts remain unmapped here; the standalone Linux layout is now source-pinned and separately fixture-tested above. Do not imply the five-case server fixture covers standalone or native platforms.
 - Verify actual official runtime app-server/protocol behavior only through an authorized isolated safe test. No model call, credential read, challenge bypass or identity imitation is permitted.
 - Original GitHub#32 incident causality/recovery, metadata/provenance repairs, full TUI classification proof and overall overhaul acceptance remain open. GLM quota/reset remain unknown; the stopped workflow was not resumed/amended/restarted.
