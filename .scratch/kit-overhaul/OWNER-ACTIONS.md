@@ -81,6 +81,8 @@ Unblocks: ticket 17's criterion "A2 (real PowerShell/conhost Ctrl-C) listed as a
 
 ## OA-5 — Confirm GLM account quota availability — unverified, owner action
 
+**Execution-block superseded on 2026-11-10:** the user's explicit fresh-merger instruction authorizes GPT/Grok and says go. OA-5 is now a GLM account-information follow-up only; it does NOT block the authorized GPT/Grok work. This does not restore GLM quota or establish a reset time. Historical no-provider-authorization and prepared/not-dispatched statements below describe the earlier state, not the current routing. This fresh merger used `openai/gpt-6.1-sol-subagent`, with no GLM/Anthropic/Gemini, delegation, additional model request or change to user concurrency. It did not resume/amend/restart the historical stopped workflow. Current merge/gate evidence is in STATE.md and RUNLOG.md.
+
 OA-4 is reserved by the unmerged ticket82 branch for GitHub issue32 live re-observation; this entry does not replace it.
 
 Target: `account:zai-start-plan/GLM-5.3-Flash`, effort `max`. Last known provider result is quota error1005; no reset or restored availability has been confirmed. An automatic continuation reminder is not account-state evidence or permission to buy quota/change provider.
