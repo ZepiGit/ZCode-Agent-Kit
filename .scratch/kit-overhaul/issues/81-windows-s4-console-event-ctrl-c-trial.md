@@ -38,3 +38,7 @@ ADR: no
 **Common acceptance (every ticket):** as in every ticket file.
 
 ## Comments
+
+### 2026-11-10 — blocked pre-merge gate, no merge performed
+
+PR76/run42691497644 at headfaaf2ef8ec4b857f5b8b38c60b23122ab3a122ec is FAILURE7/8, not the earlier claimed8/8. Windows memory job129412090016 failed S4/short trial0 with '__K81__CREATEFAIL 123' (CreateProcessW), no child created; harness failure is never expected. Fresh merger verified head/run and stopped without merging; integration remained clean4f21396. Keep original per-trial handler-line delivery proof, Linux behavior and expected-RED owner unchanged. Ticket81(h) requires the hosted-runner failure to return for decision/repair evidence; no fallback child.kill or acceptance exemption. Event-death0xC000013A may be useful mutant evidence but does not substitute for the ordinary run's child-handler proof.

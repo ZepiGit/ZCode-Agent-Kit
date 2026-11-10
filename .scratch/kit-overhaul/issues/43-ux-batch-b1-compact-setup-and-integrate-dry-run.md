@@ -32,4 +32,8 @@ Spec stories: 95, 97, 111, 115
 
 ## Comments
 
+### 2026-11-10 — actual CI failure and reproducible PTY check
+
+PR79/run42725722962 at staged99142f2 failed all four test-kit jobs (remaining jobs were still running when inspected). LinuxNode24log /home/AgentKit/overhaul-tools/t43-ci42725722962-linux24.log identifies4PTY failures in account-setup and harness-consent: legacy /OK {2}/ expectations versus intended glyph/aligned TTY output. Exact local reproduction from /home/AgentKit/wt/t43, through run-capped.sh t43-controller-ci-pty-red 3G300, with CI=true TERM=xterm-256color and node --test --test-name-pattern='rotator asked once|interactive setup asks per harness|setup --select: one numbered|Ctrl-C during the questions' tests/account-setup.test.mjs tests/harness-consent.test.mjs executed4tests/0pass/4fail/0skip, exit1. Log reports/t43-controller-ci-pty-red.log. This is a real regression check, not test discovery/infrastructure failure. A GLM workflow worker owns the repair; preserve stored consent/replay/MCP/abort/exit/stream assertions, justify any formatting-only expectation changes and do not weaken nonTTY contracts. Ticket40 is NOT merged;43's actual prerequisites still apply. No new CI rerun authorized from this record.
+
 - 2026-11-07 (orchestrator, from ticket 42): the harness-prompt part of audit finding A-22 and moving prompts to stderr remain here (ticket 42 kept prompts on stdout).
