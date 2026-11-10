@@ -67,3 +67,55 @@ RED→GREEN evidence (all offline, isolated HOME, capped, Bun 1.4.2):
 Boundaries honored: B1 — only error text, diagnostics and tests changed in captcha-*/handler files; detection, classification, retry, recycle and identity logic untouched (3012 stays TERMINAL + 403-authorization mapping). B2 — only synthetic markers, fixture secrets (`fixtureSecret`), no real credentials. B5/B6 — no dist changes, no version bumps. Coordination with 27/58: no solver lifecycle (spawn/recycle/cap) code touched, only refusal error construction and pool error surfacing.
 
 Unverified (incident stays open): the real cause of the reporter's 405+3012 and whether the guest TypeErrors correlate — three earlier reports disagree; no live model request, claim or vendor challenge was run (out of scope by ticket). Owner-only verification remains in OWNER-ACTIONS.md.
+
+
+### 2026-11-10 — rejected-review repair candidate (not ticket resolution)
+
+Starting point: clean `883f566bf7a6e24f6faa96580ad1653955782498`, own branch/worktree only. Read the recovered independent `approved:false` review `/home/AgentKit/overhaul-tools/t82-completed-review-recovered-20261110.json:7-15` and full `/home/AgentKit/overhaul-tools/t82-metadata-boundary-finding-20261110.md:1-79`. The earlier “bounded/plain identifier” and “sanitized provenance” implementation claims above are superseded: those guards leaked guest-controlled function/class/fragment text and raw/mutable SDK messages. No new independent approval is claimed.
+
+Confirmed causes and repairs:
+- `runtime/guest-error.ts`: host error-class allowlist, bounded validated known bundle identifiers or opaque resource hashes; discard callbacks, arbitrary basenames, paths, queries, fragments and message-line sources. Keep message length and SHA256. `hasGuestSourceFrame` itself is unchanged. `isGuestOriginError` is now a strict compatibility alias; TUI explicitly uses `hasGuestSourceFrame`.
+- `proxy/captcha-token.ts`: canonical host-built refusal/category text lives in a WeakMap outside mutable Error objects. Normalization rebuilds clean errors; a trusted class alone no longer authorizes message/stack/cause forwarding. Local refusal detail is allowlisted. Raw diagnostics retain only category/length/hash. Worker output and dispatcher error construction validate the text again, without changing the message protocol. The existing cleanup recycle predicate and its 4096-character worker window are preserved as a fixed sentence, not guest text.
+- `proxy/captcha-pool.ts`: failure recording, per-attempt messages, parallel warnings and storm-probe warnings use host-built provenance/metadata. All retry counts, admission/storm/backoff/scheduling branches and token handling remain unchanged. No CAPTCHA shim, identity/signing/protocol change, vendor execution, claim call, account rotation or quota workaround.
+
+Permanent regressions were added/run RED before their corresponding fixes, at approved seams 3/4 and existing formatter/process-log boundaries. New `*.test.ts` files are automatically wired by `zcode-proxy-src/package.json` (`bun test`) and root `test:proxy`; the HTTP fixture runs in a child to contain its solver-provider mock, uses port 0 and the real listener/router/pool. TUI regression executes real `runTui` and its installed uncaught handler with synthetic terminal capabilities, temp HOME and mocked empty credential source (no real store); no native PTY claim. Actual uncaughtException and unhandledRejection children cover function/class/fragment/filename/long-frame counterexamples and fatal-host controls. The worker fixture imports no vendor/happy-dom backend.
+
+#### Commands executed in this repair ask
+
+All Bun commands below use pinned Bun1.4.2 via the wrapper, 1G hard cap/no swap, isolated HOME. Logs are under `/home/AgentKit/wt/overhaul/.scratch/kit-overhaul/reports/`; the wrapper owns those report outputs. No integration product/state file was edited.
+
+Original external probes, both before and after fixes (same unedited scripts):
+
+```sh
+for item in 'metadata-boundary 30' 'real-error-boundary 90' 'review-followup 60' 'http-provenance-boundary 90'; do
+  set -- $item; name=$1; limit=$2
+  BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh "t82-repair-candidate-external-$name" 1G "$limit" -- /home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin/bun "/home/AgentKit/overhaul-tools/t82-$name-probe-20261110.ts"
+done
+```
+
+RED used name prefix `t82-repair-external-red-`: metadata5 executed/1pass/4fail, actual boundary12/4/8, classification+pool3/0/3, realHTTP12/6/6; all EXIT1. Final GREEN uses `t82-repair-candidate-external-`: metadata5/5/0 (`:6-7`), boundary12/12/0 (`:13-14`), followup3/3/0 (`:4-5`), HTTP12/12/0 (`:27-28`), all EXIT0. HTTP: 12 owned loopback requests, 9 synthetic upstream calls, 0 unexpected external fetches; wrong-key controls remain401, authorized solver failures503, exactly5 fixture mints/storm, two pool takes and one upstream call/request, no resend. Original probe's `productionEdits:false` label means the probe performs no edits, not that this repair has no product diff.
+
+Permanent RED logs: `t82-repair-metadata-wired-red.log:338-342` 24pass/20fail includes three TUI fixture startup failures (port0 rejected by config), not three behavioral failures; corrected TUI fixture `t82-repair-tui-wired-red.log:34-38` 1pass/2 genuine failures. `t82-repair-provenance-wired-red.log:360-364` 34pass/5fail; `t82-repair-dispatcher-worker-wired-red.log:33-38` 0pass/2fail. Added cleanup-predicate preservation regression was RED (`t82-repair-cleanup-preservation-red.log:13-24`) before preserving its fixed signal. Intermediate `t82-repair-line-bound-red.log` was only an incorrect expected literal length (49 vs51), not a product failure; corrected expected51 without a production change. Intermediate runs are not reclassified as green.
+
+Final targeted command (not full suite):
+
+```sh
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-repair-candidate-targeted 1G 120 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && printf "runner_pid=%s runner_pgid=%s\n" "$$" "$(ps -o pgid= -p $$)"; bun test src/runtime/guest-error.test.ts src/runtime/guest-error-boundary.test.ts src/tui/guest-error-boundary.test.ts src/proxy/captcha-token.test.ts src/proxy/captcha-pool.test.ts src/proxy/solver-transport.test.ts src/proxy/captcha-solver.test.ts src/proxy/handler-issue32.test.ts src/server/solver-error-http.test.ts src/server/routes-quota.test.ts'
+```
+
+Actual `t82-repair-candidate-targeted.log:225-229`: **125pass/0fail**,10files,9.38s,EXIT0. Includes 12 actual HTTP cases in the child fixture, actual TUI handler controls, actual uncaught/unhandled boundaries, worker/dispatcher sanitization, unchanged cleanup/deadline/category behavior, claim-preview missing-data fail-closed, and3012terminal **one initial mint/one upstream call/HTTP405 authorization rejection**. RunnerPID3503869/PGID3503868 recorded at:1; no owned scenario process remains after completion.
+
+```sh
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-repair-candidate-typecheck 1G 60 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && bun run typecheck'
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-repair-preservation 1G 60 -- bash -c 'cd /home/AgentKit/wt/t82/zcode-proxy-src && bun test src/proxy/captcha-happy.test.ts src/proxy/captcha-diagnostics.test.ts src/proxy/credential-recovery.test.ts --test-name-pattern "local verification refusals|provenance|metadata|incompatible|never recovers or duplicates after SSE output"'
+BUN_DIR=/home/AgentKit/overhaul-tools/bun-1.4.2/node_modules/.bin bash /home/AgentKit/overhaul-tools/run-capped.sh t82-repair-wiring2 1G 45 -- bash -c 'cd /home/AgentKit/wt/t82 && node --test tests/test-wiring.test.mjs'
+git -C /home/AgentKit/wt/t82 diff --check
+```
+
+Typecheck EXIT0 (`:1-2`). Preservation12pass/0fail/80filtered (`:26-31`), including no retry/import after SSE output across all three route formats; not the full three files. Wiring guard Node26.7.0 **10pass/0fail** (`:11-19`), verifies `test:proxy` preload and CI wiring; earlier attempted `bun --use node --test` was an invalid CLI invocation and failed before tests (`t82-repair-wiring.log`), not a passing check. `diff --check` EXIT0. No install/build/full `test:all`/nativeWindows/macOS/compiled-solver/CI run in this ask; central validation owns fullsuite, independent review and fresh OS CI.
+
+#### Separately OPEN under82: current-runtime discovery, not implemented here
+
+Read integration's `.scratch/kit-overhaul/research/zcode-current-runtime-20261110.md:1-110` as supplied source/evidence, not as tests rerun in this ask. Source pinned at public commit a9fe401 and releasev3.17.2; agentpackage0.17.1 is a separate version domain. The note records server fixtures5/3/2 (default/custom `ZCODE_DATA_BASE_DIR` current.json not discovered; legacy/explicit/missing-explicit controls pass) and standalone fixtures4/2/2 (default/custom `ZCODE_DIST_HOME/current/agent/zcode.cjs` not discovered; explicit controls pass). These are Linux synthetic MCP health findings, not native/runtime/protocol success. No discovery/MCP source/dist change in this repair. Explicit override precedence, pointer containment/malformed metadata and multi-distribution selection require separate scoping/review plus permanent seam7 tests/native evidence. Do not merge moving integration here; the merger/controller will reconcile afterward.
+
+Original GitHub#32 Windows405+3012 cause and correlation with guest TypeErrors remain OPEN; OA-4 owner-only re-observation remains necessary. No real inference recovery, challenge compatibility or latest official app-server protocol compatibility proved. Native Windows/macOS TUI/PTY and current-runtime discovery acceptance remain unverified. This commit is only a **candidate for central review/validation**, never entire82 resolved. Controller owns task-observer; no observation files written by this subagent.

@@ -78,6 +78,25 @@ describe("solver dispatcher over a transport", () => {
     expect(generations[0]!.terminated).toBe(true);
   });
 
+  it("rebuilds failure provenance at the dispatcher boundary, preserving categories but never worker text", async () => {
+    for (const category of ['other', 'rate-limit', 'duplicate', 'incompatible'] as const) {
+      const { transport, generations } = memoryTransport((gen, msg) => gen.events.message({
+        type: 'result', id: msg.id, ok: false, heapUsedMB: 12,
+        error: { category, message: 'synthetic worker failure | SyntheticTransportCredential' },
+      }));
+      const solver = createCaptchaSolver({ transport });
+      try {
+        const err = await solver.run('synthetic-failure', 'fixture', 'fixture').catch(err => err);
+        expect(err.category).toBe(category);
+        expect(err.message).not.toContain('SyntheticTransportCredential');
+        expect(err.stack).not.toContain('SyntheticTransportCredential');
+        expect(err.message).toMatch(/len=\d+ sha256=[0-9a-f]{64}/);
+        expect(generations).toHaveLength(1);
+        expect(solver.stats()).toMatchObject({ totalFailures: 1, totalSolves: 0, generation: 1 });
+      } finally { solver.shutdown(); }
+    }
+  });
+
   it("keeps each dispatcher's state in its own object", async () => {
     const a = memoryTransport(answerWithToken);
     const b = memoryTransport(answerWithToken);
@@ -145,6 +164,30 @@ describe("solver dispatcher over a transport", () => {
     expect(solver.stats()).toMatchObject({ totalFailures: 1, totalSolves: 1, generation: 1 });
     solver.shutdown();
   });
+});
+
+it("real worker reports sanitized raw, mutable typed and local refusal failures (no vendor execution)", async () => {
+  const failureBackend = new URL('./__fixtures__/solver-failure.ts', import.meta.url).href;
+  const worker = new Worker(new URL('./captcha-solver-worker.ts', import.meta.url));
+  const timer = setTimeout(() => worker.terminate(), 5_000);
+  try {
+    worker.postMessage({ type: 'init', backendModule: failureBackend });
+    let id = 0;
+    for (const scene of ['raw', 'typed', 'local', 'cleanup']) {
+      const reply = new Promise<any>((resolve, reject) => {
+        worker.addEventListener('message', event => resolve(event.data), { once: true });
+        worker.addEventListener('error', reject, { once: true });
+      });
+      worker.postMessage({ type: 'solve', id: ++id, scene, region: 'fixture', prefix: 'fixture' });
+      const message = await reply;
+      expect(message.type).toBe('result');
+      expect(message.ok).toBe(false);
+      expect(message.error.category).toBe('other');
+      expect(message.error.message).not.toContain('SyntheticWorkerCredential');
+      if (scene === 'local') expect(message.error.message).toContain('too short (76 chars)');
+      if (scene === 'cleanup') expect(message.error.message).toContain('cleanup failed');
+    }
+  } finally { clearTimeout(timer); worker.terminate(); }
 });
 
 const solverPath = fileURLToPath(new URL("./captcha-solver.ts", import.meta.url));

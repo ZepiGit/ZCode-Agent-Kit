@@ -1,3 +1,10 @@
+import { createHash } from "node:crypto";
+
+// Canonical host-built text is held outside mutable Error objects. Neither an
+// instanceof check nor a readonly TypeScript field makes message/stack safe.
+const hostFailureText = new WeakMap<object, string>();
+const LOCAL_REFUSAL = /^(solver returned empty param|verify param too short \(\d{1,6} chars\) — degraded result, refused|verify param missing securityToken — degraded result, refused|verify param not base64-JSON)$/;
+
 /** Decode certifyId from a base64 Aliyun verify-param blob. */
 export function parseCertifyId(param: string): string | null {
   try {
@@ -22,6 +29,7 @@ export class CaptchaSdkError extends Error {
       : category === "incompatible" ? "CAPTCHA SDK incompatible"
       : "captcha SDK failure");
     this.name = "CaptchaSdkError";
+    hostFailureText.set(this, this.message);
   }
 }
 
@@ -31,6 +39,7 @@ export class CaptchaSdkIncompatibleError extends CaptchaSdkError {
     super("incompatible");
     const describe = (value: unknown) => value === undefined ? "missing" : `non-callable (${value === null ? "null" : typeof value})`;
     this.message += `: startTracelessVerification ${describe(primary)}; show ${describe(fallback)}`;
+    hostFailureText.set(this, this.message);
   }
 }
 
@@ -45,7 +54,8 @@ export class CaptchaLocalVerificationError extends CaptchaSdkError {
   constructor(detail: string) {
     super("other");
     this.name = "CaptchaLocalVerificationError";
-    this.message = `verify param refused: ${detail.replace(/[\r\n\t]+/g, " ").trim().slice(0, 200)}`;
+    this.message = `verify param refused: ${LOCAL_REFUSAL.test(detail) ? detail : "local validation failure"}`;
+    hostFailureText.set(this, this.message);
   }
 }
 
@@ -96,8 +106,48 @@ export function classifyCaptchaError(error: unknown): CaptchaFailureCategory {
   return category;
 }
 
+/** Bounded diagnostic provenance; no raw text or guest serialization survives. */
+export function describeCaptchaFailure(error: unknown): string {
+  const category = classifyCaptchaError(error);
+  const raw = typeof error === "string" ? error
+    : error && typeof error === "object" ? errorField(error, "message") : undefined;
+  const message = typeof raw === "string" ? raw : "";
+  const canonical = error && typeof error === "object" ? hostFailureText.get(error) : undefined;
+  if (canonical) return canonical;
+  return `${new CaptchaSdkError(category).message} [len=${message.length} sha256=${createHash("sha256").update(message).digest("hex")}]`;
+}
+
+/** Validate diagnostic text again after the worker transport (shape unchanged). */
+export function captchaFailureFromTransport(category: CaptchaFailureCategory, message: unknown): CaptchaSdkError {
+  const error = new CaptchaSdkError(category);
+  const text = typeof message === "string" ? message : "";
+  const localDetail = text.startsWith("verify param refused: ") ? text.slice("verify param refused: ".length) : "";
+  const fixed = new Set([
+    "captcha solver worker failed", "captcha solver worker exited unexpectedly",
+    "captcha solver worker fault", "captcha solver deadline exceeded",
+    "captcha solver worker unavailable", "captcha solver returned invalid token",
+    "CAPTCHA DOM cleanup failed; runtime unavailable", "verify param refused: local validation failure",
+  ]);
+  const canonicalSdk = /^(captcha SDK rate limit \(429\)|captcha SDK duplicate \(F008\)|CAPTCHA SDK incompatible|captcha SDK failure)(?: \[len=\d{1,16} sha256=[0-9a-f]{64}\])?$/;
+  const incompatible = /^CAPTCHA SDK incompatible: startTracelessVerification (?:missing|non-callable \((?:null|boolean|number|string|object|bigint|symbol)\)); show (?:missing|non-callable \((?:null|boolean|number|string|object|bigint|symbol)\))$/;
+  // Preserve the dispatcher's pre-existing cleanup recycle predicate using a
+  // fixed sentence only. No matching guest text crosses this boundary.
+  error.message = /cleanup failed/.test(text) ? "CAPTCHA DOM cleanup failed; runtime unavailable"
+    : fixed.has(text) || LOCAL_REFUSAL.test(localDetail) || canonicalSdk.test(text) || incompatible.test(text)
+      ? text : describeCaptchaFailure(text);
+  hostFailureText.set(error, error.message);
+  return error;
+}
+
 export function normalizeCaptchaError(error: unknown): CaptchaSdkError {
-  return error instanceof CaptchaSdkError ? error : new CaptchaSdkError(classifyCaptchaError(error));
+  const normalized = new CaptchaSdkError(classifyCaptchaError(error));
+  // Rebuild instead of trusting mutable message/stack/cause on typed errors.
+  const canonical = error && typeof error === "object" ? hostFailureText.get(error) : undefined;
+  if (canonical) {
+    normalized.message = canonical;
+    hostFailureText.set(normalized, canonical);
+  }
+  return normalized;
 }
 
 /** Aliyun F008 — certifyId / verify token already consumed or duplicated. */

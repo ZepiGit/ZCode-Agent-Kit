@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { CaptchaTokenPool as SolverBackedPool, type CaptchaPoolOptions } from "./captcha-pool.js";
+import { CaptchaSdkError, CaptchaLocalVerificationError } from "./captcha-token.js";
 
 const solveMock = mock(async (_scene: string, _region: string, _prefix: string, _beforeSolve?: () => void) => {
   return "x".repeat(64);
@@ -577,9 +578,40 @@ describe("CaptchaTokenPool — sanitized mint-failure provenance on later take f
     throw new Error("expected the take to reject");
   };
 
+  for (const typed of [false, true]) {
+    it(`keeps ${typed ? 'mutable typed SDK' : 'raw dispatcher'} text out of warnings and storm/probe takes`, async () => {
+      const marker = typed ? 'SyntheticTypedSdkCredential' : 'SyntheticRawSolverCredential';
+      pool = provenancePool();
+      const warn = console.warn;
+      const warnings: string[] = [];
+      solveMock.mockImplementation(async () => {
+        const error = typed ? new CaptchaSdkError('other') : new Error('synthetic solver failure');
+        error.message += ` | ${marker}\u001b[31m`;
+        throw error;
+      });
+      try {
+        console.warn = (...values) => { warnings.push(values.map(String).join(' ')); };
+        for (let i = 0; i < 5; i++) await pool.prefill(CFG);
+        expect(pool.stats().storm).toBe(true);
+        expect(solveMock).toHaveBeenCalledTimes(5);
+        const error = await rejection(pool.takeToken(CFG));
+        expect(error.message).toContain('last local mint failure:');
+        expect(error.message).not.toContain(marker);
+        expect(error.message.length).toBeLessThan(400);
+        clock += 61_000;
+        pool.requestUrgentRefill(); // real one-attempt failed storm probe + warning
+        await tick();
+        expect(solveMock).toHaveBeenCalledTimes(6);
+        expect(warnings.join('\n')).toContain('storm probe mint failed');
+        expect(warnings.join('\n')).not.toContain(marker);
+        expect(warnings.join('\n')).not.toContain('\u001b');
+      } finally { console.warn = warn; }
+    });
+  }
+
   it("the storm take failure names the last local mint failure (sanitized, bounded)", async () => {
     pool = provenancePool();
-    solveMock.mockImplementation(async () => { throw new Error(REFUSAL); });
+    solveMock.mockImplementation(async () => { throw new CaptchaLocalVerificationError(REFUSAL.slice("verify param refused: ".length)); });
     for (let i = 0; i < 5; i++) await pool.prefill(CFG);
     expect(pool.stats().storm).toBe(true);
     // The generic storm sentence stays intact (clients match on it), and the
@@ -593,7 +625,7 @@ describe("CaptchaTokenPool — sanitized mint-failure provenance on later take f
 
   it("the empty-pool take deadline names why the raced mints failed", async () => {
     pool = provenancePool();
-    solveMock.mockImplementation(async () => { throw new Error(REFUSAL); });
+    solveMock.mockImplementation(async () => { throw new CaptchaLocalVerificationError(REFUSAL.slice("verify param refused: ".length)); });
     await pool.prefill(CFG); // one failed mint → provenance recorded
     solveMock.mockImplementation(() => new Promise<string>(() => {})); // stuck mint
     const savedDeadline = process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS;

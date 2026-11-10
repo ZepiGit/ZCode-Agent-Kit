@@ -9,7 +9,7 @@ import {
   type CaptchaSolver,
   type CaptchaSolverStats,
 } from "./captcha-solver.js";
-import { classifyCaptchaError, parseCertifyId } from "./captcha-token.js";
+import { classifyCaptchaError, describeCaptchaFailure, parseCertifyId } from "./captcha-token.js";
 
 export interface CaptchaPoolOptions {
   /** @deprecated Use poolSizeMax — kept as max cap alias. */
@@ -552,7 +552,7 @@ export class CaptchaTokenPool {
         if (r.status === "fulfilled") {
           this.pushToken(r.value);
         } else {
-          console.warn("[captcha-pool] parallel solve failed:", r.reason);
+          console.warn("[captcha-pool] parallel solve failed:", describeCaptchaFailure(r.reason));
         }
       }
       remaining -= wave;
@@ -585,9 +585,8 @@ export class CaptchaTokenPool {
 
   private recordMintFailure(err: unknown): void {
     if (err instanceof StormAdmissionCancelled) return;
-    const text = err instanceof Error ? err.message : String(err);
-    if (text === STORM_TAKE_ERROR) return; // the breaker itself is not a cause
-    this.lastMintFailure = text.replace(/[\r\n\t]+/g, " ").trim().slice(0, 240) || "unknown";
+    if (err === STORM_TAKE_ERROR) return; // the breaker itself is not a cause
+    this.lastMintFailure = describeCaptchaFailure(err);
   }
 
   /** Attach the recorded provenance to a generic take failure. */
@@ -646,7 +645,7 @@ export class CaptchaTokenPool {
       this.recordMintFailure(err);
       console.warn(
         `[captcha] storm probe mint failed — backing off ${stormBackoffMs(storm.level) / 1000}s: ` +
-          `${(err instanceof Error ? err.message : String(err)).slice(0, 160)}`,
+          describeCaptchaFailure(err),
       );
     } finally {
       storm.probing = false;
@@ -696,7 +695,8 @@ export class CaptchaTokenPool {
             break;
           }
           const category = classifyCaptchaError(err);
-          lastErr = err instanceof Error ? err.message : 'captcha solver failure';
+          this.recordMintFailure(err);
+          lastErr = describeCaptchaFailure(err);
           if (category === 'duplicate') {
             lastErr = `duplicate certifyId (F008)`;
           } else if (category === 'rate-limit') {
@@ -708,7 +708,9 @@ export class CaptchaTokenPool {
           if (!mode.probe) this.noteMintOutcome(false);
         }
       }
-      this.recordMintFailure(lastErr);
+      // Every lastErr assignment above is now a fixed host sentence or the
+      // metadata renderer's result; never re-import an Error's mutable message.
+      if (lastErr && lastErr !== STORM_TAKE_ERROR) this.lastMintFailure = lastErr;
       throw new Error(`captcha failed after ${mode.attempts} attempts: ${lastErr ?? "unknown"}`);
     } finally {
       this.activeSolves -= 1;
