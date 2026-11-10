@@ -83,6 +83,7 @@ export async function run({ flags }, cmd) {
   let txId = null;
   let accountChange = false;
   const outcome = { configured: [], skipped: [], failed: [] };
+  const launchConsent = new Set();
   let undecided = false;
   let abortedByUser = false;
   // One terminal session for every question (harnesses, then the rotator):
@@ -143,6 +144,23 @@ export async function run({ flags }, cmd) {
         }
       }
     }
+    let batch = null;
+    if (!explicit && flags.select !== true && interactive && detectedIds.length) {
+      const rows = await Promise.all(detectedIds.map(async (id) => {
+        const { default: adapter } = await loadAdapter(id);
+        return { id, label: adapter.label, stored: choices.harnesses[id]?.decision,
+          unreadable: isUnreadableChoice(choices, id), owned: ownedIntegration(adapter, ctx) };
+      }));
+      ui.flush();
+      try {
+        batch = await prompter.selectHarnesses({ rows, reask: flags.reask === true,
+          mcpIds: detectedIds.filter((id) => mcpBridgeAvailable && (id === "omp" || id === "claude-code")) });
+        if (batch?.fallback) batch = null;
+      } catch (err) {
+        if (err?.code !== ABORTED) throw err;
+        abortedByUser = true;
+      }
+    }
     const mcpIds = [];
     for (const id of ADAPTER_IDS) {
       const { default: adapter } = await loadAdapter(id);
@@ -157,11 +175,12 @@ export async function run({ flags }, cmd) {
       // MCP consent is separate from provider consent: a y covers the bridge
       // only when this note was shown before the question (interactive) or
       // the harness was selected explicitly; stored decisions carry it as a flag.
-      const mcpOffered = interactive && mcpBridgeAvailable && (id === "omp" || id === "claude-code");
+      const mcpOffered = batch ? batch.mcpIds.has(id) : interactive && mcpBridgeAvailable && (id === "omp" || id === "claude-code");
       // The question text is fixed; what a y implies beyond the provider
       // entry is said before it (existing integration, MCP bridge) — as
       // prompt-context notes on stderr (A-22, ADR-0005).
-      const ask = selection ? async () => selection.has(id)
+      const ask = batch ? (batch.answers.has(id) ? async () => batch.answers.get(id) : null)
+        : selection ? async () => selection.has(id)
         : interactive ? (question) => {
           if (owned) ui.note("an existing kit integration for " + adapter.label + " was found; y keeps it current, n leaves it untouched.");
           if (mcpOffered) ui.note("y also registers the kit's MCP bridge \"zcode-harness\" for " + adapter.label + " (skip with --no-mcp).");
@@ -179,7 +198,7 @@ export async function run({ flags }, cmd) {
           owned,
           explicit,
           // A --select answer covers every detected harness, stored or not.
-          reask: flags.reask === true || selection !== null,
+          reask: batch ? batch.answers.has(id) && flags.reask === true : flags.reask === true || selection !== null,
           ask,
           mcpOffered,
           mcpAllowed: !flags["no-mcp"],
@@ -237,6 +256,7 @@ export async function run({ flags }, cmd) {
         : manual ? " — values prepared; enter them in the extension UI"
         : warning ? " — review the warning above" : "";
       outcome.configured.push({ id, label: adapter.label, refreshed: decision.action === "refresh", manual });
+      if (decision.consent === true && decision.action !== "refresh" && !manual) launchConsent.add(id);
       ui.result("ok", adapter.label + suffix);
       if (decision.mcp === true) mcpIds.push(id);
     }
@@ -334,6 +354,16 @@ export async function run({ flags }, cmd) {
     else progress(`  Connection details unavailable (${identity}); see zcode-kit proxy status.`);
   } else progress("  Connection details unavailable: no proxy manager in this kit layout (see zcode-kit proxy status after a full install).");
   if (abortedByUser) return { exitCode: EXIT_ABORTED, records: [] };
+  const launcher = outcome.failed.length ? null : outcome.configured.find((entry) =>
+    ["claude-code", "codex", "opencode", "aider"].includes(entry.id) && launchConsent.has(entry.id) && !entry.manual && !entry.refreshed);
+  ui.commands([
+    { command: "zcode-kit doctor", description: "Check the installation" },
+    ...(launcher ? [{ command: `zcode-kit run ${launcher.id}`, description: `Launch ${launcher.label} wired to ZCode` }] : []),
+    { command: "zcode-kit proxy start", description: "Start the proxy for manual clients" },
+    { command: "zcode-kit proxy status", description: "Check proxy health and connection details" },
+    { command: "zcode-kit auth status", description: "Check sign-in status" },
+    { command: "zcode-kit --help", description: "Browse all commands" },
+  ], { title: "Next steps" });
   return { exitCode: outcome.failed.length ? EXIT_HARNESS_FAILED : 0, records: [] };
 }
 

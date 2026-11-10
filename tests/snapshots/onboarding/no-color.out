@@ -1,0 +1,7 @@
+
+Next steps ─────────────────────────────────────────────────────────────────────
+  zcode-kit doctor        Check the installation
+  zcode-kit proxy start   Start the proxy for manual clients
+  zcode-kit proxy status  Check proxy health and connection details
+  zcode-kit auth status   Check sign-in status
+  zcode-kit --help        Browse all commands

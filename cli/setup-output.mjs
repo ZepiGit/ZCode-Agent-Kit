@@ -61,6 +61,14 @@ export function setupUi({ out, log, verbose = false, banner = [], stdout = proce
     logPath: null,
     out,
 
+    /** One report render and one canonical plain log append in every mode. */
+    commands(rows, opts) {
+      const text = out.commandsText(rows, opts); // validate before either real sink
+      flushSurfaced();
+      report(() => out.commands(rows, opts));
+      log(text.slice(0, -1)); // existing log callback appends exactly one LF
+    },
+
     /** Full-output line: install.log always; the screen only in verbose. */
     detail(...args) {
       const text = args.join(" ");

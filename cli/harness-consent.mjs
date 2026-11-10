@@ -13,7 +13,9 @@
 // turned into consent: the next interactive run still asks.
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
+import { createInterface, emitKeypressEvents } from "node:readline";
+import { PassThrough } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { commitFile, ensureDir } from "../lib/edit.mjs";
 
 export const HARNESS_CHOICES_DIR = "harness-choices";
@@ -75,6 +77,7 @@ export function createPrompter({ input = process.stdin, output = process.stderr,
   let aborted = false;
   let style = redraw === undefined ? null : { redraw: redraw === true };
   let onSignal = null;
+  let selectorSession = null;
   function settleWaiters() {
     while (waiters.length) {
       const waiter = waiters.shift();
@@ -103,7 +106,9 @@ export function createPrompter({ input = process.stdin, output = process.stderr,
       style = await loadPromptStyle(output, { env, platform });
     }
     if (rl || closed) return;
-    rl = createInterface({ input, output, terminal: style.redraw });
+    const lineInput = selectorSession ? await selectorSession.lineInput() : input;
+    if (closed) return;
+    rl = createInterface({ input: lineInput, output, terminal: style.redraw });
     rl.on("line", (line) => {
       const waiter = waiters.shift();
       if (waiter) waiter.resolve(line); else queue.push(line);
@@ -133,12 +138,92 @@ export function createPrompter({ input = process.stdin, output = process.stderr,
       // redraw on resize or editing.
       if (style.redraw) rl.setPrompt(promptText);
       if (rl.paused) rl.resume();
-      output.write(promptText);
+      if (selectorSession) {
+        output.write(promptText, (err) => {
+          if (err) {
+            selectorSession.close();
+            const index = waiters.findIndex((waiter) => waiter.resolve === resolve);
+            if (index !== -1) waiters.splice(index, 1);
+            reject(err);
+          }
+          else selectorSession.armLine();
+        });
+      } else output.write(promptText);
     });
   }
   return {
     interactive,
     get aborted() { return aborted; },
+    /** Automatic checkbox consent; null means the untouched legacy path. */
+    async selectHarnesses({ rows, reask = false, mcpIds = [] }) {
+      if (!interactive || closed || rl || redraw === false || typeof input.setRawMode !== "function") return null;
+      const { selectorCaps } = await import("../lib/term/caps.mjs");
+      const { displayWidth, padEndWidth } = await import("../lib/term/width.mjs");
+      const { GLYPHS } = await import("../lib/term/tokens.mjs");
+      if (!Array.isArray(rows) || rows.length > 10) throw new TypeError("selector needs at most ten rows");
+      const inventory = rows.map((row) => ({ ...row,
+        locked: !reask && !row.unreadable && (row.stored === "configured" || row.stored === "skipped"),
+        checked: !row.unreadable && row.stored === "configured",
+      }));
+      const editable = inventory.filter((row) => !row.locked);
+      if (!editable.length) return null;
+      const offers = new Set(mcpIds.filter((id) => editable.some((row) => row.id === id)));
+      let focus = inventory.findIndex((row) => !row.locked), hint = "";
+      const initialFocus = focus;
+      const reset = () => { for (const row of inventory) row.checked = !row.unreadable && row.stored === "configured"; focus = initialFocus; hint = ""; };
+      function frame(caps, feedback = hint) {
+        if (!caps.eligible || caps.width < 1) return null;
+        const width = caps.width;
+        const wrap = (text, indent = "") => {
+          const lines = []; let line = indent;
+          for (const word of text.split(" ")) {
+            if (displayWidth(indent + word) > width) return null;
+            if (line !== indent && displayWidth(line + " " + word) > width) { lines.push(line); line = indent + word; }
+            else line += (line === indent ? "" : " ") + word;
+          }
+          lines.push(line); return lines;
+        };
+        const prose = [
+          "Configure ZCode as a provider in these assistants?",
+          "Enter with editable checks answers yes for checked rows and no for unchecked rows.",
+          "Esc or Enter with no editable checks saves no harness decision.",
+          "A nonempty confirmation saves readable editable choices; unreadable choices apply only to this run.",
+          ...(reask ? ["--reask: saved choices are editable. Esc, an empty confirmation or input closing keeps their saved decision files unchanged."] : inventory.some((row) => row.locked) ? ["Saved choices are locked. Change them with: zcode-kit setup --reask"] : []),
+          ...editable.flatMap((row) => row.unreadable
+            ? [`Esc, an empty confirmation or input closing skips ${row.label} without refreshing it. Its unreadable decision file is never overwritten.`]
+            : row.owned ? [
+              `Esc, an empty confirmation or input closing refreshes the existing kit integration for ${row.label}, even if its saved choice is no. No harness decision is saved.`,
+              `In a nonempty confirmation, an unchecked ${row.label} is skipped without refreshing its integration and its readable choice is saved as no.`,
+            ] : [`Esc, an empty confirmation or input closing skips ${row.label} for this run, even if its saved choice is yes. No harness decision is saved.`]),
+          ...(offers.size ? [`Selecting ${editable.filter((row) => offers.has(row.id)).map((row) => row.label).join(" or ")} also registers the kit's MCP bridge "zcode-harness" (skip with --no-mcp).`] : []),
+        ];
+        const lines = [];
+        const append = (text, indent) => { const part = wrap(text, indent); if (!part) return false; lines.push(...part); return true; };
+        for (const text of prose) if (!append(text)) return null;
+        lines.push("");
+        const labelWidth = Math.max(...inventory.map((row) => displayWidth(row.label)));
+        for (const [i, row] of inventory.entries()) {
+          const state = row.unreadable ? "unreadable / not saved" : row.stored === "configured" ? `saved yes / ${row.locked ? "locked" : "editable"}` : row.stored === "skipped" ? `saved no / ${row.locked ? "locked" : "editable"}` : "new / editable";
+          const prefix = `  ${i === focus ? GLYPHS[caps.glyphs].pointer : " "} [${row.checked ? "x" : " "}] `;
+          const full = prefix + padEndWidth(row.label, labelWidth) + "  " + state;
+          if (displayWidth(full) <= width) lines.push(full);
+          else { if (!append(row.label, prefix)) return null; if (!append(state, "        ")) return null; }
+        }
+        lines.push("");
+        for (const text of ["Arrows move  Space toggle  a toggle all editable  Enter confirm", "Esc no new harness decision  Ctrl-C abort", `${editable.filter((row) => row.checked).length} of ${editable.length} editable checked; saved yes kept: ${inventory.filter((row) => row.locked && row.checked).length}`, feedback || ""]) if (!append(text)) return null;
+        return lines;
+      }
+      let caps = selectorCaps(output, { env, platform });
+      const maximum = frame(caps, "Saved choice is locked; use zcode-kit setup --reask");
+      if (!maximum || maximum.length + 1 > caps.rows) return null;
+      selectorSession = createSelectorSession({ input, output, getClosed: () => closed,
+        onClosed: () => { closed = true; }, onAborted: () => { aborted = true; closed = true; },
+        getCaps: () => selectorCaps(output, { env, platform }), frame, maximum, reset, inventory, editable, offers,
+        getFocus: () => focus, setFocus: (value) => { focus = value; hint = ""; },
+        setHint: (value) => { hint = value; },
+      });
+      return selectorSession.select();
+    },
     /**
      * `defaultAnswer: false` marks the question `[y/N]` and an empty line
      * (Enter) answers n; without it the marker is `[y/n]` and Enter asks again.
@@ -176,8 +261,239 @@ export function createPrompter({ input = process.stdin, output = process.stderr,
       closed = true;
       detachSignal();
       if (rl) { const current = rl; rl = null; current.close(); }
+      selectorSession?.close();
       settleWaiters();
     },
+  };
+}
+
+// Owns only the selector epoch and its subsequent fresh line transport. The
+// legacy path never constructs this session, so its typed-ahead queue is intact.
+function createSelectorSession({ input, output, onClosed, onAborted, getCaps, frame, maximum, reset, inventory, editable, offers, getFocus, setFocus, setHint }) {
+  let phase = "disclosing", ended = false, settled = false, pendingCR = false;
+  let prefix = "", paste = false, pasteMatch = 0, quarantine = false;
+  let controlString = false, stringEscape = false;
+  let decoder = null, utf8 = new StringDecoder("utf8"), line = null, inKey = false;
+  let resolve, reject, drawn = 0, painting = false, dirty = false;
+  let generation = 0;
+  const priorRaw = input.isRaw === true;
+  const endMarker = "\x1b[201~";
+  const write = (text) => new Promise((done, fail) => {
+    if (output.destroyed || output.writableEnded) return fail(new Error("selector output closed"));
+    try { output.write(text, (err) => err ? fail(err) : done()); } catch (err) { fail(err); }
+  });
+  function disposeDecoder() {
+    if (!decoder) return;
+    const current = decoder; decoder = null;
+    // Public decoder has no disposer. Flush disarmed private transport so its
+    // supported ESC timeout is cleared, then destroy only this owned stream.
+    const dispose = () => {
+      current.write(Buffer.alloc(32));
+      current.removeListener("keypress", current.selectorKey);
+      current.destroy();
+    };
+    // At most one callback is active. Other reset paths dispose synchronously,
+    // so repeated contamination cannot grow a microtask/decoder queue.
+    if (inKey) queueMicrotask(dispose); else dispose();
+  }
+  function freshDecoder() {
+    disposeDecoder(); prefix = ""; utf8 = new StringDecoder("utf8");
+    decoder = new PassThrough();
+    emitKeypressEvents(decoder);
+    const current = decoder;
+    current.selectorKey = (...args) => {
+      if (decoder !== current) return;
+      inKey = true;
+      try { onKey(...args); } finally { inKey = false; }
+    };
+    decoder.on("keypress", current.selectorKey);
+  }
+  function restore() {
+    disposeDecoder();
+    input.setRawMode(priorRaw);
+    output.removeListener("resize", resize);
+  }
+  function cleanup() {
+    phase = "closed";
+    restore();
+    input.removeListener("data", onData);
+    input.removeListener("end", eof);
+    input.removeListener("close", eof);
+    input.removeListener("error", fail);
+    // Writable may emit its error after invoking the failed write callback.
+    // Keep only this owned guard through that turn, never remove foreign ones.
+    setImmediate(() => output.removeListener("error", fail));
+    output.removeListener("close", outputClosed);
+    process.removeListener("SIGINT", interrupt);
+    for (const [signal, handler] of signals) process.removeListener(signal, handler);
+    line?.end();
+  }
+  function fail(err) {
+    if (phase === "closed") return;
+    cleanup();
+    if (!settled) { settled = true; reject(err); }
+  }
+  function outputClosed() { fail(new Error("selector output closed")); }
+  function interrupt() { onAborted(); fail(abortError()); }
+  const signals = ["SIGTERM", "SIGHUP", ...(process.platform === "win32" ? ["SIGBREAK"] : [])].map((signal) => [signal, () => {
+    cleanup();
+    // Preserve default termination after restoring the terminal. Never turn a
+    // handled termination into an absent answer or a successful setup.
+    process.kill(process.pid, signal);
+  }]);
+  function eof() {
+    ended = true; onClosed();
+    if (!settled) finish("eof");
+    else line?.end();
+  }
+  function finish(reason) {
+    if (settled) return;
+    settled = true; phase = "leaving";
+    restore();
+    const nonempty = reason === "confirm" && editable.some((row) => row.checked);
+    const answers = new Map(editable.map((row) => [row.id, nonempty ? row.checked : undefined]));
+    // Still own input while the newline drains and adapters run; no old key
+    // can become a line answer during this interval.
+    write("\n").then(() => resolve({ answers, mcpIds: offers, reason }), (err) => { cleanup(); reject(err); });
+  }
+  function fallback() {
+    if (settled) return;
+    settled = true; phase = "leaving"; reset(); restore();
+    // Geometry changed: append, since the old physical region is uncertain.
+    write("\nTerminal too small for the selector; continuing with individual questions.\n")
+      .then(() => resolve({ fallback: true }), (err) => { cleanup(); reject(err); });
+  }
+  function fits(caps) {
+    const worst = frame(caps, "Saved choice is locked; use zcode-kit setup --reask");
+    return worst && worst.length + 1 <= caps.rows;
+  }
+  async function paint(disclose = false) {
+    if (painting) { dirty = true; return; }
+    painting = true;
+    try {
+      do {
+        dirty = false;
+        const current = generation, caps = getCaps();
+        if (!fits(caps)) { fallback(); return; }
+        const lines = frame(caps);
+        const erase = drawn && !disclose ? `\x1b[${drawn}A\r\x1b[0J` : "";
+        await write(erase + lines.join("\n") + "\n");
+        drawn = lines.length;
+        if (current !== generation) { dirty = true; continue; }
+        if (phase === "disclosing") { phase = "armed"; freshDecoder(); }
+      } while (dirty && !settled);
+    } catch (err) { fail(err); }
+    finally { painting = false; }
+  }
+  function redisclose() {
+    phase = "disclosing"; reset(); quarantine = false; paste = false; pasteMatch = 0;
+    freshDecoder(); void paint(true);
+  }
+  function contaminate() { reset(); quarantine = true; prefix = ""; freshDecoder(); }
+  function resize() {
+    generation++;
+    if (!fits(getCaps())) { fallback(); return; }
+    // Append on resize rather than guessing old wrapped geometry ownership.
+    drawn = 0; void paint();
+  }
+  function onKey(_, key) {
+    if (phase !== "armed" || !decoder) return;
+    if (key.name === "escape" && prefix === "\x1b") {
+      prefix = "";
+      if (quarantine) redisclose(); else finish("escape");
+      return;
+    }
+    if (key.sequence !== prefix && prefix) return;
+    if (key.ctrl && key.name === "c") { interrupt(); return; }
+    if (key.ctrl && key.name === "d") { eof(); return; }
+    if (quarantine || key.ctrl || key.meta || (key.shift && key.name !== "a")) return;
+    if (["up", "left", "down", "right"].includes(key.name)) {
+      setFocus((getFocus() + (["up", "left"].includes(key.name) ? -1 : 1) + inventory.length) % inventory.length);
+    } else if (key.name === "space") {
+      const row = inventory[getFocus()];
+      if (row.locked) setHint("Saved choice is locked; use zcode-kit setup --reask");
+      else { row.checked = !row.checked; setHint(""); }
+    } else if (key.name === "a") {
+      const checked = !editable.every((row) => row.checked);
+      for (const row of editable) row.checked = checked;
+      setHint("");
+    } else if (key.name === "return" || key.name === "enter") { finish("confirm"); return; }
+    else return;
+    void paint();
+  }
+  function character(ch) {
+    if (phase !== "armed") return;
+    if (paste) {
+      pasteMatch = ch === endMarker[pasteMatch] ? pasteMatch + 1 : ch === endMarker[0] ? 1 : 0;
+      if (pasteMatch === endMarker.length) redisclose();
+      return;
+    }
+    if (ch === "\x03") { interrupt(); return; }
+    if (controlString) {
+      if (ch === "\x07" || (stringEscape && ch === "\\")) { controlString = false; stringEscape = false; redisclose(); }
+      else stringEscape = ch === "\x1b";
+      return;
+    }
+    if (quarantine) {
+      if (ch === "\r" || ch === "\n") { redisclose(); return; }
+      if (ch !== "\x1b" && !prefix) return;
+    }
+    if (prefix || ch === "\x1b") {
+      prefix += ch;
+      if (Buffer.byteLength(prefix) > 32) { contaminate(); return; }
+      if (prefix === "\x1b") { decoder.write(ch); return; }
+      if (["\x1b]", "\x1bP", "\x1b^", "\x1b_"].includes(prefix)) {
+        reset(); controlString = true; stringEscape = false; freshDecoder(); return;
+      }
+      if (prefix === "\x1b[" || prefix === "\x1bO") { decoder.write(ch); return; }
+      const csi = prefix.startsWith("\x1b[");
+      const ss3 = prefix.startsWith("\x1bO");
+      if ((csi || ss3) && !/[\x40-\x7e]$/.test(ch)) return;
+      if (prefix === "\x1b[200~") { reset(); paste = true; pasteMatch = 0; freshDecoder(); return; }
+      const complete = prefix;
+      if (csi || ss3) decoder.write(complete.slice(2)); else decoder.write(ch);
+      prefix = "";
+      return;
+    }
+    if (quarantine) return;
+    if (ch.length && ch >= " " && ch !== " " && ch !== "a" && ch !== "A" && ch !== "\x7f") { contaminate(); return; }
+    decoder.write(ch);
+  }
+  function onData(chunk) {
+    try {
+      const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      for (const byte of bytes) {
+        if (pendingCR) { pendingCR = false; if (byte === 10) continue; }
+        if (byte === 13) pendingCR = true;
+        if (phase === "line" && line) { line.write(Buffer.from([byte])); continue; }
+        if (phase !== "armed") continue;
+        const text = utf8.write(Buffer.from([byte]));
+        for (const ch of text) character(ch);
+      }
+    } catch (err) { fail(err); }
+  }
+  return {
+    select() {
+      return new Promise((yes, no) => {
+        resolve = yes; reject = no;
+        input.on("data", onData); input.on("end", eof); input.on("close", eof); input.on("error", fail);
+        output.on("resize", resize); output.on("error", fail); output.on("close", outputClosed);
+        process.on("SIGINT", interrupt);
+        for (const [signal, handler] of signals) process.on(signal, handler);
+        input.setRawMode(true); input.resume();
+        void paint(true);
+      });
+    },
+    async lineInput() {
+      phase = "leaving";
+      line ??= new PassThrough();
+      line.isTTY = input.isTTY;
+      line.setRawMode = (raw) => { input.setRawMode(raw); return line; };
+      if (ended) line.end();
+      return line;
+    },
+    armLine() { if (!ended && phase !== "closed") phase = "line"; },
+    close: cleanup,
   };
 }
 
