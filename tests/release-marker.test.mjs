@@ -41,6 +41,11 @@ function packageFixture(t) {
     assert.equal(result.status, 0, result.stderr);
   }
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(KIT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   put("cli/local-only.mjs");
   const build = (...args) => {
     const result = spawnSync(process.execPath, [join(root, "pack/build.mjs"), ...args], { encoding: "utf8" });

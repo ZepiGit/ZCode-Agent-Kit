@@ -447,6 +447,11 @@ async function cli(argv) {
   try {
     const { cpSync } = await import("node:fs");
     for (const member of ["cli", "lib", "package.json"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
     mkdirSync(join(root, "proxy"));
     mkdirSync(join(root, "home"));
     const env = { PATH: process.env.PATH, HOME: join(root, "home"), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
@@ -833,6 +838,11 @@ test("entry: run passes the preflight's refusal (3) and the harness's exit code 
   const root = mkdtempSync(join(tmpdir(), "cli-commands-run-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const member of ["cli", "lib", "package.json"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "logs")); mkdirSync(join(root, "generated"));
   for (const file of ["config.example.yaml", "zcode-proxy-manager.mjs"]) cpSync(join(ROOT, "proxy", file), join(root, "proxy", file));
   const home = join(root, "home"); mkdirSync(home);

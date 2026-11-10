@@ -375,6 +375,106 @@ test("CLI: integrate --dry-run writes nothing", () => {
   }
 });
 
+// A-16 / story 111: the dry run must list every file it would write and every
+// registration with the undo command, so it can be reviewed before consent.
+// The list is proven against a REAL run on an equal temp HOME: the files the
+// real run writes (home + state generated/, snapshot diff) equal the dry run's
+// `would write` set. The checkout-write guard needs a prepared state dir and
+// the explicit opt-in, as tests/setup-regressions.test.mjs does.
+function dryRunOmpFixture(home) {
+  const agent = join(home, ".omp", "agent");
+  mkdirSync(agent, { recursive: true });
+  writeFileSync(join(agent, "models.yml"), "providers:\n  openai:\n    name: OpenAI\n    models:\n      - id: gpt-test\n");
+  writeFileSync(join(agent, "config.yml"), "disabledProviders:\n  - zcode\nallowTools:\n  - zcode\n");
+}
+
+function dryRunState(home) {
+  const state = `${home}-state`;
+  mkdirSync(join(state, "proxy"), { recursive: true });
+  writeFileSync(join(state, ".owner.json"), JSON.stringify({ root: KIT }) + "\n");
+  writeFileSync(join(state, ".proxykey"), "synthetic-dry-run-key\n");
+  writeFileSync(join(state, "proxy", "config.yaml"), "server:\n  port: 19439\n  proxyApiKey: \"synthetic-dry-run-key\"\n");
+  return state;
+}
+
+function runIntegrate(home, state, args) {
+  try {
+    return {
+      code: 0,
+      out: execFileSync(process.execPath, [join(KIT, "cli", "zcode-kit.mjs"), ...args], {
+        env: { ...process.env, USERPROFILE: home, HOME: home, ZCODE_KIT_STATE_DIR: state, ZCODE_KIT_SKIP_DEPS: "1", ZCODE_KIT_ALLOW_CHECKOUT: "1", PATH: "/usr/bin:/bin" },
+        encoding: "utf8",
+      }),
+    };
+  } catch (err) {
+    return { code: err.status, out: `${err.stdout ?? ""}${err.stderr ?? ""}` };
+  }
+}
+
+test("integrate --dry-run lists every file a real run writes, with the undo command (temp-HOME comparison)", () => {
+  const tokeniser = (home, state) => (p) =>
+    (p.startsWith(state) ? `<STATE>${p.slice(state.length)}` : p.startsWith(home) ? `<HOME>${p.slice(home.length)}` : p).replace(/\\/g, "/");
+  const dryHome = fakeHome("dryrun-list-dry");
+  dryRunOmpFixture(dryHome);
+  const dryState = dryRunState(dryHome);
+  const dry = runIntegrate(dryHome, dryState, ["integrate", "omp", "--dry-run"]);
+  assert.equal(dry.code, 0, dry.out);
+  const wouldWrite = [...dry.out.matchAll(/^  would write  (.+)$/gm)].map((m) => m[1]);
+  assert.ok(wouldWrite.length > 0, "the dry run lists the files it would write");
+  assert.match(dry.out, /zcode-kit rollback/, "the undo command is shown");
+
+  const realHome = fakeHome("dryrun-list-real");
+  dryRunOmpFixture(realHome);
+  const state = dryRunState(realHome);
+  const before = { home: snapshotTree(realHome), generated: snapshotTree(join(state, "generated")) };
+  const real = runIntegrate(realHome, state, ["integrate", "omp"]);
+  assert.equal(real.code, 0, real.out);
+  const after = { home: snapshotTree(realHome), generated: snapshotTree(join(state, "generated")) };
+  const written = [];
+  for (const base of ["home", "generated"]) {
+    const root = base === "home" ? realHome : join(state, "generated");
+    for (const rel of Object.keys(after[base])) {
+      if (before[base][rel] !== after[base][rel] && !String(after[base][rel]).startsWith("dir")) written.push(join(root, rel));
+    }
+  }
+  const token = tokeniser(realHome, state);
+  assert.deepEqual(
+    [...new Set(written.map(token))].sort(),
+    [...new Set(wouldWrite.map(tokeniser(dryHome, dryState)))].sort(),
+    "the dry run's `would write` list must equal the files the real run wrote",
+  );
+});
+
+// A-07 / story 115: the Codex adapter names the launcher that works on the
+// user's OS — `bin/zcode-codex.sh` on POSIX, `bin\zcode-codex.cmd` on Windows
+// — in its output and in the generated config.toml. The platform is read from
+// ctx.platform (the kit context's own value), so both branches run here.
+test("codex adapter prints the POSIX launcher on POSIX and the .cmd on Windows", async () => {
+  const codex = (await import("../cli/adapters/codex.mjs")).default;
+  for (const [platform, launcher, wrong] of [
+    ["linux", "bin/zcode-codex.sh", "zcode-codex.cmd"],
+    ["win32", "bin\\zcode-codex.cmd", "bin/zcode-codex"],
+  ]) {
+    const home = fakeHome(`codex-launcher-${platform}`);
+    const { ctx, restore } = ctxWithAppData(home);
+    ctx.platform = platform;
+    ctx.root = join(home, "kitroot");
+    ctx.generated = join(ctx.root, "generated");
+    const lines = [];
+    try {
+      await codex.apply(ctx, noopTx(), (m) => lines.push(m));
+    } finally {
+      restore();
+    }
+    const text = lines.join("\n");
+    assert.match(text, new RegExp(`use via: ${launcher.replace(/\\/g, "\\\\")}`), `${platform}: the shown launcher must work on the user's OS`);
+    assert.ok(!text.includes(wrong), `${platform}: the wrong platform's launcher must not appear`);
+    const toml = readFileSync(join(ctx.generated, "codex-home", "config.toml"), "utf8");
+    assert.match(toml, new RegExp(`use ${launcher.replace(/\\/g, "\\\\")} to enter this setup`), `${platform}: the config comment names the same launcher`);
+    assert.ok(!toml.includes(wrong), `${platform}: the config comment must not name the other platform's launcher`);
+  }
+});
+
 // ------------------------------------------- test backlog: dry-run matrix
 import { createHash } from "node:crypto";
 import { readdirSync, statSync } from "node:fs";

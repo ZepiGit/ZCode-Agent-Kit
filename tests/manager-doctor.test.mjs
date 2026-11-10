@@ -63,6 +63,11 @@ function kitFixture(t, { port, configured = false, installed = false, artifacts 
   const root = mkdtempSync(join(tmpdir(), "kit-manager-doctor-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const member of ["cli", "lib"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "home"));
   // The kit CLI and its adapters read these members too (as in the UX capture).
   for (const member of ["package.json", "proxy/zcode-proxy-manager.mjs", "proxy/zcode-proxy-autostart.ts", "proxy/resolve-zcode-proxy-key.mjs", "proxy/config.example.yaml"]) {

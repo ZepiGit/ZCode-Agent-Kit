@@ -161,6 +161,11 @@ function kitFixture(t, port, { proxySrc = false } = {}) {
     mkdirSync(join(root, "zcode-proxy-src", "src"));
     writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), FAKE_PROXY);
   }
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   return root;
 }
 

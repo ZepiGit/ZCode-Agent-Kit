@@ -69,7 +69,11 @@ function install(t) {
   // The fixture root as it appears in written files (native, forward slashes, JSON-escaped).
   const spellings = [...new Set([root, root.replace(/\\/g, '/'), root.replace(/\\/g, '\\\\')])].sort((a, b) => b.length - a.length);
   const anonymous = (text) => spellings.reduce((acc, s) => acc.replaceAll(s, '<ROOT>'), text);
-  return { home, state, kit, put, anonymous, txOf: (out) => out.match(/transaction (\S+) recorded/)?.[1] };
+  // Ticket 43: on the compact screen the verbatim transaction line lives in
+  // install.log; --verbose keeps it on stdout. Reads both.
+  const txOf = (out) => out.match(/transaction (\S+) recorded/)?.[1]
+    ?? (() => { try { return fs.readFileSync(path.join(state, 'logs', 'install.log'), 'utf8').match(/transaction (\S+) recorded/)?.[1]; } catch { return undefined; } })();
+  return { home, state, kit, put, anonymous, txOf };
 }
 
 /**

@@ -12,6 +12,11 @@ const FIXTURE_PORT = await freePort();
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'kit-cli-'));
   for (const member of ['cli', 'lib']) cpSync(join(source, member), join(root, member), { recursive: true });
+  // Ticket 43: the output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(source, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   mkdirSync(join(root, 'proxy')); mkdirSync(join(root, 'logs')); mkdirSync(join(root, 'generated'));
   // A free port of this run as the template's port (ticket 75): setup probes it,
   // and the production port 8457 may be the owner's own proxy.
@@ -66,7 +71,8 @@ test('setup smoke failure reports configured state without failing successful se
   }
   const res = await run(f, ['setup', '--harness', 'pi', '--no-mcp']);
   assert.equal(res.code, 0, res.stdout + res.stderr);
-  assert.match(res.stdout + res.stderr, /configur.*(?:saved|complete)|integrations.*saved/i);
+  // Ticket 43: the compact report's summary block (Assistants n configured …)
+  assert.match(res.stdout + res.stderr, /Assistants\s+\d+ configured/i);
   assert.match(res.stdout + res.stderr, /1113|smoke|model access/i);
 });
 
@@ -97,10 +103,13 @@ else { fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.arg
 
   // An equivalent spelling that already carries the flag: recognised, left alone.
   writeFileSync(state, `${SEMI} ${configured} --stdio`);
+  // Ticket 43: the compact report shows the report rows; the bridge step's
+  // diagnostics live in install.log.
+  const logText = () => readFileSync(join(f.root, 'logs', 'install.log'), 'utf8');
   let result = await run(f, ['setup', '--harness', 'claude-code']);
   assert.equal(result.code, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /registered by another kit copy/);
-  assert.match(result.stdout, /claude: "zcode-harness" already registered/);
+  assert.doesNotMatch(logText(), /registered by another kit copy/);
+  assert.match(logText(), /claude: "zcode-harness" already registered/);
   assert.equal(existsSync(attempts), false, 'equivalent registration is not replaced');
 
   // The same equivalent spelling without the flag: this installation's own
@@ -108,8 +117,8 @@ else { fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.arg
   writeFileSync(state, `${configured} --stdio`);
   result = await run(f, ['setup', '--harness', 'claude-code']);
   assert.equal(result.code, 0, result.stderr);
-  assert.doesNotMatch(result.stdout, /registered by another kit copy/);
-  assert.match(result.stdout, /claude: re-registered "zcode-harness" with --max-semi-space-size=1/);
+  assert.doesNotMatch(logText(), /registered by another kit copy/);
+  assert.match(logText(), /claude: re-registered "zcode-harness" with --max-semi-space-size=1/);
   assert.deepEqual(calls(), [
     ['mcp', 'remove', 'zcode-harness', '--scope', 'user'],
     ['mcp', 'add', 'zcode-harness', '--scope', 'user', '--', 'node', SEMI, server, '--stdio'],
@@ -120,7 +129,7 @@ else { fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.arg
   for (let i = 0; i < 2; i++) {
     result = await run(f, ['setup', '--harness', 'claude-code']);
     assert.equal(result.code, 0, result.stderr);
-    assert.match(result.stdout, /claude: "zcode-harness" already registered/);
+    assert.match(logText(), /claude: "zcode-harness" already registered/);
     assert.equal(calls().length, 2, 'the migrated registration is not replaced again');
   }
 });
