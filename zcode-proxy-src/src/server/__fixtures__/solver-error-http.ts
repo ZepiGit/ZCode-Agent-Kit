@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mock } from "bun:test";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import type { ProxyConfig } from "../../config/types.js";
 
 // Permanent isolated regression fixture. Seam4: real loopback listener and route/error
@@ -79,7 +80,11 @@ const records: unknown[] = [];
 const previousWarning = console.warn;
 let warningMarkerVisible = false;
 let marker = "";
-console.warn = (...values) => { warningMarkerVisible ||= marker !== "" && values.some(v => String(v).includes(marker)); };
+let warnings: string[] = [];
+console.warn = (...values) => {
+  warnings.push(values.map(String).join(" "));
+  warningMarkerVisible ||= marker !== "" && values.some(v => String(v).includes(marker));
+};
 const server = await startServer({ config, auth, fetchImpl });
 PORT = server.port;
 try {
@@ -139,6 +144,66 @@ try {
       activePool = null;
     }
   }
+
+  // Distinct returned-token path: seed the real issued-id registry with an
+  // unchanged successful token, then return it repeatedly. Do not invalidate:
+  // that would clear the registry and bypass the branch under test.
+  marker = "SyntheticHttpReturnedCertifyIdCredential\u001b[31m\n";
+  warningMarkerVisible = false;
+  warnings = [];
+  const param = Buffer.from(JSON.stringify({ certifyId: marker, securityToken: "offline-fixture" })).toString("base64");
+  let mints = 0;
+  let recycles = 0;
+  const dispatcher = {
+    run: async () => { mints += 1; return param; },
+    concurrency: () => 1,
+    stats: () => ({ mode: "worker", alive: false, busy: false, queueDepth: 0, generation: 0, solvesSinceSpawn: 0, totalSolves: mints, totalFailures: 0, consecutiveFailures: 0, deadlineKills: 0, recycles, lastRecycleReason: null, lastRecycleAt: null, lastSdkScripts: null }),
+    requestRecycle: () => { recycles += 1; },
+  };
+  activePool = new CaptchaTokenPool({ poolSizeMin: 1, poolSizeMax: 1, tokenTtlMs: 60000, refillIntervalMs: 600000, staggerMs: 0, solveRetries: 1, solveConcurrency: 1, emptyTakeRace: 1, scaleDownIdleMs: 600000, deepIdleAfterMs: 600000, cpuLimitPercent: 0, now: () => 2000000 }, dispatcher);
+  try {
+    await activePool.prefill(poolConfig);
+    assert.equal(await activePool.takeToken(poolConfig), param, "successful token bytes must stay unchanged");
+    await Bun.sleep(0); // the take's refill returns the first duplicate
+    assert.equal(activePool.stats().ready, 0);
+    assert.equal(activePool.stats().mintSuccessRate10m, 0.5);
+    for (let attempt = 0; attempt < 4; attempt += 1) await activePool.prefill(poolConfig);
+    assert.equal(mints, 6, "one success and five returned duplicates, not thrown failures");
+    assert.equal(activePool.stats().storm, true);
+    assert.equal(activePool.stats().mintSuccessRate10m, 1 / 6);
+    assert.equal(recycles, 1);
+    const parallelWarning = "[captcha-pool] parallel solve failed: captcha SDK failure [len=52 sha256=8e4ac8107f5bc2cf05206e31d060905549fcffe00631df1115602a68ea7da3a3]";
+    const expectedWarnings = [
+      parallelWarning, parallelWarning, parallelWarning, parallelWarning,
+      "[captcha] mint storm: 17% of 6 mints succeeded in 10 min — pausing minting for 60s and recycling the solver",
+      parallelWarning,
+    ];
+    const expectedText = '{"error":{"type":"captcha_solver_failed","message":"captcha minting degraded (storm) — retry later (last local mint failure: duplicate certifyId)"}}';
+    for (const path of paths) {
+      const beforeUpstream = upstreamCalls;
+      const beforeTakes = publicTakes;
+      const resp = await fetch(`http://127.0.0.1:${PORT}${path}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, connection: "close" }, body: JSON.stringify(bodyFor(path)), signal: AbortSignal.timeout(5000) });
+      const text = await resp.text();
+      const body = JSON.parse(text) as { error: { type: string; message: string } };
+      assert.equal(resp.status, 503);
+      assert.equal(resp.headers.get("content-type"), "application/json");
+      assert.equal(body.error.type, "captcha_solver_failed");
+      assert.equal(upstreamCalls - beforeUpstream, 1, "no resend after solver refusal");
+      assert.equal(publicTakes - beforeTakes, 2);
+      assert.equal(mints, 6, "storm backoff forbids more solver work");
+      const markerVisible = text.includes(marker) || text.includes("SyntheticHttpReturnedCertifyIdCredential");
+      const paramVisible = text.includes(param) || warnings.some(line => line.includes(param));
+      const exactReply = text === expectedText;
+      const exactWarnings = isDeepStrictEqual(warnings, expectedWarnings);
+      const pass = !markerVisible && !warningMarkerVisible && !paramVisible && exactReply && exactWarnings;
+      executed += 1;
+      if (pass) passed += 1; else failures.push(`returned-certifyid-marker:${path}`);
+      records.push({ scenario: "returned-certifyid-marker", path, pass, status: resp.status, type: body.error.type, markerVisible, paramVisible, warningMarkerVisible, exactReply, exactWarnings, response: body, warnings, mints, upstreamCallsThisRequest: upstreamCalls - beforeUpstream });
+    }
+  } finally {
+    activePool.stopBackgroundRefill();
+    activePool = null;
+  }
 } finally {
   await server.close();
   console.warn = previousWarning;
@@ -146,8 +211,8 @@ try {
 }
 for (const record of records) console.log(JSON.stringify(record));
 console.log(JSON.stringify({ executed, passed, failed: failures.length, failures, localRequests, upstreamFixtureCalls: upstreamCalls, blockedExternalFetches, syntheticOnly: true, liveUpstreamRequests: 0, listenerClosed: true, pid: process.pid }));
-assert.equal(executed, 12, "all auth/security/control cases must run");
-assert.equal(localRequests, 12);
-assert.equal(upstreamCalls, 9);
+assert.equal(executed, 15, "all auth/security/control and returned-token cases must run");
+assert.equal(localRequests, 15);
+assert.equal(upstreamCalls, 12);
 assert.equal(blockedExternalFetches, 0, "no unexpected external fetch attempted");
-assert.equal(failures.length, 0, "client-visible solver failures must exclude untrusted raw or mutable SDK message text");
+assert.equal(failures.length, 0, "client-visible solver failures must exclude raw/mutable messages and returned certifyIds");

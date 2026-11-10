@@ -682,7 +682,8 @@ export class CaptchaTokenPool {
             continue;
           }
           if (this.isDuplicateParam(param)) {
-            lastErr = `duplicate certifyId ${parseCertifyId(param) ?? "?"}`;
+            // The decoded id is untrusted token content, not diagnostic text.
+            lastErr = "duplicate certifyId";
             // Same outcome as an F008 error: the mint produced nothing usable.
             if (!mode.probe) this.noteMintOutcome(false);
             continue;

@@ -609,6 +609,89 @@ describe("CaptchaTokenPool — sanitized mint-failure provenance on later take f
     });
   }
 
+  it("keeps returned duplicate certifyIds out of exact storm/probe errors and warnings", async () => {
+    const marker = "SyntheticReturnedCertifyIdCredential\u001b[31m\n";
+    const param = Buffer.from(JSON.stringify({ certifyId: marker, securityToken: "offline-fixture" })).toString("base64");
+    const parallelWarning = "[captcha-pool] parallel solve failed: captcha SDK failure [len=52 sha256=8e4ac8107f5bc2cf05206e31d060905549fcffe00631df1115602a68ea7da3a3]";
+    const metadata = "captcha SDK failure [len=52 sha256=8e4ac8107f5bc2cf05206e31d060905549fcffe00631df1115602a68ea7da3a3]";
+    const warn = console.warn;
+    const warnings: string[] = [];
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => param);
+    try {
+      console.warn = (...values) => { warnings.push(values.map(String).join(" ")); };
+      await pool.prefill(CFG);
+      // Issuing the successful token registers its id; invalidate() would erase
+      // that registry and miss the returned-token branch entirely.
+      expect(await pool.takeToken(CFG)).toBe(param);
+      await tick(); // the take's refill returns the first duplicate
+      expect(pool.stats().ready).toBe(0);
+      expect(pool.stats().mintSuccessRate10m).toBe(0.5);
+      for (let i = 0; i < 4; i++) await pool.prefill(CFG);
+      expect(solveMock).toHaveBeenCalledTimes(6); // one success, five duplicates
+      expect(pool.stats().storm).toBe(true);
+      expect(pool.stats().mintSuccessRate10m).toBeCloseTo(1 / 6);
+      expect(recycleMock.mock.calls).toEqual([["storm"]]);
+      const error = await rejection(pool.takeToken(CFG));
+      expect(error.message).not.toContain(marker);
+      expect(error.message).not.toContain(param);
+      expect(error.message).toBe("captcha minting degraded (storm) — retry later (last local mint failure: duplicate certifyId)");
+      expect(warnings).toEqual([
+        parallelWarning, parallelWarning, parallelWarning, parallelWarning,
+        "[captcha] mint storm: 17% of 6 mints succeeded in 10 min — pausing minting for 60s and recycling the solver",
+        parallelWarning,
+      ]);
+      clock += 60_000;
+      pool.requestUrgentRefill();
+      await tick(); // the single probe also returns the already-issued token
+      expect(solveMock).toHaveBeenCalledTimes(7);
+      expect(pool.stats().storm).toBe(true);
+      expect(warnings.at(-1)).toBe(`[captcha] storm probe mint failed — backing off 120s: ${metadata}`);
+      expect((await rejection(pool.takeToken(CFG))).message).toBe(`captcha minting degraded (storm) — retry later (last local mint failure: ${metadata})`);
+      expect(warnings.join("\n")).not.toContain(marker);
+      expect(warnings.join("\n")).not.toContain(param);
+    } finally { console.warn = warn; }
+  });
+
+  it("keeps returned duplicate certifyIds out of the exact later take deadline", async () => {
+    const marker = "SyntheticDeadlineCertifyIdCredential\u001b[31m\n";
+    const param = Buffer.from(JSON.stringify({ certifyId: marker, securityToken: "offline-fixture" })).toString("base64");
+    const warn = console.warn;
+    const warnings: string[] = [];
+    const savedDeadline = process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS;
+    const savedGrace = process.env.CAPTCHA_TAKE_GRACE_MS;
+    const stuck = Promise.withResolvers<string>();
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => param);
+    try {
+      console.warn = (...values) => { warnings.push(values.map(String).join(" ")); };
+      await pool.prefill(CFG);
+      expect(await pool.takeToken(CFG)).toBe(param);
+      await tick(); // returned duplicate establishes provenance before the hang
+      expect(solveMock).toHaveBeenCalledTimes(2);
+      expect(pool.stats().mintSuccessRate10m).toBe(0.5);
+      expect(pool.stats().storm).toBe(false);
+      solveMock.mockImplementation(() => stuck.promise);
+      process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = "1000";
+      process.env.CAPTCHA_TAKE_GRACE_MS = "0";
+      const error = await rejection(pool.takeToken(CFG));
+      expect(error.message).not.toContain(marker);
+      expect(error.message).not.toContain(param);
+      expect(error.message).toBe("captcha take deadline (1000ms) (last local mint failure: duplicate certifyId)");
+      expect(warnings).toEqual(["[captcha-pool] parallel solve failed: captcha SDK failure [len=52 sha256=8e4ac8107f5bc2cf05206e31d060905549fcffe00631df1115602a68ea7da3a3]"]);
+      expect(solveMock).toHaveBeenCalledTimes(3);
+      expect(recycleMock).not.toHaveBeenCalled();
+    } finally {
+      // Settle the owned synthetic solve rather than leaving work behind.
+      stuck.resolve(param);
+      await tick();
+      console.warn = warn;
+      if (savedDeadline === undefined) delete process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS; else process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = savedDeadline;
+      if (savedGrace === undefined) delete process.env.CAPTCHA_TAKE_GRACE_MS; else process.env.CAPTCHA_TAKE_GRACE_MS = savedGrace;
+    }
+    expect(pool.stats().activeSolves).toBe(0);
+  });
+
   it("the storm take failure names the last local mint failure (sanitized, bounded)", async () => {
     pool = provenancePool();
     solveMock.mockImplementation(async () => { throw new CaptchaLocalVerificationError(REFUSAL.slice("verify param refused: ".length)); });
