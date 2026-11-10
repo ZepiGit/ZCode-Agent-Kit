@@ -14,7 +14,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
@@ -589,7 +589,7 @@ process.exit(r.status ?? 1);
 
 // Only a successful exit of the real fixture manager may arm its next proxy.
 // This wrapper changes no manager lifecycle code, timings, or exit statuses.
-function completionManager(root, { managerNodeArgs = [], lifecycleModule = pathToFileURL(join(root, "lib", "proxy-lifecycle.mjs")).href } = {}) {
+function completionManager(root, { managerNodeArgs = [], managerAfterObserverArgs = [], lifecycleModule = pathToFileURL(join(root, "lib", "proxy-lifecycle.mjs")).href } = {}) {
   const entry = join(root, "completion-manager.mjs");
   const adapter = join(root, "completion-lifecycle.mjs");
   const preload = join(root, "completion-observer.mjs");
@@ -599,12 +599,19 @@ function completionManager(root, { managerNodeArgs = [], lifecycleModule = pathT
   writeFileSync(adapter, `
 export * from ${JSON.stringify(lifecycleModule)};
 import { createLifecycle as realLifecycle } from ${JSON.stringify(lifecycleModule)};
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+const traceFile = ${JSON.stringify(join(root, "logs"))} + "/completion-observer-" + process.pid + ".json";
+const trace = (fields) => {
+  let previous = {};
+  try { previous = JSON.parse(readFileSync(traceFile, "utf8")); } catch {}
+  writeFileSync(traceFile, JSON.stringify({ ...previous, ...fields }), { mode: 0o600 });
+};
 const snapshot = () => {
   const r = JSON.parse(readFileSync(${JSON.stringify(join(root, "logs", "proxy.pid"))}, "utf8"));
   return { pid: r.pid, startedMs: r.startedMs, ...(r.startTicks === undefined ? {} : { startTicks: r.startTicks }) };
 };
 export function createLifecycle(options) {
+  trace({ adapterInvoked: true, managerPid: process.pid });
   let spawned = null;
   const lifecycle = realLifecycle({ ...options, stepHook(step) {
     options.stepHook?.(step);
@@ -614,7 +621,11 @@ export function createLifecycle(options) {
     const result = await lifecycle[intent](...args);
     if (result.code === 0) {
       const identity = spawned ?? snapshot(); // late acknowledgement: existing serving generation
-      await new Promise((resolve, reject) => process.send({ type: "fixture-manager-generation", identity }, (err) => err ? reject(err) : resolve()));
+      trace({ intent, intentCode: result.code, identity, sendCalled: true });
+      await new Promise((resolve, reject) => process.send({ type: "fixture-manager-generation", identity }, (err) => {
+        trace({ sendCallback: true, sendErrorCode: err?.code ?? null });
+        err ? reject(err) : resolve();
+      }));
     }
     return result;
   };
@@ -623,9 +634,35 @@ export function createLifecycle(options) {
 `);
   writeFileSync(preload, `
 import { registerHooks } from "node:module";
+import { realpathSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+// Canonicalize BOTH operands: Node's parentURL spelling need not equal the
+// native realpath URL (Windows short names/case, or equivalent URL encoding).
+// Scope stays this fixture's exact manager file and exact lifecycle import.
+const canonical = (url) => {
+  if (!url?.startsWith("file:")) return null;
+  try {
+    const path = realpathSync.native(fileURLToPath(url));
+    return process.platform === "win32" ? path.toLowerCase() : path;
+  } catch { return null; }
+};
+const manager = canonical(${JSON.stringify(pathToFileURL(join(root, "proxy", "zcode-proxy-manager.mjs")).href)});
+let hookOrdinal = 0;
 registerHooks({ resolve(spec, context, next) {
-  if (context.parentURL === ${JSON.stringify(pathToFileURL(realpathSync.native(join(root, "proxy", "zcode-proxy-manager.mjs"))).href)} && spec === "../lib/proxy-lifecycle.mjs")
-    return { url: ${JSON.stringify(pathToFileURL(adapter).href)}, shortCircuit: true };
+  hookOrdinal++;
+  if (spec === "../lib/proxy-lifecycle.mjs") {
+    const parent = canonical(context.parentURL);
+    const matched = manager !== null && parent === manager;
+    // Trace EVERY lifecycle-import resolve, whatever the parentURL spelling —
+    // a short-name (8.3) or otherwise non-suffix spelling must still leave
+    // evidence, especially when the comparator misses it. Only fixture file
+    // identity/URL facts; never env, config, key or pid-record contents.
+    // parentURL is recorded as RECEIVED, so a rewrite by an earlier hook of
+    // the chain stays visible; hookOrdinal is this hook's resolve count, the
+    // order it saw inside this process.
+    writeFileSync(${JSON.stringify(join(root, "logs"))} + "/completion-resolve-" + process.pid + ".json", JSON.stringify({ parentURL: context.parentURL ?? null, canonicalParent: parent, canonicalManager: manager, matched, hookOrdinal }), { mode: 0o600 });
+    if (matched) return { url: ${JSON.stringify(pathToFileURL(adapter).href)}, shortCircuit: true };
+  }
   return next(spec, context);
 } });
 `);
@@ -633,19 +670,25 @@ registerHooks({ resolve(spec, context, next) {
 import { spawn } from "node:child_process";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-const child = spawn(process.execPath, [...${JSON.stringify(managerNodeArgs)}, "--import", ${JSON.stringify(pathToFileURL(preload).href)}, ${JSON.stringify(join(root, "proxy", "zcode-proxy-manager.mjs"))}, ...process.argv.slice(2)], { env: process.env, stdio: ["inherit", "inherit", "inherit", "ipc"] });
+const child = spawn(process.execPath, [...${JSON.stringify(managerNodeArgs)}, "--import", ${JSON.stringify(pathToFileURL(preload).href)}, ...${JSON.stringify(managerAfterObserverArgs)}, ${JSON.stringify(join(root, "proxy", "zcode-proxy-manager.mjs"))}, ...process.argv.slice(2)], { env: process.env, stdio: ["inherit", "inherit", "inherit", "ipc"] });
 let generation = null;
-child.on("message", (message) => { if (message?.type === "fixture-manager-generation") generation = message.identity; });
+let messages = 0;
+const receiptFile = ${JSON.stringify(join(root, "logs"))} + "/completion-receipt-" + child.pid + ".json";
+const receipt = (fields = {}) => writeFileSync(receiptFile, JSON.stringify({ wrapperPid: process.pid, managerPid: child.pid, messages, generation, ...fields }), { mode: 0o600 });
+child.on("message", (message) => {
+  if (message?.type === "fixture-manager-generation") { generation = message.identity; messages++; receipt(); }
+});
 const timer = setTimeout(() => { child.kill("SIGKILL"); process.exitCode = 124; }, 90_000);
 child.once("error", (err) => { clearTimeout(timer); console.error(err.message); process.exitCode = 1; });
 child.once("close", (code) => {
   clearTimeout(timer);
+  receipt({ closeCode: code });
   if (process.exitCode === 124) return;
   process.exitCode = code ?? 1;
   if (code !== 0) return;
   const logDir = ${JSON.stringify(join(root, "logs"))};
   const record = JSON.parse(readFileSync(join(logDir, "proxy.pid"), "utf8"));
-  if (!generation || !Number.isInteger(generation.pid) || !Number.isFinite(generation.startedMs)) throw new Error("completed manager left no started proxy generation");
+  if (!generation || !Number.isInteger(generation.pid) || !Number.isFinite(generation.startedMs)) throw new Error("completed manager left no started proxy generation: " + JSON.stringify({ messages, generationPresent: generation !== null, pidInteger: Number.isInteger(generation?.pid), startedMsFinite: Number.isFinite(generation?.startedMs) }));
   if (record.pid !== generation.pid || record.startedMs !== generation.startedMs || record.startTicks !== generation.startTicks) throw new Error("completed manager proxy generation changed before completion");
   const marker = join(logDir, "fixture-manager-complete-" + record.pid);
   const temp = marker + "." + process.pid + ".tmp";
@@ -656,6 +699,94 @@ child.once("close", (code) => {
   return entry;
 }
 
+// Exercise the generated wrapper and real CLI, not a hand-built successful
+// marker. Percent-encoding an unreserved character keeps the same file but
+// changes the raw parentURL string, portably exposing representation matching.
+// This is a controlled URL-shape counterexample, NOT native Windows evidence.
+test("the completion observer follows an equivalent file URL through the actual wrapper and CLI", { timeout: 60_000 }, async (t) => {
+  const root = kitFixture(t, await freePort(), { proxySrc: true });
+  const control = join(root, "parent-url-control.mjs");
+  const trace = join(root, "parent-url-control.json");
+  writeFileSync(control, `
+import { registerHooks } from "node:module";
+import { writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+registerHooks({ resolve(spec, context, next) {
+  if (spec === "../lib/proxy-lifecycle.mjs" && context.parentURL?.endsWith("/proxy/zcode-proxy-manager.mjs")) {
+    const shaped = context.parentURL.replace("zcode-proxy-manager.mjs", "%7Acode-proxy-manager.mjs");
+    writeFileSync(${JSON.stringify(trace)}, JSON.stringify({ original: context.parentURL, shaped, sameFile: fileURLToPath(shaped) === fileURLToPath(context.parentURL) }));
+    return next(spec, { ...context, parentURL: shaped });
+  }
+  return next(spec, context);
+} });
+`);
+  const manager = completionManager(root, { managerAfterObserverArgs: ["--import", pathToFileURL(control).href] });
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+  const result = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024 });
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  if (record) defer(root, () => killFixtureProxy(root, record.pid));
+  const evidence = readJson(trace);
+  assert.equal(evidence?.sameFile, true, "the control changes URL spelling, never the imported file");
+  assert.notEqual(evidence.original, evidence.shaped);
+  assert.equal(result.status, 0, completionEvidence(root, result.stdout + result.stderr));
+  const observers = readdirSync(join(root, "logs")).filter((name) => /^completion-observer-\d+\.json$/.test(name));
+  assert.equal(observers.length, 1, "one actual manager adapter invocation");
+  const observed = readJson(join(root, "logs", observers[0]));
+  assert.equal(observed.adapterInvoked, true);
+  assert.equal(observed.intent, "ensureRunning");
+  assert.equal(observed.intentCode, 0);
+  assert.equal(observed.sendCalled, true);
+  assert.equal(observed.sendCallback, true, "the real IPC send callback ran before CLI exit");
+  assert.equal(observed.sendErrorCode, null);
+  const receipt = readJson(join(root, "logs", `completion-receipt-${observed.managerPid}.json`));
+  assert.equal(receipt.messages, 1, "the actual wrapper received the generation message");
+  assert.equal(receipt.closeCode, 0, "the real CLI closed successfully");
+  assert.deepEqual(receipt.generation, observed.identity);
+  assert.deepEqual(readJson(join(root, "logs", `fixture-manager-complete-${record.pid}`)), {
+    pid: record.pid, startedMs: record.startedMs, ...(record.startTicks === undefined ? {} : { startTicks: record.startTicks }),
+  }, "only the actual wrapper publishes after its real manager closes 0");
+  assert.equal(receipt.wrapperPid, result.pid, "receipt belongs to the actual spawned wrapper");
+  if (process.platform !== "win32") {
+    const groups = spawnSync("ps", ["-o", "pid=,pgid=", "-p", [process.pid, record.pid].join(",")], { encoding: "utf8", timeout: 5000 });
+    assert.equal(groups.status, 0, groups.stderr);
+    t.diagnostic(`owned PID/PGID (runner, proxy): ${groups.stdout.trim().replace(/\s*\n\s*/g, "; ")}`);
+  }
+  t.diagnostic(`equivalent-parentURL=${JSON.stringify(evidence)}; wrapper=${result.pid} manager=${observed.managerPid} proxy=${record.pid}; adapterInvoked=${observed.adapterInvoked} sendCallback=${observed.sendCallback} sendError=${observed.sendErrorCode} receivedMessages=${receipt.messages} CLIclose=${receipt.closeCode} wrapperExit=${result.status}`);
+});
+
+// Failure evidence is limited to owned fixture output and explicitly named
+// fixture logs/traces. Never read proxy.pid, config, keys, env or account stores.
+// Redaction is shape-based so an arbitrary key spelling cannot leak: ANSI is
+// stripped first, then the fixture key itself, any bearer token, a
+// proxyApiKey value in any spelling, 64-hex tokens, and 43-char base64url
+// stop tokens (ticket 18's shape) are all replaced before the text is capped.
+const fixtureOutput = (text) => String(text)
+  .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+  .replaceAll(KEY, "<fixture-key-redacted>")
+  .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi, "Bearer <fixture-secret-redacted>")
+  .replace(/(proxyApiKey["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s"',}]{8,})/gi, "$1<fixture-secret-redacted>")
+  .replace(/\b[a-f0-9]{64}\b/gi, "<fixture-token-redacted>")
+  .replace(/\b[A-Za-z0-9_-]{43}\b/g, "<fixture-token-redacted>")
+  .slice(-8192);
+function fixtureTail(file, limit = 6000) {
+  let fd;
+  try {
+    fd = openSync(file, "r");
+    const size = fstatSync(fd).size;
+    const bytes = Buffer.alloc(Math.min(size, limit));
+    readSync(fd, bytes, 0, bytes.length, Math.max(0, size - bytes.length));
+    return fixtureOutput(bytes.toString("utf8"));
+  } catch { return "<absent>"; }
+  finally { if (fd !== undefined) closeSync(fd); }
+}
+function completionEvidence(root, output = "") {
+  const dir = join(root, "logs");
+  const traces = readdirSync(dir).filter((name) => /^completion-(?:resolve|observer|receipt|hookorder)-\d+\.json$/.test(name)).sort().slice(-12);
+  return fixtureOutput(output) + "\nfixture proxy.log tail:\n" + fixtureTail(join(dir, "proxy.log")) +
+    "\nfixture early-log tail:\n" + fixtureTail(join(dir, "proxy.early.log")) +
+    traces.map((name) => `\n${name}: ${fixtureTail(join(dir, name), 2000)}`).join("");
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The fixture's stand-in proxies alive now (by command line), or null when the process table cannot be read. */
 const standIns = (root) => fixtureProcesses(root)?.filter((p) => /zcode-proxy-src[\\/]+src[\\/]+index\.ts\b.*\bserve\b/.test(p.commandLine)) ?? null;
@@ -664,7 +795,7 @@ const countOf = (text, re) => (text.match(re) ?? []).length;
 // Instrument only the fixture manager's lifecycle import. The actual CLI entry,
 // completion wrapper, stand-in and supervisor are unchanged; stepHook is the
 // existing lifecycle seam. No production file is rewritten, even in the copy.
-function heldCompletionFixture(t, port, { onExit = "none", windowsTicks = false } = {}) {
+function heldCompletionFixture(t, port, { onExit = "none", windowsTicks = false, missObserver = false, orderProbe = false } = {}) {
   const root = kitFixture(t, port, { proxySrc: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), SUPERVISED_PROXY);
   const held = join(root, "manager-held.json");
@@ -700,7 +831,22 @@ export function createLifecycle(options) {
 }
 `);
   writeFileSync(preload, `
+import { registerHooks } from "node:module";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+${orderProbe ? `
+// Passive order probe, registered BEFORE the observer (this --import comes
+// first in the spawn argv). Synchronous registerHooks chains LIFO, so the
+// observer registered later runs first: when it short-circuits the manager's
+// lifecycle import, this probe never sees it. Records only spec strings.
+const seenSpecs = [];
+let lifecycleSeen = false;
+registerHooks({ resolve(spec, context, next) {
+  if (spec === "../lib/proxy-lifecycle.mjs") lifecycleSeen = true;
+  if (seenSpecs.length < 64) seenSpecs.push(String(spec));
+  return next(spec, context);
+} });
+process.on("exit", () => writeFileSync(${JSON.stringify(join(root, "logs"))} + "/completion-hookorder-" + process.pid + ".json", JSON.stringify({ lifecycleSeen, specs: seenSpecs })));
+` : ""}
 const exit = process.exit;
 process.exit = (code) => {
   if (Number(code) === 0) {
@@ -727,24 +873,39 @@ process.exit = (code) => {
 };
 `);
   const entry = completionManager(root, { managerNodeArgs: ["--import", pathToFileURL(preload).href], lifecycleModule: pathToFileURL(adapter).href });
+  // Diagnostic negative control only: omit the generated observation hook
+  // before spawn, leaving the SAME wrapper, real CLI and stand-in untouched.
+  if (missObserver) writeFileSync(join(root, "completion-observer.mjs"), "// Deliberately missing fixture observer.\n");
   const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "0", FAKE_COMPLETION_MANAGER: entry });
   const child = spawn(process.execPath, [entry, "start"], { env, stdio: ["ignore", "pipe", "pipe"] });
   defer(root, () => killChild(child));
   let output = "";
-  child.stdout.on("data", (d) => { output += d; });
-  child.stderr.on("data", (d) => { output += d; });
-  const exited = new Promise((r) => child.once("close", (code) => r(code)));
+  child.stdout.on("data", (d) => { output = (output + d).slice(-8192); });
+  child.stderr.on("data", (d) => { output = (output + d).slice(-8192); });
+  let closed;
+  const exited = new Promise((r) => child.once("close", (code) => { closed = code; r(code); }));
   // Cleanup releases both handshakes even when an assertion fails. The wrapper
   // owns its real manager child; fixture teardown waits for both and the proxy.
   defer(root, async () => {
     writeFileSync(release, "release"); writeFileSync(exitRelease, "release");
     await exited;
   });
-  return { t, root, child, env, held, release, exiting, exitRelease, exited, output: () => output };
+  return { t, root, child, env, held, release, exiting, exitRelease, exited, closed: () => closed, output: () => fixtureOutput(output) };
 }
 
 async function heldProxy(f) {
-  const held = await until("the actual wrapper's manager held at spawn:start-recorded", () => readJson(f.held), 20_000);
+  let held;
+  try {
+    held = await until("the actual wrapper's manager held at spawn:start-recorded", () => {
+      const record = readJson(f.held);
+      if (record) return record;
+      if (f.closed() !== undefined) assert.fail(`actual wrapper closed early: code=${f.closed()} signal=${f.child.signalCode}`);
+      return null;
+    }, 20_000);
+  } catch (err) {
+    err.message += "\n" + completionEvidence(f.root, f.output());
+    throw err;
+  }
   assert.ok(Number.isInteger(held.managerPid) && held.managerPid !== f.child.pid, "the wrapper spawned the held real manager child");
   defer(f.root, () => killFixtureProxy(f.root, held.pid));
   if (process.platform !== "win32") {
@@ -763,6 +924,185 @@ async function pressureDetails(port) {
 const pressureState = async (port) => (await pressureDetails(port))?.pressureState ?? null;
 const pressurePoll = async (port) => (await pressureDetails(port))?.readinessPolls ?? -1;
 const fixtureLog = (root) => { try { return readFileSync(join(root, "logs", "proxy.log"), "utf8"); } catch { return ""; } };
+
+test("a missed completion observer reports bounded fixture evidence on actual wrapper early exit", { timeout: 60_000 }, async (t) => {
+  const f = heldCompletionFixture(t, await freePort(), { missObserver: true });
+  // Both handshakes are pre-written so the emptied-observer case ends
+  // deterministically at the wrapper's early-close guard: the hold preload's
+  // patched process.exit waits for its exit release, and without the
+  // pre-release the manager holds inside that patched exit (up to 20 s) while
+  // the stand-in's own 10 s completion wait fails first — an observed
+  // instability of the first attempt of this negative, kept reproducible only
+  // by this pre-release. No mechanism claim beyond that composition
+  // dependency; the early close itself is the wrapper's compound guard.
+  writeFileSync(f.release, "release");
+  writeFileSync(f.exitRelease, "release");
+  await assert.rejects(() => heldProxy(f), (err) => {
+    assert.match(err.message, /actual wrapper closed early: code=1/);
+    assert.match(err.message, /completed manager left no started proxy generation/);
+    assert.match(err.message, /"messages":0,"generationPresent":false/);
+    assert.match(err.message, /completion-receipt-\d+\.json/);
+    assert.match(err.message, /fixture proxy\.log tail:/);
+    assert.doesNotMatch(err.message, new RegExp(KEY));
+    assert.ok(err.message.length < 48_000, "failure evidence stays bounded");
+    t.diagnostic(`missing-observer early-exit evidence: ${err.message}`);
+    return true;
+  });
+  writeFileSync(f.exitRelease, "release");
+  assert.equal(await f.exited, 1);
+  const record = readJson(join(f.root, "logs", "proxy.pid"));
+  defer(f.root, () => killFixtureProxy(f.root, record.pid));
+  assert.equal(existsSync(join(f.root, "logs", `fixture-manager-complete-${record.pid}`)), false);
+  writeFileSync(join(f.root, "logs", "proxy.early.log"), KEY + " " + "a".repeat(64) + " " + "x".repeat(12_000));
+  assert.doesNotMatch(completionEvidence(f.root, KEY), new RegExp(KEY));
+  assert.ok(fixtureTail(join(f.root, "logs", "proxy.early.log")).length <= 6000);
+});
+
+// ADR-0015 identity, fixture-only comparison helpers (production files and
+// the identity policy untouched). A respawn event belongs to a serving
+// generation only when it names the generation's pid AND was reserved after
+// that generation started — the same pid + `at > requestTime` shape the proxy
+// applies to its own acknowledgement
+// (zcode-proxy-src/src/runtime/watchdog.ts isRespawnAcknowledgement). An older
+// generation's event under legitimate PID reuse (its reservation precedes the
+// reused pid's new start) never matches; there is no time window that could
+// excuse a real stale server. Events carry no start identity of their own, so
+// the event rule binds on startedMs; a record without a usable start identity
+// cannot be bound to a generation and keeps the pid-only comparison there
+// (never weaker than before). A record's full start identity (ticket 77) is
+// pid + startedMs + the exact startTicks compared as strings when present.
+const servesGeneration = (event, record) =>
+  event?.pid === record?.pid && (!Number.isFinite(record?.startedMs) || event.at > record.startedMs);
+const sameGeneration = (a, b) =>
+  !!a && !!b && a.pid === b.pid && (a.startedMs ?? null) === (b.startedMs ?? null) && (a.startTicks ?? null) === (b.startTicks ?? null);
+
+// ADR-0015 identity, portable counterexample over the REAL requestRespawn and
+// readState seams with a synthetic permitted history: an older generation had
+// the same pid, was acknowledged, exited, and the OS reused the pid for the
+// serving generation — every reservation precedes the current start. The
+// pid-only comparison flags the refused generation as replaced (the old
+// assertion false-alarms here); the pid + start comparison keeps it. A
+// test-assumption repair only: NOT an explanation of any historical Windows
+// CI failure (runs 42828829522 / 42870123342 stay unattributed).
+test("a legitimately reused pid does not make the refused generation look replaced (ADR-0015 identity)", { timeout: 60_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port);
+  await identityServer(t, port, "ours");
+  const now = Date.now();
+  const currentStart = now - 1000;
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: process.pid, startedMs: currentStart, startedIso: new Date(currentStart).toISOString() }) + "\n");
+  const history = { events: [
+    { at: now - 5000, pid: process.pid, reason: "memory" },
+    { at: now - 4000, pid: NEVER_ALLOCATED_PID, reason: "memory" },
+    { at: now - 3000, pid: NEVER_ALLOCATED_PID + 1, reason: "memory" },
+  ] };
+  writeFileSync(join(root, "logs", "respawn.json"), JSON.stringify(history) + "\n");
+  const lifecycle = await lifecycleFor(root);
+  const refused = await lifecycle.requestRespawn(process.pid, "memory");
+  assert.equal(refused.code, 4, refused.lines.join("\n"));
+  assert.equal(refused.outcome, "refused", "the exhausted budget refuses through the real seam");
+  assert.deepEqual(readJson(join(root, "logs", "respawn.json")), history, "a refusal records no event");
+  const state = await lifecycle.readState();
+  assert.equal(state.identity, "ours", "the reused pid still serves as ours");
+  assert.equal(state.pidRecord.pid, process.pid);
+  assert.equal(state.pidRecord.startedMs, currentStart);
+  const events = history.events;
+  // The old assertion's false alarm, made explicit: pid-only matching flags
+  // the legitimate reuse; the repaired comparison does not.
+  assert.ok(events.some((e) => e.pid === state.pidRecord.pid), "premise (the old pid-only assertion false-alarms here): a historical event shares the reused pid");
+  assert.ok(events.every((e) => e.at < state.pidRecord.startedMs), "premise: every reservation predates the serving generation (legitimate reuse, ADR-0015 cond 4's unmatchable shape)");
+  assert.ok(!events.some((e) => servesGeneration(e, state.pidRecord)), "the repaired comparison keeps the refused generation serving under legitimate pid reuse");
+  // Teeth: an acknowledged event of the serving generation itself, a different
+  // generation at the same pid, and a different tick identity must all fail.
+  assert.ok(servesGeneration({ pid: state.pidRecord.pid, at: state.pidRecord.startedMs + 5000, reason: "memory" }, state.pidRecord), "an acknowledged event of the serving generation is caught (same pid, reserved after its start)");
+  assert.ok(!sameGeneration(state.pidRecord, { ...state.pidRecord, startedMs: state.pidRecord.startedMs + 1 }), "a different generation at the same pid is caught by the start identity");
+  assert.ok(!sameGeneration(state.pidRecord, { ...state.pidRecord, startTicks: "639298000000030002" }), "a different tick identity is caught when ticks are present");
+});
+
+// Synthetic 8.3-shaped parentURL counterexample (RUNNER%7E1-style). A real
+// directory alias named RUNNER~1 (a symlink to the fixture's proxy dir) makes
+// the alias a valid spelling of the SAME manager file here — on Windows the
+// filesystem itself resolves the short name, and the CI wrapper URLs spell it
+// exactly like this (file:///C:/Users/RUNNER%7E1/...). The shaped URL also
+// percent-encodes the manager filename, so it neither ends with the manager
+// suffix nor equals the manager URL: with the widened trace EVERY spelling
+// leaves evidence, and the canonicalized comparator matches the same file.
+// Synthetic alias, NOT native Windows evidence.
+test("an 8.3-shaped alias spelling of the manager parent leaves a resolve trace and still matches (synthetic)", { timeout: 60_000 }, async (t) => {
+  const root = kitFixture(t, await freePort(), { proxySrc: true });
+  try {
+    symlinkSync(join(root, "proxy"), join(root, "RUNNER~1"), "dir");
+  } catch (err) {
+    t.skip(`this environment cannot create the RUNNER~1 directory alias (${err.code ?? err.message}); Windows resolves 8.3 short names itself, Linux needs this alias to synthesize the shape`);
+    return;
+  }
+  const control = join(root, "parent-url-control.mjs");
+  const trace = join(root, "parent-url-control.json");
+  writeFileSync(control, `
+import { registerHooks } from "node:module";
+import { realpathSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+registerHooks({ resolve(spec, context, next) {
+  if (spec === "../lib/proxy-lifecycle.mjs" && context.parentURL?.endsWith("/proxy/zcode-proxy-manager.mjs")) {
+    const shaped = context.parentURL.replace("/proxy/zcode-proxy-manager.mjs", "/RUNNER%7E1/%7Acode-proxy-manager.mjs");
+    writeFileSync(${JSON.stringify(trace)}, JSON.stringify({ original: context.parentURL, shaped, sameFile: realpathSync.native(fileURLToPath(shaped)) === realpathSync.native(fileURLToPath(context.parentURL)) }));
+    return next(spec, { ...context, parentURL: shaped });
+  }
+  return next(spec, context);
+} });
+`);
+  const manager = completionManager(root, { managerAfterObserverArgs: ["--import", pathToFileURL(control).href] });
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail() });
+  const result = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024 });
+  const record = readJson(join(root, "logs", "proxy.pid"));
+  if (record) defer(root, () => killFixtureProxy(root, record.pid));
+  const evidence = readJson(trace);
+  assert.notEqual(evidence.original, evidence.shaped);
+  assert.match(evidence.shaped, /\/RUNNER%7E1\/%7Acode-proxy-manager\.mjs$/, "the shaped spelling is 8.3-style and matches neither the suffix nor the manager URL");
+  assert.equal(evidence.sameFile, true, "the alias names the same manager file (fileURLToPath + native realpath)");
+  assert.equal(result.status, 0, completionEvidence(root, result.stdout + result.stderr));
+  const observers = readdirSync(join(root, "logs")).filter((name) => /^completion-observer-\d+\.json$/.test(name));
+  assert.equal(observers.length, 1, "one actual manager adapter invocation");
+  const observed = readJson(join(root, "logs", observers[0]));
+  const resolveTrace = readJson(join(root, "logs", `completion-resolve-${observed.managerPid}.json`));
+  assert.equal(resolveTrace.parentURL, evidence.shaped, "the trace records the raw shaped parentURL as received");
+  assert.equal(resolveTrace.matched, true, "the canonicalized comparator matches the alias spelling");
+  assert.equal(resolveTrace.canonicalParent, resolveTrace.canonicalManager, "both resolved spellings agree");
+  assert.ok(Number.isInteger(resolveTrace.hookOrdinal) && resolveTrace.hookOrdinal >= 1, "the trace carries the hook order the observer saw");
+  const receipt = readJson(join(root, "logs", `completion-receipt-${observed.managerPid}.json`));
+  assert.equal(receipt.messages, 1, "the actual wrapper received the generation message");
+  assert.equal(receipt.closeCode, 0, "the real CLI closed successfully");
+  t.diagnostic(`alias-parentURL=${JSON.stringify(evidence)}; matched=${resolveTrace.matched} hookOrdinal=${resolveTrace.hookOrdinal} messages=${receipt.messages}`);
+});
+
+// Hook-composition control for the held fixtures: the hold preload's --import
+// is registered BEFORE the observer's (spawn argv order), and synchronous
+// registerHooks chains LIFO — the observer registered later runs first. The
+// passive probe inside the hold preload records what its earlier-registered,
+// later-run position still sees. Linux control, not native Windows evidence.
+test("the held fixture's hook composition keeps the observer resolving and the hold engaging (LIFO order)", { timeout: 60_000 }, async (t) => {
+  const port = await freePort();
+  const f = heldCompletionFixture(t, port, { orderProbe: true });
+  const held = await heldProxy(f);
+  // The observer resolved: the manager is held at spawn:start-recorded through
+  // the redirected held adapter, and its resolve trace names the match.
+  const resolveTrace = await until("the observer's resolve trace", () => readJson(join(f.root, "logs", `completion-resolve-${held.managerPid}.json`)), 5000);
+  assert.equal(resolveTrace.matched, true, "the observer's redirect matched the manager's lifecycle import");
+  assert.equal(resolveTrace.canonicalParent, resolveTrace.canonicalManager);
+  assert.ok(Number.isInteger(resolveTrace.hookOrdinal) && resolveTrace.hookOrdinal >= 1);
+  writeFileSync(f.release, "release");
+  await until("the real CLI has returned success but not exited", () => readJson(f.exiting), 10_000);
+  writeFileSync(f.exitRelease, "release");
+  assert.equal(await f.exited, 0, completionEvidence(f.root, f.output()));
+  assert.deepEqual(readJson(held.marker), { pid: held.pid, startedMs: held.startedMs, ...(held.startTicks === undefined ? {} : { startTicks: held.startTicks }) }, "the hold still engages and the actual wrapper publishes after real exit 0");
+  const order = readJson(join(f.root, "logs", `completion-hookorder-${held.managerPid}.json`));
+  // LIFO measured, not assumed: the probe registered before the observer (and
+  // running after it) saw the process's ordinary imports but never the
+  // short-circuited lifecycle import.
+  assert.equal(order.lifecycleSeen, false, "the probe registered before the observer never sees the short-circuited lifecycle import");
+  assert.ok(order.specs.length > 0, "the probe still resolves the process's other imports (the chain runs)");
+  t.diagnostic(`hook-order: matched=${resolveTrace.matched} hookOrdinal=${resolveTrace.hookOrdinal}; probe specs=${order.specs.length} lifecycleSeen=${order.lifecycleSeen}`);
+});
 
 // This is the SAME wrapper and stand-in as the induced-pressure test below.
 // Only the actual wrapper publishes a successful completion; this test writes
@@ -797,7 +1137,10 @@ for (const windowsTicks of [false, true]) {
     assert.equal(await pressureState(port), "waiting-manager", "a successful intent is not a successful process exit");
     assert.equal((await pressureDetails(port)).samplesTaken, 0, "no supervisor sample before real manager exit");
     writeFileSync(f.exitRelease, "release");
-    assert.equal(await f.exited, 0, f.output());
+    // completionEvidence, not the raw output alone: a native hold that passes
+    // the early-close check and then fails the marker keeps the resolve,
+    // observer, receipt (and hook-order) tails attached to this failure.
+    assert.equal(await f.exited, 0, completionEvidence(f.root, f.output()));
     assert.deepEqual(readJson(held.marker), { pid: held.pid, startedMs: held.startedMs, ...(held.startTicks === undefined ? {} : { startTicks: held.startTicks }) }, "the actual wrapper publishes this exact generation after real exit 0");
     await until("the actual wrapper's marker arms the supervisor and sampling starts", async () => {
       const details = await pressureDetails(port);
@@ -848,20 +1191,24 @@ test("induced memory pressure: acknowledged respawns drain, the budget caps them
   const remember = () => { const r = readJson(join(root, "logs", "proxy.pid")); if (Number.isInteger(r?.pid) && !seen.has(r.pid)) { seen.add(r.pid); defer(root, () => killFixtureProxy(root, r.pid)); } };
   const start = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 90_000 });
   remember();
-  assert.equal(start.status, 0, start.stdout + start.stderr);
+  assert.equal(start.status, 0, completionEvidence(root, start.stdout + start.stderr));
 
   // Sample until the refusal is logged: never two proxies at once.
   const refused = / ERROR supervisor respawn refused by the kit manager; keeps serving /;
   const counts = [];
   const deadline = Date.now() + 180_000;
   while (!refused.test(log())) {
-    if (Date.now() > deadline) assert.fail(`no refusal logged; proxy.log tail:\n${log().slice(-3000)}`);
+    if (Date.now() > deadline) assert.fail(`no refusal logged; ${completionEvidence(root)}`);
     remember();
     const list = standIns(root);
     if (list) counts.push(list.length);
     await sleep(100);
   }
   remember();
+  // The record the moment the refusal is first seen: the refused generation's
+  // own start identity, compared against the final record below (ADR-0015
+  // identity, fixture-only; production untouched).
+  const refusedRecord = readJson(join(root, "logs", "proxy.pid"));
   const hooksAtRefusal = countOf(log(), /respawn: requested for pid \d+ \(reason memory\)/g);
   // After the refusal: exactly one proxy at every sample, ours and serving.
   const after = [];
@@ -882,7 +1229,8 @@ test("induced memory pressure: acknowledged respawns drain, the budget caps them
   assert.equal(countOf(text, / ERROR supervisor /g), 1, "one ERROR line");
   assert.match(text, / ERROR supervisor respawn refused by the kit manager; keeps serving .*outcome=refused .*hookExit=4 restarts=exhausted retryInS=900\n/);
   assert.equal(countOf(text, /respawn refused: 3 restarts in 15 min/g), 1);
-  assert.ok(!events.some((e) => e.pid === record.pid), "the serving proxy is the one whose request was refused");
+  assert.ok(sameGeneration(record, refusedRecord), `the record still names the generation that was refused (pid + start identity, exact ticks when present: no replacement or stale generation took over; refusal=${JSON.stringify(refusedRecord)} final=${JSON.stringify(record)})`);
+  assert.ok(!events.some((e) => servesGeneration(e, record)), "the serving proxy is the one whose request was refused: no acknowledged respawn event belongs to its generation (same pid, reserved after its start; an older generation's pid reuse never matches)");
   await managerStop(t, root, env, record);
 });
 
@@ -899,13 +1247,13 @@ test("a late acknowledgement: the proxy keeps serving, the manager ends in 'alre
   const start = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 90_000 });
   const record = readJson(join(root, "logs", "proxy.pid"));
   if (record) defer(root, () => killFixtureProxy(root, record.pid));
-  assert.equal(start.status, 0, start.stdout + start.stderr);
+  assert.equal(start.status, 0, completionEvidence(root, start.stdout + start.stderr));
 
   // The late manager waits 30 s for the proxy to exit, which it never does.
   const counts = [];
   const deadline = Date.now() + 120_000;
   while (!existsSync(lateOut)) {
-    if (Date.now() > deadline) assert.fail("the late manager did not finish");
+    if (Date.now() > deadline) assert.fail(`the late manager did not finish; ${completionEvidence(root)}`);
     const list = standIns(root);
     if (list) counts.push(list.length);
     await sleep(250);
