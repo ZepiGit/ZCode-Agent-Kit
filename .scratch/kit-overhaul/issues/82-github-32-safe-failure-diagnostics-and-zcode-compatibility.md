@@ -35,6 +35,10 @@ PROMPT.md B1-B6 remain binding. Work may improve error handling, secret-safe obs
 
 ## Comments
 
+### 2026-11-10 — verified metadata-boundary blocker despite green PR77
+
+Controller ran an offline synthetic probe through the actual describeGuestError/hasGuestSourceFrame seam on clean t82HEAD883f566; wholeproduct diff versus testedstaging/82e22c921 (excluding.scratch) is empty. Probe /home/AgentKit/overhaul-tools/t82-metadata-boundary-probe-20261110.ts under cappedBun1.4.2/1G30s executed5cases:ordinaryguestcontrolPASS;guestfunctionname,classidentifierandURLfragmentmarkersstillappearFAIL;onehugechosenframeoutput3512charactersFAIL versus existingtested300bound. Summary1pass/4fail,exit1; reportst82-controller-metadata-boundary-red-20261110.log. No vendor request/credentialread/productedit occurred. This is verified arbitraryguesttext/output-bound failure, not evidence any realtokenleaked or originalissue32reproduced. Source guest-error.ts:106-117 permits guestidentifiernames and retains rawframeprefix/remainder. Keep82unmerged;require allowlistedhostbuiltmetadata/boundedsourceparseandrealuncaught/unhandledregressions without changingclassification/auth/retry/anti-abusebehavior. Full finding/nextwork /home/AgentKit/overhaul-tools/t82-metadata-boundary-finding-20261110.md. The completed workflow review's actual verdict remains unavailable to the controller; do not attribute this independently executed finding to that review or inferapprovalfromitsdone-status.
+
 ### 2026-11-09 — orchestration intake
 
 Added at the user's request. Safe diagnostics and supported-runtime compatibility are actionable; the reported challenge compatibility cause is unverified and any challenge-pass-rate repair is outside this overhaul's B1 boundary. No live model request, claim, credential access or vendor challenge execution is authorized by this ticket. Existing three-agent investigation reports remain conversation evidence; consolidate verified facts in a durable report before implementation.
