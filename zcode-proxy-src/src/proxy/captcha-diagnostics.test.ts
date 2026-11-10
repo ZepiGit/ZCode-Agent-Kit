@@ -140,8 +140,15 @@ describe("callable SDK start alternatives", () => {
       expect(classifyCaptchaError(caught)).toBe("incompatible");
       if (!(caught instanceof CaptchaSdkIncompatibleError)) throw new Error('Expected trusted SDK incompatibility');
       const safe = normalizeCaptchaError(caught);
-      expect(safe).toBe(caught);
+      // Canonical safety preserves the semantic subtype, not a mutable object.
+      expect(safe).not.toBe(caught);
+      expect(safe).toBeInstanceOf(CaptchaSdkIncompatibleError);
+      expect(classifyCaptchaError(safe)).toBe("incompatible");
+      expect(safe.message).toBe(instance.show === null
+        ? "CAPTCHA SDK incompatible: startTracelessVerification non-callable (string); show non-callable (null)"
+        : "CAPTCHA SDK incompatible: startTracelessVerification missing; show missing");
       expect(safe.message).not.toContain("PRIVATE_METHOD_MARKER");
+      expect(safe.cause).toBeUndefined();
     }
   });
 

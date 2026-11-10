@@ -3,14 +3,54 @@ import { GlobalWindow } from "happy-dom";
 import {
   createDom,
   destroyDom,
+  extractVerifyParam,
   installGlobalWindowAlias,
   removeGlobalWindowAlias,
 } from "./captcha-happy.js";
+import { normalizeCaptchaError } from "./captcha-token.js";
 
 const HERMETIC_RESOURCES = {
   primeCookies: async () => [],
   documentHtml: "<!doctype html><html><body><div id=\"cap\"></div><button id=\"btn\"></button></body></html>",
 };
+
+// GitHub issue 32: the solver's local verification refusals must keep their
+// sanitized provenance through normalization (they surface on request
+// failures) while never carrying refused payload content. The synthetic
+// marker stands in for any secret-shaped material in a degraded token.
+const SECRET = "SYNTHETIC-SECRET-MARKER-9f2c41ab";
+const b64 = (obj: unknown): string => Buffer.from(JSON.stringify(obj)).toString("base64");
+
+describe("extractVerifyParam — local verification refusals (issue 32 provenance)", () => {
+  test("a too-short degraded param is refused with length metadata, never its content", () => {
+    const param = b64({ certifyId: "70bdb", isSign: true, note: SECRET });
+    let thrown: unknown;
+    try { extractVerifyParam(param); } catch (err) { thrown = err; }
+    expect(thrown).toBeInstanceOf(Error);
+    const msg = (thrown as Error).message;
+    expect(msg).toMatch(/too short/);
+    expect(msg).toContain(String(param.length));
+    expect(msg).not.toContain(SECRET);
+    // The refusal must survive normalization so the reason can surface on a
+    // subsequent request failure instead of collapsing into "captcha SDK failure".
+    expect(normalizeCaptchaError(thrown).message).toMatch(/too short/);
+  });
+
+  test("a missing securityToken is refused; a secret in the refused payload never leaks", () => {
+    const param = b64({ certifyId: "70bdb", sceneId: "11xygtvd", isSign: true, pad: "p".repeat(160) + SECRET });
+    let thrown: unknown;
+    try { extractVerifyParam(param); } catch (err) { thrown = err; }
+    const msg = (thrown as Error).message;
+    expect(msg).toMatch(/securityToken/);
+    expect(msg).not.toContain(SECRET);
+    expect(normalizeCaptchaError(thrown).message).toMatch(/securityToken/);
+  });
+
+  test("a valid param passes through unchanged", () => {
+    const param = b64({ certifyId: "c".repeat(48), sceneId: "11xygtvd", isSign: true, securityToken: "t".repeat(96) });
+    expect(extractVerifyParam(param)).toBe(param);
+  });
+});
 
 describe("createDom resource injection", () => {
   test("remote guest JavaScript is disabled without operator opt-in", async () => {

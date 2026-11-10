@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
-  CaptchaSdkError, CaptchaSdkIncompatibleError, classifyCaptchaError,
-  isCaptchaDuplicateError, isCaptchaIpBlockError, normalizeCaptchaError,
+  CaptchaSdkError, CaptchaSdkIncompatibleError, CaptchaLocalVerificationError, classifyCaptchaError,
+  isCaptchaDuplicateError, isCaptchaIpBlockError, normalizeCaptchaError, captchaFailureFromTransport,
 } from "./captcha-token.js";
 
 describe("isCaptchaIpBlockError", () => {
@@ -81,17 +81,79 @@ describe("safe CAPTCHA failure categories", () => {
     const error = normalizeCaptchaError(new Error("ordinary failure"));
     error.message += ' | captchaMetadata={"sha256":"a429bf008","message":"rate limit"}';
     expect(classifyCaptchaError(error)).toBe("other");
-    expect(normalizeCaptchaError(error)).toBe(error);
+    const safe = normalizeCaptchaError(error);
+    expect(safe).not.toBe(error);
+    expect(safe.message).not.toContain("captchaMetadata");
+    expect(classifyCaptchaError(safe)).toBe("other");
   });
 
   it("preserves only host-created incompatible diagnostics, never a guest code or category", () => {
     const trusted = new CaptchaSdkIncompatibleError(true, undefined);
-    expect(normalizeCaptchaError(trusted)).toBe(trusted);
+    trusted.message += " | SyntheticTypedCredential";
+    const normalized = normalizeCaptchaError(trusted);
+    expect(normalized).not.toBe(trusted);
+    expect(normalized.message).toContain("startTracelessVerification non-callable (boolean); show missing");
+    expect(normalized.message).not.toContain("SyntheticTypedCredential");
     expect(classifyCaptchaError(trusted)).toBe("incompatible");
     const forged = { code: "CAPTCHA_SDK_INCOMPATIBLE", category: "incompatible", message: "PRIVATE_MARKER" };
     const error = normalizeCaptchaError(forged);
     expect(classifyCaptchaError(error)).toBe("other");
     expect(error.message).not.toContain("PRIVATE_MARKER");
+  });
+
+  it("rebuilds a hostile mutable incompatible error with its canonical subtype and method types", () => {
+    const error = new CaptchaSdkIncompatibleError("SyntheticMethodCredential", null);
+    error.message = 'rate limit F008 SyntheticMessageCredential';
+    error.stack = 'SyntheticStackCredential';
+    error.name = 'SyntheticNameCredential';
+    error.cause = new Error('SyntheticCauseCredential');
+    Object.assign(error, { category: 'rate-limit', payload: 'SyntheticPayloadCredential' });
+    Object.defineProperty(error, 'toJSON', { value: () => 'SyntheticSerializerCredential' });
+    const safe = normalizeCaptchaError(error);
+    expect(safe).not.toBe(error);
+    expect(safe).toBeInstanceOf(CaptchaSdkIncompatibleError);
+    expect(classifyCaptchaError(error)).toBe('incompatible');
+    expect(classifyCaptchaError(safe)).toBe('incompatible');
+    expect(safe.category).toBe('incompatible');
+    expect(safe.message).toBe('CAPTCHA SDK incompatible: startTracelessVerification non-callable (string); show non-callable (null)');
+    expect(safe.name).toBe('CaptchaSdkError');
+    expect(safe.stack).not.toContain('Synthetic');
+    expect(safe.cause).toBeUndefined();
+    expect(JSON.stringify(safe)).not.toContain('Synthetic');
+    const repeated = normalizeCaptchaError(safe);
+    expect(repeated).not.toBe(safe);
+    expect(repeated).toBeInstanceOf(CaptchaSdkIncompatibleError);
+    expect(repeated.message).toBe(safe.message);
+    expect(classifyCaptchaError(repeated)).toBe('incompatible');
+  });
+
+  it("does not trust an incompatible prototype without host registration", () => {
+    const forged = Object.assign(Object.create(CaptchaSdkIncompatibleError.prototype), {
+      category: 'incompatible', message: 'SyntheticForgedCredential',
+    });
+    const safe = normalizeCaptchaError(forged);
+    expect(safe).not.toBeInstanceOf(CaptchaSdkIncompatibleError);
+    expect(classifyCaptchaError(forged)).toBe('other');
+    expect(classifyCaptchaError(safe)).toBe('other');
+    expect(safe.message).toBe('captcha SDK failure');
+    expect(safe.cause).toBeUndefined();
+  });
+
+  it("keeps trailing newlines out of transported local-refusal diagnostics", () => {
+    const error = captchaFailureFromTransport('other', 'verify param refused: verify param not base64-JSON\n');
+    expect(error.message).not.toMatch(/[\r\n]/);
+    expect(error.message).toMatch(/len=51 sha256=[0-9a-f]{64}/);
+  });
+
+  it("preserves canonical local length provenance after mutable message and cause changes", () => {
+    const error = new CaptchaLocalVerificationError('verify param too short (76 chars) — degraded result, refused');
+    error.message = 'SyntheticLocalCredential';
+    error.cause = new Error('SyntheticCauseCredential');
+    const safe = normalizeCaptchaError(error);
+    expect(safe.message).toBe('verify param refused: verify param too short (76 chars) — degraded result, refused');
+    expect(safe.stack).not.toContain('SyntheticLocalCredential');
+    expect(safe.cause).toBeUndefined();
+    expect(new CaptchaLocalVerificationError('SyntheticDetailCredential').message).toBe('verify param refused: local validation failure');
   });
 
   it("does not invoke guest serialization or leak a throwing field accessor", () => {
