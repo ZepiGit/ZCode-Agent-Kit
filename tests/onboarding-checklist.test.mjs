@@ -3,6 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { createHook } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import * as capabilities from "../lib/term/caps.mjs";
 import { emitKeypressEvents } from "node:readline";
@@ -11,19 +12,21 @@ import { setupUi } from "../cli/setup-output.mjs";
 import { C3_VARIANTS, matchSnapshot } from "./snapshot-harness.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, realpathSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { freePort } from "./free-port.mjs";
 
 const FIXTURE_PORT = await freePort();
-function fixtureSetup(t, args = [], harnesses = "none", { failure = false, env: extraEnv = {} } = {}) {
+function fixtureSetup(t, args = [], harnesses = "none", { failure = false, env: extraEnv = {}, kit = join(import.meta.dirname, "..") } = {}) {
   const root = mkdtempSync(join(tmpdir(), "t83-setup-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home"), state = join(root, "state");
   mkdirSync(home); mkdirSync(state);
-  const kit = join(import.meta.dirname, "..");
-  writeFileSync(join(state, ".owner.json"), JSON.stringify({ root: kit }));
+  // Match the existing state owner contract, including Windows case folding.
+  let owner = realpathSync(kit);
+  if (process.platform === "win32") owner = owner.toLowerCase();
+  writeFileSync(join(state, ".owner.json"), JSON.stringify({ root: owner }));
   mkdirSync(join(state, "proxy"));
   writeFileSync(join(state, "proxy/config.yaml"), `server:\n  host: "127.0.0.1"\n  port: ${FIXTURE_PORT}\n  proxyApiKey: "synthetic-t83-key"\nauth:\n  accounts:\n    enabled: false\n`);
   writeFileSync(join(state, ".proxykey"), "synthetic-t83-key\n");
@@ -37,6 +40,27 @@ function fixtureSetup(t, args = [], harnesses = "none", { failure = false, env: 
   }); } catch (err) { code = err.status; stdout = err.stdout; if (!failure) throw err; }
   return { stdout, code, home, state, kit, log: readFileSync(join(state, "logs/install.log"), "utf8") };
 }
+
+test("onboarding fixture accepts a canonical owner through a kit path alias and still rejects a foreign owner", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "t83-owner-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const alias = join(root, "MixedCaseKit");
+  symlinkSync(join(import.meta.dirname, ".."), alias, process.platform === "win32" ? "junction" : "dir");
+  // Same public setup boundary as all six integration cases. A symlink makes
+  // the realpath requirement observable on Linux too, without faking win32.
+  const fixture = fixtureSetup(t, [], "none", { kit: alias });
+  assert.equal(fixture.code, 0);
+  assert.match(fixture.stdout, /Next steps/);
+  writeFileSync(join(fixture.state, ".owner.json"), JSON.stringify({ root: join(root, "foreign-kit") }));
+  const refused = spawnSync(process.execPath, [join(alias, "cli/zcode-kit.mjs"), "setup", "--account-rotator", "n"], {
+    encoding: "utf8", timeout: 10000,
+    env: { ...process.env, HOME: fixture.home, USERPROFILE: fixture.home, ZCODE_KIT_STATE_DIR: fixture.state,
+      ZCODE_KIT_ALLOW_CHECKOUT: "1", ZCODE_KIT_SKIP_DEPS: "1", ZCODE_KIT_SKIP_SMOKE: "1", ZCODE_KIT_HARNESSES: "none", CI: "true" },
+  });
+  assert.equal(refused.status, 2);
+  assert.equal(refused.stdout, "");
+  assert.equal(refused.stderr, "zcode-kit: state directory belongs to a different kit installation\n");
+});
 
 test("completed setup includes five base commands last in stdout and one plain log copy, also in installer mode", (t) => {
   for (const args of [[], ["--verbose"], ["--installer"]]) {
@@ -224,6 +248,59 @@ function capture(tty = false, columns = 80) {
   let text = "";
   return { isTTY: tty, columns, write(chunk) { text += chunk; return true; }, text: () => text };
 }
+test("native Windows refresh changes exactly the 22 reviewed onboarding outputs and preserves every other baseline byte", () => {
+  const proof = JSON.parse(readFileSync(new URL("./fixtures/onboarding-windows-83.json", import.meta.url), "utf8"));
+  const expected = [
+    ...["help", "help-flag", "unknown-command"].map(id => `help/${id}`),
+    ...["explicit", "installer-compact", "interactive", "none-detected", "proxy-running", "select"].map(id => `setup/setup-${id}`),
+    "update/update-checkout", "update/update-release",
+  ].flatMap(id => ["ci", "pipe"].map(v => `${id}/${v}.txt`)).sort();
+  assert.deepEqual(Object.keys(proof.after).sort(), expected);
+  const baselineRoot = join(import.meta.dirname, "ux-before/windows");
+  const files = (dir, prefix = "") => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const name = prefix + entry.name;
+    return entry.isDirectory() ? files(join(dir, entry.name), name + "/") : [name];
+  });
+  assert.deepEqual(files(baselineRoot).sort(), Object.keys(proof.before).sort(), "no baseline file added or removed");
+  const digest = bytes => createHash("sha256").update(bytes).digest("hex");
+  const changed = [];
+  for (const [file, before] of Object.entries(proof.before)) {
+    const bytes = readFileSync(new URL(`./ux-before/windows/${file}`, import.meta.url));
+    const actual = digest(bytes);
+    if (actual !== before) changed.push(file);
+    assert.equal(actual, proof.after[file] ?? before, file);
+  }
+  assert.deepEqual(changed.sort(), expected);
+  const baseSuffix = "\nNext steps ---------------------------------------------------------------------\n" +
+    "  zcode-kit doctor        Check the installation\n" +
+    "  zcode-kit proxy start   Start the proxy for manual clients\n" +
+    "  zcode-kit proxy status  Check proxy health and connection details\n" +
+    "  zcode-kit auth status   Check sign-in status\n" +
+    "  zcode-kit --help        Browse all commands\n";
+  for (const file of expected) {
+    const text = readFileSync(new URL(`./ux-before/windows/${file}`, import.meta.url), "utf8");
+    let prior;
+    if (file.startsWith("help/")) {
+      prior = text.replace("bootstrap + assistant consent", "bootstrap + one y/n question per detected harness")
+        .replace("  (setup: auto uses a checkbox list when the terminal fits: arrows move, Space toggles,\n   a toggles all editable rows, Enter confirms; Esc/empty Enter/EOF saves no new decision.\n   Saved choices stay locked unless --reask. No-answer may refresh an existing kit integration.\n   No-color/dumb/small/unknown geometry uses individual [y/n] questions;\n", '  (setup: auto asks "Configure ZCode as a provider ... in <HARNESS>? [y/n]" per detected harness;\n')
+        .replace("  (setup: Next steps lists five complete commands and at most one successfully configured launch target;\n   configuration is not proof of sign-in or a model reply. Marked paste/text is discarded;\n   unmarked valid-only key bytes cannot be distinguished from typing)\n", "")
+        .replace("130 setup aborted with Ctrl-C (unconfirmed checkbox batch not applied; prior applied answers remain)", "130 setup aborted with Ctrl-C (answers already given were applied)");
+    } else {
+      const launch = /^setup\/setup-(explicit|proxy-running)\//.test(file);
+      const suffix = launch ? baseSuffix.replace("  zcode-kit proxy start", "  zcode-kit run codex     Launch Codex CLI wired to ZCode\n  zcode-kit proxy start") : baseSuffix;
+      assert.equal(text.split(suffix).length, 2, `${file}: exactly one complete inventory`);
+      if (file.startsWith("setup/")) assert.ok(text.endsWith(suffix), file);
+      else assert.ok(text.includes(suffix + "update: starting the proxy on the updated code...\n"), file);
+      prior = text.replace(suffix, "");
+      // Undo only the two exact run-to-run values already reviewed in the
+      // unchanged comparator; this is not an equivalence normalizer.
+      const replacement = proof.volatileReplacements[file];
+      if (replacement) prior = prior.replace(...replacement);
+    }
+    assert.equal(digest(Buffer.from(prior)), proof.before[file], `${file}: no change beyond the reviewed additive contract`);
+  }
+});
+
 test("described commands keep indivisible commands intact on narrow terminals and remain plain with forced color in scripts", () => {
   for (const columns of [12, 32, 40, 80, 120]) {
     const stdout = capture(true, columns), stderr = capture();
