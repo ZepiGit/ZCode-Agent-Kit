@@ -532,14 +532,16 @@ const config = readFileSync(process.env.ZCODE_PROXY_CONFIG, "utf8");
 const port = Number(config.match(/^  port:\\s*(\\d+)/m)[1]);
 const key = config.match(/proxyApiKey:\\s*"([^"]+)"/)[1];
 let answeredAt = null;
+let pressureState = "starting";
 const server = createServer((req, res) => {
   if (req.headers.authorization !== "Bearer " + key) return res.writeHead(401).end("{}");
-  if (req.url === "/health") { answeredAt ??= Date.now(); return res.end(JSON.stringify({ status: "ok", provider: "zai" })); }
+  if (req.url === "/health") { answeredAt ??= Date.now(); return res.end(JSON.stringify({ status: "ok", provider: "zai", details: { pressureState } })); }
   res.writeHead(404).end("{}");
 }).listen(port, "127.0.0.1");
 // A slow manager (the late acknowledgement): the hook runs FAKE_LATE_MANAGER,
 // which starts the real manager late.
 const env = { ...process.env };
+if (env.FAKE_COMPLETION_MANAGER) env.ZCODE_KIT_RESPAWN_MANAGER = env.FAKE_COMPLETION_MANAGER;
 if (env.FAKE_LATE_MANAGER) { env.FAKE_REAL_MANAGER = env.ZCODE_KIT_RESPAWN_MANAGER; env.ZCODE_KIT_RESPAWN_MANAGER = env.FAKE_LATE_MANAGER; }
 const supervisor = createHealthSupervisor({
   thresholds: { samples: 1, sampleIntervalMs: 250 },
@@ -548,17 +550,26 @@ const supervisor = createHealthSupervisor({
   shutdown: async () => { console.log("stand-in drained"); server.close(); process.exit(0); },
   watchdog: false,
 });
-// The pressure starts once the manager's start has finished: this proxy
-// answered /health and its pid record names it with its start time (or, where
-// the start-time probe is slow, 10 s after the first answer).
+// Health + a start-time record does not mean the spawning manager finished:
+// Windows process/connection probes can still be running. Each fixture
+// manager publishes a per-generation marker only after the real CLI exits 0.
+// Missing completion is a fixture failure, never permission to start pressure.
 const ready = setInterval(() => {
   if (answeredAt === null) return;
   let record = null;
   try { record = JSON.parse(readFileSync(join(process.env.ZCODE_KIT_LOG_DIR, "proxy.pid"), "utf8")); } catch {}
   const recorded = record?.pid === process.pid && Number.isFinite(record?.startedMs);
-  if (!recorded && Date.now() - answeredAt < 10_000) return;
+  let completed = null;
+  try { completed = JSON.parse(readFileSync(join(process.env.ZCODE_KIT_LOG_DIR, "fixture-manager-complete-" + process.pid), "utf8")); } catch {}
+  const sameGeneration = recorded && completed?.pid === record.pid && completed?.startedMs === record.startedMs && completed?.startTicks === record.startTicks;
+  if (!sameGeneration) {
+    pressureState = "waiting-manager";
+    if (Date.now() - answeredAt >= 10_000) throw new Error("fixture start manager did not complete within 10000ms");
+    return;
+  }
   clearInterval(ready);
-  setTimeout(() => supervisor.start(), 1_000);
+  pressureState = "running";
+  supervisor.start();
 }, 100);
 `;
 
@@ -573,17 +584,106 @@ writeFileSync(process.env.FAKE_LATE_OUT, JSON.stringify({ argv: process.argv.sli
 process.exit(r.status ?? 1);
 `;
 
+// Only a successful exit of the real fixture manager may arm its next proxy.
+// This wrapper changes no manager lifecycle code, timings, or exit statuses.
+function completionManager(root) {
+  const entry = join(root, "completion-manager.mjs");
+  writeFileSync(entry, `
+import { spawn } from "node:child_process";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+const child = spawn(process.execPath, [${JSON.stringify(join(root, "proxy", "zcode-proxy-manager.mjs"))}, ...process.argv.slice(2)], { env: process.env, stdio: "inherit" });
+const timer = setTimeout(() => { child.kill("SIGKILL"); process.exitCode = 124; }, 90_000);
+child.once("error", (err) => { clearTimeout(timer); console.error(err.message); process.exitCode = 1; });
+child.once("close", (code) => {
+  clearTimeout(timer);
+  if (process.exitCode === 124) return;
+  process.exitCode = code ?? 1;
+  if (code !== 0) return;
+  const logDir = ${JSON.stringify(join(root, "logs"))};
+  const record = JSON.parse(readFileSync(join(logDir, "proxy.pid"), "utf8"));
+  if (!Number.isInteger(record.pid) || !Number.isFinite(record.startedMs)) throw new Error("completed manager left no started proxy record");
+  const marker = join(logDir, "fixture-manager-complete-" + record.pid);
+  const temp = marker + "." + process.pid + ".tmp";
+  writeFileSync(temp, JSON.stringify({ pid: record.pid, startedMs: record.startedMs, startTicks: record.startTicks }), { mode: 0o600, flag: "wx" });
+  renameSync(temp, marker);
+});
+`);
+  return entry;
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** The fixture's stand-in proxies alive now (by command line), or null when the process table cannot be read. */
 const standIns = (root) => fixtureProcesses(root)?.filter((p) => /zcode-proxy-src[\\/]+src[\\/]+index\.ts\b.*\bserve\b/.test(p.commandLine)) ?? null;
 const countOf = (text, re) => (text.match(re) ?? []).length;
 
+// A portable counterexample to starting pressure before a slow start manager
+// has returned. The existing lifecycle step hook holds it after the start-time
+// record is written; health is already available, but startup is not complete.
+test("the pressure fixture waits for its start manager to finish before arming the supervisor", { timeout: 60_000 }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port, { proxySrc: true });
+  writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), SUPERVISED_PROXY);
+  const held = join(root, "manager-held");
+  const release = join(root, "manager-release");
+  const entry = join(root, "held-start.mjs");
+  writeFileSync(entry, `
+import { existsSync, writeFileSync } from "node:fs";
+import { createLifecycle } from "./lib/proxy-lifecycle.mjs";
+const manager = createLifecycle({ root: ${JSON.stringify(root)}, home: ${JSON.stringify(join(root, "home"))},
+  managerPath: ${JSON.stringify(join(root, "proxy", "zcode-proxy-manager.mjs"))},
+  stepHook(step) {
+    if (step !== "spawn:start-recorded") return;
+    writeFileSync(${JSON.stringify(held)}, "held");
+    const deadline = Date.now() + 20_000;
+    while (!existsSync(${JSON.stringify(release)})) {
+      if (Date.now() > deadline) throw new Error("held start was not released");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  },
+});
+const result = await manager.ensureRunning();
+process.exitCode = result.code;
+`);
+  const child = spawn(process.execPath, [entry], { env: childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "0" }), stdio: ["ignore", "pipe", "pipe"] });
+  defer(root, () => killChild(child));
+  let output = "";
+  child.stdout.on("data", (d) => { output += d; });
+  child.stderr.on("data", (d) => { output += d; });
+  const exited = new Promise((r) => child.once("close", (code) => r(code)));
+  await until("the manager held after its start-time record", () => existsSync(held), 20_000);
+  const heldRecord = readJson(join(root, "logs", "proxy.pid"));
+  if (heldRecord) defer(root, () => killFixtureProxy(root, heldRecord.pid));
+  const marker = join(root, "logs", `fixture-manager-complete-${heldRecord.pid}`);
+  // A reused pid's old generation marker is not completion of this start.
+  writeFileSync(marker, JSON.stringify({ pid: heldRecord.pid, startedMs: heldRecord.startedMs - 1, startTicks: heldRecord.startTicks }), { mode: 0o600 });
+  try {
+    const state = await until("the pressure fixture's startup decision", async () => {
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/health`, { headers: { authorization: `Bearer ${KEY}` }, signal: AbortSignal.timeout(1500) });
+        const state = (await res.json()).details?.pressureState;
+        return state && state !== "starting" ? state : null;
+      } catch { return null; }
+    }, 10_000);
+    assert.equal(state, "waiting-manager", "a healthy recorded proxy must not arm pressure while its start manager is held");
+  } finally {
+    writeFileSync(release, "released");
+    assert.equal(await exited, 0, output);
+    const record = readJson(join(root, "logs", "proxy.pid"));
+    writeFileSync(marker, JSON.stringify({ pid: record.pid, startedMs: record.startedMs, startTicks: record.startTicks }), { mode: 0o600 });
+  }
+  await until("the supervisor to arm after manager completion", async () => {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { headers: { authorization: `Bearer ${KEY}` }, signal: AbortSignal.timeout(1500) });
+    return (await res.json()).details?.pressureState === "running";
+  }, 10_000);
+});
+
 test("induced memory pressure: acknowledged respawns drain, the budget caps them at 3, the refused one keeps its proxy serving with one ERROR and no further hook", { timeout: 240_000 }, async (t) => {
   const port = await freePort();
   const root = kitFixture(t, port, { proxySrc: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), SUPERVISED_PROXY);
-  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "4096" });
-  const manager = join(root, "proxy", "zcode-proxy-manager.mjs");
+  const manager = completionManager(root);
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "4096", FAKE_COMPLETION_MANAGER: manager });
   const logFile = join(root, "logs", "proxy.log");
   const log = () => { try { return readFileSync(logFile, "utf8"); } catch { return ""; } };
   const seen = new Set();
@@ -617,7 +717,7 @@ test("induced memory pressure: acknowledged respawns drain, the budget caps them
 
   assert.ok(counts.length > 0 && counts.every((n) => n <= 1), `never two proxies (samples: ${counts.join(",")})`);
   assert.deepEqual(after.filter((s) => s.proxies !== 1 || s.identity !== "ours"), [], `exactly one serving proxy after the refusal: ${JSON.stringify(after)}`);
-  assert.equal(events.length, 3, "three restarts reserved in the window, never more");
+  assert.equal(events.length, 3, `three restarts reserved in the window, never more; proxy.log tail:\n${text.slice(-6000)}`);
   assert.equal(countOf(text, /stand-in drained/g), 3, "each acknowledged respawn drained its proxy");
   assert.equal(hooksAtRefusal, 4, "three acknowledged requests and the refused one");
   assert.equal(countOf(text, /respawn: requested for pid \d+ \(reason memory\)/g), 4, "no further hook within the budget window");
@@ -636,8 +736,8 @@ test("a late acknowledgement: the proxy keeps serving, the manager ends in 'alre
   writeFileSync(late, LATE_MANAGER);
   const lateOut = join(root, "late-manager.json");
   // The proxy waits 1.5 s for the acknowledgement; the manager reserves after 3 s.
-  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "4096", FAKE_ACK_WAIT_MS: "1500", FAKE_LATE_MANAGER: late, FAKE_LATE_MS: "3000", FAKE_LATE_OUT: lateOut });
-  const manager = join(root, "proxy", "zcode-proxy-manager.mjs");
+  const manager = completionManager(root);
+  const env = childEnv(root, { ZCODE_KIT_BUN: bunOrFail(), FAKE_PRESSURE_MB: "4096", FAKE_COMPLETION_MANAGER: manager, FAKE_ACK_WAIT_MS: "1500", FAKE_LATE_MANAGER: late, FAKE_LATE_MS: "3000", FAKE_LATE_OUT: lateOut });
   const start = spawnSync(process.execPath, [manager, "start"], { env, encoding: "utf8", timeout: 90_000 });
   const record = readJson(join(root, "logs", "proxy.pid"));
   if (record) defer(root, () => killFixtureProxy(root, record.pid));

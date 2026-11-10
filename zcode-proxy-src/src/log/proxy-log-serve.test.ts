@@ -190,7 +190,9 @@ describe("serve with ZCODE_KIT_LOG_DIR: the proxy.log writer", () => {
     const appended: string[] = [];
     for (let k = 0; k < 100; k++) {
       const line = `[manager ${new Date().toISOString()}] kit-append-${k}\n`;
-      appendFileSync(p.log, line);
+      // Like the real manager's appendLog: rotation can rename the file
+      // between opens, so this appender may be the creator of the new file.
+      appendFileSync(p.log, line, { mode: 0o600 });
       appended.push(line);
       await Bun.sleep(2);
     }
