@@ -49,7 +49,7 @@ async function heldMock(): Promise<Mock> {
 
 interface Proxy { child: ChildProcess; out(): string; exited: Promise<number | null>; key: string; base: string; dir: string; home: string; token: string; port: number }
 
-async function spawnProxy(mock: Mock, managed = false): Promise<Proxy> {
+async function spawnProxy(mock: Mock, managed = false, dirtyMetadata = false): Promise<Proxy> {
   const dir = mkdtempSync(join(tmpdir(), "t21-serve-"));
   dirs.push(dir);
   const home = join(dir, "home");
@@ -92,12 +92,17 @@ async function spawnProxy(mock: Mock, managed = false): Promise<Proxy> {
     ZCODE_PROXY_ACCOUNTS_PATH: join(dir, "accounts.json"),
   });
   if (managed) Object.assign(env, { ZCODE_KIT_STOP_TOKEN: token, ZCODE_KIT_LOG_DIR: join(dir, "logs") });
+  if (dirtyMetadata) {
+    env.SYNTHETIC_METADATA_PATH = join(dir, "synthetic-metadata.json");
+    writeFileSync(env.SYNTHETIC_METADATA_PATH, JSON.stringify([{ id: "synthetic", failureGeneration: 0, lastFailureAt: 1, exhaustedUntil: 2 }]));
+  }
   const store = join(SRC, "auth", "store.ts");
   const made = spawnSync(process.execPath, ["-e", `import { saveCredential } from ${JSON.stringify(store)};
 await saveCredential({ apiKey: "fixture-key-" + crypto.randomUUID(), secret: "fixture-secret-" + crypto.randomUUID(), provider: "zai" });`], { env, encoding: "utf8", timeout: 30_000 });
   if (made.status !== 0) throw new Error(`fixture credential: ${made.stderr}`);
 
-  const child = spawn(process.execPath, ["--preload", join(SRC, "runtime", "__fixtures__", "egress-guard.ts"), join(SRC, "index.ts"), "serve", config], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const entry = dirtyMetadata ? [join(SRC, "runtime", "__fixtures__", "dirty-stop.ts"), config] : [join(SRC, "index.ts"), "serve", config];
+  const child = spawn(process.execPath, ["--preload", join(SRC, "runtime", "__fixtures__", "egress-guard.ts"), ...entry], { env, stdio: ["ignore", "pipe", "pipe"] });
   children.push(child);
   let out = "";
   child.stdout!.on("data", (d) => { out += d; });
@@ -136,10 +141,10 @@ const body = JSON.stringify({ model: "glm-4.6", max_tokens: 8, messages: [{ role
 
 // No platform skip: the Windows CI leg must execute this real serve + manager
 // CLI path, not an injected flush callback. Only fixture stores are opened.
-it("proxy stop CLI runs the real serve account-metadata flush through the stop request on every OS", async () => {
+async function managerStopProof(dirtyMetadata = false): Promise<void> {
   const mock = await heldMock();
   mocks.push(mock);
-  const p = await spawnProxy(mock, true);
+  const p = await spawnProxy(mock, true, dirtyMetadata);
   const { createLifecycle } = await import(pathToFileURL(join(p.dir, "lib", "proxy-lifecycle.mjs")).href);
   const lifecycle = createLifecycle({ root: p.dir, home: p.home });
   const startedMs = lifecycle.processStartMs(p.child.pid);
@@ -167,13 +172,23 @@ it("proxy stop CLI runs the real serve account-metadata flush through the stop r
   expect(await p.exited).toBe(0);
   expect(p.child.signalCode).toBeNull();
   const log = readFileSync(join(p.dir, "logs", "proxy.log"), "utf8");
-  expect(log).toMatch(/ INFO shutdown flush finished reason=stop/);
-  expect(log.match(/ INFO shutdown started reason=stop /g)).toHaveLength(1);
+  const shutdownLog = dirtyMetadata ? p.out() : log;
+  expect(shutdownLog).toMatch(/ INFO shutdown flush finished reason=stop/);
+  expect(shutdownLog.match(/ INFO shutdown started reason=stop /g)).toHaveLength(1);
   expect(log).not.toContain(p.token);
   expect(existsSync(join(p.dir, "logs", "proxy.pid"))).toBe(false);
   expect(p.out()).not.toContain("EGRESS-BLOCKED");
   expect(mock.arrived).toBe(0);
-}, 45_000);
+  if (dirtyMetadata) {
+    // Read only this fixture's metadata after the actual child has exited.
+    expect(JSON.parse(readFileSync(join(p.dir, "synthetic-metadata.json"), "utf8"))).toEqual([
+      { id: "synthetic", failureGeneration: 1 },
+    ]);
+  }
+}
+
+it("proxy stop CLI runs the real serve account-metadata flush through the stop request on every OS", () => managerStopProof(), 45_000);
+it("proxy stop persists dirty synthetic metadata before the real server process exits", () => managerStopProof(true), 45_000);
 
 describe.skipIf(process.platform === "win32")("serve: signals run the graceful shutdown", () => {
   it("SIGTERM drains: the accepted request finishes, a new one gets 503 + Retry-After, the proxy exits 0", async () => {

@@ -1965,7 +1965,7 @@ createServer((req, res) => {
     const exit = /^202-exit-(\\d+)$/.exec(behavior ?? "");
     if (exit) {
       res.writeHead(202, { "content-type": "application/json" }).end(JSON.stringify({ accepted: true }));
-      setTimeout(() => process.exit(0), Number(exit[1]));
+      setTimeout(() => { appendFileSync(record + ".natural", "exited naturally\\n"); process.exit(0); }, Number(exit[1]));
       return;
     }
     return res.writeHead(Number(behavior || 404), { "content-type": "application/json" }).end("{}");
@@ -2002,6 +2002,109 @@ function spawnStopStandIn(t, root, port, behavior, record, hung = false) {
   return new Promise((resolveStand) => stand.stdout.once("data", () => resolveStand(stand)));
 }
 
+// Portable seam-2 controls: the real stop/lock/identity/deadline logic with
+// Windows-shaped OS boundaries. These do NOT prove native TerminateProcess.
+async function portableStop(t, { answer = 202, exitsAt = Infinity, reuseAt = Infinity, unknownAt = Infinity, noToken = false, down = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), "portable-stop-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const dir of ["proxy", "logs", "home"]) mkdirSync(join(root, dir));
+  writeFileSync(join(root, "proxy", "config.yaml"), `server:\n  port: ${await freePort()}\n`);
+  writeFileSync(join(root, ".proxykey"), KEY);
+  const pid = 2147483644; // never a real process; all OS boundaries injected
+  const ticks = "638800000000000001";
+  const start = { ms: 1744403200000, ticks };
+  const record = { pid, startedMs: start.ms, startTicks: ticks, ...(noToken ? {} : { stopToken: "synthetic-stop-token" }) };
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify(record));
+  let now = 0, alive = true;
+  const trace = [], sleeps = [];
+  const { createLifecycle } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
+  const lifecycle = createLifecycle({
+    root, home: join(root, "home"),
+    clock: { now: () => now, sleep: async ms => { sleeps.push(ms); now += ms; } },
+    processAdapter: {
+      platform: "win32",
+      alive: p => { assert.equal(p, pid); return alive && now < exitsAt; },
+      identity: p => {
+        assert.equal(p, pid);
+        if (now >= unknownAt) return null;
+        // Exactly one 100 ns tick apart, deliberately identical milliseconds.
+        return { ms: start.ms, ticks: now >= reuseAt ? "638800000000000002" : ticks };
+      },
+      terminate: (p, expectedTicks) => {
+        assert.equal(p, pid);
+        trace.push({ kind: "terminate", at: now, ticks: expectedTicks });
+        assert.equal(expectedTicks, ticks);
+        alive = false;
+        return 0;
+      },
+    },
+    processCommandLineImpl: () => ({ commandLine: `bun ${join(root, "zcode-proxy-src", "src", "index.ts")} serve`, executablePath: "bun" }),
+    startupGraceMs: 0, hungProbeCount: 1,
+    fetchImpl: async (url, options) => {
+      trace.push({ kind: new URL(url).pathname, at: now });
+      if (url.endsWith("/health")) {
+        if (down) throw new Error("synthetic connection failure");
+        return new Response(JSON.stringify({ status: "ok", provider: "zai" }));
+      }
+      assert.equal(new URL(url).pathname, "/__kit/stop");
+      assert.equal(options.method, "POST");
+      assert.ok(options.headers.Authorization === `Bearer ${KEY}`);
+      assert.ok(options.headers["x-zcode-stop-token"] === "synthetic-stop-token");
+      if (answer === "error") throw new Error("synthetic connection failure");
+      return new Response(null, { status: answer });
+    },
+  });
+  return { lifecycle, trace, sleeps, start, pid, root, now: () => now };
+}
+
+test("portable Windows stop: exits after proxy grace but before manager margin without force", async t => {
+  const p = await portableStop(t, { exitsAt: 10500 });
+  const result = await p.lifecycle.stop();
+  assert.deepEqual([result.code, result.outcome], [0, "stopped"]);
+  assert.deepEqual(p.trace, [{ kind: "/health", at: 0 }, { kind: "/health", at: 0 }, { kind: "/__kit/stop", at: 0 }]);
+  assert.equal(p.now(), 10500);
+  assert.equal(existsSync(join(p.root, "logs", "proxy.pid")), false);
+});
+
+test("portable Windows stop: real stop waits exactly through grace and margin before guarded force", async t => {
+  const p = await portableStop(t);
+  assert.equal((await p.lifecycle.stop()).code, 0);
+  assert.deepEqual(p.trace, [{ kind: "/health", at: 0 }, { kind: "/health", at: 0 }, { kind: "/__kit/stop", at: 0 }, { kind: "terminate", at: 12000, ticks: "638800000000000001" }]);
+  assert.ok(p.sleeps.every(ms => ms === 300));
+});
+
+test("portable Windows stop: a one-tick PID replacement during grace is gone, never terminated", async t => {
+  const p = await portableStop(t, { reuseAt: 12000 });
+  assert.equal((await p.lifecycle.stop()).code, 0);
+  assert.equal(p.trace.filter(e => e.kind === "terminate").length, 0);
+  assert.equal(p.now(), 12000);
+});
+
+test("portable Windows stop: unknown identity at escalation fails closed with exit 2", async t => {
+  const p = await portableStop(t, { unknownAt: 12000 });
+  const result = await p.lifecycle.stop();
+  assert.deepEqual([result.code, result.outcome], [2, "kill-failed"]);
+  assert.equal(p.trace.filter(e => e.kind === "terminate").length, 0);
+  assert.equal(existsSync(join(p.root, "logs", "proxy.pid")), true);
+});
+
+test("portable Windows stop: refused/error/legacy requests fall back immediately after identity", async t => {
+  for (const answer of [404, 401, 403, "error", "no-token"]) {
+    const p = await portableStop(t, { answer: answer === "no-token" ? 404 : answer, noToken: answer === "no-token" });
+    assert.equal((await p.lifecycle.stop()).code, 0);
+    assert.deepEqual(p.trace.map(e => e.kind), answer === "no-token" ? ["/health", "/health", "terminate"] : ["/health", "/health", "/__kit/stop", "terminate"]);
+    assert.equal(p.trace.at(-1).at, 0);
+  }
+});
+
+test("portable Windows stop: hung recovery and explicit force never issue a stop request", async t => {
+  const hung = await portableStop(t, { down: true });
+  assert.deepEqual([(await hung.lifecycle.stop()).outcome, hung.trace.map(e => e.kind)], ["stopped-hung", ["/health", "/health", "terminate"]]);
+  const forced = await portableStop(t);
+  assert.equal(await forced.lifecycle.forceStop(forced.pid, { recordedStart: forced.start }), true);
+  assert.deepEqual(forced.trace, [{ kind: "terminate", at: 0, ticks: "638800000000000001" }]);
+});
+
 const POSIX_STOP_STANDIN_SKIP = process.platform === "win32" && "the fallback signal and the stand-in's exit shape are asserted; Windows stops through the handle-checked TerminateProcess (the request path itself is platform-independent)";
 
 test("one shared module holds the stop deadlines and the request shape; the manager forces only after grace + margin, and the copies are byte-identical", async () => {
@@ -2026,6 +2129,52 @@ test("one shared module holds the stop deadlines and the request shape; the mana
   assert.deepEqual(proxySide.stop, { drainMs: 6_000, deadlineMs: STOP_GRACE_MS }, "the stop sequence drains inside its own grace and exits at it");
   // The manager's force point is strictly after the proxy's own deadline.
   assert.ok(STOP_GRACE_MS + STOP_EXIT_MARGIN_MS > proxySide.grace);
+});
+
+// Native acceptance remains separate from portable clock/process controls.
+// No POSIX shebang or signal-exit assumptions: this child is the running Node.
+test("native Windows accepted stop honors grace/margin and exits without TerminateProcess", { skip: process.platform !== "win32", timeout: 60_000 }, async t => {
+  const root = kitFixture(t, await freePort());
+  const port = Number(readFileSync(join(root, "proxy", "config.yaml"), "utf8").match(/port: (\d+)/)[1]);
+  const requests = join(root, "native-stop.jsonl");
+  const stand = await spawnStopStandIn(t, root, port, "202-exit-1200", requests);
+  const lifecycle = await lifecycleFor(root, { stopGraceMs: 600, stopExitMarginMs: 1800 });
+  const startedMs = lifecycle.processStartMs(stand.pid);
+  assert.ok(Number.isFinite(startedMs));
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs, stopToken: "synthetic-native-stop" }));
+  const stopped = await lifecycle.stop();
+  await gone(stand);
+  assert.equal(stopped.code, 0);
+  assert.equal(stand.exitCode, 0);
+  assert.equal(readStopRequests(requests).length, 1);
+  assert.equal(existsSync(requests + ".natural"), true, "child reached its natural-exit timer, not TerminateProcess");
+  assert.ok(!stopped.lines.some(line => /refusing|kill guard/.test(line)));
+});
+
+test("native Windows accepted stop forces only after margin; direct force sends no request", { skip: process.platform !== "win32", timeout: 90_000 }, async t => {
+  for (const direct of [false, true]) {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    const requests = join(root, "native-stop.jsonl");
+    const stand = await spawnStopStandIn(t, root, port, "202", requests);
+    const lifecycle = await lifecycleFor(root, { stopGraceMs: 600, stopExitMarginMs: 600 });
+    const startedMs = lifecycle.processStartMs(stand.pid);
+    assert.ok(Number.isFinite(startedMs));
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs, stopToken: "synthetic-native-stop" }));
+    let requestAt = null, forceAt = null;
+    const observe = line => {
+      if (line.includes("stop request sent")) requestAt = performance.now();
+      if (line.includes("outlived the grace; forcing")) forceAt = performance.now();
+    };
+    if (direct) assert.equal(await lifecycle.forceStop(stand.pid, { recordedStart: { ms: startedMs, ticks: null }, observe }), true);
+    else {
+      assert.equal((await lifecycle.stop({ observe })).code, 0);
+      assert.ok(forceAt !== null && requestAt !== null && forceAt - requestAt >= 1200, "native manager never enters force inside grace/margin");
+    }
+    await gone(stand);
+    assert.equal(stand.exitCode, 0);
+    assert.equal(readStopRequests(requests).length, direct ? 0 : 1);
+  }
 });
 
 test("stop sends the stop request with the bearer key and the recorded token, answers 202, and never signals while the proxy exits within the grace", {

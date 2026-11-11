@@ -61,14 +61,30 @@ async function cardAfterStart(lifecycle, { flags }, ctx) {
  * Run one intent under a Progress. An intent that throws (an unexpected
  * error, e.g. an unreadable config) ends as an error block with exit 1, the
  * manager CLI's `manager error: …` code. `observe` hands the intent the
- * progress updates: on a TTY the spinner line carries the latest narration
- * while the grace runs; off a TTY every narration is its own line.
+ * progress updates: on a TTY the stable action label animates while the
+ * grace runs; off a TTY only fixed-vocabulary stop stages get their own line.
  */
 async function step(ctx, label, intent, finishName, lifecycle, failure) {
   const progress = await ctx.step(label);
   let record;
   try {
-    record = await intent((line) => progress.update(line));
+    record = await intent((line) => {
+      // Lifecycle narration is also the manager's frozen terminal result/error.
+      // Render those once via finishStop, not again as transient progress.
+      // Only fixed-vocabulary stop stages belong on the spinner/line channel;
+      // timestamps, process ids and the detailed fallback reason stay in logs.
+      const stage = /\b(?:INFO|WARN) manager (stop request (?:sent|skipped; no token|refused; falling back|outlived the grace; forcing))(?: |$)/.exec(line)?.[1];
+      const detail = {
+        "stop request sent": "requesting graceful shutdown",
+        "stop request skipped; no token": "older proxy; using guarded fallback",
+        "stop request refused; falling back": "request not accepted; using guarded fallback",
+        "stop request outlived the grace; forcing": "shutdown deadline passed; forcing guarded stop",
+      }[stage];
+      // The TTY already animates the stable action label throughout the wait.
+      // Keep it stable (including for TERM=dumb); line mode gets each stage
+      // once, without turning a repeated spinner frame into a second report.
+      if (detail && !progress.tty) progress.update(`${label}: ${detail}`);
+    });
   } catch (err) {
     progress.fail({ what: failure, why: String(err?.message ?? err), next: ["zcode-kit doctor"], exit: 1 });
     return { ok: false, code: 1 };
@@ -83,7 +99,7 @@ async function start(args, ctx, lifecycle) {
 }
 
 // The stop intent streams its narration (ticket 22): the stop request's send
-// and the fallbacks become progress on a TTY, lines elsewhere.
+// and fallbacks become lines off a TTY; a TTY keeps the action spinner.
 const stop = (ctx, lifecycle) => step(ctx, "Proxy stop", (observe) => lifecycle.stop({ observe }), "finishStop", lifecycle, "The proxy did not stop");
 
 /** @param {{ positional: string[], flags: Record<string, unknown> }} args */
