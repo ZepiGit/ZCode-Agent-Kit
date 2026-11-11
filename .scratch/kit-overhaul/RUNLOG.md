@@ -367,3 +367,6 @@ Actual output:
 ```text
 EXACT_V4_ARCHIVE=91468bytes_SHA256_match; EXACT_RESPONSE_ARCHIVES=2/2_SHA256_match; EXIT=0
 ```
+- 2026-11-10T22:44:53Z SENTINEL ALERT: MemAvailable 13% < 15%; terminated run-owned PIDs: 3766607 3766988
+- 2026-11-11T00:19:39Z SENTINEL ALERT: MemAvailable 14% < 15%; terminated run-owned PIDs: none
+- 2026-11-11T02:00:24Z SENTINEL ALERT: MemAvailable 14% < 15%; terminated run-owned PIDs: 58299 58300 58430
