@@ -261,8 +261,9 @@ export function finishStop(progress, record, lifecycle) {
     progress.fail(stopFailure(record, lifecycle));
     return false;
   }
-  if (record.outcome === "not-running") progress.skip("not running");
-  else progress.done(`${record.outcome === "stopped-hung" ? "stopped a hung proxy" : "stopped"}${record.pid ? ` (pid ${record.pid})` : ""}`);
+  // Progress updates describe the wait, not the action's stable result name.
+  if (record.outcome === "not-running") progress.skip("not running", { label: "Proxy stop" });
+  else progress.done(`${record.outcome === "stopped-hung" ? "stopped a hung proxy" : "stopped"}${record.pid ? ` (pid ${record.pid})` : ""}`, { label: "Proxy stop" });
   return true;
 }
 
