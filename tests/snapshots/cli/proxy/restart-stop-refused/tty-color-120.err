@@ -1,4 +1,4 @@
-| Proxy stop[K[31m✗ FAIL  Port 18458 is answered by another service[0m
+| Proxy stop[K| ERROR: something foreign is on port 18458. Refusing to stop anything.[K[31m✗ FAIL  Port 18458 is answered by another service[0m
    [2mwhy[0m   it does not prove this kit's identity, so nothing was stopped; the kit never stops a service it did not start
    [2mnext[0m  [1mzcode-kit proxy status[0m
    [2mexit[0m 3

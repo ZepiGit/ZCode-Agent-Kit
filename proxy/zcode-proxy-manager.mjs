@@ -53,11 +53,18 @@ export function createManager({
   // ---------------------------------------------------------- lifecycle
   const start = async ({ waitMs, onlyIfRecord } = {}) =>
     exitOf(await lifecycle.ensureRunning({ ...(waitMs === undefined ? {} : { waitMs }), onlyIfRecord: onlyIfRecord ?? null, observe: print }));
-  const stop = async () => (await lifecycle.stop({ observe: print })).code;
-  const restart = async () => exitOf(await lifecycle.restart({ observe: print }));
+  // Keep the legacy narration bytes on stdout. The new stop-request events
+  // are diagnostics, not another report (ADR-0005).
+  const printStop = (line) => {
+    if (/^\d{4}-\d{2}-\d{2}T\S+ (INFO|WARN) manager stop request /.test(line)) console.error(line);
+    else print(line);
+  };
+  const stop = async () => (await lifecycle.stop({ observe: printStop })).code;
+  const restart = async () => exitOf(await lifecycle.restart({ observe: printStop }));
   const respawn = async (pid, reason) => exitOf(await lifecycle.requestRespawn(pid, reason, { observe: print }));
   const readState = () => lifecycle.readState();
-  const killOwned = (pid, guard = null) => lifecycle.killOwned(pid, guard, { observe: print });
+  const forceStop = (pid, options = {}) => lifecycle.forceStop(pid, { ...options, observe: print });
+  const killOwned = (pid, guard = null) => forceStop(pid, { guard });
   const logEvent = (level, message, fields) => lifecycle.logEvent(level, message, fields, { observe: print });
 
   // ----------------------------------------------------------------- status
@@ -208,7 +215,7 @@ export function createManager({
   return {
     start, stop, restart, respawn, readState, status, doctor, logs, logEvent, healthIdentify, readPidFile,
     verifyOwnProcess: lifecycle.verifyOwnProcess, proveHungOwn: lifecycle.proveHungOwn,
-    pidAlive, processStartMs: lifecycle.processStartMs, killOwned, lastRecovery: lifecycle.lastRecovery, connectionDetails, printConnectionDetails,
+    pidAlive, processStartMs: lifecycle.processStartMs, forceStop, killOwned, lastRecovery: lifecycle.lastRecovery, connectionDetails, printConnectionDetails,
     LOG_FILE, PID_FILE, CONFIG, KEY_FILE, LOG_DIR, RESPAWN_FILE,
   };
 }

@@ -180,7 +180,12 @@ export function configureAccountRotator(ctx, tx, enabled, runProxyCli) {
 export async function restartForAccountChange(ctx) {
   const { createLifecycle } = await import("../lib/proxy-lifecycle.mjs");
   const lifecycle = createLifecycle({ root: ctx.root, home: ctx.home });
-  const observe = (line) => console.log(line);
+  const observe = (line) => {
+    // Stop-request diagnostics are additive; preserve the manager's existing
+    // narration on stdout, as before this graceful-stop lifecycle change.
+    if (/^\d{4}-\d{2}-\d{2}T\S+ (INFO|WARN) manager stop request /.test(line)) console.error(line);
+    else console.log(line);
+  };
   const exitOf = (record) => {
     if (record.outcome === "start-lock-unavailable") throw new Error(record.error);
     return record.code;

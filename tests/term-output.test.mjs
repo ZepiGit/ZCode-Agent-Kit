@@ -178,6 +178,17 @@ test("progress: motion only when animating; otherwise one start line and one res
   assert.match(anim.stderr.text, /\r\x1b\[K  \x1b\[32m✓ OK\x1b\[0m    Install\n$/, "the spinner line is replaced by one result row, once");
 });
 
+test("progress: an explicit result label survives transient updates without another progress line", () => {
+  const { out, stderr } = output({ env: UTF8 });
+  const done = out.step("Proxy stop");
+  done.update("Waiting for graceful stop");
+  done.done("stopped (pid 4242)", { label: "Proxy stop" });
+  const skipped = out.step("Proxy stop");
+  skipped.update("Checking the recorded process");
+  skipped.skip("not running", { label: "Proxy stop" });
+  assert.equal(stderr.text, "Proxy stop ...\nWaiting for graceful stop ...\nOK  Proxy stop - stopped (pid 4242)\nProxy stop ...\nChecking the recorded process ...\nSKIP  Proxy stop - not running\n");
+});
+
 test("verdict(): counts carry their word; the exit code is named only when non-zero", () => {
   const { out, stdout } = output({ env: UTF8 });
   out.verdict({ fail: 2, warn: 1, pass: 9, skip: 3 }, { label: "doctor", exit: 1 });

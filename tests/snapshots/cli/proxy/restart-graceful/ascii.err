@@ -1,0 +1,2 @@
+| Proxy stop[K| <TS> INFO manager stop request sent pid=4242 graceMs=10000[K| stopped (pid <PID>)[K  [32m+ OK[0m    Proxy stop  [2mstopped (pid <PID>)[0m
+| Proxy start[K  [32m+ OK[0m    Proxy start  [2mstarted (pid <PID>)[0m

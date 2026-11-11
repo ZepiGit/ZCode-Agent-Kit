@@ -1291,9 +1291,10 @@ test("the respawn wait (30 s) is longer than the acknowledgement wait (10 s) + t
   // The manager's side: the module the manager CLI builds on.
   const { RESPAWN_WAIT_MS } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
   assert.deepEqual({ respawnWait: RESPAWN_WAIT_MS, ack: proxy.ack, deadline: proxy.deadline }, { respawnWait: 30_000, ack: 10_000, deadline: 10_000 });
-  // STOP_EXIT_MARGIN_MS (ticket 22) is "a few 300 ms poll intervals, for example 2 s".
-  const MARGIN_MS = 2_000;
-  assert.ok(RESPAWN_WAIT_MS > proxy.ack + proxy.deadline + MARGIN_MS);
+  // STOP_EXIT_MARGIN_MS (ticket 22) lives in the shared module; the margin is
+  // the same one the manager's stop force point adds after STOP_GRACE_MS.
+  const { STOP_EXIT_MARGIN_MS } = await stopDeadlines();
+  assert.ok(RESPAWN_WAIT_MS > proxy.ack + proxy.deadline + STOP_EXIT_MARGIN_MS);
 });
 
 /** Run fn with console.log/console.warn recorded per stream (not passed through). */
@@ -1923,4 +1924,298 @@ test("a spawn's records all carry its stop token next to startTicks: the intent,
   assert.ok(!started.lines.concat(stopped.lines).some((l) => l.includes(token)), "no narration line carries the token");
   assert.deepEqual({ code: stopped.code, lines: stopped.lines }, { code: 0, lines: [`stopped (pid ${started.pid})`] });
   await until("the proxy to leave the port", async () => await identity(port) === "down", 15_000);
+});
+
+// -------------------------------- graceful stop request (ticket 22, ADR-0014)
+// The manager asks its own proxy to stop gracefully with `POST /__kit/stop`
+// (bearer key + per-spawn stop token, the one from proxy.pid) after the
+// identity proof, then waits past the proxy's own deadline (STOP_GRACE_MS)
+// plus STOP_EXIT_MARGIN_MS before it forces. The force paths (hung-own
+// recovery, the explicit force helper, the startup timeout) never send the
+// request. Tokens are generated fixtures and are compared, never printed (B2).
+
+const stopDeadlines = () => import(pathToFileURL(join(ROOT, "lib", "stop-deadlines.mjs")).href);
+const PROXY_STOP_DEADLINES_URL = pathToFileURL(join(ROOT, "zcode-proxy-src", "src", "runtime", "stop-deadlines.mjs")).href;
+
+/** One stand-in's recorded stop requests: a JSON line per POST /__kit/stop. */
+const readStopRequests = (file) => existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
+
+/**
+ * A stand-in for the proxy (seam 2): answers the identity proof, records every
+ * stop request (method, URL, bearer, token header) in its own JSONL file, and
+ * answers POST /__kit/stop per `STOP_STANDIN_STOP`: a fixed status
+ * ("202"/"404"/"401"/"403"), "destroy" (a connection error), or
+ * "202-exit-<ms>" (accepted; the process exits after that many milliseconds,
+ * the way a draining proxy does, without any signal). Its dummy argv element
+ * names the fixture, so teardown sees it.
+ */
+const STOP_STANDIN = `
+import { createServer } from "node:http";
+import { appendFileSync } from "node:fs";
+const port = Number(process.env.STOP_STANDIN_PORT);
+const key = process.env.STOP_STANDIN_KEY;
+const behavior = process.env.STOP_STANDIN_STOP;
+const record = process.env.STOP_STANDIN_RECORD;
+createServer((req, res) => {
+  if (req.headers.authorization !== "Bearer " + key) return res.writeHead(401).end("{}");
+  if (req.url === "/health") return res.end(JSON.stringify({ status: "ok", provider: "zai" }));
+  if (req.url === "/__kit/stop" && req.method === "POST") {
+    appendFileSync(record, JSON.stringify({ method: req.method, url: req.url, auth: req.headers.authorization, token: req.headers["x-zcode-stop-token"] ?? null }) + "\\n");
+    if (behavior === "destroy") { res.destroy(); return; }
+    const exit = /^202-exit-(\\d+)$/.exec(behavior ?? "");
+    if (exit) {
+      res.writeHead(202, { "content-type": "application/json" }).end(JSON.stringify({ accepted: true }));
+      setTimeout(() => process.exit(0), Number(exit[1]));
+      return;
+    }
+    return res.writeHead(Number(behavior || 404), { "content-type": "application/json" }).end("{}");
+  }
+  res.writeHead(404).end("{}");
+}).listen(port, "127.0.0.1", () => process.stdout.write("up\\n"));
+`;
+
+/** The hung variant: /health destroys the socket (no answer), /__kit/stop still records. */
+const STOP_STANDIN_HUNG = `
+import { createServer } from "node:http";
+import { appendFileSync } from "node:fs";
+const port = Number(process.env.STOP_STANDIN_PORT);
+const key = process.env.STOP_STANDIN_KEY;
+const record = process.env.STOP_STANDIN_RECORD;
+createServer((req, res) => {
+  if (req.headers.authorization !== "Bearer " + key) return res.writeHead(401).end("{}");
+  if (req.url === "/health") { res.destroy(); return; }
+  if (req.url === "/__kit/stop" && req.method === "POST") {
+    appendFileSync(record, JSON.stringify({ method: req.method, url: req.url, auth: req.headers.authorization, token: req.headers["x-zcode-stop-token"] ?? null }) + "\\n");
+    return res.writeHead(202).end("{}");
+  }
+  res.writeHead(404).end("{}");
+}).listen(port, "127.0.0.1", () => process.stdout.write("up\\n"));
+`;
+
+/** Spawn one stop-request stand-in for `root`'s fixture; killed with the fixture. */
+function spawnStopStandIn(t, root, port, behavior, record, hung = false) {
+  const stand = spawn(process.execPath, ["-e", hung ? STOP_STANDIN_HUNG : STOP_STANDIN, join(root, "stand-in")], {
+    env: { ...process.env, STOP_STANDIN_PORT: String(port), STOP_STANDIN_KEY: KEY, STOP_STANDIN_STOP: behavior, STOP_STANDIN_RECORD: record },
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  defer(root, () => killChild(stand));
+  return new Promise((resolveStand) => stand.stdout.once("data", () => resolveStand(stand)));
+}
+
+const POSIX_STOP_STANDIN_SKIP = process.platform === "win32" && "the fallback signal and the stand-in's exit shape are asserted; Windows stops through the handle-checked TerminateProcess (the request path itself is platform-independent)";
+
+test("one shared module holds the stop deadlines and the request shape; the manager forces only after grace + margin, and the copies are byte-identical", async () => {
+  const { STOP_GRACE_MS, STOP_EXIT_MARGIN_MS, STOP_REQUEST_PATH, STOP_TOKEN_HEADER } = await stopDeadlines();
+  // ADR-0014 cond 4: STOP_GRACE_MS is the proxy's own hard deadline.
+  assert.equal(STOP_GRACE_MS, 10_000);
+  // "a named margin of at least a few 300 ms poll intervals (for example 2 s)".
+  assert.ok(STOP_EXIT_MARGIN_MS >= 3 * 300, `STOP_EXIT_MARGIN_MS (${STOP_EXIT_MARGIN_MS}) must cover a few 300ms poll intervals`);
+  assert.equal(STOP_REQUEST_PATH, "/__kit/stop");
+  assert.match(STOP_TOKEN_HEADER, /^x-/);
+  // One implementation, two byte-identical copies (the event-line pattern):
+  // the manager runs from lib/, the proxy builds from zcode-proxy-src alone.
+  assert.ok(
+    readFileSync(join(ROOT, "lib", "stop-deadlines.mjs")).equals(readFileSync(join(ROOT, "zcode-proxy-src", "src", "runtime", "stop-deadlines.mjs"))),
+    "lib/stop-deadlines.mjs and zcode-proxy-src/src/runtime/stop-deadlines.mjs are byte-identical",
+  );
+  // The proxy's own stop deadline, read from its modules by Bun.
+  const read = spawnSync(bunOrFail(), ["-e", `import { SHUTDOWN_TIMING } from ${JSON.stringify(SUPERVISOR_URL)}; import { STOP_GRACE_MS } from ${JSON.stringify(PROXY_STOP_DEADLINES_URL)}; console.log(JSON.stringify({ stop: SHUTDOWN_TIMING.stop, grace: STOP_GRACE_MS }));`], { encoding: "utf8", timeout: 60_000 });
+  assert.equal(read.status, 0, read.stderr);
+  const proxySide = JSON.parse(read.stdout);
+  assert.equal(proxySide.grace, STOP_GRACE_MS);
+  assert.deepEqual(proxySide.stop, { drainMs: 6_000, deadlineMs: STOP_GRACE_MS }, "the stop sequence drains inside its own grace and exits at it");
+  // The manager's force point is strictly after the proxy's own deadline.
+  assert.ok(STOP_GRACE_MS + STOP_EXIT_MARGIN_MS > proxySide.grace);
+});
+
+test("stop sends the stop request with the bearer key and the recorded token, answers 202, and never signals while the proxy exits within the grace", {
+  skip: POSIX_STOP_STANDIN_SKIP,
+}, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port);
+  const { STOP_REQUEST_PATH } = await stopDeadlines();
+  const token = randomBytes(32).toString("base64url");
+  const record = join(root, "stop-requests.jsonl");
+  const stand = await spawnStopStandIn(t, root, port, "202-exit-900", record);
+  const recordedMs = Date.now() - 10 * 60_000;
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, startedIso: new Date(recordedMs).toISOString(), stopToken: token }) + "\n", { mode: 0o600 });
+  const lifecycle = await lifecycleFor(root, { processStartMsImpl: () => recordedMs, stopGraceMs: 800, stopExitMarginMs: 400 });
+  const observed = [];
+  const stopped = await lifecycle.stop({ observe: (l) => observed.push(l) });
+  // The proxy exits at 900 ms: after its own deadline (800 ms), before the
+  // manager's force point (800 + 400 ms). No signal was ever delivered.
+  assert.equal(stand.exitCode, 0, "the stand-in exited by itself (never signalled)");
+  assert.equal(stand.signalCode, null);
+  const requests = readStopRequests(record);
+  assert.equal(requests.length, 1, "the manager sent exactly one stop request");
+  assert.equal(requests[0].method, "POST");
+  assert.equal(requests[0].url, STOP_REQUEST_PATH);
+  assert.equal(requests[0].auth, `Bearer ${KEY}`);
+  assert.ok(requests[0].token === token, "the request carried the recorded stop token");
+  assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 0, outcome: "stopped" });
+  // The intent's narration keeps its frozen text; the request's steps are
+  // event lines (ticket 14) on the observe channel and in proxy.log.
+  assert.deepEqual(stopped.lines, [`stopped (pid ${stand.pid})`]);
+  assert.ok(observed.some((l) => / INFO manager stop request sent pid=\d+ graceMs=800$/.test(l)), observed.join("\n"));
+  assert.match(readFileSync(join(root, "logs", "proxy.log"), "utf8"), / INFO manager stop request sent pid=\d+ graceMs=800$/m);
+  assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "the stopped proxy's record is removed");
+});
+
+test("stop falls back per status and OS against a proxy that does not accept the request, and without a recorded token it sends none", { timeout: 120_000 }, async (t) => {
+  for (const behavior of ["404", "401", "403", "destroy", "no-token"]) {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    const token = behavior === "no-token" ? null : randomBytes(32).toString("base64url");
+    const record = join(root, "stop-requests.jsonl");
+    const stand = await spawnStopStandIn(t, root, port, behavior === "no-token" ? "404" : behavior, record);
+    const nativeWindows = process.platform === "win32";
+    const nativeLifecycle = nativeWindows ? await lifecycleFor(root) : null;
+    const recordedMs = nativeWindows ? nativeLifecycle.processStartMs(stand.pid) : Date.now() - 10 * 60_000;
+    assert.ok(Number.isFinite(recordedMs), `${behavior}: creation time is readable`);
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, startedIso: new Date(recordedMs).toISOString(), ...(token ? { stopToken: token } : {}) }) + "\n", { mode: 0o600 });
+    const lifecycle = nativeLifecycle ?? await lifecycleFor(root, { processStartMsImpl: () => recordedMs, stopGraceMs: 800, stopExitMarginMs: 400 });
+    const observed = [];
+    const stopped = await lifecycle.stop({ observe: (l) => observed.push(l) });
+    const requests = readStopRequests(record);
+    assert.equal(requests.length, behavior === "no-token" ? 0 : 1, `${behavior}: request count`);
+    if (process.platform === "win32") {
+      await gone(stand);
+      assert.equal(stand.exitCode, 0, `${behavior}: handle-checked TerminateProcess exits 0`);
+    } else {
+      assert.equal(stand.signalCode, "SIGTERM", `${behavior}: the fallback signal was delivered`);
+    }
+    assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 0, outcome: "stopped" });
+    assert.deepEqual(stopped.lines, [`stopped (pid ${stand.pid})`], `${behavior}: the narration keeps its frozen text`);
+    if (behavior === "no-token") {
+      assert.ok(observed.some((l) => new RegExp(` INFO manager stop request skipped; no token pid=\\d+ fallback=${process.platform === "win32" ? "TerminateProcess" : "SIGTERM"}$`).test(l)), observed.join("\n"));
+    } else {
+      const why = behavior === "destroy" ? "connection error" : behavior;
+      assert.ok(observed.some((l) => new RegExp(` INFO manager stop request refused; falling back pid=\\d+ why=(?:"${why}"|${why}) fallback=${process.platform === "win32" ? "TerminateProcess" : "SIGTERM"}$`).test(l)), observed.join("\n"));
+    }
+  }
+});
+
+test("an accepted stop that outlives grace waits through the margin before escalation", { skip: POSIX_STOP_STANDIN_SKIP }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port);
+  const record = join(root, "stop-requests.jsonl");
+  const token = randomBytes(32).toString("base64url");
+  const stand = await spawnStopStandIn(t, root, port, "202", record);
+  const recordedMs = Date.now() - 600_000;
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, stopToken: token }) + "\n");
+  const lifecycle = await lifecycleFor(root, { processStartMsImpl: () => recordedMs, stopGraceMs: 600, stopExitMarginMs: 600 });
+  const started = Date.now();
+  const stopped = await lifecycle.stop();
+  assert.equal(stopped.code, 0);
+  assert.ok(Date.now() - started >= 1200, "never signal before grace + margin");
+  assert.equal(stand.signalCode, "SIGTERM");
+  assert.equal(readStopRequests(record).length, 1);
+});
+
+test("an accepted stop never signals a reused PID at escalation", { skip: POSIX_STOP_STANDIN_SKIP }, async (t) => {
+  const port = await freePort();
+  const root = kitFixture(t, port);
+  const record = join(root, "stop-requests.jsonl");
+  const token = randomBytes(32).toString("base64url");
+  const stand = await spawnStopStandIn(t, root, port, "202", record);
+  const recordedMs = Date.now() - 600_000;
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, stopToken: token }) + "\n");
+  const lifecycle = await lifecycleFor(root, {
+    processStartMsImpl: () => readStopRequests(record).length ? recordedMs + 1000 : recordedMs,
+    stopGraceMs: 300, stopExitMarginMs: 300,
+  });
+  const stopped = await lifecycle.stop();
+  assert.equal(stopped.code, 0, "the recorded generation is gone");
+  assert.equal(stand.exitCode, null);
+  assert.equal(stand.signalCode, null, "no signal to the replacement generation");
+});
+
+test("Windows-shaped old-proxy stop fallbacks keep the creation-time checked TerminateProcess path", { ...fakeWindows, timeout: 120_000 }, async (t) => {
+  for (const behavior of ["404", "401", "403", "destroy"]) {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    const record = join(root, "stop-requests.jsonl");
+    const token = randomBytes(32).toString("base64url");
+    const stand = await spawnStopStandIn(t, root, port, behavior, record);
+    const pidRecord = { ...newKitRecord(stand.pid, WORKED_TICKS, WORKED_MS), stopToken: token };
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify(pidRecord) + "\n");
+    const lifecycle = await lifecycleFor(root);
+    const win = asWindows({ [stand.pid]: { ticks: String(WORKED_TICKS) } });
+    let result, calls;
+    try { result = await lifecycle.stop(); calls = win.calls(); } finally { win.restore(); }
+    assert.equal(result.code, 0, behavior);
+    assert.equal(readStopRequests(record).length, 1, `${behavior}: request before fallback`);
+    assert.ok(calls.some((c) => c.kind === "guard" && c.exit === 0), `${behavior}: handle-checked fallback ran`);
+    await gone(stand);
+  }
+});
+
+test("the force paths never send the stop request: hung-own recovery, the explicit force helper, and the startup timeout", {
+  timeout: 120_000,
+  skip: process.platform === "win32" && "the fake-bun startup path is POSIX; Windows forces through the handle-checked TerminateProcess (proven by the kill-guard tests)",
+}, async (t) => {
+  const token = randomBytes(32).toString("base64url");
+
+  // (1) Hung-own recovery (recoverHung): a recorded proxy that answers nothing
+  // is killed only with the hung-own proof, and never through the request.
+  {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    const record = join(root, "stop-requests.jsonl");
+    const stand = await spawnStopStandIn(t, root, port, "202", record, true);
+    const recordedMs = Date.now() - 10 * 60_000;
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, startedIso: new Date(recordedMs).toISOString(), stopToken: token }) + "\n", { mode: 0o600 });
+    const lifecycle = await lifecycleFor(root, {
+      processStartMsImpl: () => recordedMs,
+      processCommandLineImpl: () => ({ commandLine: `bun ${join(root, "zcode-proxy-src", "src", "index.ts")} serve`, executablePath: "bun" }),
+      hungProbeCount: 1, hungProbeIntervalMs: 10, hungProbeTimeoutMs: 100,
+      stopGraceMs: 800, stopExitMarginMs: 400,
+    });
+    const observed = [];
+    const stopped = await lifecycle.stop({ observe: (l) => observed.push(l) });
+    assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 0, outcome: "stopped-hung" });
+    assert.equal(readStopRequests(record).length, 0, "hung-own recovery sent no stop request");
+    assert.ok(!observed.some((l) => l.includes("stop request sent")), observed.join("\n"));
+    await until("the hung stand-in to be gone", async () => stand.exitCode !== null || stand.signalCode !== null, 15_000);
+  }
+
+  // (2) The explicit force helper (the golden-path crash injection's entry):
+  // killOwned/forceStop signal directly, no request is sent.
+  {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    const record = join(root, "stop-requests.jsonl");
+    const stand = await spawnStopStandIn(t, root, port, "202", record);
+    const recordedMs = Date.now() - 10 * 60_000;
+    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: recordedMs, startedIso: new Date(recordedMs).toISOString(), stopToken: token }) + "\n", { mode: 0o600 });
+    const lifecycle = await lifecycleFor(root, { processStartMsImpl: () => recordedMs, stopGraceMs: 800, stopExitMarginMs: 400 });
+    const observed = [];
+    const { createManager } = await import(pathToFileURL(join(root, "proxy", "zcode-proxy-manager.mjs")).href);
+    const manager = createManager({ root, home: join(root, "home"), processStartMsImpl: () => recordedMs });
+    assert.equal(typeof manager.forceStop, "function", "golden-path crash injection uses the manager's public force helper");
+    const killed = await manager.forceStop(stand.pid, { recordedStart: { ms: recordedMs } });
+    assert.equal(killed, true, "the force helper killed the stand-in");
+    assert.equal(readStopRequests(record).length, 0, "the force helper sent no stop request");
+    assert.ok(!observed.some((l) => l.includes("stop request sent")), observed.join("\n"));
+    await until("the forced stand-in to be gone", async () => stand.exitCode !== null || stand.signalCode !== null, 15_000);
+  }
+
+  // (3) The startup timeout: a spawned proxy that never becomes healthy is
+  // killed by the start, and no stop request goes out.
+  {
+    const port = await freePort();
+    const root = kitFixture(t, port);
+    const record = join(root, "stop-requests.jsonl");
+    await spawnStopStandIn(t, root, port, "202", record, true); // /health stays silent
+    mkdirSync(join(root, "zcode-proxy-src", "node_modules"), { recursive: true });
+    const fakeBun = join(root, "fake-bun.mjs");
+    writeFileSync(fakeBun, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => process.exit(0)); setInterval(() => {}, 1e6);\n");
+    chmodSync(fakeBun, 0o755);
+    const lifecycle = await lifecycleFor(root, { bunResolver: () => fakeBun, stopGraceMs: 800, stopExitMarginMs: 400 });
+    const observed = [];
+    const started = await lifecycle.ensureRunning({ waitMs: 1500, observe: (l) => observed.push(l) });
+    assert.deepEqual({ code: started.code, outcome: started.outcome }, { code: 2, outcome: "unhealthy" });
+    assert.equal(readStopRequests(record).length, 0, "the startup timeout sent no stop request");
+    assert.ok(!observed.some((l) => l.includes("stop request sent")), observed.join("\n"));
+  }
 });

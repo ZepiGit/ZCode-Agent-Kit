@@ -9,7 +9,8 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -46,17 +47,27 @@ async function heldMock(): Promise<Mock> {
   return mock;
 }
 
-interface Proxy { child: ChildProcess; out(): string; exited: Promise<number | null>; key: string; base: string }
+interface Proxy { child: ChildProcess; out(): string; exited: Promise<number | null>; key: string; base: string; dir: string; home: string; token: string; port: number }
 
-async function spawnProxy(mock: Mock): Promise<Proxy> {
+async function spawnProxy(mock: Mock, managed = false): Promise<Proxy> {
   const dir = mkdtempSync(join(tmpdir(), "t21-serve-"));
   dirs.push(dir);
   const home = join(dir, "home");
   mkdirSync(home, { recursive: true });
   const key = randomBytes(24).toString("base64url");
-  const config = join(dir, "config.yaml");
+  const port = managed ? 19222 : PORT; // ticket 22's isolated port range
+  const token = randomBytes(32).toString("base64url");
+  const config = managed ? join(dir, "proxy", "config.yaml") : join(dir, "config.yaml");
+  if (managed) {
+    const root = join(SRC, "..", "..");
+    for (const member of ["cli", "lib"]) cpSync(join(root, member), join(dir, member), { recursive: true });
+    mkdirSync(join(dir, "proxy"));
+    mkdirSync(join(dir, "logs"));
+    cpSync(join(root, "proxy", "zcode-proxy-manager.mjs"), join(dir, "proxy", "zcode-proxy-manager.mjs"));
+    writeFileSync(join(dir, ".proxykey"), key + "\n", { mode: 0o600 });
+  }
   writeFileSync(config, [
-    "server:", `  port: ${PORT}`, '  host: "127.0.0.1"',
+    "server:", `  port: ${port}`, '  host: "127.0.0.1"',
     "auth:", `  proxyApiKey: "${key}"`,
     "provider: zai", "plan: coding-plan",
     "providers:", "  zai:", `    anthropicBase: "${mock.base}/api/anthropic"`, `    openaiBase: "${mock.base}/api/coding/paas/v4"`,
@@ -80,6 +91,7 @@ async function spawnProxy(mock: Mock): Promise<Proxy> {
     ZCODE_PROXY_CREDENTIAL_SECRET: randomBytes(24).toString("hex"),
     ZCODE_PROXY_ACCOUNTS_PATH: join(dir, "accounts.json"),
   });
+  if (managed) Object.assign(env, { ZCODE_KIT_STOP_TOKEN: token, ZCODE_KIT_LOG_DIR: join(dir, "logs") });
   const store = join(SRC, "auth", "store.ts");
   const made = spawnSync(process.execPath, ["-e", `import { saveCredential } from ${JSON.stringify(store)};
 await saveCredential({ apiKey: "fixture-key-" + crypto.randomUUID(), secret: "fixture-secret-" + crypto.randomUUID(), provider: "zai" });`], { env, encoding: "utf8", timeout: 30_000 });
@@ -91,8 +103,12 @@ await saveCredential({ apiKey: "fixture-key-" + crypto.randomUUID(), secret: "fi
   child.stdout!.on("data", (d) => { out += d; });
   child.stderr!.on("data", (d) => { out += d; });
   const exited = new Promise<number | null>((r) => child.once("exit", (code) => r(code)));
-  await until(() => out.includes(`listening on http://127.0.0.1:${PORT}`), 20_000, () => out);
-  return { child, out: () => out, exited, key, base: `http://127.0.0.1:${PORT}` };
+  await until(() => {
+    if (out.includes(`listening on http://127.0.0.1:${port}`)) return true;
+    const log = join(dir, "logs", "proxy.log");
+    return managed && existsSync(log) && readFileSync(log, "utf8").includes(`listening on http://127.0.0.1:${port}`);
+  }, 20_000, () => out);
+  return { child, out: () => out, exited, key, base: `http://127.0.0.1:${port}`, dir, home, token, port };
 }
 
 async function until(cond: () => boolean, ms: number, detail: () => string = () => ""): Promise<void> {
@@ -106,13 +122,58 @@ async function until(cond: () => boolean, ms: number, detail: () => string = () 
 const dirs: string[] = [];
 const children: ChildProcess[] = [];
 const mocks: Mock[] = [];
-afterEach(() => {
-  for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill("SIGKILL");
+afterEach(async () => {
+  for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) {
+    const exited = new Promise<void>((resolve) => c.once("exit", () => resolve()));
+    c.kill("SIGKILL");
+    await exited;
+  }
   for (const m of mocks.splice(0)) { m.release(); m.server.closeAllConnections(); m.server.close(); }
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
 const body = JSON.stringify({ model: "glm-4.6", max_tokens: 8, messages: [{ role: "user", content: "hi" }] });
+
+// No platform skip: the Windows CI leg must execute this real serve + manager
+// CLI path, not an injected flush callback. Only fixture stores are opened.
+it("proxy stop CLI runs the real serve account-metadata flush through the stop request on every OS", async () => {
+  const mock = await heldMock();
+  mocks.push(mock);
+  const p = await spawnProxy(mock, true);
+  const { createLifecycle } = await import(pathToFileURL(join(p.dir, "lib", "proxy-lifecycle.mjs")).href);
+  const lifecycle = createLifecycle({ root: p.dir, home: p.home });
+  const startedMs = lifecycle.processStartMs(p.child.pid);
+  expect(startedMs).not.toBeNull();
+  writeFileSync(join(p.dir, "logs", "proxy.pid"), JSON.stringify({
+    pid: p.child.pid, startedMs, startedIso: new Date(startedMs!).toISOString(), stopToken: p.token,
+  }) + "\n", { mode: 0o600 });
+  const node = process.env.ZCODE_KIT_NODE ?? "node";
+  // Keep this parent's event loop running so it reaps the proxy while the
+  // separate manager waits for that process to disappear (no zombie fixture).
+  const manager = spawn(node, [join(p.dir, "proxy", "zcode-proxy-manager.mjs"), "stop"], {
+    env: { ...process.env, HOME: p.home, USERPROFILE: p.home },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  children.push(manager);
+  let output = "";
+  manager.stdout!.on("data", (d) => { output += d; });
+  manager.stderr!.on("data", (d) => { output += d; });
+  const code = await new Promise<number | null>((resolve, reject) => {
+    manager.once("error", reject);
+    manager.once("close", resolve);
+  });
+  expect(code).toBe(0);
+  expect(output).toContain(`stopped (pid ${p.child.pid})`);
+  expect(await p.exited).toBe(0);
+  expect(p.child.signalCode).toBeNull();
+  const log = readFileSync(join(p.dir, "logs", "proxy.log"), "utf8");
+  expect(log).toMatch(/ INFO shutdown flush finished reason=stop/);
+  expect(log.match(/ INFO shutdown started reason=stop /g)).toHaveLength(1);
+  expect(log).not.toContain(p.token);
+  expect(existsSync(join(p.dir, "logs", "proxy.pid"))).toBe(false);
+  expect(p.out()).not.toContain("EGRESS-BLOCKED");
+  expect(mock.arrived).toBe(0);
+}, 45_000);
 
 describe.skipIf(process.platform === "win32")("serve: signals run the graceful shutdown", () => {
   it("SIGTERM drains: the accepted request finishes, a new one gets 503 + Retry-After, the proxy exits 0", async () => {

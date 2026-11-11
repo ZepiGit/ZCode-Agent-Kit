@@ -60,13 +60,15 @@ async function cardAfterStart(lifecycle, { flags }, ctx) {
 /**
  * Run one intent under a Progress. An intent that throws (an unexpected
  * error, e.g. an unreadable config) ends as an error block with exit 1, the
- * manager CLI's `manager error: …` code.
+ * manager CLI's `manager error: …` code. `observe` hands the intent the
+ * progress updates: on a TTY the spinner line carries the latest narration
+ * while the grace runs; off a TTY every narration is its own line.
  */
 async function step(ctx, label, intent, finishName, lifecycle, failure) {
   const progress = await ctx.step(label);
   let record;
   try {
-    record = await intent();
+    record = await intent((line) => progress.update(line));
   } catch (err) {
     progress.fail({ what: failure, why: String(err?.message ?? err), next: ["zcode-kit doctor"], exit: 1 });
     return { ok: false, code: 1 };
@@ -80,7 +82,9 @@ async function start(args, ctx, lifecycle) {
   return { exitCode: 0, records: await cardAfterStart(lifecycle, args, ctx) };
 }
 
-const stop = (ctx, lifecycle) => step(ctx, "Proxy stop", () => lifecycle.stop(), "finishStop", lifecycle, "The proxy did not stop");
+// The stop intent streams its narration (ticket 22): the stop request's send
+// and the fallbacks become progress on a TTY, lines elsewhere.
+const stop = (ctx, lifecycle) => step(ctx, "Proxy stop", (observe) => lifecycle.stop({ observe }), "finishStop", lifecycle, "The proxy did not stop");
 
 /** @param {{ positional: string[], flags: Record<string, unknown> }} args */
 export async function run(args, ctx) {

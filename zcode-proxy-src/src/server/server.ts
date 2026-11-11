@@ -8,7 +8,7 @@
  */
 import { createServer, type Server } from "node:http";
 import { Readable } from "node:stream";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import webuiHtml from "./webui.txt" with { type: "text" };
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";
@@ -21,6 +21,7 @@ import { collectPoolQuotaSnapshot } from "./routes-quota.js";
 import { loadAccountStore } from "../auth/account-store.js";
 import { errorResponse } from "../proxy/handler.js";
 import { healthDetails } from "../runtime/health-monitor.js";
+import { STOP_REQUEST_PATH, STOP_TOKEN_HEADER } from "../runtime/stop-deadlines.mjs";
 import type { ResponseStore } from "../responses/store.js";
 import {
   ADMISSION_SHED_NEXT,
@@ -36,7 +37,10 @@ import {
   type EndpointShape,
 } from "./admission.js";
 
-interface ServerOptions {
+// Transport-only handoff, not a wire header or a second shutdown sequence.
+const stopResponses = new WeakSet<Response>();
+
+export interface ServerOptions {
   config: ProxyConfig;
   auth: AuthManager;
   /** Override fetch for testing. */
@@ -49,6 +53,15 @@ interface ServerOptions {
   admission?: Admission;
   /** The drain gate `startServer` shares with its handler (ADR-0008 cond 2). */
   drain?: DrainGate;
+  /**
+   * This spawn's stop token (ADR-0014, ticket 18): `ZCODE_KIT_STOP_TOKEN` as
+   * the manager set it at spawn. A proxy hosted without a manager (the TUI,
+   * standalone) passes none: the stop route then answers the unknown-route
+   * `404 not_found_error` and never accepts without a token.
+   */
+  stopToken?: string;
+  /** Runs the graceful shutdown sequence once the stop request is accepted (serve()'s wiring). */
+  onStopRequest?: () => void;
 }
 
 /** Minimal server handle: what the caller needs to print URLs and shut down. */
@@ -240,6 +253,32 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       return errorResponse(401, "authentication_error", "account status requires proxy API key authentication");
     }
 
+    // The graceful stop request (ADR-0014, ticket 22): it sits after the Host,
+    // Origin and bearer checks and additionally requires the per-spawn stop
+    // token, both compared in constant time including length. It has no body,
+    // bypasses admission (it is never queued behind the byte cap) and the
+    // drain shed — a repeated request during the drain joins the running
+    // sequence — and answers 202 before the drain starts.
+    if (path === STOP_REQUEST_PATH && method === "POST") {
+      if (!opts.stopToken) {
+        // A proxy spawned without a stop token (TUI-hosted, standalone)
+        // answers the same 404 not_found_error as an unknown route.
+        return errorResponse(404, "not_found_error", `No route for ${method} ${path}`);
+      }
+      const presented = req.headers.get(STOP_TOKEN_HEADER) ?? "";
+      if (!stopTokenMatches(presented, opts.stopToken)) {
+        return errorResponse(403, "forbidden", "the stop token does not match");
+      }
+      // The transport triggers only after the 202 has finished writing. Merely
+      // constructing a Response is not delivery and must not start the drain.
+      const response = new Response(JSON.stringify({ accepted: true }), {
+        status: 202,
+        headers: { "content-type": "application/json" },
+      });
+      stopResponses.add(response);
+      return response;
+    }
+
     // Draining (ADR-0008 cond 2): shed every new request; /health keeps
     // answering for the manager's hung-proxy detection.
     if (drain?.active && path !== "/health" && path !== "/") {
@@ -408,7 +447,13 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
 
     try {
       const webReq = nodeReqToWebRequest(req, abortController.signal, (n) => admission.noteBodyRead(n));
-      const resp = await handler(webReq).then((r) => addCorsHeaders(r, webReq.headers.get("origin"), opts.config));
+      const answer = await handler(webReq);
+      if (stopResponses.has(answer)) {
+        res.once("finish", () => {
+          try { opts.onStopRequest?.(); } catch { /* the shutdown logs its own failure */ }
+        });
+      }
+      const resp = addCorsHeaders(answer, webReq.headers.get("origin"), opts.config);
       await writeWebResponseToNodeResp(resp, res, abortController.signal);
     } catch (err) {
       if (abortController.signal.aborted) return;
@@ -600,10 +645,22 @@ async function writeWebResponseToNodeResp(resp: Response, res: import("node:http
 function checkProxyKey(authHeader: string, expected: string): boolean {
   const trimmed = authHeader.trim();
   const presented = trimmed.startsWith("Bearer ") ? trimmed.slice(7).trim() : trimmed;
-  const a = Buffer.from(presented, "utf-8");
-  const b = Buffer.from(expected, "utf-8");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  // Fixed-size digests include the complete value and its length. Never
+  // branch on a secret's byte length before the constant-time comparison.
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+  return timingSafeEqual(digest(presented), digest(expected));
+}
+
+/**
+ * The stop-token check (ADR-0014 cond 1): constant time, length included —
+ * fixed-size digests prevent a secret-length-dependent early return, as for
+ * checkProxyKey. The complete UTF-8 input participates in each digest.
+ */
+function stopTokenMatches(presented: string, expected: string): boolean {
+  // Fixed-size digests include the complete value and its length. Never
+  // branch on a secret's byte length before the constant-time comparison.
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+  return timingSafeEqual(digest(presented), digest(expected));
 }
 
 /** Build a CORS preflight response. */

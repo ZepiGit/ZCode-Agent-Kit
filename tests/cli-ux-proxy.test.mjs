@@ -47,7 +47,15 @@ export function createLifecycle(opts) {
     healthIdentify: async () => f.reproof ?? "ours",
     redact: (text) => text.split(${JSON.stringify(KEY)}).join("<redacted>"),
     ensureRunning: async () => { if (f.startThrows) throw new Error(f.startThrows); return f.start; },
-    stop: async () => { if (f.stopThrows) throw new Error(f.stopThrows); return stops.shift() ?? f.stop; },
+    stop: async (opts = {}) => {
+      if (f.stopThrows) throw new Error(f.stopThrows);
+      const record = stops.shift() ?? f.stop;
+      // The real intent forwards every step to observe: the stop request's
+      // event lines (ticket 14) and its narration lines alike.
+      for (const line of (f.stopEvents ?? [])) opts?.observe?.(line);
+      for (const line of (record.lines ?? [])) opts?.observe?.(line);
+      return record;
+    },
   };
 }
 `;
@@ -139,12 +147,20 @@ const START = {
 };
 const STOP = {
   "stop-stopped": { stop: { intent: "stop", code: 0, outcome: "stopped", recovered: null, lines: ["stopped (pid 4242)"], pid: 4242 } },
+  // Ticket 22: the graceful stop request's steps reach observe as event lines
+  // (ticket 14); the narration follows them. The fixture's line is fixed and
+  // 78 columns wide so the spinner frame stays inside 80.
+  "stop-graceful": {
+    stopEvents: ["2026-11-11T00:00:00.000Z INFO manager stop request sent pid=4242 graceMs=10000"],
+    stop: { intent: "stop", code: 0, outcome: "stopped", recovered: null, lines: ["stopped (pid 4242)"], pid: 4242 },
+  },
   "stop-not-running": { stop: { intent: "stop", code: 0, outcome: "not-running", recovered: null, lines: ["not running"] } },
   "stop-foreign": { stop: { intent: "stop", code: 3, outcome: "foreign", recovered: null, lines: ["ERROR: something foreign is on port 18458. Refusing to stop anything."] } },
   "stop-reuse-suspect": { stop: { intent: "stop", code: 4, outcome: "reuse-suspect", recovered: null, lines: ["ERROR: pid 4242 exists but its start time does not match the pid file (PID reuse suspected) — refusing to kill."] } },
 };
 const RESTART = {
   "restart-ok": { ...STOP["stop-stopped"], ...START["start-started"] },
+  "restart-graceful": { ...STOP["stop-graceful"], ...START["start-started"] },
   "restart-stop-refused": { ...STOP["stop-foreign"], ...START["start-started"] },
 };
 
