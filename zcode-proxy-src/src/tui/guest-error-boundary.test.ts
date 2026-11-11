@@ -333,7 +333,7 @@ test("readiness parser requires a whole terminated line across chunks", () => {
 
 // OS/pipe fault injection at the SAME supervisor boundary: no unkillable real
 // child is created. These controls cannot leak processes even when signalling fails.
-for (const fault of ["kill", "stream", "log"] as const) {
+for (const fault of ["kill", "stream", "log", "cancel-hang", "cancel-error"] as const) {
   test(`TUI cleanup reports ${fault} failure within its own finite budget`, async () => {
     const home = mkdtempSync(join(tmpdir(), "t82-tui-fault-"));
     const log = join(home, "tui.log");
@@ -342,6 +342,10 @@ for (const fault of ["kill", "stream", "log"] as const) {
       start(controller) {
         controller.enqueue(new TextEncoder().encode(READY_LINE + "\n"));
         if (err) controller.error(new Error("synthetic pipe failure"));
+      },
+      cancel() {
+        if (fault === "cancel-hang") return new Promise<void>(() => {});
+        if (fault === "cancel-error") throw new Error("synthetic cancel failure");
       },
     });
     const child = supervise({ pid: -1, stdout: stream(fault === "stream"), stderr: stream(),
@@ -355,6 +359,8 @@ for (const fault of ["kill", "stream", "log"] as const) {
       expect(diagnostic).toContain("cleanup-drain-overrun");
       if (fault === "kill") expect(diagnostic).toContain("kill-error=Error: synthetic signal denied");
       if (fault === "stream") expect(diagnostic).toContain("stdout-stream-error=Error: synthetic pipe failure");
+      if (fault === "cancel-hang") expect(diagnostic).toContain("stream-cancel-overrun");
+      if (fault === "cancel-error") expect(diagnostic).toContain("stream-cancel-error=Error: synthetic cancel failure");
       if (fault === "log") {
         expect(diagnostic).toContain("tuiLogReadError=");
         expect(diagnostic).not.toContain("tuiLog=absent");
