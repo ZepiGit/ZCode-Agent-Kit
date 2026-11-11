@@ -140,6 +140,10 @@ describe("the graceful stop request POST /__kit/stop", () => {
 
     // A Host header that is not a loopback host is rejected before the token matters.
     expect((await stop({ host: "intranet.example" })).status).toBe(421);
+    // Competing failures pin the order, not just each check in isolation.
+    expect((await stop({ host: "intranet.example", origin: "https://evil.example", authorization: "Bearer wrong", [STOP_TOKEN_HEADER]: WRONG_TOKEN })).status).toBe(421);
+    expect((await stop({ origin: "https://evil.example", authorization: "Bearer wrong", [STOP_TOKEN_HEADER]: WRONG_TOKEN })).status).toBe(403);
+    expect((await stop({ authorization: "Bearer wrong", [STOP_TOKEN_HEADER]: WRONG_TOKEN })).status).toBe(401);
     // A disallowed browser origin is rejected before the token matters (no CORS allowance).
     const evil = await fetch(`${p.base}${STOP_REQUEST_PATH}`, {
       method: "POST",

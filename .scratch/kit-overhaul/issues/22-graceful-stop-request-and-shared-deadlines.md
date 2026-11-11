@@ -49,3 +49,26 @@ Pre-existing test change justification: deadline relation imports the actual sha
 Fresh targeted proxy neighbor run `reports/t22-gpt-20261111-proxy-neighbors.log`: 84 pass / 0 fail, typecheck exit 0. Initial complete targeted kit neighbor run: 325 pass / 2 fail / 1 skip; two stdout regressions were diagnosed and repaired, not relaxed. Final reruns and committed-checkpoint mutation evidence follow below. Exact commands/PID/PGID metadata is external in `t22-gpt-evidence-20261111-1/`. Checks use original `run-capped.sh`, Bun 1.4.2, hard systemd caps, explicit timeouts and isolated HOME/XDG. Controller explicitly permitted only new ignored `reports/t22-gpt-20261111-*.log` and append-only `reports/run-pids.txt` integration harness outputs, retaining Sentinel visibility; no tracked integration writes.
 
 Pending central gates: full `test:all`, memory job, exact-head both-OS CI, actual windows-latest flush execution, independent Grok review. No native/CI acceptance, ticket resolution or new memory measurements claimed.
+
+### Fresh final checks and mutation proof
+
+Implementation checkpoint: `469922292135b850bafee0d530c4e6b4b432ed9a`. Each mutation began from that owned committed product, saved its exact applied diff externally (`mutant-*.diff`), ran through the unchanged capped wrapper, then restored only the mutated path with `gitc.sh checkout 469922292135b850bafee0d530c4e6b4b432ed9a -- <path>`; byte equality and `git diff --exit-code` were checked after every restore. No history rewrite. Runner and metadata: `/home/AgentKit/overhaul-tools/t22-gpt-evidence-20261111-1/{mutants.py,mutant-results.json,run.py,t22-gpt-20261111-*.json}`. All logs below are under canonical `.scratch/kit-overhaul/reports/` and were executed in this continuation, not recovered archive passes.
+
+| Check / deliberately broken property | Fresh result (pass / fail / skip) | Log |
+| --- | --- | --- |
+| Complete targeted kit neighbors, 11 files | 327 / 0 / 1; 328 tests, exit 0, 184 s | `t22-gpt-20261111-neighbors-final.log` |
+| Proxy neighbors, six actual files, plus typecheck | 84 / 0 / 0; typecheck clean, exit 0, 27 s | `t22-gpt-20261111-proxy-final.log` |
+| Restored checkpoint: CLI/output/safety + named seam-2 + route/serve/typecheck | 66 + 8 + 9 pass, 0 fail/skip, exit 0 | `t22-gpt-20261111-restored.log` |
+| Final route auth-order strengthening + typecheck | 6 / 0 / 0, clean typecheck | `t22-gpt-20261111-auth-final.log` |
+| Remove stable stop result label | 31 / 6 / 0; existing result assertion and exact snapshots fail | `t22-gpt-20261111-mut-label.log` |
+| Disable Host rejection | 5 / 1 / 0; 421 expected, 202 received | `t22-gpt-20261111-mut-host.log` |
+| Force immediately after accepted request | 0 / 2 / 0; graceful-exit and margin guards fail | `t22-gpt-20261111-mut-margin.log` |
+| Remove real serve flush callback | 2 / 1 / 0; actual manager-stop log lacks flush marker | `t22-gpt-20261111-mut-flush.log` |
+| Trigger before transport delivery | 2 / 4 / 0; handler guard sees true instead of false, extra triggers detected | `t22-gpt-20261111-mut-order.log` |
+| Claim successful stop for a reused PID | 0 / 1 / 0; existing refusal guard expects exit 4, receives 0 | `t22-gpt-20261111-mut-refusal.log` |
+
+Exact final neighbor launch: `run-capped.sh t22-gpt-20261111-neighbors-final 2G 480 -- bash -c 'cd /home/AgentKit/wt/t22 && node --test tests/proxy-lifecycle.test.mjs tests/manager-safety.test.mjs tests/manager-audit.test.mjs tests/proxy-env.test.mjs tests/cli-ux-proxy.test.mjs tests/cli-ux-streams.test.mjs tests/term-output.test.mjs tests/term-snapshots.test.mjs tests/event-line.test.mjs tests/test-wiring.test.mjs tests/golden-path.test.mjs'`.
+
+Exact final proxy launch: `run-capped.sh t22-gpt-20261111-proxy-final 2G 180 -- bash -c 'cd /home/AgentKit/wt/t22/zcode-proxy-src && bun test src/server/stop-route.test.ts src/server/server.test.ts src/runtime/supervisor.test.ts src/runtime/supervisor-serve.test.ts src/runtime/watchdog.test.ts src/index.test.ts && bun run typecheck'`. Exact other launches are preserved in the external per-run JSON, including explicit memory/timeout and command argv. First three direct RED launches used the same original wrapper with caps 1G and timeouts 90/90/60 s for cli/progress/order respectively; those initial three lack supplementary external process metadata (the wrapper's own Sentinel PID register remains).
+
+All 93 original preserved paths remain; no path deletion, MCP dist delta, baseline refresh, integration product write or install occurred. The final auth-order test edit is test-only after the mutation checkpoint; it was separately executed GREEN. Snapshot changes are 48 existing stop/restart stderr files plus 32 new graceful stdout/stderr snapshots across eight C3 variants. The existing single platform skip in the complete neighbor run is retained, not newly introduced. No memory delta is asserted because no memory scenario was run. The candidate is ready only for central validation and independent Grok review, not accepted/resolved.
