@@ -1,4 +1,4 @@
-{
-  "logged_in": false,
-  "error": "fetch failed"
-}
+  [2mLogged in[0m  no
+[31m✗ FAIL  the proxy did not answer[0m
+   [2mwhy[0m   fetch failed
+   [2mnext[0m  [1mzcode-kit proxy start[0m

@@ -1,11 +1,20 @@
 // `zcode-kit accounts …`: the offline account-pool wrapper. The proxy CLI
-// owns encryption, redaction, its output (on the terminal) and the exit code
-// (no exit status: 1); this command forwards to it and never starts a serving
-// process. `enable|disable` switch the Account Rotator in the proxy config
-// through a transaction (exit 0), record it as the stored Account Rotator
-// decision (generated/account-rotator.json, the one setup asks about), and
-// restart a running proxy of this kit.
+// owns encryption, redaction, its JSON documents and the exit code (no exit
+// status: 1); this command never starts a serving process. `enable|disable`
+// switch the Account Rotator in the proxy config through a transaction
+// (exit 0), record it as the stored Account Rotator decision
+// (generated/account-rotator.json, the one setup asks about), and restart a
+// running proxy of this kit.
 // A missing account id or an unknown subcommand: exit 2.
+//
+// Streams and rendering (ticket 46; design-language §4.7, §7; ADR-0005): the
+// text views of `accounts` and `accounts health` render here through the
+// output module (cli/accounts-report.mjs) — one table with an active marker,
+// one number format, and every next step naming `zcode-kit …` (A-19, A-27).
+// `--json` and `--live` keep forwarding the proxy CLI verbatim with an
+// inherited terminal, so the JSON documents stay byte-stable (C2) and the
+// store's own diagnostics stay on stderr. `doctor`, `quota`, `explain`,
+// `remove|pause|resume` and `unlock` keep forwarding as before.
 import { acquireLock, beginTransaction, releaseLock } from "../../lib/transaction.mjs";
 import { ensureState } from "../../lib/state.mjs";
 import { configureAccountRotator, recordRotatorDecision, restartForAccountChange } from "../account-setup.mjs";
@@ -29,16 +38,34 @@ export async function run({ positional, flags }, ctx) {
     if (flags.json === true) cliArgs.push("--json");
     return forward(cliArgs);
   }
-  if (sub === "doctor" || sub === "quota" || sub === "health") {
+  if (sub === "doctor" || sub === "quota") {
     return forward(["auth", "accounts", sub, ...(flags.json === true ? ["--json"] : [])]);
+  }
+  if (sub === "health") {
+    if (flags.json === true) return forward(["auth", "accounts", "health", "--json"]);
+    return rendered(["auth", "accounts", "health", "--json"], ctx);
   }
   if (sub !== undefined && sub !== "--json" && sub !== "--live") {
     return { exitCode: 2, records: [stderrLine("Usage: zcode-kit accounts [--json|--live] | accounts remove|pause|resume ID [--yes] | accounts unlock [--force]")] };
   }
-  const cliArgs = ["auth", "accounts"];
-  if (flags.json === true) cliArgs.push("--json");
-  if (flags.live === true) cliArgs.push("--live");
-  return forward(cliArgs);
+  if (flags.json === true || flags.live === true) {
+    const cliArgs = ["auth", "accounts"];
+    if (flags.json === true) cliArgs.push("--json");
+    if (flags.live === true) cliArgs.push("--live");
+    return forward(cliArgs);
+  }
+  return rendered(["auth", "accounts", "--json"], ctx);
+}
+
+/**
+ * One offline view through the output module (cli/accounts-report.mjs): the
+ * proxy CLI's redacted JSON in, records out. The report builder loads on
+ * use, like the doctor's (the launcher process stays lean).
+ */
+async function rendered(cliArgs, ctx) {
+  const res = proxyCli(ctx, cliArgs, { stdio: ["ignore", "pipe", "inherit"] });
+  const { proxyAccountRecords } = await import("../accounts-report.mjs");
+  return proxyAccountRecords(cliArgs, { exitCode: res.status, stdout: res.stdout ?? "" });
 }
 
 async function toggle(enable, ctx) {

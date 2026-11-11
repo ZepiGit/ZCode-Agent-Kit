@@ -1,6 +1,8 @@
 // `zcode-kit auth status|login [zai|bigmodel] [--import] [--account ID] [--replace]|logout [--yes]`.
-//   status  JSON from the proxy's /quota answer: exit 0 when the proxy
-//           answered (logged in or not), 1 when it did not;
+//   status  human text on a TTY; the proxy's /quota JSON unchanged when
+//           stdout is not a TTY (or with `--json`, on a TTY too, in the same
+//           bytes): exit 0 when the proxy answered (logged in or not), 1
+//           when it did not (ticket 46; spec Story 102, decision D4);
 //   login   the proxy CLI on the terminal; its exit code (no status: 1);
 //   logout  removes only the kit proxy's credential store, with --yes;
 //           without it, exit 2. Unknown subcommands: exit 2.
@@ -12,13 +14,14 @@ import { keepRecords, proxyCli, proxyFetch, stderrLine, stdoutLine } from "./com
 /** @param {{ positional: string[], flags: Record<string, unknown> }} args */
 export async function run({ positional, flags }, ctx) {
   const sub = positional[1] ?? "status";
-  if (sub === "status") return status(ctx);
+  if (sub === "status") return status(flags, ctx);
   if (sub === "login") return login(positional, flags, ctx);
   if (sub === "logout") return logout(flags, ctx);
   return { exitCode: 2, records: [stderrLine(`unknown auth subcommand: ${sub}`)] };
 }
 
-async function status(ctx) {
+async function status(flags, ctx) {
+  let value;
   try {
     const res = await proxyFetch(ctx, "/quota");
     const body = await res.json().catch(() => null);
@@ -29,10 +32,42 @@ async function status(ctx) {
     const errors = diagnostic.cause === "healthy" ? [] : [diagnostic.detail];
     const jwt = body?.jwt && Number.isFinite(body.jwt.ageHours) && Number.isFinite(body.jwt.issuedAt)
       ? { ageHours: body.jwt.ageHours, issuedAt: body.jwt.issuedAt } : null;
-    return { exitCode: 0, records: [{ kind: "json", value: { logged_in: loggedIn, errors, jwt } }] };
+    value = { logged_in: loggedIn, errors, jwt };
+    return { exitCode: 0, records: statusRecords(flags, ctx, value) };
   } catch (err) {
-    return { exitCode: 1, records: [{ kind: "json", value: { logged_in: false, error: String(err.message) } }] };
+    value = { logged_in: false, error: String(err.message) };
+    return { exitCode: 1, records: statusRecords(flags, ctx, value) };
   }
+}
+
+/** `5.2 h old` under two days, `3.1 d old` beyond (design-language §7). */
+function tokenAge(ageHours) {
+  return ageHours >= 48 ? `${(ageHours / 24).toFixed(1)} d old` : `${ageHours.toFixed(1)} h old`;
+}
+
+/**
+ * The records for one /quota answer: today's exact JSON document when stdout
+ * is not a TTY (or with `--json`), a human key/value block on a TTY — with a
+ * WARN/FAIL block carrying what/why/next for the not-logged-in and
+ * unreachable cases (Stories 95, 102; design-language §7).
+ */
+function statusRecords(flags, ctx, value) {
+  const tty = ctx?.terminal?.stdout?.isTTY === true;
+  if (flags.json === true || !tty) return [{ kind: "json", value }];
+  const pairs = [["Logged in", value.logged_in ? "yes" : "no"]];
+  if (value.jwt && Number.isFinite(value.jwt.ageHours)) pairs.push(["Token", tokenAge(value.jwt.ageHours)]);
+  const records = [{ kind: "kv", pairs }];
+  if (value.error !== undefined) {
+    records.push({ kind: "error", what: "the proxy did not answer", why: value.error, next: ["zcode-kit proxy start"] });
+  } else if (!value.logged_in) {
+    records.push({
+      kind: "warn",
+      what: "not logged in",
+      ...(value.errors.length ? { why: value.errors.join(" ") } : {}),
+      next: ["zcode-kit auth login zai"],
+    });
+  }
+  return records;
 }
 
 function login(positional, flags, ctx) {

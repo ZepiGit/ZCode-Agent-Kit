@@ -1,7 +1,8 @@
-live data unavailable — start the proxy with: zcode-kit proxy start
-
-  work      unknown  ready   —  never used
-  personal  unknown  ready   —  never used
-  backup    unknown  paused  —  never used
-
-usable: 0 of 3; totals: n/a
+x FAIL  live data unavailable
+   why   the kit proxy is not reachable, so runtime state and quota are unknown
+   next  zcode-kit proxy start
+  ACCOUNT   VERDICT  PLAN         QUOTA  USED
+  work      unknown  coding-plan         never used
+  personal  unknown  start-plan          never used
+  backup    unknown  coding-plan         never used
+  usable: 0 of 3
