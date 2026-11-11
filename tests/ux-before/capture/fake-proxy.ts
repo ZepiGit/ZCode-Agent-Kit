@@ -17,7 +17,9 @@ if (args[0] === "auth" && args[1] === "accounts" && args[2] === "health" && proc
     // An actual inherited pipe, not a fabricated missing-close event. The
     // keeper remains live and owns this descendant until its tree is reaped.
     const { spawn } = await import("node:child_process");
-    const holder = spawn(process.env.UX_CAPTURE_NODE!, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["ignore", "inherit", "inherit"] });
+    const env = { ...process.env };
+    delete env.UX_CAPTURE_FAULT;
+    const holder = spawn(process.env.UX_CAPTURE_NODE!, ["-e", "setInterval(() => {}, 1000)"], { env, stdio: ["ignore", "inherit", "inherit"] });
     console.error(`UX_CAPTURE_PIPE_HOLDER pid=${holder.pid}`);
     holder.unref();
     process.exit(process.env.UX_CAPTURE_FAULT === "early-exit-drain" ? 23 : 0);
@@ -108,10 +110,15 @@ if (args[0] !== "serve") {
   if (process.env.UX_CAPTURE_OWNED_LISTENER === "1") {
     process.stdin.resume();
     process.stdin.once("end", async () => {
+      if (["ignore-eof", "never-ready-ignore-eof"].includes(process.env.UX_CAPTURE_LISTENER_FAULT ?? "")) return;
       await server.stop(true);
       console.log("UX_LISTENER_STOPPED");
     });
-    console.log("UX_LISTENER_READY");
+    // Fault injection stays in the real synthetic listener stage, after bind.
+    const fault = process.env.UX_CAPTURE_LISTENER_FAULT;
+    if (fault) console.error(`UX_CAPTURE_LISTENER_FAULT ${fault} pid=${process.pid}`);
+    if (fault === "early-exit") process.exit(23);
+    if (!fault?.startsWith("never-ready")) console.log("UX_LISTENER_READY");
   }
   // Seed the log so `proxy logs` has representative content (compact format).
   log("r001 ANT glm-5.3 200 stream 812ms→6.4s 1830tok 286t/s");
