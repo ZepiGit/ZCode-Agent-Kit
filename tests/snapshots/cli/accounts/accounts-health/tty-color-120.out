@@ -1,0 +1,6 @@
+    [1;2mACCOUNT   VERDICT    PLAN         QUOTA                                          USED[0m
+  * work      ok         coding-plan  GLM Coding Lite 4120/6000 (69 %) resets 00:00  used 2m ago
+    personal  exhausted  start-plan   Start Plan Bonus 0/200 (0 %) resets 00:00      used 2h ago
+    backup    paused     coding-plan                                                 never used
+  [2musable: 1 of 3; * = active account[0m
+  [2mtotals[0m  GLM Coding Lite 4120/6000 (69 %) resets 00:00, Start Plan Bonus 35/200 (18 %) resets 00:00

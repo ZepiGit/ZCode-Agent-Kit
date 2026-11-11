@@ -10,8 +10,31 @@ import { readFileSync } from "node:fs";
 
 const REAL_PROXY_SRC = "__REAL_PROXY_SRC__";
 const args = process.argv.slice(2);
+// Faults belong only to this synthetic public capture path, never production.
+if (args[0] === "auth" && args[1] === "accounts" && args[2] === "health" && process.env.UX_CAPTURE_FAULT) {
+  console.error(`UX_CAPTURE_FAULT ${process.env.UX_CAPTURE_FAULT} pid=${process.pid}`);
+  if (/^(drain|early-exit-drain)/.test(process.env.UX_CAPTURE_FAULT)) {
+    // The actual owned holder now precedes the CLI, not an unacknowledged
+    // Bun descendant. Preserve real CLI exit codes through spawnSync.
+    if (process.env.UX_CAPTURE_PIPE_BOUNDARY !== "owned-holder") {
+      console.error("CAPTURE_FAULT_SETUP missing owned pipe boundary");
+      process.exit(24);
+    }
+    process.exit(process.env.UX_CAPTURE_FAULT === "early-exit-drain" ? 23 : 0);
+  }
+  if (process.env.UX_CAPTURE_FAULT === "early-exit") process.exit(23);
+  if (process.env.UX_CAPTURE_FAULT === "hang") await new Promise(() => { setInterval(() => {}, 1000); });
+}
 
 if (args[0] !== "serve") {
+  // Pin only the fixture health CLI's report clock to the reviewed capture
+  // date. The fixed status timestamps below are then 5d old, and its expired
+  // exhaustion stays expired (pinning to Nov 5 would change the verdict).
+  // The real producer still builds asOf and consumes real loopback JSON.
+  // No production clock, other command, timer or capture normalizer changes.
+  if (args[0] === "auth" && args[1] === "accounts" && args[2] === "health") {
+    Date.now = () => Date.parse("2026-11-11T00:00:00.000Z");
+  }
   const real = await import(`${REAL_PROXY_SRC}/src/index.ts`);
   real.main();
 } else {
@@ -49,7 +72,7 @@ if (args[0] !== "serve") {
   log("  plan: start-plan");
   log("  models: 2 available");
   log("  /v1/responses: ON");
-  Bun.serve({
+  const server = Bun.serve({
     hostname: "127.0.0.1",
     port,
     fetch(req) {
@@ -80,6 +103,21 @@ if (args[0] !== "serve") {
       }
     },
   });
+  // Capture-owned mode uses stdin EOF as its explicit stop request; manager
+  // fixtures retain their historical signal/identity behavior.
+  if (process.env.UX_CAPTURE_OWNED_LISTENER === "1") {
+    process.stdin.resume();
+    process.stdin.once("end", async () => {
+      if (["ignore-eof", "never-ready-ignore-eof"].includes(process.env.UX_CAPTURE_LISTENER_FAULT ?? "")) return;
+      await server.stop(true);
+      console.log("UX_LISTENER_STOPPED");
+    });
+    // Fault injection stays in the real synthetic listener stage, after bind.
+    const fault = process.env.UX_CAPTURE_LISTENER_FAULT;
+    if (fault) console.error(`UX_CAPTURE_LISTENER_FAULT ${fault} pid=${process.pid}`);
+    if (fault === "early-exit") process.exit(23);
+    if (!fault?.startsWith("never-ready")) console.log("UX_LISTENER_READY");
+  }
   // Seed the log so `proxy logs` has representative content (compact format).
   log("r001 ANT glm-5.3 200 stream 812ms→6.4s 1830tok 286t/s");
   log("r002 OAI glm-5.3-flash 200 stream 390ms→2.1s 402tok 191t/s");

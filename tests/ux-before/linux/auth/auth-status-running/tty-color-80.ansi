@@ -1,8 +1,2 @@
-{
-  "logged_in": true,
-  "errors": [],
-  "jwt": {
-    "ageHours": 5.2,
-    "issuedAt": 1793914084
-  }
-}
+  [2mLogged in[0m  yes
+  [2mToken    [0m  5.2 h old

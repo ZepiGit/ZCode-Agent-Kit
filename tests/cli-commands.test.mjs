@@ -170,11 +170,14 @@ function proxyCtx(answer, kit = {}) {
 }
 const answerModels = (ids) => () => ({ ok: true, status: 200, json: async () => ({ data: ids.map((id) => ({ id })) }) });
 const out = (text) => ({ kind: "text", stream: "stdout", text });
+// Since ticket 46 the models list is a data record (it renders through the
+// output module); the bytes are unchanged.
+const data = (text) => ({ kind: "data", text });
 
 test("models: the running proxy's list, one id per line, exit 0, asked with the kit key", async () => {
   const { run } = await load("models");
   const { ctx, requests } = proxyCtx(answerModels(["glm-5.3", "glm-5.2"]));
-  assert.deepEqual(await run(args(["models"]), ctx), { exitCode: 0, records: [out("glm-5.3\nglm-5.2\n")] });
+  assert.deepEqual(await run(args(["models"]), ctx), { exitCode: 0, records: [data("glm-5.3\nglm-5.2\n")] });
   assert.deepEqual(requests, [{ url: "http://127.0.0.1:19071/v1/models", authorization: "Bearer synthetic-key" }]);
 });
 
@@ -182,10 +185,10 @@ test("models: a down or failing proxy falls back to the registry snapshot, still
   const { run } = await load("models");
   for (const answer of [() => { throw new Error("ECONNREFUSED"); }, () => ({ ok: false, status: 503, json: async () => ({}) })]) {
     const { ctx } = proxyCtx(answer);
-    assert.deepEqual(await run(args(["models"]), ctx), { exitCode: 0, records: [out("glm-5.3\nglm-5.3-flash\n")] });
+    assert.deepEqual(await run(args(["models"]), ctx), { exitCode: 0, records: [data("glm-5.3\nglm-5.3-flash\n")] });
   }
   const unreadableKey = proxyCtx(answerModels(["x"]), { key: () => { throw new Error("ENOENT .proxykey"); } });
-  assert.deepEqual(await run(args(["models"]), unreadableKey.ctx), { exitCode: 0, records: [out("glm-5.3\nglm-5.3-flash\n")] });
+  assert.deepEqual(await run(args(["models"]), unreadableKey.ctx), { exitCode: 0, records: [data("glm-5.3\nglm-5.3-flash\n")] });
   assert.equal(unreadableKey.requests.length, 0);
 });
 
@@ -203,9 +206,9 @@ test("models --show-key: the warning goes to stderr and the key alone to stdout,
   assert.deepEqual(await run(args(["models"], { "show-key": true }), ctx), {
     exitCode: 0,
     records: [
-      out("glm-5.3\n"),
+      data("glm-5.3\n"),
       { kind: "text", stream: "stderr", text: "\nlocal proxy key (never share; shown because --show-key was given):\n" },
-      out("synthetic-key\n"),
+      data("synthetic-key\n"),
     ],
   });
 });
@@ -216,7 +219,7 @@ test("models --show-key with an unreadable key fails after the list: the error c
   const { ctx } = proxyCtx(answerModels(["glm-5.3"]), { key: () => { if (reads++ === 0) return "synthetic-key"; throw new Error("EACCES .proxykey"); } });
   await assert.rejects(run(args(["models"], { "show-key": true }), ctx), (err) => {
     assert.equal(err.message, "EACCES .proxykey");
-    assert.deepEqual(err.records, [out("glm-5.3\n"), { kind: "text", stream: "stderr", text: "\nlocal proxy key (never share; shown because --show-key was given):\n" }]);
+    assert.deepEqual(err.records, [data("glm-5.3\n"), { kind: "text", stream: "stderr", text: "\nlocal proxy key (never share; shown because --show-key was given):\n" }]);
     return true;
   });
 });
@@ -592,7 +595,10 @@ test("auth logout: without --yes it explains and exits 2; with --yes it removes 
 test("accounts: the proxy CLI's exit code passes through for every forwarded subcommand (no exit status is 1)", async () => {
   const { run } = await load("accounts");
   for (const [positional, flags, forwarded] of [
-    [["accounts"], {}, ["auth", "accounts"]],
+    // `accounts` without --json/--live renders its own table since ticket 46
+    // (cli/accounts-report.mjs; the table and its C3 snapshots live in
+    // tests/cli-ux-accounts-auth-models.test.mjs). Every JSON/live and
+    // management subcommand still forwards verbatim.
     [["accounts"], { json: true, live: true }, ["auth", "accounts", "--json", "--live"]],
     [["accounts", "remove", "personal"], { yes: true }, ["auth", "accounts", "remove", "personal", "--yes"]],
     [["accounts", "pause", "work"], {}, ["auth", "accounts", "pause", "work"]],

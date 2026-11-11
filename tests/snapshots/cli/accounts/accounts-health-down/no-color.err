@@ -1,0 +1,3 @@
+✗ FAIL  live data unavailable
+   why   the kit proxy is not reachable, so runtime state and quota are unknown
+   next  zcode-kit proxy start

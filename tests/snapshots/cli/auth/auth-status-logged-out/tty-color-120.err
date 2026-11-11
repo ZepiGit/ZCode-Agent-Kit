@@ -1,0 +1,4 @@
+[33m! WARN  not logged in[0m
+   [2mwhy[0m   ZCode auth3012: not logged in. Refresh the Desktop login, then use zcode-kit auth login if still needed; no
+         repeated retries.
+   [2mnext[0m  [1mzcode-kit auth login zai[0m

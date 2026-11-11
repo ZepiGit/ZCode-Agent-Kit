@@ -1,6 +1,8 @@
 // `zcode-kit models [--json] [--show-key]`: the running proxy's model list,
 // or the registry snapshot when the proxy does not answer. Always exit 0.
-import { keepRecords, proxyFetch, stderrLine, stdoutLine } from "./common.mjs";
+// The list and the key are data records (ticket 46): they render through the
+// output module with today's exact bytes.
+import { keepRecords, proxyFetch, stderrLine } from "./common.mjs";
 
 /** The models the kit's synced registry copy names (the proxy-down answer). */
 const REGISTRY_SNAPSHOT = ["glm-5.3", "glm-5.3-flash"];
@@ -26,11 +28,11 @@ export async function run({ flags }, ctx) {
       // fallback is NOT a proxy answer and must not be labeled as one.
       records.push({ kind: "json", value: { models: list, source: fromProxy ? "proxy" : "registry" } });
     } else {
-      records.push(stdoutLine(list.join("\n")));
+      records.push({ kind: "data", text: `${list.join("\n")}\n` });
     }
     if (flags["show-key"]) {
       records.push(stderrLine("\nlocal proxy key (never share; shown because --show-key was given):"));
-      records.push(stdoutLine(ctx.kit.key()));
+      records.push({ kind: "data", text: `${ctx.kit.key()}\n` });
     }
     return { exitCode: 0, records };
   } catch (err) {
