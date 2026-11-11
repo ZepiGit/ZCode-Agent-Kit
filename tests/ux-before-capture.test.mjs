@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cloneArgs, describeFailure, fakeProxySource, fixtureBaseEnv, importBase, pathForms, pinBun, swapPath, tarBinary, windowsGitDir } from "./ux-before/capture/host.mjs";
 import { VOLATILE, compareCaptures, normaliseVolatile } from "./ux-before/compare.mjs";
+import { runOwned, requireSuccess } from "./ux-before/capture/owned-child.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const TEMPLATE = readFileSync(join(ROOT, "tests", "ux-before", "capture", "fake-proxy.ts"), "utf8");
@@ -24,6 +25,17 @@ function captureEnv() {
   const env = { ...process.env };
   delete env.UX_CAPTURE_PORT;
   return env;
+}
+function assertObservedOwnedDead(...pids) {
+  for (const pid of pids) {
+    assert.ok(pid > 0, "observed owned PID required");
+    let live = true;
+    try {
+      process.kill(pid, 0);
+      if (process.platform === "linux") live = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1][0] !== "Z";
+    } catch (error) { if (error.code === "ESRCH" || error.code === "ENOENT") live = false; else throw error; }
+    assert.equal(live, false, `owned PID ${pid} must not remain live (zombie is exited, not reaping proof)`);
+  }
 }
 const literalOf = (source) => source.match(/^const REAL_PROXY_SRC = (.*);$/m)[1];
 
@@ -120,17 +132,17 @@ test("Linux end to end: a kit path with `\\u` in it starts the fixture proxy (th
 // historical expired-exhaustion verdict; listener/producer/renderer stay real.
 test("accounts health raw capture pipeline preserves millisecond ages and reviewed baselines", {
   timeout: 120_000,
-}, (t) => {
+}, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ux-health-age-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const variants = process.platform === "win32" ? ["pipe", "ci"]
     : ["tty-color-80", "tty-color-120", "no-color", "term-dumb", "ascii-locale", "pipe", "ci"];
   const out = join(dir, "out");
-  const run = spawnSync(process.execPath, [CAPTURE, "--kit", ROOT, "--out", out,
+  const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", out,
     "--only", "^accounts-health(-json)?$", "--variants", variants.join(",")], {
-    encoding: "utf8", timeout: 110_000, env: { ...captureEnv(), TZ: "UTC" },
+    cwd: ROOT, phase: "raw-health-capture", timeoutMs: 110_000, env: { ...captureEnv(), TZ: "UTC" },
   });
-  assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
+  requireSuccess(run);
   const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
   assert.equal(manifest.length, variants.length * 2);
   assert.ok(manifest.every((m) => !m.error && m.exit === 0), JSON.stringify(manifest));
@@ -154,6 +166,196 @@ test("accounts health raw capture pipeline preserves millisecond ages and review
       ["work", 1793879880000], ["personal", 1793872800000], ["backup", null],
     ], "live fixture milliseconds survive the real health JSON producer");
   }
+});
+
+// Controlled faults use the same public capture CLI and real health producer.
+// They prove the harness contract, not the cause of run 42974492278.
+for (const [fault, code, status] of [["early-exit", "CAPTURE_EXIT", 23], ["hang", "CAPTURE_TIMEOUT", null], ["drain", "CAPTURE_DRAIN_TIMEOUT", 0], ["early-exit-drain", "CAPTURE_EXIT", 23]]) {
+  test(`health capture controlled ${fault}: finite owned cleanup and primary diagnostic`, { timeout: 30000 }, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ux-health-fault-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, "out"), "--only", "^accounts-health-json$", "--variants", "ci"], {
+      cwd: ROOT, phase: "raw-health-capture", timeoutMs: 25000, env: { ...captureEnv(), TZ: "UTC", UX_CAPTURE_FAULT: fault },
+    });
+    requireSuccess(run);
+    const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    assert.equal(row.diagnostic?.error?.code, code, JSON.stringify(row));
+    assert.equal(row.diagnostic.status, status);
+    assert.equal(row.diagnostic.phase, "health-cli");
+    assert.equal(row.diagnostic.ownerClosed, true);
+    assert.equal(row.cleanup?.listenerClosed, true);
+    assert.equal(row.cleanup?.portClosed, true);
+    assert.equal(row.cleanup?.fixtureRemoved, true);
+    assert.ok(row.diagnostic.pid > 0 && row.diagnostic.ownerPid > 0);
+    assert.equal(row.diagnostic.pgid, process.platform === "win32" ? null : row.diagnostic.ownerPid);
+    assert.ok(row.diagnostic.stdout.length <= 16384 && row.diagnostic.stderr.length <= 16384);
+    assert.match(row.diagnostic.stderr, /UX_CAPTURE_FAULT/);
+    assert.equal(row.diagnostic.cleanupError, undefined);
+    assert.equal(row.cleanup.stopAcknowledged, true);
+    if (fault.includes("drain")) assert.match(row.diagnostic.stderr, /UX_CAPTURE_PIPE_HOLDER pid=\d+/);
+    for (const pid of [row.diagnostic.pid, row.diagnostic.ownerPid,
+      ...[...row.diagnostic.stderr.matchAll(/UX_CAPTURE_PIPE_HOLDER pid=(\d+)/g)].map((m) => Number(m[1]))]) {
+      let live = true;
+      try {
+        process.kill(pid, 0);
+        // Linux PID 1 may retain an exited orphan's zombie; it is not live.
+        if (process.platform === "linux") live = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1][0] !== "Z";
+      } catch (error) { if (error.code === "ESRCH" || error.code === "ENOENT") live = false; else throw error; }
+      assert.equal(live, false, `owned PID ${pid} must not remain live`);
+    }
+    t.diagnostic(JSON.stringify({ fault, phase: row.diagnostic.phase, status: row.diagnostic.status,
+      signal: row.diagnostic.signal, error: row.diagnostic.error, pid: row.diagnostic.pid,
+      ownerPid: row.diagnostic.ownerPid, pgid: row.diagnostic.pgid, exited: row.diagnostic.exited,
+      drained: row.diagnostic.drained, ownerClosed: row.diagnostic.ownerClosed,
+      listenerClosed: row.cleanup.listenerClosed, portClosed: row.cleanup.portClosed, fixtureRemoved: row.cleanup.fixtureRemoved }));
+  });
+}
+
+// Listener faults bind the actual fixture listener before failing. Not a CLI fault.
+for (const [fault, code] of [["never-ready", "CAPTURE_READINESS_TIMEOUT"], ["early-exit", "CAPTURE_EXIT"]]) {
+  test(`health listener controlled ${fault}: manifest and enclosing cleanup`, { timeout: 30000 }, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ux-listener-fault-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, "out"), "--only", "^accounts-health-json$", "--variants", "ci"], {
+      cwd: ROOT, phase: "raw-health-capture", timeoutMs: 25000,
+      env: { ...captureEnv(), TZ: "UTC", UX_CAPTURE_LISTENER_FAULT: fault },
+    });
+    requireSuccess(run);
+    assert.ok(existsSync(join(dir, "out", "INDEX.md")));
+    const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    assert.equal(row.diagnostic?.error?.code, code, JSON.stringify(row));
+    assert.equal(row.diagnostic.phase, "health-listener");
+    assert.match(row.diagnostic.stderr, /UX_CAPTURE_LISTENER_FAULT/);
+    assert.equal(row.diagnostic.status, fault === "early-exit" ? 23 : null);
+    assert.equal(row.cleanup.listenerClosed, true);
+    assert.equal(row.cleanup.portClosed, true);
+    assert.equal(row.cleanup.fixtureRemoved, true);
+    assertObservedOwnedDead(row.cleanup.listener.pid, row.cleanup.listener.ownerPid);
+    assert.equal(row.cleanup.listener.groupVerified, process.platform !== "win32");
+    t.diagnostic(JSON.stringify({ fault, code, cleanup: row.cleanup }));
+  });
+}
+
+for (const [fault, code] of [["budget", "CAPTURE_BUDGET"], ["diagnostic", "CAPTURE_RECORD_FAULT"], ["diagnostic-trap", "CAPTURE_RECORD_FAULT"]]) {
+  test(`health record controlled ${fault}: primary survives record failure`, { timeout: 30000 }, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ux-record-fault-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, "out"), "--only", "^accounts-health-json$", "--variants", "ci"], {
+      cwd: ROOT, phase: "raw-health-capture", timeoutMs: 25000,
+      env: { ...captureEnv(), TZ: "UTC", UX_CAPTURE_RECORD_FAULT: fault },
+    });
+    requireSuccess(run);
+    const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    assert.equal(row.diagnostic?.error?.code, code, JSON.stringify(row));
+    assert.equal(row.cleanup.listenerClosed, true);
+    assert.equal(row.cleanup.portClosed, true);
+    assert.equal(row.cleanup.fixtureRemoved, true);
+    assert.ok(existsSync(join(dir, "out", "INDEX.md")));
+    assert.ok(JSON.stringify(row).length < 65536);
+    if (fault === "diagnostic-trap") assert.equal(row.diagnosticError, "DIAGNOSTIC_SERIALIZATION_FAILED");
+  });
+}
+
+for (const fault of ["ignore-eof", "never-ready-ignore-eof"]) {
+  test(`health listener controlled ${fault}: manifest survives cleanup failure`, { timeout: 30000 }, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ux-listener-eof-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, "out"), "--only", "^accounts-health-json$", "--variants", "ci"], {
+      cwd: ROOT, phase: "raw-health-capture", timeoutMs: 25000,
+      env: { ...captureEnv(), TZ: "UTC", UX_CAPTURE_LISTENER_FAULT: fault },
+    });
+    requireSuccess(run);
+    const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    assert.equal(row.cleanup.listenerClosed, true);
+    assert.equal(row.cleanup.portClosed, true);
+    assert.equal(row.cleanup.fixtureRemoved, true);
+    assert.equal(row.cleanup.stopAcknowledged, false);
+    assert.ok(row.error);
+    if (fault.startsWith("never-ready")) assert.equal(row.diagnostic.error.code, "CAPTURE_READINESS_TIMEOUT");
+    assert.ok(existsSync(join(dir, "out", "INDEX.md")));
+    assert.equal(row.cleanup.listener.groupVerified, process.platform !== "win32");
+    assertObservedOwnedDead(row.cleanup.listener.pid, row.cleanup.listener.ownerPid);
+    t.diagnostic(JSON.stringify({ fault, primary: row.diagnostic?.error, cleanup: row.cleanup }));
+  });
+}
+
+test("synthetic Windows taskkill failures are explicit, killer exit is not tree-death proof", { timeout: 5000 }, async () => {
+  const { EventEmitter } = await import("node:events");
+  const { terminateWindowsOwner } = await import("./ux-before/capture/owned-child.mjs");
+  assert.equal(typeof terminateWindowsOwner, "function");
+  for (const kind of ["missing", "access-denied", "timeout", "surviving-owner", "closed-owner"]) {
+    let ownerClosed = kind === "closed-owner", killedKiller = false;
+    const calls = [];
+    const result = await terminateWindowsOwner({ ownerPid: 43210, ownerClosed: () => ownerClosed, timeoutMs: 30,
+      spawnImpl(command, args) {
+        calls.push([command, args]);
+        const killer = new EventEmitter();
+        killer.kill = () => { killedKiller = true; return true; };
+        killer.unref = () => {};
+        queueMicrotask(() => {
+          if (kind === "missing") killer.emit("error", Object.assign(new Error("missing"), { code: "ENOENT" }));
+          else if (kind === "access-denied") killer.emit("close", 5, null);
+          else if (kind !== "timeout") killer.emit("close", 0, null);
+        });
+        return killer;
+      },
+    });
+    assert.deepEqual(calls, [["taskkill", ["/PID", "43210", "/T", "/F"]]]);
+    assert.equal(result.treeDead, false, "no process-table/tree identity evidence was supplied");
+    assert.equal(result.cleanupError, { missing: "TASKKILL_ENOENT", "access-denied": "TASKKILL_EXIT_5", timeout: "TASKKILL_TIMEOUT", "surviving-owner": "OWNER_CLOSE_TIMEOUT", "closed-owner": undefined }[kind]);
+    assert.equal(killedKiller, kind === "timeout");
+  }
+});
+
+test("health capture handled termination writes manifest after real listener cleanup", { timeout: 30000,
+  skip: process.platform === "win32" ? "POSIX SIGTERM delivery; native Windows termination remains downstream" : false,
+}, async (t) => {
+  const { startOwned } = await import("./ux-before/capture/owned-child.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "ux-health-signal-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const capture = startOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, "out"), "--only", "^accounts-health-json$", "--variants", "ci"], {
+    cwd: ROOT, phase: "raw-health-capture", timeoutMs: 25000,
+    env: { ...captureEnv(), TZ: "UTC", UX_CAPTURE_FAULT: "hang" },
+  });
+  try {
+    const until = performance.now() + 15000;
+    while (!capture.result.stderr.includes('"type":"ready"') && !capture.result.ownerClosed && performance.now() < until) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.match(capture.result.stderr, /"type":"ready"/);
+    process.kill(capture.result.pid, "SIGTERM"); // exact live command spawned by this test
+    const result = await capture.done;
+    assert.equal(result.status, 143);
+    assert.equal(result.ownerClosed, true);
+    const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    assert.equal(row.cleanup.listenerClosed, true);
+    assert.equal(row.cleanup.portClosed, true);
+    assert.equal(row.cleanup.fixtureRemoved, true);
+    assert.ok(existsSync(join(dir, "out", "INDEX.md")));
+  } finally { if (!capture.result.ownerClosed) await capture.stop(); }
+});
+
+test("POSIX capture ownership verifies actual keeper and command private PGID", {
+  timeout: 10000, skip: process.platform === "win32" ? "POSIX process groups only; Windows adapter is separate" : false,
+}, async () => {
+  const { startOwned } = await import("./ux-before/capture/owned-child.mjs");
+  const child = startOwned(process.execPath, ["-e", 'process.stdout.write("ready\\n"); setInterval(() => {}, 1000)'], {
+    cwd: ROOT, env: captureEnv(), phase: "group-control", timeoutMs: 5000,
+  });
+  try {
+    const until = performance.now() + 3000;
+    while (!child.result.stdout.includes("ready") && performance.now() < until) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(child.result.groupVerified, true);
+    assert.ok(child.result.pid > 0);
+    const probe = (pid) => {
+      const r = spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8", timeout: 1000 });
+      assert.equal(r.status, 0);
+      return Number(r.stdout.trim());
+    };
+    assert.equal(probe(child.result.ownerPid), child.result.ownerPid);
+    assert.equal(probe(child.result.pid), child.result.ownerPid);
+    assert.notEqual(probe(process.pid), child.result.ownerPid);
+  } finally { await child.stop(); }
+  assert.equal(child.result.ownerClosed, true);
+  assert.equal(child.result.cleanupError, undefined);
 });
 
 // ------------------------------------------- the Bun path (ubuntu, run 42590699086)
