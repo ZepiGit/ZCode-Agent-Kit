@@ -13,15 +13,13 @@ const args = process.argv.slice(2);
 // Faults belong only to this synthetic public capture path, never production.
 if (args[0] === "auth" && args[1] === "accounts" && args[2] === "health" && process.env.UX_CAPTURE_FAULT) {
   console.error(`UX_CAPTURE_FAULT ${process.env.UX_CAPTURE_FAULT} pid=${process.pid}`);
-  if (["drain", "early-exit-drain"].includes(process.env.UX_CAPTURE_FAULT)) {
-    // An actual inherited pipe, not a fabricated missing-close event. The
-    // keeper remains live and owns this descendant until its tree is reaped.
-    const { spawn } = await import("node:child_process");
-    const env = { ...process.env };
-    delete env.UX_CAPTURE_FAULT;
-    const holder = spawn(process.env.UX_CAPTURE_NODE!, ["-e", "setInterval(() => {}, 1000)"], { env, stdio: ["ignore", "inherit", "inherit"] });
-    console.error(`UX_CAPTURE_PIPE_HOLDER pid=${holder.pid}`);
-    holder.unref();
+  if (/^(drain|early-exit-drain)/.test(process.env.UX_CAPTURE_FAULT)) {
+    // The actual owned holder now precedes the CLI, not an unacknowledged
+    // Bun descendant. Preserve real CLI exit codes through spawnSync.
+    if (process.env.UX_CAPTURE_PIPE_BOUNDARY !== "owned-holder") {
+      console.error("CAPTURE_FAULT_SETUP missing owned pipe boundary");
+      process.exit(24);
+    }
     process.exit(process.env.UX_CAPTURE_FAULT === "early-exit-drain" ? 23 : 0);
   }
   if (process.env.UX_CAPTURE_FAULT === "early-exit") process.exit(23);

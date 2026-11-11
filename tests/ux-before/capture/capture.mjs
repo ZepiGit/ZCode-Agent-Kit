@@ -75,7 +75,10 @@ async function healthRun(command, args, options) {
   healthChildren.add(owned);
   healthCase.children.add(owned);
   try { return requireSuccess(await owned.done); }
-  finally { healthChildren.delete(owned); }
+  finally {
+    if (options.phase === "health-cli" && process.env.UX_CAPTURE_FAULT) healthCase.cli = owned.result;
+    healthChildren.delete(owned);
+  }
 }
 async function stopHealthChildren() { await Promise.all([...healthChildren].map((child) => child.stop())); }
 for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => {
@@ -769,6 +772,9 @@ async function runScenario(s, variant) {
     recordFailure(row, err);
   } finally {
     if (s.health) {
+      // Fixture faults retain the CLI ledger on success too, so a missing
+      // negative diagnostic cannot hide owner/holder/exit/EOF evidence.
+      if (process.env.UX_CAPTURE_FAULT && healthCase.cli) row.cli = boundedDiagnostic(healthCase.cli);
       row.cleanup = { listenerClosed: !f?.healthListener, portClosed: false, fixtureRemoved: !f };
       try { if (f) Object.assign(row.cleanup, await stopHealth(f)); }
       catch (error) { row.cleanup.error = boundedDiagnostic(error); }
