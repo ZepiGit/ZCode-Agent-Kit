@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cloneArgs, describeFailure, fakeProxySource, fixtureBaseEnv, importBase, pathForms, pinBun, swapPath, tarBinary, windowsGitDir } from "./ux-before/capture/host.mjs";
 import { VOLATILE, compareCaptures, normaliseVolatile } from "./ux-before/compare.mjs";
+import { runOwned, requireSuccess } from "./ux-before/capture/owned-child.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 const TEMPLATE = readFileSync(join(ROOT, "tests", "ux-before", "capture", "fake-proxy.ts"), "utf8");
@@ -120,17 +121,17 @@ test("Linux end to end: a kit path with `\\u` in it starts the fixture proxy (th
 // historical expired-exhaustion verdict; listener/producer/renderer stay real.
 test("accounts health raw capture pipeline preserves millisecond ages and reviewed baselines", {
   timeout: 120_000,
-}, (t) => {
+}, async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "ux-health-age-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const variants = process.platform === "win32" ? ["pipe", "ci"]
     : ["tty-color-80", "tty-color-120", "no-color", "term-dumb", "ascii-locale", "pipe", "ci"];
   const out = join(dir, "out");
-  const run = spawnSync(process.execPath, [CAPTURE, "--kit", ROOT, "--out", out,
+  const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", out,
     "--only", "^accounts-health(-json)?$", "--variants", variants.join(",")], {
-    encoding: "utf8", timeout: 110_000, env: { ...captureEnv(), TZ: "UTC" },
+    cwd: ROOT, phase: "raw-health-capture", timeoutMs: 110_000, env: { ...captureEnv(), TZ: "UTC" },
   });
-  assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
+  requireSuccess(run);
   const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
   assert.equal(manifest.length, variants.length * 2);
   assert.ok(manifest.every((m) => !m.error && m.exit === 0), JSON.stringify(manifest));
@@ -155,6 +156,49 @@ test("accounts health raw capture pipeline preserves millisecond ages and review
     ], "live fixture milliseconds survive the real health JSON producer");
   }
 });
+
+// Controlled faults use the same public capture CLI and real health producer.
+// They prove the harness contract, not the cause of run 42974492278.
+for (const [fault, code, status] of [["early-exit", "CAPTURE_EXIT", 23], ["hang", "CAPTURE_TIMEOUT", null], ["drain", "CAPTURE_DRAIN_TIMEOUT", 0], ["early-exit-drain", "CAPTURE_EXIT", 23]]) {
+  test(`health capture controlled ${fault}: finite owned cleanup and primary diagnostic`, { timeout: 30000 }, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ux-health-fault-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, "out"), "--only", "^accounts-health-json$", "--variants", "ci"], {
+      cwd: ROOT, phase: "raw-health-capture", timeoutMs: 25000, env: { ...captureEnv(), TZ: "UTC", UX_CAPTURE_FAULT: fault },
+    });
+    requireSuccess(run);
+    const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    assert.equal(row.diagnostic?.error?.code, code, JSON.stringify(row));
+    assert.equal(row.diagnostic.status, status);
+    assert.equal(row.diagnostic.phase, "health-cli");
+    assert.equal(row.diagnostic.ownerClosed, true);
+    assert.equal(row.cleanup?.listenerClosed, true);
+    assert.equal(row.cleanup?.portClosed, true);
+    assert.equal(row.cleanup?.fixtureRemoved, true);
+    assert.ok(row.diagnostic.pid > 0 && row.diagnostic.ownerPid > 0);
+    assert.equal(row.diagnostic.pgid, process.platform === "win32" ? null : row.diagnostic.ownerPid);
+    assert.ok(row.diagnostic.stdout.length <= 16384 && row.diagnostic.stderr.length <= 16384);
+    assert.match(row.diagnostic.stderr, /UX_CAPTURE_FAULT/);
+    assert.equal(row.diagnostic.cleanupError, undefined);
+    assert.equal(row.cleanup.stopAcknowledged, true);
+    if (fault.includes("drain")) assert.match(row.diagnostic.stderr, /UX_CAPTURE_PIPE_HOLDER pid=\d+/);
+    for (const pid of [row.diagnostic.pid, row.diagnostic.ownerPid,
+      ...[...row.diagnostic.stderr.matchAll(/UX_CAPTURE_PIPE_HOLDER pid=(\d+)/g)].map((m) => Number(m[1]))]) {
+      let live = true;
+      try {
+        process.kill(pid, 0);
+        // Linux PID 1 may retain an exited orphan's zombie; it is not live.
+        if (process.platform === "linux") live = readFileSync(`/proc/${pid}/stat`, "utf8").split(") ")[1][0] !== "Z";
+      } catch (error) { if (error.code === "ESRCH" || error.code === "ENOENT") live = false; else throw error; }
+      assert.equal(live, false, `owned PID ${pid} must not remain live`);
+    }
+    t.diagnostic(JSON.stringify({ fault, phase: row.diagnostic.phase, status: row.diagnostic.status,
+      signal: row.diagnostic.signal, error: row.diagnostic.error, pid: row.diagnostic.pid,
+      ownerPid: row.diagnostic.ownerPid, pgid: row.diagnostic.pgid, exited: row.diagnostic.exited,
+      drained: row.diagnostic.drained, ownerClosed: row.diagnostic.ownerClosed,
+      listenerClosed: row.cleanup.listenerClosed, portClosed: row.cleanup.portClosed, fixtureRemoved: row.cleanup.fixtureRemoved }));
+  });
+}
 
 // ------------------------------------------- the Bun path (ubuntu, run 42590699086)
 // The kit prints the Bun it runs (doctor's `bun available` row) and an

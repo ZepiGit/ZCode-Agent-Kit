@@ -47,6 +47,34 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { cloneArgs, describeFailure, fakeProxySource as fakeProxySourceFor, fixtureBaseEnv, importBase, pinBun, swapPath, tarBinary, windowsGitDir } from "./host.mjs";
 import { freePort } from "../../free-port.mjs";
+import { startOwned, requireSuccess } from "./owned-child.mjs";
+
+// Health captures used to put a 120s command and two 60s manager calls
+// inside the raw guard's 110s deadline. Own the synthetic listener directly:
+// the guard is about the JSON -> public CLI -> raw writer, not manager stop.
+// One monotonic budget covers ALL selected health captures (not per capture).
+let healthDeadline = null;
+const healthChildren = new Set();
+const healthBudget = (limit) => {
+  const remaining = healthDeadline - performance.now();
+  if (remaining <= 0) {
+    const error = new Error("all health captures exhausted their shared 90s budget");
+    error.diagnostic = { phase: "health-budget", error: { code: "CAPTURE_BUDGET", message: error.message } };
+    throw error;
+  }
+  return Math.max(1, Math.min(limit, remaining));
+};
+const traceHealth = (event) => console.error(`[ux-health] ${JSON.stringify(event)}`);
+async function healthRun(command, args, options) {
+  const owned = startOwned(command, args, { ...options, timeoutMs: healthBudget(options.timeoutMs ?? 5000), onEvent: traceHealth });
+  healthChildren.add(owned);
+  try { return requireSuccess(await owned.done); }
+  finally { healthChildren.delete(owned); }
+}
+async function stopHealthChildren() { await Promise.all([...healthChildren].map((child) => child.stop())); }
+for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => {
+  void stopHealthChildren().finally(() => process.exit(signal === "SIGINT" ? 130 : 143));
+});
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -530,8 +558,8 @@ sc("models", "usage-json-down", "usage --json (down)", { args: ["usage", "--json
 sc("accounts", "accounts-empty", "accounts (empty pool)", { args: ["accounts"], prep: (f) => configured(f) });
 sc("accounts", "accounts-list", "accounts (3 synthetic accounts)", { args: ["accounts"], prep: (f) => { configured(f); seed(f, "accounts"); } });
 sc("accounts", "accounts-json", "accounts --json", { args: ["accounts", "--json"], prep: (f) => { configured(f); seed(f, "accounts"); } });
-sc("accounts", "accounts-health", "accounts health (proxy running, live data)", { args: ["accounts", "health"], prep: (f) => { configured(f); seed(f, "accounts"); running(f); } });
-sc("accounts", "accounts-health-json", "accounts health --json", { args: ["accounts", "health", "--json"], prep: (f) => { configured(f); seed(f, "accounts"); running(f); } });
+sc("accounts", "accounts-health", "accounts health (proxy running, live data)", { args: ["accounts", "health"], health: true });
+sc("accounts", "accounts-health-json", "accounts health --json", { args: ["accounts", "health", "--json"], health: true });
 sc("accounts", "accounts-health-down", "accounts health (proxy down)", { args: ["accounts", "health"], prep: (f) => { configured(f); seed(f, "accounts"); } });
 sc("accounts", "accounts-doctor", "accounts doctor", { args: ["accounts", "doctor"], prep: (f) => { configured(f); seed(f, "accounts"); } });
 sc("accounts", "accounts-quota", "accounts quota (running)", { args: ["accounts", "quota"], prep: (f) => { configured(f); seed(f, "accounts"); running(f); } });
@@ -592,6 +620,39 @@ if (opt("--extra", null) === "json") {
 const manifest = [];
 function save(rel, name, text) { const dir = join(OUT, rel); mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, name), text); }
 
+// Same real capture/CLI/producer path, with fixture-only ownership instead of
+// manager probing. Readiness, exit and pipe drain have distinct acknowledgements.
+async function prepareHealth(f) {
+  healthDeadline ??= performance.now() + 90000;
+  await healthRun(process.execPath, [KIT_CLI(f), "setup", "--harness", "omp,codex", "--account-rotator", "n"], { env: f.env({ UX_CAPTURE_FAULT: "" }), cwd: f.root, phase: "health-setup" });
+  await healthRun(BUN, [join(HERE, "seed-store.ts"), PROXY_SRC_REF, "accounts"], { env: f.env({ UX_CAPTURE_FAULT: "" }), cwd: f.root, phase: "health-seed" });
+  const listener = startOwned(BUN, ["run", join(f.root, "zcode-proxy-src", "src", "index.ts"), "serve"], {
+    cwd: f.root, env: f.env({ ZCODE_PROXY_CONFIG: join(f.root, "proxy", "config.yaml"), UX_CAPTURE_OWNED_LISTENER: "1", UX_CAPTURE_FAULT: "" }), input: null, phase: "health-listener", timeoutMs: healthBudget(15000), onEvent: traceHealth,
+  });
+  healthChildren.add(listener);
+  f.healthListener = listener;
+  const deadline = performance.now() + healthBudget(5000);
+  while (!listener.result.stdout.includes("UX_LISTENER_READY")) {
+    if (listener.result.ownerClosed) requireSuccess(listener.result);
+    if (performance.now() >= deadline) {
+      const diagnostic = { ...listener.result, error: { code: "CAPTURE_READINESS_TIMEOUT", message: "listener did not acknowledge readiness" } };
+      const error = new Error(JSON.stringify(diagnostic)); error.diagnostic = diagnostic; throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  traceHealth({ type: "ready", port: PORT, pid: listener.result.pid, ownerPid: listener.result.ownerPid, pgid: listener.result.pgid });
+}
+async function stopHealth(f) {
+  const listener = f.healthListener;
+  if (!listener) return { listenerClosed: true, portClosed: !await portBusy() };
+  listener.eof();
+  const result = await Promise.race([listener.done, new Promise((resolve) => setTimeout(() => resolve(null), 1000))]);
+  if (!result) await listener.stop();
+  healthChildren.delete(listener);
+  const cleanup = { listenerClosed: listener.result.ownerClosed, stopAcknowledged: listener.result.stdout.includes("UX_LISTENER_STOPPED"), portClosed: !await portBusy(), listener: listener.result };
+  traceHealth({ type: "listener-cleanup", listenerClosed: cleanup.listenerClosed, stopAcknowledged: cleanup.stopAcknowledged, portClosed: cleanup.portClosed });
+  return cleanup;
+}
 async function runScenario(s, variant) {
   await nextPort();
   const f = makeFixture(s.fixture ?? {});
@@ -600,6 +661,7 @@ async function runScenario(s, variant) {
   const install = join(f.base, "install");
   try {
     if (await portBusy()) throw new Error(`port ${PORT} busy before ${s.id}; refusing to continue`);
+    if (s.health) await prepareHealth(f);
     if (s.prep) await s.prep(f);
     if (s.foreign) foreign = await foreignService();
     if (s.vendor) { vendor = await upstreamVendor(); extraEnv.ZCODE_KIT_UPSTREAM_ORIGIN = `http://127.0.0.1:${vendor.address().port}`; }
@@ -622,7 +684,16 @@ async function runScenario(s, variant) {
       Object.assign(extraEnv, { RELEASE_DIR: dir, ZCODE_KIT_INSTALL_DIR: install, ZCODE_KIT_VERSION: s.install.version });
       cmd = "sh"; args = [join(KIT, "install.sh")]; cwd = f.base;
     }
-    const r = await runCaptured(cmd, args, { env: f.env(extraEnv), cwd, variant, input: s.input });
+    let r;
+    if (s.health) {
+      const v = VARIANTS[variant];
+      const started = performance.now();
+      const line = `stty cols ${v.cols} rows ${v.rows} 2>/dev/null; exec ${[cmd, ...args].map(shq).join(" ")}`;
+      const result = await healthRun(v.tty ? "script" : cmd, v.tty ? ["-qec", line, "/dev/null"] : args, {
+        env: { ...f.env(extraEnv), ...v.env, UX_CAPTURE_NODE: process.execPath }, cwd, phase: "health-cli", timeoutMs: process.env.UX_CAPTURE_FAULT === "hang" ? 1000 : 5000,
+      });
+      r = { code: result.status, stdout: result.stdout, stderr: result.stderr, ms: performance.now() - started };
+    } else r = await runCaptured(cmd, args, { env: f.env(extraEnv), cwd, variant, input: s.input });
     const rel = join(s.group, s.id);
     const v = VARIANTS[variant];
     const outText = normalise(r.stdout, f);
@@ -634,12 +705,22 @@ async function runScenario(s, variant) {
     const hasAnsi = /\x1b/.test(r.stdout) || /\x1b/.test(r.stderr ?? "");
     manifest.push({ group: s.group, id: s.id, title: s.title, variant, exit: r.code, ms: r.ms, hasAnsi, ...widthStats(plain + (errPlain ? "\n" + errPlain : "")), command: s.install ? "sh install.sh" : `zcode-kit ${s.args.join(" ")}` });
   } catch (err) {
-    manifest.push({ group: s.group, id: s.id, title: s.title, variant, error: String(err.message ?? err).slice(0, 400) });
+    manifest.push({ group: s.group, id: s.id, title: s.title, variant, error: String(err.message ?? err).slice(0, 400), ...(err.diagnostic ? { diagnostic: err.diagnostic } : {}) });
   } finally {
     await closeServer(foreign); await closeServer(vendor);
-    await stopProxy(f);
-    if (s.install && existsSync(install)) await stopProxy(f, install);
-    rmSync(f.base, { recursive: true, force: true });
+    if (s.health) {
+      const row = manifest[manifest.length - 1];
+      row.cleanup = await stopHealth(f);
+      rmSync(f.base, { recursive: true, force: true });
+      row.cleanup.fixtureRemoved = !existsSync(f.base);
+      if (!row.cleanup.listenerClosed || !row.cleanup.portClosed || !row.cleanup.stopAcknowledged || !row.cleanup.fixtureRemoved) {
+        row.error ??= "health fixture cleanup was not acknowledged";
+      }
+    } else {
+      await stopProxy(f);
+      if (s.install && existsSync(install)) await stopProxy(f, install);
+      rmSync(f.base, { recursive: true, force: true });
+    }
   }
 }
 
