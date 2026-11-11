@@ -58,8 +58,8 @@ const HEALTH_DOC = {
   activeAccountId: "work",
   proxy: { reachable: true, quotaAvailable: true },
   accounts: [
-    { id: "work", probeSource: "live", verdict: "ok", state: "ready", paused: false, plan: "coding-plan", provider: "zai", lastUsedAt: NOW - 120, exhaustedUntil: null, balances: [CODE_LITE], errors: [] },
-    { id: "personal", probeSource: "live", verdict: "exhausted", state: "exhausted", paused: false, plan: "start-plan", provider: "zai", lastUsedAt: NOW - 7200, exhaustedUntil: NOW + 3600, balances: [PLAN_EMPTY], errors: [] },
+    { id: "work", probeSource: "live", verdict: "ok", state: "ready", paused: false, plan: "coding-plan", provider: "zai", lastUsedAt: 1793879880000, exhaustedUntil: null, balances: [CODE_LITE], errors: [] },
+    { id: "personal", probeSource: "live", verdict: "exhausted", state: "exhausted", paused: false, plan: "start-plan", provider: "zai", lastUsedAt: 1793872800000, exhaustedUntil: NOW + 3600, balances: [PLAN_EMPTY], errors: [] },
     { id: "backup", probeSource: "skipped", verdict: "paused", state: "paused", paused: true, plan: "coding-plan", provider: "bigmodel", lastUsedAt: null, exhaustedUntil: null, balances: [], errors: [] },
   ],
   summary: { usable: 1, total: 3, totals: [CODE_LITE, PLAN_BONUS] },
@@ -230,6 +230,20 @@ test("accounts health: one table, verdict words, one number format, usable in th
   assert.ok(stdout.includes("never used"), "a row without use says so");
   assert.ok(out.some((l) => l === "  usable: 1 of 3; * = active account"), `the summary line in the footer: ${stdout}`);
   assert.ok(!stdout.includes("zcode-proxy"), "never names the standalone binary");
+});
+
+test("accounts health preserves last-use ages from millisecond timestamps", async (t) => {
+  // account-health.ts emits lastUsedAt in milliseconds, unlike quota expiresAt.
+  const doc = structuredClone(HEALTH_DOC);
+  doc.accounts[0].lastUsedAt = 1793879880000; // 2026-11-05T11:58:00Z
+  doc.accounts[1].lastUsedAt = 1793872800000; // 2026-11-05T10:00:00Z
+  const { ctx } = proxyCtx(t, { stdout: `${JSON.stringify(doc)}\n` });
+  const { exitCode, records } = await (await load("accounts")).run(args(["accounts", "health"]), ctx);
+  assert.equal(exitCode, 0);
+  const { stdout } = renderLikeEntry("pipe", records);
+  assert.match(stdout, /work[^\n]*used 2m ago/);
+  assert.match(stdout, /personal[^\n]*used 2h ago/);
+  assert.match(stdout, /backup[^\n]*never used/);
 });
 
 test("accounts health: proxy down keeps the table, and the error block on stderr names zcode-kit proxy start", async (t) => {

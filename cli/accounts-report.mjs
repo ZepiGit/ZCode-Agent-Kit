@@ -40,9 +40,9 @@ export function formatBalance(balance) {
 }
 
 /** `used 14h ago` / `never used`, measured against the report's own asOf (deterministic). */
-export function ageText(lastUsedAt, nowSeconds) {
+export function ageText(lastUsedAt, nowMs) {
   if (typeof lastUsedAt !== "number" || !Number.isFinite(lastUsedAt)) return "never used";
-  const seconds = Math.max(0, Math.floor((nowSeconds - lastUsedAt) / 1000));
+  const seconds = Math.max(0, Math.floor((nowMs - lastUsedAt) / 1000));
   if (seconds < 60) return `used ${seconds}s ago`;
   if (seconds < 3600) return `used ${Math.floor(seconds / 60)}m ago`;
   if (seconds < SECONDS_PER_DAY) return `used ${Math.floor(seconds / 3600)}h ago`;
@@ -96,13 +96,13 @@ export function listRecords(doc) {
 
 /** The combined health table: ACCOUNT/VERDICT/PLAN/QUOTA/USED, usable in the footer. Records only; the exit code stays the proxy CLI's. */
 export function healthRecords(doc) {
-  const nowSeconds = Math.floor(Date.parse(doc.asOf) / 1000);
+  const nowMs = Date.parse(doc.asOf);
   const rows = doc.accounts.map((a) => ({
     id: String(a?.id ?? ""),
     verdict: verdictWord(a?.verdict),
     plan: String(a?.plan ?? ""),
     quota: quotaText(a),
-    used: ageText(a?.lastUsedAt, nowSeconds),
+    used: ageText(a?.lastUsedAt, nowMs),
   }));
   const footerParts = [`usable: ${doc.summary.usable} of ${doc.summary.total}`];
   if (doc.activeAccountId) footerParts.push("* = active account");
