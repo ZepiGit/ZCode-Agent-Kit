@@ -127,14 +127,15 @@ function authCtx(t, fixture, { tty = true, fetchThrows = null } = {}) {
 // ------------------------------------------------------------ rendering
 
 /** The entry's renderer (cli/zcode-kit.mjs): text verbatim, JSON as one document, the rest through Out. */
-function renderLikeEntry(variant, records, { json = false } = {}) {
+function renderLikeEntry(variant, records, { json = false, stderrVariant = variant } = {}) {
   const v = C3_VARIANTS[variant];
+  const err = C3_VARIANTS[stderrVariant];
   const mk = (tty, columns) => {
     const chunks = [];
     return { isTTY: tty, columns: tty ? columns : undefined, write(c) { chunks.push(String(c)); return true; }, text: () => chunks.join("") };
   };
   const stdout = mk(v.tty, v.columns);
-  const stderr = mk(v.tty, v.columns);
+  const stderr = mk(err.tty, err.columns);
   const out = createOutput({ stdout, stderr, env: v.env, platform: v.platform, json, clock: fakeClock() });
   let batch = [];
   const flush = () => { if (batch.length) { renderRecords(out, batch); batch = []; } };
@@ -317,6 +318,27 @@ test("auth status piped: byte-identical to the pre-change JSON", async (t) => {
   assert.equal(renderLikeEntry("ci", records).stdout, AUTH_JSON_RUNNING);
   assert.equal(renderLikeEntry("term-dumb", records).stdout, AUTH_JSON_RUNNING);
   assert.deepEqual(requests.map((r) => r.authorization), ["Bearer UXFIXTURE-not-a-secret-0000000000000000000"]);
+});
+
+test("auth status uses stdout alone to choose JSON with asymmetric terminals", async (t) => {
+  for (const [stdoutTTY, stderrTTY] of [[false, true], [true, false]]) {
+    const { ctx } = authCtx(t, AUTH_LOGGED_OUT, { tty: stdoutTTY });
+    ctx.terminal.stderr.isTTY = stderrTTY;
+    const { exitCode, records } = await (await load("auth")).run(args(["auth", "status"]), ctx);
+    assert.equal(exitCode, 0);
+    const { stdout, stderr } = renderLikeEntry(stdoutTTY ? "tty-color-80" : "pipe", records, {
+      stderrVariant: stderrTTY ? "tty-color-80" : "pipe",
+    });
+    if (!stdoutTTY) {
+      assert.equal(stdout, AUTH_JSON_LOGGED_OUT, "a TTY stderr must not turn piped JSON into text");
+      assert.equal(stderr, "", "piped legacy JSON adds no diagnostic bytes");
+    } else {
+      assert.match(stdout.replace(/\x1b\[[0-9;]*m/g, ""), /Logged in\s+no/);
+      assert.match(stderr, /^WARN {2}not logged in$/m);
+      assert.match(stderr, /^ {2}next: zcode-kit auth login zai$/m);
+      assert.ok(!stderr.includes("\x1b"), "redirected stderr uses its own plain capabilities");
+    }
+  }
 });
 
 test("auth status --json on a TTY: the same bytes as the piped output", async (t) => {
