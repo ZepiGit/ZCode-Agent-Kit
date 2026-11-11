@@ -1491,11 +1491,14 @@
     "exit": 0,
     "ms": 288,
     "hasAnsi": false,
-    "maxWidth": 115,
-    "linesOver80": 3,
-    "nonAsciiChars": 2,
-    "glyphs": "—·",
-    "command": "zcode-kit accounts health"
+    "maxWidth": 100,
+    "linesOver80": 5,
+    "nonAsciiChars": 0,
+    "glyphs": "",
+    "command": "zcode-kit accounts health",
+    "captureSource": "Historically Linux-derived path-free pipe/ci baseline; age-only correction reviewed against Linux t46-age-pipeline-20261111-reviewed-clock; NOT a native Windows capture",
+    "nativeWindowsExecuted": false,
+    "msHistorical": true
   },
   {
     "group": "accounts",
@@ -1505,11 +1508,14 @@
     "exit": 0,
     "ms": 247,
     "hasAnsi": false,
-    "maxWidth": 115,
-    "linesOver80": 3,
-    "nonAsciiChars": 2,
-    "glyphs": "—·",
-    "command": "zcode-kit accounts health"
+    "maxWidth": 100,
+    "linesOver80": 5,
+    "nonAsciiChars": 0,
+    "glyphs": "",
+    "command": "zcode-kit accounts health",
+    "captureSource": "Historically Linux-derived path-free pipe/ci baseline; age-only correction reviewed against Linux t46-age-pipeline-20261111-reviewed-clock; NOT a native Windows capture",
+    "nativeWindowsExecuted": false,
+    "msHistorical": true
   },
   {
     "group": "accounts",

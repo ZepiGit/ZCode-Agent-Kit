@@ -12,6 +12,14 @@ const REAL_PROXY_SRC = "__REAL_PROXY_SRC__";
 const args = process.argv.slice(2);
 
 if (args[0] !== "serve") {
+  // Pin only the fixture health CLI's report clock to the reviewed capture
+  // date. The fixed status timestamps below are then 5d old, and its expired
+  // exhaustion stays expired (pinning to Nov 5 would change the verdict).
+  // The real producer still builds asOf and consumes real loopback JSON.
+  // No production clock, other command, timer or capture normalizer changes.
+  if (args[0] === "auth" && args[1] === "accounts" && args[2] === "health") {
+    Date.now = () => Date.parse("2026-11-11T00:00:00.000Z");
+  }
   const real = await import(`${REAL_PROXY_SRC}/src/index.ts`);
   real.main();
 } else {

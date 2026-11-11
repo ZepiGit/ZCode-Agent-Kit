@@ -112,6 +112,50 @@ test("Linux end to end: a kit path with `\\u` in it starts the fixture proxy (th
   assert.equal(JSON.parse(readFileSync(join(out, "proxy", "proxy-status-json-running", "pipe.txt"), "utf8").replace(/<PID>/g, "0")).health, "ours", "the fixture proxy answered as this kit's own");
 });
 
+// Ticket 46: exercise the real proxy health JSON producer, public kit CLI,
+// Out renderer and capture writer. Do NOT use compareCaptures here: its
+// relative-age rule would hide the old milliseconds/seconds regression.
+// fake-proxy.ts pins only the health CLI clock to 2026-11-11T00:00Z;
+// the unchanged live timestamps from Nov 5 are 5d old. This keeps the
+// historical expired-exhaustion verdict; listener/producer/renderer stay real.
+test("accounts health raw capture pipeline preserves millisecond ages and reviewed baselines", {
+  timeout: 120_000,
+}, (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ux-health-age-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const variants = process.platform === "win32" ? ["pipe", "ci"]
+    : ["tty-color-80", "tty-color-120", "no-color", "term-dumb", "ascii-locale", "pipe", "ci"];
+  const out = join(dir, "out");
+  const run = spawnSync(process.execPath, [CAPTURE, "--kit", ROOT, "--out", out,
+    "--only", "^accounts-health(-json)?$", "--variants", variants.join(",")], {
+    encoding: "utf8", timeout: 110_000, env: { ...captureEnv(), TZ: "UTC" },
+  });
+  assert.equal(run.status, 0, (run.stdout + run.stderr).slice(-2000));
+  const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
+  assert.equal(manifest.length, variants.length * 2);
+  assert.ok(manifest.every((m) => !m.error && m.exit === 0), JSON.stringify(manifest));
+  const baseline = join(ROOT, "tests", "ux-before", process.platform === "win32" ? "windows" : "linux");
+  for (const variant of variants) {
+    const rel = join("accounts", "accounts-health", `${variant}.txt`);
+    const raw = readFileSync(join(out, rel), "utf8");
+    assert.match(raw, /work[^\n]*used 5d ago/, `${variant}: literal age, no volatility normalizer`);
+    assert.match(raw, /personal[^\n]*used 5d ago/, `${variant}: literal age, no volatility normalizer`);
+    assert.match(raw, /backup[^\n]*never used/);
+    assert.doesNotMatch(raw, /used 0s ago/);
+    assert.equal(raw, readFileSync(join(baseline, rel), "utf8"), `${variant}: raw baseline bytes`);
+    if (variant !== "pipe" && variant !== "ci") {
+      const ansi = rel.replace(/\.txt$/, ".ansi");
+      assert.equal(readFileSync(join(out, ansi), "utf8"), readFileSync(join(baseline, ansi), "utf8"), `${variant}: raw ANSI baseline bytes`);
+    }
+    assert.equal(existsSync(join(out, "accounts", "accounts-health", `${variant}.stderr.txt`)), false);
+    const doc = JSON.parse(readFileSync(join(out, "accounts", "accounts-health-json", `${variant}.txt`), "utf8"));
+    assert.equal(doc.asOf, "<TS>", "only the existing ISO timestamp capture rule applies");
+    assert.deepEqual(doc.accounts.map((a) => [a.id, a.lastUsedAt]), [
+      ["work", 1793879880000], ["personal", 1793872800000], ["backup", null],
+    ], "live fixture milliseconds survive the real health JSON producer");
+  }
+});
+
 // ------------------------------------------- the Bun path (ubuntu, run 42590699086)
 // The kit prints the Bun it runs (doctor's `bun available` row) and an
 // 80-column TTY wraps that row by the path's real length before `<BUN>`
