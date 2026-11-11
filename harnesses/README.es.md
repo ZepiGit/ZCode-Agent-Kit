@@ -21,7 +21,27 @@ guarda fuera de `node_modules`, en el estado exclusivo de esa instalación.
 
 ## Configurado por `zcode-kit setup` (harnesses detectados, solo con consentimiento)
 
-`zcode-kit setup --harness auto` detecta los harnesses instalados y pregunta, por cada uno sin decisión guardada, "Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]". Un `y` configura ese harness; `n` lo omite y deja sus archivos intactos, y sin terminal se omite todo harness sin decidir. Ctrl-C detiene las preguntas (código de salida 130); lo que ya respondiste con `y` queda configurado. Si únicamente se detecta OMP, no se crean configuraciones ni wrappers de Claude/Codex. Las decisiones se guardan en un archivo por harness en `generated/harness-choices/` y forman parte de la transacción de configuración (un rollback las elimina de nuevo); `zcode-kit update` y `zcode-kit doctor --fix` solo vuelven a aplicar integraciones consentidas (un `y`, una selección explícita o `zcode-kit integrate <harness>`), y un `n` guardado se respeta hasta que `--harness`, `integrate` o `zcode-kit setup --reask` (vuelve a preguntar en una terminal) lo cambien. Una integración que el kit creó antes de preguntar se actualiza en ejecuciones desatendidas, pero nunca se convierte en consentimiento. Para ejecuciones desatendidas selecciona los harnesses con `--harness omp,codex` o `ZCODE_KIT_HARNESSES=omp,codex` (`none` omite todos los detectados); los id desconocidos son errores. El puente MCP del kit solo se registra con consentimiento aparte: una selección explícita o un `y` dado tras la nota MCP que la configuración muestra antes de la pregunta (`--no-mcp` lo desactiva); `integrate`, una actualización o una decisión guardada sin esa nota nunca lo registran. Un harness que falla no detiene a los demás: sus propios cambios parciales se deshacen, el resumen lo lista como fallido y la configuración termina con código 20 (los instaladores continúan con una advertencia).
+`zcode-kit setup --harness auto` detects installed harnesses and collects
+consent in a fitting-terminal checkbox list. Arrows move, Space toggles,
+`a` toggles all editable rows, and nonempty Enter confirms checked yes and
+unchecked no. Saved choices stay locked unless `--reask`. Esc, empty Enter
+and EOF save no new decision: readable owned integrations may refresh;
+unowned or unreadable choices skip. The full per-row consequence is shown
+before input arms. Ctrl-C aborts an unconfirmed batch with exit 130 and no
+provisional apply. No-color/dumb/small/unknown-size terminals retain
+individual "Configure ZCode for <HARNESS>? [y/n]" questions; already applied
+line answers remain on later abort. CI/pipes ask nothing. A user with only
+OMP gets no Claude/Codex configuration or generated wrapper files.
+
+Marked paste/text contamination resets provisional edits; identical valid
+unmarked key bytes cannot be distinguished from typing. The one lexical CR
+bit consumes an immediately adjacent LF even across the next-question
+handoff: an indistinguishable fresh LF-only key can be consumed once; CR or
+a later LF works. Completed setup prints five Next steps commands and at
+most one concrete qualified launch row, with one plain install.log copy.
+The launch row certifies configuration, not sign-in or a model reply.
+
+Las decisiones se guardan en un archivo por harness en `generated/harness-choices/` y forman parte de la transacción de configuración (un rollback las elimina de nuevo); `zcode-kit update` y `zcode-kit doctor --fix` solo vuelven a aplicar integraciones consentidas (un `y`, una selección explícita o `zcode-kit integrate <harness>`), y un `n` guardado se respeta hasta que `--harness`, `integrate` o `zcode-kit setup --reask` (vuelve a preguntar en una terminal) lo cambien. Una integración que el kit creó antes de preguntar se actualiza en ejecuciones desatendidas, pero nunca se convierte en consentimiento. Para ejecuciones desatendidas selecciona los harnesses con `--harness omp,codex` o `ZCODE_KIT_HARNESSES=omp,codex` (`none` omite todos los detectados); los id desconocidos son errores. El puente MCP del kit solo se registra con consentimiento aparte: una selección explícita o un `y` dado tras la nota MCP que la configuración muestra antes de la pregunta (`--no-mcp` lo desactiva); `integrate`, una actualización o una decisión guardada sin esa nota nunca lo registran. Un harness que falla no detiene a los demás: sus propios cambios parciales se deshacen, el resumen lo lista como fallido y la configuración termina con código 20 (los instaladores continúan con una advertencia).
 
 | Harness | Mecanismo | Impacto en la config existente |
 |---|---|---|

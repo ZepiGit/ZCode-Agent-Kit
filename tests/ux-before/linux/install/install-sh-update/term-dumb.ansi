@@ -55,6 +55,14 @@ OK  Connection check - Setup live smoke skipped (CI/test or explicit ZCODE_KIT_S
     API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+
+Next steps ---------------------------------------------------------------------
+  zcode-kit doctor        Check the installation
+  zcode-kit run codex     Launch Codex CLI wired to ZCode
+  zcode-kit proxy start   Start the proxy for manual clients
+  zcode-kit proxy status  Check proxy health and connection details
+  zcode-kit auth status   Check sign-in status
+  zcode-kit --help        Browse all commands
   [32m[OK][0m   zcode-kit command installed
   note: <HOME>/.local/bin is not on your PATH - add it to use zcode-kit from anywhere
 

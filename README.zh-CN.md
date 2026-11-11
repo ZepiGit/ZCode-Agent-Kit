@@ -22,11 +22,11 @@
 
 ## 第 2 步 — 安装一次 Kit
 
-在下面的正式版安装器和 npm 之间选择一种方式。正式版安装器会替你运行设置，无须再单独运行设置命令。设置会对每个检测到的助手提问一次：**"Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"**（其中是助手名称），只有回答 `y` 后才修改该助手的配置；回答 `n` 会跳过它，其设置保持不变。没有终端回答时不会新增任何配置：只有在你明确选择（见下文）或此前已同意的情况下才会配置助手，Kit 在提问之前创建的集成只会保持更新。
+Choose the release installer or npm below. The release installer runs setup for you, so there is no separate setup command to run afterward. Setup collects consent for detected assistants using the checkbox list described below, or individual **"Configure ZCode for <HARNESS>? [y/n]"** questions on fallback terminals. A checked row in a nonempty confirmation or a line `y` configures that assistant; a deliberate no skips it without refreshing its files. Absent answers save no new decision: a readable existing kit-owned integration may still refresh, as disclosed before input arms.
 
-安装器会显示四个编号步骤、每个助手一行结果（已配置、已跳过或失败）、连接检查，以及供手动配置客户端使用的连接详情。详细的设置输出保存在屏幕提示的 `install.log` 中；设置 `ZCODE_KIT_VERBOSE=1` 可显示全部输出，设置 `NO_COLOR=1` 可显示纯文本。交互式安装会对每个助手以及（单独地）账号轮换问题询问 `y` 或 `n`；按 Ctrl-C 会停止提问，所有未回答 `y` 的项目保持不变。无人值守安装请用 `ZCODE_KIT_HARNESSES=omp,codex`（或 `none`）明确选择助手，并设置 `ZCODE_KIT_ACCOUNT_ROTATOR=y` 或 `n`；没有明确选择时，未决定的助手会被跳过，原有的账号轮换设置保持不变。回答保存在 `generated/harness-choices/` 中：之后的设置、update 或 `zcode-kit doctor --fix` 只会刷新你已同意的助手（回答 `y`、明确选择或 `zcode-kit integrate <助手>`），绝不会重新集成已跳过的助手；Kit 在提问之前创建的集成会保持更新，但只有在你回答 `y` 后才算作同意。`zcode-kit setup --reask` 会在终端中对每个检测到的助手重新提问。即使安装成功，连接检查失败仍会显示为警告。
+The installer shows four numbered stages, one result line per assistant (configured, skipped or failed), a connection check and the connection details for manual client setup. Detailed setup output is saved to the displayed `install.log`; set `ZCODE_KIT_VERBOSE=1` for full output and `NO_COLOR=1` for plain text. Interactive installs collect assistant consent and ask a separate Account Rotator question. Ctrl-C aborts an unconfirmed checkbox batch without applying it; on the fallback sequential path, already applied answers remain. For unattended installs, select assistants explicitly with `ZCODE_KIT_HARNESSES=omp,codex` (or `none`) and set `ZCODE_KIT_ACCOUNT_ROTATOR=y` or `n`; without an explicit selection, undecided assistants are skipped and the existing Account Rotator setting is preserved. Answers are stored under `generated/harness-choices/`: a later setup, update or `zcode-kit doctor --fix` refreshes only assistants you consented to (a `y`, an explicit selection or `zcode-kit integrate <assistant>`) and never re-integrates a skipped one; an integration the kit created before it asked is kept current but only counts as consent once you answer `y`. `zcode-kit setup --reask` asks every detected assistant again on a terminal. A failed connection check remains a warning even when installation succeeds.
 
-> **运行安装器之前：**安装器会下载并执行脚本，只修改你回答 `y` 的助手的配置，并可能为这些助手注册 MCP 工具。设置时也会尝试一次小型模型请求，可能消耗额度。变更会被记录，但之后若发生错误，先前的变更仍可能保留。如果安全政策有要求，请先检查安装脚本。
+> **Before you run the installer:** it downloads and executes a script, changes assistant configuration only under current or saved consent (or the disclosed existing-integration refresh), and may register MCP tools only with the separate eligible consent. Setup also attempts a small model request that can use quota. Changes are recorded, but a later failure can leave earlier changes in place. Inspect the installer if required by your security policy.
 
 **Windows — PowerShell，无须管理员权限：**
 
@@ -60,7 +60,9 @@ npm install -g zcode-agent-kit@latest
 zcode-kit setup --harness auto --installer
 ```
 
-npm 会安装 `zcode-kit` 和 `zcode-agent-kit` 两个命令。第二个命令会安装 Kit 的依赖项，对每个检测到的助手提出一个 y/n 问题，然后询问账号轮换的 y/n 问题。安装 npm 包后请运行该命令。使用同一种安装方式，以确保命令、配置和代理属于同一份 Kit。
+npm installs the `zcode-kit` and `zcode-agent-kit` commands. The second command installs the kit's dependencies, collects assistant consent and then asks the separate Account Rotator y/n question. Run it after installing the npm package. Use one installation method to keep your command, configuration and proxy tied to the same kit copy.
+
+Received marked paste and contaminated text are discarded. Unmarked valid key bytes cannot be distinguished from identical typing; the selector does not promise universal paste detection. Completed setup ends with five paste-safe commands under **Next steps**, plus at most one concrete launch command for a successfully configured, consented assistant. One plain copy is kept in `install.log`, including installer mode. That launch row confirms configuration, not an installed executable, sign-in, quota or a working model reply.
 
 ## 第 3 步 — 在所选助手中使用 GLM-5.3(-flash)
 

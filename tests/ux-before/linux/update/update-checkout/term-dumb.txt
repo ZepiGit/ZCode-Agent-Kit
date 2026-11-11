@@ -16,11 +16,11 @@ remote: Total 3 (delta 2), reused 0 (delta 0), pack-reused 0
 Unpacking objects:  33% (1/3)
 Unpacking objects:  66% (2/3)
 Unpacking objects: 100% (3/3)
-Unpacking objects: 100% (3/3), 270 bytes | 270.00 KiB/s, done.
+Unpacking objects: 100% (3/3), 267 bytes | 267.00 KiB/s, done.
 From <FIXTURE>/origin
-   de49d51..2d3de6d  main       -> origin/main
+   e806cd5..8eb2562  main       -> origin/main
 not running
-Updating de49d51..2d3de6d
+Updating e806cd5..8eb2562
 Fast-forward
  package.json | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
@@ -53,6 +53,13 @@ OK  Connection check - Setup live smoke skipped (CI/test or explicit ZCODE_KIT_S
     API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+
+Next steps ---------------------------------------------------------------------
+  zcode-kit doctor        Check the installation
+  zcode-kit proxy start   Start the proxy for manual clients
+  zcode-kit proxy status  Check proxy health and connection details
+  zcode-kit auth status   Check sign-in status
+  zcode-kit --help        Browse all commands
 update: starting the proxy on the updated code...
 starting zcode-proxy ...
 started (pid <PID>) — healthy on http://127.0.0.1:18458

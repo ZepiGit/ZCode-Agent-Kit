@@ -1,7 +1,7 @@
 unknown command: frobnicate
 zcode-kit — local ZCode provider for your own agent harnesses
 
-  zcode-kit setup [--harness auto|omp,pi,...|none] [--select]   bootstrap + one y/n question per detected harness
+  zcode-kit setup [--harness auto|omp,pi,...|none] [--select]   bootstrap + assistant consent
   zcode-kit integrate <harness> [--dry-run]     explicit consent for one harness
   zcode-kit run <harness> -- <args>             launch harness wired to ZCode
   zcode-kit doctor [--fix] [--harness <id>] [--json] [--upstream] | doctor --forget <harness>
@@ -14,12 +14,18 @@ zcode-kit — local ZCode provider for your own agent harnesses
   zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
   (update keeps .proxykey, proxy/config.yaml, logs, backups, generated and node_modules)
-  (setup: auto asks "Configure ZCode as a provider ... in <HARNESS>? [y/n]" per detected harness;
+  (setup: auto uses a checkbox list when the terminal fits: arrows move, Space toggles,
+   a toggles all editable rows, Enter confirms; Esc/empty Enter/EOF saves no new decision.
+   Saved choices stay locked unless --reask. No-answer may refresh an existing kit integration.
+   No-color/dumb/small/unknown geometry uses individual [y/n] questions;
    without a terminal, undecided harnesses are skipped — never configured silently)
   (setup: --harness <list> or ZCODE_KIT_HARNESSES=<list> selects harnesses without questions (unattended);
    none skips all; the selection also limits MCP registration; --no-mcp skips registration;
    answers are remembered under generated/harness-choices/ — --reask asks again;
    --select shows one numbered list instead: chosen = configured, the other detected ones = skipped)
+  (setup: Next steps lists five complete commands and at most one successfully configured launch target;
+   configuration is not proof of sign-in or a model reply. Marked paste/text is discarded;
+   unmarked valid-only key bytes cannot be distinguished from typing)
   (doctor: --forget <harness> removes a stored decision (the integration stays; setup asks again);
    --upstream compares the kit's gateway with the provider config the ZCode client receives — network, opt-in)
   (proxy status --json: one object, connection details without the key; exit 0 only when this kit's proxy answers)
@@ -30,6 +36,6 @@ zcode-kit — local ZCode provider for your own agent harnesses
 Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
 4 safe-start refused · 5 auth/identity failure ·
 20 setup: at least one harness failed, the others are configured ·
-130 setup aborted with Ctrl-C (answers already given were applied)
+130 setup aborted with Ctrl-C (unconfirmed checkbox batch not applied; prior applied answers remain)
 
 Harnesses: omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose

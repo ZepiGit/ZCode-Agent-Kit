@@ -482,7 +482,8 @@ test("help: the usage text on stdout, exit 0, naming every harness", async () =>
   assert.equal(records.length, 1);
   assert.equal(records[0].stream, "stdout");
   assert.match(records[0].text, /^zcode-kit — local ZCode provider for your own agent harnesses\n\n {2}zcode-kit setup /);
-  assert.match(records[0].text, /\n130 setup aborted with Ctrl-C \(answers already given were applied\)\n\nHarnesses: omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose\n$/);
+  // Round39 / onboarding design §2.2: an unconfirmed batch is atomic; prior line answers stay applied.
+  assert.match(records[0].text, /\n130 setup aborted with Ctrl-C \(unconfirmed checkbox batch not applied; prior applied answers remain\)\n\nHarnesses: omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose\n$/);
 });
 
 test("an unknown command: the error on stderr, then the usage text on stdout, exit 2", async () => {

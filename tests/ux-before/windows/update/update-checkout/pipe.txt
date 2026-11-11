@@ -1,5 +1,5 @@
 not running
-Updating b1ec07e..9828c98
+Updating 4093b80..086b7ec
 Fast-forward
  package.json | 72 ++++++++++++++++++++++++++++++------------------------------
  1 file changed, 36 insertions(+), 36 deletions(-)
@@ -25,6 +25,13 @@ INFO  Account Rotator disabled (saved choice; not asked again).
     API key (Bearer / x-api-key):  (redacted: not an interactive terminal — print it with: zcode-kit models --show-key)
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+
+Next steps ---------------------------------------------------------------------
+  zcode-kit doctor        Check the installation
+  zcode-kit proxy start   Start the proxy for manual clients
+  zcode-kit proxy status  Check proxy health and connection details
+  zcode-kit auth status   Check sign-in status
+  zcode-kit --help        Browse all commands
 update: starting the proxy on the updated code...
 starting zcode-proxy ...
 started (pid <PID>) — healthy on http://127.0.0.1:18458

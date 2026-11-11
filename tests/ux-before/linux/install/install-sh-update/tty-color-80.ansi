@@ -70,6 +70,14 @@ n
     API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
     Model IDs:                     glm-5.3, glm-5.3-flash
     Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+
+[1mNext steps[0m [2m─────────────────────────────────────────────────────────────────────[0m
+  [1mzcode-kit doctor      [0m  [2mCheck the installation[0m
+  [1mzcode-kit run codex   [0m  [2mLaunch Codex CLI wired to ZCode[0m
+  [1mzcode-kit proxy start [0m  [2mStart the proxy for manual clients[0m
+  [1mzcode-kit proxy status[0m  [2mCheck proxy health and connection details[0m
+  [1mzcode-kit auth status [0m  [2mCheck sign-in status[0m
+  [1mzcode-kit --help      [0m  [2mBrowse all commands[0m
   [32m[OK][0m   zcode-kit command installed
   note: <HOME>/.local/bin is not on your PATH - add it to use zcode-kit from anywhere
 
