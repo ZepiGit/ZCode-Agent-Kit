@@ -179,8 +179,26 @@ for (const [fault, code, status] of [["early-exit", "CAPTURE_EXIT", 23], ["hang"
     });
     requireSuccess(run);
     const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    // Print bounded fixture ownership evidence before the first assertion.
+    t.diagnostic(JSON.stringify({ fault, row }));
     assert.equal(row.diagnostic?.error?.code, code, JSON.stringify(row));
     assert.equal(row.diagnostic.status, status);
+    if (fault.includes("drain")) {
+      assert.equal(row.diagnostic.holder.ready, true);
+      assert.equal(row.diagnostic.holder.liveAfterCliExit, true);
+      assert.equal(row.diagnostic.holder.closed, true);
+      assert.ok(row.diagnostic.holder.pid > 0);
+      assert.ok(row.diagnostic.holder.startId);
+      assert.deepEqual(row.diagnostic.drainObservation, { exited: true, drained: false, holderLive: true, status, signal: null }, "real exit plus missing EOF at the original observer deadline");
+      assert.equal(row.diagnostic.drained, true, "release permits actual EOF during cleanup");
+      assert.equal(row.diagnostic.holder.exited, true);
+      assert.equal(row.diagnostic.holder.status, 0);
+      assert.equal(row.diagnostic.cliClosed, true, "actual CLI spawn handle closed");
+      assert.ok(row.diagnostic.events.indexOf("holder-ready,") < row.diagnostic.events.indexOf("spawn,"));
+      assert.ok(row.diagnostic.events.indexOf("exit,") < row.diagnostic.events.indexOf("holder-live,"));
+      assert.match(row.diagnostic.stdout, new RegExp(row.diagnostic.holder.startId));
+      assert.match(row.diagnostic.stderr, new RegExp(row.diagnostic.holder.startId));
+    }
     assert.equal(row.diagnostic.phase, "health-cli");
     assert.equal(row.diagnostic.ownerClosed, true);
     assert.equal(row.cleanup?.listenerClosed, true);
@@ -208,6 +226,51 @@ for (const [fault, code, status] of [["early-exit", "CAPTURE_EXIT", 23], ["hang"
       ownerPid: row.diagnostic.ownerPid, pgid: row.diagnostic.pgid, exited: row.diagnostic.exited,
       drained: row.diagnostic.drained, ownerClosed: row.diagnostic.ownerClosed,
       listenerClosed: row.cleanup.listenerClosed, portClosed: row.cleanup.portClosed, fixtureRemoved: row.cleanup.fixtureRemoved }));
+  });
+}
+
+for (const fault of ["drain-release", "drain-startup-failed", "drain-ack-missing", "none"]) {
+  test(`health pipe handshake ${fault}: real public capture control`, { timeout: 30000 }, async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "ux-health-handshake-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const run = await runOwned(process.execPath, [CAPTURE, "--kit", ROOT, "--out", join(dir, "out"), "--only", "^accounts-health-json$", "--variants", "ci"], {
+      cwd: ROOT, phase: "raw-health-capture", timeoutMs: 25000,
+      env: { ...captureEnv(), TZ: "UTC", UX_CAPTURE_FAULT: fault },
+    });
+    requireSuccess(run);
+    const [row] = JSON.parse(readFileSync(join(dir, "out", "manifest.json"), "utf8"));
+    t.diagnostic(JSON.stringify({ fault, row }));
+    const cli = row.cli;
+    assert.ok(cli.pid > 0 || fault.includes("failed") || fault.includes("missing"));
+    assert.equal(cli.ownerClosed, true);
+    assert.equal(row.cleanup.listenerClosed, true);
+    assert.equal(row.cleanup.portClosed, true);
+    assert.equal(row.cleanup.fixtureRemoved, true);
+    assert.ok(existsSync(join(dir, "out", "INDEX.md")));
+    if (["drain-startup-failed", "drain-ack-missing"].includes(fault)) {
+      assert.equal(row.diagnostic.error.code, "CAPTURE_FAULT_SETUP");
+      assert.equal(cli.holder.ready, false);
+      assert.equal(cli.holder.exited, true);
+      assert.equal(cli.holder.closed, true);
+      assert.equal(cli.exited, false, "unacknowledged setup must not launch a CLI");
+    } else {
+      assert.equal(row.error, undefined);
+      assert.equal(row.exit, 0);
+      assert.equal(cli.error, null);
+      assert.equal(cli.exited, true);
+      assert.equal(cli.drained, true);
+      if (fault === "drain-release") {
+        assert.equal(cli.holder.ready, true);
+        assert.equal(cli.holder.liveAfterCliExit, true);
+        assert.equal(cli.holder.pipeOpenAfterCliExit, true);
+        assert.equal(cli.holder.exited, true);
+        assert.equal(cli.holder.closed, true);
+        assert.equal(cli.holder.status, 0);
+        assert.ok(cli.events.indexOf("exit") < cli.events.indexOf("holder-live"));
+        assert.ok(cli.events.indexOf("holder-exit") < cli.events.indexOf("drained"));
+      } else assert.equal(cli.holder, undefined, "no holder means no drain timeout");
+    }
+    assert.equal(cli.cleanupError, undefined);
   });
 }
 
