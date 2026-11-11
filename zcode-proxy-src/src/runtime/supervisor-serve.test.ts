@@ -47,9 +47,10 @@ async function heldMock(): Promise<Mock> {
   return mock;
 }
 
-interface Proxy { child: ChildProcess; out(): string; exited: Promise<number | null>; key: string; base: string; dir: string; home: string; token: string; port: number }
+interface Proxy { child: ChildProcess; out(): string; exited: Promise<number | null>; key: string; base: string; dir: string; home: string; token: string; port: number; fixtureEnv: Record<string, string> }
 
-async function spawnProxy(mock: Mock, managed = false, dirtyMetadata = false): Promise<Proxy> {
+type DirtyMode = false | true | "serve"; // true retains the earlier component-composition proof
+async function spawnProxy(mock: Mock, managed = false, dirtyMetadata: DirtyMode = false): Promise<Proxy> {
   const dir = mkdtempSync(join(tmpdir(), "t21-serve-"));
   dirs.push(dir);
   const home = join(dir, "home");
@@ -69,6 +70,7 @@ async function spawnProxy(mock: Mock, managed = false, dirtyMetadata = false): P
   writeFileSync(config, [
     "server:", `  port: ${port}`, '  host: "127.0.0.1"',
     "auth:", `  proxyApiKey: "${key}"`,
+    ...(dirtyMetadata === "serve" ? ["  accounts:", "    enabled: true"] : []),
     "provider: zai", "plan: coding-plan",
     "providers:", "  zai:", `    anthropicBase: "${mock.base}/api/anthropic"`, `    openaiBase: "${mock.base}/api/coding/paas/v4"`,
     "  bigmodel:", `    anthropicBase: "${mock.base}/api/anthropic"`, `    openaiBase: "${mock.base}/api/coding/paas/v4"`,
@@ -92,7 +94,8 @@ async function spawnProxy(mock: Mock, managed = false, dirtyMetadata = false): P
     ZCODE_PROXY_ACCOUNTS_PATH: join(dir, "accounts.json"),
   });
   if (managed) Object.assign(env, { ZCODE_KIT_STOP_TOKEN: token, ZCODE_KIT_LOG_DIR: join(dir, "logs") });
-  if (dirtyMetadata) {
+  if (dirtyMetadata === "serve") env.ZCODE_PROXY_ACCOUNTS_PATH = join(home, "synthetic-serve-accounts.json");
+  if (dirtyMetadata === true) {
     env.SYNTHETIC_METADATA_PATH = join(dir, "synthetic-metadata.json");
     writeFileSync(env.SYNTHETIC_METADATA_PATH, JSON.stringify([{ id: "synthetic", failureGeneration: 0, lastFailureAt: 1, exhaustedUntil: 2 }]));
   }
@@ -101,8 +104,17 @@ async function spawnProxy(mock: Mock, managed = false, dirtyMetadata = false): P
 await saveCredential({ apiKey: "fixture-key-" + crypto.randomUUID(), secret: "fixture-secret-" + crypto.randomUUID(), provider: "zai" });`], { env, encoding: "utf8", timeout: 30_000 });
   if (made.status !== 0) throw new Error(`fixture credential: ${made.stderr}`);
 
-  const entry = dirtyMetadata ? [join(SRC, "runtime", "__fixtures__", "dirty-stop.ts"), config] : [join(SRC, "index.ts"), "serve", config];
-  const child = spawn(process.execPath, ["--preload", join(SRC, "runtime", "__fixtures__", "egress-guard.ts"), ...entry], { env, stdio: ["ignore", "pipe", "pipe"] });
+  if (dirtyMetadata === "serve") {
+    const madePool = spawnSync(process.execPath, ["-e", `import { saveAccountStore } from ${JSON.stringify(join(SRC, "auth", "account-store.ts"))};
+await saveAccountStore([
+  { id: "synthetic", plan: "coding-plan", credential: { apiKey: "synthetic-serve-key", provider: "zai" }, failureGeneration: 0, lastFailureAt: 1, exhaustedUntil: 2 },
+  { id: "untouched", paused: true, credential: { apiKey: "synthetic-untouched-key", provider: "zai" }, failureGeneration: 7, lastFailureAt: 3, exhaustedUntil: 4 }
+]);`], { env, encoding: "utf8", timeout: 30_000 });
+    if (madePool.status !== 0) throw new Error(`fixture pool: ${madePool.stderr}`);
+  }
+  const entry = dirtyMetadata === true ? [join(SRC, "runtime", "__fixtures__", "dirty-stop.ts"), config] : [join(SRC, "index.ts"), "serve", config];
+  const preload = dirtyMetadata === "serve" ? ["--preload", join(SRC, "runtime", "__fixtures__", "dirty-serve-preload.ts")] : [];
+  const child = spawn(process.execPath, ["--preload", join(SRC, "runtime", "__fixtures__", "egress-guard.ts"), ...preload, ...entry], { env, stdio: ["ignore", "pipe", "pipe"] });
   children.push(child);
   let out = "";
   child.stdout!.on("data", (d) => { out += d; });
@@ -113,7 +125,7 @@ await saveCredential({ apiKey: "fixture-key-" + crypto.randomUUID(), secret: "fi
     const log = join(dir, "logs", "proxy.log");
     return managed && existsSync(log) && readFileSync(log, "utf8").includes(`listening on http://127.0.0.1:${port}`);
   }, 20_000, () => out);
-  return { child, out: () => out, exited, key, base: `http://127.0.0.1:${port}`, dir, home, token, port };
+  return { child, out: () => out, exited, key, base: `http://127.0.0.1:${port}`, dir, home, token, port, fixtureEnv: env };
 }
 
 async function until(cond: () => boolean, ms: number, detail: () => string = () => ""): Promise<void> {
@@ -141,17 +153,23 @@ const body = JSON.stringify({ model: "glm-4.6", max_tokens: 8, messages: [{ role
 
 // No platform skip: the Windows CI leg must execute this real serve + manager
 // CLI path, not an injected flush callback. Only fixture stores are opened.
-async function managerStopProof(dirtyMetadata = false): Promise<void> {
+async function managerStopProof(dirtyMetadata: DirtyMode = false): Promise<void> {
   const mock = await heldMock();
   mocks.push(mock);
   const p = await spawnProxy(mock, true, dirtyMetadata);
   const { createLifecycle } = await import(pathToFileURL(join(p.dir, "lib", "proxy-lifecycle.mjs")).href);
   const lifecycle = createLifecycle({ root: p.dir, home: p.home });
-  const startedMs = lifecycle.processStartMs(p.child.pid);
-  expect(startedMs).not.toBeNull();
+  const start = lifecycle.processStartIdentity(p.child.pid);
+  expect(start).not.toBeNull();
+  if (process.platform === "win32") expect(start.ticks).toMatch(/^\d{18,19}$/);
   writeFileSync(join(p.dir, "logs", "proxy.pid"), JSON.stringify({
-    pid: p.child.pid, startedMs, startedIso: new Date(startedMs!).toISOString(), stopToken: p.token,
+    pid: p.child.pid, startedMs: start.ms, startedIso: new Date(start.ms).toISOString(),
+    ...(start.ticks === null ? {} : { startTicks: start.ticks }), stopToken: p.token,
   }) + "\n", { mode: 0o600 });
+  if (dirtyMetadata === "serve") {
+    const before = JSON.parse(readFileSync(join(p.home, "dirty-before-stop.json"), "utf8"));
+    expect(before.find((a: { id: string }) => a.id === "synthetic").failureGeneration).toBe(0);
+  }
   const node = process.env.ZCODE_KIT_NODE ?? "node";
   // Keep this parent's event loop running so it reaps the proxy while the
   // separate manager waits for that process to disappear (no zombie fixture).
@@ -172,14 +190,30 @@ async function managerStopProof(dirtyMetadata = false): Promise<void> {
   expect(await p.exited).toBe(0);
   expect(p.child.signalCode).toBeNull();
   const log = readFileSync(join(p.dir, "logs", "proxy.log"), "utf8");
-  const shutdownLog = dirtyMetadata ? p.out() : log;
+  const shutdownLog = dirtyMetadata === true ? p.out() : log;
   expect(shutdownLog).toMatch(/ INFO shutdown flush finished reason=stop/);
   expect(shutdownLog.match(/ INFO shutdown started reason=stop /g)).toHaveLength(1);
   expect(log).not.toContain(p.token);
   expect(existsSync(join(p.dir, "logs", "proxy.pid"))).toBe(false);
   expect(p.out()).not.toContain("EGRESS-BLOCKED");
   expect(mock.arrived).toBe(0);
-  if (dirtyMetadata) {
+  if (dirtyMetadata === "serve") {
+    // Decrypt only the synthetic store in a separate isolated process AFTER
+    // the proxy and real manager have exited. Print metadata, never credentials.
+    const after = spawnSync(process.execPath, ["-e", `import { loadAccountStore } from ${JSON.stringify(join(SRC, "auth", "account-store.ts"))};
+const profiles = await loadAccountStore();
+console.log(JSON.stringify(profiles.map(({ id, failureGeneration, lastFailureAt, exhaustedUntil, paused }) => ({ id, failureGeneration, lastFailureAt, exhaustedUntil, paused }))));`], {
+      env: p.fixtureEnv,
+      encoding: "utf8", timeout: 30_000,
+    });
+    expect(after.status).toBe(0);
+    const profiles = JSON.parse(after.stdout);
+    expect(profiles.find((a: { id: string }) => a.id === "synthetic").failureGeneration).toBe(1);
+    const before = JSON.parse(readFileSync(join(p.home, "dirty-before-stop.json"), "utf8"));
+    expect(profiles.find((a: { id: string }) => a.id === "untouched")).toEqual(before.find((a: { id: string }) => a.id === "untouched"));
+    expect(profiles).toHaveLength(2);
+  }
+  if (dirtyMetadata === true) {
     // Read only this fixture's metadata after the actual child has exited.
     expect(JSON.parse(readFileSync(join(p.dir, "synthetic-metadata.json"), "utf8"))).toEqual([
       { id: "synthetic", failureGeneration: 1 },
@@ -189,6 +223,7 @@ async function managerStopProof(dirtyMetadata = false): Promise<void> {
 
 it("proxy stop CLI runs the real serve account-metadata flush through the stop request on every OS", () => managerStopProof(), 45_000);
 it("proxy stop persists dirty synthetic metadata before the real server process exits", () => managerStopProof(true), 45_000);
+it("proxy stop persists dirty metadata through the actual serve auth factory without losing the untouched account", () => managerStopProof("serve"), 60_000);
 
 describe.skipIf(process.platform === "win32")("serve: signals run the graceful shutdown", () => {
   it("SIGTERM drains: the accepted request finishes, a new one gets 503 + Retry-After, the proxy exits 0", async () => {

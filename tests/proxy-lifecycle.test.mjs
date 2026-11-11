@@ -2080,6 +2080,15 @@ test("portable Windows stop: a one-tick PID replacement during grace is gone, ne
   assert.equal(p.now(), 12000);
 });
 
+test("portable Windows stop: initial one-tick mismatch refuses with exit 4 and direct force never terminates (synthetic)", async t => {
+  const p = await portableStop(t, { reuseAt: 0 });
+  const result = await p.lifecycle.stop();
+  assert.deepEqual([result.code, result.outcome], [4, "reuse-suspect"]);
+  assert.equal(await p.lifecycle.forceStop(p.pid, { recordedStart: p.start }), true);
+  assert.equal(p.trace.some(e => e.kind === "terminate" || e.kind === "/__kit/stop"), false);
+  assert.equal(existsSync(join(p.root, "logs", "proxy.pid")), true);
+});
+
 test("portable Windows stop: unknown identity at escalation fails closed with exit 2", async t => {
   const p = await portableStop(t, { unknownAt: 12000 });
   const result = await p.lifecycle.stop();
@@ -2131,17 +2140,33 @@ test("one shared module holds the stop deadlines and the request shape; the mana
   assert.ok(STOP_GRACE_MS + STOP_EXIT_MARGIN_MS > proxySide.grace);
 });
 
+test("exact creation identity observer retains every Windows tick (synthetic OS boundary)", fakeWindows, async t => {
+  const root = kitFixture(t, await freePort());
+  const lifecycle = await lifecycleFor(root);
+  const win = asWindows({ "4242": { ticks: String(WORKED_TICKS) } });
+  try {
+    assert.deepEqual(recordNativeStart(lifecycle, root, 4242), { ms: WORKED_MS, ticks: String(WORKED_TICKS) });
+  } finally { win.restore(); }
+});
+
 // Native acceptance remains separate from portable clock/process controls.
 // No POSIX shebang or signal-exit assumptions: this child is the running Node.
+function recordNativeStart(lifecycle, root, pid) {
+  const start = lifecycle.processStartIdentity(pid);
+  assert.ok(Number.isFinite(start?.ms));
+  assert.match(start?.ticks ?? "", /^\d{18,19}$/);
+  assert.equal(typeof start.ticks, "string", "OS ticks never pass through Number");
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid, startedMs: start.ms, startTicks: start.ticks, stopToken: "synthetic-native-stop" }));
+  assert.deepEqual(lifecycle.readPidFile(), { pid, startedMs: start.ms, startedIso: null, startTicks: start.ticks });
+  return start;
+}
 test("native Windows accepted stop honors grace/margin and exits without TerminateProcess", { skip: process.platform !== "win32", timeout: 60_000 }, async t => {
   const root = kitFixture(t, await freePort());
   const port = Number(readFileSync(join(root, "proxy", "config.yaml"), "utf8").match(/port: (\d+)/)[1]);
   const requests = join(root, "native-stop.jsonl");
   const stand = await spawnStopStandIn(t, root, port, "202-exit-1200", requests);
   const lifecycle = await lifecycleFor(root, { stopGraceMs: 600, stopExitMarginMs: 1800 });
-  const startedMs = lifecycle.processStartMs(stand.pid);
-  assert.ok(Number.isFinite(startedMs));
-  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs, stopToken: "synthetic-native-stop" }));
+  recordNativeStart(lifecycle, root, stand.pid);
   const stopped = await lifecycle.stop();
   await gone(stand);
   assert.equal(stopped.code, 0);
@@ -2158,15 +2183,13 @@ test("native Windows accepted stop forces only after margin; direct force sends 
     const requests = join(root, "native-stop.jsonl");
     const stand = await spawnStopStandIn(t, root, port, "202", requests);
     const lifecycle = await lifecycleFor(root, { stopGraceMs: 600, stopExitMarginMs: 600 });
-    const startedMs = lifecycle.processStartMs(stand.pid);
-    assert.ok(Number.isFinite(startedMs));
-    writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs, stopToken: "synthetic-native-stop" }));
+    const start = recordNativeStart(lifecycle, root, stand.pid);
     let requestAt = null, forceAt = null;
     const observe = line => {
       if (line.includes("stop request sent")) requestAt = performance.now();
       if (line.includes("outlived the grace; forcing")) forceAt = performance.now();
     };
-    if (direct) assert.equal(await lifecycle.forceStop(stand.pid, { recordedStart: { ms: startedMs, ticks: null }, observe }), true);
+    if (direct) assert.equal(await lifecycle.forceStop(stand.pid, { recordedStart: start, observe }), true);
     else {
       assert.equal((await lifecycle.stop({ observe })).code, 0);
       assert.ok(forceAt !== null && requestAt !== null && forceAt - requestAt >= 1200, "native manager never enters force inside grace/margin");
@@ -2175,6 +2198,28 @@ test("native Windows accepted stop forces only after margin; direct force sends 
     assert.equal(stand.exitCode, 0);
     assert.equal(readStopRequests(requests).length, direct ? 0 : 1);
   }
+});
+
+test("native Windows one-tick mismatch refuses public stop and the real handle guard without killing the owned child", { skip: process.platform !== "win32", timeout: 60_000 }, async t => {
+  const port = await freePort();
+  const root = kitFixture(t, port);
+  const requests = join(root, "native-mismatch.jsonl");
+  const stand = await spawnStopStandIn(t, root, port, "202", requests);
+  const lifecycle = await lifecycleFor(root);
+  const start = recordNativeStart(lifecycle, root, stand.pid);
+  // Deliberately wrong expected identity, not a claim that OS PID reuse occurred.
+  const mismatch = { ms: start.ms, ticks: (BigInt(start.ticks) + 1n).toString() };
+  writeFileSync(join(root, "logs", "proxy.pid"), JSON.stringify({ pid: stand.pid, startedMs: mismatch.ms, startTicks: mismatch.ticks, stopToken: "synthetic-native-stop" }));
+  const stopped = await lifecycle.stop();
+  assert.deepEqual([stopped.code, stopped.outcome], [4, "reuse-suspect"]);
+  assert.equal(readStopRequests(requests).length, 0);
+  assert.equal(await lifecycle.forceStop(stand.pid, { recordedStart: mismatch }), true, "the recorded generation is gone, not permission to kill the live generation");
+  const { killGuardScript } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
+  const guard = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", killGuardScript(stand.pid, mismatch.ticks)], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+  assert.equal(guard.status, 4, "real GetProcessTimes handle comparison rejects a one-tick mismatch");
+  assert.ok(untouchedChild(stand));
+  assert.equal(lifecycle.pidAlive(stand.pid), true);
+  assert.deepEqual(lifecycle.processStartIdentity(stand.pid), start);
 });
 
 test("stop sends the stop request with the bearer key and the recorded token, answers 202, and never signals while the proxy exits within the grace", {
