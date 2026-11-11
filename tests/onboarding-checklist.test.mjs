@@ -256,21 +256,53 @@ test("native Windows refresh changes exactly the 22 reviewed onboarding outputs 
     "update/update-checkout", "update/update-release",
   ].flatMap(id => ["ci", "pipe"].map(v => `${id}/${v}.txt`)).sort();
   assert.deepEqual(Object.keys(proof.after).sort(), expected);
+  // Ticket 46's reviewed Windows outputs, disjoint from the 22 above.
+  // Ten are command output: eight refreshed accounts pipe/ci renders and two
+  // added accounts-health-down stderr files. INDEX.md and manifest.json are
+  // the matching reviewed metadata, not command output. Hashes are the bytes
+  // of parent dcc8d55, which are the union bytes.
+  const reviewed46 = {
+    "INDEX.md": "4cd727dac2daf287b8b8223f70b33f151c33dbc515450b566ed74f68b7ee2ea5",
+    "accounts/accounts-empty/ci.txt": "0358126da5851421de67aa597a7477317fd7f9e4d3306a7c6cf00e92c43f1113",
+    "accounts/accounts-empty/pipe.txt": "0358126da5851421de67aa597a7477317fd7f9e4d3306a7c6cf00e92c43f1113",
+    "accounts/accounts-health-down/ci.stderr.txt": "966c2babe063549ce326a605f0ca711ba76fe1a03df3c8bbb37f1d410621aa5f",
+    "accounts/accounts-health-down/ci.txt": "8cf94e494ec9fd1ecc635e1408b7d44ce6225889967c624db28c993d466df606",
+    "accounts/accounts-health-down/pipe.stderr.txt": "966c2babe063549ce326a605f0ca711ba76fe1a03df3c8bbb37f1d410621aa5f",
+    "accounts/accounts-health-down/pipe.txt": "8cf94e494ec9fd1ecc635e1408b7d44ce6225889967c624db28c993d466df606",
+    "accounts/accounts-health/ci.txt": "331576e5b9e1402508544cd949dac1e7607f888bd3378cd2175aa6092fddc3fd",
+    "accounts/accounts-health/pipe.txt": "331576e5b9e1402508544cd949dac1e7607f888bd3378cd2175aa6092fddc3fd",
+    "accounts/accounts-list/ci.txt": "837b0f0c41aaa9430be7e14689f0a36ed13e5cdae26b03895bacd254c40671b7",
+    "accounts/accounts-list/pipe.txt": "837b0f0c41aaa9430be7e14689f0a36ed13e5cdae26b03895bacd254c40671b7",
+    "manifest.json": "3a91430bfb2fadcb688cbcf36aa202895911358e16f250e81fc0a892bf865fc2",
+  };
+  const overlap = expected.filter(file => file in reviewed46);
+  assert.deepEqual(overlap, []);
   const baselineRoot = join(import.meta.dirname, "ux-before/windows");
   const files = (dir, prefix = "") => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const name = prefix + entry.name;
     return entry.isDirectory() ? files(join(dir, entry.name), name + "/") : [name];
   });
-  assert.deepEqual(files(baselineRoot).sort(), Object.keys(proof.before).sort(), "no baseline file added or removed");
+  const allowed = [...new Set([...Object.keys(proof.before), ...Object.keys(reviewed46)])].sort();
+  assert.deepEqual(files(baselineRoot).sort(), allowed, "no baseline file added or removed");
   const digest = bytes => createHash("sha256").update(bytes).digest("hex");
   const changed = [];
   for (const [file, before] of Object.entries(proof.before)) {
     const bytes = readFileSync(new URL(`./ux-before/windows/${file}`, import.meta.url));
     const actual = digest(bytes);
+    if (file in reviewed46) {
+      assert.equal(actual, reviewed46[file], file);
+      if (actual !== before) changed.push(file);
+      continue;
+    }
     if (actual !== before) changed.push(file);
     assert.equal(actual, proof.after[file] ?? before, file);
   }
-  assert.deepEqual(changed.sort(), expected);
+  for (const [file, hash] of Object.entries(reviewed46)) {
+    if (file in proof.before) continue;
+    const bytes = readFileSync(new URL(`./ux-before/windows/${file}`, import.meta.url));
+    assert.equal(digest(bytes), hash, file);
+  }
+  assert.deepEqual(changed.filter(file => !(file in reviewed46)).sort(), expected);
   const baseSuffix = "\nNext steps ---------------------------------------------------------------------\n" +
     "  zcode-kit doctor        Check the installation\n" +
     "  zcode-kit proxy start   Start the proxy for manual clients\n" +
