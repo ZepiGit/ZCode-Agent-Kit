@@ -154,6 +154,20 @@ const STOP = {
     stopEvents: ["2026-11-11T00:00:00.000Z INFO manager stop request sent pid=4242 graceMs=10000"],
     stop: { intent: "stop", code: 0, outcome: "stopped", recovered: null, lines: ["stopped (pid 4242)"], pid: 4242 },
   },
+  "stop-fallback": {
+    stopEvents: [
+      "2026-11-11T00:00:00.000Z INFO manager stop request sent pid=4242 graceMs=10000",
+      "2026-11-11T00:00:00.000Z INFO manager stop request refused; falling back pid=4242 why=404 fallback=TerminateProcess",
+    ],
+    stop: { intent: "stop", code: 0, outcome: "stopped", recovered: null, lines: ["stopped (pid 4242)"], pid: 4242 },
+  },
+  "stop-forced": {
+    stopEvents: [
+      "2026-11-11T00:00:00.000Z INFO manager stop request sent pid=4242 graceMs=10000",
+      "2026-11-11T00:00:12.000Z WARN manager stop request outlived the grace; forcing pid=4242 graceMs=10000 marginMs=2000",
+    ],
+    stop: { intent: "stop", code: 0, outcome: "stopped", recovered: null, lines: ["stopped (pid 4242)"], pid: 4242 },
+  },
   "stop-not-running": { stop: { intent: "stop", code: 0, outcome: "not-running", recovered: null, lines: ["not running"] } },
   "stop-foreign": { stop: { intent: "stop", code: 3, outcome: "foreign", recovered: null, lines: ["ERROR: something foreign is on port 18458. Refusing to stop anything."] } },
   "stop-reuse-suspect": { stop: { intent: "stop", code: 4, outcome: "reuse-suspect", recovered: null, lines: ["ERROR: pid 4242 exists but its start time does not match the pid file (PID reuse suspected) — refusing to kill."] } },
@@ -299,6 +313,33 @@ test("proxy start|stop|restart: the lifecycle's exit codes 0-5 pass through; a t
     const cards = (run.stdout.match(/^Connection details/gm) ?? []).length;
     assert.equal(cards, code === 0 && sub !== "stop" ? 1 : 0, `${fixture}: the card once, after a successful start only`);
     if (code !== 0 || sub === "stop") assert.equal(run.stdout, "", `${fixture}: nothing on stdout`);
+  }
+});
+
+test("stop progress keeps needed request stages but never repeats terminal narration or raw errors", async (t) => {
+  for (const variant of VARIANTS) {
+    const idle = await runIn(t, variant, STOP["stop-not-running"], "proxy", ["proxy", "stop"]);
+    assert.equal(idle.exitCode, 0);
+    assert.equal(idle.stdout, "");
+    assert.equal((stripAnsi(idle.stderr).match(/not running/g) ?? []).length, 1, variant);
+    const refused = await runIn(t, variant, STOP["stop-reuse-suspect"], "proxy", ["proxy", "restart"]);
+    assert.equal(refused.exitCode, 4);
+    assert.equal(refused.stdout, "");
+    assert.doesNotMatch(stripAnsi(refused.stderr), /ERROR:|Proxy start/, variant);
+    const graceful = await runIn(t, variant, STOP["stop-graceful"], "proxy", ["proxy", "stop"]);
+    assert.equal(graceful.exitCode, 0);
+    assert.equal(graceful.stdout, "");
+    assert.doesNotMatch(stripAnsi(graceful.stderr), /INFO manager|pid=|stopped \(pid 4242\) \.\.\./, variant);
+    if (["pipe", "ci"].includes(variant)) {
+      assert.equal(graceful.stderr, "Proxy stop ...\nProxy stop: requesting graceful shutdown ...\nOK  Proxy stop - stopped (pid 4242)\n");
+      assert.equal(idle.stderr, "Proxy stop ...\nSKIP  Proxy stop - not running\n");
+      const fallback = await runIn(t, variant, STOP["stop-fallback"], "proxy", ["proxy", "stop"]);
+      assert.equal(fallback.stderr, "Proxy stop ...\nProxy stop: requesting graceful shutdown ...\nProxy stop: request not accepted; using guarded fallback ...\nOK  Proxy stop - stopped (pid 4242)\n");
+      assert.equal(fallback.exitCode, 0);
+      const forced = await runIn(t, variant, STOP["stop-forced"], "proxy", ["proxy", "stop"]);
+      assert.equal(forced.stderr, "Proxy stop ...\nProxy stop: requesting graceful shutdown ...\nProxy stop: shutdown deadline passed; forcing guarded stop ...\nOK  Proxy stop - stopped (pid 4242)\n");
+      assert.equal(forced.exitCode, 0);
+    } else assert.match(stripAnsi(graceful.stderr), /Proxy stop/);
   }
 });
 

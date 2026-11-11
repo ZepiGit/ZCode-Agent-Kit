@@ -1,4 +1,4 @@
-| Proxy stop[K| ERROR: pid <PID> exists but its start time does not match the pid file (PID reuse suspected) — refusing to kill.[K[31mx FAIL  Nothing was stopped: the process is not proven to be this kit's proxy[0m
+| Proxy stop[K[31mx FAIL  Nothing was stopped: the process is not proven to be this kit's proxy[0m
    [2mwhy[0m   pid <PID> exists but its start time does not match the pid file (PID
          reuse suspected) — refusing to kill.
    [2mnext[0m  [1mzcode-kit doctor[0m
