@@ -323,7 +323,7 @@ test("TUI invalid configuration preserves real loadConfig exit1 and config-error
 test("readiness parser requires a whole terminated line across chunks", () => {
   let count = 0;
   const parse = readyParser(() => { count++; });
-  parse(`prefix ${READY_LINE}\n${READY_LINE} suffix\n${READY_LINE}`);
+  parse(`prefix ${READY_LINE}\n${READY_LINE} suffix\nx${READY_LINE}\n${READY_LINE}x\n${READY_LINE}`);
   expect(count).toBe(0);
   parse("\n");
   expect(count).toBe(1);
