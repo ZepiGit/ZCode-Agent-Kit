@@ -21,10 +21,9 @@ if (process.argv[2] === "--pipe-holder") {
   const send = (event) => { if (process.connected) process.send({ ...event, startId }, () => {}); };
   let cli;
   const release = () => {
-    if (cli && cli.exitCode === null && cli.signalCode === null) {
-      cli.once("close", () => process.disconnect());
-      cli.kill("SIGKILL");
-    } else process.disconnect();
+    // Keep the ownership chain intact for group/taskkill fallback if the
+    // actual CLI has not exited. Never detach its still-running Bun subtree.
+    if (!cli || cli.exitCode !== null || cli.signalCode !== null) process.disconnect();
   };
   process.on("disconnect", () => { if (cli && cli.exitCode === null && cli.signalCode === null) cli.kill("SIGKILL"); });
   process.on("message", (message) => {
@@ -45,8 +44,11 @@ if (process.argv[2] === "--pipe-holder") {
   });
   // Both real handles must be open and both writes completed before readiness.
   fstatSync(1); fstatSync(2);
-  process.stdout.write(`UX_CAPTURE_HOLDER_STDOUT ${startId}\n`, () => {
-    process.stderr.write(`UX_CAPTURE_PIPE_HOLDER pid=${process.pid} start=${startId}\n`, () => {
+  process.stdout.on("error", () => {}); process.stderr.on("error", () => {});
+  process.stdout.write(`UX_CAPTURE_HOLDER_STDOUT ${startId}\n`, (error) => {
+    if (error) { send({ type: "error", code: "CAPTURE_FAULT_SETUP", message: "holder stdout write failed" }); return; }
+    process.stderr.write(`UX_CAPTURE_PIPE_HOLDER pid=${process.pid} start=${startId}\n`, (error) => {
+      if (error) { send({ type: "error", code: "CAPTURE_FAULT_SETUP", message: "holder stderr write failed" }); return; }
       if (fault !== "drain-ack-missing") send({ type: "holder-ready", pid: process.pid, stdoutWritten: true, stderrWritten: true });
     });
   });
@@ -69,6 +71,9 @@ if (process.argv[2] === "--keeper") {
     child.on("message", (message) => {
       if (message.startId !== startId) return;
       if (message.type === "holder-ready") {
+        if (message.pid !== child.pid || message.stdoutWritten !== true || message.stderrWritten !== true) {
+          setupFailure("incomplete holder readiness ACK"); return;
+        }
         ready = true; clearTimeout(setup); send(message); tell("start");
       } else if (message.type === "exit") {
         cliStatus = message.status; cliSignal = message.signal; cliExited = true;
@@ -162,8 +167,10 @@ export function startOwned(command, args, { cwd, env, input = "", phase, timeout
       send("release-holder");
       await Promise.race([holderClose, sleep(left(cleanupMs / 2))]);
       if (!result.holder.closed) result.cleanupError = "HOLDER_CLOSE_TIMEOUT";
-      send("release");
-      await Promise.race([ownerClose, sleep(left(cleanupMs / 2))]);
+      if (result.holder.closed) {
+        send("release");
+        await Promise.race([ownerClose, sleep(left(cleanupMs / 2))]);
+      }
     }
     if (phase === "raw-health-capture" && keeper.connected) {
       send("terminate");
@@ -227,7 +234,9 @@ export function startOwned(command, args, { cwd, env, input = "", phase, timeout
       }, remaining(drainMs));
     }
     if (message.type === "drained") {
-      result.drained = true; result.status = message.status; result.signal = message.signal; event("drained");
+      result.drained = true;
+      if (!fault || result.exited) { result.status = message.status; result.signal = message.signal; }
+      event("drained");
       clearTimeout(deadline); clearTimeout(drain);
       if (message.status !== 0) fail("CAPTURE_EXIT", "command exited unsuccessfully");
       if (result.error) void stop();
