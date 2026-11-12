@@ -61,6 +61,15 @@ export async function solveTraceless({ scene, region, prefix }: { scene: string;
         process.stderr.write(Buffer.from(arg!, "base64"));
         return param("stderr-line:written");
       }
+      case "balloon": {
+        // Allocates and touches <arg> MB in 8 MB steps and keeps all of it.
+        const kept: Uint8Array[] = [];
+        for (let mb = 0; mb < Number(arg); mb += 8) {
+          kept.push(new Uint8Array(8 * 1024 * 1024).fill(1));
+          await Bun.sleep(2);
+        }
+        return param(`balloon:${kept.length * 8}`);
+      }
       case "slow":
         await Bun.sleep(Number(arg));
         return param(`token:slow:${concurrency}`);

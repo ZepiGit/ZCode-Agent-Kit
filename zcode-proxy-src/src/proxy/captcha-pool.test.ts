@@ -28,6 +28,8 @@ const fakeSolver = {
     lastRecycleReason: null,
     lastRecycleAt: null,
     lastSdkScripts: null,
+    capMB: null,
+    enforcement: "none" as const,
   }),
   requestRecycle: recycleMock,
 };

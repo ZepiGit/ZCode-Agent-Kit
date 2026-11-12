@@ -19,6 +19,7 @@ import { removeExecutableDirectory, terminateOwnedChild, withinCleanupDeadline }
 
 const solverPath = fileURLToPath(new URL("./captcha-solver.ts", import.meta.url));
 const tokenPath = fileURLToPath(new URL("./captcha-token.ts", import.meta.url));
+const capPath = fileURLToPath(new URL("./solver-cap.ts", import.meta.url));
 const fixtureUrl = new URL("./__fixtures__/solver-backend.ts", import.meta.url).href;
 
 interface HostRun { code: number | null; stdout: string; stderr: Buffer }
@@ -28,11 +29,12 @@ function hermeticEnv(): Record<string, string | undefined> {
   return Object.fromEntries(Object.entries(process.env).filter(([name]) => !/proxy|stop_token|respawn/i.test(name)));
 }
 
-/** Runs `source` in a host Bun with `solver`, `label`, `classify` and `backendModule` in scope. */
+/** Runs `source` in a host Bun with `solver`, `cap` (solver-cap.ts), `label`, `classify` and `backendModule` in scope. */
 async function host(source: string, env: Record<string, string | undefined> = {}, timeoutMs = 20_000): Promise<HostRun> {
   const child = Bun.spawn([process.execPath, "--eval", `
     import assert from 'node:assert/strict';
     import * as solver from ${JSON.stringify(solverPath)};
+    import * as cap from ${JSON.stringify(capPath)};
     import { classifyCaptchaError as classify } from ${JSON.stringify(tokenPath)};
     const backendModule = ${JSON.stringify(fixtureUrl)};
     const label = token => JSON.parse(Buffer.from(token,'base64').toString()).certifyId;
@@ -147,6 +149,9 @@ describe("solver process: the proxy's dispatcher", () => {
     const child = spawn(process.execPath, [entry, String(process.pid)], { stdio: ["ignore", "ignore", "pipe", "ipc"], serialization: "json", env: hermeticEnv() });
     try {
       const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+      // The entry greets, and serves only once its cap is acknowledged.
+      expect(await new Promise<unknown>((resolve) => child.once("message", resolve))).toMatchObject({ type: "hello", pid: child.pid });
+      child.send({ type: "cap", enforcement: "none", capMB: null });
       const answered = new Promise<unknown>((resolve) => child.once("message", resolve));
       child.send({ type: "init", backendModule: fixtureUrl });
       child.send({ type: "solve", id: 1, scene: "keep-loop", region: "sgp", prefix: "p" });
@@ -455,6 +460,199 @@ describe("solver process: output", () => {
     expect(text).toContain(big);
     expect(text.endsWith("tail-without-newline")).toBe(true);
     expect(run.stderr.length).toBe(Buffer.byteLength("PROXY LINE\npartial-without-newline then the rest ✓\n" + big + "tail-without-newline"));
+  });
+});
+
+/** Does a systemd user scope apply MemoryMax here? Then the solver cap is enforced by a cgroup. */
+function systemdScopeCaps(): boolean {
+  if (process.platform !== "linux") return false;
+  const want = 64 * 1024 * 1024;
+  const probe = Bun.spawnSync(["systemd-run", "--user", "--scope", "--quiet", "-p", `MemoryMax=${want}`, "-p", "MemorySwapMax=0", "--",
+    "sh", "-c", 'cat "/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max"'], { stdout: "pipe", stderr: "ignore" });
+  return probe.exitCode === 0 && probe.stdout.toString().trim() === String(want);
+}
+
+/** The enforcement mode the operating system gives the solver cap on this machine. */
+const expectedEnforcement = process.platform === "win32" ? "job-object" : systemdScopeCaps() ? "cgroup" : "sampling";
+
+const SAMPLING_CAP = "async () => ({ enforcement: 'sampling', reason: 'test', endedAtCap: async () => false, release() {} })";
+const KILLED_BY_OS = /^\S+ WARN solver solver process ended by the operating system at its memory cap capMB=128 enforcement=(cgroup|job-object) key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"$/m;
+const ENDED_ITSELF = /^\S+ WARN solver solver process reached its memory cap and ended itself capMB=128 enforcement=sampling key=solver\.memoryCapMB footprintMB=\d+$/m;
+
+describe("solver process: memory cap", () => {
+  /** The real entry behind the module probe, started the way the transport starts it. */
+  async function probedEntry(args: string[], body: (child: import("node:child_process").ChildProcess, messages: unknown[], modules: () => string[]) => Promise<void>) {
+    const { spawn } = await import("node:child_process");
+    const dir = mkdtempSync(join(tmpdir(), "solver-handshake-"));
+    const log = join(dir, "modules.log");
+    const modules = () => readFileSync(log, "utf8").trim().split("\n");
+    const child = spawn(process.execPath, [entryFixture, ...args, String(process.pid)], {
+      stdio: ["ignore", "ignore", "pipe", "ipc"], serialization: "json", env: { ...hermeticEnv(), SOLVER_TEST_MODULE_LOG: log },
+    });
+    const messages: unknown[] = [];
+    child.on("message", (message) => messages.push(message));
+    let stderr = "";
+    child.stderr!.on("data", (chunk) => { stderr += chunk; });
+    const exited = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+    try {
+      await body(child, messages, modules);
+      return { stderr, modules: modules() };
+    } finally {
+      child.kill("SIGKILL");
+      await exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const until = async (ready: () => boolean, ms = 5000) => {
+    const deadline = Date.now() + ms;
+    while (!ready() && Date.now() < deadline) await Bun.sleep(10);
+    expect(ready()).toBe(true);
+  };
+
+  it("loads neither the DOM runtime nor the solve code before the cap acknowledgement, and ignores a solve sent before it", async () => {
+    const run = await probedEntry([], async (child, messages, modules) => {
+      await until(() => messages.length === 1);
+      expect(messages[0]).toMatchObject({ type: "hello", pid: child.pid });
+      child.send({ type: "init", backendModule: fixtureUrl });
+      child.send({ type: "solve", id: 1, scene: "token:early", region: "sgp", prefix: "p" });
+      await Bun.sleep(400);
+      expect(messages).toHaveLength(1);
+      child.send({ type: "cap", enforcement: "none", capMB: null });
+      child.send({ type: "init", backendModule: fixtureUrl });
+      child.send({ type: "solve", id: 2, scene: "token:late", region: "sgp", prefix: "p" });
+      await until(() => messages.length === 2);
+      expect(messages[1]).toMatchObject({ type: "result", id: 2, ok: true });
+      expect(typeof (messages[1] as { footprintMB?: unknown }).footprintMB).toBe("number");
+      child.send({ type: "probe" });
+      await until(() => modules().length === 3);
+    });
+    expect(run.modules.slice(0, 2)).toEqual(["start 0", "cap 0"]);
+    // The probe does see the modules once a solve has run.
+    expect(Number(run.modules[2]!.replace("probe ", ""))).toBeGreaterThan(0);
+  });
+
+  it("ends itself without solving when the cap acknowledgement never arrives", async () => {
+    let outcome: { code: number | null; signal: string | null } | null = null;
+    const run = await probedEntry(["handshake-timeout", "300"], async (child, messages) => {
+      const exit = new Promise<{ code: number | null; signal: string | null }>((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
+      await until(() => messages.length === 1);
+      child.send({ type: "init", backendModule: fixtureUrl });
+      child.send({ type: "solve", id: 1, scene: "token:never", region: "sgp", prefix: "p" });
+      outcome = await exit;
+      expect(messages).toHaveLength(1);
+    });
+    expect(outcome!).toEqual({ code: 3, signal: null });
+    expect(run.stderr).toMatch(/^\S+ ERROR solver solver process got no memory cap acknowledgement from the proxy; it ends without solving waitedMs=300\n$/);
+    expect(run.modules).toEqual(["start 0", "exit 0"]);
+  });
+
+  it("fails the solve and never runs it when the cap cannot be confirmed to the solver process", async () => {
+    const run = await expectOk(host(`${REPORT}
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({
+        command: [process.execPath, ${JSON.stringify(entryFixture)}, 'handshake-timeout', '300'], applyCap: () => new Promise(() => {}) }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      let failure = null;
+      try { await s.run('token:uncapped', 'sgp', 'p'); } catch (e) { failure = [e.name, e.message, classify(e)]; }
+      report({ failure, stats: s.stats() });
+      s.shutdown();
+    `));
+    const { failure, stats } = reported(run);
+    expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
+    expect(stats).toMatchObject({ totalSolves: 0, enforcement: null });
+  });
+
+  it(`caps the proxy's solver at 300 MB by default, enforced here by ${expectedEnforcement}, and reports both`, async () => {
+    const run = await expectOk(host(`${REPORT}
+      const before = solver.getCaptchaSolverStats();
+      solver.configureCaptchaSolver({ backendModule, idleMs: 2000 });
+      await solver.runCaptchaSolve('token:a', 'sgp', 'p');
+      report({ before: [before.capMB, before.enforcement], after: [solver.getCaptchaSolverStats().capMB, solver.getCaptchaSolverStats().enforcement],
+        thread: (({ capMB, enforcement }) => [capMB, enforcement])(solver.createCaptchaSolver({ transport: solver.threadTransport() }).stats()) });
+      solver.shutdownCaptchaSolver();
+    `));
+    expect(reported(run)).toEqual({ before: [300, null], after: [300, expectedEnforcement], thread: [null, "none"] });
+  });
+
+  it(`ends a solver that allocates past its cap (${expectedEnforcement}), fails only that solve and names the config key in the log`, async () => {
+    const run = await expectOk(host(`${REPORT}
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 128 }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      const first = label(await s.run('pid', 'sgp', 'p'));
+      let failure = null;
+      const ballooning = s.run('balloon:600', 'sgp', 'p');
+      const queued = s.run('pid', 'sgp', 'p');
+      try { await ballooning; } catch (e) { failure = [e.name, e.message, classify(e)]; }
+      const next = label(await queued);
+      await new Promise(resolve => setTimeout(resolve, 600));
+      report({ first, failure, next, stats: s.stats() });
+      s.shutdown();
+    `, {}, 40_000));
+    const { first, failure, next, stats } = reported(run);
+    expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
+    expect(next).not.toBe(first);
+    expect(stats).toMatchObject({ capMB: 128, enforcement: expectedEnforcement, generation: 2, totalSolves: 2, totalFailures: 1 });
+    if (expectedEnforcement === "sampling") expect(run.stderr.toString()).toMatch(ENDED_ITSELF);
+    else expect(run.stdout).toMatch(KILLED_BY_OS);
+  }, 50_000);
+
+  it("ends itself at the cap where the operating system enforces nothing (sampling), with the config key in its log line", async () => {
+    const run = await expectOk(host(`${REPORT}
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 128, applyCap: ${SAMPLING_CAP} }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      let failure = null;
+      try { await s.run('balloon:600', 'sgp', 'p'); } catch (e) { failure = [e.name, e.message, classify(e)]; }
+      const after = label(await s.run('token:after', 'sgp', 'p'));
+      report({ failure, after, stats: s.stats() });
+      s.shutdown();
+      await new Promise(resolve => setTimeout(resolve, 300));
+    `, {}, 40_000));
+    const { failure, after, stats } = reported(run);
+    expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
+    expect(after).toBe("token:after:active=1");
+    expect(stats).toMatchObject({ capMB: 128, enforcement: "sampling" });
+    expect(run.stderr.toString()).toMatch(ENDED_ITSELF);
+    expect(run.stdout).not.toMatch(KILLED_BY_OS);
+    // Said once, not per generation.
+    expect(run.stdout.match(/WARN solver the operating system does not enforce the solver's memory cap; the solver process measures itself and ends at the cap capMB=128 enforcement=sampling why=test/g)).toHaveLength(1);
+  }, 50_000);
+
+  it.skipIf(process.platform !== "linux")("reports sampling, never cgroup, when the scope's memory.max does not show the requested limit", async () => {
+    const run = await expectOk(host(`${REPORT}
+      const { readFileSync } = await import('node:fs');
+      const { execFile } = await import('node:child_process');
+      const os = {
+        platform: 'linux',
+        run: (command, args, timeout) => new Promise(resolve => execFile(command, args, { timeout }, (error, stdout) => resolve({ code: error ? 1 : 0, stdout: String(stdout) }))),
+        // A user systemd without the memory controller: the scope exists, the limit does not.
+        read: (path) => { if (path.endsWith('/memory.max')) return 'max\\n'; try { return readFileSync(path, 'utf8'); } catch { return null; } },
+        sleep: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
+        jobObjects: async () => null,
+      };
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ applyCap: (pid, bytes) => cap.applySolverCap(pid, bytes, os) }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      await s.run('token:a', 'sgp', 'p');
+      report(s.stats().enforcement);
+      s.shutdown();
+    `));
+    expect(reported(run)).toBe("sampling");
+  });
+
+  it.skipIf(expectedEnforcement !== "cgroup")("leaves no scope and no solver process behind after an idle exit", async () => {
+    const run = await expectOk(host(`${REPORT}
+      const { readFileSync, existsSync } = await import('node:fs');
+      solver.configureCaptchaSolver({ backendModule, idleMs: 300 });
+      const pid = Number(label(await solver.runCaptchaSolve('pid', 'sgp', 'p')).slice(4));
+      const scope = '/sys/fs/cgroup' + readFileSync('/proc/' + pid + '/cgroup', 'utf8').split('\\n').find(line => line.startsWith('0::')).slice(3);
+      const limit = [readFileSync(scope + '/memory.max', 'utf8').trim(), readFileSync(scope + '/memory.swap.max', 'utf8').trim()];
+      const deadline = Date.now() + 5000;
+      const alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      while ((alive() || existsSync(scope)) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 25));
+      report({ pid, host: process.pid, scope, limit, alive: alive(), scopeExists: existsSync(scope), reason: solver.getCaptchaSolverStats().lastRecycleReason });
+    `));
+    const { pid, host: hostPid, scope, limit, alive: stillAlive, scopeExists, reason } = reported(run);
+    expect(scope).toMatch(new RegExp(`/zcode-captcha-solver-${hostPid}-${pid}-[0-9a-f]{8}\\.scope$`));
+    expect(limit).toEqual([String(300 * 1024 * 1024), "0"]);
+    expect({ reason, stillAlive, scopeExists }).toEqual({ reason: "idle", stillAlive: false, scopeExists: false });
   });
 });
 
