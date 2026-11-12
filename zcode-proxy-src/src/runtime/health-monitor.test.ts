@@ -75,6 +75,11 @@ describe("healthDetails captcha section", () => {
       lastSdkScripts: null,
       capMB: null,
       enforcement: "none",
+      lastFootprintMB: null,
+      abnormalExits: 0,
+      failFast: false,
+      failFastUntil: null,
+      shedSolves: 0,
     },
   };
 

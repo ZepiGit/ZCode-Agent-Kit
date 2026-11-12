@@ -30,6 +30,11 @@ const fakeSolver = {
     lastSdkScripts: null,
     capMB: null,
     enforcement: "none" as const,
+    lastFootprintMB: null,
+    abnormalExits: 0,
+    failFast: false,
+    failFastUntil: null,
+    shedSolves: 0,
   }),
   requestRecycle: recycleMock,
 };
