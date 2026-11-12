@@ -62,4 +62,4 @@ This release makes the local proxy steadier under load and makes starting and st
 ## Not in this release
 
 - MCP protocol revision `2026-07-28`. The bridge would have to route HTTP requests by revision to keep today's clients working; that is not built. Clients must open the connection with `initialize`.
-- A proxy that `zcode-kit run` started stays in the process table as an exited child of the assistant until the assistant ends. It uses no memory.
+- When a proxy that `zcode-kit run` started stops while the assistant is still running, it stays in the process table as an exited child of the assistant until the assistant ends. It uses no memory.
