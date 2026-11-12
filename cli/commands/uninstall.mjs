@@ -18,10 +18,10 @@ export async function run(_args, ctx) {
   try {
     const ids = listTransactions(kit.backupDir);
     const serverJs = join(kit.mcpDir, "dist", "index.js");
-    // AUD-008: execute the KNOWN kit registrations' undo hints ourselves
+    // Execute the KNOWN kit registrations' undo hints ourselves
     // (currently only the claude user-scope MCP registration); never run
     // arbitrary strings from manifests — only the exact undo command shape
-    // we issued. F-09: only remove a registration that points at THIS copy.
+    // we issued. Only remove a registration that points at THIS copy.
     const undoExternal = (e) => {
       if (e.undoHint !== 'claude mcp remove zcode-harness --scope user') return false;
       const get = ctx.runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });

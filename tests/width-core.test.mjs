@@ -1,4 +1,4 @@
-// Seam 6 under Node: the shared width core and token set (ticket 05), reached
+// Seam 6 under Node: the shared width core and token set, reached
 // through the CLI's lib/term/ re-exports. The same suite runs under Bun in
 // zcode-proxy-src/src/tui/width-core.test.ts.
 import { test } from "node:test";

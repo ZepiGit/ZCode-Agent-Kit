@@ -1,4 +1,4 @@
-// Seam 7: per-task caps and the response-text bound (ADR-0009, spec §7).
+// Seam 7: per-task caps and the response-text bound.
 // Task response text is bounded at 4 MiB of UTF-8 while it is collected: past
 // the cap the first 1 MiB is kept, then one `[… N bytes truncated …]` marker
 // line, then the last bytes up to 4 MiB in total, with cuts on code-point
@@ -157,7 +157,7 @@ test('a tool call past the cap is reported in the warnings', async () => {
   } finally { await c.stop(); }
 });
 
-// The bound is a memory bound, not an output trim (Round 3 Q6 condition 1), and
+// The bound is a memory bound, not an output trim, and
 // a kept slice must not keep its parent alive (ticket 32's probe): the bridge's
 // retained heap after a 40 MiB stream of small deltas, and after one 24 MiB
 // delta, stays near the 4 MiB the task may keep.

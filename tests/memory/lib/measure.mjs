@@ -1,4 +1,4 @@
-// The S1/burst1 measurement (Round 8 Q1 condition 2, ticket 60): N fresh,
+// The S1/burst1 measurement: N fresh,
 // isolated S1/burst1 runs one after another (job.mjs --measure-burst1 N), each
 // recorded with the value the median rule judges and the observations that
 // prove it is real. It is a distribution, not a verdict: nothing here decides
@@ -24,7 +24,7 @@ export function parseMeasureCount(text) {
 }
 
 /**
- * The marker's content (Round 10 Q1 condition 1): "N" (N runs on the job's
+ * The marker's content: "N" (N runs on the job's
  * Bun) or "N bun=<x.y.z>,<x.y.z>[,…]" (the paired measurement: N runs per
  * arm, the arms interleaved in this order). → { count, arms | null }, or throws.
  */
@@ -95,7 +95,7 @@ export function stableMaxCount(runs, n) {
 const fmtP = (p) => (p === null || p === undefined ? "—" : p < 0.0001 ? p.toExponential(2) : String(Number(p.toFixed(4))));
 
 /**
- * Round 11 Q1 condition 4, the re-entry rule for a newer Bun (ticket 62),
+ * Round 11 Q1 condition 4, the re-entry rule for a newer Bun,
  * on one leg. arms[0] is the reference: the pinned Bun, listed first in the
  * marker. Each later arm is a candidate. A candidate passes on this leg when:
  *   (i)   every run of its arm and of the reference arm is valid and ≤ the ceiling;
@@ -146,7 +146,7 @@ export function measureObservation({ rep, result, summary, csvText, rule, arm = 
   const revisions = [...new Set((summary?.notes?.bunRuntime?.proxies ?? []).map((p) => p.revision).filter(Boolean))];
   const out = { ...obs, ...(arm ? { bun: arm, bunPath } : {}), bunRuntime: revisions.length ? revisions.join(" / ") : null, env: summary?.notes?.runtimeEnv ?? null };
   if (arm) {
-    // Paired mode (Round 10 Q1 condition 1): a run counts for its arm only if its proxy ran that arm's Bun.
+    // Paired mode: a run counts for its arm only if its proxy ran that arm's Bun.
     if (!revisions.length) out.problems = [...out.problems, "no runtime Bun version recorded for the proxy"];
     for (const r of revisions) if (r.split("+")[0] !== arm) out.problems = [...out.problems, `proxy ran Bun ${r}, not the ${arm} arm`];
     out.valid = out.problems.length === 0;
@@ -302,7 +302,7 @@ export function measureMarkdown(m) {
   return lines.join("\n") + "\n";
 }
 
-// ── The S1/stalled attribution (ticket 61, Round 12 Q3 condition 1) ──
+// ── The S1/stalled attribution ──
 // job.mjs --measure-stalled N (CI: only while the one-run marker
 // tests/memory/measure-stalled exists): N rotations of two arms on the same
 // commit, the stalled run and its drained reference (the same requests and
@@ -320,7 +320,7 @@ export function measureMarkdown(m) {
 //        do not explain (send buffering toward a socket that does not drain, or
 //        anything else outside the JS heap).
 // "Accounted" says whether (i) + (iii) explain the stalled excess within
-// ±20 % (Round 12 Q3 condition 1): otherwise the residual carries the rest.
+// ±20 %: otherwise the residual carries the rest.
 // A distribution with no verdict and no ratchet.
 
 export const STALLED_ARMS = ["S1/stalled", "S1/drained"];

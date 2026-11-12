@@ -440,7 +440,7 @@ provider: openai
     expect(() => loadConfig(path)).toThrow(/Invalid provider/);
   });
 
-  // ZAK-002: loopback binding is a load-time invariant, not a template default.
+  // Loopback binding is a load-time invariant, not a template default.
   it("throws on non-loopback server.host (0.0.0.0, LAN address, DNS name)", () => {
     for (const host of ["0.0.0.0", "::", "192.168.1.10", "proxy.example.com"]) {
       const path = writeYaml(`

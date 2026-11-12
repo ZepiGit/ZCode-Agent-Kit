@@ -37,7 +37,7 @@ const ENV = {
 
 const DEFAULTS = {
   PORT: 8080,
-  // ZAK-002: loopback is the enforced invariant — the default must match it
+  // Loopback is the enforced invariant — the default must match it
   // (was 0.0.0.0, which validate() now rejects).
   HOST: "127.0.0.1",
   PROVIDER: "zai" as const,
@@ -178,7 +178,7 @@ export function loadConfig(path: string): ProxyConfig {
   return config;
 }
 
-/** Bounds of the `health.memory` keys (ADR-0008). */
+/** Bounds of the `health.memory` keys. */
 const HEALTH_MEMORY_BOUNDS = {
   softLimitMB: { min: 64, max: 65536, unit: " MB" },
   hardLimitMB: { min: 64, max: 65536, unit: " MB" },
@@ -187,10 +187,10 @@ const HEALTH_MEMORY_BOUNDS = {
 } as const;
 
 /**
- * `health.memory` (ADR-0008): the health supervisor's soft and hard memory
+ * `health.memory`: the health supervisor's soft and hard memory
  * limits, how many samples each must be held for and the time between two
  * samples. Every key is optional; a key left out keeps the default
- * (512 / 1024 MB × 3 samples 15 s apart). No env override (ADR-0008 cond 6).
+ * (512 / 1024 MB × 3 samples 15 s apart). No env override.
  * An invalid value stops the load with what/why/next.
  */
 function resolveHealthConfig(raw: unknown): HealthConfig | undefined {
@@ -283,11 +283,11 @@ function resolveAccountsConfig(raw: unknown): AccountsConfig {
   };
 }
 
-/** Admission bounds for `server.admission.maxInFlightMB` (ADR-0004). */
+/** Admission bounds for `server.admission.maxInFlightMB`. */
 const ADMISSION_MAX_INFLIGHT_MB = { min: 1, max: 4096 };
 
 /**
- * `server.admission` (ADR-0004): the cap on request-body bytes in flight, in
+ * `server.admission`: the cap on request-body bytes in flight, in
  * MB, overridable by ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB. Absent = the
  * proxy's default (64 MB). An invalid value stops the load with what/why/next.
  */
@@ -539,10 +539,10 @@ function validate(config: ProxyConfig): void {
     throw new Error(`server.port ${config.server.port} is out of range (1-65535)`);
   }
 
-  // ZAK-002: loopback binding is a startup invariant, not a template default.
+  // Loopback binding is a startup invariant, not a template default.
   // Reject non-loopback hosts (including 0.0.0.0/:: and DNS names) so an
   // account-backed proxy can never end up reachable from other interfaces.
-  // AUD-011: normalize the bracketed IPv6 literal — Node's server.listen
+  // Normalize the bracketed IPv6 literal — Node's server.listen
   // expects "::1", not "[::1]".
   const rawHost = (config.server.host ?? "").trim().toLowerCase();
   const host = rawHost === "[::1]" ? "::1" : rawHost;

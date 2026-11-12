@@ -20,8 +20,8 @@ export const PROFILES = ["short", "long"];
 /**
  * The runs of each `memory-budget` leg, in order. S2/gc is a diagnostic
  * variant (phase A only, with forced GC) and stays local. The windows leg
- * (ticket 02, spec §12) runs S1, S2 (offline fixture backend), S3, S4, S5 and
- * S7; S6 stays ubuntu-only. S3/omp is the OMP stub-host leg (ticket 03), on both legs.
+ * runs S1, S2 (offline fixture backend), S3, S4, S5 and
+ * S7; S6 stays ubuntu-only. S3/omp is the OMP stub-host leg, on both legs.
  */
 const LINUX = [
   "S1/short", "S1/burst1", "S1/burst4", "S1/burst16", "S1/burst32", "S1/bigbody", "S1/stalled",

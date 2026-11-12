@@ -13,7 +13,7 @@
  * worker); callers queue FIFO. `bun build --compile` must list
  * src/proxy/captcha-solver-worker.ts as an extra entrypoint.
  *
- * Shape (ADR-0002): the dispatcher is an object built by createCaptchaSolver()
+ * Shape: the dispatcher is an object built by createCaptchaSolver
  * over a SolverTransport, which starts solver generations and carries the
  * message protocol below unchanged. threadTransport() is the Bun Worker; the
  * module-level functions drive the proxy's own dispatcher over it.

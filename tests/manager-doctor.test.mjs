@@ -353,7 +353,7 @@ for (const state of STATES) {
     matchPlatformSnapshot(`manager-doctor/${state.id}.txt`, snapshotText(run, root));
   });
 
-  // zcode-kit doctor over the same states: its text report (ticket 40), its
+  // zcode-kit doctor over the same states: its text report, its
   // --json (today's keys plus ticket 40's additive ones) and their exit codes.
   for (const [variant, args] of [["text", ["doctor"]], ["json", ["doctor", "--json"]]]) {
     test(`zcode-kit doctor${variant === "json" ? " --json" : ""}, ${state.title}: output and exit code as in the snapshot`, { timeout: 120_000 }, async (t) => {

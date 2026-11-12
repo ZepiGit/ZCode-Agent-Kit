@@ -6,7 +6,7 @@ import { withLineEndingsOf } from "../lib/line-endings.mjs";
 import { ABORTED, askYesNo } from "./harness-consent.mjs";
 
 export const ACCOUNT_ROTATOR_QUESTION = "Do you want to activate the Account Rotator feature?";
-// The question's default is "no" ([y/N], design-language §4.9): Enter declines.
+// The question's default is "no" ([y/N]): Enter declines.
 const ROTATOR_ASK = { defaultAnswer: false };
 
 export function rotatorChoice(value) {
@@ -20,7 +20,7 @@ export function askAccountRotator(streams = {}) {
   return askYesNo(ACCOUNT_ROTATOR_QUESTION, streams, ROTATOR_ASK);
 }
 
-// The stored decision (ticket 42, Round 1 Q8). One file next to the harness
+// The stored decision. One file next to the harness
 // choices, written through the transaction of the command that decided, so a
 // rollback of that command removes or restores it:
 //   <state>/generated/account-rotator.json
@@ -85,7 +85,7 @@ function configuredRotator(ctx) {
  *      wins, is applied and recorded (source flag/env), even after an abort;
  *   2. after Ctrl-C at an earlier question nothing else happens;
  *   3. migration: no stored decision and auth.accounts.enabled: true → "yes"
- *      recorded without asking (Round 1 Q8 cond 1); `false` stays undecided;
+ *      recorded without asking; `false` stays undecided;
  *   4. a stored decision stands (nothing asked, nothing applied) unless
  *      `reask` on a terminal;
  *   5. otherwise the question, on a terminal only; the answer is applied and

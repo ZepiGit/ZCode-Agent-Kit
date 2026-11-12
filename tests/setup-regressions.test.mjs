@@ -50,7 +50,7 @@ function fakeHome() {
 }
 
 /**
- * The kit state for one fake home (ticket 75): created first with this
+ * The kit state for one fake home: created first with this
  * checkout's .owner.json, so nothing of the checkout's own state is used, and
  * a proxy config on a free port of this run, so setup's probe can never meet
  * a listener of a parallel run or the owner's proxy on 8457.
@@ -197,12 +197,12 @@ test("update from a checkout completes — re-setup implies the checkout opt-in 
   // stub manager pins the restart contract: update must invoke it.
   cpSync(join(KIT, "cli"), join(checkout, "cli"), { recursive: true });
   cpSync(join(KIT, "lib"), join(checkout, "lib"), { recursive: true });
-  // Ticket 43: setup renders through the output module, whose token set and
+  // Setup renders through the output module, whose token set and
   // width core re-export the shared files under zcode-proxy-src/src/tui —
   // part of every real kit layout, so the minimal fixture kit carries them.
   mkdirSync(join(checkout, "zcode-proxy-src", "src", "tui"), { recursive: true });
   for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(KIT, "zcode-proxy-src", "src", "tui", f), join(checkout, "zcode-proxy-src", "src", "tui", f));
-  // Template port: a free port of this run (ticket 75), as the re-setup probes it.
+  // Template port: a free port of this run, as the re-setup probes it.
   writeFileSync(join(checkout, "proxy", "config.example.yaml"), readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8").replace(/^  port: \d+/m, `  port: ${await freePort()}`));
   writeFileSync(join(checkout, "proxy", "zcode-proxy-manager.mjs"), "console.log('stub manager:', process.argv[2] ?? 'none');\n");
   const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8" });
@@ -319,7 +319,7 @@ test("omp adapter fails closed on hand-written zcode entry outside managed block
   assert.equal(readFileSync(modelsYml, "utf8"), before, "nothing written on refusal");
 });
 
-// Ticket 43: the compact report is the default. The screen shows the report
+// The compact report is the default. The screen shows the report
 // (banner, stage rows, one result row per assistant, the connection check,
 // the undo command, the connection details) and install.log carries the full
 // output — every line the old verbose output had (the line-set comparison
@@ -327,7 +327,7 @@ test("omp adapter fails closed on hand-written zcode entry outside managed block
 test("compact setup by default: report on the screen, full output in install.log", async () => {
   const { home } = fakeHome();
   const state = await stateFor(home);
-  // Both streams: the stage rows are progress and go to stderr (ADR-0005);
+  // Both streams: the stage rows are progress and go to stderr;
   // the report rows go to stdout. install.log carries both.
   const spawned = spawnSync(process.execPath, [join(KIT, "setup.mjs")], {
     env: {

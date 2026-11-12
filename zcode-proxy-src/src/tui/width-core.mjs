@@ -1,7 +1,7 @@
 /**
  * Shared width core: display width in terminal cells, for the proxy TUI (Bun,
  * through width.ts) and the kit CLI (Node, through lib/term/width.mjs).
- * ADR-0011: plain ESM, no imports, no runtime-specific APIs; types in
+ * Plain ESM, no imports, no runtime-specific APIs; types in
  * width-core.d.mts.
  *
  * Width is measured per grapheme cluster (Intl.Segmenter), as grapheme-aware

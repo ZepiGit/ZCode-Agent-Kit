@@ -1,4 +1,4 @@
-// Repository guard (seam 9): every kit test file `tests/*.test.mjs` must be
+// Repository guard: every kit test file `tests/*.test.mjs` must be
 // referenced by a test script (`test` or `test:*` in package.json), so no test
 // can sit outside `npm run test` and CI unnoticed. Since ticket 75 also: no kit
 // test depends on a fixed loopback port (scripts/fixture-ports.mjs).
@@ -50,7 +50,7 @@ test("every kit test file in this repository is wired into a test script", () =>
   assert.deepEqual(unwired, [], `wire these into a test script in package.json: ${unwired.join(", ")}`);
 });
 
-// Ticket 76: the proxy test run loads the egress guard. `npm run test:proxy`
+// The proxy test run loads the egress guard. `npm run test:proxy`
 // runs `bun test` inside zcode-proxy-src, where bunfig.toml preloads it, and
 // both CI workflows run that script.
 test("npm run test:proxy loads the egress guard preload, in CI too", async () => {
@@ -76,7 +76,7 @@ test("npm run test:proxy loads the egress guard preload, in CI too", async () =>
   });
 });
 
-// Ticket 75: no kit test depends on a fixed loopback port. `node --test` runs
+// No kit test depends on a fixed loopback port. `node --test` runs
 // the files in parallel, and two checkouts may run the suite at once; a shared
 // port made a "down" case see another run's listener (json-superset,
 // ux-before-capture), a bind fail with EADDRINUSE (cli-commands) and a test

@@ -1,7 +1,7 @@
 /**
  * health-monitor.ts — cheap process vitals for `/health` `details`. The memory
  * thresholds and the respawn request live in the health supervisor
- * (`supervisor.ts`, ADR-0008).
+ * (`supervisor.ts`).
  *
  * Before this existed the proxy had no memory or event-loop signal at all: a
  * process at 11 GB RSS with a parked main thread looked identical to a

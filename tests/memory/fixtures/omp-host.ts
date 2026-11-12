@@ -1,4 +1,4 @@
-// Stub OMP host for the S3 OMP leg (ADR-0013 cond 4): a Bun process that
+// Stub OMP host for the S3 OMP leg: a Bun process that
 // loads the GENERATED OMP extension the way OMP does (default export called
 // with an `on` registrar) and fires its `before_provider_request` hook once
 // for the zcode provider. It measures its own memory while the hook runs; that
@@ -12,9 +12,9 @@
 // stdin: a line "arm" opens the measurement (sent at spawn), a line "go" fires
 // the hook; end of stdin (the loop went away) exits.
 // Metric: RSS, or on Windows the commit charge (Bun.unsafe.memoryFootprint:
-// PrivateUsage there), matching the loop's per-OS metric (spec §1). On Windows
+// PrivateUsage there), matching the loop's per-OS metric. On Windows
 // the working-set delta (process.memoryUsage().rss) is measured beside it and
-// reported as wsCostMB (Round 7 Q1 condition 3: every memory check shows both).
+// reported as wsCostMB (every memory check shows both).
 import { pathToFileURL } from "node:url";
 
 const extensionPath = process.argv[2];

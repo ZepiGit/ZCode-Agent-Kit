@@ -5,12 +5,12 @@
 // Every crash cycle counts solver processes right after the proxy's SIGKILL
 // (0 allowed), and every sample allows ≤ 1 solver per proxy. With today's
 // coding-plan proxy no solver spawns; the counts become live with the solver
-// process (ticket 27).
+// process.
 // Then two adversarial checks:
 //   - Ctrl-C (SIGINT) of a `proxy start` while it holds the start lock;
 //   - a respawn storm: the proxy's own restart hook asked 6 times in a row
 //     (the manager allows 3 per 15 minutes).
-// Last, induced memory pressure on the real proxy (ticket 23, `pressure:*`).
+// Last, induced memory pressure on the real proxy (`pressure:*`).
 import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -113,7 +113,7 @@ export async function run(ctx) {
   const proxies = () => scan(ctx.marker).filter((p) => p.role === "proxy");
   // What is left after a lifecycle step is read from the process table as it is
   // after the step (on Windows the first poll that started after it): a proxy
-  // that exited is never counted, whatever its pid names by then (ticket 73).
+  // that exited is never counted, whatever its pid names by then.
   const settle = () => settled(ctx.marker);
   const listening = () => proxies().filter((p) => portsOf(p.pid).includes(kit.port)).length;
   const logFiles = () => readdirSync(kit.logDir).sort();
@@ -248,7 +248,7 @@ export async function run(ctx) {
   return {
     budgets: {
       counts: { proxy: PROCESSES.proxiesPerInstallation },
-      commitBackstop: PROXY_COMMIT_BACKSTOP, // paced (Round 7 Q1)
+      commitBackstop: PROXY_COMMIT_BACKSTOP, // paced
       perParent: [{ role: "solver", max: PROCESSES.solversPerProxy }],
       observed: [{ name: "solver:after-proxy-sigkill", label: "after-proxy-sigkill", role: "solver", max: PROCESSES.solversAfterProxyKill }],
       orphans: PROCESSES.orphans,

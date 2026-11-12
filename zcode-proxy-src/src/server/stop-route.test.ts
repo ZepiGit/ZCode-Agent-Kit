@@ -1,9 +1,9 @@
 /**
- * The graceful stop request `POST /__kit/stop` (seam 4, ADR-0014, ticket 22):
+ * The graceful stop request `POST /__kit/stop`:
  * the route sits after the Host, Origin and bearer checks and additionally
  * requires the per-spawn stop-token header, both compared in constant time
  * including length; without a configured token it answers the unknown-route
- * `404 not_found_error`; it has no body, bypasses admission (ADR-0004) and the
+ * `404 not_found_error`; it has no body, bypasses admission and the
  * drain shed, answers 202 before the drain starts, triggers the one graceful
  * sequence with the shared deadlines, and the listener stays open during the
  * drain.

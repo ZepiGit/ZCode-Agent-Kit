@@ -1,5 +1,5 @@
-// S7's responses store at its cap, judged on the heap the store RETAINS
-// (Owner Proxy Round 17 Q1, ticket 71). After the load and the scenario's
+// S7's responses store at its cap, judged on the heap the store RETAINS.
+// After the load and the scenario's
 // 5 s wait, /health is read at least 30 times, 1 s apart; the check value is
 // the MINIMUM heapUsedMB of that series minus the reading before the load
 // (h0). Memory the store retains is in every reading, so a store over its

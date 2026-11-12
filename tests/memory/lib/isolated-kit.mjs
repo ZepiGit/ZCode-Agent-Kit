@@ -39,7 +39,7 @@ export function bunPath(env = process.env) {
 }
 
 /**
- * The run's own bun executable (Windows sampler run token, spec §1): a hard
+ * The run's own bun executable (Windows sampler run token): a hard
  * link, or a copy across volumes, of the bun in use, under the run directory
  * whose name is the run id. Every Bun process the run starts through
  * ZCODE_KIT_BUN (the manager's proxy, the S2 body) then carries the id in its

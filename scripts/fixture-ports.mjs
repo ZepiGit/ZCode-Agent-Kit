@@ -1,4 +1,4 @@
-// Fixture-port guard (ticket 75): kit tests run their files in parallel
+// Fixture-port guard: kit tests run their files in parallel
 // (`node --test`), and two checkouts may run the suite at once, so no kit test
 // may depend on a fixed loopback port. A test that needs a port takes one from
 // the kernel (`listen(0)`, or tests/free-port.mjs) and passes it into its
@@ -15,7 +15,7 @@
 //   ports  a literal port (1024-65535) in a port position (`port: 19421`,
 //          `PORT = 19680`, `port: () => 18458`, `["Port", "18458"]`,
 //          `127.0.0.1:19500`, `localhost:11434`), or any literal in the
-//          overhaul's fixture range 18000-19999. Allowed only where
+//          fixture range 18000-19999. Allowed only where
 //          RECORDED_PORTS lists it for that file with its reason: data (a value
 //          a test renders, parses or writes into a config that nothing binds
 //          and nothing connects to), or the one recorded exception, the memory
@@ -43,7 +43,7 @@ export const MANUAL_TOOLS = Object.freeze([
 const GUARD_VECTORS = "tests/test-wiring.test.mjs";
 
 /**
- * Literal ports allowed per file, with the reason. Verified for ticket 75 by a
+ * Literal ports allowed per file, with the reason. Verified by a
  * run of `npm run test` that logged every listen and connect of every Node
  * process: none of these ports was bound or connected to. A test that makes a
  * process bind or connect to one of them must take a free port instead.
@@ -61,7 +61,7 @@ export const RECORDED_PORTS = Object.freeze({
   "tests/crlf-writers.test.mjs": { ports: [19682, 19689], why: `${DATA} (an earlier Goose entry, a mirrored config's content)` },
   "tests/golden-path.test.mjs": { ports: [18457], why: `${DATA} (fillProxyTemplate input)` },
   "tests/harness-consent.test.mjs": { ports: [11434], why: `${DATA} (a foreign Ollama provider in the user's pi config)` },
-  "tests/memory/lib/isolated-kit.mjs": { ports: [18457, 18458], why: "the memory loop's own port (seam 1, `npm run memloop`/`memloop:job`, not `npm run test`): its default and its refused ports; ZCODE_MEMLOOP_PORT overrides it, the CI memory-budget job runs alone" },
+  "tests/memory/lib/isolated-kit.mjs": { ports: [18457, 18458], why: "the memory loop's own port (`npm run memloop`/`memloop:job`, not `npm run test`): its default and its refused ports; ZCODE_MEMLOOP_PORT overrides it, the CI memory-budget job runs alone" },
   "tests/memory/lib/proxy-session.mjs": { ports: [18457], why: "the memory loop's own port default (ZCODE_MEMLOOP_PORT overrides it; not part of `npm run test`)" },
   "tests/memory/loop.test.mjs": { ports: [18457, 19024, 19025, 19026, 19031], why: `${DATA} (rendered configs, fake process tables and evidence records)` },
   "tests/memory/scenarios/s6-tui-run.ts": { ports: [18457], why: `${DATA} (serverUrl of rendered TUI frames)` },

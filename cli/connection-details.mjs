@@ -12,7 +12,7 @@ import { isIP } from "node:net";
 
 export const DEFAULT_MODEL_IDS = ["glm-5.3", "glm-5.3-flash"];
 export const REDACTED_KEY = "(redacted: not an interactive terminal — print it with: zcode-kit models --show-key)";
-/** The same marker in the connection card (lib/term/out.mjs), short enough for 80 columns (design-language §4.6). */
+/** The same marker in the connection card (lib/term/out.mjs), short enough for 80 columns. */
 export const REDACTED_KEY_CARD = "(redacted — print it with: zcode-kit models --show-key)";
 
 export function shouldRevealKey({ stdin = process.stdin, stdout = process.stdout, env = process.env, json = false } = {}) {

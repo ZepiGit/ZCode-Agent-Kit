@@ -1,6 +1,6 @@
 /**
  * Protocol contract: the bytes and event order a client receives for a
- * streamed answer (seam 4, ticket 61).
+ * streamed answer.
  *
  * A real proxy on a loopback listener answers client requests from an
  * injected upstream (no network) that streams representative SSE answers in

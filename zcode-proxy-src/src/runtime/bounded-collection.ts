@@ -1,5 +1,5 @@
 /**
- * Bounded collection (ADR-0009): one in-process LRU with an entry limit, a
+ * Bounded collection: one in-process LRU with an entry limit, a
  * byte budget, an optional TTL and an injected clock. Lifted from the
  * responses store, which keeps its behaviour by delegating here; every other
  * store that must not grow without limit (the captcha CDN memory cache, the

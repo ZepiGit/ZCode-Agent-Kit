@@ -1,4 +1,4 @@
-// The `zcode-kit accounts` reports (ticket 46; design-language §4.7, §7; ADR-0001).
+// The `zcode-kit accounts` reports.
 // Pure: the proxy CLI's redacted JSON in → output-module records out. The
 // command (./commands/accounts.mjs) collects the documents; the entry renders
 // the records through the output module.
@@ -10,11 +10,11 @@
 // --json` keep forwarding the proxy CLI verbatim (C2), so the JSON documents
 // are byte-stable; only the text views render here.
 //
-// The tables follow design-language §4.7: a header row, an active-row marker
+// The tables share one layout: a header row, an active-row marker
 // `*` explained in a footer line, one number format — thousands without
 // separators, `69 %`, local `HH:MM` reset times — and no truncation in a
-// pipe. Every next step names `zcode-kit …`, never the standalone binary
-// (A-19), and the words `no quota data`/`auth error` replace the machine
+// pipe. Every next step names `zcode-kit …`, never the standalone binary,
+// and the words `no quota data`/`auth error` replace the machine
 // codes `no_quota_data`/`auth_error` in text (the JSON keeps them verbatim).
 
 const SECONDS_PER_DAY = 86_400;
@@ -25,13 +25,13 @@ function roundedPercent(balance) {
   return typeof p === "number" && Number.isFinite(p) ? Math.round(p) : null;
 }
 
-/** Local `HH:MM` from epoch seconds (design-language §4.7), as the proxy CLI prints it. */
+/** Local `HH:MM` from epoch seconds, as the proxy CLI prints it. */
 function clock(epochSeconds) {
   const date = new Date(epochSeconds * 1000);
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
-/** `GLM Coding Lite 4120/6000 (69 %) resets 00:00` — one number format (A-27). */
+/** `GLM Coding Lite 4120/6000 (69 %) resets 00:00` — one number format. */
 export function formatBalance(balance) {
   const left = `${balance?.remainingUnits ?? "?"}/${balance?.totalUnits ?? "?"}`;
   const pct = roundedPercent(balance) === null ? "" : ` (${roundedPercent(balance)} %)`;
@@ -50,7 +50,7 @@ export function ageText(lastUsedAt, nowMs) {
 }
 
 const WORD_VERDICTS = { no_quota_data: "no quota data", auth_error: "auth error" };
-/** A verdict word for text: the machine codes `no_quota_data`/`auth_error` read as words (A-19). */
+/** A verdict word for text: the machine codes `no_quota_data`/`auth_error` read as words. */
 export const verdictWord = (verdict) => WORD_VERDICTS[verdict] ?? String(verdict ?? "unknown");
 
 /** The QUOTA column: balances with one number format, or the report's own reason. */
@@ -138,7 +138,7 @@ export function healthRecords(doc) {
  * Turn one captured proxy-CLI answer into records. The child's stderr stayed
  * inherited (diagnostics reach stderr as before); its stdout is the JSON
  * parsed here. A proxy CLI that prints no readable JSON is an error block
- * with a next step, never a bare code (Story 95).
+ * with a next step, never a bare code.
  */
 export function proxyAccountRecords(cliArgs, { exitCode, stdout }) {
   let doc = null;

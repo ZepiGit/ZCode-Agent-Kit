@@ -153,7 +153,7 @@ test("root attributes normalize scripts and keep release archives free of CI/tes
   }
 });
 
-// CI toolchain pins (ticket 09, ADR-0006/0016, seam 9). Every tracked workflow
+// CI toolchain pins (ADR-0006/0016). Every tracked workflow
 // file is scanned, so a vendored copy with stale pins that reappears anywhere
 // in the tree (the nested proxy workflows pinned Bun 1.4.0) fails here too.
 // The pin: Bun 1.4.2 everywhere (Round 11 Q1 condition 1; Bun >= 1.4.3 raises
@@ -191,7 +191,7 @@ function pinViolations(text) {
   return problems;
 }
 
-// The one exception (Round 10 Q1 condition 1): the paired Bun measurement
+// The one exception: the paired Bun measurement
 // installs other Bun versions as measurement arms. Such a step must be a
 // setup-bun step that runs only with the one-run marker (which never merges),
 // is uncached and sits in the memory-budget job; release.yml never has one.
@@ -298,9 +298,9 @@ test("CI and release workflows pin checkout@v7, setup-node@v7, setup-bun@v2, Bun
   assert.match(manifest, /zcode-proxy-src\/\.github\/workflows\//, "MANIFEST.md records the nested-workflow vendor change");
 });
 
-// One Bun everywhere (story 126; Round 11 Q1 conditions 1 and 6): the installers'
+// One Bun everywhere: the installers'
 // bootstrap URLs and messages, README in all five languages and SUPPORT_MATRIX
-// name the CI pin and no other Bun. Moving the pin (ticket 62) moves all of them.
+// name the CI pin and no other Bun. Moving the pin moves all of them.
 test("Bun 1.4.2 is the one pin: both installers, README x5 and SUPPORT_MATRIX name no other Bun", () => {
   const versions = (text, pattern) => [...new Set([...text.matchAll(pattern)].map((m) => m[1]))];
   for (const file of ["install.sh", "install.ps1"]) {

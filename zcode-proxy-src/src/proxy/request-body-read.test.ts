@@ -1,5 +1,5 @@
 /**
- * Reading a request body into one buffer of its declared size (ticket 20).
+ * Reading a request body into one buffer of its declared size.
  *
  * The handler reads a body with a Content-Length straight into a buffer of that
  * size. A Request built in-process can declare any length, so these tests send

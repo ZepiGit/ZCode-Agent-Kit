@@ -1,4 +1,4 @@
-// Seam 6 under Bun: the shared width core and token set (ticket 05). The same
+// Seam 6 under Bun: the shared width core and token set. The same
 // suite runs under Node in tests/width-core.test.mjs.
 import { expect, test } from "bun:test";
 import * as core from "./width-core.mjs";

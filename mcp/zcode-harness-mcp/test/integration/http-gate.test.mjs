@@ -89,7 +89,7 @@ async function runGateAssertions() {
   assert.ok(gatePassed(okOrigin), `legit origin must reach the MCP layer (got ${okOrigin.status})`);
 }
 
-// ZAK-010: the 4 MiB body bound must hold on the ACTUAL stream — a chunked
+// The 4 MiB body bound must hold on the ACTUAL stream — a chunked
 // request without Content-Length used to bypass the declared-size check.
 test("http gate: oversized chunked body without content-length is refused with 413", async () => {
   const probe = http.createServer();

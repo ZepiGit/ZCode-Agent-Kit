@@ -15,7 +15,7 @@
 // doctor's checks are a record from lib/proxy-doctor.mjs (which zcode-kit
 // doctor reads too); `doctor` here renders it in the legacy grammar. Status
 // and the log tail come from lib/proxy-status.mjs and lib/proxy-logs.mjs,
-// which zcode-kit status / proxy logs read too (ticket 40); this file renders
+// which zcode-kit status / proxy logs read too; this file renders
 // them in its own unchanged text.
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -54,7 +54,7 @@ export function createManager({
   const start = async ({ waitMs, onlyIfRecord } = {}) =>
     exitOf(await lifecycle.ensureRunning({ ...(waitMs === undefined ? {} : { waitMs }), onlyIfRecord: onlyIfRecord ?? null, observe: print }));
   // Keep the legacy narration bytes on stdout. The new stop-request events
-  // are diagnostics, not another report (ADR-0005).
+  // are diagnostics, not another report.
   const printStop = (line) => {
     if (/^\d{4}-\d{2}-\d{2}T\S+ (INFO|WARN) manager stop request /.test(line)) console.error(line);
     else print(line);
@@ -189,7 +189,7 @@ export function createManager({
 
   // ----------------------------------------------------------------- doctor
   // The checks are lib/proxy-doctor.mjs's record; this renders it in the
-  // legacy off-TTY grammar (ADR-0001 rule 1), which the manager CLI keeps.
+  // legacy off-TTY grammar, which the manager CLI keeps.
   async function doctor() {
     const { checks, code } = await managerDoctor({ lifecycle });
     let failed = 0, skipped = 0;
@@ -205,7 +205,7 @@ export function createManager({
 
   // ------------------------------------------------------------------- logs
   // The tail is lib/proxy-logs.mjs's; the proxy's own lines are shown
-  // redacted too (ADR-0010 rule 4).
+  // redacted too.
   function logs(n = 40) {
     const tail = readLogTail(LOG_FILE, { n, redact });
     console.log(tail.exists ? tail.lines.join("\n") : `(no log file at ${LOG_FILE})`);

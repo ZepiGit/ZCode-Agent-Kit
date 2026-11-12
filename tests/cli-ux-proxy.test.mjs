@@ -6,7 +6,7 @@
 // forced capabilities in every C3 variant and compared byte for byte with
 // tests/snapshots/cli/{status,proxy}/.
 //
-// Pinned here (spec Stories 93, 95, 105; A-09, A-12, A-17, A-23):
+// Pinned here (spec Stories 93, 95, 105):
 //   - the status starts with a state line in human units; the connection
 //     details appear once, unboxed, within 80 columns, routes only with
 //     --verbose; the key only on an interactive terminal outside CI;
@@ -51,7 +51,7 @@ export function createLifecycle(opts) {
       if (f.stopThrows) throw new Error(f.stopThrows);
       const record = stops.shift() ?? f.stop;
       // The real intent forwards every step to observe: the stop request's
-      // event lines (ticket 14) and its narration lines alike.
+      // event lines and its narration lines alike.
       for (const line of (f.stopEvents ?? [])) opts?.observe?.(line);
       for (const line of (record.lines ?? [])) opts?.observe?.(line);
       return record;
@@ -147,8 +147,8 @@ const START = {
 };
 const STOP = {
   "stop-stopped": { stop: { intent: "stop", code: 0, outcome: "stopped", recovered: null, lines: ["stopped (pid 4242)"], pid: 4242 } },
-  // Ticket 22: the graceful stop request's steps reach observe as event lines
-  // (ticket 14); the narration follows them. The fixture's line is fixed and
+  // The graceful stop request's steps reach observe as event lines;
+  // the narration follows them. The fixture's line is fixed and
   // 78 columns wide so the spinner frame stays inside 80.
   "stop-graceful": {
     stopEvents: ["2026-11-11T00:00:00.000Z INFO manager stop request sent pid=4242 graceMs=10000"],
@@ -183,7 +183,7 @@ const snap = (dir, variant, { stdout, stderr }) => {
   matchSnapshot(`cli/${dir}/${variant}.out`, normaliseSnapshot(stdout));
   matchSnapshot(`cli/${dir}/${variant}.err`, normaliseSnapshot(stderr));
 };
-/** Every line within 80 columns at an 80-column terminal (design-language §1.4, A-12). */
+/** Every line within 80 columns at an 80-column terminal. */
 const within80 = (text, label) => {
   // A spinner redraws its line with \r: what stays on screen is the last frame.
   for (const line of stripAnsi(text).split("\n").map((l) => l.split("\r").at(-1))) assert.ok(displayWidth(line) <= 80, `${label}: ${displayWidth(line)} columns: ${JSON.stringify(line)}`);

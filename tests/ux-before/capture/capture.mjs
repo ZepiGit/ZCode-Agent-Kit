@@ -208,7 +208,7 @@ function writeKitTree(root, { srcLinks = true, version } = {}) {
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), fakeProxySource());
   // The release payload ships the shared token set and width core (pack
   // allowlist zcode-proxy-src/src/, verify-payload requires them); the CLI
-  // output module re-exports them (ticket 43). Always present, never faked.
+  // output module re-exports them. Always present, never faked.
   link(join(KIT, "zcode-proxy-src", "src", "tui"), join(root, "zcode-proxy-src", "src", "tui"));
   link(join(KIT, "zcode-proxy-src", "node_modules"), join(root, "zcode-proxy-src", "node_modules"));
   if (srcLinks) {
@@ -388,7 +388,7 @@ function normalise(text, f) {
   s = s.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/g, "<TS>");
   s = s.replace(/\bpid (\d+)/g, (m, p) => (p === "4242" ? m : "pid <PID>")).replace(/("pid": )\d+/g, "$1<PID>").replace(/pid file:  \d+/g, "pid file:  <PID>");
   s = s.replace(/\(\d+ms\)/g, "(<MS>ms)");
-  // Tooling additions (ticket 06), no-ops for a run like the original's
+  // Tooling additions, no-ops for a run like the original's
   // (port 18458, Bun 1.4.2): the fixture port and the running Bun's version
   // are written back as the baseline's values.
   if (PORT !== null && PORT !== BASE_PORT) s = s.replace(new RegExp(`\\b${PORT}\\b`, "g"), String(BASE_PORT));
@@ -641,7 +641,7 @@ installScenario("install-sh-hash-mismatch", "install.sh with a corrupt release a
 installScenario("install-sh-bad-version", "install.sh with ZCODE_KIT_VERSION=latest", { version: "latest" });
 installScenario("install-sh-foreign-target", "install.sh into a non-kit directory", { target: "foreign" });
 
-// --extra json (ticket 06): `--json` outputs the Phase 1C set does not cover,
+// --extra json: `--json` outputs the Phase 1C set does not cover,
 // captured only for the JSON key/type baseline (tests/ux-before/json-baseline.json).
 // Opt-in, so the default run is exactly the BEFORE set's scenario list.
 if (opt("--extra", null) === "json") {
@@ -896,7 +896,7 @@ function writeIndex() {
   console.log(`captures: ${ok.length} ok, ${failed.length} failed -> ${OUT}`);
 }
 
-// Windows (ticket 06): only the non-TTY variants run (no `script` pty), and
+// Windows: only the non-TTY variants run (no `script` pty), and
 // these scenarios need a POSIX shell: install.sh itself, and the shell-script
 // `opencode` fixture binary. They are not captured there.
 const WIN32_SKIP = /^(install-sh-|run-opencode$)/;

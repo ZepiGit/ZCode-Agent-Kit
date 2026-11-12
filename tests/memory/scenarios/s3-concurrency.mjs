@@ -151,7 +151,7 @@ export function makeHungRound({ kit, proxies, portsOf, round, note, freeze, thaw
     // Our own proxy, frozen: /health stops answering. It is always thawed, and
     // a failed thaw ends the run as a harness failure (lib/freeze.mjs). It is
     // named by the identity the run's scan saw, so neither the freeze nor the
-    // thaw can reach a stranger that took its pid (ticket 73).
+    // thaw can reach a stranger that took its pid.
     const id = sampleIdentity(ours.find((p) => p.pid === target.pid));
     await whileFrozen(id, () => round(name, 10, { kind: "mixed" }), { ...(freeze ? { freeze } : {}), ...(thaw ? { thaw } : {}) });
   };
@@ -182,7 +182,7 @@ export async function run(ctx) {
   const proxies = () => scan(ctx.marker).filter((p) => p.role === "proxy");
   // A count after a step (a stop, a round) is read from the process table as it
   // is after the step (on Windows the first poll that started after it): a
-  // proxy that exited is never counted, whatever its pid names by then (ticket 73).
+  // proxy that exited is never counted, whatever its pid names by then.
   const settle = () => settled(ctx.marker);
 
   async function stopAll(label) {
@@ -272,7 +272,7 @@ export async function run(ctx) {
               const procs = scan(ctx.marker);
               if (procs.some((p) => p.pid === holder.pid)) {
                 process.kill(holder.pid, "SIGKILL");
-                // Where in its start the holder died decides what it leaves (ticket 65). Recorded
+                // Where in its start the holder died decides what it leaves. Recorded
                 // after the kill, from the scan that found it, so the kill's timing is unchanged.
                 return { killed: holder.pid, afterMs: Date.now() - t0, proxiesAtKill: procs.filter((p) => p.role === "proxy").length, pidRecordAfterKill: kit.pidRecord() };
               }
@@ -351,7 +351,7 @@ export async function run(ctx) {
             baselineMB: done[id]?.baselineMB ?? ready[id]?.baselineMB ?? null,
             peakMB: done[id]?.peakMB ?? null,
             metric: ready[id]?.metric ?? null,
-            // Windows: the host's working-set delta, reported beside the commit gate (Round 7 Q1 condition 3).
+            // Windows: the host's working-set delta, reported beside the commit gate.
             wsCostMB: done[id]?.wsCostMB ?? null,
             hookMs: done[id]?.ms ?? null,
             finished: done[id] !== null,

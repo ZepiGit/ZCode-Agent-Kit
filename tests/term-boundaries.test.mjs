@@ -4,7 +4,7 @@
 //    commands migrating onto lib/term/ add their files to NEW_CODE);
 // 2. rendering loads lazily: importing lib/term/load.mjs loads no renderer,
 //    and the preflight and the lifecycle intents never import lib/term/ or
-//    the shared TUI tokens and width core (ADR-0011 cond 3).
+//    the shared TUI tokens and width core.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -17,7 +17,7 @@ const rel = (file) => relative(ROOT, file).split(sep).join("/");
 /** Code added by ticket 06 (and later tickets that build on it). caps.mjs is the reader. */
 const NEW_CODE = [
   ...readdirSync(join(ROOT, "lib", "term")).filter((f) => f.endsWith(".mjs") && f !== "caps.mjs").map((f) => `lib/term/${f}`),
-  // Ticket 40: the commands migrated onto the output module and their report builders.
+  // The commands migrated onto the output module and their report builders.
   "cli/doctor-report.mjs", "cli/proxy-report.mjs",
   ...["doctor", "proxy", "status", "logs"].map((name) => `cli/commands/${name}.mjs`),
 ];

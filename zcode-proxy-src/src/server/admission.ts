@@ -1,5 +1,5 @@
 /**
- * Admission control (ADR-0004): a cap on the request-body bytes in flight.
+ * Admission control: a cap on the request-body bytes in flight.
  *
  * A request that carries a body is admitted before anything reads it. It is
  * admitted when the bytes already in flight plus its own fit under the cap, or
@@ -30,7 +30,7 @@
  */
 import { createEventLogger, type EventLogger } from "../log/event-line.mjs";
 
-/** The default cap: 64 MB of request bodies in flight (ADR-0004). */
+/** The default cap: 64 MB of request bodies in flight. */
 export const DEFAULT_MAX_IN_FLIGHT_MB = 64;
 export const DEFAULT_MAX_IN_FLIGHT_BYTES = DEFAULT_MAX_IN_FLIGHT_MB * 1024 * 1024;
 /** The FIFO's count bound: requests waiting for admission at most. */
@@ -296,7 +296,7 @@ export function admissionCost(req: Request): number | null {
 export type EndpointShape = "anthropic" | "openai";
 
 /**
- * The ADR-0004 shed contract: HTTP 503 with `Retry-After`, in the endpoint's
+ * The shed contract: HTTP 503 with `Retry-After`, in the endpoint's
  * own error shape (Anthropic `overloaded_error`; the OpenAI `error` object).
  * Never 429: clients map 429 to quota exhaustion. The message says what
  * happened, why and what to do next. Reused by the supervisor's drain (21)

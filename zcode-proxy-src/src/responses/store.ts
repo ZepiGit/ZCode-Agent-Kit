@@ -66,7 +66,7 @@ export class ResponseStore {
     });
   }
 
-  /** Serialized UTF-8 byte size of an entry (ZAK-014: bytes, not UTF-16 code units). */
+  /** Serialized UTF-8 byte size of an entry (bytes, not UTF-16 code units). */
   private static byteSize(entry: StoredResponse): number {
     let size = 128; // structural overhead baseline
     try {

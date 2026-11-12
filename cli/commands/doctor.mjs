@@ -1,9 +1,9 @@
 // `zcode-kit doctor [--fix] [--harness <id>] [--json] [--upstream]` and
 // `doctor --forget <harness>`. The manager's checks come as its doctor
-// record (lib/proxy-doctor.mjs, ticket 38), never as parsed text, and count
+// record (lib/proxy-doctor.mjs), never as parsed text, and count
 // with the adapter checks: exit 0 when nothing failed (WARN and SKIP never
 // fail), 1 otherwise, 2 on a usage error. The report is ../doctor-report.mjs:
-// each check once, grouped, one verdict (ticket 40, A-02).
+// each check once, grouped, one verdict.
 // `--fix` progress (the repairs, the proxy start) goes to stderr as it
 // happens; the report is records on stdout. The report builders load on use:
 // every command module is imported by the CLI entry, `run` included, whose

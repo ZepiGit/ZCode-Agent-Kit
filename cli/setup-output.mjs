@@ -1,4 +1,4 @@
-// The setup report (ticket 43; design-language §4/§7, ADR-0001, ADR-0005).
+// The setup report.
 //
 // Compact is the default: stage rows, one result row per assistant, the
 // connection check, the connection details and the undo command on screen.
@@ -110,7 +110,7 @@ export function setupUi({ out, log, verbose = false, banner = [], stdout = proce
       warnBlock({ what: line.replace(/^WARN: /, "").trim() });
     },
 
-    /** A prompt-context note (A-22): stderr row above the question. */
+    /** A prompt-context note: stderr row above the question. */
     note(text) {
       plain(`  note: ${text}`);
       if (verbose) return;
@@ -118,7 +118,7 @@ export function setupUi({ out, log, verbose = false, banner = [], stdout = proce
       out.note(text);
     },
 
-    /** Stage 1/4: TTY progress via Out.step (design-language §4.10). */
+    /** Stage 1/4: TTY progress via Out.step. */
     step(label) {
       if (verbose) return { done() {}, skip() {}, fail() {} };
       const progress = out.step(label);
@@ -182,9 +182,9 @@ export function setupUi({ out, log, verbose = false, banner = [], stdout = proce
 
 /**
  * Compact installer output; full adapter diagnostics remain available in a
- * private log. Compact is the default (ticket 43); `verbose` prints the full
+ * private log. Compact is the default; `verbose` prints the full
  * stream; `banner` lines are the kit banner (suppressed in installer mode:
- * the installers print it themselves — one banner, audit A-26).
+ * the installers print it themselves — one banner).
  */
 export async function setupOutput(ctx, { verbose = false, banner = [] } = {}) {
   const { loadOutput } = await import("../lib/term/load.mjs");

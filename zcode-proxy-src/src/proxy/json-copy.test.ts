@@ -1,5 +1,5 @@
 /**
- * jsonCopy and transformBuiltRequestBody (ticket 20).
+ * jsonCopy and transformBuiltRequestBody.
  *
  * A translated request used to be serialised, parsed back and serialised again
  * by the body transforms. It is now copied structurally (jsonCopy) and

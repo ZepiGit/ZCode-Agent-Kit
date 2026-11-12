@@ -20,7 +20,7 @@ import { runOwned, requireSuccess } from "./ux-before/capture/owned-child.mjs";
 const ROOT = join(import.meta.dirname, "..");
 const TEMPLATE = readFileSync(join(ROOT, "tests", "ux-before", "capture", "fake-proxy.ts"), "utf8");
 const CAPTURE = join(ROOT, "tests", "ux-before", "capture", "capture.mjs");
-/** The host environment without UX_CAPTURE_PORT: every capture scenario takes a free port of its own (ticket 75). */
+/** The host environment without UX_CAPTURE_PORT: every capture scenario takes a free port of its own. */
 function captureEnv() {
   const env = { ...process.env };
   delete env.UX_CAPTURE_PORT;
@@ -124,7 +124,7 @@ test("Linux end to end: a kit path with `\\u` in it starts the fixture proxy (th
   assert.equal(JSON.parse(readFileSync(join(out, "proxy", "proxy-status-json-running", "pipe.txt"), "utf8").replace(/<PID>/g, "0")).health, "ours", "the fixture proxy answered as this kit's own");
 });
 
-// Ticket 46: exercise the real proxy health JSON producer, public kit CLI,
+// Exercise the real proxy health JSON producer, public kit CLI,
 // Out renderer and capture writer. Do NOT use compareCaptures here: its
 // relative-age rule would hide the old milliseconds/seconds regression.
 // fake-proxy.ts pins only the health CLI clock to 2026-11-11T00:00Z;
@@ -592,7 +592,7 @@ test("git's diffstat of the fixture update normalises whatever the checkout's li
   assert.notEqual(normaliseVolatile(ffwd([" cli/zcode-kit.mjs | 2 +-", DIFFSTAT_LF[1]])), want, "the path stays: a different file is a difference");
 });
 
-// Ticket 40: the TTY progress of `proxy start|stop|restart` and `doctor --fix`
+// The TTY progress of `proxy start|stop|restart` and `doctor --fix`
 // as the capture stores it (\r turned into \n): one line per spinner frame
 // (colour: ESC[K before every redraw; NO_COLOR: a line of spaces after each).
 const frames = (label, n, { colour = true, elapsedFrom = Infinity } = {}) => {
@@ -656,7 +656,7 @@ test("Linux end to end: a CRLF package.json (as on a windows checkout) changes o
   cpSync(join(ROOT, "zcode-proxy-src", "package.json"), join(kit, "zcode-proxy-src", "package.json"));
   symlinkSync(join(ROOT, "zcode-proxy-src", "src"), join(kit, "zcode-proxy-src", "src"));
   symlinkSync(join(ROOT, "zcode-proxy-src", "node_modules"), join(kit, "zcode-proxy-src", "node_modules"));
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout. Here the fixture symlinks src/ to this checkout, so the files
   // are already reachable and a copy would be src == dest.
@@ -678,7 +678,7 @@ test("Linux end to end: a CRLF package.json (as on a windows checkout) changes o
   assert.deepEqual(compareCaptures(join(ROOT, "tests", "ux-before", "linux"), out, { only: /^update\/update-checkout$/, variants: ["pipe", "ci"] }), []);
 });
 
-// Ticket 75: captures run in parallel (json-superset and this file under
+// Captures run in parallel (json-superset and this file under
 // `node --test`, or two checkouts at once). Every scenario takes a free port of
 // its own, so a "down" capture never sees another capture's fixture proxy and
 // a "running" capture never finds its port taken. Both stay byte-identical to

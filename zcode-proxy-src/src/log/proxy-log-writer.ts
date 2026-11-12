@@ -1,8 +1,8 @@
 /**
- * The `proxy.log` writer (ticket 33, spec §8, story 74): while it runs, the
+ * The `proxy.log` writer: while it runs, the
  * proxy is the single rotator of `proxy.log`.
  *
- * - The manager sets `ZCODE_KIT_LOG_DIR` at every spawn (ADR-0015 amendment).
+ * - The manager sets `ZCODE_KIT_LOG_DIR` at every spawn.
  *   With it, `serve` opens `<dir>/proxy.log` through this size-capped writer;
  *   without it (TUI-hosted, standalone) nothing here runs and the output stays
  *   where it always went.
@@ -10,7 +10,7 @@
  *   when `write` returns, also right before `process.exit`.
  * - Once open, console, process.stdout and process.stderr go through it, and
  *   the line content stays as it is, except that every chunk passes through
- *   `redactLine` (ADR-0010 rule 4, ticket 14): the stop token in the
+ *   `redactLine`: the stop token in the
  *   environment, the secrets added with `addSecret` and token shapes are masked.
  * - Rotation: before each write the writer checks the file's size through its
  *   own fd, so appends by other kit processes (the manager's narration) count.
@@ -22,7 +22,7 @@
  *   sharing violation surfaces as EPERM, EBUSY or EACCES) leaves the writer
  *   appending to the current file. It writes one WARN event line per blocked
  *   spell and retries at every check; nothing is lost.
- * - File modes (spec §8, Round 3 Q5): the logs directory is created `0o700`,
+ * - File modes: the logs directory is created `0o700`,
  *   `proxy.log` is created `0o600` on open and on every reopen. `proxy.log.1`
  *   is the renamed file and keeps its mode.
  * - If the file cannot be (re)opened, a chunk goes to the original stream it
@@ -34,7 +34,7 @@ import { format } from "node:util";
 import { createEventLogger, redactLine } from "./event-line.mjs";
 
 export const PROXY_LOG_NAME = "proxy.log";
-/** Rotation threshold: 5 MB (spec §8). */
+/** Rotation threshold: 5 MB. */
 export const PROXY_LOG_MAX_BYTES = 5 * 1024 * 1024;
 
 export interface ProxyLogWriter {

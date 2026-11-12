@@ -55,12 +55,12 @@ export async function run(ctx) {
     ctx.setProgress(nA + i + 4);
   }
   await new Promise((r) => setTimeout(r, 5000));
-  // The store's retained heap (Round 17 Q1): ≥ 30 /health readings 1 s apart, judged on their minimum.
+  // The store's retained heap: ≥ 30 /health readings 1 s apart, judged on their minimum.
   const series = await readHeapSeries(() => kit.health());
   const h1 = series[0] ?? {};
   ctx.note("responsesStore", { entriesSent: nB, inputKB: 64, heapBeforeMB: h0.heapUsedMB, heapAfterMB: h1.heapUsedMB, rssBeforeMB: h0.rssMB, rssAfterMB: h1.rssMB, heapSeriesMB: series.map((x) => x?.heapUsedMB ?? null), rssLastMB: series.at(-1)?.rssMB ?? null, configuredByteBudgetMB: 64 });
   ctx.log(`proxy.log ${bytesPerRequest.toFixed(0)} B/request, ${(whileRunning / 1048576).toFixed(1)} MB while running (rotated: ${whileRunning < beforeMore}); responses store heap ${h0.heapUsedMB} -> ${h1.heapUsedMB} MB (series of ${series.length}: ${series.map((x) => x?.heapUsedMB ?? "—").join(" ")}), rss ${h0.rssMB} -> ${h1.rssMB} … ${series.at(-1)?.rssMB} MB`);
-  // The proxy's early output (ticket 34): ≤ 1 MB plus a bounded overshoot,
+  // The proxy's early output: ≤ 1 MB plus a bounded overshoot,
   // taken here as one 64 KB write. Absent today, which is within budget.
   const earlyLog = join(kit.logDir, "proxy.early.log");
   const earlyBytes = existsSync(earlyLog) ? statSync(earlyLog).size : 0;
@@ -73,7 +73,7 @@ export async function run(ctx) {
   return {
     budgets: {
       procPeaks: { proxy: MEMORY.S1.peakMB },
-      commitBackstop: PROXY_COMMIT_BACKSTOP, // paced (Round 7 Q1)
+      commitBackstop: PROXY_COMMIT_BACKSTOP, // paced
       orphans: PROCESSES.orphans,
       extra: [
         { name: "proxy.log:bounded-while-running", red: whileRunning > MEMORY.S7.proxyLogMB * MiB, value: Number((whileRunning / MiB).toFixed(2)), budget: MEMORY.S7.proxyLogMB, unit: "MB" },

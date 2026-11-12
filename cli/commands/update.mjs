@@ -13,7 +13,7 @@
 // harness failed) and 130 (interrupted) are update's exit code too.
 // Output is streamed (ctx.progress): git, npm, setup and the manager share
 // the terminal. Below the Node support floor the entry refuses first
-// (`nodeFloor`, ADR-0006).
+// (`nodeFloor`).
 import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,7 +54,7 @@ export async function run({ flags }, ctx) {
 
   if (type === "checkout") {
     // Conservative by design: refuses on a dirty tree; fast-forward only.
-    // V1-01: a missing git must be reported, not mistaken for a clean tree.
+    // A missing git must be reported, not mistaken for a clean tree.
     const dirty = ctx.runCommandSync("git", ["status", "--porcelain"], { cwd: ROOT, encoding: "utf8" });
     if (dirty.error || dirty.status !== 0) {
       progressError(`update: cannot run git (${dirty.error?.message ?? `exit ${dirty.status}`}) — install git or re-run the installer.`);
@@ -174,7 +174,7 @@ function stopProxyIfRunning(ctx) {
  * The setup re-run's stdin: the terminal only when stdin and stderr are both
  * terminals (and not CI). Otherwise setup gets no input, so it asks nothing:
  * stored decisions apply and undecided questions are skipped. An unattended
- * update never waits on a question nobody can see or answer (Round 1 Q8 cond 3).
+ * update never waits on a question nobody can see or answer.
  */
 export function setupStdin({ terminal, env }) {
   return isInteractive({ input: terminal?.stdin ?? {}, output: terminal?.stderr ?? {}, env }) ? "inherit" : "ignore";

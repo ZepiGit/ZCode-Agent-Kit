@@ -1,4 +1,4 @@
-// Seam 3 (B1, ticket 29, Owner Proxy round 20 Q1): pruning the CDN disk
+// Seam 3 (B1): pruning the CDN disk
 // directory changes disk use only. For a workload that fits within 256 MiB and
 // whose entries are pruned only once expired, every call returns the same
 // bytes, sha256 and fetchedAt as today and the network fetches are the same

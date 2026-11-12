@@ -59,7 +59,7 @@ for (const [name, override, startedMs] of [
 function hungListener(t, port) {
   const child = spawn(process.execPath, ['-e', `require('node:net').createServer(()=>{}).listen(${port},'127.0.0.1',()=>console.log('up'))`], { stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(() => { try { child.kill('SIGKILL'); } catch {} });
-  // A listener that cannot bind (EADDRINUSE) exits: fail the test instead of waiting forever (ticket 75).
+  // A listener that cannot bind (EADDRINUSE) exits: fail the test instead of waiting forever.
   let stderr = '';
   child.stderr.on('data', d => { stderr += d; });
   return new Promise((resolve, reject) => {
@@ -85,7 +85,7 @@ test('start terminates a proven hung own proxy and starts a replacement', async 
   assert.match(output, new RegExp(`hung proxy pid ${hung.pid} \\(no /health answer on 3 probes.*\\) — terminating and restarting`));
   assert.equal(spawnAttempts, 1, 'a new start must follow the kill');
   assert.equal(code, 4, 'the synthetic Bun resolver refuses the actual spawn');
-  // Through the child's handle, not its PID: Windows may reuse a freed PID at once (ticket 70).
+  // Through the child's handle, not its PID: Windows may reuse a freed PID at once.
   assert.equal(hung.kill(0), false, 'the hung process is gone');
   assert.equal(existsSync(join(root, 'logs', 'proxy.pid')), false, 'its record is removed');
   assert.equal(manager.lastRecovery()?.pid, hung.pid);

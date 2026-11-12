@@ -312,7 +312,7 @@ describe("handleQuota singleflight + cache", () => {
     clearQuotaCache();
   });
 
-  // ZAK-009: a caller joining an in-flight fetch must receive the COMPLETE
+  // A caller joining an in-flight fetch must receive the COMPLETE
   // snapshot once it resolves — never the null placeholder spread as a
   // malformed-but-200 "cached" body.
   it("a caller joining an in-flight fetch awaits the real snapshot (no null placeholder body)", async () => {

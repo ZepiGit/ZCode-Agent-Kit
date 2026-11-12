@@ -104,7 +104,7 @@ async function readBody(req: Request): Promise<{ ok: true; body: string } | { ok
   }
   // Inflate `content-encoding: gzip` request bodies with the cap enforced on
   // the DECOMPRESSED size — a small gzip bomb must not bypass the byte cap.
-  // Admission (ADR-0004): charge the bytes really held from now on.
+  // Admission: charge the bytes really held from now on.
   settleBodyBytes(req, total);
   const encoding = req.headers.get("content-encoding")?.toLowerCase().trim() ?? "";
   let bytes: Uint8Array = Buffer.concat(chunks);
@@ -238,7 +238,7 @@ export async function handleAsyncMessages(req: Request, opts: AsyncHandlerOption
     model: resolveModel({ model: modelStr }, opts.config),
     stream: true,
   } as AnthropicMessagesRequest;
-  // Transformed as built, serialised once (ticket 20): the bytes of transformRequestBody(JSON.stringify(upstreamBody)).
+  // Transformed as built, serialised once: the bytes of transformRequestBody(JSON.stringify(upstreamBody)).
   const upstreamBodyText = transformBuiltRequestBody(upstreamBody, { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) });
 
   // Now we're safe to take a ticket
@@ -298,7 +298,7 @@ export async function handleAsyncChat(req: Request, opts: AsyncHandlerOptions): 
     return errorResponse(400, "invalid_request_error", `OpenAI→Anthropic translation failed: ${(err as Error).message}`);
   }
   anthropicReq.stream = true;
-  // Transformed as built, serialised once (ticket 20): the bytes of transformRequestBody(JSON.stringify(anthropicReq)).
+  // Transformed as built, serialised once: the bytes of transformRequestBody(JSON.stringify(anthropicReq)).
   const upstreamBodyText = transformBuiltRequestBody(anthropicReq, { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) });
 
   try {

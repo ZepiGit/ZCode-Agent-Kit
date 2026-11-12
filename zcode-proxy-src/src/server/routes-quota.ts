@@ -353,7 +353,7 @@ export async function handleQuota(
   try {
     // Singleflight + short TTL: parallel UI probes (manager status, doctor,
     // webui) share one billing round-trip instead of hammering the gateway.
-    // Cache states are kept distinct (ZAK-009): an in-flight entry carries a
+    // Cache states are kept distinct: an in-flight entry carries a
     // null snapshot and is always awaited — never spread as if it were a
     // completed snapshot. A completed entry is served only within its TTL;
     // afterwards a fresh fetch starts instead of serving stale data forever.

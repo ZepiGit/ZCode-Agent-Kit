@@ -261,7 +261,7 @@ async function runLifecycle({ root, home, env, kit, omp, key, port, timeoutMs })
     }
     // Crash only the freshly isolated manager's authenticated + start-time
     // verified PID. No PID/port guessing and no operation on the real root.
-    // The explicit force helper (ADR-0014 cond 5): a crash injection knows the
+    // The explicit force helper: a crash injection knows the
     // proxy is broken and never sends the graceful stop request.
     const crash = async () => {
       const code = `import {createManager} from ${JSON.stringify(pathToFileURL(manager).href)}; const m=createManager({root:${JSON.stringify(isolatedKit)},home:${JSON.stringify(home)}}); const p=m.readPidFile(); if(await m.healthIdentify()!=='ours'||!p||m.verifyOwnProcess(p)!=='match')process.exit(4); if(!await m.forceStop(p.pid))process.exit(5); console.log('owned-crash');`;

@@ -72,7 +72,7 @@ export function startOmpHost({ bun, extension, env, cwd }) {
     killTree() {
       if (posix) { try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} } }
       // taskkill names the tree by pid: after the host's exit that pid may be a
-      // stranger's, and /T would take the stranger's tree (ticket 72).
+      // stranger's, and /T would take the stranger's tree.
       else if (running()) spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     },
   };

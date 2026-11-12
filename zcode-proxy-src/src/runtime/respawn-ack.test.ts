@@ -1,5 +1,5 @@
 /**
- * The respawn acknowledgement (ADR-0015, seam 4): on a memory respawn the
+ * The respawn acknowledgement: on a memory respawn the
  * proxy spawns the kit manager's hook with unchanged arguments and waits for a
  * `respawn.json` event with its own pid and an `at` later than its request
  * time. Real hook processes (a stand-in manager script), a real logs dir.

@@ -8,7 +8,7 @@
 //   costMB      its own RSS (commit on Windows) above its idle baseline while
 //               the hook ran, or null when it never reported one;
 //   wsCostMB    Windows only: the same delta on working set, reported beside
-//               the commit gate (Round 7 Q1 condition 3). Round 7 Q1 moved only
+//               the commit gate. Round 7 Q1 moved only
 //               the kit's per-process budgets to working set; the waiter cost
 //               stays on commit there (ticket 03 Comments);
 //   killed      the round killed it (the starter, with its process tree);

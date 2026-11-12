@@ -17,7 +17,7 @@ import {
 export interface ResolveSessionContextInput {
   clientReq: Request;
   body: string | undefined;
-  /** `JSON.parse(body)` when the caller already has it (ticket 20: no second parse). */
+  /** `JSON.parse(body)` when the caller already has it (no second parse). */
   parsedBody?: unknown;
   upstreamFormat: Format;
   model: string;

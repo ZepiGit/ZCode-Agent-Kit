@@ -58,7 +58,7 @@ test("fixture processes never count as kit footprint", () => {
   assert.equal(verdict(rows, { peaks: { kit: 600 } }).red, false);
 });
 
-// ── Budgets (spec §18) ─────────────────────────────────────────────────────
+// ── Budgets ─────────────────────────────────────────────────────
 const proc = (pid, role, mb, { hwm = mb, ppid = 1 } = {}) => ({ pid, ppid, key: `${pid}:1`, role, rssKb: mb * 1024, hwmKb: hwm * 1024, threads: 1, fds: 1, heapMB: null });
 const rowsOf = (...samples) => samples.map((procs, i) => ({ t: i * 1000, progress: i, procs }));
 const checkNamed = (v, name) => v.checks.find((c) => c.name === name);
@@ -68,7 +68,7 @@ test("budgets are the spec §18 numbers", () => {
   assert.equal(MEMORY.growth.risingWindows, 3);
   assert.deepEqual(MEMORY.S1, { steadyMB: 160, peakMB: 250, burstPeakMB: { burst16: 400, burst32: 600 } });
   assert.deepEqual(MEMORY.S2, { solverCapMB: 300, costPerGenerationMB: 300, retainedBeforeRecycleMB: 300, hungReclaimMB: 64, cdnMemoryMB: 64, coldStartMs: 4500 });
-  // Round 7 Q2: windows 600 → 514 MB commit (0.7 × the 734.5 MB first clean windows run).
+  // Windows 600 → 514 MB commit (0.7 × the 734.5 MB first clean windows run).
   assert.deepEqual(MEMORY.S3, { kitTotalMB: { linux: 596, windows: 514 }, rolePeakMB: { launcher: 74, "mcp-bridge": 75, preflight: 76, proxy: 62, solver: 20 } });
   assert.deepEqual(MEMORY.S5, { procPeakMB: 150, rebootCostMB: 20, taskFailures: 0 });
   assert.deepEqual(MEMORY.S6, { linesHeapMB: 16, longLineHeapMB: 16, resizeHeapMB: 8 });
@@ -137,9 +137,9 @@ test("observed process counts: a solver alive after the proxy was SIGKILLed is r
   assert.equal(checkNamed(verdict([], budgets, { observations: [] }), "solver-after-proxy-sigkill").red, true);
 });
 
-// ── Expected-RED ratchet (seam 9) ─────────────────────────────────────────
+// ── Expected-RED ratchet ─────────────────────────────────────────
 // A small job of three runs; ticket files 19 and 37 exist, nothing else does.
-// Each listed single run maps its owner tickets to the checks they own (Round 14 Q1, Round 15 Q1).
+// Each listed single run maps its owner tickets to the checks they own.
 const job = { linux: ["S1/short", "S1/burst16", "S3/short"] };
 const issueIds = new Set(["19", "37"]);
 const judge = (expected, results, os = "linux") => checkRatchet({ expected, os, results, job, issueIds });
@@ -215,10 +215,10 @@ test("ratchet: a listed run that did not run fails", () => {
   assert.match(r.failures.join("\n"), /S3\/short.*did not run/);
 });
 
-// ── Metric per OS (spec §1, ticket 02): commit on Windows, RSS on Linux ─────
+// ── Metric per OS: commit on Windows, RSS on Linux ─────
 const winProc = (pid, role, { ws, commit, peakCommit = commit, peakWs = ws }) => ({ pid, ppid: 1, key: `${pid}:1`, role, rssKb: ws * 1024, commitKb: commit * 1024, hwmKb: peakCommit * 1024, wsPeakKb: peakWs * 1024, threads: 1, fds: 1, heapMB: null });
 
-// Round 7 Q1: on Windows the per-process peak and steady budgets of the proxy,
+// On Windows the per-process peak and steady budgets of the proxy,
 // launcher, MCP bridge and preflight are judged on working set (max of sampled
 // WS and PeakWorkingSetSize); the S3 total, every growth check and every
 // solver/S2 check stay on commit; paced runs fail when a proxy sample's commit
@@ -287,7 +287,7 @@ test("Linux samples (no commit_kb) keep the RSS verdict unchanged", () => {
   assert.equal(v.workingSet, null);
 });
 
-// ── S1/burst1: the median of n fresh repetitions (Round 6 Q1, ticket 60) ────
+// ── S1/burst1: the median of n fresh repetitions ────
 // One repetition's summary as run.mjs writes it: the peak check plus the others.
 const rep = (peakMB, { exitCode = peakMB > 250 ? 1 : 0, others = [] } = {}) => ({ exitCode, checks: [{ name: "procPeak:proxy", red: peakMB > 250, value: peakMB, budget: 250, unit: "MB" }, { name: "count:proxy", red: false, value: 1 }, ...others] });
 const rule5 = { n: 5, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 };
@@ -363,7 +363,7 @@ test("repetitions run one after another, as many as the rule's n, and a harness 
   assert.deepEqual([failing.exitCode, failing.error], [2, "repetition 2: timed out"]);
 });
 
-// Round 7 Q1 / Round 8 Q1: on Windows the S1/burst1 set is judged on the
+// On Windows the S1/burst1 set is judged on the
 // working-set gate, max(sampled WS, PeakWorkingSetSize), and the 400 MB
 // per-run ceiling applies to that same value; commit is reported per repetition.
 // One repetition as job.mjs hands it over on Windows: osVerdict's checks plus the
@@ -398,7 +398,7 @@ test("median rule on Windows: a WS majority above 250 is RED, and the 400 MB cei
   assert.deepEqual([linux.gate, linux.commitValues, linux.redOnlyOnCommit], [null, null, false]);
 });
 
-// ── The ratchet over a repeated run key (Round 9 Q1 condition 1) ──────────
+// ── The ratchet over a repeated run key ──────────
 // A listed repeated key tolerates only its median check: a ceiling breach, any
 // other RED check in any repetition or a harness failure fails, listed or not.
 // The set result as job.mjs hands it to the ratchet.
@@ -508,16 +508,16 @@ test("the committed list has no S1/burst1 entry (ticket 20 removed it) and marks
   // Ticket 20 deleted the windows entry, citing the 24-run measurement 42502424683 (WS gate max 131.7 MB, 0 above 250).
   assert.equal(Object.hasOwn(expected.windows, "S1/burst1"), false);
   assert.equal(Object.hasOwn(expected.linux, "S1/burst1"), false);
-  // Round 13 Q1: windows S5/short is the same defect as linux S5/short, one owner (ticket 30, re-owned to
+  // Windows S5/short is the same defect as linux S5/short, one owner (ticket 30, re-owned to
   // ticket 74 by Round 24 Q1); linux stays a binary entry (since Round 14/15 Q1 one that names the check its owner owns).
   assert.deepEqual(expected.windows["S5/short"], { ticket: "74", state: "unstable" });
-  // Round 17 Q2: its one name flips (RED in 9 of 10 runs on ticket 13's tree, run 42436186573 GREEN on the trend flag).
+  // Its one name flips (RED in 9 of 10 runs on ticket 13's tree, run 42436186573 GREEN on the trend flag).
   assert.deepEqual(expected.linux["S5/short"], { owners: { 74: ["growth:mcp-bridge"] }, flips: ["growth:mcp-bridge"] });
   const unstable = Object.entries(expected).flatMap(([os, e]) => Object.entries(e).filter(([, v]) => v?.state === "unstable").map(([k]) => `${os} ${k}`));
   assert.deepEqual(unstable, ["windows S5/short"]);
 });
 
-// ── The `unstable` entry: windows S5/short, a growth-value band (Round 13 Q1 conditions 1 and 3) ──
+// ── The `unstable` entry: windows S5/short, a growth-value band ──
 // Judged on the commit value of growth:mcp-bridge, not on RED/GREEN: 5 < v ≤ 30
 // passes with either trend flag and prints its line; > 30 fails; ≤ 5 fails as
 // "at budget but listed"; any other RED fails; no value is a measurement gap.
@@ -649,7 +649,7 @@ test("S1/burst1 is judged on a median (with linux S6/short since Round 21): n fr
   assert.deepEqual([above(BURST1_TIP), BURST1_TIP.length], [5, 48]);
   assert.equal(chooseRepetitions(tipP), 3); // 3.0 %
   assert.equal(chooseRepetitions(pooledP), 5); // 3: 5.02 % > 5 %; 5: 2.0 %
-  // Round 11 Q1 condition 2: the paired run's Bun 1.4.2 arm (CI 42352122623,
+  // The paired run's Bun 1.4.2 arm (CI 42352122623,
   // Linux) had 5 of 24 above 250 MB, the less favourable estimate against the
   // pooled 1.4.2 CI history of 6 of 48 (with run 42316982634's 1 of 24).
   assert.equal(chooseRepetitions(5 / 24), 7); // 5: 6.45 % > 5 %; 7: 3.83 %
@@ -661,11 +661,11 @@ test("S1/burst1 is judged on a median (with linux S6/short since Round 21): n fr
   assert.equal(Math.max(chooseRepetitions(tipP), chooseRepetitions(pooledP), chooseRepetitions(5 / 24), chooseRepetitions(6 / 48)), 7);
   assert.deepEqual(repetitionRule("S1/burst1"), { n: 7, check: "procPeak:proxy", budgetMB: 250, ceilingMB: 400 });
   assert.ok(Math.max(...BURST1_TIP, ...BURST1_EARLIER.values) <= 400, "the ceiling sits above every measured run");
-  // Round 21 Q1 (ticket 71): linux S6/short is judged on a median of 5 too, with its own n (pinned below).
+  // Linux S6/short is judged on a median of 5 too, with its own n (pinned below).
   for (const os of Object.keys(JOB)) for (const key of JOB[os]) if (key !== "S1/burst1" && key !== "S6/short") assert.equal(repetitionRule(key), null, `${os} ${key}`);
 });
 
-// Round 17 Q3 (ticket 71): windows S1/short commit growth over 49 CI runs, min
+// Windows S1/short commit growth over 49 CI runs, min
 // 1.43, median 3.56, max 5.27 %/1k, RED in 2 of 49; normal fit P(> 5) = 4.3 %,
 // log-normal 7.8 %. Linux S1/short: 70 runs, max 4.43, never RED.
 test("windows S1/short is judged on 5 fresh repetitions, RED at ≥ 3 RED, ceiling 10 %/1k; n from the 49-run distribution at ≤ 1 %; linux stays a single run", async () => {
@@ -683,7 +683,7 @@ test("windows S1/short is judged on 5 fresh repetitions, RED at ≥ 3 RED, ceili
   assert.deepEqual(repeatedKeys, { linux: ["S1/burst1", "S6/short"], windows: ["S1/short", "S1/burst1"] });
 });
 
-// Round 21 Q1 (ticket 71): tui:adversarial-line-heap read exactly 8 MB in 32 of 33
+// Tui:adversarial-line-heap read exactly 8 MB in 32 of 33
 // CI runs on the same S6 code and 20 MB once (42446461464); 1 of 10 on the staging/19 tree.
 test("linux S6/short is judged on the median of 5 fresh repetitions against 16 MB, every repetition ≤ 32 MB; n from 1 of 10 at ≤ 1 %", async () => {
   const { REPEATED } = await import("./lib/budgets.mjs");
@@ -701,7 +701,7 @@ test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the l
   assert.ok(JOB.windows.includes("S3/hung") && JOB.windows.includes("S2/short"));
 });
 
-// ── S3 OMP stub-host leg (ticket 03, ADR-0013 cond 4, Round 4 Q1 add. 4) ────
+// ── S3 OMP stub-host leg (Round 4 Q1 add. 4) ────
 // A host is a stub Bun host running the generated OMP extension. A starter
 // spawned a preflight process; a waiter spawned none. Its cost is its own RSS
 // delta (commit on Windows) above its idle baseline while the hook ran.
@@ -717,7 +717,7 @@ test("OMP leg budgets are the spec §18 numbers: 5 hosts, ≤ 1 concurrent prefl
   assert.deepEqual(OMP_LEG, { hosts: 5, concurrentPreflights: 1, waiterCostMB: 5 });
 });
 
-// ── The OMP no-op floor (ticket 03's floor test; Round 17 Q4, ticket 71) ────
+// ── The OMP no-op floor (ticket 03's floor test) ────
 // n fresh stub hosts, each charged for a hook that does nothing: the median
 // cost < 2.5 MB (half the waiter gate), every repetition < 5 MB (the gate),
 // every value printed. The windows commit floor reached 2.55 once in 16 legs.
@@ -922,15 +922,15 @@ test("OMP leg on Windows: the waiter cost is gated on commit and reported with i
   assert.match(linux.detail.join("\n"), /omp-5 host 1 waiter \+1\.2 MB$/m);
 });
 
-// ── A listed single-run key names the checks its tickets own (Round 14 Q1, Round 15 Q1) ──
+// ── A listed single-run key names the checks its tickets own ──
 // A single-run entry that is not `unstable` maps owner ticket → check names,
 // one owner per check: { "owners": { "<NN>": [<check>, …] }, "flips": [<check>, …] }.
 // RED only on owned checks passes and prints "<key>: RED on <checks>, owned by
 // ticket <t> (<names>), …"; RED on any other check fails as an ownership
 // question naming every owner; RED with no check named, a harness failure and
 // an owned name the run does not produce (stale or mistyped, Round 3 Q8
-// condition 2) all fail. GREEN passes only while a name is marked `flips`
-// (Round 15 Q1 condition 4); otherwise GREEN while listed fails. Repeated keys
+// condition 2) all fail. GREEN passes only while a name is marked `flips`;
+// otherwise GREEN while listed fails. Repeated keys
 // keep their median rule; the two `unstable` keys refuse owners and flips.
 // The Round 14 cases below are unchanged in input and outcome; their entries
 // use the Round 15 shape through `owned()` and their lines the Round 15 wording.
@@ -956,7 +956,7 @@ test("owns: a plain ticket id (string or number) for a listed single-run key is 
   assert.deepEqual(validateExpectedRed(ownsDoc, { job: ownsJob, issueIds: ownsIds }), []);
   // A plainly listed single run never passes the ratchet, whatever it ran.
   assert.equal(judgeOwns({ linux: { ...ownsDoc.linux, "S3/short": "37" } }, [run1("S1/burst16", ["procPeak:proxy"]), run1("S3/short", ["peak:kit"])]).ok, false);
-  // Round 14's single-ticket shape is gone too (Round 15 Q1 condition 1: one shape).
+  // Round 14's single-ticket shape is gone too (one shape).
   assert.match(validateExpectedRed({ linux: { ...ownsDoc.linux, "S3/short": { ticket: "37", owns: ["peak:kit"] } } }, { job: ownsJob, issueIds: ownsIds }).join("\n"), /linux S3\/short: an entry is a ticket id or/);
 });
 
@@ -1120,7 +1120,7 @@ test("the committed expected-red.json: each leg passes with every listed run RED
   for (const os of ["linux", "windows"]) {
     const entries = expected[os];
     const singles = Object.entries(entries).filter(([key, v]) => typeof v === "object" && v?.owners && !repetitionRule(key));
-    // Every listed single run that is not unstable maps owners to names (Round 15 Q1 condition 1).
+    // Every listed single run that is not unstable maps owners to names.
     for (const [key, v] of Object.entries(entries)) if (!repetitionRule(key) && v?.state !== "unstable") assert.ok(v?.owners && Object.keys(v.owners).length > 0, `${os} ${key}`);
     const results = JOB[os].map((key) => {
       const v = entries[key];
@@ -1133,7 +1133,7 @@ test("the committed expected-red.json: each leg passes with every listed run RED
     assert.deepEqual(r.failures, [], os);
     for (const [key, v] of singles) assert.match(r.rows.find((x) => x.key === key).note, new RegExp(`^${key.replace("/", "\\/")}: RED on .+, owned by ticket \\d\\d \\(`), `${os} ${key}`);
     for (const [key, v] of singles) {
-      // Round 16 Q1: count:proxy is owned only in windows S4/short (ticket 17).
+      // Count:proxy is owned only in windows S4/short.
       assert.equal(namesOf(v).includes("count:proxy"), os === "windows" && key === "S4/short", `${os} ${key}`);
       const extra = ["count:proxy", "orphans"].find((c) => !namesOf(v).includes(c));
       const withExtra = results.map((x) => (x.key === key ? { ...x, redChecks: [...x.redChecks, extra] } : x));

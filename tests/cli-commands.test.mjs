@@ -1,4 +1,4 @@
-// Seam 5: CLI command modules (spec §10 "CLI command modules", Story 61).
+// Seam 5: CLI command modules.
 // Each command module takes parsed args + a command ctx and returns
 // `{ exitCode, records }`; the CLI entry keeps parsing, dispatch and
 // rendering. Two properties are pinned here:
@@ -227,7 +227,7 @@ test("models --show-key with an unreadable key fails after the list: the error c
 // doctor runs against a temp kit (no stored decisions, an empty home: no
 // kit integration anywhere) with the manager's doctor faked at its boundary:
 // the kit's lib/proxy-doctor.mjs, whose check record zcode-kit doctor reads
-// (ticket 38; before, the manager CLI was faked at the spawn boundary).
+// (before, the manager CLI was faked at the spawn boundary).
 const HARNESS_IDS = "omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose";
 
 /** `manager` is the doctor record the fake returns, or `{ throws: message }`. */
@@ -410,7 +410,7 @@ async function cli(argv) {
   try {
     const { cpSync } = await import("node:fs");
     for (const member of ["cli", "lib", "package.json"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout, so the fixture kit carries them too.
   mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
@@ -805,7 +805,7 @@ test("entry: run passes the preflight's refusal (3) and the harness's exit code 
   const root = mkdtempSync(join(tmpdir(), "cli-commands-run-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const member of ["cli", "lib", "package.json"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout, so the fixture kit carries them too.
   mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });

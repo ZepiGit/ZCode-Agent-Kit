@@ -1,4 +1,4 @@
-// Shared pieces of the CLI command modules (spec §10 "CLI command modules").
+// Shared pieces of the CLI command modules.
 //
 // A command module exports `run(args, ctx) → { exitCode, records }`:
 //   args — the entry's parsed argv: `{ positional, flags, passthrough }`;
@@ -23,7 +23,7 @@
 // module has no side effects: no argv or env reads, no process.exit and no
 // I/O at module scope (tests/cli-commands.test.mjs).
 //
-// Record kinds while the split is in its expand phase (tickets 07/08): the
+// Record kinds while the split is in its expand phase: the
 // commands keep today's exact bytes, so they return verbatim text records.
 // Later batches (40+) replace them with the output module's record kinds.
 //   { kind: "text", stream: "stdout" | "stderr", text }  written verbatim

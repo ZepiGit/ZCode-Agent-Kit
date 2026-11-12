@@ -1,6 +1,6 @@
 // `zcode-kit models [--json] [--show-key]`: the running proxy's model list,
 // or the registry snapshot when the proxy does not answer. Always exit 0.
-// The list and the key are data records (ticket 46): they render through the
+// The list and the key are data records: they render through the
 // output module with today's exact bytes.
 import { keepRecords, proxyFetch, stderrLine } from "./common.mjs";
 

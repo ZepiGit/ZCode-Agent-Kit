@@ -175,12 +175,12 @@ describe("CDN singleflight publication", () => {
   });
 });
 
-// Ticket 25 (ADR-0009, spec §7, Round 20 Q1): the memory tier holds at most
+// The memory tier holds at most
 // 256 entries and 32 MiB of bodies, so its memory stays within 64 MB (the
 // runtime keeps the memory of evicted bodies for a while on top). Eviction
 // changes memory use only: an evicted entry is read back from its disk
 // envelope (same bytes, same retrieval time) or, without one, fetched again.
-// The disk tier is not bounded here (ticket 29).
+// The disk tier is not bounded here.
 // The bound tests run without a disk tier: the bound is a memory property,
 // and hundreds of fsync'd envelope writes made them take seconds on Windows
 // runners. The read-back tests use a real disk tier with a few entries.

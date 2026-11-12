@@ -37,7 +37,7 @@ export interface CdnCacheOptions {
   /**
    * Body budget of the memory tier. Tests only (the seam-3 replay compares
    * 32 and 64 MiB); production always uses CDN_MEMORY_MAX_BYTES. Deliberately
-   * not a config key or env override (Owner Proxy round 20 Q1).
+   * not a config key or env override.
    */
   memoryMaxBytes?: number;
   /**
@@ -49,14 +49,13 @@ export interface CdnCacheOptions {
 
 const sha256 = (body: Buffer | string) => crypto.createHash("sha256").update(body).digest("hex");
 
-// The memory tier's bound (ADR-0009, spec §7): ≤ 64 MB of memory and ≤ 256
+// The memory tier's bound: ≤ 64 MB of memory and ≤ 256
 // entries. It lives in the solver, so it also resets with each solver
 // generation. Eviction changes memory use only: an evicted entry is read back
 // from its disk envelope or fetched again.
 // Bodies are capped at half the memory bound because the runtime keeps the
 // memory of evicted bodies for a while: S2 measured a steady +26 MB over the
-// held bytes (64 MiB held → 90 MB, 32 MiB → 58 MB; ticket 25). Confirmed as a
-// code constant by Owner Proxy round 20 Q1.
+// held bytes (64 MiB held → 90 MB, 32 MiB → 58 MB).
 export const CDN_MEMORY_MAX_ENTRIES = 256;
 export const CDN_MEMORY_MAX_BYTES = 32 * 1024 * 1024;
 
@@ -91,7 +90,7 @@ export class CaptchaCdnCache {
       maxBytes: options.diskMaxBytes ?? CDN_DISK_MAX_BYTES,
       ageLimitMs: cdnDiskAgeLimit(this.ttlMs),
     });
-    // Pruned at start and after each write (spec §7). A TTL of 0 disables the
+    // Pruned at start and after each write. A TTL of 0 disables the
     // disk tier, so such an installation leaves the directory alone.
     if (this.ttlMs > 0) this.disk.prune();
   }

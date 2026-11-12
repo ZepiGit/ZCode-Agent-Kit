@@ -159,7 +159,7 @@ export function anthropicSseToOpenaiSse(
   let buffer = "";
   const reader = upstream.getReader();
   let cancelled = false;
-  // Read the upstream only as the client drains the output (ticket 61).
+  // Read the upstream only as the client drains the output.
   const demand = pullDemand();
 
   const pump = async (controller: ReadableStreamDefaultController<Uint8Array>): Promise<void> => {
@@ -372,7 +372,7 @@ export function openaiSseToAnthropicSse(
   const reader = upstream.getReader();
   let cancelled = false;
   let failed = false;
-  // Read the upstream only as the client drains the output (ticket 61).
+  // Read the upstream only as the client drains the output.
   const demand = pullDemand();
 
   const pump = async (controller: ReadableStreamDefaultController<Uint8Array>): Promise<void> => {

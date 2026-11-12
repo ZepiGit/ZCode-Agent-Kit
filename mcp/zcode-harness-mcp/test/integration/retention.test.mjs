@@ -1,4 +1,4 @@
-// Seam 7: task retention (ADR-0009 correction 3, spec §7). Terminal tasks are
+// Seam 7: task retention (ADR-0009 correction 3). Terminal tasks are
 // evicted at more than 500 or older than 7 days, whichever comes first;
 // non-terminal tasks never. An evicted task's files go with it, its lookups give
 // the existing not-found error and its idempotency key starts a new task.

@@ -1,4 +1,4 @@
-// Event lines (ADR-0010 rule 4) under Bun: the proxy's side of the shared
+// Event lines under Bun: the proxy's side of the shared
 // event-line module. The same vectors run under Node in tests/event-line.test.mjs.
 import { describe, expect, test } from "bun:test";
 import { createEventLogger, formatEventLine, redactLine } from "./event-line.mjs";

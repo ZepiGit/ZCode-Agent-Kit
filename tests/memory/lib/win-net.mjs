@@ -1,4 +1,4 @@
-// TCP sockets per pid on Windows (ticket 02): `netstat -ano` stands in for
+// TCP sockets per pid on Windows: `netstat -ano` stands in for
 // /proc/net/tcp + /proc/<pid>/fd. Used for the listener counts (S3, S4) and
 // the "no real upstream" isolation proof (lib/proxy-session.mjs).
 import { spawnSync } from "node:child_process";

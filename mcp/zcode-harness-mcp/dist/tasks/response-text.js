@@ -1,6 +1,6 @@
 /**
- * ResponseText — a task's response text, bounded while it is collected
- * (ADR-0009, spec §7). Up to 4 MiB of UTF-8 the text is kept whole. Past that,
+ * ResponseText — a task's response text, bounded while it is collected.
+ * Up to 4 MiB of UTF-8 the text is kept whole. Past that,
  * the first 1 MiB is frozen, the rest is a rolling window of the last bytes (up
  * to 4 MiB in total) and the dropped bytes are counted; the text then reads as
  * head + one `[… N bytes truncated …]` marker line + tail. Cuts fall on

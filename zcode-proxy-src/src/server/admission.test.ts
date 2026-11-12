@@ -1,5 +1,5 @@
 /**
- * Admission control over the proxy's loopback listener (seam 4, ADR-0004):
+ * Admission control over the proxy's loopback listener:
  * a cap on the request-body bytes in flight, a bounded FIFO whose bodies stay
  * unread, and the 503 + Retry-After shed in each endpoint's error shape.
  *

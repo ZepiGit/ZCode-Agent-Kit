@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const KIT = join(import.meta.dirname, "..");
-// The shared width core and token set (ADR-0011) the CLI and the TUI load.
+// The shared width core and token set the CLI and the TUI load.
 const SHARED_OUTPUT_FILES = [
   "zcode-proxy-src/src/tui/width-core.mjs", "zcode-proxy-src/src/tui/width-core.d.mts",
   "zcode-proxy-src/src/tui/tokens.mjs", "zcode-proxy-src/src/tui/tokens.d.mts",
@@ -41,7 +41,7 @@ function packageFixture(t) {
     assert.equal(result.status, 0, result.stderr);
   }
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout, so the fixture kit carries them too.
   mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });

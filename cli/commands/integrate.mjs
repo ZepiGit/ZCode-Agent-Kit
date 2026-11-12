@@ -1,7 +1,7 @@
 // `zcode-kit integrate <harness> [--dry-run]`: explicit consent for one
 // harness; its adapter applies the integration through a transaction and the
 // decision is recorded. `--dry-run` writes nothing and lists every file the
-// real run would write and every registration with the undo command (A-16).
+// real run would write and every registration with the undo command.
 // Exit 0; an unknown harness is exit 2. Output is streamed
 // (ctx.progress): the adapter and bootstrap log as they work.
 import { join } from "node:path";
@@ -25,7 +25,7 @@ export async function run({ positional, flags }, ctx) {
     progress(`  detected: ${detected[id] ? "yes" : "no"}`);
     kit.dryRun = true;
     kit.tx = null;
-    // A-16 / story 111: list every file the real run would write and every
+    // List every file the real run would write and every
     // registration with its undo command. commitFile and recordHarnessChoice
     // report their would-writes through tx.touch; an adapter's own
     // registration reports through tx.external.

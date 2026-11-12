@@ -32,14 +32,14 @@ const REQUIRED_FILES = [
   "cli/adapters/pi.mjs",
   "cli/adapters/goose.mjs",
   "proxy/zcode-proxy-manager.mjs",
-  // Ticket 15: the proxy lifecycle module the manager CLI and the preflight
+  // The proxy lifecycle module the manager CLI and the preflight
   // share, and the heal log it writes.
   "lib/proxy-lifecycle.mjs",
   "lib/heal-log.mjs",
-  // Ticket 38: the manager's doctor checks, which the manager CLI and
+  // The manager's doctor checks, which the manager CLI and
   // zcode-kit doctor both read as a check record.
   "lib/proxy-doctor.mjs",
-  // Ticket 40: the status record and the log tail the manager CLI and
+  // The status record and the log tail the manager CLI and
   // zcode-kit status / proxy logs both read, and the CLI's report builders.
   "lib/proxy-status.mjs",
   "lib/proxy-logs.mjs",
@@ -52,13 +52,13 @@ const REQUIRED_FILES = [
   "bin/zcode-claude.cmd",
   "bin/zcode-codex.cmd",
   "scripts/verify-release-marker.mjs",
-  // ADR-0011: the width core and token set shared by the CLI (lib/term/) and
+  // The width core and token set shared by the CLI (lib/term/) and
   // the proxy TUI, with their type declarations.
   "zcode-proxy-src/src/tui/width-core.mjs",
   "zcode-proxy-src/src/tui/width-core.d.mts",
   "zcode-proxy-src/src/tui/tokens.mjs",
   "zcode-proxy-src/src/tui/tokens.d.mts",
-  // Ticket 08: the CLI entry dispatches every command through its command
+  // The CLI entry dispatches every command through its command
   // module (cli/commands/index.mjs is the dispatch table).
   ...["index", "common", "help", "version", "setup", "integrate", "run", "doctor", "status", "proxy", "logs", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"]
     .map((name) => `cli/commands/${name}.mjs`),

@@ -137,9 +137,9 @@ const EXISTING_INSTALL = {
   "generated/harness-choices/omp.json": '{"schema":1}\n',
 };
 
-// ADR-0006: the floor is Node 24. A Node below it is refused before any
+// The floor is Node 24. A Node below it is refused before any
 // download, temp directory or file change; the existing installation, its
-// state and HOME stay byte-identical (seam 8, C2).
+// state and HOME stay byte-identical (C2).
 for (const found of ["v20.19.0", "v22.23.4", "v23.11.1", "garbage", ""]) {
   test(`install.sh refuses Node ${JSON.stringify(found)} before any file changes and leaves the existing installation as it was`, () => {
     const root = mkdtempSync(join(tmpdir(), "zcode-installer-floor-"));
@@ -176,7 +176,7 @@ printf 'node %s\\n' "$*" >> "$AUDIT_LOG"; exit 91`);
   });
 }
 
-// Bun v1.4.2, pinned everywhere (Owner Proxy Round 11 Q1 condition 1). The
+// Bun v1.4.2, pinned everywhere. The
 // five SHA-256s come from the release's own SHASUMS256.txt
 // (https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/SHASUMS256.txt,
 // clearsigned by Robobun <robobun@oven.sh>, key F3DCC08A8572C0749B3E18888EAB4D40A7B22B59).

@@ -9,7 +9,7 @@
 //   K (two more hosts) the host SIGKILLed with a live generation: hung, idle
 // The S2 body plays the proxy: the dispatcher lives in it exactly as in the
 // proxy. Today the solver is a worker thread of that process (its RSS is the
-// captcha cost); with the solver process (ADR-0002, ticket 27) it is a child
+// captcha cost); with the solver process it is a child
 // with the `solver` role, and the process-level claims become observable:
 // ≤ 1 solver per proxy at every sample, 0 after an idle exit, 0 after the
 // proxy is SIGKILLed.
@@ -101,7 +101,7 @@ export async function run(ctx) {
     heavyDomLast10: heap.filter((h) => h.kind === "heavy-dom").slice(-10).map((h) => h.heapMB),
     retainMaxMB: maxWorkerHeap("retain"),
   });
-  // The OS's metric (spec §1): RSS on Linux, commit (Bun's memory footprint) on Windows.
+  // The OS's metric: RSS on Linux, commit (Bun's memory footprint) on Windows.
   const metricKey = process.platform === "win32" ? "footprintMB" : "rssMB";
   const rss = (name) => byName[name]?.[metricKey] ?? null;
   const hangLeakMB = rss("C-end") - rss("C-start");

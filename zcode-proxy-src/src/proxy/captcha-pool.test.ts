@@ -8,7 +8,7 @@ const solveMock = mock(async (_scene: string, _region: string, _prefix: string, 
 
 const recycleMock = mock((_reason: string) => {});
 
-// The pool's solver dispatcher, injected at the dispatcher interface (seam 3)
+// The pool's solver dispatcher, injected at the dispatcher interface
 // instead of replacing the captcha-solver module process-wide.
 const fakeSolver = {
   run: solveMock,

@@ -7,7 +7,7 @@
  * proxy errors regularly do, since upstream bodies are passed through).
  *
  * The implementation is the shared width core (`width-core.mjs`, grapheme
- * clusters + a UCD-generated W/F table), which the kit CLI uses as well
- * (ADR-0011). This module keeps the TUI's import path stable.
+ * clusters + a UCD-generated W/F table), which the kit CLI uses as well.
+ * This module keeps the TUI's import path stable.
  */
 export { displayWidth, padEndWidth, stripAnsi, truncateToWidth } from "./width-core.mjs";

@@ -1,6 +1,6 @@
 /**
- * Shared token set of the terminal design language (design-language §3,
- * ADR-0001, ADR-0011): glyph tiers, box chrome, 16-colour roles and verdict
+ * Shared token set of the terminal output: glyph tiers, box chrome,
+ * 16-colour roles and verdict
  * words. One set for two renderers: the proxy TUI's frame.ts (Bun) and the
  * kit CLI's lib/term/ (Node). Plain ESM, no imports, no runtime-specific
  * APIs; types in tokens.d.mts. Every export is deeply frozen, so neither
@@ -20,7 +20,7 @@ export const GLYPH_TIERS = deepFreeze(["full", "wgl4", "ascii"]);
 
 /**
  * Words printed in every tier. Checks report PASS|FAIL|WARN|SKIP, actions
- * OK|FAIL|WARN|SKIP|INFO (ADR-0001 rule 1: the words never map down).
+ * OK|FAIL|WARN|SKIP|INFO (the words never map down).
  */
 export const WORDS = deepFreeze({
   pass: "PASS", fail: "FAIL", warn: "WARN", skip: "SKIP", ok: "OK", info: "INFO", run: "running", stop: "stopped",
@@ -28,7 +28,7 @@ export const WORDS = deepFreeze({
 export const CHECK_WORDS = deepFreeze(["PASS", "FAIL", "WARN", "SKIP"]);
 export const ACTION_WORDS = deepFreeze(["OK", "FAIL", "WARN", "SKIP", "INFO"]);
 
-/** Status glyphs and chrome glyphs per tier (design-language §3.1, §3.2). */
+/** Status glyphs and chrome glyphs per tier. */
 export const GLYPHS = deepFreeze({
   full: {
     pass: "✓", ok: "✓", fail: "✗", warn: "!", skip: "–", info: "•", run: "●", stop: "○",
@@ -57,7 +57,7 @@ export const BOX = deepFreeze({
 /** Spinner frames, the same in every tier (no braille, R12). */
 export const SPINNER = deepFreeze(["|", "/", "-", "\\"]);
 
-/** Colour roles as 16-colour SGR parameters (design-language §3.3, R13). */
+/** Colour roles as 16-colour SGR parameters (R13). */
 export const ROLES = deepFreeze({
   ok: "32", fail: "31", warn: "33", info: "36", accent: "36", heading: "1", cmd: "1", muted: "2",
 });

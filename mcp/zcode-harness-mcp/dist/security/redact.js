@@ -4,7 +4,7 @@
  *
  * Never construct output strings directly from provider configuration.
  */
-// D-10: token-style keys (access/refresh/id tokens, cookies, private keys,
+// Token-style keys (access/refresh/id tokens, cookies, private keys,
 // client secrets, signatures) are covered too, not only "api_key"-like names.
 const SECRET_KEY_RE = /(api[-_]?key|auth[-_]?token|authorization|password|passwd|secret|credential|(?:access|refresh|id|bearer|session|csrf|xsrf)[-_]?token|^token$|cookie|set-?cookie|private[-_]?key|client[-_]?secret|signature|x-aliyun-captcha-verify-param|proxy[-_]?key)/i;
 /** Known bearer/API-key shapes inside free-form strings. */

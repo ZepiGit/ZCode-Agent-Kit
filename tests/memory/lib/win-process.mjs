@@ -1,9 +1,9 @@
 // Windows has no SIGSTOP/SIGCONT: S3's hung proxy is frozen with
-// NtSuspendProcess and thawed with NtResumeProcess (ticket 02). Each action
+// NtSuspendProcess and thawed with NtResumeProcess. Each action
 // names a process by its identity (pid + start time, lib/process-identity.mjs),
 // never by its pid alone: Windows hands a freed pid to a new process quickly on
-// a busy runner (tickets 70, 72), and a pid-only resume or terminate would act
-// on that stranger (ticket 73).
+// a busy runner (72), and a pid-only resume or terminate would act
+// on that stranger.
 //
 // The action holds a handle on the pid first. While any handle to a process is
 // open its pid cannot be reused ("The PID can be reused once the process is

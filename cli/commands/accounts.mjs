@@ -7,10 +7,10 @@
 // running proxy of this kit.
 // A missing account id or an unknown subcommand: exit 2.
 //
-// Streams and rendering (ticket 46; design-language §4.7, §7; ADR-0005): the
+// Streams and rendering: the
 // text views of `accounts` and `accounts health` render here through the
 // output module (cli/accounts-report.mjs) — one table with an active marker,
-// one number format, and every next step naming `zcode-kit …` (A-19, A-27).
+// one number format, and every next step naming `zcode-kit …`.
 // `--json` and `--live` keep forwarding the proxy CLI verbatim with an
 // inherited terminal, so the JSON documents stay byte-stable (C2) and the
 // store's own diagnostics stay on stderr. `doctor`, `quota`, `explain`,
@@ -77,7 +77,7 @@ async function toggle(enable, ctx) {
   let result;
   try {
     result = configureAccountRotator(kit, tx, enable, (cliArgs, opts) => proxyCli(ctx, cliArgs, opts));
-    // One meaning (Round 1 Q8 cond 2): this is also the stored answer setup
+    // One meaning: this is also the stored answer setup
     // reads, in the same transaction. An unreadable decision file is left alone.
     recordRotatorDecision(kit, tx, enable, "accounts");
   } finally { try { tx.finish(); } finally { releaseLock(lock); } }

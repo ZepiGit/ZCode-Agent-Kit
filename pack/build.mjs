@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DIST = join(ROOT, "pack", "dist");
-// Node.js support floor (ADR-0006; the same number as lib/node-floor.mjs,
+// Node.js support floor (the same number as lib/node-floor.mjs,
 // kept equal by tests/node-floor.test.mjs). The packed manifest declares it,
 // and the build itself refuses to run below it.
 const NODE_FLOOR = 24;
@@ -128,7 +128,7 @@ function main() {
   }
 
   const rootPkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
-  // AUD-012: the release marker is version-bound — a marker for a different
+  // The release marker is version-bound — a marker for a different
   // version must NOT produce a publishable package. prepublishOnly enforces
   // the same check inside the package at publish time.
   const releaseMarker = existsSync(join(ROOT, "pack", "ALLOW_PUBLISH"));
@@ -147,7 +147,7 @@ function main() {
     // name directly executable; `zcode-kit` remains the concise primary CLI.
     bin: rootPkg.bin,
     engines: { node: `>=${NODE_FLOOR}` },
-    // Fail closed at the package level, not only in CI (ZAK-012): a generated
+    // Fail closed at the package level, not only in CI: a generated
     // package stays private unless pack/ALLOW_PUBLISH existed at build time
     // AND names this exact version.
     private: !releaseVersionConsistent,

@@ -59,7 +59,7 @@ if (Test-Path -LiteralPath $InstallDir) {
   }
 }
 if ($env:ZCODE_KIT_VERSION -and $env:ZCODE_KIT_VERSION -notmatch $VersionPattern) { throw 'Invalid release version: ZCODE_KIT_VERSION must be vX.Y.Z or vX.Y.Z-prerelease.' }
-# Node.js support floor (ADR-0006): checked before the release lookup, the
+# Node.js support floor: checked before the release lookup, the
 # temp directory and any file write, so an old Node leaves an existing
 # installation exactly as it was.
 $NodeFloor = 24

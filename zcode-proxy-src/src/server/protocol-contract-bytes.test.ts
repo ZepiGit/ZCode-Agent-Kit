@@ -1,5 +1,5 @@
 /**
- * Protocol contract: the bytes the proxy sends upstream (seam 4, ticket 20).
+ * Protocol contract: the bytes the proxy sends upstream.
  *
  * A real proxy on a loopback listener forwards representative client requests
  * to a mock upstream on another loopback listener, which records every request

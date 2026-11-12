@@ -8,7 +8,7 @@ import { ResponseStore } from "../responses/store.js";
 import type { ServerOptions } from "./server.js";
 
 /**
- * The stop-request wiring (ticket 22, ADR-0014): only the manager-spawned
+ * The stop-request wiring: only the manager-spawned
  * `serve` entry passes it. The TUI and Android host the proxy in-process
  * without a manager, so they pass none and the stop route answers 404.
  */

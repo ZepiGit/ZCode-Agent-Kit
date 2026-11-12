@@ -1,14 +1,14 @@
 /**
- * The response-body module (ticket 61, architecture candidate 6): a streamed
+ * The response-body module (architecture candidate 6): a streamed
  * answer is observed in the client's path, not through a `tee()`.
  *
  * Before, each SSE answer was tee()'d: a stats branch read the upstream at
  * upstream speed while the client's branch queued, without bound, whatever a
- * slow or stalled client had not read yet (Round 12 Q3: on Windows, where the
- * loopback socket takes little, that queue is the S1/stalled peak). Here the
+ * slow or stalled client had not read yet (on Windows, where the loopback
+ * socket takes little, that queue was the memory peak under stalled readers). Here the
  * observer sees each chunk as the client pulls it, so the upstream is read no
  * faster than the client drains it. Nothing is capped, shed or ended: a
- * client that resumes reading gets every byte, in order (Round 1 Q5).
+ * client that resumes reading gets every byte, in order.
  *
  * The bytes the client receives are exactly the bytes of `source`; the
  * observer only reads them. The stream record keeps the meaning of the
@@ -42,7 +42,7 @@ export interface ObserveOptions {
 }
 
 const SAMPLE_BYTES = 4096;
-/** The largest piece handed on per pull (ticket 61: linux S1/stalled RSS, METRICS). */
+/** The largest piece handed on per pull (linux S1/stalled RSS, METRICS). */
 export const PIECE_BYTES = 64 * 1024;
 
 /** Output tokens of the SSE lines in `text`, folded into `tokens` (usage totals win over counted deltas). */

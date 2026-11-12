@@ -31,7 +31,7 @@ export type TaskState = IngressState;
 export const TERMINAL_STATES: TaskState[] = ["completed", "failed", "cancelled", "interrupted", "unknown"];
 
 /**
- * Task retention (ADR-0009 correction 3): a terminal task is evicted when there
+ * Task retention: a terminal task is evicted when there
  * are more than 500 of them or it finished more than 7 days ago, whichever
  * comes first. Its files go with it and its idempotency key is forgotten, so
  * the idempotency window equals the retention. Non-terminal tasks are never

@@ -61,7 +61,7 @@ export function transformRequestBody(body: string | undefined, ctx: TransformCon
 /**
  * `transformRequestBody(JSON.stringify(value), ctx)` for a request this
  * process built (a translated body), without serialising it and parsing the
- * text back (ticket 20: two fewer copies of every translated body). The
+ * text back (two fewer copies of every translated body). The
  * transforms run on `jsonCopy(value)`, which is what parsing that text would
  * give, and the result is serialised once. When nothing changed, that
  * serialisation is the text `JSON.stringify(value)` itself, so the bytes are
@@ -130,8 +130,8 @@ function copyJsonProperty(key: string, input: unknown, stack: object[]): unknown
 
 /**
  * The transformations of `transformRequestBody`, applied in place to a body
- * the caller has already parsed (ticket 20: one JSON parse per request body
- * instead of one per reader). Returns true when the object changed; the caller
+ * the caller has already parsed (one JSON parse per request body instead of
+ * one per reader). Returns true when the object changed; the caller
  * then sends `JSON.stringify(parsed)`, otherwise the body text it parsed, so
  * the bytes upstream are exactly those of `transformRequestBody(text, ctx)`.
  */

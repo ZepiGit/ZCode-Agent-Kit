@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CI helper for the paired Bun measurement (Round 10 Q1 condition 1):
+// CI helper for the paired Bun measurement:
 //
 //   node tests/memory/lib/keep-bun-arm.mjs <bun-path> <x.y.z> <arms-dir>
 //

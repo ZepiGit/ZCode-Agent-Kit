@@ -1,4 +1,4 @@
-// Hard caps for the memory-budget job's runs (spec §12): every run gets a
+// Hard caps for the memory-budget job's runs: every run gets a
 // memory cap far above every budget and a timeout, so a cap kill is a harness
 // failure, never a verdict, and the job never runs uncapped.
 //

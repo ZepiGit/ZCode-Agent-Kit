@@ -22,7 +22,7 @@
 // check may be GREEN) and prints "<key>: RED on <checks>, owned by ticket <t>
 // (<names>), ticket <u> (<names>)". It passes GREEN only while one of its
 // names is marked `flips`, and prints "<key>: GREEN, listed for ticket(s)
-// <t…> on flipping checks <names> (Round 15 Q1)". A name is marked only by
+// <t…> on flipping checks <names>". A name is marked only by
 // ticket 67 from its ≥ 10-run evidence (RED in fewer than all matching runs).
 // The list only shrinks, per owner: only the owner's own commit removes its
 // names, with evidence (a flipping name needs ≥ 10 GREEN matching CI runs of
@@ -43,21 +43,21 @@
 //   - a listed run did not run at all;
 //   - a listed repeated run (lib/budgets.mjs REPEATED) is RED on anything but
 //     its median check: a ceiling breach or another RED check in any
-//     repetition (Round 9 Q1 condition 1).
+//     repetition.
 // So the list can only shrink, and a stale or mistyped entry cannot hide a
 // RED run.
 //
 // An entry may instead be `{ "ticket": "<NN>", "state": "unstable" }`, only for
 // a key in UNSTABLE below (any other key carrying the state is a schema
 // error). Each key there has its own bound kind, and the kind must fit the key:
-//   - { maxMedianMB } (a repeated key; Round 9 Q1): windows S1/burst1, whose
+//   - { maxMedianMB } (a repeated key): windows S1/burst1, whose
 //     WS-gated median sits on its 250 MB budget (p ≈ 0.54, 24 fresh runs). It
 //     passes with its median ≤ 250 (GREEN) or ≤ maxMedianMB (RED on the median
 //     only) and prints "<key>: unstable (median <x> MB, budget <b>), owned by
 //     ticket <t>"; a median above maxMedianMB fails, and the listed-repeated
 //     rule above holds on top. It leaves only through ticket 20's ≥ 20-run
 //     criterion.
-//   - { growthBand: { check, budget, max } } (a single run; Round 13 Q1):
+//   - { growthBand: { check, budget, max } } (a single run):
 //     windows S5/short, whose growth:mcp-bridge is over its 5 %/1k budget in
 //     28 of 28 runs and RED only when the trend flag fires (1 of 28). It is
 //     judged on the check's commit value, not on RED/GREEN: budget < value ≤
@@ -79,10 +79,10 @@ const OUTCOME = { 0: "GREEN", 1: "RED", 2: "HARNESS FAILURE" };
 
 /**
  * The one place the `unstable` state is allowed (Round 9 Q1 condition 3, Round
- * 13 Q1 condition 3), each key with its own bound: S1/burst1 a median bound
- * (Round 9 Q1 condition 2), S5/short a growth-value band on commit whose floor
+ * 13 Q1 condition 3), each key with its own bound: S1/burst1 a median bound,
+ * S5/short a growth-value band on commit whose floor
  * is the growth budget and whose 30 %/1k ceiling is a regression bound, not a
- * budget (Round 13 Q1 condition 2).
+ * budget.
  */
 export const UNSTABLE = {
   windows: {
@@ -93,7 +93,7 @@ export const UNSTABLE = {
 
 const isNum = (x) => typeof x === "number" && Number.isFinite(x);
 
-/** Why an allow-list bound does not fit its key (Round 13 Q1 condition 3), or null. */
+/** Why an allow-list bound does not fit its key, or null. */
 function boundKindError(key, bound, repeated, os) {
   const kinds = bound && typeof bound === "object" ? Object.keys(bound).sort().join() : "";
   const isRepeated = !!repetitionRule(key, repeated, os);
@@ -115,7 +115,7 @@ export function ticketsLabel(ids) {
 
 /**
  * An entry value → { ticket, state, … }, or { error }: "red" for a plain ticket
- * id (a repeated key), "unstable", or "owned" (Round 15 Q1 condition 1) with
+ * id (a repeated key), "unstable", or "owned" with
  * `ids` (owner tickets, ascending), `owners` (id → its valid check names, for
  * judging), `flips` (null when absent) and `shapeErrors` (what is malformed).
  * `extrasWithState` is an `owners` or `flips` next to `state: "unstable"`.
@@ -140,7 +140,7 @@ function namesError(list, what, emptyHint) {
   return null;
 }
 
-/** The owners shape (Round 15 Q1 condition 1): one owner per check, flips only on owned names. */
+/** The owners shape: one owner per check, flips only on owned names. */
 function ownedEntry(value) {
   const shapeErrors = [];
   const owners = {};
@@ -170,7 +170,7 @@ function ownedEntry(value) {
   return { ticket: ids.join(", ") || null, state: "owned", ids, owners, ownerOf, flips, shapeErrors };
 }
 
-/** Why an entry's kind does not fit its key (Round 14 Q1 condition 1, Round 15 Q1 condition 1): a list of errors. */
+/** Why an entry's kind does not fit its key: a list of errors. */
 function kindErrors(os, key, entry, { repeated, unstable }) {
   const isRepeated = !!repetitionRule(key, repeated, os);
   const isUnstableKey = Object.hasOwn(unstable[os] ?? {}, key);
@@ -183,7 +183,7 @@ function kindErrors(os, key, entry, { repeated, unstable }) {
   return [];
 }
 
-/** Why a ticket id cannot name an owner, or null (Round 3 Q8 condition 2). */
+/** Why a ticket id cannot name an owner, or null. */
 function ticketIdError(ticket, issueIds) {
   if (typeof ticket !== "string" || !/^\d{2}$/.test(ticket)) return `ticket id must be a two-digit string, got ${JSON.stringify(ticket)}`;
   if (!issueIds.has(ticket)) return `ticket ${ticket} has no issue file (tests/memory/known-issues/${ticket}-*.md)`;
@@ -261,7 +261,7 @@ export function checkRatchet({ expected, os, results, job = JOB, issueIds, catal
     if (isUnstable && boundKindError(key, unstable[os][key], repeated, os)) continue;
     const band = isUnstable ? unstable[os][key].growthBand : undefined;
     if (band && (outcome === "RED" || outcome === "GREEN")) {
-      // Round 13 Q1 condition 1: judged on the check's commit value, either trend flag.
+      // Judged on the check's commit value, either trend flag.
       const red = result.redChecks ?? [];
       const other = red.filter((c) => c !== band.check);
       const g = (result.growthChecks ?? []).find((c) => c.name === band.check);
@@ -275,7 +275,7 @@ export function checkRatchet({ expected, os, results, job = JOB, issueIds, catal
       continue;
     }
     if (isUnstable && (outcome === "RED" || outcome === "GREEN")) {
-      // Round 9 Q1 condition 2: GREEN or RED on the median alone, within the bound.
+      // GREEN or RED on the median alone, within the bound.
       const { maxMedianMB } = unstable[os][key];
       const medianMB = result.median?.medianMB;
       if (typeof medianMB !== "number") failures.push(`${key}: unstable entry without a median value (${os})`);
@@ -284,7 +284,7 @@ export function checkRatchet({ expected, os, results, job = JOB, issueIds, catal
       continue;
     }
     if (rule && ticket !== null && outcome === "RED") continue;
-    // Round 14 Q1 condition 2, Round 15 Q1 condition 4: a listed single run is RED
+    // A listed single run is RED
     // only on checks its owners own; GREEN passes only while a name is marked `flips`.
     if (!rule && !isUnstable && entry?.state === "owned" && (outcome === "RED" || (outcome === "GREEN" && entry.flips))) {
       const red = result.redChecks ?? [];

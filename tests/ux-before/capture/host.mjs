@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
  * the Bun it runs (doctor's `bun available` row), and an 80-column TTY wraps
  * that row by the real path's length before normalise() writes `<BUN>`: Bun
  * under a long host directory put `(1.4.2)` on a continuation line where the
- * CI runner's ~/.bun/bin/bun printed one line (ticket 40, run 42590699086).
+ * CI runner's ~/.bun/bin/bun printed one line (run 42590699086).
  * Windows: the host's path as found (symlinks need rights there, and its
  * pipe/ci variants never wrap a row).
  */

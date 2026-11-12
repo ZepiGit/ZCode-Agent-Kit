@@ -104,7 +104,7 @@ describe("spawnRespawnHook", () => {
   });
 });
 
-// proxy-env suite (seam 8, ticket 18; ADR-0014 Round 4 amendment): the
+// proxy-env suite (ADR-0014 Round 4 amendment): the
 // respawn hook is the next manager, which spawns the next proxy; the stop
 // token of this spawn must not travel down that chain.
 describe("proxy-env: the respawn hook's environment", () => {
@@ -267,7 +267,7 @@ writeFileSync(process.env.WATCHDOG_MARKER, process.argv.slice(2).join(" "));
     expect(existsSync(marker)).toBe(false);
   }, 30_000);
 
-  // Ticket 23 (ADR-0015 cond 5): with the manager's logs dir, the watchdog
+  // With the manager's logs dir, the watchdog
   // waits for the respawn acknowledgement or a refusal, at most 10 s, then
   // terminates regardless and logs which outcome it saw (event-line format).
   // The stand-in hooks end by themselves once the stop file exists, and the

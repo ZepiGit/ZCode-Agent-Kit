@@ -24,10 +24,10 @@ export async function run(ctx) {
   const { startBridge } = await import(pathToFileURL(join(KIT_ROOT, "mcp", "zcode-harness-mcp", "test", "integration", "client.mjs")).href);
   const dataDir = join(ctx.outDir, "bridge-data");
   mkdirSync(join(dataDir, "workspaces"), { recursive: true });
-  // RSS on Linux, commit on Windows (spec §1).
+  // RSS on Linux, commit on Windows.
   const bridgeRss = () => scan(ctx.marker).filter((p) => p.role === "mcp-bridge").reduce((a, p) => a + (p.commitKb ?? p.rssKb), 0) / 1024;
   // After 3 s, from the process table as it is then (Windows: a poll that started
-  // after the wait), so a bridge that already exited is never summed (ticket 73).
+  // after the wait), so a bridge that already exited is never summed.
   const settle = async () => { await new Promise((r) => setTimeout(r, 3000)); await settled(ctx.marker); return Math.round(bridgeRss()); };
 
   let c = await startBridge({ reuseDataDir: dataDir, maxConcurrentTasks: "2", interactionTimeoutSec: "2" });

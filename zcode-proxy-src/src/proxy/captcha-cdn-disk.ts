@@ -2,14 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-// The CDN disk tier's bound (ADR-0009 correction 2, spec §7 "CDN cache, disk").
+// The CDN disk tier's bound.
 // Removing an entry changes disk use only: a removed entry that is still fresh
 // becomes a network fetch once the memory tier no longer holds it, so the size
 // prune evicts the oldest entries and only when the directory is above the cap.
 export const CDN_DISK_MAX_BYTES = 256 * 1024 * 1024;
 // The age prune removes only entries already expired for this installation:
 // the limit is max(14 days, configured TTL), so an installation with a TTL of
-// up to ~24.8 days keeps serving its own entries (ADR-0009 correction 2). The
+// up to ~24.8 days keeps serving its own entries. The
 // 14-day floor leaves expired entries to installations sharing the directory
 // with a longer TTL.
 export const CDN_DISK_MIN_AGE_MS = 14 * 24 * 60 * 60 * 1000;

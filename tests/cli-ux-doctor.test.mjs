@@ -5,9 +5,9 @@
 // with forced capabilities in every C3 variant (tests/snapshot-harness.mjs)
 // and compared byte for byte with tests/snapshots/cli/doctor/.
 //
-// Pinned here (spec Stories 90-92, ADR-0001 rules 1 and 3, Round 1 Q10):
+// Pinned here (spec Stories 90-92, ADR-0001 rules 1 and 3):
 //   - each check appears once, one verdict line, a problem-count lead line
-//     only when something failed (A-02);
+//     only when something failed;
 //   - off a TTY every row matches `^(PASS|FAIL|SKIP|WARN)  <name>( — <detail>)?$`
 //     with today's names, followed only by whitespace-indented why:/next: lines;
 //   - WARN never changes the exit code, and a check that FAILs is never WARN;

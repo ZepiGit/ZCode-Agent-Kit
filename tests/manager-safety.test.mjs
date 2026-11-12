@@ -74,7 +74,7 @@ test("manager imports every child_process helper it calls (H2a: darwin spawnSync
   // so stop/restart would silently refuse on macOS. Enforce import coverage.
   // The darwin probe moved to lib/proxy-lifecycle.mjs (ticket 15, guarded in
   // proxy-lifecycle.test.mjs) and the doctor's Bun probes to
-  // lib/proxy-doctor.mjs (ticket 38): every module the manager CLI runs them from is checked.
+  // lib/proxy-doctor.mjs: every module the manager CLI runs them from is checked.
   const usedAnywhere = new Set();
   for (const rel of [["proxy", "zcode-proxy-manager.mjs"], ["lib", "proxy-doctor.mjs"]]) {
     const src = readFileSync(join(import.meta.dirname, "..", ...rel), "utf8");
@@ -183,7 +183,7 @@ test("stop cleanly kills a verified-own process (identity + pid + start time mat
     // here. Probe the child's own handle, never its PID: once the process is
     // gone and its handles are closed, Windows may hand that PID to an
     // unrelated new process at once, and a PID probe then sees a stranger
-    // (ticket 70, CI run 42436186573). The handle cannot be reused.
+    // (CI run 42436186573). The handle cannot be reused.
     assert.equal(dummy.kill(0), false, "the process must be gone");
     assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "pid file cleaned up");
   } finally {

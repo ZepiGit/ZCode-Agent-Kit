@@ -1,5 +1,4 @@
-// The proxy commands' reports (ticket 40; design-language §4.5, §4.6, §7;
-// ADR-0005): `status` / `proxy status` from a status record
+// The proxy commands' reports: `status` / `proxy status` from a status record
 // (lib/proxy-status.mjs), and the result of `proxy start|stop|restart` from
 // the lifecycle's outcome records (lib/proxy-lifecycle.mjs). Pure apart from
 // the Progress it finishes: records in, output-module records out.
@@ -10,7 +9,7 @@
 
 // ------------------------------------------------------------ human units
 
-/** `45 s`, `12 min`, `1 h 02 min`, `3 d 4 h` (design-language §4.7). */
+/** `45 s`, `12 min`, `1 h 02 min`, `3 d 4 h`. */
 export function formatDuration(totalSec) {
   const s = Math.max(0, Math.floor(totalSec));
   if (s < 60) return `${s} s`;
@@ -105,9 +104,9 @@ function captchaRows(d) {
 const section = (title, pairs) => (pairs.length ? [{ kind: "heading", title }, { kind: "kv", pairs }, { kind: "blank" }] : []);
 
 /**
- * `status` / `proxy status` text: a state line first (human units, A-17),
+ * `status` / `proxy status` text: a state line first (human units),
  * then Memory, Quota and Captcha for the own proxy, then the connection
- * details once (A-12). A foreign listener or a missing key is an error block.
+ * details once. A foreign listener or a missing key is an error block.
  */
 export function statusRecords(status, { key = null, reveal = false, verbose = false } = {}) {
   const exitCode = status.identity === "ours" ? 0 : 1;

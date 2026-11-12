@@ -8,7 +8,7 @@
  *
  * The HTTP stack (node:http, the SDK's streamable HTTP transport and hono)
  * is imported lazily inside serveHttp: the stdio bridge, one per harness
- * session, never loads it (about 7 MB RSS; spec §6 b).
+ * session, never loads it (about 7 MB RSS).
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -49,7 +49,7 @@ function buildServer(opts) {
             };
         }
         try {
-            // D-09: enforce the declared inputSchema before the handler sees args.
+            // Enforce the declared inputSchema before the handler sees args.
             validateArguments(tool.inputSchema, args);
             const result = await tool.handler(args);
             const text = toolTextPayload(result);
@@ -61,7 +61,7 @@ function buildServer(opts) {
             };
         }
         catch (err) {
-            // D-10: error texts can echo harness payloads — redact them too.
+            // Error texts can echo harness payloads — redact them too.
             const message = redactText(err instanceof Error ? err.message : String(err));
             log.warn("tool failed", { tool: name, error: message });
             return {
@@ -179,7 +179,7 @@ export async function serveHttp(opts, host, port, httpKey) {
             res.writeHead(405).end("method not allowed");
             return;
         }
-        // ZAK-010/AUD-006: the 4 MiB bound is enforced on the ACTUAL stream, not
+        // The 4 MiB bound is enforced on the ACTUAL stream, not
         // just the declared Content-Length. Oversized requests are refused the
         // moment the limit is crossed (413 + Connection: close, then socket
         // teardown) — draining until EOF would let a slow writer bind one of the
@@ -202,7 +202,7 @@ export async function serveHttp(opts, host, port, httpKey) {
 }
 async function handleMcpPostBounded(opts, HttpTransport, req, res, maxBodyBytes) {
     try {
-        // Declared-size fast path (AUD-006): refuse before reading any bytes when
+        // Declared-size fast path: refuse before reading any bytes when
         // a truthful Content-Length already exceeds the bound. (Conflicting or
         // duplicate content-length headers are rejected by Node's HTTP parser.)
         const declared = Number(req.headers["content-length"]);
@@ -261,7 +261,7 @@ async function handleMcpPost(opts, HttpTransport, req, res, parsedBody) {
         const transport = new HttpTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
         const server = buildServer(opts);
         await server.connect(transport);
-        // parsedBody comes from our bounded pre-read (ZAK-010); the transport's
+        // parsedBody comes from our bounded pre-read; the transport's
         // pre-parsed-body path skips reading the (already consumed) request stream.
         await transport.handleRequest(req, res, parsedBody);
         res.on("close", () => {

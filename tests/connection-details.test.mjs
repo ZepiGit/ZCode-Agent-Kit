@@ -234,7 +234,7 @@ test("start on an already running own proxy exits 0 and the details are re-verif
   assert.doesNotMatch(gone.text, /running and verified/);
 });
 
-// Ticket 40: the manager CLI's status text renders from lib/proxy-status.mjs's
+// The manager CLI's status text renders from lib/proxy-status.mjs's
 // record (zcode-kit status renders the same record through the output
 // module). Its bytes stay as before: the expected text is the pre-change
 // manager's output for this fixture (captured at the integration tip

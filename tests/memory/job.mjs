@@ -8,7 +8,7 @@
 //   node tests/memory/job.mjs --measure-burst1 N [--os …] [--out DIR] [--cap …]
 //   node tests/memory/job.mjs --measure-burst1 "N bun=<pinned>,<candidate>[,…]" --bun <pinned>=PATH,<candidate>=PATH[,…] [--os …] [--out DIR] [--cap …]
 //
-// The paired form (Round 10 Q1 condition 1; ticket 62's re-entry tool) runs
+// The paired form (ticket 62's re-entry tool) runs
 // N fresh S1/burst1 runs per arm, the arms interleaved in rotation (A, B, C,
 // A, …), each run with ZCODE_KIT_BUN = its arm's binary. The first arm is the
 // reference, the pinned Bun (1.4.2 since Round 11); the later arms are
@@ -24,7 +24,7 @@
 // marker file tests/memory/measure-burst1 exists, see ci.yml): instead of the
 // job and its ratchet, N fresh, isolated S1/burst1 runs one after another,
 // each under the same cap, timeout and evidence gate as a job run, recorded in
-// <out>/measure-S1-burst1.{json,md} (lib/measure.mjs, Round 8 Q1 condition 2)
+// <out>/measure-S1-burst1.{json,md} (lib/measure.mjs)
 // and appended to $GITHUB_STEP_SUMMARY. Exit 0 when every run is a valid
 // observation, 2 otherwise. It never decides n or the expected-RED list.
 //
@@ -50,9 +50,9 @@
 // Run keys in lib/budgets.mjs REPEATED run n times on the legs their rule names,
 // one fresh isolated run after another, under <out>/<scenario>-<variant>/rep-<i>/,
 // and are judged as one verdict (lib/repetitions.mjs): S1/burst1 (and linux
-// S6/short) on the median plus a per-run ceiling (Round 6 Q1, Round 21 Q1);
+// S6/short) on the median plus a per-run ceiling;
 // windows S1/short on a majority of RED repetitions under the unchanged
-// growth() verdict plus a per-run ceiling (Round 17 Q3).
+// growth verdict plus a per-run ceiling.
 // <out>/<scenario>-<variant>/summary.json records every repetition's value
 // (and trend), the median and the ceiling check.
 //
@@ -75,7 +75,7 @@ import { repetitionRule, runRepetitions } from "./lib/repetitions.mjs";
 import { measureMarkdown, measureObservation, measureReport, pairedMarkdown, pairedReport, parseBunArms, parseMeasureSpec, parseStalledCount, STALLED_ARMS, stalledMarkdown, stalledObservation, stalledReport } from "./lib/measure.mjs";
 import { heapAtCapLine } from "./lib/retained-heap.mjs";
 
-// Round 17 Q1 condition 3: a retained-heap minimum above this comes back as a question.
+// A retained-heap minimum above this comes back as a question.
 const RETAINED_HEAP_QUESTION_MB = 66;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -105,7 +105,7 @@ function parseArgs(argv) {
     else throw new Error(`unknown argument ${argv[i]}`);
   }
   if (out.measureStalled && (out.measure || out.bun || out.only)) throw new Error("--measure-stalled runs on its own (no --measure-burst1, --bun or --only)");
-  // --bun exists only for the paired measurement, and names exactly its arms (Round 10 Q1 condition 1).
+  // --bun exists only for the paired measurement, and names exactly its arms.
   if (out.bun && !out.measure) throw new Error("--bun exists only in measurement mode (--measure-burst1 \"N bun=<v>,<v>…\")");
   if (out.measure?.arms || out.bun) {
     const arms = out.measure.arms ?? [];
@@ -168,8 +168,8 @@ function markdown({ os, cap, ratchet, results, partial }) {
     lines.push(`| ${row.key} | ${row.outcome}${row.state === "unstable" ? " (unstable)" : ""}${r?.redOnlyOnCommit ? " (only on commit)" : ""} | ${row.owners ? ticketsLabel(row.owners) : row.ticket ? `ticket ${row.ticket}` : "—"} | ${(r?.redChecks ?? []).join(", ") || "—"} | ${r?.durationS ?? ""} | ${r?.samples ?? "—"} | ${Object.entries(r?.rolesSeen ?? {}).map(([k, v]) => `${k} ${v}`).join(", ") || "—"} |`);
   }
   if (ratchet.failures.length) lines.push("", "Failures:", ...ratchet.failures.map((f) => `- ${f}`));
-  // Round 9 Q1 condition 2, Round 13 Q1 condition 1: every passing run of an unstable entry says so.
-  // Round 14 Q1 condition 2, Round 15 Q1 condition 4: every tolerated RED of a listed single run with
+  // Every passing run of an unstable entry says so.
+  // Every tolerated RED of a listed single run with
   // the tickets that own its checks, and every listed run passing GREEN on a flipping check.
   const owned = ratchet.rows.filter((row) => row.note && row.state !== "unstable");
   if (owned.length) lines.push("", "Tolerated REDs and flipping GREENs (Round 14 Q1, Round 15 Q1: each listed run RED only on checks its owners own, GREEN only while a check is marked `flips`; each owner removes only its own names, in its own commit):", ...owned.map((row) => `- ${row.note}`));
@@ -203,7 +203,7 @@ function markdown({ os, cap, ratchet, results, partial }) {
     lines.push("", "Memory checks, commit / working set (Round 7 Q1: WS gates the per-process peak and steady budgets of proxy, launcher, mcp-bridge and preflight; commit gates the rest):");
     for (const r of withValues) for (const c of r.memoryChecks) lines.push(`- ${r.key} ${c.name}: commit ${c.commitMB} / WS ${c.wsMB} MB (budget ${c.budget}, gate ${c.gate === "ws" ? "WS" : "commit"}) ${c.red ? "RED" : "ok"}`);
   }
-  // Round 17 Q1 conditions 1 and 3: every run records the retained-heap series; a minimum
+  // Every run records the retained-heap series; a minimum
   // above 66 MB (the store's cluster is 59–65 MB) comes back as a question with the series.
   const heaps = results.filter((r) => r.retainedHeap?.detail);
   if (heaps.length) {
@@ -260,21 +260,21 @@ async function main() {
     if (!evidence.ok) { exitCode = 2; why = `no evidence the scenario ran: ${evidence.problems.join("; ")}`; }
     if (why) console.log(`${key}: harness failure: ${why}`);
     const result = { key, exitCode, rawExit: r.code, signal: r.signal, cap: size, durationS: r.durationS, scenarioS: summary?.durationS ?? null, samples: summary?.samples ?? null, rolesSeen: Object.fromEntries(Object.entries(summary?.summary ?? {}).filter(([role]) => role !== "*" && role !== "kit").map(([role, s]) => [role, s.maxCount])), units: summary?.notes?.sampler?.units ?? null, ...(r.job ? { jobApplied: r.job.applied === true, jobPeakMB: r.job.applied ? Math.round(r.job.peakBytes / 1048576) : null } : {}), metric: summary?.metric ?? null, samplerOverhead: summary?.notes?.sampler?.overhead ?? null, redOnlyOnCommit: summary?.redOnlyOnCommit === true, workingSetRedChecks: summary?.workingSet?.redChecks ?? [], redChecks: (summary?.checks ?? []).filter((c) => c.red).map((c) => c.name),
-      // Every check the run produced: the ratchet refuses an owned name the run never produces (Round 14 Q1).
+      // Every check the run produced: the ratchet refuses an owned name the run never produces.
       checkNames: (summary?.checks ?? []).map((c) => c.name),
-      // S7: the responses store's retained-heap check with its series (Round 17 Q1).
+      // S7: the responses store's retained-heap check with its series.
       ...(() => { const c = (summary?.checks ?? []).find((x) => x.name === "responses-store:heap-at-cap" && x.detail?.seriesMB); return c ? { retainedHeap: c } : {}; })(),
-      // Windows (Round 7 Q1): every memory check with both values and the metric that gates it.
+      // Windows: every memory check with both values and the metric that gates it.
       memoryChecks: (summary?.checks ?? []).filter((c) => c.commitValue !== undefined).map((c) => ({ name: c.name, red: c.red, gate: c.gate, commitMB: c.commitValue, wsMB: c.wsValue, budget: c.budget })),
       // Every growth check with its value, trend and sample count, insufficient ones included:
-      // the ratchet judges an unstable growth band on it (lib/ratchet.mjs, Round 13 Q1).
+      // the ratchet judges an unstable growth band on it (lib/ratchet.mjs).
       growthChecks: (summary?.checks ?? []).filter((c) => /^growth:/.test(c.name)).map((c) => ({ name: c.name, red: c.red, value: c.value ?? null, commitValue: c.commitValue ?? null, wsValue: c.wsValue ?? null, gate: c.gate ?? null, budget: c.budget, trend: c.trend === true, insufficient: c.detail?.insufficient === true, samples: c.detail?.samples ?? null, windowMediansMB: c.detail?.windowMediansMB ?? null, risingWindows: c.detail?.risingWindows ?? null, netRisePct: c.detail?.netRisePct ?? null })),
       error: why ?? summary?.error ?? r.error ?? null };
     return { result, summary };
   }
 
   if (args.measureStalled) {
-    // The S1/stalled attribution (ticket 61, Round 12 Q3 condition 1): the
+    // The S1/stalled attribution: the
     // stalled run and its drained reference in rotation, no verdict, no ratchet.
     const reps = [];
     let i = 0;
@@ -299,8 +299,8 @@ async function main() {
   }
 
   if (args.measure) {
-    // Measurement mode (Round 8 Q1 condition 2): the distribution, no verdict, no ratchet.
-    // With arms (Round 10 Q1 condition 1): N runs per arm, interleaved in
+    // Measurement mode: the distribution, no verdict, no ratchet.
+    // With arms: N runs per arm, interleaved in
     // rotation (never in blocks), each run on its arm's Bun.
     const key = "S1/burst1";
     const rule = repetitionRule(key);
@@ -338,7 +338,7 @@ async function main() {
       results.push((await runIn(key, dir)).result);
       continue;
     }
-    // Judged on the median of n fresh, sequential repetitions (lib/repetitions.mjs, Round 6 Q1).
+    // Judged on the median of n fresh, sequential repetitions (lib/repetitions.mjs).
     const set = await runRepetitions(rule, async (i) => {
       console.log(`\n── ${key} (repetition ${i} of ${rule.n}) ──`);
       const { result, summary } = await runIn(key, join(dir, `rep-${i}`));
@@ -346,7 +346,7 @@ async function main() {
     });
     const majority = rule.kind === "majority";
     const repetitions = set.reps.map((r, i) => ({ rep: i + 1, exitCode: r.exitCode, value: set.values[i], ...(majority ? { trend: set.trends[i], red: set.redRepetitions.includes(i + 1), ...(set.wsValues ? { wsValue: set.wsValues[i] } : {}) } : {}), ...(set.commitValues ? { commitValue: set.commitValues[i] } : {}), redChecks: r.redChecks, durationS: r.durationS, samples: r.samples, units: r.units, ...(r.jobApplied !== undefined ? { jobApplied: r.jobApplied } : {}), ...(r.error ? { error: r.error } : {}) }));
-    // Round 17 Q3: the majority rule reports every value, its trend and the median.
+    // The majority rule reports every value, its trend and the median.
     const verdictOf = majority
       ? { majority: { n: rule.n, check: rule.check, gate: set.gate, unit: rule.unit, values: set.values, trends: set.trends, redRepetitions: set.redRepetitions, median: set.median, budget: rule.budget, redAtLeast: rule.redAtLeast, ceiling: rule.ceiling, overCeiling: set.overCeiling, ...(set.commitValues ? { commitValues: set.commitValues } : {}), ...(set.wsValues ? { wsValues: set.wsValues } : {}) } }
       : { median: { n: rule.n, check: rule.check, gate: set.gate, values: set.values, medianMB: set.medianMB, budgetMB: rule.budgetMB, ceilingMB: rule.ceilingMB, overCeiling: set.overCeiling, ...(set.commitValues ? { commitValues: set.commitValues, commitMedianMB: set.commitMedianMB } : {}) } };

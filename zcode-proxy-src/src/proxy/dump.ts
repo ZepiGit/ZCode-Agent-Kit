@@ -12,8 +12,8 @@
  *   proxy secrets) are masked to `abcd1234…wxyz` so fingerprints are visible
  *   while credentials stay redacted.
  * - Bodies are JSON.parsed and re-stringified when possible (for readability);
- *   otherwise emitted as the raw string. BODY CONTENT IS NOT REDACTED
- *   (ZAK-011): agent prompts may contain secrets from the user's project. The
+ *   otherwise emitted as the raw string. BODY CONTENT IS NOT REDACTED:
+ * agent prompts may contain secrets from the user's project. The
  *   startup warning below makes that unmistakable when the dump is enabled.
  *
  * The dump file is line-oriented JSON (JSONL); each line is self-contained:

@@ -12,13 +12,13 @@ const FIXTURE_PORT = await freePort();
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'kit-cli-'));
   for (const member of ['cli', 'lib']) cpSync(join(source, member), join(root, member), { recursive: true });
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout, so the fixture kit carries them too.
   mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
   for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(source, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   mkdirSync(join(root, 'proxy')); mkdirSync(join(root, 'logs')); mkdirSync(join(root, 'generated'));
-  // A free port of this run as the template's port (ticket 75): setup probes it,
+  // A free port of this run as the template's port: setup probes it,
   // and the production port 8457 may be the owner's own proxy.
   writeFileSync(join(root, 'proxy', 'config.example.yaml'), readFileSync(join(source, 'proxy', 'config.example.yaml'), 'utf8').replace(/^  port: \d+/m, `  port: ${FIXTURE_PORT}`));
   cpSync(join(source, 'proxy', 'zcode-proxy-manager.mjs'), join(root, 'proxy', 'zcode-proxy-manager.mjs'));
@@ -71,12 +71,12 @@ test('setup smoke failure reports configured state without failing successful se
   }
   const res = await run(f, ['setup', '--harness', 'pi', '--no-mcp']);
   assert.equal(res.code, 0, res.stdout + res.stderr);
-  // Ticket 43: the compact report's summary block (Assistants n configured …)
+  // The compact report's summary block (Assistants n configured …)
   assert.match(res.stdout + res.stderr, /Assistants\s+\d+ configured/i);
   assert.match(res.stdout + res.stderr, /1113|smoke|model access/i);
 });
 
-// Ticket 36 round 2: since the bridge flag, an equivalent registration is left
+// Since the bridge flag, an equivalent registration is left
 // alone only when it already carries the flag; a flagless one of this
 // installation is migrated exactly once (remove + add with the flag), and the
 // next setup is a no-op. Ownership never changes. Windows checks its own path
@@ -103,7 +103,7 @@ else { fs.appendFileSync(${JSON.stringify(attempts)}, JSON.stringify(process.arg
 
   // An equivalent spelling that already carries the flag: recognised, left alone.
   writeFileSync(state, `${SEMI} ${configured} --stdio`);
-  // Ticket 43: the compact report shows the report rows; the bridge step's
+  // The compact report shows the report rows; the bridge step's
   // diagnostics live in install.log.
   const logText = () => readFileSync(join(f.root, 'logs', 'install.log'), 'utf8');
   let result = await run(f, ['setup', '--harness', 'claude-code']);
@@ -143,7 +143,7 @@ test('Claude MCP registration refuses a foreign path containing the managed path
   writeFileSync(join(f.bin, 'claude.cmd'), '@ECHO off\r\nSET dp0=%~dp0\r\n"' + process.execPath + '" "%dp0%\\entry.cjs" %*\r\n');
   const result = await run(f, ['setup', '--harness', 'claude-code']);
   assert.equal(result.code, 0, result.stderr);
-  // The refusal is a WARN (F-09): stderr on the compact screen and the full
+  // The refusal is a WARN: stderr on the compact screen and the full
   // line in install.log (the bridge diagnostics sink, as in the migration
   // test above). ADR-0005/spec §Streams put report rows on stdout only —
   // asserting stdout there was the wrong sink (CI win24 42725722962).

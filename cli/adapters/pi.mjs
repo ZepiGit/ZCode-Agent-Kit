@@ -3,7 +3,7 @@
 // kit writes an "x-zcode-agent-kit" marker inside its provider entry and only
 // ever updates entries carrying that marker (or byte-identical legacy kit
 // entries from before the marker existed). A hand-written "zcode" entry
-// without either proof is a hard conflict — nothing is written (ZAK-004).
+// without either proof is a hard conflict — nothing is written.
 // Efforts: pi's thinking system is separate from OMP's. The kit writes no
 // thinkingLevelMap: on anthropic-messages pi sends the mapped values only with
 // compat.forceAdaptiveThinking, otherwise it sends a thinking budget and clamps

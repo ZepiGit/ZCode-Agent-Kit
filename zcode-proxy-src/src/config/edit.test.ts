@@ -8,7 +8,7 @@ const crlf = (text: string) => text.replace(/\n/g, "\r\n");
 const bareLf = (text: string) => (text.match(/(?<!\r)\n/g) ?? []).length;
 
 /**
- * Ticket 68: the same edit on the same config once LF and once CRLF (a Windows
+ * The same edit on the same config once LF and once CRLF (a Windows
  * user's file). The CRLF result is the LF result with CRLF line breaks, and the
  * same edit again leaves the CRLF file byte-identical.
  */

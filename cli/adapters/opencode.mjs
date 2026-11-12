@@ -74,7 +74,7 @@ export default {
       log("  opencode: zcode provider already current");
       return { changed: false };
     }
-    // AUD-003: fail closed on foreign entries — an existing provider.zcode
+    // Fail closed on foreign entries — an existing provider.zcode
     // that does not match the kit signature is never overwritten (same
     // ownership model as the pi adapter).
     if (doc.provider?.zcode && !isKitOwned(doc.provider.zcode)) {

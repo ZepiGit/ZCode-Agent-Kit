@@ -4,7 +4,7 @@
 // manager spawns, reparented to init) keep the marker, so they stay visible —
 // and anything still alive after the scenario stopped is an orphan.
 //
-// Linux reads /proc directly. Windows (ticket 02) cannot read another
+// Linux reads /proc directly. Windows cannot read another
 // process's environment: one long-lived PowerShell poller reads Win32_Process
 // and the run's processes are the tree below this process plus every process
 // carrying the run id in its command line or executable path (lib/win-sampler.mjs).
@@ -36,8 +36,8 @@ const useWindows = (marker) => winSessions.has(marker) || process.platform === "
 // With the live poller, a scan is the latest poll as the tracker selects it:
 // each process is its pid and creation time, as the poll saw them. No pid is
 // asked whether it is still alive: on Windows a freed pid may already name a
-// stranger (tickets 70, 72), so such an answer could keep a dead process in the
-// scan and fail a check (ticket 73). A scan is as old as its poll; a read that
+// stranger (72), so such an answer could keep a dead process in the
+// scan and fail a check. A scan is as old as its poll; a read that
 // must see the state after an event (a stop, a kill) awaits `settled` first.
 function scanWindows(marker) {
   const s = winSession(marker);
@@ -96,7 +96,7 @@ function readText(path) {
 /** Classify a command line into the roles the budgets talk about. */
 export function roleOf(argv) {
   const cmd = argv.join(" ");
-  // The captcha solver process (ADR-0002; ticket 27): from source it runs the
+  // The captcha solver process: from source it runs the
   // solver entry module, compiled builds a self-exec subcommand. Either way its
   // argv names "captcha-solver"; the in-process worker thread has no process.
   if (/captcha[-_]solver/i.test(cmd)) return "solver";
@@ -245,7 +245,7 @@ export function externalConnections(pid) {
   return connectionsOf(pid).filter((c) => c.state !== "0A" && !/^(?:127\.\d+\.\d+\.\d+|\[::1\]|0\.0\.0\.0):/.test(c.remote));
 }
 
-// commit_kb (ticket 02) and ws_peak_kb (Round 7 Q1) are additive (appended):
+// commit_kb and ws_peak_kb are additive (appended):
 // commit charge and PeakWorkingSetSize on Windows, empty on Linux.
 const HEADER = "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb\n";
 

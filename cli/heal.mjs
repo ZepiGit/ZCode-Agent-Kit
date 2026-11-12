@@ -46,7 +46,7 @@ export const PREFLIGHT_WARNINGS = {
   'runtime-missing': `The autostart's pinned Node.js path no longer exists; run zcode-kit setup with Node.js ${NODE_FLOOR} or newer, then restart OMP.`,
 };
 
-// ADR-0006 condition 2: the OMP autostart runs this preflight with the
+// The OMP autostart runs this preflight with the
 // absolute interpreter path setup pinned. A version manager can remove that
 // Node or leave it below the floor after an upgrade; report both. Only this
 // installation's autostart is checked, a pinned Bun is out of scope (the floor
@@ -85,7 +85,7 @@ export function autostartRuntimeCheck(ctx) {
   if (major === null || major >= NODE_FLOOR) return null; // unreadable is not a claim the preflight makes
   return { cause: 'runtime-floor', detail: `the pinned Node.js ${version} is below the support floor (Node.js ${NODE_FLOOR})`, next: RUNTIME_NEXT };
 }
-/** The off-TTY check rows for a runtime warning (design-language §4.3). */
+/** The off-TTY check rows for a runtime warning. */
 export function runtimeWarningLines(runtime) {
   return runtime ? [`WARN  OMP autostart runtime \u2014 ${runtime.detail}`, `  next: ${runtime.next}`] : [];
 }
@@ -112,7 +112,7 @@ async function preflight(ctx, { timeoutMs = 8000 } = {}) {
   let code, recovered = false;
   try {
     // The lifecycle intent, not the manager CLI: the preflight imports no
-    // presentation code (spec §4). Its narration lines stream to stdout as
+    // presentation code. Its narration lines stream to stdout as
     // the manager printed them.
     const { createLifecycle } = await import('../lib/proxy-lifecycle.mjs');
     const started = await createLifecycle({ root: ctx.root, home: ctx.home }).ensureRunning({ waitMs: 20000, observe: line => console.log(line) });
@@ -235,7 +235,7 @@ async function alignOfflineKey(ctx, tx) {
   });
   try {
     if (readFileSync(ctx.config, 'utf8') !== text || ctx.key() !== key) throw new Error('runtime files changed concurrently; retry after inspecting ownership');
-    // AUD-005/B-12: unique staging name — a fixed name left by a crash would
+    // Unique staging name — a fixed name left by a crash would
     // block every later repair with EEXIST.
     tx.touch(ctx.config);
     const temp = `${ctx.config}.zcode-staging-${process.pid}-${randomBytes(6).toString('hex')}`;
@@ -258,7 +258,7 @@ export async function repairManaged(ctx, adapters, log = () => {}) {
   } catch (err) {
     // Commit post-hashes first so rollback remains conflict-aware, rather than
     // blindly restoring an in-progress journal over unrelated concurrent edits.
-    // B-24: a failure here must not mask the original error or skip logging.
+    // A failure here must not mask the original error or skip logging.
     try {
       const id = tx.finish();
       if (id) rollbackTransaction(ctx.backupDir, id);

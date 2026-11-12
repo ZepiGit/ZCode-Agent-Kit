@@ -1,4 +1,4 @@
-// Free loopback ports for kit test fixtures (ticket 75). `node --test` runs
+// Free loopback ports for kit test fixtures. `node --test` runs
 // the test files in parallel and two checkouts may run the suite at once, so a
 // fixture never pins a port: it asks the kernel for one (bind 127.0.0.1:0),
 // releases it and writes it into its config. A "down" case checks a port that

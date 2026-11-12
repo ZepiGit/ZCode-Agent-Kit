@@ -1,4 +1,4 @@
-// Snapshot harness (spec Testing Decisions, seam 5): renders records through
+// Snapshot harness (spec Testing Decisions): renders records through
 // the output module with FORCED capabilities, so every C3 variant is
 // deterministic on every OS leg without a pty, and compares the bytes
 // (ANSI included) with committed snapshot files.
@@ -36,7 +36,7 @@ export const C3_VARIANTS = Object.freeze({
   "wgl4": { tty: true, columns: 80, env: {}, platform: "win32" },
 });
 
-/** Variants with colour off: no escape sequence may appear in any render (Story 107). */
+/** Variants with colour off: no escape sequence may appear in any render. */
 export const COLOURLESS_VARIANTS = Object.freeze(["no-color", "pipe", "term-dumb", "ci"]);
 
 function fakeStream(isTTY, columns) {

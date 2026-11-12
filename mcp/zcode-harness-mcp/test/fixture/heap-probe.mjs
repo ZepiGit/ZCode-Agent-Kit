@@ -1,4 +1,4 @@
-// Retained-heap probe for the bridge process (seam 7): loaded with
+// Retained-heap probe for the bridge process: loaded with
 // `--expose-gc --import <this file's URL>` on the bridge command line and
 // ZCODE_TEST_HEAP_DIR=<dir>. When the test creates `<dir>/request`, the probe
 // deletes it, runs full garbage collections and writes `<dir>/heap.json` as

@@ -1,6 +1,6 @@
 /**
  * The real `serve` entry point wires SIGTERM and SIGINT to the single graceful
- * shutdown sequence (ADR-0008): a spawned proxy against a loopback mock
+ * shutdown sequence: a spawned proxy against a loopback mock
  * upstream, with every outbound fetch to a non-loopback host refused by a
  * preload (`__fixtures__/egress-guard.ts`). POSIX only: on Windows a signal from
  * another process terminates it outright (the stop request, ticket 22, is the

@@ -1,4 +1,4 @@
-// Measurement-mode probes (Round 10 Q1 condition 1, ticket 09). run.mjs
+// Measurement-mode probes. run.mjs
 // turns them on only when job.mjs sets ZCODE_MEMLOOP_MEASURE_PROBES=1, i.e.
 // in measurement mode; a ratchet run never starts them.
 //

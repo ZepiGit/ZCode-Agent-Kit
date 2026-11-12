@@ -1,4 +1,4 @@
-// Test clock for the bridge process (seam 7): loaded with
+// Test clock for the bridge process: loaded with
 // NODE_OPTIONS=--import=<this file's URL> and FAKE_CLOCK_FILE=<path>. The file
 // holds a millisecond offset; Date.now() and `new Date()` return the real time
 // plus that offset, so a test can move the bridge 7 days ahead without

@@ -1,5 +1,5 @@
 /**
- * Seam 7 (spec §6 b, ADR-0013 consequences): the bridge's startup footprint.
+ * Seam 7 (spec §6 b): the bridge's startup footprint.
  *   - stdio mode never loads the HTTP transport (node:http, the SDK's
  *     streamable HTTP transport, hono): it is imported lazily;
  *   - HTTP mode still loads it and serves MCP unchanged;

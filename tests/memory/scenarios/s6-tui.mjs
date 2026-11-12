@@ -31,7 +31,7 @@ export async function run(ctx) {
   const linesHeap = (by["B-start"]?.heapMB ?? 0) - (by["A-start"]?.heapMB ?? 0);
   const resizeHeap = (by["C-start"]?.heapMB ?? 0) - (by["B-start"]?.heapMB ?? 0);
   const longLineHeap = (by["C-end"]?.heapMB ?? 0) - (by["C-start"]?.heapMB ?? 0);
-  // Ticket 32: the pane's heap after each adversarial part, against the same
+  // The pane's heap after each adversarial part, against the same
   // baseline; the worst part is judged.
   const dMarks = ["D-mixed", "D-huge", "D-cjk", "D-records", "end"].map((n) => by[n]);
   const adversarialHeap = dMarks.every(Boolean)
@@ -59,7 +59,7 @@ export async function run(ctx) {
         { name: "tui:resize-storm-heap", red: resizeHeap > MEMORY.S6.resizeHeapMB, value: resizeHeap, budget: MEMORY.S6.resizeHeapMB, unit: "MB" },
         // §18: the pane bounds bytes, not only lines (2,000 lines x 64 KB was the ceiling before ticket 32).
         { name: "tui:long-line-heap", red: longLineHeap > MEMORY.S6.longLineHeapMB, value: longLineHeap, budget: MEMORY.S6.longLineHeapMB, unit: "MB" },
-        // Ticket 32: the same budget under two-byte, CJK, over-cap and substring-of-a-parent records.
+        // The same budget under two-byte, CJK, over-cap and substring-of-a-parent records.
         { name: "tui:adversarial-line-heap", red: adversarialHeap > MEMORY.S6.longLineHeapMB, value: adversarialHeap, budget: MEMORY.S6.longLineHeapMB, unit: "MB" },
       ],
     },

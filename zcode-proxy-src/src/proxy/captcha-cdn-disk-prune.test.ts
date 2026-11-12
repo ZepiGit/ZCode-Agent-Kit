@@ -1,4 +1,4 @@
-// Seam 3/6 (ticket 29, ADR-0009 correction 2, spec §7 "CDN cache, disk"):
+// Seam 3/6 (ADR-0009 correction 2):
 // the CDN disk directory stays at or below 256 MiB (oldest first), the age
 // prune removes only entries already expired at max(14 days, configured TTL),
 // pruning runs when a cache starts and after each write, and it skips temp

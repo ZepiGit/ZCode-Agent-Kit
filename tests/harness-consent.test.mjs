@@ -50,7 +50,7 @@ test("createPrompter: sequential questions on one terminal, typed-ahead answers 
   s.done();
 });
 
-// ADR-0005 / design-language §4.9: a prompt is a diagnostic — without an
+// A prompt is a diagnostic — without an
 // explicit stream it is written to stderr, in the `? <question> [y/n]` form,
 // and the kit's harness question is the short copy (`Configure ZCode for …?`).
 // The default-output half is proven through a real spawn: the child fakes TTYs
@@ -376,12 +376,12 @@ function fixture(t, { detect = ["omp", "pi"], mcpDist = true } = {}) {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "logs")); mkdirSync(join(root, "zcode-proxy-src"));
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout, so the fixture kit carries them too.
   mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
   for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(KIT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
-  // The template's port is a free port of this run (ticket 75): setup, doctor
+  // The template's port is a free port of this run: setup, doctor
   // and the manager probe it, and the production port 8457 may be the owner's.
   writeFileSync(join(root, "proxy", "config.example.yaml"), readFileSync(join(KIT, "proxy", "config.example.yaml"), "utf8").replace(/^  port: \d+/m, `  port: ${FIXTURE_PORT}`));
   cpSync(join(KIT, "proxy", "zcode-proxy-manager.mjs"), join(root, "proxy", "zcode-proxy-manager.mjs"));
@@ -730,7 +730,7 @@ test("interactive setup asks per harness and applies the answers", { skip: !scri
   assert.ok(r.out.indexOf("for OMP / Oh My Pi? [y/n]") < r.out.indexOf("for pi? [y/n]"), "questions in detection order");
   assert.ok(r.out.indexOf("for pi? [y/n]") < r.out.indexOf(`${ACCOUNT_ROTATOR_QUESTION} [y/N]`), "rotator question comes after the harness questions");
   assert.match(r.out, /INFO {2}y also registers the kit's MCP bridge "zcode-harness" for OMP \/ Oh My Pi/);
-  // Result-row grammar (design-language §4.3): on the pty the status column
+  // Result-row grammar: on the pty the status column
   // is `✓ OK    ` (glyph, space, the word padded to 4); a pipe keeps `OK  `.
   // These pty proofs pin the status word and the label text, not the pad.
   assert.match(r.out, /(?:✓ )?OK {2,4}OMP \/ Oh My Pi/);

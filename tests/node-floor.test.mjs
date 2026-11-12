@@ -1,4 +1,4 @@
-// Node.js support floor (ADR-0006, spec stories 124/125, seam 8): `setup` and
+// Node.js support floor (spec stories 124/125): `setup` and
 // `update` on a Node below 24 refuse before they change any state, with
 // what/why/next, and leave the existing installation as it was.
 //
@@ -105,7 +105,7 @@ for (const [command, args] of [["setup", ["setup", "--harness", "none"]], ["upda
       assert.equal(existsSync(fixture.calls), false, `no child process or network call may run:\n${existsSync(fixture.calls) ? readFileSync(fixture.calls, "utf8") : ""}`);
       assert.deepEqual({ kit: snapshotTree(fixture.kit), home: snapshotTree(fixture.home) }, before,
         "the installation, its state and HOME are byte-identical (nothing created, removed or touched)");
-      // what / why / next / exit, on stderr (an error block, design-language §4.5); stdout stays empty.
+      // what / why / next / exit, on stderr (an error block); stdout stays empty.
       assert.equal(result.stdout, "");
       const lines = result.stderr.trimEnd().split("\n");
       assert.equal(lines[0], `FAIL  Node.js ${version} is below the support floor (Node.js 24)`);

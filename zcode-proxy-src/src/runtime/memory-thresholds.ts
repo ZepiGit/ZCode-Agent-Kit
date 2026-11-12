@@ -1,5 +1,5 @@
 /**
- * The health supervisor's memory thresholds and their defaults (ADR-0008).
+ * The health supervisor's memory thresholds and their defaults.
  * A leaf module, so the config loader can validate against the defaults
  * without loading the supervisor.
  */
@@ -14,7 +14,7 @@ export interface MemoryThresholds {
   sampleIntervalMs: number;
 }
 
-/** ADR-0008: soft 512 MB, hard 1024 MB, each held for 3 samples 15 s apart. */
+/** Soft 512 MB, hard 1024 MB, each held for 3 samples 15 s apart. */
 export const DEFAULT_MEMORY_THRESHOLDS: Readonly<MemoryThresholds> = Object.freeze({
   softLimitMB: 512,
   hardLimitMB: 1024,

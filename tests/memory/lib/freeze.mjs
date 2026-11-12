@@ -2,14 +2,14 @@
 // NtSuspendProcess on Windows). Whatever the work in between does, the
 // process is thawed afterwards; a thaw that fails is a harness failure, so a
 // process the loop itself left frozen can never pass as a kit orphan or a
-// kit verdict (CI run 42252896054, ticket 02 round 4).
+// kit verdict (CI run 42252896054).
 // A process that is gone after the work (the kit's hung-own recovery killed
 // it, which is what the S3 hung rounds test) needs no thaw.
 //
 // The frozen process is named by its identity (pid + start time,
 // lib/process-identity.mjs), taken from the run's own scan that chose it, and
-// every freeze and thaw is judged by it, never by the pid alone (ticket 73):
-// Windows hands a freed pid to a new process quickly (tickets 70, 72), so once
+// every freeze and thaw is judged by it, never by the pid alone:
+// Windows hands a freed pid to a new process quickly (72), so once
 // the frozen proxy is gone its pid may name a stranger. A stranger is never
 // frozen or thawed, and it neither fails the run (a refused or failed resume
 // of a process the loop never froze) nor passes it.

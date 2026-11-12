@@ -2,7 +2,7 @@
 // The lifecycle intents (lib/proxy-lifecycle.mjs, which owns identity,
 // ownership proofs and the exit codes 0-5) run in this process, as the
 // manager CLI runs them; the kit renders their outcome records through the
-// output module (../proxy-report.mjs, ticket 40): progress, the result row
+// output module (../proxy-report.mjs): progress, the result row
 // and error blocks on stderr, the connection details once on stdout after a
 // successful start or restart. `status` is shared with `zcode-kit status`;
 // `logs` lives in ./logs.mjs. The report builders and the reveal rule load on
@@ -98,7 +98,7 @@ async function start(args, ctx, lifecycle) {
   return { exitCode: 0, records: await cardAfterStart(lifecycle, args, ctx) };
 }
 
-// The stop intent streams its narration (ticket 22): the stop request's send
+// The stop intent streams its narration: the stop request's send
 // and fallbacks become lines off a TTY; a TTY keeps the action spinner.
 const stop = (ctx, lifecycle) => step(ctx, "Proxy stop", (observe) => lifecycle.stop({ observe }), "finishStop", lifecycle, "The proxy did not stop");
 

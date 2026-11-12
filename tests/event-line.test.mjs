@@ -1,4 +1,4 @@
-// Event lines and redaction on the manager's side (ADR-0010 rule 4).
+// Event lines and redaction on the manager's side.
 //  - the shared event-line module gives the same lines under Node as under Bun
 //    (zcode-proxy-src/src/log/event-line.test.ts holds the full vectors)
 //  - the manager writes new events as event lines to the proxy log

@@ -140,7 +140,7 @@ test("the record is a frozen snapshot: later env changes do not alter it", () =>
   assert.deepEqual(Object.keys(record).sort(), ["animate", "color", "fixed", "glyphs", "plain", "tty", "width"]);
 });
 
-// Ticket 42 round 2: how a question is drawn comes from the record, not from
+// How a question is drawn comes from the record, not from
 // the process's own TERM (readline's rl.prompt() checks process.env.TERM).
 test("promptStyle: a question may be redrawn with cursor control only on a colour TTY with motion (not NO_COLOR, TERM=dumb, CI or a pipe)", async () => {
   const { promptStyle } = await import("../lib/term/caps.mjs");

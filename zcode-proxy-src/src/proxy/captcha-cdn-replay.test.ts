@@ -1,4 +1,4 @@
-// Seam 3 (B1, Owner Proxy round 20 Q1): bounding the CDN memory tier changes
+// Seam 3 (B1): bounding the CDN memory tier changes
 // memory only, never which bytes are served or which network fetches happen.
 // A recorded sequence of one solver generation's cache calls
 // (__fixtures__/cdn-sequence.json: 373 URLs, 106 MiB of bodies, repeat reads

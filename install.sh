@@ -39,7 +39,7 @@ fi
 for tool in curl tar node mktemp; do
   command -v "$tool" >/dev/null 2>&1 || { die "required tool missing: $tool" 2; }
 done
-# Node.js support floor (ADR-0006): checked before any download, temp
+# Node.js support floor: checked before any download, temp
 # directory or file write, so an old Node leaves an existing installation
 # exactly as it was.
 NODE_FLOOR=24

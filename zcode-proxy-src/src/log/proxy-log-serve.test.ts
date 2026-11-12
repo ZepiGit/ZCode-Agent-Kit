@@ -1,5 +1,5 @@
 /**
- * Seam 4: the `proxy.log` writer of a spawned `serve` (ticket 33, spec §8).
+ * Seam 4: the `proxy.log` writer of a spawned `serve`.
  * The manager sets `ZCODE_KIT_LOG_DIR` at every spawn; with it, the proxy
  * opens `<dir>/proxy.log` through its size-capped writer, and console,
  * process.stdout and process.stderr go through that writer. It rotates the

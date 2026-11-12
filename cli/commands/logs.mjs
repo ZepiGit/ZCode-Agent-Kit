@@ -1,6 +1,6 @@
 // `zcode-kit proxy logs [n] [--level warn|error] [--grep <text>]`: the last n
 // lines of the proxy log (default 40), redacted, as data on stdout. The
-// filters are additive (ticket 40, A-23; lib/proxy-logs.mjs). No log file yet
+// filters are additive (lib/proxy-logs.mjs). No log file yet
 // is a note on stderr, exit 0; a bad filter is a usage error, exit 2.
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";

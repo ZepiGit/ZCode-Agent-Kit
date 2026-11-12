@@ -196,7 +196,7 @@ export interface ProxyConfig {
   server: {
     port: number;
     host: string;
-    /** Admission control (ADR-0004). Absent = the defaults (64 MB). */
+    /** Admission control. Absent = the defaults (64 MB). */
     admission?: AdmissionConfig;
   };
   auth: AuthConfig;
@@ -235,11 +235,11 @@ export interface ProxyConfig {
   logging: {
     level: "debug" | "info" | "warn" | "error";
   };
-  /** Health supervisor settings (ADR-0008). Absent = the defaults. */
+  /** Health supervisor settings. Absent = the defaults. */
   health?: HealthConfig;
 }
 
-/** `health` in config.yaml (ADR-0008). Every key is optional. */
+/** `health` in config.yaml. Every key is optional. */
 export interface HealthConfig {
   /** Memory thresholds; keys left out keep the supervisor's defaults (512 / 1024 MB × 3 samples 15 s apart). */
   memory: {
@@ -251,7 +251,7 @@ export interface HealthConfig {
   };
 }
 
-/** `server.admission` in config.yaml (ADR-0004). */
+/** `server.admission` in config.yaml. */
 export interface AdmissionConfig {
   /** Cap on request-body bytes in flight (`maxInFlightMB` × 1 MiB). */
   maxInFlightBytes: number;

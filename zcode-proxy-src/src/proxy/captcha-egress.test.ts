@@ -57,7 +57,7 @@ describe("captcha egress allowlist", () => {
   });
 });
 
-// Egress routing (spec §13, story 130). Bun ignores undici's `dispatcher`, so
+// Egress routing. Bun ignores undici's `dispatcher`, so
 // the configured ZCODE_PROXY_UPSTREAM_PROXY must reach Bun's own `proxy`
 // option, and an unset setting must not fall back to ambient HTTP(S)_PROXY.
 // Everything here is loopback: the recording proxies answer absolute-form
@@ -147,7 +147,7 @@ describe("captcha egress routing (captchaFetch and the sync-XHR worker)", () => 
 
   // Bun 1.4.2 (the pinned runtime) ignores `proxy: false` and still reads the
   // ambient variables; 1.4.3 honours it. On Bun < 1.4.3 this case is a declared
-  // known gap (Owner Proxy round 19): ticket 27 delivers the unset guarantee
+  // known gap: ticket 27 delivers the unset guarantee
   // there through the solver child's environment, and ticket 62 records it.
   // The `>=1.4.3` gate is never moved to admit a runtime. This is the only
   // allowed it.failing; the runner prints it as (pass), hence the name.

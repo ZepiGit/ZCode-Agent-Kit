@@ -83,7 +83,7 @@ function requireWritable(ctx: ToolContext, tool: string): void {
 }
 
 /**
- * D-02: the "yolo" permission mode disables the harness's permission
+ * The "yolo" permission mode disables the harness's permission
  * prompts and therefore the bridge's interaction policy. Only an operator
  * who started the bridge with --allow-yolo may enable it.
  */
@@ -264,7 +264,7 @@ export function buildTools(ctx: ToolContext): ToolSpec[] {
         params.workspace = workspaceRef(ctx.allowlist.enforce(String(w.workspacePath)));
       }
       if (typeof params.sessionId === "string") {
-        // D-01: session-scoped reads (messages/events/usage/...) are only
+        // Session-scoped reads (messages/events/usage/...) are only
         // allowed for sessions whose workspace is allowlisted.
         const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, params.sessionId);
         params.sessionId = sessionId;
@@ -519,7 +519,7 @@ export function buildTools(ctx: ToolContext): ToolSpec[] {
     mutating: false,
     handler: async (args) => {
       const listResult = await ctx.runtime.call<{ sessions?: unknown[] }>("session/list", {});
-      // D-01: the harness session store is shared with the desktop app; only
+      // The harness session store is shared with the desktop app; only
       // sessions of allowlisted workspaces are visible through the bridge.
       const sessions = (listResult?.sessions ?? []).filter((s) => {
         const wp = sessionWorkspaceOf(s);
@@ -704,7 +704,7 @@ export function buildTools(ctx: ToolContext): ToolSpec[] {
       requireModeAllowed(ctx, mode);
       let sessionIdRaw = optStr(args, "sessionId");
       if (sessionIdRaw) {
-        // D-01: a reused session must belong to the very workspace the task
+        // A reused session must belong to the very workspace the task
         // claims; otherwise the turn would run (and be attributed) elsewhere.
         const scoped = await sessionInScope(ctx.runtime, ctx.allowlist, sessionIdRaw);
         if (workspaceIdentity(scoped.workspacePath) !== workspaceIdentity(workspacePath)) {

@@ -3,7 +3,7 @@
 // header, with no summary and no sample, and the job called them GREEN.
 // So a run's exit 0/1 is accepted only together with evidence in its
 // summary.json; anything less is a harness failure (exit 2). This is Round 6
-// Q2 condition 2: a GREEN from a missing observation is a harness failure,
+// A GREEN from a missing observation is a harness failure,
 // not a calibration.
 //
 // The evidence floors per scenario sit at about half the shortest Linux run
@@ -20,7 +20,7 @@ export const EVIDENCE = {
   // No mcp-bridge: a bridge starts only after a launch succeeds, and S3 measures
   // launches that fail (S3/hung on Windows: 21 of 21, CI run 42252896054).
   S3: { minDurationS: 15, minSamples: 10, roles: ["proxy", "launcher", "preflight"] },
-  // The OMP stub-host leg (ticket 03) starts no launcher: its proof is the stub
+  // The OMP stub-host leg starts no launcher: its proof is the stub
   // hosts, the preflights they spawn and the proxy one of them starts. Linux
   // runs take 10–12 s with 28–37 samples (ticket 03 Comments); the manager a
   // preflight runs is too short-lived to be required on a Windows poll.
@@ -47,7 +47,7 @@ export const ROUNDS = {
 // The rounds where a refused `manager start` is the measured outcome, not a
 // round that did not run (ticket 65; CI runs 42395651721, 42398295810,
 // 42398299724). The killed holder's stale lock is what the round tests, and
-// while the kit refuses that lock (ticket 16) the start fails there. Such a
+// while the kit refuses that lock the start fails there. Such a
 // round counts as run only with its evidence: a non-zero exit code, the
 // stderr, a lock whose holder was not alive, its launches, and the scenario's
 // start-over-stale-lock check RED. In any other round a refused start is no
@@ -64,8 +64,7 @@ export const STALE_LOCK_ROUNDS = {
 // pid and exited non-zero. No kill, a pid that matches no launch, a matched
 // launch that exited 0, or two or more launches on the pid (a reused pid,
 // which would hide a real failure) are harness failures, never GREEN: a
-// missing observation must not read as the killed-holder case passing
-// (Round 8 Q1 condition 1).
+// missing observation must not read as the killed-holder case passing.
 export const KILL_HOLDER_ROUNDS = {
   "S3/short": ["kill-holder-10"],
   "S3/long": ["kill-holder-10"],

@@ -4,13 +4,13 @@
  *   A 100k (long: 1M) ordinary log lines, rendering a frame every 100 lines
  *   B resize storm: 5k (long: 50k) frames at random sizes
  *   C 4,000 long lines (64 KB each — a body or stack dumped into one record);
- *     the pane's 8 MB byte cap holds (ticket 32; before it, 2,000 x 64 KB)
- *   D adversarial records against the byte cap, while scrolled to the top
- *     (ticket 32): 64 KB ASCII lines with one emoji (held two bytes per
+ *     the pane's 8 MB byte cap holds (before it, 2,000 x 64 KB)
+ *   D adversarial records against the byte cap, while scrolled to the top:
+ * 64 KB ASCII lines with one emoji (held two bytes per
  *     UTF-16 unit), one 20 MB line (above the cap), 64 KB CJK lines, and
  *     multi-line records whose rows are substrings of a 20 MB parent (Bun
  *     keeps a substring's parent alive). Marked after each part.
- *   E (information, not gated; Round 21 Q1): 2,000 short ordinary lines evict
+ *   E (information, not gated): 2,000 short ordinary lines evict
  *     every stored row, then a `flushed` mark.
  * One JSON line per second on stdout, phase marks with forced-GC heap and the
  * pane's byte count (paneBytes).
@@ -30,7 +30,7 @@ setInterval(() => {
 function mark(name: string, extra: Record<string, unknown> = {}) {
   Bun.gc(true);
   const m = process.memoryUsage();
-  // paneBytes: the pane's own byte count at the mark (Round 21 Q1 condition 3, information).
+  // paneBytes: the pane's own byte count at the mark (information).
   emit({ type: "phase", name, progress, ms: Math.round(performance.now()), rssMB: Math.round(m.rss / MB), heapMB: Math.round(m.heapUsed / MB), paneBytes: pane.bytes, ...extra });
 }
 
@@ -110,7 +110,7 @@ for (let k = 0; k < 4; k++) {
 mark("D-records", { lines: pane.count });
 pane.scrollDown(pane.count);
 mark("end", { lines: pane.count });
-// Attribution, not gated (Round 21 Q1 condition 3): 2,000 short ordinary lines
+// Attribution, not gated: 2,000 short ordinary lines
 // evict every stored row; heap the pane's rows held is free at `flushed`.
 phase = "E-flush";
 for (let i = 0; i < 2000; i++) pane.push(`[flush ${i}] GET /health 200`, "info");

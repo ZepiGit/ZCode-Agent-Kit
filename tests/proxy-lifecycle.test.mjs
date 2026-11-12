@@ -161,7 +161,7 @@ function kitFixture(t, port, { proxySrc = false } = {}) {
     mkdirSync(join(root, "zcode-proxy-src", "src"));
     writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), FAKE_PROXY);
   }
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout, so the fixture kit carries them too.
   mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
@@ -334,7 +334,7 @@ test("ensure running prints nothing and returns an outcome record per identity o
 test("ensure running reports a lock it may not take as an outcome, leaves the lock untouched and prints nothing", async (t) => {
   const root = kitFixture(t, await freePort());
   const lock = join(root, "logs", "manager.lock");
-  // Ticket 16: a dead holder's lock is now taken over on proof (ADR-0003), so
+  // A dead holder's lock is now taken over on proof, so
   // the lock it may not take is one of an unknown higher protocol version.
   writeFileSync(lock, '{"pid":2147483647,"startedAt":"2026-01-01T00:00:00.000Z","nonce":"stale","v":99}');
   const { value, out } = await printed(async () => (await lifecycleFor(root)).ensureRunning({ waitMs: 1000 }));
@@ -515,8 +515,8 @@ test("an old proxy (origin/main) calling the new manager's respawn CLI gets a fr
   }
 });
 
-// ------------------------------------- respawn acknowledgement (ticket 23)
-// ADR-0015: on a memory respawn the proxy drains only after the manager has
+// ------------------------------------- respawn acknowledgement
+// On a memory respawn the proxy drains only after the manager has
 // reserved the restart budget (a respawn.json event with its pid, written
 // after its request). The stand-in proxy below runs the REAL health supervisor
 // and respawn handoff of this checkout under induced memory pressure (its
@@ -969,7 +969,7 @@ test("a missed completion observer reports bounded fixture evidence on actual wr
 // excuse a real stale server. Events carry no start identity of their own, so
 // the event rule binds on startedMs; a record without a usable start identity
 // cannot be bound to a generation and keeps the pid-only comparison there
-// (never weaker than before). A record's full start identity (ticket 77) is
+// (never weaker than before). A record's full start identity is
 // pid + startedMs + the exact startTicks compared as strings when present.
 const servesGeneration = (event, record) =>
   event?.pid === record?.pid && (!Number.isFinite(record?.startedMs) || event.at > record.startedMs);
@@ -1291,7 +1291,7 @@ test("the respawn wait (30 s) is longer than the acknowledgement wait (10 s) + t
   // The manager's side: the module the manager CLI builds on.
   const { RESPAWN_WAIT_MS } = await import(pathToFileURL(join(ROOT, "lib", "proxy-lifecycle.mjs")).href);
   assert.deepEqual({ respawnWait: RESPAWN_WAIT_MS, ack: proxy.ack, deadline: proxy.deadline }, { respawnWait: 30_000, ack: 10_000, deadline: 10_000 });
-  // STOP_EXIT_MARGIN_MS (ticket 22) lives in the shared module; the margin is
+  // STOP_EXIT_MARGIN_MS lives in the shared module; the margin is
   // the same one the manager's stop force point adds after STOP_GRACE_MS.
   const { STOP_EXIT_MARGIN_MS } = await stopDeadlines();
   assert.ok(RESPAWN_WAIT_MS > proxy.ack + proxy.deadline + STOP_EXIT_MARGIN_MS);
@@ -1330,7 +1330,7 @@ test("the account change restarts a verified own proxy through the intents, with
   // A record whose pid is dead is not a running proxy: nothing starts, the
   // change is reported. The proxy is stopped through the intent (which
   // returns only after the exit); the dead record names a pid no process has,
-  // so a reused pid cannot turn it into a live one (ticket 70).
+  // so a reused pid cannot turn it into a live one.
   if (startTimeMissing(after)) { t.diagnostic("windows: the fresh record has no start time (ticket 16); stopped through its fixture command line"); killFixtureProxy(root, after.pid); }
   else {
     const { createLifecycle } = await import(pathToFileURL(join(root, "lib", "proxy-lifecycle.mjs")).href);
@@ -1376,8 +1376,8 @@ test("a proxy started through the preflight carries the frozen respawn hook, and
   assert.deepEqual(readdirSync(join(root, "logs")).filter((f) => f === "manager.lock"), []);
 });
 
-// ------------------------------------------- per-spawn environment (ticket 18)
-// ADR-0014/ADR-0015, Round 4 Q4: at every proxy spawn the manager sets
+// ------------------------------------------- per-spawn environment
+// At every proxy spawn the manager sets
 // ZCODE_KIT_STOP_TOKEN (fresh, 32 random bytes base64url, also written to
 // proxy.pid) and ZCODE_KIT_LOG_DIR (its own logs dir), overwriting whatever the
 // manager inherited. Assertions never print a token (B2): values are compared
@@ -1482,7 +1482,7 @@ test("manager output masks the recorded stop token exactly, also where the token
   assert.equal(logs().stdout, "[zcode-proxy] echoed <redacted>\n");
 });
 
-// ------------------------------------------- proxy.log ownership (ticket 33)
+// ------------------------------------------- proxy.log ownership
 // Spec §8: while it runs, the proxy is the single rotator of proxy.log. The
 // manager keeps appending its `[manager <ISO>] …` lines and rotates only
 // under the start lock and only when no live recorded proxy exists (the
@@ -1807,13 +1807,13 @@ test("a proxy the manager starts on Windows records its exact start ticks, and s
   await until("the proxy to leave the port", async () => await identity(port) === "down", 15_000);
 });
 
-// ------------------------- the stop token in 16's pid record (tickets 16, 18, 77)
-// Every proxy.pid is built by one builder (pidRecord, ticket 16) and written
-// atomically at mode 0600; the stop token (ticket 18) goes through it: the
+// ------------------------- the stop token in 16's pid record (18, 77)
+// Every proxy.pid is built by one builder (pidRecord) and written
+// atomically at mode 0600; the stop token goes through it: the
 // spawn intent, the pid and start-time writes of the spawner, and
 // completeRecord, which rewrites a record another manager wrote and so keeps
 // that record's token for the same spawn and never invents one. startTicks
-// (ticket 77) and the spawn intent stay as they were. Tokens are generated
+// and the spawn intent stay as they were. Tokens are generated
 // fixtures and are compared without printing them (B2).
 
 // An in-process listener that answers the identity proof naming `pid` as its own.
@@ -1926,7 +1926,7 @@ test("a spawn's records all carry its stop token next to startTicks: the intent,
   await until("the proxy to leave the port", async () => await identity(port) === "down", 15_000);
 });
 
-// -------------------------------- graceful stop request (ticket 22, ADR-0014)
+// -------------------------------- graceful stop request
 // The manager asks its own proxy to stop gracefully with `POST /__kit/stop`
 // (bearer key + per-spawn stop token, the one from proxy.pid) after the
 // identity proof, then waits past the proxy's own deadline (STOP_GRACE_MS)
@@ -1941,7 +1941,7 @@ const PROXY_STOP_DEADLINES_URL = pathToFileURL(join(ROOT, "zcode-proxy-src", "sr
 const readStopRequests = (file) => existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
 
 /**
- * A stand-in for the proxy (seam 2): answers the identity proof, records every
+ * A stand-in for the proxy: answers the identity proof, records every
  * stop request (method, URL, bearer, token header) in its own JSONL file, and
  * answers POST /__kit/stop per `STOP_STANDIN_STOP`: a fixed status
  * ("202"/"404"/"401"/"403"), "destroy" (a connection error), or
@@ -2118,7 +2118,7 @@ const POSIX_STOP_STANDIN_SKIP = process.platform === "win32" && "the fallback si
 
 test("one shared module holds the stop deadlines and the request shape; the manager forces only after grace + margin, and the copies are byte-identical", async () => {
   const { STOP_GRACE_MS, STOP_EXIT_MARGIN_MS, STOP_REQUEST_PATH, STOP_TOKEN_HEADER } = await stopDeadlines();
-  // ADR-0014 cond 4: STOP_GRACE_MS is the proxy's own hard deadline.
+  // STOP_GRACE_MS is the proxy's own hard deadline.
   assert.equal(STOP_GRACE_MS, 10_000);
   // "a named margin of at least a few 300 ms poll intervals (for example 2 s)".
   assert.ok(STOP_EXIT_MARGIN_MS >= 3 * 300, `STOP_EXIT_MARGIN_MS (${STOP_EXIT_MARGIN_MS}) must cover a few 300ms poll intervals`);
@@ -2248,7 +2248,7 @@ test("stop sends the stop request with the bearer key and the recorded token, an
   assert.ok(requests[0].token === token, "the request carried the recorded stop token");
   assert.deepEqual({ code: stopped.code, outcome: stopped.outcome }, { code: 0, outcome: "stopped" });
   // The intent's narration keeps its frozen text; the request's steps are
-  // event lines (ticket 14) on the observe channel and in proxy.log.
+  // event lines on the observe channel and in proxy.log.
   assert.deepEqual(stopped.lines, [`stopped (pid ${stand.pid})`]);
   assert.ok(observed.some((l) => / INFO manager stop request sent pid=\d+ graceMs=800$/.test(l)), observed.join("\n"));
   assert.match(readFileSync(join(root, "logs", "proxy.log"), "utf8"), / INFO manager stop request sent pid=\d+ graceMs=800$/m);

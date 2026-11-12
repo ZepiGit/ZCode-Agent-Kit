@@ -218,7 +218,7 @@ test('repair refuses checkout writes and preserves a competing transaction lock'
   try { await assert.rejects(repairManaged(ctx, []), /another setup/); assert.equal(readFileSync(lock, 'utf8'), before); }
   finally { releaseLock(lock); }
 });
-// Ticket 16: a dead holder's lock is taken over on proof (ADR-0003); a lock the
+// A dead holder's lock is taken over on proof; a lock the
 // kit cannot judge (here an unknown higher protocol version) is never stolen.
 test('stale pid is removed safely but a manager lock the kit cannot judge is not stolen', async t => {
   const ctx = fixture(t); const { startupPreflight } = await api();
@@ -505,7 +505,7 @@ test('generated OMP extension recovers after disk module repair without restarti
   assert.equal(result.stdout, '', 'print-mode stdout remains reserved for model output');
 });
 
-// ADR-0006 condition 2 (spec story 125, seam 8): the preflight reports when
+// The preflight reports when
 // the OMP autostart's pinned absolute Node path is below the support floor or
 // missing, so a Node upgrade through a version manager cannot silently break
 // or age the autostart. A fake old Node is a wrapper that answers --version
@@ -557,7 +557,7 @@ test('preflight reports a pinned autostart Node below the floor or missing as a 
     rmSync(join(ctx.root, 'logs', 'heal.log'), { force: true });
     const result = await runNode(join(ctx.root, 'cli', 'heal.mjs'), [], env);
     assert.equal(result.code, 0, `${label}: the warning does not fail the preflight\n${result.stderr}`);
-    // The off-TTY check grammar (design-language §4.3): WARN row, then next.
+    // The off-TTY check grammar: WARN row, then next.
     const lines = result.stderr.split('\n');
     const at = lines.indexOf(`WARN  OMP autostart runtime \u2014 ${detail}`);
     assert.ok(at >= 0, `${label}:\n${result.stderr}`);

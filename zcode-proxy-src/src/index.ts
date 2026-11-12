@@ -207,7 +207,7 @@ Examples:
 
 async function serve(configPath: string | undefined, debug: boolean): Promise<void> {
   // A manager-started proxy (ZCODE_KIT_LOG_DIR) writes proxy.log itself,
-  // through the size-capped writer, before anything else prints (ticket 33).
+  // through the size-capped writer, before anything else prints.
   const proxyLog = startProxyLog();
   if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA === "1") installGuestErrorBoundary();
   const path = configPath ?? process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
@@ -242,8 +242,8 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
 
   if (debug) printDebugBanner(config, path, cred);
 
-  // The stop request (ADR-0014, ticket 22): only a manager-spawned proxy
-  // carries the per-spawn token (ZCODE_KIT_STOP_TOKEN, ticket 18); the TUI and
+  // The stop request: only a manager-spawned proxy
+  // carries the per-spawn token (ZCODE_KIT_STOP_TOKEN); the TUI and
   // the Android entry build their options without it, so their stop route
   // answers the unknown-route 404. The trigger is hung onto the shutdown
   // through a ref, since the shutdown exists after the listener is up; the
@@ -1053,7 +1053,7 @@ function ensureConfigWithDeviceMid(): string {
 export function ensureDeviceMidInConfig(path: string): string {
   // The value is the rest of the `deviceMid:` line only: the separator never
   // crosses a line break (LF or CRLF), so an empty unquoted `deviceMid:` reads
-  // as empty, as `loadConfig` reads it, not as the next line's text (ticket 69).
+  // as empty, as `loadConfig` reads it, not as the next line's text.
   const deviceMidLine = /^(\s*)deviceMid:[^\S\r\n]*(.*)$/m;
   const identityBlockLine = /^identity:\s*$/m;
   const raw = readFileSync(path, "utf-8");

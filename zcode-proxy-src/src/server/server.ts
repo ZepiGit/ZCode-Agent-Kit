@@ -49,12 +49,12 @@ export interface ServerOptions {
   debug?: boolean;
   /** Responses-API state store. When absent, `/v1/responses` runs stateless (`previous_response_id` returns 404). */
   responseStore?: ResponseStore;
-  /** Admission control for request bodies (ADR-0004). Defaults to one built from `config.server.admission`. */
+  /** Admission control for request bodies. Defaults to one built from `config.server.admission`. */
   admission?: Admission;
-  /** The drain gate `startServer` shares with its handler (ADR-0008 cond 2). */
+  /** The drain gate `startServer` shares with its handler. */
   drain?: DrainGate;
   /**
-   * This spawn's stop token (ADR-0014, ticket 18): `ZCODE_KIT_STOP_TOKEN` as
+   * This spawn's stop token: `ZCODE_KIT_STOP_TOKEN` as
    * the manager set it at spawn. A proxy hosted without a manager (the TUI,
    * standalone) passes none: the stop route then answers the unknown-route
    * `404 not_found_error` and never accepts without a token.
@@ -72,10 +72,10 @@ export interface ProxyServer {
   stop(exit?: boolean): void;
   /** Promise that resolves once the server has fully stopped. */
   close(): Promise<void>;
-  /** Admission counters (`inFlightBytes`, `queued`, `shedTotal`, …), for observability (ticket 39). */
+  /** Admission counters (`inFlightBytes`, `queued`, `shedTotal`, …), for observability. */
   admission(): AdmissionStats;
   /**
-   * Start the drain (ADR-0008 cond 2): the listener stays open, every new
+   * Start the drain: the listener stays open, every new
    * request (and every request still waiting for admission) is shed with 503
    * + `Retry-After` in its endpoint's shape; `/health` keeps answering.
    * Requests already accepted run on. Irreversible.
@@ -253,7 +253,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       return errorResponse(401, "authentication_error", "account status requires proxy API key authentication");
     }
 
-    // The graceful stop request (ADR-0014, ticket 22): it sits after the Host,
+    // The graceful stop request: it sits after the Host,
     // Origin and bearer checks and additionally requires the per-spawn stop
     // token, both compared in constant time including length. It has no body,
     // bypasses admission (it is never queued behind the byte cap) and the
@@ -279,7 +279,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       return response;
     }
 
-    // Draining (ADR-0008 cond 2): shed every new request; /health keeps
+    // Draining: shed every new request; /health keeps
     // answering for the manager's hung-proxy detection.
     if (drain?.active && path !== "/health" && path !== "/") {
       return drain.shedResponse(path);
@@ -388,7 +388,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
  * timeouts.
  */
 export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
-  // ZAK-002: loopback binding and bearer auth are startup invariants for the
+  // Loopback binding and bearer auth are startup invariants for the
   // serve path, not template conventions. Defense in depth: the config loader
   // already rejects non-loopback hosts; here we re-check both right before
   // binding, so no code path can listen without a real key or on a wide host.
@@ -564,13 +564,13 @@ function countedPullStream(source: ReadableStream<Uint8Array>, onRead?: (bytes: 
   }, { highWaterMark: 0 });
 }
 
-/** The admission control a proxy builds from its config (ADR-0004). */
+/** The admission control a proxy builds from its config. */
 function admissionFor(config: ProxyConfig): Admission {
   return createAdmission({ maxInFlightBytes: config.server.admission?.maxInFlightBytes ?? DEFAULT_MAX_IN_FLIGHT_BYTES });
 }
 
 /**
- * The largest single write to a client socket (ticket 61). A body chunk can
+ * The largest single write to a client socket. A body chunk can
  * be hundreds of KB (a late read of an accumulated upstream body); written
  * whole, whatever a client that does not read leaves of it stays in the
  * proxy's write buffer. In pieces, that is at most one piece per client.
@@ -638,7 +638,7 @@ async function writeWebResponseToNodeResp(resp: Response, res: import("node:http
 
 /**
  * Check whether the client provided the correct proxy API key.
- * Constant-time comparison (audit R2-10): a plain `===` on the presented vs
+ * Constant-time comparison: a plain `===` on the presented vs
  * expected key is a timing side channel on public-network deployments
  * (default bind is 0.0.0.0). Behavior is unchanged for honest callers.
  */
@@ -652,7 +652,7 @@ function checkProxyKey(authHeader: string, expected: string): boolean {
 }
 
 /**
- * The stop-token check (ADR-0014 cond 1): constant time, length included —
+ * The stop-token check: constant time, length included —
  * fixed-size digests prevent a secret-length-dependent early return, as for
  * checkProxyKey. The complete UTF-8 input participates in each digest.
  */

@@ -29,7 +29,7 @@
 //                                 (lib/retained-heap.mjs) from a fake /health:
 //                                 FAKE_RUN_HEAP = { before, readings } (/health
 //                                 details; a null reading = no answer). The other S7
-//                                 checks are as on CI (proxy.log RED, ticket 33). An
+//                                 checks are as on CI (proxy.log RED). An
 //                                 incomplete series is a harness failure, as run.mjs
 //                                 writes one (exit 2).
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -202,7 +202,7 @@ const win = process.platform === "win32";
 const summary = {
   id: "fake", key, scenario, profile: "short", variant, platform: process.platform, outcome: "GREEN", metric: win ? "commit" : "rss",
   durationS: complete ? 300 : 1, red: false,
-  // One memory check as osVerdict reports it on Windows: both values and the gate (Round 7 Q1).
+  // One memory check as osVerdict reports it on Windows: both values and the gate.
   checks: complete ? [{ name: "procPeak:proxy", red: false, value: 120, budget: 250, unit: "MB", gate: "ws", commitValue: 310, wsValue: 120 }] : [],
   summary: complete ? { "*": role(2), kit: role(1), proxy: role(1), "mock-upstream": role(1) } : { "*": role(0), kit: role(0) },
   samples: complete ? 300 : 0, notes: { sampler: { units: win ? { ok: true, compared: 40 } : null, overhead: null } }, observations: [], orphans: [],

@@ -1,4 +1,4 @@
-// The Windows sampler (seam 1, ticket 02), proved on any OS from recorded
+// The Windows sampler, proved on any OS from recorded
 // PowerShell output: `Get-CimInstance Win32_Process … | ConvertTo-Csv` polls
 // (tests/memory/fixtures/win32/), the spec §1 unit mapping, kit-process
 // selection by tree + run token, the units self-test against Get-Process and
@@ -104,7 +104,7 @@ test("S3/omp: the stub OMP host and its console host are the harness; the prefli
   const kit = createKitTracker(RUN).select([...base, ...extra], { selfPid: 2200 });
   const role = (pid) => kit.find((p) => p.pid === pid)?.role;
   assert.deepEqual([2950, 2951, 2952, 2953, 2954].map(role), ["omp-host", "omp-host", "preflight", "other", "other"]);
-  // Kit commit counts the preflight, its PowerShell and its console host (Round 7 Q2 condition 3), never the host's.
+  // Kit commit counts the preflight, its PowerShell and its console host, never the host's.
   const only = (pids) => kit.filter((p) => pids.includes(p.pid));
   const v = osVerdict([{ t: 0, progress: 0, procs: only([2950, 2951, 2952, 2953, 2954]) }], { peaks: { kit: 1000 } });
   const total = v.checks.find((c) => c.name === "peak:kit");
@@ -143,7 +143,7 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
     const csv = parseSamplesCsv(readFileSync(join(dir, "samples.csv"), "utf8"));
     assert.equal(readFileSync(join(dir, "samples.csv"), "utf8").split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb");
     const proxy = csv.find((r) => r.pid === 2400);
-    // ws_peak_kb = PeakWorkingSetSize (130000 KB): the WS peak is reproducible from the artefact (Round 7 Q1).
+    // ws_peak_kb = PeakWorkingSetSize (130000 KB): the WS peak is reproducible from the artefact.
     assert.deepEqual({ role: proxy.role, rssKb: proxy.rssKb, commitKb: proxy.commitKb, hwmKb: proxy.hwmKb, wsPeakKb: proxy.wsPeakKb, progress: proxy.progress }, { role: "proxy", rssKb: 122880, commitKb: 153600, hwmKb: 190000, wsPeakKb: 130000, progress: 3 });
     // Read back from the CSV, the working-set verdict sees the same peak as the live run.
     const back = rowsForMetric(rowsFromSamples(csv), "rss").flatMap((r) => r.procs).find((p) => p.pid === 2400);
@@ -153,7 +153,7 @@ test("the Windows sampler writes commit_kb, excludes its poller, records its ove
     const o = sampler.overhead();
     assert.deepEqual({ pid: o.pid, polls: o.polls >= 3, peakCommitKb: o.peakCommitKb, peakRssKb: o.peakRssKb, pollMsMax: o.pollMsMax >= 180 }, { pid: 2200, polls: true, peakCommitKb: 65536, peakRssKb: 81920, pollMsMax: true });
     // The sampler's own handle on its poller, never the pid: stop() resolves on
-    // the poller's exit, and a freed pid may already name a stranger (ticket 72).
+    // the poller's exit, and a freed pid may already name a stranger.
     assert.equal(sampler.pollerRunning(), false, "the poller child is reaped on stop");
   } finally { await sampler?.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
@@ -257,7 +257,7 @@ test("the Job Object report is read from the real CI run log despite the CLIXML 
   assert.deepEqual(parseJobReport(fixture("ci-42221794531-run-log.txt")), { applied: true, limitBytes: 3221225472, peakBytes: 103886848 });
 });
 
-// ── Reads after an event judge processes by the poll, never by a pid (ticket 73) ──
+// ── Reads after an event judge processes by the poll, never by a pid ──
 // The live scan is the latest poll: each process is its pid and creation time
 // as the poll saw them, and no pid is asked whether it is alive (Windows may
 // hand a freed pid to a stranger at once, tickets 70, 72). A read after an

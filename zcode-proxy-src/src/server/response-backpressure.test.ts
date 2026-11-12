@@ -243,7 +243,7 @@ describe("a streaming client's reads pace the upstream (ticket 61)", () => {
   it("messages: a large upstream chunk is written to the client in pieces of at most 64 KiB (a stalled client holds at most one in the proxy), bytes unchanged", async () => {
     // A late read of a fetch body returns what accumulated meanwhile, often
     // hundreds of KB at once; written whole, a stalled client's socket keeps
-    // all of it in the proxy's write buffer (ticket 61: linux RSS +14 MB).
+    // all of it in the proxy's write buffer (linux RSS +14 MB).
     const frames = [...HEAD, ...Array<Uint8Array>(160).fill(DELTA), ...TAIL];
     const big = Buffer.concat(frames);
     oneChunk = big;
@@ -318,7 +318,7 @@ async function rowsSince(from: number, tag: "ANT" | "OAI", maxMs = 10_000): Prom
 /**
  * The Tok a row must show for `text` as delivered: the upstream's usage total
  * when a usage event is among the delivered events, otherwise the counted
- * text deltas (Owner Proxy round 31 Q2, correction 6).
+ * text deltas (correction 6).
  */
 function tokOf(text: string): string {
   let tokens = 0;

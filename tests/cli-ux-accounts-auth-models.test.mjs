@@ -10,12 +10,12 @@
 //   - `accounts` / `accounts health`: one table per command with an active
 //     marker explained in the footer, a verdict word per account, one number
 //     format (thousands without separators, `69 %`), and every next step
-//     names `zcode-kit …`, never `zcode-proxy …` (A-19, A-27);
+//     names `zcode-kit …`, never `zcode-proxy …`;
 //   - `auth status`: human key/value text on a TTY, today's exact JSON when
 //     stdout is not a TTY, the same JSON bytes on a TTY with `--json`;
 //   - `models`: the list, the key and the warning keep today's exact bytes,
 //     now as output-module records (data/json) instead of plain text records;
-//   - streams (ADR-0005): tables, kv blocks, the list and all JSON on stdout;
+//   - streams: tables, kv blocks, the list and all JSON on stdout;
 //     error blocks on stderr.
 import { test } from "node:test";
 import assert from "node:assert/strict";

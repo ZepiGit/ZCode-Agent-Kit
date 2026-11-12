@@ -21,7 +21,7 @@
 const MB = 1024;
 // The kit's own footprint: everything but the test fixtures around it.
 // "tooling": the loop's own netstat/PowerShell on Windows (lib/win-sampler.mjs).
-// The S3 OMP leg's stub host is the harness (ADR-0013 cond 4): reported, never kit.
+// The S3 OMP leg's stub host is the harness: reported, never kit.
 const NOT_KIT = new Set(["mock-upstream", "scenario", "fake-harness", "tooling", "omp-host"]);
 const inRole = (p, role) => role === "*" || (role === "kit" ? !NOT_KIT.has(p.role) : p.role === role);
 
@@ -219,7 +219,7 @@ export function rowsForMetric(rows, metric) {
   }));
 }
 
-// Round 7 Q1: the roles whose per-process peak and steady budgets are judged
+// The roles whose per-process peak and steady budgets are judged
 // on working set on Windows (their §9 numbers are RSS numbers). Everything else
 // (the S3 total, growth, solver and S2 checks) stays on commit there.
 export const WS_GATED_ROLES = new Set(["proxy", "launcher", "mcp-bridge", "preflight"]);
@@ -231,7 +231,7 @@ export function windowsGate(name) {
 }
 
 /**
- * The verdict on the OS's metrics (spec §1, amended by Round 7 Q1). Linux
+ * The verdict on the OS's metrics (amended by Round 7 Q1). Linux
  * (no commit_kb): RSS, unchanged. Windows: the per-process peak and steady
  * budgets of WS_GATED_ROLES on working set (max of sampled WS and
  * PeakWorkingSetSize), every other memory check on commit, each memory check

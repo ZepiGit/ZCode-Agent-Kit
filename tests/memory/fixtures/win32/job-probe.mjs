@@ -20,7 +20,7 @@ if (mode === "alloc") {
   const c = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { detached: true, stdio: "ignore" });
   c.unref();
   // Its identity (pid + start time) while it surely runs: once the job kills
-  // it, its pid may name a stranger (ticket 72).
+  // it, its pid may name a stranger.
   const { start } = identityOf(c.pid);
   console.log(`GRANDCHILD ${c.pid} ${start}`);
   process.exit(0);

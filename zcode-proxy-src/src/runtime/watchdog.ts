@@ -9,9 +9,9 @@
  * thread ticks, and when the heartbeat freezes past the threshold it asks the
  * kit manager to respawn (hook env present) and hard-kills the process: with
  * the manager's logs dir after the respawn acknowledgement or a refusal, at
- * most 10 s later (ADR-0015 cond 5), logging the outcome it saw.
+ * most 10 s later, logging the outcome it saw.
  *
- * The respawn acknowledgement (ADR-0015) lives here too, self-contained so the
+ * The respawn acknowledgement lives here too, self-contained so the
  * watcher can embed it: the hook is spawned with unchanged arguments, and the
  * manager's answer is a `respawn.json` event with this pid and an `at` later
  * than the request time (written at budget reservation by old and new
@@ -90,7 +90,7 @@ export function respawnHookCommand(
 
 /**
  * The respawn hook's environment: `env` without the stop token
- * (`ZCODE_KIT_STOP_TOKEN`, any casing; ADR-0014). The token belongs to this
+ * (`ZCODE_KIT_STOP_TOKEN`, any casing). The token belongs to this
  * spawn only, and the hook is the next manager, which spawns the next proxy.
  * `env` itself is left unchanged. Self-contained (embedded in the worker).
  */
@@ -141,7 +141,7 @@ export function launchRespawnHook(
   return promise;
 }
 
-/** How long the proxy waits for the respawn acknowledgement or a refusal (ADR-0015), on both paths. */
+/** How long the proxy waits for the respawn acknowledgement or a refusal, on both paths. */
 export const RESPAWN_ACK_WAIT_MS = 10_000;
 /** How often the wait reads `respawn.json`. */
 export const RESPAWN_ACK_POLL_MS = 100;
@@ -156,7 +156,7 @@ export const RESPAWN_ACK_POLL_MS = 100;
  *   otherwise without one;
  * - `hook-failed`: the hook did not start;
  * - `started`: no logs dir to read an acknowledgement from (a manager older
- *   than ADR-0015): today's handoff, the hook's start is the confirmation.
+ *   than 0.3.0): the hook's start is the confirmation.
  */
 export type RespawnOutcome = "acknowledged" | "refused" | "no-acknowledgement" | "hook-failed" | "started";
 
@@ -313,7 +313,7 @@ setInterval(() => {
   // place — but only after the manager has answered or the wait is over.
   const logDir = process.env.ZCODE_KIT_LOG_DIR;
   if (!logDir) {
-    // A manager older than ADR-0015 (no logs dir): wait for the hook's start
+    // A manager older than 0.3.0 (no logs dir): wait for the hook's start
     // only, bounded so a wedged spawn cannot keep the hung process alive.
     launchRespawnHook(spawn, hook, process.env, workerData.hookAckMs).then((result) => {
       if (!result.ok) writeSync(2, "[watchdog] respawn hook failed: " + result.error + "\\n");
@@ -321,7 +321,7 @@ setInterval(() => {
     }, kill);
     return;
   }
-  // ADR-0015 cond 5: wait at most ackWaitMs for the acknowledgement or a
+  // Wait at most ackWaitMs for the acknowledgement or a
   // refusal, then terminate regardless and log the outcome. A refusal here
   // can end with no proxy; the next launch's preflight starts a fresh one.
   setTimeout(kill, workerData.ackWaitMs + 2000).unref?.();

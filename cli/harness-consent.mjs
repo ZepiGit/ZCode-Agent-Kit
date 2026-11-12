@@ -48,7 +48,7 @@ function abortError() {
  * as consent). Ctrl-C rejects with an error whose `code` is ABORTED so the
  * caller can stop asking instead of treating it as "no answer".
  *
- * A prompt is a diagnostic (ADR-0005, design-language §4.9): without an
+ * A prompt is a diagnostic: without an
  * explicit stream it is written to stderr, in the `? <question> [y/n]` form,
  * and questions appear only when stdin AND stderr are terminals — with
  * stderr redirected the question would be invisible, so nothing is asked.

@@ -79,7 +79,7 @@ test('managed env passes the admission byte-cap override through to the proxy (A
   assert.equal(env.ZCODE_PROXY_ADMISSION_MAX_QUEUED, undefined);
 });
 
-// Per-spawn variables (ADR-0014/ADR-0015, Round 4 Q4; ticket 18). Tokens are
+// Per-spawn variables. Tokens are
 // generated fixtures; assertions compare them without printing them (B2).
 const PER_SPAWN = ['ZCODE_KIT_STOP_TOKEN', 'ZCODE_KIT_LOG_DIR'];
 const kitCtx = { config: '/kit/proxy/config.yaml', logDir: '/kit/logs' };

@@ -1,5 +1,5 @@
 // Generates the width tables of zcode-proxy-src/src/tui/width-core.mjs from
-// the Unicode Character Database (ticket 05; ADR-0011, Round 1 Q12).
+// the Unicode Character Database.
 //
 // usage: node scripts/gen-width-tables.mjs <ucd-dir> [--check]
 //

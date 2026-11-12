@@ -1,4 +1,4 @@
-// The memory loop at process level (seam 1): the sampler finds every process
+// The memory loop at process level: the sampler finds every process
 // carrying the run marker — including a detached child its parent left
 // behind — and writes the CSV schema the verdict and reverdict read; the
 // entry point refuses to run outside a capped, isolated run.
@@ -45,7 +45,7 @@ test("samples.csv keeps its columns and appends commit_kb, empty on Linux", linu
     await sleep(700);
     const rows = await sampler.stop();
     const text = readFileSync(join(dir, "samples.csv"), "utf8");
-    // commit_kb (ticket 02) and ws_peak_kb (Round 7 Q1) are additive and empty on Linux.
+    // commit_kb and ws_peak_kb are additive and empty on Linux.
     assert.equal(text.split("\n")[0], "t_ms,pid,ppid,role,rss_kb,hwm_kb,threads,fds,heap_mb,progress,cmd,commit_kb,ws_peak_kb");
     const parsed = parseSamplesCsv(text).filter((r) => r.pid === child.pid);
     assert.ok(parsed.length >= 2, "the marked child is sampled");
@@ -103,7 +103,7 @@ test("a marked process is re-attributed after it execs (a proxy first seen befor
   }
 });
 
-// A fake /proc for the exec window (ticket 64): one directory per pid, the
+// A fake /proc for the exec window: one directory per pid, the
 // files the sampler reads. `stat` carries the pid's start time (field 22),
 // which survives the exec, and its flags (field 9; PF_KTHREAD = 0x200000).
 function fakeProc() {
@@ -245,7 +245,7 @@ test("a detached child whose parent exited is still found as a survivor", linuxO
   await new Promise((r) => parent.on("close", r));
   const orphanPid = Number(out.trim());
   // Its identity while it surely runs (it sleeps 20 s): the cleanup kills that
-  // process, never whatever holds its pid by then (ticket 73).
+  // process, never whatever holds its pid by then.
   let orphan = null;
   try {
     orphan = identityOf(orphanPid);
@@ -258,7 +258,7 @@ test("a detached child whose parent exited is still found as a survivor", linuxO
   }
 });
 
-// ── The windows leg's cap (ticket 02): a Job Object per run ─────────────────
+// ── The windows leg's cap: a Job Object per run ─────────────────
 test("on Windows the job caps every run with a Job Object (job memory + kill-on-close) and its own timeout", () => {
   assert.deepEqual(chooseCap("auto", { platform: "win32" }), { cap: "jobobject" });
   const c = commandFor("jobobject", "3G", 1200, ["S1", "--profile", "short"], { node: "C:\\node\\node.exe", runScript: "D:\\kit\\tests\\memory\\run.mjs" });
@@ -285,9 +285,9 @@ test("the Job Object wrapper's report says whether the cap was applied and how c
   assert.equal(parseJobReport("no report"), null);
 });
 
-// ── Process identity: pid + start time (ticket 72) ──────────────────────────
+// ── Process identity: pid + start time ──────────────────────────
 // A check that holds no handle on a process asks for that process, not its pid:
-// Windows reuses a freed pid quickly (ticket 70), so a stranger at the same pid
+// Windows reuses a freed pid quickly, so a stranger at the same pid
 // must neither keep a dead process "alive" nor stand in for a live one.
 test("a process identity is its pid and start time: a stranger at the same pid is not it, a gone pid is not it", () => {
   const proc = mkdtempSync(join(tmpdir(), "memloop-identity-"));
@@ -331,7 +331,7 @@ test("a live child keeps its identity until it exits, then no process is it", as
   } finally { try { child.kill("SIGKILL"); } catch {} }
 });
 
-// ── Live Windows self-tests (spec §1; run on the windows-latest legs) ───────
+// ── Live Windows self-tests (run on the windows-latest legs) ───────
 const waitFor = async (fn, ms = 15_000) => { const end = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > end) return v; await sleep(250); } };
 
 test("Windows: the units self-test against Get-Process PrivateMemorySize64 passes on the live process table", windowsOnly, async () => {
@@ -373,7 +373,7 @@ test("Windows: a deliberately orphaned detached process is found, by the run tok
     const after = survivors(marker).filter((s) => !/^conhost\.exe$/i.test(s.comm ?? ""));
     assert.deepEqual(after.map((s) => s.pid).sort((a, b) => a - b), [byToken.orphan, byTree.orphan].sort((a, b) => a - b), "a fresh poll after stop still finds both, and nothing else");
     assert.equal(after.find((s) => s.pid === byTree.orphan).ppid, byTree.parent, "Windows keeps the dead parent's pid");
-    // The cleanup kills each orphan by its identity (TerminateProcess under a held handle, ticket 73).
+    // The cleanup kills each orphan by its identity (TerminateProcess under a held handle).
     while (orphans.length) { assert.equal(killProcess(orphans[0]), true, `orphan ${orphans[0].pid} is still itself and is terminated`); orphans.shift(); }
   } finally {
     await sampler?.stop();
@@ -423,7 +423,7 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
   assert.equal(r.status, 0, r.stdout + r.stderr);
   // The probe prints the grandchild's identity (pid + start time), taken while
   // it ran: the job kills it before this test could ask, and its freed pid may
-  // already name a stranger (ticket 72).
+  // already name a stranger.
   const m = r.stdout.match(/GRANDCHILD (\d+) (\d+)/);
   assert.ok(m, r.stdout);
   const grandchild = { pid: Number(m[1]), start: m[2] };
@@ -433,7 +433,7 @@ test("Windows: closing the Job Object kills a detached grandchild (nothing escap
   assert.ok(gone, "the grandchild died with the job");
 });
 
-// ── S3 OMP leg: the stub Bun host runs the generated extension (ticket 03) ──
+// ── S3 OMP leg: the stub Bun host runs the generated extension ──
 const KIT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /** The promise's value, or `fallback` after `ms`; the timer never outlives the race. */
 const within = (promise, ms, fallback) => { let t; return Promise.race([promise, new Promise((r) => { t = setTimeout(() => r(fallback), ms); })]).finally(() => clearTimeout(t)); };
@@ -504,7 +504,7 @@ test("killing a starter host takes its running preflight with it (the killed-sta
     preflight = identityOf(preflightPid); // it waits 30 s: surely running now
     host.killTree();
     await within(host.exited, 10_000);
-    // Gone = no longer that process: a stranger given its freed pid is not it (ticket 72).
+    // Gone = no longer that process: a stranger given its freed pid is not it.
     const gone = await waitFor(() => !isSameProcess(preflight), 10_000);
     assert.equal(host.running(), false, "the host is gone");
     assert.equal(gone, true, "its preflight is gone too");
@@ -530,7 +530,7 @@ async function noopHostCost(extension) {
   }
 }
 
-// The floor measurement mode (Round 17 Q4 condition 1), off by default: while
+// The floor measurement mode, off by default: while
 // the one-run marker tests/memory/measure-omp-floor exists (content: N, 1–50),
 // the floor test below measures N fresh hosts instead of judging n, prints each
 // value as an OMP_FLOOR_VALUE line (as every run does), adds an
@@ -669,7 +669,7 @@ test("`--cap none` on Windows runs the run script directly under the job's own t
 // launch failed on Windows, so no session ever started a bridge.
 // A kill-holder round as ticket 16's scenario records it: the adversary's kill
 // and exactly one launch on that pid that exited non-zero. A bare round name
-// is no evidence the killed-holder case ran (Owner Proxy round 27 Q1 condition 2).
+// is no evidence the killed-holder case ran.
 const KILL_HOLDER_ROUND = {
   name: "kill-holder-10", n: 10, adversary: { killed: 501, afterMs: 160 },
   launches: Array.from({ length: 10 }, (_, i) => ({ i, via: "preflight", pid: 500 + i, code: i === 1 ? null : 0, signal: i === 1 ? "SIGKILL" : null })),
@@ -710,7 +710,7 @@ test("run evidence: an S3 round that was skipped or never ran fails the run, wha
   assert.match(runEvidence(short, { key: "S3/short", exitCode: 1 }).problems.join(), /round kill-holder-10 never ran/);
 });
 
-// ── S3/omp (ticket 03): no launcher ever runs, the run takes 10–12 s on Linux,
+// ── S3/omp: no launcher ever runs, the run takes 10–12 s on Linux,
 // and its proof is the stub hosts, their preflights and the proxy one of them
 // started. Its own floor, never an exemption from the gate.
 const S3_OMP_ROUNDS = [{ name: "omp-5" }, { name: "omp-5-kill-starter" }];
@@ -739,7 +739,7 @@ const S3_OMP_RUN = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "lo
 test("job: a real S3/omp run passes the evidence gate and is the listed RED; without its killed-starter round it is a harness failure", () => {
   const { r, row, result } = fakeJob("replay", "S3/omp", { FAKE_RUN_SUMMARY: S3_OMP_RUN });
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  // Round 14 Q1 condition 2, Round 15 Q1: the row names the tolerated RED and the ticket that owns it.
+  // The row names the tolerated RED and the ticket that owns it.
   assert.deepEqual(row, { key: "S3/omp", outcome: "RED", ticket: "35, 37", owners: ["35", "37"], note: "S3/omp: RED on omp:concurrent-preflights, owned by ticket 35 (omp:concurrent-preflights)" });
   assert.deepEqual(result.redChecks, ["omp:concurrent-preflights"]);
   const dir = mkdtempSync(join(tmpdir(), "memloop-s3omp-"));
@@ -778,7 +778,7 @@ test("whileFrozen thaws after the work, after a failing work, and a failed thaw 
   await assert.rejects(whileFrozen({ pid: 9, start: "90" }, async () => 1, { freeze, thaw: () => { throw new Error("status 0xC000000B"); } }), /could not thaw pid 9 .*0xC000000B/);
 });
 
-// ── Freeze, thaw and kill by identity (ticket 73) ───────────────────────────
+// ── Freeze, thaw and kill by identity ───────────────────────────
 // The S3 hung proxy is named by its pid AND start time, as the run's scan saw
 // it. Once it is gone its pid may name a stranger (Windows reuses pids quickly,
 // tickets 70, 72): the stranger is never frozen, thawed or killed, and it
@@ -1160,8 +1160,8 @@ test("job: a real S3/hung run whose stale-lock start was refused passes the evid
     // The gate: a measured RED, not a harness failure.
     assert.equal(row?.outcome, "RED", r.stdout + r.stderr);
     assert.ok(result.redChecks.includes("start-over-stale-lock"), result.redChecks.join());
-    // Ticket 16 removed failed-launches and stale-lock-after-round from S3/hung
-    // (Round 15 Q1 condition 5): this pre-fix run's REDs on them are unowned now.
+    // Ticket 16 removed failed-launches and stale-lock-after-round from S3/hung:
+    // this pre-fix run's REDs on them are unowned now.
     assert.equal(r.status, 1, "the ratchet fails on the removed names");
     const unowned = r.stdout.split("\n").filter((l) => / not owned by /.test(l)).map((l) => l.trim());
     assert.deepEqual(unowned, [
@@ -1209,7 +1209,7 @@ test("whileFrozen: a frozen process the kit killed meanwhile (hung-own recovery)
   } finally { try { child.kill("SIGKILL"); } catch {} }
 });
 
-// ── S1/burst1 at the job seam: the median rule and the measurement mode (ticket 60) ──
+// ── S1/burst1 at the job seam: the median rule and the measurement mode ──
 // The fake run's burst1 mode writes proxy samples and judges them with the real
 // osVerdict, in the Linux or the Windows shape (fixtures/fake-run.mjs).
 function burst1Job(args, { shape = "linux", peaks, env = {} } = {}) {
@@ -1253,7 +1253,7 @@ function assertMeasurementWiring(ciText) {
   assert.match(measure, /if: hashFiles\('tests\/memory\/measure-burst1'\) != ''/);
   assert.match(measure, /--measure-burst1 "\$\(cat tests\/memory\/measure-burst1\)"/);
   assert.match(step("Upload memory loop artefacts"), /measure-S1-burst1\.json[\s\S]*measure-S1-burst1\.md/);
-  // Round 10 Q1 condition 1 / Round 11 Q1 condition 4: the candidate Bun arms
+  // The candidate Bun arms
   // are installed only with the marker, uncached (setup-bun's post step would
   // cache the binary then on ~/.bun/bin under the wrong version); the job's
   // own Bun, the pinned 1.4.2 and the reference arm, comes last so it stays
@@ -1284,7 +1284,7 @@ test("the measurement-mode wiring check reads ci.yml the same with LF and CRLF l
   assertMeasurementWiring(crlf);
 });
 
-// ── The S1/stalled attribution at the job seam (ticket 61, Round 12 Q3 condition 1) ──
+// ── The S1/stalled attribution at the job seam ──
 function stalledJob(args, { shape = "linux", arms }) {
   const home = mkdtempSync(join(tmpdir(), "memloop-stalled-"));
   const stepSummary = join(home, "step-summary.md");
@@ -1440,10 +1440,10 @@ test("measurement mode rejects a count that is not a whole number from 1 to 50 b
   }
 });
 
-// ── Paired Bun measurement (Round 10 Q1 conditions 1–2, ticket 09) ──
+// ── Paired Bun measurement (Round 10 Q1 conditions 1–2) ──
 // The marker names the arms ("N bun=1.4.2,1.4.3,1.4.4"); --bun gives their
 // binaries; the arms run interleaved in rotation, N valid runs each, and the
-// output carries the re-entry reading (Round 11 Q1 condition 4) at the job's
+// output carries the re-entry reading at the job's
 // n, with the first arm as the reference. The fake run reports the
 // proxy's runtime Bun from FAKE_RUN_BUN_REVISIONS (path → revision).
 function bunArms(home, versions) {
@@ -1679,7 +1679,7 @@ test("job: windows S1/burst1 against the committed list (no entry since ticket 2
   assert.doesNotMatch(red.stepSummary, /owned by ticket 20/);
 });
 
-// ── windows S5/short at the job seam (Round 13 Q1, ticket 66) ──────────────────
+// ── windows S5/short at the job seam ──────────────────
 // The real windows S5/short summary.json of CI run 42404639968 (staging/65, the
 // RED run: growth:mcp-bridge 23.71 %/1k commit, trend true) and of run
 // 42401136452 (staging/42, GREEN: 15.55, trend false), replayed through the job
@@ -1746,7 +1746,7 @@ test("job: the replayed windows S5/short fails above 30, at 5, with another RED 
   }
 });
 
-// ── The job prints every tolerated RED (Round 14 Q1 condition 2) ───────────────
+// ── The job prints every tolerated RED ───────────────
 // The real S3/omp run (fixtures/local-20261107-s3-omp-linux-summary.json, RED on
 // omp:concurrent-preflights only) replayed through the job against the committed
 // list: its row and the summary say which checks were RED and which ticket owns
@@ -1791,7 +1791,7 @@ test("job: an unowned RED or an owned check the run no longer produces fails the
   assert.doesNotMatch(renamed.r.stdout, /owned by ticket 35 \(/);
 });
 
-// Round 15 Q1 condition 4: the committed linux S3/omp entry marks 37's role peaks as
+// The committed linux S3/omp entry marks 37's role peaks as
 // flipping, so the run GREEN on every check (35's fix landed, the peaks did not flip
 // RED this time) passes with its line; the same run RED on an unowned check still fails.
 test("job: a GREEN run of a listed entry with flipping checks passes and the summary says which checks flip and whose they are", () => {
@@ -1809,7 +1809,7 @@ test("job: a GREEN run of a listed entry with flipping checks passes and the sum
   assert.equal(greenOrphan.row.note, undefined);
 });
 
-// ── linux S5/short GREEN on the trend flag (Round 17 Q2) ───────────────────────
+// ── linux S5/short GREEN on the trend flag ───────────────────────
 // The real linux S5/short summary of CI run 42436186573 (staging/67, ticket 13's
 // tree): growth:mcp-bridge 39.53 %/1k RSS, eight times the 5 %/1k budget, GREEN
 // only because the net rise (9.7 %) missed the 10 % trend branch. Replayed through
@@ -1835,7 +1835,7 @@ function s5LinuxReplay(change = null) {
   }
 }
 
-// ── S7 responses store: retained heap (Round 17 Q1, ticket 71) ───────────────
+// ── S7 responses store: retained heap ───────────────
 // heap-at-cap is the minimum of ≥ 30 /health heapUsedMB readings 1 s apart
 // after the existing 5 s wait, minus the reading before the load (h0). The fake
 // run reads its fixture series through the scenario's own reader and judge
@@ -1900,7 +1900,7 @@ test("S7 retained heap: a series shorter than 30 readings is a harness failure",
   assert.match(result.error, /29 readings, need ≥ 30/);
 });
 
-// ── windows S1/short: 5 fresh repetitions (Round 17 Q3, ticket 71) ──────────
+// ── windows S1/short: 5 fresh repetitions ──────────
 // growth:proxy is RED when ≥ 3 of 5 repetitions are RED under the unchanged
 // growth() (commit > 5 AND trend), the reported value is the median, every
 // repetition must stay ≤ 10 %/1k on commit, and every other check is judged in
@@ -1982,7 +1982,7 @@ test("linux S1/short stays a single run under the unchanged growth() verdict", (
   assert.equal(dirs.some((d) => d.startsWith("rep-")), false, dirs.join());
 });
 
-// ── linux S6/short: the median of 5 fresh S6 body repetitions (Round 21 Q1, ticket 71) ──
+// ── linux S6/short: the median of 5 fresh S6 body repetitions ──
 // tui:adversarial-line-heap is judged on the median against 16 MB, every
 // repetition ≤ 32 MB; orphans and the other tui checks in each repetition. The
 // fake run's s6-reps mode writes one S6/short summary per repetition from
@@ -2052,7 +2052,7 @@ test("job: the linux S5/short run of CI 42436186573 (GREEN on the trend flag at 
   assert.match(orphan.r.stdout, /- S5\/short: RED on orphans, not owned by ticket 74 \(linux, Round 14 Q1, Round 15 Q1\)/);
 });
 
-// Ticket 16: the kill-holder adversary SIGKILLs one of the round's own
+// The kill-holder adversary SIGKILLs one of the round's own
 // launches (the lock holder). That launch was ended by the scenario and is
 // reported apart; every OTHER launch that did not exit 0 is a failed launch,
 // so `failed-launches` (budget 0, "incl. a killed lock holder") can be met.
@@ -2075,7 +2075,7 @@ test("S3 failed launches leave out only the launch the kill-holder adversary kil
   assert.deepEqual(s3Scenario.launchOutcomes([{ i: 0, via: "preflight", pid: 101, code: 0 }], { killed: 101 }), { failedLaunches: [], killedByAdversary: [] });
 });
 
-// Owner Proxy round 27 Q1 condition 2: pid matching may only ever make the
+// Pid matching may only ever make the
 // count stricter. Windows reuses pids quickly; a pid carried by two launches
 // of the round names no single victim, so neither is left out.
 test("S3 failed launches: a killed pid carried by two launches leaves neither out (a reused pid never hides a real failure)", () => {

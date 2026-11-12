@@ -196,7 +196,7 @@ export async function handleResponses(
     // same device/session blob as coding-plan. The /v1/responses path has no
     // client-session resolution — session_id falls back to "" (a legal `bnt`
     // output in the bundle).
-    // Transformed as built, serialised once (ticket 20); the bytes are those
+    // Transformed as built, serialised once; the bytes are those
     // of transformRequestBody(JSON.stringify(anthropicReq)).
     upstreamRequestBody = transformBuiltRequestBody(anthropicReq, {
       format: "anthropic",

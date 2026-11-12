@@ -40,7 +40,7 @@ export const VOLATILE = Object.freeze([
   ["generated proxy key", /(API key \(Bearer \/ x-api-key\): {2})(?!UXFIXTURE-)[A-Za-z0-9_-]{43}\b/g, "$1<GENERATED_KEY>"],
   // Size of the fixture release tree, which grows with every kit file added under cli/ or lib/.
   ["fixture release size", /\(\d+ files updated, \d+ removed\)/g, "(<N> files updated, <N> removed)"],
-  // The TTY progress of a lifecycle step (ticket 40, design-language §4.10):
+  // The TTY progress of a lifecycle step:
   // its spinner redraws the line at 10 Hz for as long as the start or stop
   // takes, so the number of frames (one line each once the capture turns \r
   // into \n, each followed by a line of spaces under NO_COLOR) differs per

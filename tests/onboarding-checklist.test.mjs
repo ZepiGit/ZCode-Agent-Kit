@@ -1,4 +1,4 @@
-// Ticket 83: public capability/prompter/output seams, never private parser state.
+// Public capability/prompter/output seams, never private parser state.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";

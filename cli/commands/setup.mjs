@@ -9,14 +9,14 @@
 // the others were configured, 130 when the user aborted with Ctrl-C (answers
 // already given were applied), 2 for an unknown harness in the selection.
 //
-// The report is compact by default (ticket 43, design-language §7): stage
+// The report is compact by default: stage
 // rows, one result row per assistant, the connection check, the connection
 // details and the undo command; the full output goes to install.log and to
 // the screen with `--verbose`/ZCODE_KIT_VERBOSE=1 (cli/setup-output.mjs).
 // `--installer` is still accepted: the installers print the banner themselves,
-// so setup suppresses it there (one banner, A-26). Questions are asked on
-// stderr (ADR-0005). Below the Node support floor the entry refuses first
-// (`nodeFloor`, ADR-0006).
+// so setup suppresses it there (one banner). Questions are asked on
+// stderr. Below the Node support floor the entry refuses first
+// (`nodeFloor`).
 //
 // The command ctx is `cmd`; `ctx` below is the kit context (cmd.kit), the
 // object the adapters, bootstrap and the consent records work on.
@@ -64,7 +64,7 @@ export async function run({ flags }, cmd) {
   ensureState(ctx);
   // Compact by default; `--verbose`/ZCODE_KIT_VERBOSE=1 print the full stream.
   const verbose = flags.verbose === true || cmd.env.ZCODE_KIT_VERBOSE === "1";
-  // One banner (A-26): the installers print it themselves, so `--installer`
+  // One banner: the installers print it themselves, so `--installer`
   // suppresses setup's own.
   const version = installedVersion(ctx.root);
   const ui = await setupOutput(ctx, {
@@ -88,7 +88,7 @@ export async function run({ flags }, cmd) {
   let abortedByUser = false;
   // One terminal session for every question (harnesses, then the rotator):
   // answers typed ahead stay in order instead of being lost between prompts.
-  // Prompts are diagnostics: they render on stderr (ADR-0005) and appear only
+  // Prompts are diagnostics: they render on stderr and appear only
   // when stdin and stderr are terminals.
   const prompter = createPrompter();
   const mcpBridgeAvailable = !flags["no-mcp"] && existsSync(join(ctx.mcpDir, "dist", "index.js"));
@@ -178,7 +178,7 @@ export async function run({ flags }, cmd) {
       const mcpOffered = batch ? batch.mcpIds.has(id) : interactive && mcpBridgeAvailable && (id === "omp" || id === "claude-code");
       // The question text is fixed; what a y implies beyond the provider
       // entry is said before it (existing integration, MCP bridge) — as
-      // prompt-context notes on stderr (A-22, ADR-0005).
+      // prompt-context notes on stderr.
       const ask = batch ? (batch.answers.has(id) ? async () => batch.answers.get(id) : null)
         : selection ? async () => selection.has(id)
         : interactive ? (question) => {
@@ -265,7 +265,7 @@ export async function run({ flags }, cmd) {
     // a refresh, an `integrate` decision or a y given without the note.
     await integrateMcp(cmd, flags, tx, detected, mcpIds, (...args) => ui.detail(...args));
     ui.heading("Account Rotator");
-    // Asked once (ticket 42): a stored decision stands unless --reask; the
+    // Asked once: a stored decision stands unless --reask; the
     // overrides still win. See decideAccountRotator for the order.
     const rotator = await decideAccountRotator({
       ctx,
@@ -392,7 +392,7 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
   log("== mcp: zcode-harness bridge ==");
   if (targets.includes("omp") && detected.omp) {
     const ompMcp = join(ctx.home, ".omp", "agent", "mcp.json");
-    // The bridge flags (ticket 36) go on the command line; an older entry of
+    // The bridge flags go on the command line; an older entry of
     // this installation is refreshed to this form through the transaction.
     const entry = { type: "stdio", command: "node", args: bridgeArgs(serverJs) };
     if (existsSync(ompMcp)) {
@@ -400,7 +400,7 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
         const text = readFileSync(ompMcp, "utf8");
         const j = JSON.parse(text);
         const current = j.mcpServers?.["zcode-harness"];
-        // F-09: an entry pointing at ANOTHER kit copy is not "ours" — replace
+        // An entry pointing at ANOTHER kit copy is not "ours" — replace
         // only when it is absent or already points at this installation.
         const ours = !current || sameInstallationPath(bridgeScriptOf(current.args), serverJs);
         if (!current || (ours && JSON.stringify(current) !== JSON.stringify(entry))) {
@@ -425,12 +425,12 @@ async function integrateMcp(cmd, flags, tx, detected, targets, log) {
     const get = cmd.runCommandSync("claude", ["mcp", "get", "zcode-harness"], { stdio: "pipe", encoding: "utf8" });
     const { state, registered } = get.status === 0 ? claudeRegistrationState(get.stdout, serverJs) : { state: "absent", registered: null };
     if (state === "foreign") {
-      // F-09: registered by another kit copy — never silently adopt it.
+      // Registered by another kit copy — never silently adopt it.
       log('  WARN: claude "zcode-harness" is registered by another kit copy — left untouched');
     } else if (state === "current") {
       log('  claude: "zcode-harness" already registered');
     } else if (state === "outdated") {
-      // This installation's older registration (ticket 36): `claude mcp add`
+      // This installation's older registration: `claude mcp add`
       // refuses an existing name, so re-register. A failed add puts the
       // previous registration back, so the bridge is never left unregistered.
       const remove = cmd.runCommandSync("claude", ["mcp", "remove", "zcode-harness", "--scope", "user"], { stdio: "pipe", encoding: "utf8" });

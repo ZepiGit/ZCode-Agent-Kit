@@ -186,7 +186,7 @@ const _DEBUG = /^(1|true|yes)$/i.test(
 // `proxy` option, reads HTTP(S)_PROXY/ALL_PROXY on every fetch, so on Bun the
 // route is its own `proxy` option: the configured URL, or `false` for direct.
 // `proxy: false` takes effect from Bun 1.4.3; 1.4.2 still reads the ambient
-// variables when the setting is unset (ticket 62 moves the pin).
+// variables when the setting is unset.
 // Node keeps the ProxyAgent dispatcher.
 const CAPTCHA_PROXY_URL = process.env.ZCODE_PROXY_UPSTREAM_PROXY?.trim() || undefined;
 let _captchaProxyAgent;
@@ -1825,7 +1825,7 @@ async function createDom(region: string, prefix: string, resources?: DomResource
       enableImageFileLoading: true,
       // happy-dom 21 turned these off by default (GHSA-c8p4-j97h-3vg8). Kept on
       // so a solve loads what it loaded on 20.x: the surface is unchanged, not
-      // stricter (ADR-0007, B1). Dropping either needs a live vendor solve.
+      // stricter (B1). Dropping either needs a live vendor solve.
       enableCSSFileLoading: true,
       enableIframePageLoading: true,
       suppressInsecureJavaScriptEnvironmentWarning: true,

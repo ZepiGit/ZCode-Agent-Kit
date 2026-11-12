@@ -1,10 +1,10 @@
 // A process is its pid plus its OS start time. A pid alone names whatever
 // process holds it now: Windows hands a freed pid to a new process quickly on
-// a busy runner (ticket 70), so "is pid N alive?" asked after the process
+// a busy runner, so "is pid N alive?" asked after the process
 // exited can answer yes for a stranger. A check that holds no handle on the
 // process (a grandchild, a process another one spawned) records its identity
 // while the process is surely alive and later asks whether that same process
-// is still there (ticket 72). A stranger at the same pid is never "it".
+// is still there. A stranger at the same pid is never "it".
 //
 // The start time is the one the samplers record: Linux /proc/<pid>/stat field
 // 22 (starttime, lib/sampler.mjs key), Windows Win32_Process CreationDate as a

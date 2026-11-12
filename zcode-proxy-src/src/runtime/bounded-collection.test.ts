@@ -1,5 +1,5 @@
 // Seam 6 (pure shared modules): the bounded collection lifted from the
-// responses store (ADR-0009). Every test drives eviction through the public
+// responses store. Every test drives eviction through the public
 // interface with an injected clock; expected values are literals.
 import { describe, expect, it } from "bun:test";
 import { BoundedCollection } from "./bounded-collection.js";

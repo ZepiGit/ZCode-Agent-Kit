@@ -2,7 +2,7 @@
 //   status  human text on a TTY; the proxy's /quota JSON unchanged when
 //           stdout is not a TTY (or with `--json`, on a TTY too, in the same
 //           bytes): exit 0 when the proxy answered (logged in or not), 1
-//           when it did not (ticket 46; spec Story 102, decision D4);
+//           when it did not;
 //   login   the proxy CLI on the terminal; its exit code (no status: 1);
 //   logout  removes only the kit proxy's credential store, with --yes;
 //           without it, exit 2. Unknown subcommands: exit 2.
@@ -40,7 +40,7 @@ async function status(flags, ctx) {
   }
 }
 
-/** `5.2 h old` under two days, `3.1 d old` beyond (design-language §7). */
+/** `5.2 h old` under two days, `3.1 d old` beyond. */
 function tokenAge(ageHours) {
   return ageHours >= 48 ? `${(ageHours / 24).toFixed(1)} d old` : `${ageHours.toFixed(1)} h old`;
 }
@@ -49,7 +49,7 @@ function tokenAge(ageHours) {
  * The records for one /quota answer: today's exact JSON document when stdout
  * is not a TTY (or with `--json`), a human key/value block on a TTY — with a
  * WARN/FAIL block carrying what/why/next for the not-logged-in and
- * unreachable cases (Stories 95, 102; design-language §7).
+ * unreachable cases.
  */
 function statusRecords(flags, ctx, value) {
   const tty = ctx?.terminal?.stdout?.isTTY === true;

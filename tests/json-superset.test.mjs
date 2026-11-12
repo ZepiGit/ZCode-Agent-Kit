@@ -1,4 +1,4 @@
-// JSON key/type superset (spec §18 COMPATIBILITY, Story 123; seam 5): every
+// JSON key/type superset (spec §18 COMPATIBILITY): every
 // `--json` output of the current tree keeps every key name and value type of
 // the baseline captured once from the pre-change code
 // (tests/ux-before/json-baseline.json), and its exit code. Keys may only be added.
@@ -36,7 +36,7 @@ test("every --json output of this tree is a key/type superset of the baseline, w
 }, (t) => {
   const out = mkdtempSync(join(tmpdir(), "json-superset-"));
   t.after(() => rmSync(out, { recursive: true, force: true }));
-  // No UX_CAPTURE_PORT: every scenario takes a free port of its own (ticket 75),
+  // No UX_CAPTURE_PORT: every scenario takes a free port of its own,
   // so the "down" captures cannot see a parallel capture's fixture proxy.
   const env = { ...process.env };
   delete env.UX_CAPTURE_PORT;

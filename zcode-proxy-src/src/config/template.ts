@@ -131,7 +131,7 @@ clientSigning:
 logging:
   level: info
 
-# Health supervisor (optional, ADR-0008): samples the proxy's memory footprint
+# Health supervisor (optional): samples the proxy's memory footprint
 # (Pss on Linux, commit charge on Windows; RSS where neither is available).
 # Soft limit: WARN event line only. Hard limit: asks the kit manager for a
 # respawn (budget 3 per 15 min) and drains only once the manager has

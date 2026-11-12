@@ -1,7 +1,7 @@
 // The memory loop's budgets: spec §18 MEMORY and PROCESSES, in one place.
 // Scenarios build their verdict budgets from these numbers; verdict.test.mjs
 // pins them to the spec, so a budget can only change together with the spec.
-// Metric: RSS (VmRSS / VmHWM) on Linux. Windows (Round 7 Q1): working set for
+// Metric: RSS (VmRSS / VmHWM) on Linux. Windows: working set for
 // the per-process peak/steady budgets of proxy, launcher, MCP bridge and
 // preflight; commit for the S3 total, growth, solver and S2 checks.
 // Budgets are never loosened past the Phase 1B baseline (METRICS.md).
@@ -12,19 +12,19 @@ export const MEMORY = {
   S1: {
     steadyMB: 160, // proxy main, median after warm-up under the mixed load
     peakMB: 250, // proxy main, per-process peak incl. VmHWM
-    burstPeakMB: { burst16: 400, burst32: 600 }, // HWM at 16 / 32 concurrent 10.8 MB bodies (ADR-0004)
+    burstPeakMB: { burst16: 400, burst32: 600 }, // HWM at 16 / 32 concurrent 10.8 MB bodies
   },
   S2: {
-    solverCapMB: 300, // each solver process (hard cap, ADR-0002)
+    solverCapMB: 300, // each solver process (hard cap)
     costPerGenerationMB: 300, // solver RSS above the host's base, per generation
     retainedBeforeRecycleMB: 300,
     hungReclaimMB: 64,
-    cdnMemoryMB: 64, // the ≤ 256-entry bound is pinned at seam 3 (ticket 25), not observable here
+    cdnMemoryMB: 64, // the ≤ 256-entry bound is pinned at seam 3, not observable here
     coldStartMs: 4500, // spawn + handshake + module load + first solve, 5 % of the 90 s deadline
   },
   S3: {
     // (a) maximum over all samples of summed kit RSS (commit on Windows)
-    // windows: 0.7 × 734.5 MB, the first clean windows run (Round 7 Q2); kit-started PowerShell counts.
+    // windows: 0.7 × 734.5 MB, the first clean windows run; kit-started PowerShell counts.
     kitTotalMB: { linux: 596, windows: 514 },
     // (b) every kit process's own peak (VmHWM / PeakPageFileUsage) per role
     rolePeakMB: { launcher: 74, "mcp-bridge": 75, preflight: 76, proxy: 62, solver: 20 },
@@ -42,16 +42,16 @@ export const MEMORY = {
  * for 16 concurrent bodies (a run with ≤ 1 body in flight above it is a
  * regression by definition). The value judged is the check's own: RSS/VmHWM
  * on Linux, the working-set gate max(sampled WS, PeakWorkingSetSize) on
- * Windows (Round 7 Q1); the ceiling applies to that same value. n = 7: the
+ * Windows; the ceiling applies to that same value. n = 7: the
  * smallest odd n whose predicted false-RED rate is ≤ 5 % on the less
- * favourable Linux estimate (Round 11 Q1 condition 2). That estimate is the
+ * favourable Linux estimate. That estimate is the
  * Bun 1.4.2 arm of the paired CI run 42352122623, 5 of 24 above 250 MB:
  * 6.45 % at n = 5, 3.83 % at n = 7. Earlier estimates gave 3 (5 of 48 on the
- * ticket-60 tip) and 5 (8 of 59 with the earlier runs; Round 6 Q1, ticket 60).
+ * ticket-60 tip) and 5 (8 of 59 with the earlier runs).
  * One n for both legs of S1/burst1; Round 6 Q1 allows n ≤ 9. The entries
- * below have their own n each (Round 17 Q3, Round 21 Q1).
+ * below have their own n each.
  *
- * S6/short (linux only: S6 is ubuntu-only; Round 21 Q1, ticket 71): the
+ * S6/short (linux only: S6 is ubuntu-only): the
  * median of n = 5 fresh repetitions, each a fresh S6 body process, of
  * tui:adversarial-line-heap (the worst of D-mixed, D-huge, D-cjk, D-records
  * and end minus C-start, each after Bun.gc(true), unchanged) against 16 MB,
@@ -80,7 +80,7 @@ export const REPEATED = {
 };
 
 // Windows only: in paced runs no proxy sample may exceed ADR-0008's 512 MB
-// soft footprint limit in commit (Round 7 Q1 condition 2).
+// soft footprint limit in commit.
 export const PROXY_COMMIT_BACKSTOP = { role: "proxy", maxMB: 512 };
 
 export const PROCESSES = {
@@ -95,7 +95,7 @@ export const PROCESSES = {
   respawnsPer15Min: 3,
 };
 
-// S3 OMP leg (ADR-0013 cond 4, spec §18 "S3 OMP leg"): the generated OMP
+// S3 OMP leg: the generated OMP
 // extension in stub Bun hosts started together, also with the starter killed.
 // The hosts are the harness: their RSS delta is reported and gated here, never
 // counted as kit footprint.
@@ -105,7 +105,7 @@ export const OMP_LEG = {
   waiterCostMB: 5, // in-host waiter cost per host (build-time gate)
 };
 
-// The OMP no-op floor (ticket 03's floor test; Round 17 Q4, ticket 71): n fresh
+// The OMP no-op floor (ticket 03's floor test): n fresh
 // stub hosts charged for a hook that does nothing. The median must be below
 // half the waiter gate (a floor at the gate could not tell a waiter from
 // noise) and every repetition below the gate itself (the gate stays one

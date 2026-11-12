@@ -1,5 +1,5 @@
 /**
- * The health supervisor's memory policy at module level (seam 4, ADR-0008):
+ * The health supervisor's memory policy at module level:
  * an injected footprint sampler and an injected clock, so "3 samples 15 s
  * apart" is checked against the clock, not against real time.
  */
@@ -207,7 +207,7 @@ describe("health supervisor: memory thresholds (defaults 512 / 1024 MB × 3 samp
     h.hold(1_500, 6);
     await settle();
     expect(h.requests).toHaveLength(1);
-    // Ticket 23 (ADR-0015 cond 6): a new episode inside the budget window
+    // A new episode inside the budget window
     // spawns no hook either; the first request after the window does.
     h.hold(300, 1);
     h.hold(1_500, 3);
@@ -220,7 +220,7 @@ describe("health supervisor: memory thresholds (defaults 512 / 1024 MB × 3 samp
   });
 });
 
-// Ticket 23 (ADR-0015): the supervisor behind the REAL manager handoff
+// The supervisor behind the REAL manager handoff
 // (`managerRespawnHandoff`), with an injected clock and an injected spawn that
 // counts every hook it is asked to start and answers like the manager would.
 type HookAnswer = "refuse" | "silent" | "ack";

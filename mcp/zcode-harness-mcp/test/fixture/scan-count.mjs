@@ -1,4 +1,4 @@
-// Work counter for the bridge process (seam 7): loaded with
+// Work counter for the bridge process: loaded with
 // `--import <this file's URL>` on the bridge command line and
 // ZCODE_TEST_SCAN_COUNT=<path>. It counts every element visited through a
 // Map's iteration methods (values, keys, entries, the iterator, forEach) and

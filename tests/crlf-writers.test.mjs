@@ -1,4 +1,4 @@
-// Ticket 68: every writer of a user-owned text file keeps the file's line
+// Every writer of a user-owned text file keeps the file's line
 // endings. A Windows user's files are CRLF (installers, editors, git
 // autocrlf); a writer that splices or re-renders LF text into them leaves
 // mixed line endings. For each writer: a CRLF input comes back as the LF
@@ -21,7 +21,7 @@ import { freePort } from './free-port.mjs';
 
 const KIT = path.join(import.meta.dirname, '..');
 const { parse: parseYaml } = createRequire(path.join(KIT, 'zcode-proxy-src', 'package.json'))('yaml');
-// Free ports of this run (ticket 75). PORT is written into fixture configs only
+// Free ports of this run. PORT is written into fixture configs only
 // and nothing listens there, but setup probes it; HEAL_PORT is the heal
 // fixtures' config port, which `doctor --fix` binds exclusively while it aligns
 // the key, so a parallel run must never hold it.
@@ -69,7 +69,7 @@ function install(t) {
   // The fixture root as it appears in written files (native, forward slashes, JSON-escaped).
   const spellings = [...new Set([root, root.replace(/\\/g, '/'), root.replace(/\\/g, '\\\\')])].sort((a, b) => b.length - a.length);
   const anonymous = (text) => spellings.reduce((acc, s) => acc.replaceAll(s, '<ROOT>'), text);
-  // Ticket 43: on the compact screen the verbatim transaction line lives in
+  // On the compact screen the verbatim transaction line lives in
   // install.log; --verbose keeps it on stdout. Reads both.
   const txOf = (out) => out.match(/transaction (\S+) recorded/)?.[1]
     ?? (() => { try { return fs.readFileSync(path.join(state, 'logs', 'install.log'), 'utf8').match(/transaction (\S+) recorded/)?.[1]; } catch { return undefined; } })();

@@ -1,4 +1,4 @@
-// Seam 6 vectors for the shared width core and token set (ticket 05).
+// Seam 6 vectors for the shared width core and token set.
 //
 // ONE suite, run unchanged by two runners: `bun test` (src/tui/width-core.test.ts)
 // and `node --test` (tests/width-core.test.mjs, through the CLI's lib/term/
@@ -8,7 +8,7 @@
 // Expected widths come from the spec, not from the code: UAX #11 (UCD 17
 // EastAsianWidth.txt: W/F = 2, everything else 1), grapheme clusters with
 // VS16 after an emoji-variation base = 2, regional-indicator pairs = 2, and
-// every cluster capped at 2 (spec §10, research/terminal-conventions.md §3).
+// every cluster capped at 2 (research/terminal-conventions.md §3).
 // `before` is the width the pre-ticket-05 module (code-point wcwidth subset)
 // returned; a vector whose `before` differs from `width` is a grapheme class
 // whose width changes (listed in CHANGED_CLASSES below).

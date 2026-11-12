@@ -1,6 +1,6 @@
 // Seam 3 (solver dispatcher with a fixture backend): the CDN memory tier and
 // the stall counters of the REAL captcha-happy module are bounded inside one
-// solver generation and start empty in the next one (ADR-0009, spec §7).
+// solver generation and start empty in the next one.
 // The fixture backend runs inside the production worker and reports the
 // generation's resources as `cdn:<entries>:<bytes>:stalls:<urls>`.
 import { afterEach, describe, expect, it } from "bun:test";

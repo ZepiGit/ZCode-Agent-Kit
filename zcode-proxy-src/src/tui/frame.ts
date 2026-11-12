@@ -68,10 +68,10 @@ export interface FrameState {
   height: number;
 }
 
-// Colours, chrome and glyphs come from the shared token set (ADR-0011); this
+// Colours, chrome and glyphs come from the shared token set; this
 // renderer uses the full glyph tier. DIM stays the TUI's own bright-black
 // (90): the token role `muted` is SGR 2, and this frame keeps today's bytes
-// until the TUI redesign (ticket 48) moves it onto the roles and tiers.
+// until the TUI redesign moves it onto the roles and tiers.
 const DIM = "90";
 const RED = ROLES.fail;
 const GREEN = ROLES.ok;

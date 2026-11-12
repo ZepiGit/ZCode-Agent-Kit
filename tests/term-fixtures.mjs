@@ -67,7 +67,7 @@ export const PRIMITIVE_FIXTURES = {
   "connection-configured-exposed": (out) => renderRecords(out, [
     { kind: "connection", facts: { port: 18458, key: KEY, host: "0.0.0.0", source: "configured" }, reveal: false },
   ]),
-  // Ticket 40: the lead line, state lines, a blank separator and the verbose card.
+  // The lead line, state lines, a blank separator and the verbose card.
   "lead-state": (out) => renderRecords(out, [
     { kind: "lead", counts: { fail: 2, warn: 1 } },
     { kind: "blank" },

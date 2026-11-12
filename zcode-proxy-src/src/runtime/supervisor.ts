@@ -1,5 +1,5 @@
 /**
- * supervisor.ts — the proxy's health supervisor (ADR-0008).
+ * supervisor.ts — the proxy's health supervisor.
  *
  * One module owns the proxy's health policy:
  * - the heartbeat and its watcher thread (`watchdog.ts`, with `watchdogStep`
@@ -12,7 +12,7 @@
  *   15 s apart). The soft limit only WARNs: it never recycles the solver. The
  *   hard limit requests a respawn through the handoff;
  * - the respawn handoff point: the respawn request goes to the kit manager's
- *   hook; only the respawn acknowledgement (ADR-0015: the manager reserved the
+ *   hook; only the respawn acknowledgement (the manager reserved the
  *   restart budget) starts the graceful shutdown. A refused or unacknowledged
  *   request keeps the proxy serving, logs one ERROR, reports the restarts as
  *   exhausted and spawns no further hook within the budget window. Without a
@@ -86,7 +86,7 @@ export const realClock: SupervisorClock = {
 };
 
 /**
- * The respawn handoff point (ADR-0008 cond 1, ADR-0015). `request` resolves
+ * The respawn handoff point. `request` resolves
  * with the manager's answer; only a confirmed one (the respawn
  * acknowledgement: the manager has reserved the restart budget) lets the
  * proxy drain. Otherwise it keeps serving.
@@ -109,7 +109,7 @@ export interface ManagerRespawnHandoffOptions {
  * The kit manager's respawn hook from this process's environment, or null
  * without one. With the manager's logs dir (`ZCODE_KIT_LOG_DIR`) a request
  * waits for the respawn acknowledgement in `respawn.json`; without it (a
- * manager older than ADR-0015) the hook's start is the confirmation, as before.
+ * manager older than 0.3.0) the hook's start is the confirmation, as before.
  */
 export function managerRespawnHandoff(env: Record<string, string | undefined> = process.env, opts: ManagerRespawnHandoffOptions = {}): RespawnHandoff | null {
   if (respawnHookCommand(env, process.pid, "memory") === null) return null;
@@ -151,7 +151,7 @@ export interface HealthSupervisorOptions {
 /**
  * The manager's restart budget window (3 restarts per 15 min). After a
  * refused or unacknowledged respawn the proxy spawns no further hook until a
- * window has passed since that request (ADR-0015 cond 6).
+ * window has passed since that request.
  */
 export const RESPAWN_BUDGET_WINDOW_MS = 15 * 60 * 1000;
 
@@ -166,7 +166,7 @@ export interface MemoryState {
   /**
    * The restart budget as this proxy last saw it: true from a refused or
    * unacknowledged respawn until the budget window has passed (`restarts`
-   * exhausted, ADR-0015); no hook is spawned meanwhile.
+   * exhausted); no hook is spawned meanwhile.
    */
   restartsExhausted: boolean;
   /** When the next respawn request may spawn a hook (null: at once). */
@@ -176,7 +176,7 @@ export interface MemoryState {
 export interface HealthSupervisor {
   start(): void;
   stop(): void;
-  /** The last sample and the streaks (for /health details, ticket 39). */
+  /** The last sample and the streaks (for /health details). */
   memory(): MemoryState;
 }
 
@@ -198,8 +198,8 @@ export function createHealthSupervisor(opts: HealthSupervisorOptions): HealthSup
   let hardWarned = false;
 
   // The ERROR line of a respawn that did not confirm, one per request (so at
-  // most one per budget window). `restarts=exhausted` is the report ADR-0015
-  // asks for; the state carries it too (`restartsExhausted`).
+  // most one per budget window). `restarts=exhausted` reports the spent
+  // budget; the state carries it too (`restartsExhausted`).
   const NOT_CONFIRMED: Record<Exclude<RespawnOutcome, "acknowledged" | "started">, string> = {
     "refused": "respawn refused by the kit manager; keeps serving",
     "no-acknowledgement": "respawn not acknowledged by the kit manager; keeps serving",
@@ -230,7 +230,7 @@ export function createHealthSupervisor(opts: HealthSupervisorOptions): HealthSup
     state.hardStreak = s.mb > t.hardLimitMB ? state.hardStreak + 1 : 0;
     if (!softWarned && state.softStreak >= t.samples) {
       softWarned = true;
-      // ADR-0008 cond 5: the soft limit only warns; the solver is not recycled.
+      // The soft limit only warns; the solver is not recycled.
       log.warn("memory above the soft limit", { ...fields, softLimitMB: t.softLimitMB, samples: t.samples, intervalS: t.sampleIntervalMs / 1000 });
     }
     if (state.hardStreak < t.samples) return;
@@ -307,7 +307,7 @@ export function createHealthSupervisor(opts: HealthSupervisorOptions): HealthSup
 
 // ------------------------------------------------------------------ shutdown
 
-/** What started a graceful shutdown. The stop request is ticket 22's; update later. */
+/** What started a graceful shutdown. */
 export type ShutdownReason = "signal" | "memory" | "stop";
 
 export interface ShutdownTiming {
@@ -322,8 +322,8 @@ export interface ShutdownTiming {
  * manager's fallback against a proxy that does not know the stop request, so
  * drain + the 3 s account-metadata flush + exit stay inside the 5 s
  * SIGTERM→SIGKILL escalation. The memory respawn keeps today's 10 s cap: 6 s
- * for the requests in flight, then the flush. The stop request (ADR-0014
- * cond 4) takes the shared STOP_GRACE_MS as its own hard deadline: 6 s of
+ * for the requests in flight, then the flush. The stop request takes the
+ * shared STOP_GRACE_MS as its own hard deadline: 6 s of
  * drain, then the flush and the close inside the 10 s.
  */
 export const SHUTDOWN_TIMING: Readonly<Record<ShutdownReason, Readonly<ShutdownTiming>>> = Object.freeze({
@@ -419,7 +419,7 @@ export function createGracefulShutdown(opts: GracefulShutdownOptions): GracefulS
         else log.info("drain finished", fields);
         try {
           await opts.flush?.();
-          // The flush's marker line (ADR-0014 cond 6): the windows-latest
+          // The flush's marker line: the windows-latest
           // `proxy stop` proof reads it from proxy.log, between the drain
           // finished line and the exit.
           if (opts.flush) log.info("flush finished", { reason });

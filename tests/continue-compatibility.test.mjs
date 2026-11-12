@@ -121,7 +121,7 @@ test("Continue empty flow models respects dry-run with zero file mutation", (t) 
   f.ctx.dryRun = true;
   assert.equal(f.apply().changed, false);
   assert.equal(f.read(), original);
-  // Ticket 43: in a dry run tx.touch reports the would-write (the
+  // In a dry run tx.touch reports the would-write (the
   // `integrate --dry-run` listing), it does not mean a write happened.
   assert.deepEqual(f.touched, [join(f.ctx.home, ".continue", "config.yaml")], "the would-write is listed");
   assert.deepEqual(f.files(), ["config.yaml"]);

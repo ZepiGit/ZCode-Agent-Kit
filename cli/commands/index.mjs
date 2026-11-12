@@ -1,7 +1,7 @@
 // The CLI's dispatch table: every command name → its command module
 // (`run(args, ctx) → { exitCode, records }`, see ./common.mjs). A module
 // that exports `nodeFloor = true` is refused by the entry below the Node
-// support floor before the kit context exists (ADR-0006).
+// support floor before the kit context exists.
 import * as accounts from "./accounts.mjs";
 import * as auth from "./auth.mjs";
 import * as doctor from "./doctor.mjs";

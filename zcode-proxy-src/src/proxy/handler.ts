@@ -112,7 +112,7 @@ export async function proxyRequest(
     return errorResponse(400, "invalid_request_error", (err as Error).message);
   }
 
-  // The body is parsed once (ticket 20): validation, the request meta, the
+  // The body is parsed once: validation, the request meta, the
   // OpenAI translation and the body transforms all read this one object. A
   // large body is parsed straight from its bytes, which decodes them exactly
   // as TextDecoder does but holds no JS copy of the text; the text is decoded
@@ -197,7 +197,7 @@ export async function proxyRequest(
   }
 
   let upstreamBody = body;
-  // A translated request kept as an object (ticket 20): it is transformed and
+  // A translated request kept as an object: it is transformed and
   // serialised once below. Debug mode serialises it here to log its size.
   let translatedRequest: object | undefined;
   if (translateOpenAIToAnthropic && !debug) {
@@ -236,7 +236,7 @@ export async function proxyRequest(
   } else if (upstreamBody === body && parsedBody) {
     if (applyRequestBodyTransforms(parsedBody, transformContext)) {
       // The client's text is not sent: let it go before the new text is
-      // built (ticket 20). Debug output still compares the two.
+      // built. Debug output still compares the two.
       if (!debug) body = upstreamBody = undefined;
       bodyBytes = undefined;
       transformedBody = JSON.stringify(parsedBody);
@@ -479,7 +479,7 @@ export async function proxyRequest(
   }
   const isSSE = upstreamResp.headers.get("content-type")?.includes("text/event-stream") ?? false;
 
-  // Streamed answers are observed in the client's path (ticket 61): the
+  // Streamed answers are observed in the client's path: the
   // upstream is read no faster than the client drains it.
   if (translateOpenAIToAnthropic) {
     if (isSSE && upstreamResp.body) {
@@ -932,7 +932,7 @@ async function readBodyBytes(req: Request): Promise<Uint8Array | undefined> {
   if (!req.body) return undefined;
   const reader = req.body.getReader();
   // A body with a Content-Length is read straight into one buffer of that
-  // size, so each chunk can be dropped once copied (ticket 20) instead of
+  // size, so each chunk can be dropped once copied instead of
   // holding every chunk plus their joined copy. Bytes beyond the declared
   // length (a Request built in-process can declare anything) fall back to the
   // chunk list.
@@ -957,7 +957,7 @@ async function readBodyBytes(req: Request): Promise<Uint8Array | undefined> {
       size += value.byteLength;
     }
   } finally { reader.releaseLock(); }
-  // Admission (ADR-0004): from now on the request is charged the bytes it
+  // Admission: from now on the request is charged the bytes it
   // really holds, not its reservation (a body without Content-Length).
   settleBodyBytes(req, size);
   if (size === 0) return undefined;
@@ -981,7 +981,7 @@ async function readBodyBytes(req: Request): Promise<Uint8Array | undefined> {
 }
 
 /**
- * From this size on a request body is parsed from its bytes (ticket 20).
+ * From this size on a request body is parsed from its bytes.
  * Smaller bodies take the text path: an empty decoded text (a lone BOM) must
  * stay "no body", and their copies are cheap.
  */
@@ -1378,14 +1378,13 @@ const COMPACT_LOG = process.env.ZCODE_LOG_FORMAT === "compact";
  *   client leaving); "-" for any other answer.
  *
  * Streamed answers on these two routes are read from the upstream at the
- * client's pace instead of being buffered ahead of a slow client (ticket 61,
- * response-body.ts). So for a client that reads slower than the upstream
+ * client's pace instead of being buffered ahead of a slow client
+ * (response-body.ts). So for a client that reads slower than the upstream
  * sends, Total and tok/s include the time the client takes to read the answer;
  * if such a client disconnects early, Tok reflects only what was read before
  * it left (the usage total if it arrived by then, otherwise the counted text
  * deltas). For a client that keeps up the values are what they were before
- * that change. TTFB, the column names and the compact format are unchanged
- * (Owner Proxy round 31 Q2; the release-notes line is in ticket 54).
+ * that change. TTFB, the column names and the compact format are unchanged.
  */
 function printHeader(): void {
   if (headerPrinted) return;

@@ -1,4 +1,4 @@
-// Runs judged on n fresh repetitions (Round 6 Q1, ticket 60; Round 17 Q3, ticket 71).
+// Runs judged on n fresh repetitions.
 //
 // Two rule kinds live in lib/budgets.mjs REPEATED, the one place n lives:
 //   - the median rule { n, check, budgetMB, ceilingMB } (S1/burst1): the named
@@ -78,7 +78,7 @@ export function medianVerdict(reps, rule) {
   // Every other check is judged in every repetition.
   for (const r of reps) for (const c of r.checks) if (c.red && c.name !== rule.check && !redChecks.includes(c.name)) redChecks.push(c.name);
   const red = redChecks.length > 0;
-  // Windows (Round 7 Q1): the value is the check's gated one (working set for
+  // Windows: the value is the check's gated one (working set for
   // the proxy peak); commit rides along per repetition and is reported, never
   // judged. The all-WS view (the same rule over wsValue plus each repetition's
   // WS-RED checks) says whether the set is RED only on commit (build-time gate 3).
@@ -96,7 +96,7 @@ export function medianVerdict(reps, rule) {
 }
 
 /**
- * The majority rule (Round 17 Q3): reps as for medianVerdict. The rule's check
+ * The majority rule: reps as for medianVerdict. The rule's check
  * is RED when at least `redAtLeast` repetitions have it RED under their own
  * verdict (growth(): commit > budget AND trend, unchanged); every value must
  * stay ≤ `ceiling` whatever its trend; every other check is judged in every
@@ -142,7 +142,7 @@ export function majorityVerdict(reps, rule) {
 }
 
 /**
- * The OMP no-op floor (Round 17 Q4; budgets.mjs OMP_FLOOR): `values` are the
+ * The OMP no-op floor (budgets.mjs OMP_FLOOR): `values` are the
  * no-op costs (MB) of n fresh stub hosts. The median must be < medianBelowMB
  * and every value < everyBelowMB. Fewer than n values or a non-numeric one is
  * a harness failure (`error`), never a pass. Returns { ok, error, values,

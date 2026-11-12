@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { askAccountRotator, configureAccountRotator, rotatorChoice, ACCOUNT_ROTATOR_QUESTION } from "../cli/account-setup.mjs";
 
-// Ticket 42 (A-22): the question is `[y/N]`, so Enter takes the default n
+// The question is `[y/N]`, so Enter takes the default n
 // (it used to ask again); an invalid answer still asks again, and only an
 // explicit y opts in.
 test("installer opts in only on an explicit y, repeats invalid answers, and Enter takes the default n", async () => {
@@ -35,7 +35,7 @@ test("terminal redraw keeps the y/n question visible before and during input", a
     const pending = askAccountRotator({ input, output, env: {} });
     try {
       const question = `? ${ACCOUNT_ROTATOR_QUESTION} [y/N] `;
-      // Round 2: the question is drawn once the capability record has loaded (one async step).
+      // The question is drawn once the capability record has loaded (one async step).
       for (let i = 0; i < 200 && !transcript.includes(question); i++) await new Promise((r) => setTimeout(r, 5));
       assert.ok(transcript.includes(question));
       transcript = "";
@@ -97,7 +97,7 @@ test("activation imports before changing config and preserves policies/comments;
 });
 
 // ------------------------------------------------------------------------
-// Ticket 42 (seam 8, temp-HOME fixtures): the Account Rotator decision is
+// Ticket 42 (temp-HOME fixtures): the Account Rotator decision is
 // asked once. The answer is stored under generated/ next to the harness
 // choices (generated/account-rotator.json) through the setup transaction;
 // `setup --reask` asks again; `--account-rotator` and
@@ -116,7 +116,7 @@ import { freePort } from "./free-port.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 const FIXTURE_PORT = await freePort();
-const ROTATOR_PROMPT = `? ${ACCOUNT_ROTATOR_QUESTION} [y/N] `; // A-22: the `? ` prefix (ticket 43)
+const ROTATOR_PROMPT = `? ${ACCOUNT_ROTATOR_QUESTION} [y/N] `; // A-22: the `? ` prefix
 const loadAccountSetup = () => import(pathToFileURL(join(KIT, "cli", "account-setup.mjs")).href);
 
 /**
@@ -142,7 +142,7 @@ function kitFixture(t, { layout = "in-tree", accounts = false, generated = "none
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
   mkdirSync(join(root, "proxy")); mkdirSync(join(root, "zcode-proxy-src"));
   cpSync(join(KIT, "proxy", "config.example.yaml"), join(root, "proxy", "config.example.yaml"));
-  // Ticket 43: the output module's token set and width core re-export the
+  // The output module's token set and width core re-export the
   // shared files under zcode-proxy-src/src/tui — part of every real kit
   // layout, so the fixture kit carries them too.
   mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
@@ -264,7 +264,7 @@ function runPty(f, args, steps = [], { env = {}, timeout = 60000, redirect = "" 
   });
 }
 const asked = (text) => text.split(ACCOUNT_ROTATOR_QUESTION).length - 1;
-// Ticket 43: on the compact screen the verbatim transaction line lives in
+// On the compact screen the verbatim transaction line lives in
 // install.log; --verbose keeps it on stdout. Reads both.
 const txIdOf = (text, f) => text.match(/transaction (\S+) recorded/)?.[1]
   ?? (f ? (() => { try { return readFileSync(join(f.stateDir(), "logs", "install.log"), "utf8").match(/transaction (\S+) recorded/)?.[1]; } catch { return undefined; } })() : undefined);
@@ -288,7 +288,7 @@ test("rotator asked once: a terminal answer is stored; setup, doctor --fix and a
   const reask = await runPty(f, ["setup", "--reask"], [{ after: ROTATOR_PROMPT, send: "\r" }]);
   assert.equal(reask.code, 0, reask.out);
   assert.equal(asked(reask.out), 1, "--reask asks again");
-  // Result-row grammar (design-language §4.3): a pty renders the status
+  // Result-row grammar: a pty renders the status
   // column as `✓ OK    ` (glyph, space, the word padded to 4); a pipe keeps
   // `OK  `. This pty proof pins the status word and the label, not the pad.
   assert.match(reask.out, /(?:✓ )?OK {2,4}Account Rotator disabled\. Saved accounts are kept\./, "Enter takes the capitalised default N");
@@ -405,7 +405,7 @@ for (const [name, accounts] of [["enabled: false", false], ["a pre-rotator confi
   });
 }
 
-// Round 3: a Windows user's proxy/config.yaml has CRLF line endings. The
+// A Windows user's proxy/config.yaml has CRLF line endings. The
 // migration reads it; an answer rewrites it. Both must give the same result as
 // on an LF config, byte for byte up to the line endings, which are kept.
 const bareLf = (text) => /(^|[^\r])\n/.test(text);

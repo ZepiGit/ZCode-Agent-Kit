@@ -96,7 +96,7 @@ describe("LogPane", () => {
   });
 });
 
-// The pane's two bounds (§9 BOUNDS, ADR-0009): 2,000 lines and 8 MB.
+// The pane's two bounds (§9 BOUNDS): 2,000 lines and 8 MB.
 const KB64 = 64 * 1024;
 const MB8 = 8 * 1024 * 1024;
 

@@ -45,7 +45,7 @@ interface ExplicitTraceContext {
 export interface ClientSessionResolver {
   /**
    * `parsedBody`, when given, is `JSON.parse(body)` done by the caller, so the
-   * resolver reads it instead of parsing the body text again (ticket 20). It
+   * resolver reads it instead of parsing the body text again. It
    * is only read, never changed. With it, `body` may be undefined: a large
    * body parsed from its bytes has no text.
    */
@@ -257,7 +257,7 @@ function newSession(): StoredNode {
 /**
  * SHA-256 of the identity's stable stringification: keys sorted, no
  * whitespace, leaves as JSON.stringify writes them. The text is fed to the
- * hash piece by piece instead of being built first (ticket 20): building it
+ * hash piece by piece instead of being built first: building it
  * joined a full copy of the conversation at every nesting level. The digest is
  * that of the whole text, including its quirks: an object property whose value
  * JSON.stringify drops (undefined, e.g. an absent `system`) is written as the

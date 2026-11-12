@@ -19,7 +19,7 @@ mkdirSync(join(data, "workspaces"), { recursive: true });
 mkdirSync(ws, { recursive: true });
 const hold = Number(process.env.S3_HOLD_MS ?? 8000);
 
-// Started as the kit's generated harness MCP entries start it (ticket 36).
+// Started as the kit's generated harness MCP entries start it.
 const bridge = spawn(process.execPath, [...BRIDGE_NODE_FLAGS, join(mcp, "dist", "index.js"), "--stdio", "--data-dir", data, "--allow-workspace", ws, "--runtime-path", fixture], {
   stdio: ["pipe", "pipe", "ignore"],
   env: { ...process.env, ZCODE_HARNESS_RUNTIME_PATH: fixture, ZCODE_HARNESS_LOG_LEVEL: "warn" },

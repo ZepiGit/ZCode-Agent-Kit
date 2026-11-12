@@ -9,7 +9,7 @@ import { stdoutLine } from "./common.mjs";
 /** @param {{ positional: string[] }} args */
 export async function run({ positional }, { kit }) {
   const id = positional[1] ?? null;
-  // B-11: rollback mutates the same files as setup — serialize on the same lock.
+  // Rollback mutates the same files as setup — serialize on the same lock.
   ensureState(kit);
   acquireLock(kit.backupDir);
   let r;

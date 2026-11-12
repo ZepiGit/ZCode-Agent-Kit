@@ -1,5 +1,5 @@
-// The `zcode-kit doctor` report (ticket 40; design-language §4.3, §4.4, §7;
-// ADR-0001). Pure: a list of checks in → output-module records (or the JSON
+// The `zcode-kit doctor` report. Pure: a list of checks in →
+// output-module records (or the JSON
 // document) out. The command (./commands/doctor.mjs) collects the checks; the
 // entry renders the records through the output module.
 //
@@ -7,19 +7,19 @@
 //   ok    true (passed), false (failed: counts toward exit 1) or null (skipped);
 //   warn  true on a passed check that needs attention: WARN, exit 0.
 // The status is derived so that a failed check is never WARN: `ok === false`
-// is FAIL whatever else the check says (Round 1 Q10 condition 1), and WARN
-// needs `ok === true` (Story 91). WARN never changes the exit code.
+// is FAIL whatever else the check says, and WARN
+// needs `ok === true`. WARN never changes the exit code.
 //
-// The text report: a lead line with the problem count when anything failed
-// (ADR-0001 rule 3), the checks once each, grouped under section headers
+// The text report: a lead line with the problem count when anything failed,
+// the checks once each, grouped under section headers
 // (Runtime, Proxy, Account, Integrations, Upstream) in their original order,
-// and one verdict line last (A-02). Off a TTY every row keeps the grammar
+// and one verdict line last. Off a TTY every row keeps the grammar
 // `^(PASS|FAIL|SKIP|WARN)  <name>( — <detail>)?$` with today's check names.
 // Every FAIL carries why/next lines; the check's own win over the defaults.
 //
 // The JSON document is today's `{ ok, failed, skipped, checks }` plus the
 // additive `warned` count and a `status` on every check ("pass" | "fail" |
-// "warn" | "skip"): the JSON value that WARN adds (Round 1 Q10 condition 3).
+// "warn" | "skip"): the JSON value that WARN adds.
 import { ADAPTER_IDS } from "./commands/common.mjs";
 
 /** "pass" | "fail" | "warn" | "skip" for one check. */

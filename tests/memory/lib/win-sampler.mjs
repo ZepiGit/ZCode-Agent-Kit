@@ -1,11 +1,11 @@
-// The memory loop's Windows sampler (spec §1, ticket 02).
+// The memory loop's Windows sampler.
 //
 // One long-lived `powershell.exe -NoProfile -NonInteractive` child polls
 // Win32_Process (Get-CimInstance … | ConvertTo-Csv) every interval and writes
 // one framed block per poll to its stdout; the loop parses the blocks here,
 // picks the kit's processes and reaps the child on exit.
 //
-// Units (spec §1): rss_kb = WorkingSetSize/1024 (bytes), commit_kb =
+// Units: rss_kb = WorkingSetSize/1024 (bytes), commit_kb =
 // PrivatePageCount/1024 (bytes), hwm_kb = PeakPageFileUsage (already KB: the
 // peak commit charge), threads = ThreadCount, fds = HandleCount. The
 // working-set peak (PeakWorkingSetSize, KB) is kept in memory only, for the
@@ -83,14 +83,14 @@ export function splitCommandLine(line) {
 }
 
 const TOOLING = /^(?:powershell|pwsh|netstat|conhost|where)\.exe$/i;
-// The S3 OMP leg's stub host is the harness (ADR-0013 cond 4), so its console host is too.
+// The S3 OMP leg's stub host is the harness, so its console host is too.
 const FIXTURE_ROLES = new Set(["mock-upstream", "scenario", "fake-harness", "omp-host"]);
 
 // FILETIME values as decimal strings: compare as BigInt (they exceed 2^53).
 const time = (s) => { try { return BigInt(s || "0"); } catch { return 0n; } };
 
 /**
- * Which processes are this run's (spec §1): the tree below the loop root
+ * Which processes are this run's: the tree below the loop root
  * (the run.mjs process; it is not counted itself) plus every process whose
  * command line or executable path carries the run-unique token (the run's own
  * bun copy, see prepareRunBun). Windows never reparents: a child keeps its
@@ -185,7 +185,7 @@ function medianOf(values) {
 }
 
 /**
- * Start-up self-test (spec §1): the mapped CIM columns against Get-Process,
+ * Start-up self-test: the mapped CIM columns against Get-Process,
  * taken back to back by the poller. Per process the ratio commit_kb /
  * (PrivateMemorySize64/1024) and rss_kb / (WorkingSet64/1024); memory moves
  * between the two reads, so the medians over every comparable process (≥ 1 MB

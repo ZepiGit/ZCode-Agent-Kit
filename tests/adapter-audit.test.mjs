@@ -15,7 +15,7 @@ import { freePort } from './free-port.mjs';
 const KIT = path.join(import.meta.dirname, '..');
 const { parse: parseYaml } = createRequire(path.join(KIT, 'zcode-proxy-src', 'package.json'))('yaml');
 // Written into the fixture config only; nothing listens. Setup probes it, so it
-// is a free port of this run (ticket 75), never one a parallel run may hold.
+// is a free port of this run, never one a parallel run may hold.
 const PORT = await freePort();
 
 /**
@@ -46,11 +46,11 @@ function existingInstall(t) {
     PATH: process.platform === 'win32' ? 'C:\\Windows\\System32' : '/usr/bin:/bin',
   };
   const kit = (...args) => execFileSync(process.execPath, [path.join(KIT, 'cli', 'zcode-kit.mjs'), ...args], { env, encoding: 'utf8', timeout: 60000 });
-  // Ticket 43: in the (default) compact report the verbatim transaction line
+  // In the (default) compact report the verbatim transaction line
   // lives in install.log; the verbose output keeps it on stdout.
   const txOf = (out) => out.match(/transaction (\S+) recorded/)?.[1]
     ?? (() => { try { return fs.readFileSync(path.join(state, 'logs', 'install.log'), 'utf8').match(/transaction (\S+) recorded/)?.[1]; } catch { return null; } })();
-  // Ticket 43: the compact report shows the report rows; the adapter/bridge
+  // The compact report shows the report rows; the adapter/bridge
   // diagnostics (and the verbatim WARN lines) live in install.log.
   const logText = () => fs.readFileSync(path.join(state, 'logs', 'install.log'), 'utf8');
   return { home, state, key, kit, env, txOf, logText };
@@ -262,7 +262,7 @@ test('the next plain setup refreshes both HIGH fixes for an existing user with s
   assert.deepEqual(fs.readdirSync(path.join(f.home, '.vscode', 'extensions')), ['kilocode.kilo-code-7.8.27'], 'VS Code state is only read');
 });
 
-// --- Ticket 51: confirmed MEDIUM fixes (seam 8) ------------------------------
+// --- Ticket 51: confirmed MEDIUM fixes ------------------------------
 // Each "before" fixture is the byte-exact file the integration tip wrote before
 // the fix (captured from `zcode-kit integrate <id>` on 3773b47), so the refresh
 // is proven on the file an existing user actually has.
@@ -387,7 +387,7 @@ test('integrate declares supports_vision for Goose Flash, idempotently and rever
   ], 'only Flash claims image input; GLM-5.3 keeps catalog detection');
 });
 
-// The Kilo sheet the tip wrote after the HIGH fix (ticket 50), before ticket 51.
+// The Kilo sheet the tip wrote after the HIGH fix, before ticket 51.
 function kiloSheetAfterHighFix() {
   return kiloSheetBeforeFix()
     .replace(`| Base URL       | http://127.0.0.1:${PORT} |`, `| Base URL       | http://127.0.0.1:${PORT}/v1 |`)
@@ -411,7 +411,7 @@ test('integrate adds Kilo Code per-model Reasoning and Image toggles to the valu
   assert.ok(!migrated.includes(f.key), 'the sheet never embeds the proxy key');
 });
 
-// --- Ticket 59: the false Kilo `/v1/models` auto-fetch note (seam 8) ---------
+// --- Ticket 59: the false Kilo `/v1/models` auto-fetch note ---------
 // Kilo's Custom provider dialog gates both its debounced model fetch and the
 // "Fetch models" button on `canFetch`, which is false for `@ai-sdk/anthropic`
 // (Kilo-Org/kilocode@v7.8.27 CustomProviderDialog.tsx:232-233, 253, 708).
@@ -621,8 +621,8 @@ ${piModel('glm-5.3-flash', 'GLM-5.3-Flash', ['text', 'image'])}
 `);
 
   // Codex: no model_context_window / model_reasoning_effort fallback metadata.
-  // The MCP args line carries the bridge flag since ticket 36 (seam 8).
-  // Ticket 43 (A-07): the comment names the launcher of the user's OS —
+  // The MCP args line carries the bridge flag since ticket 36.
+  // The comment names the launcher of the user's OS —
   // the old pin asserted the Windows path on POSIX, the defect itself.
   f.kit('integrate', 'codex');
   const windows = process.platform === 'win32' ? '\n# Native restricted-token sandbox; no admin setup or full-access bypass.\n[windows]\nsandbox = "unelevated"\n' : '';
@@ -674,7 +674,7 @@ args = ["--max-semi-space-size=1", "${kitPath}/mcp/zcode-harness-mcp/dist/index.
   assert.doesNotMatch(fs.readFileSync(path.join(f.state, 'generated', 'cline-zcode-values.md'), 'utf8'), /--thinking|reasoning|effort/i);
 });
 
-// ------------------------------------------------ bridge flag (ticket 36)
+// ------------------------------------------------ bridge flag
 // Seam 8: every generated harness MCP entry starts the bridge as
 // `node --max-semi-space-size=1 <kit>/mcp/zcode-harness-mcp/dist/index.js --stdio`
 // (spec §6 b), never through NODE_OPTIONS, and an existing entry is migrated
@@ -723,7 +723,7 @@ exit 0
 }
 
 // Cross-platform unit test of the Claude Code ownership + flag decision
-// (round 2: the windows-only cli-audit test met the migration). Every
+// (the windows-only cli-audit test met the migration). Every
 // spelling of this installation's script is "ours"; with the kit's flags it
 // is current (left alone), without them outdated (migrated once); any other
 // script is foreign (never touched).

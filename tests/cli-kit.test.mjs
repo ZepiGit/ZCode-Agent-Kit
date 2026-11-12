@@ -168,7 +168,7 @@ test("pi adapter merges additively and is idempotent", async () => {
   assert.equal(verify[0].ok, true);
 });
 
-// ZAK-004: a hand-written zcode entry (no ownership marker) must be a hard
+// A hand-written zcode entry (no ownership marker) must be a hard
 // conflict, never silently overwritten.
 test("pi adapter refuses to overwrite a foreign zcode entry", async () => {
   const home = fakeHome("pi-foreign");
@@ -375,7 +375,7 @@ test("CLI: integrate --dry-run writes nothing", () => {
   }
 });
 
-// A-16 / story 111: the dry run must list every file it would write and every
+// The dry run must list every file it would write and every
 // registration with the undo command, so it can be reviewed before consent.
 // The list is proven against a REAL run on an equal temp HOME: the files the
 // real run writes (home + state generated/, snapshot diff) equal the dry run's
@@ -451,7 +451,7 @@ test("integrate --dry-run lists every file a real run writes, with the undo comm
   );
 });
 
-// A-07 / story 115: the Codex adapter names the launcher that works on the
+// The Codex adapter names the launcher that works on the
 // user's OS — `bin/zcode-codex.sh` on POSIX, `bin\zcode-codex.cmd` on Windows
 // — in its output and in the generated config.toml. The platform is read from
 // ctx.platform (the kit context's own value), so both branches run here.
@@ -581,7 +581,7 @@ test("dry-run leaves preexisting staging sentinels untouched", async () => {
   assert.ok(!readdirSync(agent).some((f) => f.includes(".zcode-staging") && f !== "models.yml.zcode-staging"), "no new staging files");
 });
 
-// AUD-010: a nonempty inline `models:` value cannot be block-edited — the
+// A nonempty inline `models:` value cannot be block-edited — the
 // adapter must refuse instead of appending a duplicate top-level key.
 test("continue adapter fails closed on inline models value, appends after commented header", async () => {
   const home = fakeHome("continue-inline");

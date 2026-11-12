@@ -1,5 +1,5 @@
 // Seam 2: the start lock protocol v1 and the spawn → pid record window
-// (ticket 16; spec §4; ADR-0003, ADR-0012; DECISIONS Round 7 Q4).
+// (DECISIONS Round 7 Q4).
 //   - a stale lock is taken over only on proof (holder dead, or pid reused:
 //     v1 start id / start time, v0 start later than startedAt), with one
 //     takeover event line; a live holder's lock is never touched;
@@ -15,7 +15,7 @@
 //     end with exactly one proxy that the next start adopts and stop stops;
 //     a reused pid is never signalled.
 // Ports: every test takes a free loopback port of its own (freePort), as ticket
-// 15's tests do since its Windows fix (ticket 75: parallel test files collide).
+// 15's tests do since its Windows fix (parallel test files collide).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -536,7 +536,7 @@ for (const [i, killAt] of ["spawn:spawned", "spawn:pid-recorded", "spawn:start-r
 // through CIM (ParentProcessId keeps naming a dead creator); elsewhere a
 // killed spawner never leaves an unstarted child (fork + exec), so the scan
 // is injected with what Windows reports.
-// The proxy is frozen by its identity (pid + start time, ticket 73), recorded
+// The proxy is frozen by its identity (pid + start time), recorded
 // as soon as it announced its pid: it is surely running then (it waits
 // listen-delay-ms before it listens), so a stranger at a reused pid is never
 // frozen. lib/freeze.mjs: SIGSTOP, or NtSuspendProcess under a held handle.
@@ -912,7 +912,7 @@ test("the kill guard after a record 16 completed uses the exact ticks: the same 
   }
 });
 
-// ------------------------------------------- signal release (ticket 17)
+// ------------------------------------------- signal release
 // A holder releases its own start lock when a signal ends it (SIGINT,
 // SIGTERM, SIGHUP; on Windows the console control events Node delivers as
 // SIGINT = Ctrl-C, SIGBREAK = Ctrl-Break and SIGHUP = console close), and
@@ -1046,8 +1046,8 @@ test("Ctrl-C (SIGINT) of a manager start during its health wait leaves no stale 
   assert.deepEqual(lockFiles(root), []);
 });
 
-// ------------------------------- orphan adoption with no pid record (ticket 17)
-// Round 22 Q1: a start lock holder killed after spawn() and before its pid
+// ------------------------------- orphan adoption with no pid record
+// A start lock holder killed after spawn and before its pid
 // record is written (CI runs 42457112513 and 42542508787, linux S3: orphan
 // role proxy, pidRecordAfterKill null, final stop "proxy healthy but no pid
 // file"). Since ticket 16 this kit records a spawn intent before the spawn, so

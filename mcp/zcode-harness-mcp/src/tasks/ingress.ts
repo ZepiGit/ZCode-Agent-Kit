@@ -51,7 +51,7 @@ export interface IngressTask<R extends IngressTaskRecord = IngressTaskRecord> {
   onTerminal(): void;
 }
 
-/** Per-task caps (ADR-0009): warnings 200, errors 200, tool calls 1,000. */
+/** Per-task caps: warnings 200, errors 200, tool calls 1,000. */
 export const TASK_CAPS = Object.freeze({ warnings: 200, errors: 200, toolCalls: 1000 });
 
 /** Append to a capped list; once entries are dropped, its last slot says so. */

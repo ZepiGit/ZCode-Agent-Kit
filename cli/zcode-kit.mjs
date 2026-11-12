@@ -74,7 +74,7 @@ async function main() {
   if (flags.help || (command === "help" && !wantsVersion)) return dispatch(COMMANDS.help, null);
   if (wantsVersion) return dispatch(COMMANDS.version, { root: ROOT });
   const module = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : UNKNOWN_COMMAND;
-  // ADR-0006: on a Node below the support floor, setup and update refuse
+  // On a Node below the support floor, setup and update refuse
   // before anything else runs (no state read for writing, no lock, no proxy
   // stop, no download), so the existing installation stays as it was.
   if (module.nodeFloor === true) {
@@ -89,7 +89,7 @@ async function main() {
 
 // The output module (lib/term/out.mjs) over the process streams, loaded on
 // first use only: a command that returns no output-module records (`run`,
-// whose preflight is memory-bound) never loads the renderer (ADR-0011 cond 3).
+// whose preflight is memory-bound) never loads the renderer.
 let outputPromise = null;
 const output = () => (outputPromise ??= loadOutput());
 
@@ -108,7 +108,7 @@ function commandCtx(kit) {
     fetch: (...args) => fetch(...args),
     progress: (line) => console.log(line),
     progressError: (line) => console.error(line),
-    // A Progress on stderr (design-language §4.10): animated on a TTY only.
+    // A Progress on stderr: animated on a TTY only.
     step: async (label, total) => (await output()).step(label, total),
   };
 }

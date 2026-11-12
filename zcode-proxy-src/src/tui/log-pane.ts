@@ -23,7 +23,7 @@ export interface LogView {
   readonly fromBottom: number;
 }
 
-/** The pane's bounds (§9 BOUNDS, ADR-0009): 2,000 lines and 8 MB. */
+/** The pane's bounds (§9 BOUNDS): 2,000 lines and 8 MB. */
 export const LOG_PANE_MAX_LINES = 2000;
 export const LOG_PANE_MAX_BYTES = 8 * 1024 * 1024;
 
