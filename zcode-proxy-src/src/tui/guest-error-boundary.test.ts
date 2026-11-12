@@ -136,7 +136,9 @@ function supervise(proc: OwnedChild, home: string, log: string) {
     }
     return [
       `fixture-phase=${phase}`, `ackObserved=${ackAt !== undefined}`, `child=${status}`,
-      `elapsedMs=${Math.round(performance.now() - startedAt)}`, `fixtureHome=${safe(home)}`,
+      `elapsedMs=${Math.round(performance.now() - startedAt)}`,
+      `ackAtMs=${ackAt === undefined ? "none" : Math.round(ackAt - startedAt)}`,
+      `fixtureHome=${safe(home)}`,
       `stdoutTailSanitized=${JSON.stringify(safe(stdout))}`, `stderrTailSanitized=${JSON.stringify(safe(stderr))}`,
       logText, ...faults,
     ].join(" | ");
@@ -282,9 +284,19 @@ test("TUI protocol rejects ack then hang in the handling phase", async () => {
   const child = spawnTuiChild("guest", { hangAfterAck: true });
   const start = performance.now();
   try {
-    await expect(child.outcome()).rejects.toThrow("fixture-phase=classification-overrun | ackObserved=true");
-    // Distinguishes the actual 5s handling deadline from the old 10s startup kill.
-    expect(performance.now() - start).toBeLessThan(8_000);
+    const rejection = await child.outcome().then(() => {
+      throw new Error("hanging child resolved");
+    }, (err: unknown) => err);
+    expect(rejection).toBeInstanceOf(Error);
+    const diagnostic = rejection instanceof Error ? rejection.message : "";
+    expect(diagnostic).toContain("fixture-phase=classification-overrun | ackObserved=true");
+    const elapsed = Number(diagnostic.match(/elapsedMs=(\d+)/)?.[1]);
+    const ack = Number(diagnostic.match(/ackAtMs=(\d+)/)?.[1]);
+    expect(Number.isFinite(elapsed) && Number.isFinite(ack)).toBe(true);
+    // The 5s deadline starts at ack, not at process start. 8s covers cleanup
+    // and one late SIGKILL. It does not include the 10s startup reserve.
+    expect(elapsed - ack).toBeLessThan(8_000);
+    expect(performance.now() - start).toBeLessThan(STARTUP_READINESS_BUDGET_MS + 8_000);
   } finally { await child.dispose(); }
 }, TEST_TIMEOUT_MS);
 
