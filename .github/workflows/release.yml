@@ -1,26 +1,24 @@
-# Stable releases run on main pushes, version tags and manual dispatch. Feature
-# branch dispatches/pushes run the same test matrix and create an isolated
-# GitHub prerelease (without npm publication). Both paths build release assets
-# (git-archive tarball + installers + checksums).
+# Release: every push to main publishes a new version. The workflow tests the
+# commit, picks a version number that is still free, tags it, creates the
+# GitHub release (source tarball, installers, checksums) and publishes the
+# launcher package to npm. A pushed v* tag and a manual dispatch run the same
+# path.
 #
-# npm auth is OIDC-based Trusted Publishing (no NPM_TOKEN secret, immune to
-# the account's 2FA policy): the runner exchanges a GitHub OIDC token with the
-# registry. Prerequisite configured once on npmjs.com: package Settings →
-# Trusted Publisher → ZepiGit/ZCode-Agent-Kit + workflow `release.yml`.
-# Requires npm >= 11.5 (installed in the publish job; Node 24 ships npm 11.3).
+# npm authentication is OIDC Trusted Publishing: the runner exchanges a GitHub
+# OIDC token with the registry, so there is no NPM_TOKEN secret. It is set up
+# once on npmjs.com (package Settings -> Trusted Publisher ->
+# ZepiGit/ZCode-Agent-Kit, workflow release.yml) and needs npm 11.5 or newer,
+# which the publish job installs.
 #
-# Why a tag push instead of the `release` event: GitHub delivered the
-# ReleaseEvent for v0.2.0/v0.2.1 but never started the release-triggered
-# workflow (zero runs with event=release) — a tag push is the reliable signal.
-# The release below is created with GITHUB_TOKEN, whose events do not trigger
-# other workflows (no double publish). `workflow_dispatch` re-runs the stable
-# build + verify + publish path from main, or the isolated prerelease path when
-# dispatched on `feature/account-rotator`.
+# The trigger is a tag or branch push, not the `release` event: GitHub
+# delivered that event for v0.2.0 and v0.2.1 without ever starting a workflow
+# run. The release itself is created with GITHUB_TOKEN, whose events start no
+# further workflows, so nothing is published twice.
 name: release
 
 on:
   push:
-    branches: ["main", "feature/account-rotator"]
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -36,6 +34,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -45,9 +44,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 26
-      # The proxy + MCP bridge suites need bun (their vendored toolchain).
-      # Pinned to the CI Bun (1.4.2, Rounds 10–11);
-      # older bun (e.g. 1.2.20) rejects the mcp bridge's lockfileVersion 2.
+      # The proxy and MCP bridge suites run on Bun, pinned to the same
+      # version as CI.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
@@ -63,19 +61,20 @@ jobs:
         run: npm run test:mcp
 
   release-and-publish:
-    # Generated account-rotator tags are prereleases. Keep even a manually
-    # pushed copy of one out of the stable npm publishing path.
-    if: ${{ (github.ref == 'refs/heads/main' || github.ref_type == 'tag') && !contains(github.ref_name, '-account-rotator.') }}
+    # Only main and version tags publish. A tag with a prerelease suffix
+    # (vX.Y.Z-something) never enters the stable npm path.
+    if: ${{ (github.ref == 'refs/heads/main' || github.ref_type == 'tag') && !contains(github.ref_name, '-') }}
     permissions:
       contents: write
       id-token: write
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      # The publish job alone runs on Node 24: Trusted Publishing (OIDC)
-      # needs npm >= 11.5, which is installed below. The test job above runs
-      # on Node 26 (ADR-0006); Node 24 here keeps the npm 11 upgrade path.
+      # The publish job runs on Node 24 because npm 11, which Trusted
+      # Publishing needs, is installed on top of it below. The test job above
+      # runs on Node 26.
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -86,13 +85,13 @@ jobs:
         run: |
           npm install -g npm@11.19.1
           npm --version
-      # AUTO-RELEASE POLICY (owner request): every run on main (push or
-      # workflow_dispatch) must produce a NEW release number. If the checked-out
-      # package.json version is on npm or its remote tag points to another
-      # commit, select an unused patch, update ALLOW_PUBLISH, commit + tag.
-      # Never publish changed code under a tag whose assets already exist.
-      # An unpublished exact-HEAD retry keeps its version and existing assets.
-      # Tag pushes keep the classic gated path below.
+      # Every run on main produces a new release number. If the version in
+      # package.json is already on npm, or its tag points at another commit,
+      # the next free patch version is chosen, written to package.json and
+      # pack/ALLOW_PUBLISH, committed and tagged. Changed code is never
+      # published under a tag whose assets already exist. A retry of a commit
+      # that was not published yet keeps its version and its assets. A tag
+      # push takes its version from the tag and is checked below.
       - name: Resolve release version (avoid occupied npm versions and tags)
         run: |
           CUR=$(node -p "require('./package.json').version")
@@ -132,9 +131,9 @@ jobs:
             echo "VERSION=$CUR" >> "$GITHUB_ENV"
             echo "using package.json version $CUR as-is"
           fi
-      # Classic tag pushes only: if that tag's version is already on npm there
-      # is nothing to publish — skip keeps the run green instead of dying on
-      # the registry's version-conflict check. After an auto-bump this is 0.
+      # Tag pushes only: when the tag's version is already on npm there is
+      # nothing to publish, and skipping keeps the run green instead of
+      # failing on the registry's version conflict.
       - name: Determine whether this version is already published
         if: github.ref_type == 'tag'
         run: |
@@ -147,9 +146,8 @@ jobs:
             echo "SKIP_PUBLISH=0" >> "$GITHUB_ENV"
             echo "zcode-agent-kit@$VERSION is not on npm yet — publish will proceed."
           fi
-      # Version-bound gate on every run: tag (classic) or the resolved release
-      # tag (auto path), package.json and ALLOW_PUBLISH must all agree
-      # (ZAK-013: assets must never disagree about what they are).
+      # On every run the tag, package.json and pack/ALLOW_PUBLISH must name
+      # the same version, so the assets can never disagree about what they are.
       - name: Gate release tag against package version and publish marker
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v$VERSION"; fi
@@ -178,10 +176,9 @@ jobs:
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then TAG="${GITHUB_REF_NAME}"; else TAG="v$VERSION"; fi
           VERSION="${TAG#v}"
-          # Idempotent: a retry (dispatch or a later main push auto-releasing
-          # the same version) must reach the npm publish step instead of dying
-          # on an already-existing release. ZAK-013: never replace assets
-          # under an existing tag — keep it as-is.
+          # A retry must reach the npm publish step instead of failing on a
+          # release that already exists. Assets under an existing tag are
+          # never replaced.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "release $TAG already exists — keeping it, continuing to publish"
             exit 0
@@ -212,101 +209,3 @@ jobs:
         # propagation waits = 17m 50s, plus process startup/runner overhead.
         timeout-minutes: 20
         run: node scripts/registry-version.mjs verify "$VERSION"
-
-  # Feature validation is deliberately a separate path: it never mutates or
-  # pushes main, never publishes to npm, and creates a non-latest prerelease.
-  # The metadata edits below are staged into a throwaway index before creating
-  # the source archive. `git archive HEAD` would silently omit those edits.
-  feature-account-rotator-prerelease:
-    if: ${{ github.ref == 'refs/heads/feature/account-rotator' }}
-    permissions:
-      contents: write
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 1
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-      - name: Prepare exact prerelease metadata
-        run: |
-          set -euo pipefail
-          SOURCE_SHA=$(git rev-parse HEAD)
-          test "$SOURCE_SHA" = "$GITHUB_SHA"
-          BASE_VERSION=$(node -p "require('./package.json').version")
-          VERSION="${BASE_VERSION}-account-rotator.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
-          TAG="v${VERSION}"
-          node - "$VERSION" <<'NODE'
-          const fs = require('node:fs');
-          const version = process.argv[2];
-          const packageFile = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-          packageFile.version = version;
-          fs.writeFileSync('package.json', JSON.stringify(packageFile, null, 2) + '\n');
-          const lockFile = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
-          lockFile.version = version;
-          if (lockFile.packages?.['']) lockFile.packages[''].version = version;
-          fs.writeFileSync('package-lock.json', JSON.stringify(lockFile, null, 2) + '\n');
-          NODE
-          printf '%s\n' "$VERSION" > pack/ALLOW_PUBLISH
-          echo "SOURCE_SHA=$SOURCE_SHA" >> "$GITHUB_ENV"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
-      - name: Assemble and validate prerelease package
-        run: |
-          set -euo pipefail
-          test "$(node -p "require('./package.json').version")" = "$VERSION"
-          test "$(node -p "require('./package-lock.json').version")" = "$VERSION"
-          grep -Fxq "$VERSION" pack/ALLOW_PUBLISH
-          node pack/build.mjs --tracked-only
-          node pack/verify-payload.mjs
-          node - "$VERSION" <<'NODE'
-          const fs = require('node:fs');
-          const version = process.argv[2];
-          const pkg = JSON.parse(fs.readFileSync('pack/dist/package.json', 'utf8'));
-          if (pkg.version !== version || pkg.private || !pkg.files.includes('ALLOW_PUBLISH')) {
-            throw new Error(`invalid prerelease package metadata: ${JSON.stringify(pkg)}`);
-          }
-          NODE
-          (cd pack/dist && npm pack --dry-run --ignore-scripts)
-      - name: Build versioned prerelease assets
-        run: |
-          set -euo pipefail
-          mkdir -p release
-          INDEX_FILE=$(mktemp)
-          trap 'rm -f "$INDEX_FILE"' EXIT
-          rm -f "$INDEX_FILE"
-          GIT_INDEX_FILE="$INDEX_FILE" git read-tree HEAD
-          GIT_INDEX_FILE="$INDEX_FILE" git add package.json package-lock.json pack/ALLOW_PUBLISH
-          # The normal archive policy excludes all of pack/. Keep the
-          # version-bound marker in this release tree without changing the
-          # repository's export policy for ordinary source archives.
-          ATTR_BLOB=$({ cat .gitattributes; printf '\n/pack/ALLOW_PUBLISH -export-ignore\n'; } | git hash-object -w --stdin)
-          GIT_INDEX_FILE="$INDEX_FILE" git update-index --add --cacheinfo "100644,$ATTR_BLOB,.gitattributes"
-          TREE=$(GIT_INDEX_FILE="$INDEX_FILE" git write-tree)
-          git archive --format=tar.gz --prefix="zcode-agent-kit-${VERSION}/" -o "release/${TAG}.tar.gz" "$TREE"
-          cp install.ps1 install.sh release/
-          (cd release && sha256sum "${TAG}.tar.gz" install.ps1 install.sh > checksums.txt)
-          # The archive must contain the exact metadata used to validate the
-          # package, including the marker that prevents version drift.
-          tar -xOzf "release/${TAG}.tar.gz" "zcode-agent-kit-${VERSION}/package.json" \
-            | node -e 'const fs=require("node:fs"); const expected=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(0,"utf8")); if(pkg.version!==expected) throw new Error("archive package.json version mismatch");' "$VERSION"
-          tar -xOzf "release/${TAG}.tar.gz" "zcode-agent-kit-${VERSION}/pack/ALLOW_PUBLISH" \
-            | grep -Fxq "$VERSION"
-      - name: Create GitHub prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "release $TAG already exists; keeping its immutable assets"
-            exit 0
-          fi
-          gh release create "$TAG" \
-            "release/${TAG}.tar.gz" release/install.ps1 release/install.sh release/checksums.txt \
-            --target "$SOURCE_SHA" \
-            --title "zcode-agent-kit $TAG" \
-            --prerelease --latest=false \
-            --generate-notes

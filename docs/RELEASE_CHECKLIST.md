@@ -34,6 +34,3 @@ For a version-specific GitHub release description, the workflow uses
 English, focused on user-visible changes, and current for that version. Do not
 put test outputs, audit reports, private paths, credentials, or implementation
 investigation notes in this public repository.
-
-The `feature/account-rotator` branch has a prerelease workflow; consult the
-workflow definition for its current behavior and verify its run separately.

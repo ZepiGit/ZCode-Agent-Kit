@@ -563,15 +563,13 @@ test("POSIX fixture env: exactly the original Phase 1C filter", () => {
   assert.deepEqual(fixtureBaseEnv(host), { PATH: "/usr/bin", HOME: "/h", LANG: "C.UTF-8", MSYSTEM: "x", SHELL: "/bin/sh" });
 });
 
-test("CI: the Windows baseline is captured under the same shell as the equivalence step (pwsh)", () => {
+test("CI: the equivalence step runs under the runner's default shell on both legs", () => {
   const ci = readFileSync(join(ROOT, ".github", "workflows", "ci.yml"), "utf8").replace(/\r\n/g, "\n");
   const job = ci.slice(ci.indexOf("\n  ux-before:\n"), ci.indexOf("\n  memory-budget:\n"));
   const step = (name) => job.slice(job.indexOf(`- name: ${name}`)).split(/\n      - /)[0];
-  const baseline = step("Windows baseline from the base commit");
   const equivalence = step("Before-equivalence (byte for byte)");
-  assert.match(baseline, /\n {8}shell: pwsh\n/);
-  assert.doesNotMatch(equivalence, /shell:/, "the equivalence step uses the runner default, pwsh on windows");
-  assert.match(baseline, /capture\.mjs --kit \$kit --variants pipe,ci --out \$out/);
+  assert.match(equivalence, /run: npm run test:ux-before/);
+  assert.doesNotMatch(equivalence, /shell:/, "the runner default, pwsh on windows: a bash step would leak MSYS state into the capture");
 });
 
 test("capture.mjs builds the fixture env and the Windows git dir through host.mjs (wiring of the Windows-only branch)", () => {
