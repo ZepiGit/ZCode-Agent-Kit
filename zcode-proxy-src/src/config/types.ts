@@ -237,6 +237,14 @@ export interface ProxyConfig {
   };
   /** Health supervisor settings. Absent = the defaults. */
   health?: HealthConfig;
+  /** Captcha solver process settings. Absent = the defaults. */
+  solver?: SolverConfig;
+}
+
+/** `solver` in config.yaml. Every key is optional. */
+export interface SolverConfig {
+  /** Memory cap of the solver process in MB; left out keeps the default (300). */
+  memoryCapMB?: number;
 }
 
 /** `health` in config.yaml. Every key is optional. */

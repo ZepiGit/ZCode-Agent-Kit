@@ -24,6 +24,8 @@ import type { AuthManager } from "../auth/manager.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
 import { buildUpstreamRequest, buildUpstreamHeaderPairs, type UpstreamHeaderPair } from "./upstream.js";
 import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
+import { CaptchaSolverUnavailableError } from "./captcha-token.js";
+import { shedResponse, solverShed } from "../server/admission.js";
 import { accountHandleStillCurrent, dispatchWithConnectRetry } from "./handler.js";
 import { gateStreamPrelude } from "./stream-prelude.js";
 import { recoverAndMapUpstream } from "./upstream-errors.js";
@@ -312,9 +314,11 @@ export async function handleResponses(
           buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, opts.config.identity, opts.config.plan, retryHeaders, undefined),
         ),
         mapError: (err, phase) =>
-          phase === "solver"
-            ? errorResponse(503, "captcha_solver_failed", err.message)
-            : errorResponse(502, "upstream_unreachable", "Upstream request could not be completed."),
+          phase !== "solver" ? errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.")
+            // The solver refused the solve: the shed contract, with the time to retry.
+            : err instanceof CaptchaSolverUnavailableError
+              ? shedResponse("openai", { ...solverShed(err.reason), retryAfterSeconds: err.retryAfterMs / 1000 })
+              : errorResponse(503, "captcha_solver_failed", err.message),
       });
       if (!outcome.ok) return outcome.resp;
       upstreamResp = outcome.resp;

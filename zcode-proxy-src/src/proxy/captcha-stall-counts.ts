@@ -7,7 +7,7 @@
  *
  * Bound: 1,024 URLs, count only, oldest
  * first, no TTL. A TTL would reset counts and change when the cache evicts;
- * the count bound cannot be reached in one solver generation (≤ 200 solves),
+ * the count bound cannot be reached in one solver generation (≤ 100 solves),
  * where these counters live, so the decisions stay those of the unbounded map.
  */
 import { BoundedCollection } from "../runtime/bounded-collection.js";

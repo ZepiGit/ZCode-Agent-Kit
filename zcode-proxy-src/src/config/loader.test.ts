@@ -635,3 +635,30 @@ describe("health.memory (ADR-0008)", () => {
     expect(failure("health:\n  memory:\n    softLimitMB: 2048\n")).toMatch(/^health\.memory\.hardLimitMB \(1024\) must be above health\.memory\.softLimitMB \(2048\)/);
   });
 });
+
+describe("solver.memoryCapMB", () => {
+  const base = (solver: string) => writeYaml(`server:\n  port: 8080\n  host: "127.0.0.1"\nauth:\n  proxyApiKey: "${PROXY_KEY}"\n${solver}`);
+  const failure = (yaml: string): string => {
+    try { loadConfig(base(yaml)); } catch (err) { return (err as Error).message; }
+    return "";
+  };
+
+  it("is optional: without the key the solver process keeps its 300 MB default", () => {
+    expect(loadConfig(base("")).solver).toBeUndefined();
+    expect(loadConfig(base("solver: {}\n")).solver).toBeUndefined();
+  });
+
+  it("reads the cap in MB from config.yaml, down to the documented minimum", () => {
+    expect(loadConfig(base("solver:\n  memoryCapMB: 512\n")).solver).toEqual({ memoryCapMB: 512 });
+    expect(loadConfig(base("solver:\n  memoryCapMB: 128\n")).solver).toEqual({ memoryCapMB: 128 });
+  });
+
+  for (const bad of ["127", "0", "-300", "1.5", "lots", "65537", "\"\""]) {
+    it(`rejects ${bad} with what, why and next`, () => {
+      const message = failure(`solver:\n  memoryCapMB: ${bad}\n`);
+      expect(message).toMatch(/^solver\.memoryCapMB must be a whole number of MB from 128 to 65536 \(got /);
+      expect(message).toContain("below 128 MB the solver cannot load and run a solve at all");
+      expect(message).toContain("Set it to a whole number such as 300 (the default) or remove the key.");
+    });
+  }
+});

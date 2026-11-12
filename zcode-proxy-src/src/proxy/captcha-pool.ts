@@ -9,7 +9,7 @@ import {
   type CaptchaSolver,
   type CaptchaSolverStats,
 } from "./captcha-solver.js";
-import { classifyCaptchaError, describeCaptchaFailure, parseCertifyId } from "./captcha-token.js";
+import { CaptchaSolverUnavailableError, classifyCaptchaError, describeCaptchaFailure, parseCertifyId } from "./captcha-token.js";
 
 export interface CaptchaPoolOptions {
   /** @deprecated Use poolSizeMax — kept as max cap alias. */
@@ -287,6 +287,9 @@ export class CaptchaTokenPool {
       try { param = await Promise.race([this.solveRaced(cfg), timeout.promise]); }
       finally { clearTimeout(timer); }
     } catch (err) {
+      // The solver refused the solve (its fail-fast window, a full queue):
+      // the client is told when to retry, without the grace wait below.
+      if (err instanceof CaptchaSolverUnavailableError) throw err;
       if (Date.now() < this.pausedUntil) throw err;
       // Storm began while this take raced: refills are paused, so the grace
       // wait below could only time out.
@@ -551,7 +554,8 @@ export class CaptchaTokenPool {
       for (const r of results) {
         if (r.status === "fulfilled") {
           this.pushToken(r.value);
-        } else {
+        } else if (!(r.reason instanceof CaptchaSolverUnavailableError)) {
+          // A refused solve is logged once by the solver, not per refill.
           console.warn("[captcha-pool] parallel solve failed:", describeCaptchaFailure(r.reason));
         }
       }
@@ -695,6 +699,9 @@ export class CaptchaTokenPool {
             lastErr = err.message;
             break;
           }
+          // The solver refused without running anything: not a mint, and
+          // another attempt in this chain would be refused the same way.
+          if (err instanceof CaptchaSolverUnavailableError) throw err;
           const category = classifyCaptchaError(err);
           this.recordMintFailure(err);
           lastErr = describeCaptchaFailure(err);

@@ -64,6 +64,26 @@ export class CaptchaLocalVerificationError extends CaptchaSdkError {
   }
 }
 
+/** Why the solver refused a solve without running it. */
+export type SolverUnavailableReason = "fail-fast" | "queue-full";
+
+/**
+ * The solver refused a solve without running it: it is in its fail-fast
+ * window after too many abnormal exits, or too many solves already wait.
+ * `retryAfterMs` says when a solve can be accepted again; the request that
+ * needed the solve is answered with HTTP 503 and `Retry-After`.
+ */
+export class CaptchaSolverUnavailableError extends CaptchaSdkError {
+  constructor(readonly reason: SolverUnavailableReason, readonly retryAfterMs: number) {
+    super("other");
+    this.name = "CaptchaSolverUnavailableError";
+    this.message = reason === "fail-fast"
+      ? "captcha solver unavailable: too many abnormal exits, solves are refused for now"
+      : "captcha solver unavailable: too many solves are waiting";
+    hostFailures.set(this, { category: "other", message: this.message, kind: "sdk" });
+  }
+}
+
 // Legacy synthetic errors remain supported, but diagnostics are never evidence.
 function failurePrefix(message: string): string {
   const diagnosticStart = message.search(/\||\b(?:captchaMetadata\s*=|guestErrors\s*\(|sha256\s*=|len\s*=)/);

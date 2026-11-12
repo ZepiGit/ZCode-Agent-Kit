@@ -3,8 +3,9 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
-import type { AccountsConfig, AdmissionConfig, ClientIdentityConfig, HealthConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
+import type { AccountsConfig, AdmissionConfig, ClientIdentityConfig, HealthConfig, ProxyConfig, SolverConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
 import { DEFAULT_MEMORY_THRESHOLDS } from "../runtime/memory-thresholds.js";
+import { DEFAULT_SOLVER_CAP_MB, MAX_SOLVER_CAP_MB, MIN_SOLVER_CAP_MB, SOLVER_CAP_KEY } from "../proxy/solver-cap.js";
 
 /**
  * Environment variable keys that override YAML values.
@@ -153,6 +154,7 @@ export function loadConfig(path: string): ProxyConfig {
   const endpointRouting = resolveEndpointRoutingConfig(parsed?.endpointRouting);
   const clientSigning = resolveClientSigningConfig(parsed?.clientSigning);
   const health = resolveHealthConfig(parsed?.health);
+  const solver = resolveSolverConfig(parsed?.solver);
 
   const config: ProxyConfig = {
     server: { port, host, ...(admission ? { admission } : {}) },
@@ -172,6 +174,7 @@ export function loadConfig(path: string): ProxyConfig {
     claim: claimCfg,
     logging: { level: logLevel },
     ...(health ? { health } : {}),
+    ...(solver ? { solver } : {}),
   };
 
   validate(config);
@@ -296,6 +299,29 @@ function resolveAccountsConfig(raw: unknown): AccountsConfig {
       : {}),
     ...(allowedOrigins ? { allowedOrigins } : {}),
   };
+}
+
+/**
+ * `solver.memoryCapMB`: the memory cap of the captcha solver process, in MB.
+ * Absent = the default (300). No env override. A value below the minimum
+ * leaves the solver no room to load its DOM runtime and solve, so it is
+ * rejected here, with what/why/next, instead of failing every solve later.
+ */
+function resolveSolverConfig(raw: unknown): SolverConfig | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const value = obj.memoryCapMB;
+  if (value === undefined || value === null) return undefined;
+  const text = typeof value === "string" ? value.trim() : value;
+  const n = typeof text === "number" ? text : typeof text === "string" && /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isInteger(n) || n < MIN_SOLVER_CAP_MB || n > MAX_SOLVER_CAP_MB) {
+    throw new Error(
+      `${SOLVER_CAP_KEY} must be a whole number of MB from ${MIN_SOLVER_CAP_MB} to ${MAX_SOLVER_CAP_MB} (got ${JSON.stringify(value)}). ` +
+        `It caps the memory of the captcha solver process; below ${MIN_SOLVER_CAP_MB} MB the solver cannot load and run a solve at all. ` +
+        `Set it to a whole number such as ${DEFAULT_SOLVER_CAP_MB} (the default) or remove the key.`,
+    );
+  }
+  return { memoryCapMB: n };
 }
 
 /** Admission bounds for `server.admission.maxInFlightMB`. */

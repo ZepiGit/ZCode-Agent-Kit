@@ -1,6 +1,6 @@
 /**
  * S2 body (runs under Bun; spawned by s2-captcha.mjs). Drives the REAL captcha
- * solver dispatcher (captcha-solver.ts → captcha-solver-worker.ts → happy-dom)
+ * solver dispatcher (captcha-solver.ts → captcha-solver-process.ts → happy-dom)
  * with the offline fixture backend, in the production default configuration
  * unless a phase says otherwise. Emits one JSON line per second on stdout:
  *   {"type":"sample","solves":n,"rssMB":..,"mainHeapMB":..,"phase":..,"solver":{..}}
@@ -47,7 +47,8 @@ configureCaptchaSolver({ backendModule: BACKEND });
 
 if (PHASES.includes("A")) {
 // A. Production lifecycle: heavy happy-dom solves with the default recycling
-//    (every 200 solves, heap > 768 MB, 3 failures, 10 min idle).
+//    (footprint at 80 % of the 300 MB cap, every 100 solves, 3 failures,
+//    10 min idle).
 phase = "A-heavy-dom";
 mark("A-start");
 const nA = LONG ? 2000 : 420;
@@ -58,9 +59,9 @@ for (let i = 0; i < nA; i++) {
 mark("A-end");
 }
 if (PHASES.includes("B")) {
-// B. Retained guest heap inside one generation. Production recycles on heap
-//    only above 768 MB of worker heap: how much RSS does that allow, and does
-//    terminate() give it back?
+// B. Retained guest heap inside one generation. Production recycles the
+//    solver process at 80 % of its cap: how much does the host keep before
+//    that, and does the recycle give it back?
 phase = "B-retain";
 requestCaptchaSolverRecycle("s2-phase");
 await sleep(500);
@@ -78,7 +79,8 @@ mark("B-fresh-generation");
 }
 if (PHASES.includes("C")) {
 // C. Hung solves: a guest that holds 256 MB and parks its thread. The
-//    dispatcher terminates it at the deadline. Does the thread (and its heap) go?
+//    generation ends at its cap or at the deadline, whichever comes first.
+//    Does its memory go?
 phase = "C-hang";
 configureCaptchaSolver({ deadlineMs: 3000 });
 mark("C-start");

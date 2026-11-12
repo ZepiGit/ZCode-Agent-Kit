@@ -1,10 +1,8 @@
 /**
- * Seam 3 (solver dispatcher interface) through the transport seam (ADR-0002,
- * ticket 24). The dispatcher is an object built over a transport; these tests
- * drive it with an in-memory transport that speaks the existing message
- * protocol, and drive the thread transport with the offline fixture backend.
- * The file name stays outside `captcha-*.test.ts` on purpose: those 13 suites
- * are the B1 preservation set and their count is pinned by the ticket.
+ * The solver dispatcher over a transport. The dispatcher is an object built
+ * over a transport; these tests drive it with an in-memory transport that
+ * speaks the existing message protocol, and drive the thread transport with
+ * the offline fixture backend.
  */
 import { describe, expect, it } from "bun:test";
 import { fileURLToPath } from "node:url";
@@ -213,14 +211,63 @@ async function threadScenario(source: string, env: Record<string, string> = {}):
 describe("thread transport", () => {
   it("a solver generation sees the proxy's environment as it was at spawn", async () => {
     await threadScenario(`
-      process.env.ZCODE_T24_SET_BEFORE_SPAWN = 'seen';
+      process.env.ZCODE_SOLVER_TEST_SET_BEFORE_SPAWN = 'seen';
       const s = solver.createCaptchaSolver({ transport: solver.threadTransport() });
       s.configure({ backendModule: ${JSON.stringify(fixtureUrl)}, idleMs: 1000 });
       assert.equal(label(await s.run('env:ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA','fixture','fixture')), 'env:0');
-      assert.equal(label(await s.run('env:ZCODE_T24_SET_BEFORE_SPAWN','fixture','fixture')), 'env:seen');
-      assert.equal(label(await s.run('env:ZCODE_T24_INHERITED','fixture','fixture')), 'env:from-parent');
+      assert.equal(label(await s.run('env:ZCODE_SOLVER_TEST_SET_BEFORE_SPAWN','fixture','fixture')), 'env:seen');
+      assert.equal(label(await s.run('env:ZCODE_SOLVER_TEST_INHERITED','fixture','fixture')), 'env:from-parent');
       s.shutdown();
-    `, { ZCODE_T24_INHERITED: "from-parent" });
+    `, { ZCODE_SOLVER_TEST_INHERITED: "from-parent" });
+  });
+
+  it("a solver thread gets none of the proxy's credentials, keys, stop token, respawn variables or ambient proxy variables", async () => {
+    const withheld = {
+      ZCODE_KIT_STOP_TOKEN: "x", ZCODE_KIT_RESPAWN_NODE: "x", zcode_kit_respawn_args: "x",
+      ZCODE_PROXY_CREDENTIAL_SECRET: "x", ZCODE_PROXY_CREDENTIAL_MASTER_KEY: "x", ZCODE_PROXY_MASTER_KEY: "x", zcode_proxy_api_key: "x",
+      ZCODE_CREDENTIAL_SECRET: "x", ZCODE_PROXY_CREDENTIALS_PATH: "x", ZCODE_PROXY_ACCOUNTS_PATH: "x", ZCODE_CONTROL_CAPABILITY: "x",
+      HTTP_PROXY: "http://127.0.0.1:9", https_proxy: "http://127.0.0.1:9", NO_PROXY: "x", npm_proxy: "http://127.0.0.1:9",
+    };
+    const kept = { ZCODE_PROXY_UPSTREAM_PROXY: "http://127.0.0.1:9", CAPTCHA_CDN_CACHE_TTL_MS: "1234", ZCODE_PROXY_CONFIG: "config.yaml" };
+    const pattern = `^(${[...Object.keys(withheld), ...Object.keys(kept)].join("|")})$`;
+    const out = await threadScenario(`
+      const s = solver.createCaptchaSolver({ transport: solver.threadTransport() });
+      s.configure({ backendModule: ${JSON.stringify(fixtureUrl)}, idleMs: 1000 });
+      console.log('NAMES ' + label(await s.run(${JSON.stringify(`env-names:${pattern}`)},'fixture','fixture')));
+      // The proxy itself keeps them.
+      assert.equal(process.env.ZCODE_PROXY_CREDENTIAL_SECRET, 'x');
+      s.shutdown();
+    `, { ...withheld, ...kept });
+    expect(out.split("\n").find((line) => line.startsWith("NAMES "))).toBe(`NAMES env-names:${Object.keys(kept).sort().join(",")}`);
+  });
+
+  it("a solver thread's diagnostic lines reach the proxy's own stderr stream, not fd 2, and are bounded per generation", async () => {
+    const many = Buffer.from(Array.from({ length: 230 }, (_, i) => `line ${i}\n`).join("")).toString("base64");
+    const guestLine = Buffer.from("[captcha-guest-error] from the thread\n").toString("base64");
+    const out = await threadScenario(`
+      // What a managed proxy does: its stderr stream is replaced by the log writer's.
+      const captured = [];
+      const original = process.stderr.write;
+      process.stderr.write = (chunk) => { captured.push(Buffer.from(chunk).toString()); return true; };
+      const events = [];
+      const s = solver.createCaptchaSolver({ transport: solver.threadTransport({ writeLog: line => events.push(line) }) });
+      s.configure({ backendModule: ${JSON.stringify(fixtureUrl)}, idleMs: 1000 });
+      try {
+        assert.equal(label(await s.run('stall-evict','fixture','fixture')), 'evict:memory:none');
+        await s.run('stderr-line:${guestLine}','fixture','fixture');
+        await s.run('stderr-line:${many}','fixture','fixture');
+        s.shutdown();
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } finally { process.stderr.write = original; }
+      console.log('CAPTURED ' + JSON.stringify({ text: captured.join(''), events }));
+    `);
+    const { text, events } = JSON.parse(out.split("\n").find((line) => line.startsWith("CAPTURED "))!.slice(9));
+    const lines = text.split("\n");
+    expect(lines[0]).toMatch(/^\[pe-cache-evict\] resource-[0-9a-f]{16} stalled 2x — evicting cache$/);
+    expect(lines[1]).toBe("[captcha-guest-error] from the thread");
+    expect(lines.slice(2, -1)).toEqual(Array.from({ length: 198 }, (_, i) => `line ${i}`));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatch(/ WARN solver solver wrote more output than one generation may; further lines were dropped droppedLines=32 limitLines=200 limitKiB=64$/);
   });
 
   it("the module-level dispatcher and a dispatcher built over the thread transport return the same token", async () => {
