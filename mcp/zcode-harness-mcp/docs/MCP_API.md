@@ -109,6 +109,19 @@ sie älter als 7 Tage sind (laufende nie); danach liefern sie den bekannten Fehl
 long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after
 that the same key starts a new task."
 
+**Harness restart budget.** The bridge starts the harness on the first call that needs it. When the
+harness exits, running tasks become `interrupted` and nothing is started until the next call that
+needs the harness. Every start after the first is a restart: at most 3 in any 15 minutes, each no
+earlier than a backoff after the last exit (1 s, 2 s, 4 s, doubling up to 30 s). Concurrent calls
+share one restart. With the budget used up, harness-bound tools fail as an ordinary tool error
+(`isError:true`) whose text starts with `HARNESS_RESTART_BUDGET_EXHAUSTED:` and says what happened,
+which budget refused the start, when a slot comes back and what to do next; no process is spawned.
+A task started in that state ends `failed` with the same text in `error`. `zcode_health` reports
+the state in the additive field `runtime.restartBudget`: `limit`, `windowSec`, `used`, `exhausted`,
+`retryAt` and `lastExit` (`at`, `code`, `signal`). The optional environment variable
+`ZCODE_HARNESS_RESTART_BUDGET=<restarts>/<window seconds>` sets the budget (default `3/900`;
+`0/<seconds>` never restarts the harness; an invalid value stops the bridge at start).
+
 ## Interaktionen
 
 | Tool | Argumente | Verhalten |

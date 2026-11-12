@@ -81,6 +81,12 @@ Die native Providerroute kann von der Proxyroute abweichen.
   dasselbe wie oben.
 - Neustart-Verhalten: Persistierte, nicht-terminale Tasks werden als `interrupted` wiederhergestellt
   (nie automatisch `completed`); terminale Ergebnisse bleiben vollständig lesbar (Result-Cache).
+- **Harness restarts are bounded.** A harness that has exited is started again only by the next call
+  that needs it, and at most 3 times in 15 minutes, with a backoff of 1 s, 2 s, 4 s (up to 30 s)
+  after the last exit. After that, harness-bound tools fail with `HARNESS_RESTART_BUDGET_EXHAUSTED`
+  until a slot comes back (`zcode_health` → `runtime.restartBudget.retryAt`) or the bridge is
+  restarted. `ZCODE_HARNESS_RESTART_BUDGET=<restarts>/<window seconds>` changes the budget. See
+  `MCP_API.md`, "Harness restart budget".
 - Tasks der **Desktop-App selbst** sind für die Bridge nur als Sessions sichtbar (`session/list`),
   nicht als Bridge-Tasks.
 
