@@ -32,6 +32,22 @@ Only one start runs at a time per installation. The start takes `logs/manager.lo
 
 A start that is ended by Ctrl-C releases its lock. The pid record is written before the proxy process is spawned and completed afterwards, so a start that was killed halfway leaves a record the next start can finish or discard with proof.
 
+## Launching assistants
+
+Before an assistant talks to the proxy, a preflight makes sure the proxy is running and asks it once for the account's quota state. The preflight starts the proxy the way the manager does, so the rules under "Starting" apply. It prints one line with the result and writes one line to `logs/heal.log`. Two things run it.
+
+`zcode-kit run <assistant> -- <args>` runs the preflight in its own process and then starts the assistant with the local key in its environment. On Linux and macOS with Node.js 26.1 or newer the launcher then replaces itself with the assistant (`process.execve`): the assistant keeps the launcher's process id, terminal and environment, and no kit process stays beside it for the session. This is the last thing the launcher does, after the preflight's line is printed and its lock and log writes are finished, because nothing of the launcher runs afterwards. An assistant that is ended by a signal reports that signal to its caller. In four cases the launcher instead stays as the assistant's parent process and passes its exit code on: on Windows; on an older Node.js; when the assistant's command is not an executable on `PATH` (the launcher prints `run: …` and exits 2); and when `ZCODE_KIT_RESIDENT_LAUNCHER=1` is set. Only the exact value `1` counts.
+
+OMP loads an extension that the kit generates. It runs inside OMP, imports nothing from the kit, and starts the preflight as a separate process before the first request to the kit's provider. When several OMP windows of one installation start at the same moment, only one of them runs the preflight:
+
+- The window that creates `logs/omp-autostart.token` runs the preflight. The token records that window's process (pid and start time), the attempt, and the preflight process as soon as it is spawned.
+- The other windows wait inside OMP, start no process, and watch the token. When it is gone they read `logs/omp-autostart.result`, which the first window writes before it deletes its token, and print the same warnings. If the shared preflight failed or left no result, the waiting windows take the token one after another and each runs its own, so every window reports its own failure.
+- A token is replaced only when both processes it names are proven gone (dead, or the pid now belongs to a process that started later), under the same claim file rule as the start lock. A token that is merely old proves nothing: a window that has waited 120 seconds reports a timeout and starts no second preflight.
+- The preflight checks at its start that the token names it. One whose OMP window died right after spawning it leaves without doing anything.
+- If the token cannot be used (a file with other content or a newer format in its place, no write access), each window runs its own preflight, as extensions written by older kit versions do. The start lock still allows only one proxy.
+
+`zcode-kit setup` or `zcode-kit integrate omp` writes the current extension over an older one.
+
 ## Stopping
 
 `zcode-kit proxy stop`, `restart` and `update` stop the proxy in two steps.
