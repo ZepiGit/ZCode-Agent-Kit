@@ -204,9 +204,10 @@ function writeKitTree(root, { srcLinks = true, version = FIXTURE_VERSION } = {})
   // no code path can reach 8457.
   const tpl = join(root, "proxy", "config.example.yaml");
   writeFileSync(tpl, readFileSync(tpl, "utf8").replace(/^  port: 8457$/m, `  port: ${PORT}`));
-  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  pkg.version = version;
-  writeFileSync(join(root, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
+  // Only the version value changes; the file keeps its bytes otherwise (a
+  // Windows checkout has it with CRLF).
+  const pkgPath = join(root, "package.json");
+  writeFileSync(pkgPath, readFileSync(pkgPath, "utf8").replace(/^(\s*"version":\s*")[^"]*(")/m, (_, head, tail) => head + version + tail));
   mkdirSync(join(root, "zcode-proxy-src", "src"), { recursive: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), fakeProxySource());
   // The release payload ships the shared token set and width core (pack
