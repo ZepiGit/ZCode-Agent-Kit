@@ -24,8 +24,8 @@
   },
   "windows": {
     "S2/short": {
-      "owners": { "58": ["solver:cost-per-generation", "solver:retained-before-recycle", "procPeak:scenario", "growth:scenario", "procPeak:solver"] },
-      "flips": ["growth:scenario", "procPeak:solver"]
+      "owners": { "58": ["solver:cost-per-generation", "growth:scenario", "procPeak:solver"] },
+      "flips": ["solver:cost-per-generation", "growth:scenario", "procPeak:solver"]
     },
     "S3/short": {
       "owners": { "16": ["exactly-one-proxy-after-round"], "17": ["orphans"], "37": ["peak:kit"] },

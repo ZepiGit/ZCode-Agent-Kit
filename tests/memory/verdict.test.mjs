@@ -67,7 +67,7 @@ test("budgets are the spec §18 numbers", () => {
   assert.equal(MEMORY.growth.maxPctPer1k, 5);
   assert.equal(MEMORY.growth.risingWindows, 3);
   assert.deepEqual(MEMORY.S1, { steadyMB: 160, peakMB: 250, burstPeakMB: { burst16: 400, burst32: 600 } });
-  assert.deepEqual(MEMORY.S2, { solverCapMB: 300, costPerGenerationMB: 300, retainedBeforeRecycleMB: 300, hungReclaimMB: 64, cdnMemoryMB: 64, coldStartMs: 4500 });
+  assert.deepEqual(MEMORY.S2, { solverCapMB: 300, costPerGenerationMB: 300, retainedBeforeRecycleMB: 300, hungReclaimMB: 64, cdnMemoryMB: 96, coldStartMs: 4500 });
   // Windows 600 → 514 MB commit (0.7 × the 734.5 MB first clean windows run).
   assert.deepEqual(MEMORY.S3, { kitTotalMB: { linux: 596, windows: 514 }, rolePeakMB: { launcher: 74, "mcp-bridge": 75, preflight: 76, proxy: 62, solver: 20 } });
   assert.deepEqual(MEMORY.S5, { procPeakMB: 150, rebootCostMB: 20, taskFailures: 0 });

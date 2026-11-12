@@ -1,15 +1,18 @@
 # 58 Captcha solver memory between recycles
 
 Checks: `solver:cost-per-generation`, `growth:scenario`, `procPeak:solver`
-(S2/short, Linux); on Windows also `solver:retained-before-recycle` and
-`procPeak:scenario`, until CI has measured the change there.
+(S2/short, Linux and Windows).
 
 The captcha solver used to be recycled only after a fixed number of solves,
 and its memory counted against the proxy. It now runs in a process of its own
 under a 300 MB cap and is recycled at 80 % of the cap (240 MB of its own
 memory footprint) or after 100 solves. On Linux that took `procPeak:scenario`
 from about 1130 MB to about 107 MB and `solver:retained-before-recycle` from
-689 MB to 0 MB, so both names left the Linux list.
+689 MB to 0 MB, so both names left the Linux list. On Windows the first CI
+run with the solver process measured `procPeak:scenario` at 180 MB commit
+against 600, `solver:cost-per-generation` at 266 MB against 300 and
+`procPeak:solver` at 299 MB against 300; the first two names left the Windows
+list as well, the last two are close enough to their budgets to stay listed.
 
 What is left on Linux, from three runs of the short profile:
 

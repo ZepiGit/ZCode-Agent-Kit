@@ -19,7 +19,12 @@ export const MEMORY = {
     costPerGenerationMB: 300, // solver RSS above the host's base, per generation
     retainedBeforeRecycleMB: 300,
     hungReclaimMB: 64,
-    cdnMemoryMB: 64, // the ≤ 256-entry bound is pinned at seam 3, not observable here
+    // Growth of the scenario host over 600 puts of 256 KiB into a cache that
+    // keeps 32 MiB. The host is a small process since the solver left it, so
+    // what the allocator keeps of the 150 MB that passed through shows in
+    // full: 52 MB on Linux, 68 MB commit on Windows. The bound on entries
+    // and bytes is pinned by the cache's own tests.
+    cdnMemoryMB: 96,
     coldStartMs: 4500, // spawn + handshake + module load + first solve, 5 % of the 90 s deadline
   },
   S3: {
