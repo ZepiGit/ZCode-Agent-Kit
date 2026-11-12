@@ -2260,6 +2260,9 @@ test("stop sends the stop request with the bearer key and the recorded token, an
   const stopped = await lifecycle.stop({ observe: (l) => observed.push(l) });
   // The proxy exits at 900 ms: after its own deadline (800 ms), before the
   // manager's force point (800 + 400 ms). No signal was ever delivered.
+  // stop() returns as soon as the process has exited; this test process
+  // learns the exit code of its own child a moment later.
+  await gone(stand);
   assert.equal(stand.exitCode, 0, "the stand-in exited by itself (never signalled)");
   assert.equal(stand.signalCode, null);
   const requests = readStopRequests(record);
