@@ -249,10 +249,12 @@ export default {
       );
     }
     const { indent, insertAt } = providerLayout(newModels, providersPair);
-    // The block takes the file's own line endings; the user's bytes around it
-    // stay as they are (lib/line-endings.mjs).
-    const newline = lineEndingOf(models);
-    const block = withLineEndingsOf(models, ompProviderBlock(ctx, port, indent));
+    // The block takes the line endings of the user's own lines; the bytes
+    // around it stay as they are (lib/line-endings.mjs). An earlier block of
+    // the kit is not counted: one written with LF into a CRLF file would
+    // otherwise outvote the user's lines.
+    const newline = lineEndingOf(newModels);
+    const block = withLineEndingsOf(newModels, ompProviderBlock(ctx, port, indent));
     const separator = insertAt > 0 && newModels[insertAt - 1] !== "\n" ? newline : "";
     newModels = newModels.slice(0, insertAt) + separator + block + newline + newModels.slice(insertAt);
     parseYamlDocument(ctx, newModels, "models.yml (staged)");

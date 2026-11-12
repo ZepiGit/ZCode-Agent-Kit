@@ -8,7 +8,7 @@
     "ms": 89,
     "hasAnsi": false,
     "maxWidth": 106,
-    "linesOver80": 23,
+    "linesOver80": 26,
     "nonAsciiChars": 8,
     "glyphs": "—·",
     "command": "zcode-kit help"
@@ -22,7 +22,7 @@
     "ms": 48,
     "hasAnsi": false,
     "maxWidth": 106,
-    "linesOver80": 23,
+    "linesOver80": 26,
     "nonAsciiChars": 8,
     "glyphs": "—·",
     "command": "zcode-kit help"
@@ -36,7 +36,7 @@
     "ms": 48,
     "hasAnsi": false,
     "maxWidth": 106,
-    "linesOver80": 23,
+    "linesOver80": 26,
     "nonAsciiChars": 8,
     "glyphs": "—·",
     "command": "zcode-kit --help"
@@ -50,7 +50,7 @@
     "ms": 49,
     "hasAnsi": false,
     "maxWidth": 106,
-    "linesOver80": 23,
+    "linesOver80": 26,
     "nonAsciiChars": 8,
     "glyphs": "—·",
     "command": "zcode-kit --help"
@@ -64,7 +64,7 @@
     "ms": 49,
     "hasAnsi": false,
     "maxWidth": 106,
-    "linesOver80": 23,
+    "linesOver80": 26,
     "nonAsciiChars": 8,
     "glyphs": "—·",
     "command": "zcode-kit frobnicate"
@@ -78,7 +78,7 @@
     "ms": 48,
     "hasAnsi": false,
     "maxWidth": 106,
-    "linesOver80": 23,
+    "linesOver80": 26,
     "nonAsciiChars": 8,
     "glyphs": "—·",
     "command": "zcode-kit frobnicate"
