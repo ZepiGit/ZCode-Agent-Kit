@@ -54,6 +54,23 @@ export function redactDeep<T>(value: T, depth = 0): T {
   return value;
 }
 
+/**
+ * `redactDeep`, except that the named top-level fields of an object come back
+ * as they are. For content the caller asked for by name (an artifact's bytes
+ * as base64): the value patterns above cannot tell such content from a
+ * token, and a masked run in it destroys the content. Every other field is
+ * redacted as usual.
+ */
+export function redactExcept<T>(value: T, verbatim: readonly string[]): T {
+  const out = redactDeep(value);
+  if (verbatim.length === 0 || value === null || typeof value !== "object" || Array.isArray(value)) return out;
+  const source = value as Record<string, unknown>;
+  for (const key of verbatim) {
+    if (Object.hasOwn(source, key)) (out as Record<string, unknown>)[key] = source[key];
+  }
+  return out;
+}
+
 /** Wrap a JSON-serializable value for output as text. */
 export function safeJsonStringify(value: unknown, space?: number): string {
   try {

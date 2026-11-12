@@ -32,7 +32,7 @@ import { buildTools, type ToolContext, toolTextPayload } from "./tools.js";
 import { listResources, readResource, type ResourceContext } from "./resources.js";
 import { validateArguments } from "./validate.js";
 import { createLogger } from "../util/log.js";
-import { redactDeep, redactText } from "../security/redact.js";
+import { redactExcept, redactText } from "../security/redact.js";
 
 const log = createLogger("mcp");
 
@@ -91,11 +91,11 @@ function buildServer(opts: BridgeServerOptions): BridgeServer {
       // Enforce the declared inputSchema before the handler sees args.
       validateArguments(tool.inputSchema, args);
       const result = await tool.handler(args);
-      const text = toolTextPayload(result);
+      const text = toolTextPayload(result, tool.verbatim);
       if (tool.mutating) log.info("mutating tool call", { tool: name });
       return {
         content: [{ type: "text", text }],
-        structuredContent: redactDeep(result) as Record<string, unknown>,
+        structuredContent: redactExcept(result, tool.verbatim ?? []) as Record<string, unknown>,
       };
     } catch (err) {
       // Error texts can echo harness payloads — redact them too.

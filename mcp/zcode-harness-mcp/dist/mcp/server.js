@@ -22,7 +22,7 @@ import { buildTools, toolTextPayload } from "./tools.js";
 import { listResources, readResource } from "./resources.js";
 import { validateArguments } from "./validate.js";
 import { createLogger } from "../util/log.js";
-import { redactDeep, redactText } from "../security/redact.js";
+import { redactExcept, redactText } from "../security/redact.js";
 const log = createLogger("mcp");
 // JSON-RPC error codes of a failed resources/read: what the 2025-era protocol
 // revisions define for it, and what SDK 2.x puts on the wire instead.
@@ -62,12 +62,12 @@ function buildServer(opts) {
             // Enforce the declared inputSchema before the handler sees args.
             validateArguments(tool.inputSchema, args);
             const result = await tool.handler(args);
-            const text = toolTextPayload(result);
+            const text = toolTextPayload(result, tool.verbatim);
             if (tool.mutating)
                 log.info("mutating tool call", { tool: name });
             return {
                 content: [{ type: "text", text }],
-                structuredContent: redactDeep(result),
+                structuredContent: redactExcept(result, tool.verbatim ?? []),
             };
         }
         catch (err) {
