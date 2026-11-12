@@ -439,9 +439,8 @@ describe("solver process: output", () => {
     expect(viaProcess.equals(viaThread)).toBe(true);
   });
 
-  it("never splits a solver line with a proxy line, keeps every byte of an oversized line and the unterminated tail", async () => {
+  it("never splits a solver line with a proxy line, cuts a line at 2 KiB on a character boundary and keeps the unterminated tail", async () => {
     const b64 = (text: string) => Buffer.from(text).toString("base64");
-    const big = "é".repeat(50 * 1024) + "\n"; // 100 KiB of two-byte characters: chunk boundaries fall inside them
     const run = await expectOk(host(`
       const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
       s.configure({ backendModule, idleMs: 2000 });
@@ -449,17 +448,80 @@ describe("solver process: output", () => {
       await new Promise(resolve => setTimeout(resolve, 200));
       process.stderr.write('PROXY LINE\\n');
       await s.run('stderr-line:${b64(" then the rest ✓\n")}', 'sgp', 'p');
-      await s.run('stderr-line:' + Buffer.from('é'.repeat(50 * 1024) + '\\n').toString('base64'), 'sgp', 'p');
+      // 100 KiB of two-byte characters after one ASCII byte: the 2 KiB limit falls inside a character.
+      await s.run('stderr-line:' + Buffer.from('x' + 'é'.repeat(50 * 1024) + '\\nafter the long line\\n').toString('base64'), 'sgp', 'p');
       await s.run('stderr-line:${b64("tail-without-newline")}', 'sgp', 'p');
       s.shutdown();
       await new Promise(resolve => setTimeout(resolve, 500));
     `));
-    const text = run.stderr.toString("utf8");
-    expect(text.split("\n")).toContain("PROXY LINE");
-    expect(text.split("\n")).toContain("partial-without-newline then the rest ✓");
-    expect(text).toContain(big);
-    expect(text.endsWith("tail-without-newline")).toBe(true);
-    expect(run.stderr.length).toBe(Buffer.byteLength("PROXY LINE\npartial-without-newline then the rest ✓\n" + big + "tail-without-newline"));
+    expect(run.stderr.toString("utf8")).toBe(
+      "PROXY LINE\npartial-without-newline then the rest ✓\n" + "x" + "é".repeat(1023) + "\nafter the long line\ntail-without-newline");
+    expect(run.stdout).not.toContain("further lines were dropped");
+  });
+
+  it("passes on at most 200 lines per solver process, says once how many it dropped when the process ends, and starts over with the next process", async () => {
+    const lines = (from: number, to: number, tag: string) => Array.from({ length: to - from }, (_, i) => `${tag} ${from + i}\n`).join("");
+    const run = await expectOk(host(`
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
+      s.configure({ backendModule, idleMs: 2000 });
+      await s.run('stderr-line:${Buffer.from(lines(0, 150, "first")).toString("base64")}', 'sgp', 'p');
+      await s.run('stderr-line:${Buffer.from(lines(150, 320, "first")).toString("base64")}', 'sgp', 'p');
+      s.requestRecycle('request');
+      await s.run('stderr-line:${Buffer.from(lines(0, 3, "second")).toString("base64")}', 'sgp', 'p');
+      s.shutdown();
+      await new Promise(resolve => setTimeout(resolve, 500));
+    `));
+    expect(run.stderr.toString()).toBe(lines(0, 200, "first") + lines(0, 3, "second"));
+    const dropped = run.stdout.split("\n").filter((line) => line.includes("further lines were dropped"));
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toMatch(/^\S+ WARN solver solver wrote more output than one generation may; further lines were dropped droppedLines=120 limitLines=200 limitKiB=64$/);
+  });
+
+  it("passes on at most 64 KiB per solver process, stdout and stderr together", async () => {
+    // 40 lines of 2000 bytes: 32 of them (64,032 bytes with their newlines) fit.
+    const block = Array.from({ length: 20 }, (_, i) => `${String(i).padStart(2, "0")}${"y".repeat(1998)}\n`).join("");
+    const run = await expectOk(host(`
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
+      s.configure({ backendModule, idleMs: 2000 });
+      await s.run('stderr-line:${Buffer.from(block).toString("base64")}', 'sgp', 'p');
+      await s.run('stderr-line:${Buffer.from(block).toString("base64")}', 'sgp', 'p');
+      s.shutdown();
+      await new Promise(resolve => setTimeout(resolve, 500));
+    `));
+    expect(run.stderr.length).toBe(32 * 2001);
+    expect(run.stdout).toMatch(/further lines were dropped droppedLines=8 limitLines=200 limitKiB=64$/m);
+  });
+
+  it("writes solver lines into the live proxy.log through the proxy's log writer, also after the file was rotated", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "solver-proxy-log-"));
+    const writerPath = fileURLToPath(new URL("../log/proxy-log-writer.ts", import.meta.url));
+    const b64 = (text: string) => Buffer.from(text).toString("base64");
+    try {
+      await expectOk(host(`
+        const { openProxyLogWriter, routeOutputThrough } = await import(${JSON.stringify(writerPath)});
+        // What serve does with ZCODE_KIT_LOG_DIR set, with a small rotation threshold.
+        const writer = openProxyLogWriter({ dir: ${JSON.stringify(dir)}, maxBytes: 4096 });
+        const restore = routeOutputThrough(writer);
+        try {
+          const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
+          s.configure({ backendModule, idleMs: 2000 });
+          await s.run('stderr-line:${b64("[captcha-guest-error] before the rotation\n")}', 'sgp', 'p');
+          await new Promise(resolve => setTimeout(resolve, 200));
+          console.log('p'.repeat(5000));
+          console.log('the proxy line that follows the rotation');
+          await s.run('stderr-line:${b64("[captcha-guest-error] after the rotation\n")}', 'sgp', 'p');
+          await new Promise(resolve => setTimeout(resolve, 200));
+          s.shutdown();
+        } finally { restore(); writer.close(); }
+      `, { ZCODE_KIT_STOP_TOKEN: "stop-token-for-the-log-test" }));
+      const live = readFileSync(join(dir, "proxy.log"), "utf8");
+      const rotated = readFileSync(join(dir, "proxy.log.1"), "utf8");
+      expect(rotated).toContain("[captcha-guest-error] before the rotation\n");
+      expect(rotated).not.toContain("after the rotation");
+      expect(live).toBe("the proxy line that follows the rotation\n[captcha-guest-error] after the rotation\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -663,8 +725,14 @@ const PROXY_LIKE = [
   "Pnpm_No_Proxy", "npm_proxy", "YARN_PROXY", "npm_config_proxy", "HTTP_PROXY_EXTRA", "MY_HTTP_PROXY", "SOCKS_PROXY",
 ];
 
+// What the proxy reads as a credential, a key, or the place it keeps them.
+const CREDENTIAL_NAMES = [
+  "ZCODE_PROXY_CREDENTIAL_SECRET", "ZCODE_PROXY_CREDENTIAL_MASTER_KEY", "ZCODE_PROXY_MASTER_KEY", "Zcode_Proxy_Api_Key",
+  "ZCODE_CREDENTIAL_SECRET", "zcode_proxy_credentials_path", "ZCODE_PROXY_ACCOUNTS_PATH", "ZCODE_CONTROL_CAPABILITY",
+];
+
 describe("solver process: environment", () => {
-  it("passes the worker's inputs and strips the stop token, the respawn chain and every ambient proxy name, in any case", async () => {
+  it("passes the worker's inputs and strips the stop token, the respawn chain, the proxy's credentials and keys and every ambient proxy name, in any case", async () => {
     const env: Record<string, string> = {
       ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA: "1",
       CAPTCHA_CDN_CACHE_DIR: "/tmp/solver-test-cdn",
@@ -678,6 +746,7 @@ describe("solver process: environment", () => {
       Zcode_Kit_Respawn_Manager: "/kit/manager.mjs",
       ZCODE_KIT_RESPAWN_ARGS: "[]",
     };
+    for (const name of CREDENTIAL_NAMES) env[name] = "test-credential-value";
     for (const name of PROXY_LIKE) env[name] = "http://127.0.0.1:9";
     const run = await expectOk(host(`${REPORT}
       const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
@@ -685,7 +754,7 @@ describe("solver process: environment", () => {
       const seen = {};
       for (const name of ['ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA', 'CAPTCHA_CDN_CACHE_DIR', 'CAPTCHA_CDN_CACHE_TTL_MS',
         'ZCODE_PROXY_UPSTREAM_PROXY', 'ZCODE_KIT_LOG_DIR', 'ZCODE_SOLVER_TEST_PLAIN']) seen[name] = label(await s.run('env:' + name, 'sgp', 'p'));
-      const names = label(await s.run(${JSON.stringify(`env-names:stop_token|respawn|^(${[...PROXY_LIKE, "ZCODE_PROXY_UPSTREAM_PROXY", "BUN_OPTIONS"].join("|")})$`)}, 'sgp', 'p'));
+      const names = label(await s.run(${JSON.stringify(`env-names:stop_token|respawn|credential|master_key|api_key|accounts_path|capability|^(${[...PROXY_LIKE, "ZCODE_PROXY_UPSTREAM_PROXY", "BUN_OPTIONS"].join("|")})$`)}, 'sgp', 'p'));
       const guard = label(await s.run('env:BUN_OPTIONS', 'sgp', 'p'));
       s.shutdown();
       report({ seen, names, guard });
