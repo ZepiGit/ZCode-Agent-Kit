@@ -16,7 +16,7 @@ import { readArtifact } from "../security/artifact.js";
 import { validateArguments } from "./validate.js";
 import { sessionInScope, sessionWorkspaceOf, workspaceIdentity } from "../security/session.js";
 import { workspaceRef, parseSessionId } from "../protocol/types.js";
-import { redactDeep, safeJsonStringify } from "../security/redact.js";
+import { redactDeep, redactExcept, safeJsonStringify } from "../security/redact.js";
 
 export interface ToolContext {
   config: BridgeConfig;
@@ -37,6 +37,8 @@ export interface ToolSpec {
   inputSchema: Record<string, unknown>;
   /** When true the tool changes state and is blocked in read-only mode. */
   mutating: boolean;
+  /** Top-level result fields returned as they are, not through secret redaction (content the caller asked for). */
+  verbatim?: readonly string[];
   handler: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -899,6 +901,8 @@ export function buildTools(ctx: ToolContext): ToolSpec[] {
       additionalProperties: false,
     },
     mutating: false,
+    // The file's bytes: redaction would replace any long or token-shaped run of the base64 with a placeholder.
+    verbatim: ["contentBase64"],
     handler: async (args) => {
       const { workspacePath } = ws(ctx, args);
       const rel = str(args, "path");
@@ -976,6 +980,11 @@ function guessMime(p: string): string {
   return map[ext] ?? "application/octet-stream";
 }
 
-export function toolTextPayload(value: unknown): string {
-  return safeJsonStringify(value);
+export function toolTextPayload(value: unknown, verbatim: readonly string[] = []): string {
+  if (verbatim.length === 0) return safeJsonStringify(value);
+  try {
+    return JSON.stringify(redactExcept(value, verbatim)) ?? "undefined";
+  } catch (err) {
+    return JSON.stringify({ unserializable: String(err) });
+  }
 }

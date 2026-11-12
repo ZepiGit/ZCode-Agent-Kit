@@ -6,22 +6,31 @@
  * http: binds only the configured host (default 127.0.0.1) — never a public
  * interface; streamable HTTP with per-session transports.
  *
- * The HTTP stack (node:http, the SDK's streamable HTTP transport and hono)
- * is imported lazily inside serveHttp: the stdio bridge, one per harness
- * session, never loads it (about 7 MB RSS).
+ * The HTTP stack (node:http, the SDK's Node HTTP adapter and hono) is
+ * imported lazily inside serveHttp: the stdio bridge, one per harness
+ * session, never loads it.
+ *
+ * MCP SDK 2.x (`@modelcontextprotocol/server`, and `@modelcontextprotocol/node`
+ * for HTTP). The bridge wires the low-level Server to a transport itself, so
+ * it serves the 2025-era protocol revisions only: `initialize` negotiates at
+ * most 2025-11-25.
  */
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema, } from "@modelcontextprotocol/sdk/types.js";
+import { Server, } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { buildTools, toolTextPayload } from "./tools.js";
 import { listResources, readResource } from "./resources.js";
 import { validateArguments } from "./validate.js";
 import { createLogger } from "../util/log.js";
-import { redactDeep, redactText } from "../security/redact.js";
+import { redactExcept, redactText } from "../security/redact.js";
 const log = createLogger("mcp");
+// JSON-RPC error codes of a failed resources/read: what the 2025-era protocol
+// revisions define for it, and what SDK 2.x puts on the wire instead.
+const RESOURCE_NOT_FOUND = -32002;
+const INVALID_PARAMS = -32602;
 function buildServer(opts) {
     const tools = buildTools(opts.toolCtx);
+    const failedReads = new Set();
     const server = new Server(opts.serverInfo, {
         capabilities: {
             tools: { listChanged: false },
@@ -29,16 +38,17 @@ function buildServer(opts) {
             logging: {},
         },
     });
-    server.setRequestHandler(ListToolsRequestSchema, async (_req) => ({
+    server.setRequestHandler("tools/list", async () => ({
         tools: tools.map((t) => ({
             name: t.name,
             title: t.title,
             description: t.description,
+            // The tools declare object schemas (tools.ts); their TypeScript type is only wider.
             inputSchema: t.inputSchema,
             annotations: t.mutating ? { readOnlyHint: false, destructiveHint: false, idempotentHint: false } : { readOnlyHint: true, idempotentHint: true },
         })),
     }));
-    server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    server.setRequestHandler("tools/call", async (req) => {
         const name = String(req.params?.name ?? "");
         const args = (req.params?.arguments ?? {});
         const tool = tools.find((t) => t.name === name);
@@ -52,12 +62,12 @@ function buildServer(opts) {
             // Enforce the declared inputSchema before the handler sees args.
             validateArguments(tool.inputSchema, args);
             const result = await tool.handler(args);
-            const text = toolTextPayload(result);
+            const text = toolTextPayload(result, tool.verbatim);
             if (tool.mutating)
                 log.info("mutating tool call", { tool: name });
             return {
                 content: [{ type: "text", text }],
-                structuredContent: redactDeep(result),
+                structuredContent: redactExcept(result, tool.verbatim ?? []),
             };
         }
         catch (err) {
@@ -70,27 +80,50 @@ function buildServer(opts) {
             };
         }
     });
-    server.setRequestHandler(ListResourcesRequestSchema, async (_req) => ({
+    server.setRequestHandler("resources/list", async () => ({
         resources: listResources(opts.resourceCtx),
     }));
-    server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
+    server.setRequestHandler("resources/read", async (req, ctx) => {
         const uri = String(req.params?.uri ?? "");
         try {
             return await readResource(opts.resourceCtx, uri);
         }
         catch (err) {
             const message = redactText(err instanceof Error ? err.message : String(err));
-            throw Object.assign(new Error(message), { code: -32002 });
+            // Noted for connectServer's send; a cancelled request gets no answer, so its note goes.
+            const { id, signal } = ctx.mcpReq;
+            if (!signal.aborted) {
+                failedReads.add(id);
+                signal.addEventListener("abort", () => failedReads.delete(id), { once: true });
+            }
+            throw Object.assign(new Error(message), { code: RESOURCE_NOT_FOUND });
         }
     });
-    return server;
+    return { server, failedReads };
+}
+/**
+ * Connects the server to the transport. A failed resources/read keeps its
+ * error code -32002 on the wire: SDK 2.x rewrites a handler's -32002 to
+ * -32602 just before the transport on every protocol revision, while the
+ * 2025-era revisions define -32002 for it and the bridge has always sent
+ * that. The read handler notes the request id; the answer to that id gets
+ * the code back here, and nothing else is touched.
+ */
+async function connectServer({ server, failedReads }, transport) {
+    const send = transport.send.bind(transport);
+    transport.send = (message, options) => {
+        if ("error" in message && message.id !== undefined && failedReads.delete(message.id) && message.error.code === INVALID_PARAMS) {
+            return send({ ...message, error: { ...message.error, code: RESOURCE_NOT_FOUND } }, options);
+        }
+        return send(message, options);
+    };
+    await server.connect(transport);
 }
 export async function serveStdio(opts) {
-    const server = buildServer(opts);
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
+    const bridge = buildServer(opts);
+    await connectServer(bridge, new StdioServerTransport());
     log.info("bridge ready on stdio");
-    return () => server.close();
+    return () => bridge.server.close();
 }
 export async function serveHttp(opts, host, port, httpKey) {
     // Defense in depth: the config already rejects non-loopback hosts; assert
@@ -103,9 +136,9 @@ export async function serveHttp(opts, host, port, httpKey) {
         throw new Error("HTTP transport requires an auth key — refusing to serve unauthenticated requests");
     // Lazy HTTP: loaded once here, before listen, so a missing module still
     // fails at start and no request pays for the import.
-    const [{ createServer: createHttpServer }, { StreamableHTTPServerTransport: HttpTransport }] = await Promise.all([
+    const [{ createServer: createHttpServer }, { NodeStreamableHTTPServerTransport: HttpTransport }] = await Promise.all([
         import("node:http"),
-        import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+        import("@modelcontextprotocol/node"),
     ]);
     const keyBuf = Buffer.from(httpKey, "utf8");
     const PORT = port;
@@ -255,23 +288,47 @@ async function handleMcpPostBounded(opts, HttpTransport, req, res, maxBodyBytes)
             catch { /* already gone */ }
     }
 }
+// Per-request servers built and not yet closed, across this process.
+let openRequestServers = 0;
+/** How many HTTP requests currently hold a server and a transport (0 when the bridge is idle). */
+export function openHttpRequestServers() {
+    return openRequestServers;
+}
 async function handleMcpPost(opts, HttpTransport, req, res, parsedBody) {
+    // Stateless streamable HTTP: each POST gets a server and a transport of its
+    // own, closed exactly once when the response closes, whenever that is:
+    // after the answer, while a handler is still running (the client left), or
+    // on an error before anything was written.
+    let transport;
+    let bridge;
+    let closed = false;
+    const close = () => {
+        if (closed)
+            return;
+        closed = true;
+        if (bridge)
+            openRequestServers -= 1;
+        void transport?.close().catch(() => { });
+        void bridge?.server.close().catch(() => { });
+    };
+    res.on("close", close);
     try {
-        // Stateless streamable HTTP: each POST creates a request-scoped transport.
-        const transport = new HttpTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-        const server = buildServer(opts);
-        await server.connect(transport);
+        transport = new HttpTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+        bridge = buildServer(opts);
+        openRequestServers += 1;
+        await connectServer(bridge, transport);
+        if (closed)
+            return; // the client left meanwhile
         // parsedBody comes from our bounded pre-read; the transport's
         // pre-parsed-body path skips reading the (already consumed) request stream.
         await transport.handleRequest(req, res, parsedBody);
-        res.on("close", () => {
-            transport.close();
-            server.close();
-        });
     }
     catch (err) {
         log.error("http transport error", { error: String(err) });
-        if (!res.headersSent)
+        if (!res.headersSent && !res.destroyed)
             res.writeHead(500).end("internal error");
     }
+    // A response that closed before the listener was added emits no second "close".
+    if (res.destroyed)
+        close();
 }

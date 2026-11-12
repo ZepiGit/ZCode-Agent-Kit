@@ -1,0 +1,2217 @@
+[
+ {
+  "name": "initialize 2025-06-18",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"wire-transcript\",\"version\":\"0.0.1\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 218",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"subscribe\":false},\"logging\":{}},\"serverInfo\":{\"name\":\"zcode-harness-mcp\",\"version\":\"0.1.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "2025-06-18 #0 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 36",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":2}"
+  }
+ },
+ {
+  "name": "2025-06-18 #1 tools/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 16978",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "2bd66e763442438dd3358413b944d134eea95c20a7e504aa0a4f77cf89c069e0",
+    "bytes": 16978,
+    "head": "{\"result\":{\"tools\":[{\"name\":\"zcode_health\",\"title\":\"ZCode bridge health\",\"description\":\"Bridge + harness health: runtime detection result, harness version and b"
+   }
+  }
+ },
+ {
+  "name": "2025-06-18 #2 tools/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 16978",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "77ac7ba255be66e0de7390c46f322c9fd97e195d77a17898de32f6acf5172fae",
+    "bytes": 16978,
+    "head": "{\"result\":{\"tools\":[{\"name\":\"zcode_health\",\"title\":\"ZCode bridge health\",\"description\":\"Bridge + harness health: runtime detection result, harness version and b"
+   }
+  }
+ },
+ {
+  "name": "2025-06-18 #3 resources/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"resources/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":5}"
+  }
+ },
+ {
+  "name": "2025-06-18 #4 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://capabilities\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 23437",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "8226c2964907942cd4db4c71cd745132b9e376b79a03d07efd3b97146203d2e4",
+    "bytes": 23437,
+    "head": "{\"result\":{\"contents\":[{\"uri\":\"zcode://capabilities\",\"mimeType\":\"application/json\",\"text\":\"{\\n  \\\"bridgeVersion\\\": \\\"0.1.0\\\",\\n  \\\"protocol\\\": \\\"ZCode Protocol "
+   }
+  }
+ },
+ {
+  "name": "2025-06-18 #5 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://tasks/task-missing/status\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 87",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32002,\"message\":\"unknown task: task-missing\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #6 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://nothing/here\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 99",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"unknown resource: zcode://nothing/here\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #7 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_capabilities\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 35960",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "2d0c35a39d71814851c661de93747e4d17763e0b59f2a056c0537562cb1602b1",
+    "bytes": 35960,
+    "head": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"bridgeVersion\\\":\\\"0.1.0\\\",\\\"protocol\\\":\\\"ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher insp"
+   }
+  }
+ },
+ {
+  "name": "2025-06-18 #8 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_no_such_tool\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 121",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown tool: zcode_no_such_tool\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":10}"
+  }
+ },
+ {
+  "name": "2025-06-18 #9 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_task_get\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 126",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"INVALID_ARGUMENTS: taskId is required\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":11}"
+  }
+ },
+ {
+  "name": "2025-06-18 #10 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_task_get\",\"arguments\":{\"taskId\":\"task-missing\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 115",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown task: task-missing\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":12}"
+  }
+ },
+ {
+  "name": "2025-06-18 #11 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_operation_describe\",\"arguments\":{\"method\":\"session/create\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 1069",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"method\\\":\\\"session/create\\\",\\\"known\\\":true,\\\"entries\\\":[{\\\"id\\\":\\\"session.create\\\",\\\"title\\\":\\\"Create a session\\\",\\\"description\\\":\\\"Create a harness session in a workspace (blocks until runtime preferences are answered).\\\",\\\"backend\\\":\\\"session/create\\\",\\\"direction\\\":\\\"client_call\\\",\\\"availability\\\":\\\"available\\\",\\\"implementation\\\":\\\"implemented\\\",\\\"verification\\\":\\\"live_verified\\\",\\\"mcpTool\\\":\\\"zcode_session_create\\\",\\\"evidence\\\":\\\"live probe: result.session.sessionId + protocol {ZCode Protocol,1}\\\"}]}\"}],\"structuredContent\":{\"method\":\"session/create\",\"known\":true,\"entries\":[{\"id\":\"session.create\",\"title\":\"Create a session\",\"description\":\"Create a harness session in a workspace (blocks until runtime preferences are answered).\",\"backend\":\"session/create\",\"direction\":\"client_call\",\"availability\":\"available\",\"implementation\":\"implemented\",\"verification\":\"live_verified\",\"mcpTool\":\"zcode_session_create\",\"evidence\":\"live probe: result.session.sessionId + protocol {ZCode Protocol,1}\"}]}},\"jsonrpc\":\"2.0\",\"id\":13}"
+  }
+ },
+ {
+  "name": "2025-06-18 #12 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":\"string-id\",\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 46",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":\"string-id\"}"
+  }
+ },
+ {
+  "name": "2025-06-18 #13 resources/templates/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"resources/templates/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":14,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #14 prompts/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"prompts/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":15,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #15 logging/setLevel",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"logging/setLevel\",\"params\":{\"level\":\"info\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 37",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":16}"
+  }
+ },
+ {
+  "name": "2025-06-18 #16 completion/complete",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"completion/complete\",\"params\":{\"ref\":{\"type\":\"ref/prompt\",\"name\":\"x\"},\"argument\":{\"name\":\"a\",\"value\":\"b\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":17,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #17 server/discover",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"server/discover\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":18,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #18 no/such/method",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"no/such/method\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":19,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #19 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"resources/read\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 272",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":20,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"uri\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 #20 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 273",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":21,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"name\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}}"
+  }
+ },
+ {
+  "name": "2025-06-18 notification",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"
+  },
+  "response": {
+   "status": 202,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": ""
+  }
+ },
+ {
+  "name": "2025-06-18 batch",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-06-18"
+   },
+   "body": "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}},{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}]"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 237",
+    "content-type: application/json"
+   ],
+   "body": "[{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":1},{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":2}]"
+  }
+ },
+ {
+  "name": "initialize 2025-11-25",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{},\"clientInfo\":{\"name\":\"wire-transcript\",\"version\":\"0.0.1\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 218",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"subscribe\":false},\"logging\":{}},\"serverInfo\":{\"name\":\"zcode-harness-mcp\",\"version\":\"0.1.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "2025-11-25 #0 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 36",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":2}"
+  }
+ },
+ {
+  "name": "2025-11-25 #1 tools/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 16978",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "2bd66e763442438dd3358413b944d134eea95c20a7e504aa0a4f77cf89c069e0",
+    "bytes": 16978,
+    "head": "{\"result\":{\"tools\":[{\"name\":\"zcode_health\",\"title\":\"ZCode bridge health\",\"description\":\"Bridge + harness health: runtime detection result, harness version and b"
+   }
+  }
+ },
+ {
+  "name": "2025-11-25 #2 tools/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 16978",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "77ac7ba255be66e0de7390c46f322c9fd97e195d77a17898de32f6acf5172fae",
+    "bytes": 16978,
+    "head": "{\"result\":{\"tools\":[{\"name\":\"zcode_health\",\"title\":\"ZCode bridge health\",\"description\":\"Bridge + harness health: runtime detection result, harness version and b"
+   }
+  }
+ },
+ {
+  "name": "2025-11-25 #3 resources/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"resources/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":5}"
+  }
+ },
+ {
+  "name": "2025-11-25 #4 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://capabilities\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 23437",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "8226c2964907942cd4db4c71cd745132b9e376b79a03d07efd3b97146203d2e4",
+    "bytes": 23437,
+    "head": "{\"result\":{\"contents\":[{\"uri\":\"zcode://capabilities\",\"mimeType\":\"application/json\",\"text\":\"{\\n  \\\"bridgeVersion\\\": \\\"0.1.0\\\",\\n  \\\"protocol\\\": \\\"ZCode Protocol "
+   }
+  }
+ },
+ {
+  "name": "2025-11-25 #5 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://tasks/task-missing/status\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 87",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32002,\"message\":\"unknown task: task-missing\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #6 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://nothing/here\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 99",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"unknown resource: zcode://nothing/here\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #7 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_capabilities\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 35960",
+    "content-type: application/json"
+   ],
+   "body": {
+    "sha256": "2d0c35a39d71814851c661de93747e4d17763e0b59f2a056c0537562cb1602b1",
+    "bytes": 35960,
+    "head": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"bridgeVersion\\\":\\\"0.1.0\\\",\\\"protocol\\\":\\\"ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher insp"
+   }
+  }
+ },
+ {
+  "name": "2025-11-25 #8 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_no_such_tool\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 121",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown tool: zcode_no_such_tool\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":10}"
+  }
+ },
+ {
+  "name": "2025-11-25 #9 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_task_get\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 126",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"INVALID_ARGUMENTS: taskId is required\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":11}"
+  }
+ },
+ {
+  "name": "2025-11-25 #10 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_task_get\",\"arguments\":{\"taskId\":\"task-missing\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 115",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown task: task-missing\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":12}"
+  }
+ },
+ {
+  "name": "2025-11-25 #11 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_operation_describe\",\"arguments\":{\"method\":\"session/create\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 1069",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"method\\\":\\\"session/create\\\",\\\"known\\\":true,\\\"entries\\\":[{\\\"id\\\":\\\"session.create\\\",\\\"title\\\":\\\"Create a session\\\",\\\"description\\\":\\\"Create a harness session in a workspace (blocks until runtime preferences are answered).\\\",\\\"backend\\\":\\\"session/create\\\",\\\"direction\\\":\\\"client_call\\\",\\\"availability\\\":\\\"available\\\",\\\"implementation\\\":\\\"implemented\\\",\\\"verification\\\":\\\"live_verified\\\",\\\"mcpTool\\\":\\\"zcode_session_create\\\",\\\"evidence\\\":\\\"live probe: result.session.sessionId + protocol {ZCode Protocol,1}\\\"}]}\"}],\"structuredContent\":{\"method\":\"session/create\",\"known\":true,\"entries\":[{\"id\":\"session.create\",\"title\":\"Create a session\",\"description\":\"Create a harness session in a workspace (blocks until runtime preferences are answered).\",\"backend\":\"session/create\",\"direction\":\"client_call\",\"availability\":\"available\",\"implementation\":\"implemented\",\"verification\":\"live_verified\",\"mcpTool\":\"zcode_session_create\",\"evidence\":\"live probe: result.session.sessionId + protocol {ZCode Protocol,1}\"}]}},\"jsonrpc\":\"2.0\",\"id\":13}"
+  }
+ },
+ {
+  "name": "2025-11-25 #12 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":\"string-id\",\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 46",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":\"string-id\"}"
+  }
+ },
+ {
+  "name": "2025-11-25 #13 resources/templates/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"resources/templates/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":14,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #14 prompts/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"prompts/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":15,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #15 logging/setLevel",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"logging/setLevel\",\"params\":{\"level\":\"info\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 37",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":16}"
+  }
+ },
+ {
+  "name": "2025-11-25 #16 completion/complete",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"completion/complete\",\"params\":{\"ref\":{\"type\":\"ref/prompt\",\"name\":\"x\"},\"argument\":{\"name\":\"a\",\"value\":\"b\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":17,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #17 server/discover",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"server/discover\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":18,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #18 no/such/method",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"no/such/method\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 78",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":19,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #19 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"resources/read\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 272",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":20,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"uri\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 #20 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 273",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":21,\"error\":{\"code\":-32603,\"message\":\"[\\n  {\\n    \\\"expected\\\": \\\"string\\\",\\n    \\\"code\\\": \\\"invalid_type\\\",\\n    \\\"path\\\": [\\n      \\\"params\\\",\\n      \\\"name\\\"\\n    ],\\n    \\\"message\\\": \\\"Invalid input: expected string, received undefined\\\"\\n  }\\n]\"}}"
+  }
+ },
+ {
+  "name": "2025-11-25 notification",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"
+  },
+  "response": {
+   "status": 202,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": ""
+  }
+ },
+ {
+  "name": "2025-11-25 batch",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-11-25"
+   },
+   "body": "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}},{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}]"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 237",
+    "content-type: application/json"
+   ],
+   "body": "[{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":1},{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":2}]"
+  }
+ },
+ {
+  "name": "initialize 2025-03-26",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{},\"clientInfo\":{\"name\":\"wire-transcript\",\"version\":\"0.0.1\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 218",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"protocolVersion\":\"2025-03-26\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"subscribe\":false},\"logging\":{}},\"serverInfo\":{\"name\":\"zcode-harness-mcp\",\"version\":\"0.1.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "2025-03-26 #0 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-03-26"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 36",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":2}"
+  }
+ },
+ {
+  "name": "2025-03-26 #1 resources/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-03-26"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":3}"
+  }
+ },
+ {
+  "name": "2025-03-26 #2 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-03-26"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://nothing/here\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 99",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"error\":{\"code\":-32002,\"message\":\"unknown resource: zcode://nothing/here\"}}"
+  }
+ },
+ {
+  "name": "2025-03-26 #3 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-03-26"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_no_such_tool\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 120",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown tool: zcode_no_such_tool\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":5}"
+  }
+ },
+ {
+  "name": "2025-03-26 #4 server/discover",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-03-26"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"server/discover\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 77",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2025-03-26 notification",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-03-26"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"
+  },
+  "response": {
+   "status": 202,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": ""
+  }
+ },
+ {
+  "name": "2025-03-26 batch",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2025-03-26"
+   },
+   "body": "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}},{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}]"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 237",
+    "content-type: application/json"
+   ],
+   "body": "[{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":1},{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":2}]"
+  }
+ },
+ {
+  "name": "initialize 2024-11-05",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\"clientInfo\":{\"name\":\"wire-transcript\",\"version\":\"0.0.1\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 218",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"subscribe\":false},\"logging\":{}},\"serverInfo\":{\"name\":\"zcode-harness-mcp\",\"version\":\"0.1.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "2024-11-05 #0 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2024-11-05"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 36",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":2}"
+  }
+ },
+ {
+  "name": "2024-11-05 #1 resources/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2024-11-05"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":3}"
+  }
+ },
+ {
+  "name": "2024-11-05 #2 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2024-11-05"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://nothing/here\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 99",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"error\":{\"code\":-32002,\"message\":\"unknown resource: zcode://nothing/here\"}}"
+  }
+ },
+ {
+  "name": "2024-11-05 #3 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2024-11-05"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_no_such_tool\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 120",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown tool: zcode_no_such_tool\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":5}"
+  }
+ },
+ {
+  "name": "2024-11-05 #4 server/discover",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2024-11-05"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"server/discover\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 77",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "2024-11-05 notification",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2024-11-05"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"
+  },
+  "response": {
+   "status": 202,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": ""
+  }
+ },
+ {
+  "name": "2024-11-05 batch",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2024-11-05"
+   },
+   "body": "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}},{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}]"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 237",
+    "content-type: application/json"
+   ],
+   "body": "[{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":1},{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":2}]"
+  }
+ },
+ {
+  "name": "initialize 2026-07-28",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2026-07-28\",\"capabilities\":{},\"clientInfo\":{\"name\":\"wire-transcript\",\"version\":\"0.0.1\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 218",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"subscribe\":false},\"logging\":{}},\"serverInfo\":{\"name\":\"zcode-harness-mcp\",\"version\":\"0.1.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "2026-07-28 #0 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "2026-07-28 #1 resources/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "2026-07-28 #2 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://nothing/here\"}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "2026-07-28 #3 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_no_such_tool\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "2026-07-28 #4 server/discover",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"server/discover\",\"params\":{}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "2026-07-28 notification",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "2026-07-28 batch",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "2026-07-28"
+   },
+   "body": "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}},{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}]"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 2026-07-28 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "initialize 1999-01-01",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"1999-01-01\",\"capabilities\":{},\"clientInfo\":{\"name\":\"wire-transcript\",\"version\":\"0.0.1\"}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 218",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"protocolVersion\":\"2025-11-25\",\"capabilities\":{\"tools\":{\"listChanged\":false},\"resources\":{\"subscribe\":false},\"logging\":{}},\"serverInfo\":{\"name\":\"zcode-harness-mcp\",\"version\":\"0.1.0\"}},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "1999-01-01 #0 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "1999-01-01"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 1999-01-01 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "1999-01-01 #1 resources/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "1999-01-01"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 1999-01-01 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "1999-01-01 #2 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "1999-01-01"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://nothing/here\"}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 1999-01-01 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "1999-01-01 #3 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "1999-01-01"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_no_such_tool\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 1999-01-01 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "1999-01-01 #4 server/discover",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "1999-01-01"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"server/discover\",\"params\":{}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 1999-01-01 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "1999-01-01 notification",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "1999-01-01"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 1999-01-01 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "1999-01-01 batch",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-protocol-version": "1999-01-01"
+   },
+   "body": "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"resources/list\",\"params\":{}},{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}]"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Bad Request: Unsupported protocol version: 1999-01-01 (supported versions: 2025-11-25, 2025-06-18, 2025-03-26, 2024-11-05, 2024-10-07)\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "no version header #0 ping",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 36",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":2}"
+  }
+ },
+ {
+  "name": "no version header #1 resources/list",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"resources/list\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 198",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":3}"
+  }
+ },
+ {
+  "name": "no version header #2 resources/read",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"resources/read\",\"params\":{\"uri\":\"zcode://nothing/here\"}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 99",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":4,\"error\":{\"code\":-32002,\"message\":\"unknown resource: zcode://nothing/here\"}}"
+  }
+ },
+ {
+  "name": "no version header #3 tools/call",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"zcode_no_such_tool\",\"arguments\":{}}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 120",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown tool: zcode_no_such_tool\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":5}"
+  }
+ },
+ {
+  "name": "no version header #4 server/discover",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"server/discover\",\"params\":{}}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 77",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":6,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}"
+  }
+ },
+ {
+  "name": "accept json only",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 406,
+   "headers": [
+    "content-length: 142",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Not Acceptable: Client must accept both application/json and text/event-stream\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "accept event-stream only",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 406,
+   "headers": [
+    "content-length: 142",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Not Acceptable: Client must accept both application/json and text/event-stream\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "accept anything",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "*/*"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 406,
+   "headers": [
+    "content-length: 142",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Not Acceptable: Client must accept both application/json and text/event-stream\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "no accept header",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 406,
+   "headers": [
+    "content-length: 142",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Not Acceptable: Client must accept both application/json and text/event-stream\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "text/plain body",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "text/plain",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 415,
+   "headers": [
+    "content-length: 125",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32000,\"message\":\"Unsupported Media Type: Content-Type must be application/json\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "invalid json",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{not json"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "Content-Type: application/json",
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "json but not json-rpc",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"hello\":\"world\"}"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 101",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32700,\"message\":\"Parse error: Invalid JSON-RPC message\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "empty batch",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "[]"
+  },
+  "response": {
+   "status": 202,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": ""
+  }
+ },
+ {
+  "name": "batch of 101",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":16,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":17,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":18,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":19,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":20,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":26,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":27,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":28,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":29,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":32,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":33,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":34,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":35,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":36,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":37,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":38,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":39,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":40,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":41,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":42,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":43,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":44,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":45,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":46,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":47,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":48,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":49,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":51,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":52,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":53,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":54,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":55,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":56,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":57,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":58,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":59,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":60,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":61,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":62,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":63,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":64,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":65,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":66,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":67,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":68,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":69,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":70,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":71,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":72,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":73,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":74,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":75,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":76,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":77,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":78,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":79,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":80,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":81,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":82,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":83,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":84,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":85,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":86,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":87,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":88,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":89,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":90,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":91,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":92,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":93,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":94,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":95,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":96,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":97,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":98,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":100,\"method\":\"ping\"},{\"jsonrpc\":\"2.0\",\"id\":101,\"method\":\"ping\"}]"
+  },
+  "response": {
+   "status": 400,
+   "headers": [
+    "content-length: 115",
+    "content-type: application/json"
+   ],
+   "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32600,\"message\":\"Invalid Request: Batch must not exceed 100 messages\"},\"id\":null}"
+  }
+ },
+ {
+  "name": "response-only body",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"
+  },
+  "response": {
+   "status": 202,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": ""
+  }
+ },
+ {
+  "name": "session id header is ignored",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "mcp-session-id": "not-a-session"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 36",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "GET /mcp",
+  "request": {
+   "method": "GET",
+   "path": "/mcp",
+   "headers": {
+    "accept": "text/event-stream"
+   }
+  },
+  "response": {
+   "status": 405,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "method not allowed"
+  }
+ },
+ {
+  "name": "DELETE /mcp",
+  "request": {
+   "method": "DELETE",
+   "path": "/mcp",
+   "headers": {}
+  },
+  "response": {
+   "status": 405,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "method not allowed"
+  }
+ },
+ {
+  "name": "PUT /mcp",
+  "request": {
+   "method": "PUT",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 405,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "method not allowed"
+  }
+ },
+ {
+  "name": "POST /other",
+  "request": {
+   "method": "POST",
+   "path": "/other",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}"
+  },
+  "response": {
+   "status": 404,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "not found"
+  }
+ },
+ {
+  "name": "no bearer",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}",
+   "auth": null
+  },
+  "response": {
+   "status": 401,
+   "headers": [
+    "Content-Type: text/plain",
+    "Transfer-Encoding: chunked",
+    "WWW-Authenticate: Bearer"
+   ],
+   "body": "unauthorized: set Authorization: Bearer <key> (the bridge never serves unauthenticated requests)"
+  }
+ },
+ {
+  "name": "wrong bearer",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}",
+   "auth": "Bearer wrong-key"
+  },
+  "response": {
+   "status": 401,
+   "headers": [
+    "Content-Type: text/plain",
+    "Transfer-Encoding: chunked",
+    "WWW-Authenticate: Bearer"
+   ],
+   "body": "unauthorized: set Authorization: Bearer <key> (the bridge never serves unauthenticated requests)"
+  }
+ },
+ {
+  "name": "foreign host",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}",
+   "host": "attacker.example:1"
+  },
+  "response": {
+   "status": 403,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "host not allowed"
+  }
+ },
+ {
+  "name": "foreign origin",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}",
+   "origin": "http://127.0.0.1.evil.example"
+  },
+  "response": {
+   "status": 403,
+   "headers": [
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "origin not allowed"
+  }
+ },
+ {
+  "name": "own origin",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream"
+   },
+   "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}",
+   "origin": "self"
+  },
+  "response": {
+   "status": 200,
+   "headers": [
+    "content-length: 36",
+    "content-type: application/json"
+   ],
+   "body": "{\"result\":{},\"jsonrpc\":\"2.0\",\"id\":1}"
+  }
+ },
+ {
+  "name": "declared body over 4 MiB",
+  "request": {
+   "method": "POST",
+   "path": "/mcp",
+   "headers": {
+    "content-type": "application/json",
+    "accept": "application/json, text/event-stream",
+    "content-length": "4194305"
+   }
+  },
+  "response": {
+   "status": 413,
+   "headers": [
+    "Content-Type: text/plain",
+    "Transfer-Encoding: chunked"
+   ],
+   "body": "request body too large"
+  }
+ }
+]

@@ -696,8 +696,8 @@ test("linux S6/short is judged on the median of 5 fresh repetitions against 16 M
   assert.ok(8 + 20 < 32 && 32 < 40, "the ceiling clears the pane's 8 MB plus one stray 20 MB object and fails two retained parents");
 });
 
-test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6", () => {
-  assert.deepEqual(JOB.windows, JOB.linux.filter((k) => !k.startsWith("S6/")));
+test("the windows leg runs S1, S2 (offline fixture), S3, S4, S5 and S7 — the linux runs without S6 and S5/restart", () => {
+  assert.deepEqual(JOB.windows, JOB.linux.filter((k) => !k.startsWith("S6/") && k !== "S5/restart"));
   assert.ok(JOB.windows.includes("S3/hung") && JOB.windows.includes("S2/short"));
 });
 

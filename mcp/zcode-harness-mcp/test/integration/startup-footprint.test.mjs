@@ -21,6 +21,11 @@ import { BRIDGE_NODE_FLAGS, isolatedTestEnv, startBridge } from "./client.mjs";
 
 const projectRoot = path.resolve(new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]):/, "$1:"));
 const preload = pathToFileURL(path.join(projectRoot, "test", "fixture", "module-trace.mjs")).href;
+// The MCP library's transports, by the file each release line keeps them in
+// (1.x: one package, a file per transport; 2.x: the server package's stdio
+// entry and the separate Node HTTP adapter package).
+const STDIO_TRANSPORT = /\/sdk\/dist\/esm\/server\/stdio\.js$|\/@modelcontextprotocol\/server\/dist\/stdio\.mjs$/;
+const HTTP_TRANSPORT = /\/sdk\/dist\/esm\/server\/streamableHttp\.js$|\/@modelcontextprotocol\/node\/dist\/index\.mjs$/;
 const HTTP_MODULE = /^node:https?$|\/server\/streamableHttp\.js$|\/server\/webStandardStreamableHttp\.js$|\/@hono\/node-server\/|\/node_modules\/hono\//;
 
 function tracePath(label) {
@@ -45,7 +50,7 @@ test("stdio mode loads no HTTP transport module (lazy HTTP)", async () => {
     await c.stop();
   }
   const { urls } = readTrace(trace);
-  assert.ok(urls.some((u) => u.endsWith("/sdk/dist/esm/server/stdio.js")), "the trace saw the stdio transport (the hook works)");
+  assert.ok(urls.some((u) => STDIO_TRANSPORT.test(u)), "the trace saw the stdio transport (the hook works)");
   assert.deepEqual(urls.filter((u) => HTTP_MODULE.test(u)), [], "stdio mode resolved no HTTP transport module");
 });
 
@@ -114,5 +119,5 @@ test("HTTP mode loads the HTTP transport at start and serves MCP", async () => {
   }
   const { urls } = readTrace(trace);
   assert.ok(urls.includes("node:http"), "HTTP mode loaded node:http");
-  assert.ok(urls.some((u) => u.endsWith("/sdk/dist/esm/server/streamableHttp.js")), "HTTP mode loaded the streamable HTTP transport");
+  assert.ok(urls.some((u) => HTTP_TRANSPORT.test(u)), "HTTP mode loaded the streamable HTTP transport");
 });

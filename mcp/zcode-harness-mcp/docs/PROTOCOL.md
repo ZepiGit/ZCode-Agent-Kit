@@ -151,6 +151,16 @@ without a live check.
 The `verification` value of each registry entry says how it was checked:
 `live_verified`, `fixture_verified`, `untested` or `blocked_by_environment`.
 
+## The MCP side
+
+Everything above is the inner protocol, between the bridge and the ZCode
+runtime. Toward its clients the bridge speaks MCP through MCP SDK 2
+(`@modelcontextprotocol/server`, and `@modelcontextprotocol/node` for HTTP),
+over stdio or over HTTP at `POST /mcp`. It serves the protocol revisions up to
+`2025-11-25`; `2026-07-28` is not served. The exact answers of this side are
+pinned by recorded conversations in `test/fixture/wire/`. See "MCP clients and
+protocol revision" in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+
 ## Sources
 
 Besides the bridge's own observations, two public projects were consulted for

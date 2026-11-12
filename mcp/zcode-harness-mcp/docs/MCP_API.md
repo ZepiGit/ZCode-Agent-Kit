@@ -4,8 +4,8 @@
 
 The bridge speaks MCP over stdio (default) or over HTTP at
 `http://<host>:<port>/mcp`. It is built on the low-level `Server` of
-`@modelcontextprotocol/sdk` (`^1.32.2`). A client starts with `initialize`; the
-newest protocol revision that SDK 1.32.2 negotiates is `2025-11-25`. The server
+MCP SDK 2 (`@modelcontextprotocol/server`). A client starts with `initialize`;
+the newest protocol revision the bridge negotiates is `2025-11-25`. The server
 announces tools, resources and logging. It sends no list-change notifications
 and offers no resource subscriptions.
 
@@ -230,6 +230,27 @@ or `waiting_for_input`.
   each; when the current file is full it replaces the older one. A single event
   larger than 4 MiB is stored as `bridge.record_truncated`. A jump in the
   runtime's sequence numbers is recorded as `bridge.event_gap`.
+
+### Runtime restart budget
+
+The bridge starts the runtime on the first call that needs it. When the runtime
+exits, running tasks become `interrupted` and nothing is started until the next
+call that needs it. Every start after the first is a restart: at most 3 in any
+15 minutes, each no earlier than a pause after the last exit (1, 2, 4 seconds,
+doubling up to 30). Calls that arrive together share one restart.
+
+With the budget used up, tools that need the runtime fail as an ordinary tool
+error (`isError: true`) whose text starts with
+`HARNESS_RESTART_BUDGET_EXHAUSTED:` and says what happened, when a slot is free
+again and what to do. No process is started. A task started in that state ends
+`failed` with the same text in `error`.
+
+`zcode_health` reports the state in `runtime.restartBudget`: `limit`,
+`windowSec`, `used`, `exhausted`, `retryAt` and `lastExit` (`at`, `code`,
+`signal`). The environment variable
+`ZCODE_HARNESS_RESTART_BUDGET=<restarts>/<window seconds>` sets the budget
+(default `3/900`). `0/<seconds>` never restarts the runtime. An invalid value
+stops the bridge at startup.
 
 ### Retention and idempotency
 

@@ -73,6 +73,12 @@ recorded.
 - If the runtime exits, or does not answer one request within the time limit
   (60 seconds by default), the bridge stops it and marks all unfinished tasks
   `interrupted`, not only the task that made the request.
+- A runtime that has exited is started again only by the next call that needs
+  it, and at most 3 times in 15 minutes, with a pause of 1, 2, 4 seconds (up to
+  30) after the last exit. After that, tools that need the runtime fail with
+  `HARNESS_RESTART_BUDGET_EXHAUSTED` until a slot is free again (`zcode_health`
+  shows when, in `runtime.restartBudget.retryAt`) or the bridge is restarted.
+  See "Runtime restart budget" in [MCP_API.md](MCP_API.md).
 - A task in the state `unknown` still counts as unfinished: it holds its
   session, blocks other writing tasks in its workspace and counts toward the
   limit of 50. It leaves that state when `zcode_task_cancel` confirms that the
@@ -125,21 +131,32 @@ On other systems the path to `zcode.cjs` must be given with `--runtime-path` or
 
 ## MCP clients and protocol revision
 
-- The bridge uses the 1.x line of `@modelcontextprotocol/sdk` (`^1.32.2`). The
-  newest protocol revision that version 1.32.2 negotiates is `2025-11-25`;
-  it also accepts `2025-06-18`, `2025-03-26`, `2024-11-05` and `2024-10-07`.
-- The revision `2026-07-28` is not implemented, and SDK 1.32.2 does not offer
-  it. A client must be able to open the connection with `initialize`, as the
-  revisions above do. A client that speaks only `2026-07-28` cannot use the
-  bridge.
-- Whether a later 1.x release will offer `2026-07-28`, and how long the 1.x
-  line receives fixes, is a matter of the
-  [SDK's README](https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.x/README.md).
-  What the revision changes is listed in its
+- The bridge is built on MCP SDK 2: `@modelcontextprotocol/server` 2.4.0, and
+  `@modelcontextprotocol/node` 2.1.2 for HTTP, which is loaded in HTTP mode
+  only.
+- It serves the protocol revisions up to `2025-11-25`. `initialize` answers
+  with the revision the client asked for when that is `2025-11-25`,
+  `2025-06-18`, `2025-03-26`, `2024-11-05` or `2024-10-07`, and with
+  `2025-11-25` otherwise.
+- The revision `2026-07-28` is not served. `server/discover` is answered with
+  `-32601`, and an HTTP request with `MCP-Protocol-Version: 2026-07-28` with
+  `400`. A client must be able to open the connection with `initialize`; a
+  client that speaks only `2026-07-28` cannot use the bridge. The reason: the
+  SDK's combined HTTP entry answers older clients with an event stream where
+  the bridge sends a JSON body, and reports an unknown resource with a
+  different error code. Serving both would need the bridge to route HTTP
+  requests by revision itself, which is not built. What the revision changes
+  is listed in its
   [changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog).
-  Neither page was checked for this document.
+- The move to SDK 2 did not change what clients receive. Conversations recorded
+  with SDK 1.32.2 over stdio and HTTP are replayed in the tests and must match
+  byte for byte. A failed `resources/read` still answers with `-32002`. One
+  answer differs: `tools/call` without a tool name is refused with `-32602`
+  instead of `-32603`.
 - In HTTP mode the bridge answers `POST` only, with a JSON body, without a
   session id and without an event stream. `GET` and `DELETE` return `405`.
+  Each request gets its own server and transport; both are closed when the
+  response closes, also when the client leaves while a tool is still running.
 - The tests in this directory use their own MCP client over stdio and `fetch`
   over HTTP, both with the revision `2025-06-18`. No other MCP client is covered
   by them.
