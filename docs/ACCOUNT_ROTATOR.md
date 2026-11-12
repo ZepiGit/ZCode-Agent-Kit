@@ -14,17 +14,26 @@ authorized to access.
 
 ## Enable or disable
 
-The feature is off by default. Setup asks:
+The feature is off by default. On a terminal, setup asks:
 
-> Do you want to activate the Account Rotator feature? [y/n]
+> Do you want to activate the Account Rotator feature? [y/N]
 
-Choose `y` to enable it and keep sign-ins already available to the Kit. Choose
-`n` to leave it off; you can enable it later:
+Answer `y` to enable it and keep sign-ins already available to the Kit. `n` or
+Enter leaves it off. Setup stores the answer and does not ask again;
+`zcode-kit setup --reask` asks again. Without a terminal, setup leaves the
+setting as it is. For unattended installs, pass `--account-rotator y` or
+`--account-rotator n` to setup, or set `ZCODE_KIT_ACCOUNT_ROTATOR` to `y` or
+`n`.
+
+You can switch the feature at any time:
 
 ```sh
 zcode-kit accounts enable
 zcode-kit accounts disable
 ```
+
+Both commands restart a running proxy of this Kit so that the change takes
+effect. Disabling keeps the saved accounts.
 
 ## Add and manage accounts
 
@@ -52,11 +61,27 @@ The account list shows the IDs used by these management commands:
 ```sh
 zcode-kit accounts pause <ID>
 zcode-kit accounts resume <ID>
-zcode-kit accounts remove <ID>
+zcode-kit accounts remove <ID> --yes
 ```
+
+Pausing and resuming apply to new requests; a request that is already running
+keeps its account. `remove` without `--yes` changes nothing and asks you to
+repeat the command with it. Removing an account does not touch the Desktop
+login.
 
 If no eligible saved account is available, the Kit does not switch to an
 unrelated or unauthorized account; the request may fail.
+
+More commands:
+
+| Command | Purpose |
+| --- | --- |
+| `zcode-kit accounts --json` | The account list as JSON, without credentials. |
+| `zcode-kit accounts --live` | The runtime state of the accounts, read from the running proxy. |
+| `zcode-kit accounts quota` | The quota of all accounts in the pool, read from the running proxy. |
+| `zcode-kit accounts explain --model MODEL --operation OP` | Which saved accounts the configuration allows for a model and an operation (`inference`, `billing`, `quota` or `async`), and why the others are excluded. Reads only the configuration and the store. |
+| `zcode-kit accounts doctor [--json]` | Read-only checks of the configuration and the account store. |
+| `zcode-kit accounts unlock [--force]` | Removes an abandoned lock on the account store. A lock that is still held or cannot be read is removed only with `--force`. |
 
 ## Signing in again
 
@@ -85,14 +110,17 @@ zcode-kit accounts health
 zcode-kit accounts health --json
 ```
 
-Shows one line per account: verdict, runtime state, remaining/total per quota
-package with percentage and reset time, when it was last used, and `*` for the
-active account, followed by `usable: N of M` and pool totals. It needs the
-running proxy; otherwise every account is `unknown` and the command tells you
-to run `zcode-kit proxy start`. Exit code 0 means at least one account is `ok`
-or `low`; 1 means none is usable right now or live data is unavailable.
+Shows a table with one row per account: account ID, verdict, plan, quota
+(remaining/total per quota package with percentage and reset time) and when
+the account was last used. `*` marks the active account. Below the table are
+`usable: N of M` and the pool totals. The command needs the running proxy;
+otherwise every account is `unknown` and the command tells you to run
+`zcode-kit proxy start`. Exit code 0 means at least one account is `ok` or
+`low`; 1 means none is usable right now or live data is unavailable.
 
-Verdicts, in order of precedence:
+Verdicts, in order of precedence. The table prints `auth_error` and
+`no_quota_data` as `auth error` and `no quota data`; the JSON output keeps the
+names below.
 
 | Verdict | Meaning |
 | --- | --- |

@@ -15,17 +15,27 @@ Verwende nur Konten, auf die du zugreifen darfst.
 
 ## Aktivieren oder deaktivieren
 
-Die Funktion ist standardmäßig ausgeschaltet. Beim Setup erscheint die Frage:
+Die Funktion ist standardmäßig ausgeschaltet. In einem Terminal fragt das
+Setup:
 
-> Do you want to activate the Account Rotator feature? [y/n]
+> Do you want to activate the Account Rotator feature? [y/N]
 
 Mit `y` wird die Funktion aktiviert und bereits verfügbare Logins werden
-übernommen. Mit `n` bleibt sie ausgeschaltet. Du kannst sie später aktivieren:
+übernommen. Mit `n` oder Enter bleibt sie ausgeschaltet. Das Setup speichert
+die Antwort und fragt nicht erneut; `zcode-kit setup --reask` fragt noch
+einmal. Ohne Terminal lässt das Setup die Einstellung unverändert. Für
+unbeaufsichtigte Installationen übergib dem Setup `--account-rotator y` oder
+`--account-rotator n` oder setze `ZCODE_KIT_ACCOUNT_ROTATOR` auf `y` oder `n`.
+
+Du kannst die Funktion jederzeit umschalten:
 
 ```sh
 zcode-kit accounts enable
 zcode-kit accounts disable
 ```
+
+Beide Befehle starten einen laufenden Proxy dieses Kits neu, damit die
+Änderung wirkt. Beim Deaktivieren bleiben die gespeicherten Konten erhalten.
 
 ## Konten hinzufügen und verwalten
 
@@ -55,11 +65,27 @@ Die Kontenliste zeigt die IDs für diese Verwaltungsbefehle:
 ```sh
 zcode-kit accounts pause <ID>
 zcode-kit accounts resume <ID>
-zcode-kit accounts remove <ID>
+zcode-kit accounts remove <ID> --yes
 ```
+
+Pausieren und Fortsetzen gelten für neue Anfragen; eine bereits laufende
+Anfrage behält ihr Konto. `remove` ohne `--yes` ändert nichts und fordert dich
+auf, den Befehl damit zu wiederholen. Das Entfernen eines Kontos lässt den
+Desktop-Login unberührt.
 
 Gibt es kein verfügbares gespeichertes Konto, verwendet das Kit kein
 unbeteiligtes oder nicht autorisiertes Konto; die Anfrage kann dann fehlschlagen.
+
+Weitere Befehle:
+
+| Befehl | Zweck |
+| --- | --- |
+| `zcode-kit accounts --json` | Die Kontenliste als JSON, ohne Zugangsdaten. |
+| `zcode-kit accounts --live` | Der Laufzeitstatus der Konten, gelesen vom laufenden Proxy. |
+| `zcode-kit accounts quota` | Das Kontingent aller Konten im Pool, gelesen vom laufenden Proxy. |
+| `zcode-kit accounts explain --model MODEL --operation OP` | Welche gespeicherten Konten die Konfiguration für ein Modell und eine Operation (`inference`, `billing`, `quota` oder `async`) zulässt und warum die übrigen ausgeschlossen sind. Liest nur die Konfiguration und den Speicher. |
+| `zcode-kit accounts doctor [--json]` | Rein lesende Prüfungen der Konfiguration und des Kontenspeichers. |
+| `zcode-kit accounts unlock [--force]` | Entfernt eine verwaiste Sperre des Kontenspeichers. Eine Sperre, die noch gehalten wird oder sich nicht lesen lässt, wird nur mit `--force` entfernt. |
 
 ## Erneut anmelden
 
@@ -92,14 +118,17 @@ zcode-kit accounts health
 zcode-kit accounts health --json
 ```
 
-Zeigt je Konto eine Zeile: Urteil, Laufzeitstatus, verbleibend/gesamt je
-Kontingentpaket mit Prozent und Reset-Uhrzeit, letzte Nutzung und `*` für das
-aktive Konto, danach `usable: N of M` und die Summen des Pools. Der Befehl
-braucht den laufenden Proxy; sonst ist jedes Konto `unknown` und der Befehl
-nennt `zcode-kit proxy start`. Exit-Code 0 bedeutet: mindestens ein Konto ist
-`ok` oder `low`; 1 bedeutet: gerade keines nutzbar oder keine Live-Daten.
+Zeigt eine Tabelle mit einer Zeile je Konto: Konto-ID, Urteil, Plan,
+Kontingent (verbleibend/gesamt je Kontingentpaket mit Prozent und
+Reset-Uhrzeit) und letzte Nutzung. `*` markiert das aktive Konto. Unter der
+Tabelle stehen `usable: N of M` und die Summen des Pools. Der Befehl braucht
+den laufenden Proxy; sonst ist jedes Konto `unknown` und der Befehl nennt
+`zcode-kit proxy start`. Exit-Code 0 bedeutet: mindestens ein Konto ist `ok`
+oder `low`; 1 bedeutet: gerade keines nutzbar oder keine Live-Daten.
 
-Urteile, nach Vorrang geordnet:
+Urteile, nach Vorrang geordnet. Die Tabelle gibt `auth_error` und
+`no_quota_data` als `auth error` und `no quota data` aus; die JSON-Ausgabe
+behält die Namen unten.
 
 | Urteil | Bedeutung |
 | --- | --- |

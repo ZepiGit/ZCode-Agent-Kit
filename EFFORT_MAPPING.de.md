@@ -2,14 +2,44 @@
 [English (original)](EFFORT_MAPPING.md) · **Deutsch**
 
 Dieses Dokument listet die Reasoning-Effort-Stufen auf, die die OMP-Integration
-für die unterstützten ZCode-Modelle bereitstellt.
+für die unterstützten ZCode-Modelle bereitstellt, und beschreibt, wie der Proxy
+die Werte anderer Clients zuordnet.
 
-| Modell | Unterstützte Effort-Stufen |
+| Modell | Unterstützte Effort-Stufen | Standard |
+|---|---|---|
+| GLM-5.3 | `low`, `high`, `max` | `max` |
+| GLM-5.3-Flash | `low`, `high`, `max` | `max` |
+
+Die OMP-Integration schreibt diese Stufen und den Standard in ihren
+Provider-Eintrag in `models.yml`. Eine Stufe `medium` gibt es nicht.
+
+## Werte von Anthropic-kompatiblen Clients
+
+Ein Client am Anthropic-kompatiblen Endpunkt, auch OMP, sendet die Stufe als
+`output_config.effort` zusammen mit seinem eigenen `thinking.budget_tokens`.
+Der Proxy ändert beides nicht, abgesehen von der Flash-Regel unten.
+
+## Werte von OpenAI-kompatiblen Clients
+
+Ein Client am OpenAI-kompatiblen Endpunkt sendet `reasoning_effort`; am
+Responses-Endpunkt ist es `reasoning.effort`. Für die GLM-5.3-Modelle ordnet
+der Proxy den Wert den drei Stufen zu:
+
+| `reasoning_effort` | Stufe |
 |---|---|
-| GLM-5.3 | `low`, `high`, `max` |
-| GLM-5.3-Flash | `low`, `high`, `max` |
+| `none`, `minimal`, `light`, `low` | `low` |
+| `medium`, `high` | `high` |
+| `xhigh`, `max`, `ultra` | `max` |
+| nicht gesetzt oder ein anderer Wert | `max` |
 
-GLM-5.3-Flash verwendet jetzt immer Thinking. Eine ausdrückliche Anforderung,
+Danach ergänzt der Proxy das Thinking-Budget dieser Stufe: `8000` Tokens für
+`low`, `16000` für `high` und `32000` für `max`. Das Budget kommt zum
+`max_tokens` der Anfrage hinzu, höchstens bis zum Ausgabelimit des Modells.
+Setzt eine Anfrage ein eigenes Thinking-Budget, bleibt es erhalten.
+
+## GLM-5.3-Flash und abgeschaltetes Thinking
+
+GLM-5.3-Flash verwendet immer Thinking. Eine ausdrückliche Anforderung,
 Thinking abzuschalten, wird auf die niedrigste unterstützte Stufe `low`
 normalisiert; explizites `high` und `max` bleiben unverändert. Im
 Anthropic-kompatiblen Pfad verwendet die niedrige Stufe ein Thinking-Budget von

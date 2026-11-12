@@ -8,7 +8,10 @@ The Kit manages its setup; assistant integrations are configured only with your 
 
 Use the Kit's setup and model commands described in the [main README](../README.md).
 The bundled source version and local changes are listed in the
-[component manifest](../MANIFEST.md).
+[component manifest](../MANIFEST.md). The Kit needs Node.js 24 or newer and
+starts the proxy with Bun; the pinned Bun version is 1.4.2.
+
+## Desktop login import
 
 `zcode-kit auth login zai --import` reads the current shared Desktop login.
 Desktop 0.16.9's `credentials.json` is authoritative when present; only its
@@ -17,6 +20,8 @@ secret, or an unsupported active provider do not silently fall back. Importing
 an active `zai`/`start-plan` login requires an explicitly configured plan for
 `start-plan`; `coding-plan` uses normal OAuth instead. Import does not create accounts, reset
 quotas, or resolve/create API keys. See [account management](../docs/ACCOUNT_ROTATOR.md).
+
+## CAPTCHA solver and cache
 
 The in-process solver runs one CAPTCHA window at a time. It warms one token
 and grows its bank only with demand, up to four tokens; legacy parallel sizing
@@ -48,9 +53,81 @@ corruption, and sensitive DBT argument dumps (`CAPTCHA_DUMP_DBT`) were removed.
 Do not use those switches. The solver, its security gates, and the callable
 `show` alternative remain; debug diagnostics are metadata-only.
 
-The local repair decodes gzip, deflate, and Brotli before interpreting translated streams or JSON error envelopes. Empty or undecodable batch bodies are reported as `upstream_invalid_response`, not successful empty answers. The proxy does not substitute its daemon directory for the calling harness workspace; `ZCODE_IDENTITY_ENV_CWD` remains an explicit override.
+## Responses and retries
 
-Transient failures before any output (connection refused or reset, HTTP 500/502/503/504/524/529, 429, and the gateway error codes the official client retries) are retried up to three times on the same account with a growing delay, a smaller budget than the official client's (base delay 1 s doubling, set by `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS`: base delay in milliseconds, default 500, maximum 10000; `off` keeps only the retry of never-established connections); the account is re-checked before every retry, a `Retry-After` is honoured up to 15 seconds and passed to the client above that, and gateway verdicts (quota, balance, captcha, model, authentication), request errors and anything after output has started are never retried. A stream that fails before its first content event (an error event such as `overloaded_error`, or a cut connection) is retried the same way; the client then receives the response headers once the first content event arrived (at most 15 seconds later). On start-plan, every retry after a response or a dropped connection takes a fresh captcha token. The ordered transport used for enforced client sessions retries a connection dropped before the response like the fetch path (same account; the quota failover never replays it on another account). A native Anthropic stream that ends without `message_stop` receives one terminal `event: error` frame of type `api_error` (its message names `upstream_incomplete`, or `upstream_stream_error` when the read failed); an unfinished last frame is dropped so clients see a parseable failure instead of a silent truncation.
+The proxy decodes gzip, deflate, and Brotli before it interprets translated
+streams or JSON error envelopes. Empty or undecodable batch bodies are reported
+as `upstream_invalid_response`, not as successful empty answers. The proxy does
+not substitute its daemon directory for the calling harness workspace;
+`ZCODE_IDENTITY_ENV_CWD` remains an explicit override.
+
+Transient failures before any output are retried up to three times on the same
+account, a smaller budget than the official client's:
+
+- Retried: a connection that was refused or reset, HTTP 500, 502, 503, 504,
+  524, 529 and 429, and the gateway error codes the official client retries.
+- Never retried: gateway verdicts (quota, balance, captcha, model,
+  authentication), request errors, and anything after output has started.
+- The wait grows: about 1 s before the first retry, then double each time.
+  `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` sets the unit, which is half the first
+  wait, in milliseconds (default 500, maximum 10000). `off` keeps only the
+  retry of connections that were never established.
+- The account is re-checked before every retry. A `Retry-After` is honoured up
+  to 15 seconds and passed to the client above that.
+- A stream that fails before its first content event (an error event such as
+  `overloaded_error`, or a cut connection) is retried the same way; the client
+  then receives the response headers once the first content event arrived (at
+  most 15 seconds later).
+- On start-plan, every retry after a response or a dropped connection takes a
+  fresh captcha token.
+- The ordered transport used for enforced client sessions retries a connection
+  dropped before the response like the fetch path (same account; the quota
+  failover never replays it on another account).
+
+A native Anthropic stream that ends without `message_stop` receives one
+terminal `event: error` frame of type `api_error`. Its message names
+`upstream_incomplete`, or `upstream_stream_error` when the read failed. An
+unfinished last frame is dropped, so clients see a parseable failure instead
+of a silent truncation.
+
+## Stopping, restarting and overload
+
+- **Stop.** The Kit manager asks the proxy to stop with an authenticated
+  request on the loopback listener (`POST /__kit/stop`, the proxy key plus a
+  stop token created for each start). The proxy then answers new requests with
+  HTTP 503 and `Retry-After`, gives requests already running up to 6 seconds
+  to finish, cuts those still open and exits within 10 seconds. The manager
+  ends the process itself only if it is still alive 2 seconds after that.
+- **Overload.** The proxy holds at most 64 MiB of request bodies at a time.
+  Further requests wait, at most 64 of them and each for up to 15 seconds, and
+  are then answered with HTTP 503 and `Retry-After: 2`, never with 429. An
+  idle proxy always admits one request. Set the limit with
+  `server.admission.maxInFlightMB` in `proxy/config.yaml` (1 to 4096) or with
+  `ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB`. Open response streams are not
+  limited.
+- **Memory.** The proxy samples its memory every 15 seconds. Above 512 MB for
+  three samples in a row it writes a warning to the log. Above 1024 MB for
+  three samples in a row it asks the Kit manager for a restart and drains once
+  the manager has accepted it. The manager accepts at most 3 restarts within
+  15 minutes; if it refuses, the proxy keeps serving. The limits are
+  `softLimitMB`, `hardLimitMB`, `samples` and `sampleIntervalSeconds` under
+  `health.memory` in `proxy/config.yaml`.
+- **Unresponsive proxy.** When the proxy's main thread has not run for 45
+  seconds, the proxy asks the Kit manager for a restart and ends itself.
+- **Without the Kit manager.** A proxy that the Kit manager did not start does
+  not offer the stop request, and nobody restarts it. Above the memory limit
+  it only writes to the log and keeps serving; when its main thread stops
+  running, it ends itself and stays down.
+
+## Logs
+
+Started by the Kit manager, the proxy writes its output to `logs/proxy.log`
+through one writer. The writer rotates the file at 5 MB and keeps one older
+file, `proxy.log.1`. It replaces the proxy key, the stop token and strings
+shaped like tokens with `<redacted>`. On macOS and Linux the log files are
+created with mode `0600` and the logs directory with mode `0700`. Read the log
+with `zcode-kit proxy logs [n] [--level warn|error] [--grep <text>]`. A proxy
+started without the Kit manager keeps writing to its terminal.
 
 ## Security
 

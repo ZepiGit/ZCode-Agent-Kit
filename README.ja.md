@@ -3,74 +3,95 @@
 
 普段使っているコーディングアシスタントで、自分の ZCode アカウントを利用できます。
 
-![ZCode Desktop とコーディングアシスタントを Agent Kit で接続](zcode_agent_kit.png)
+![Agent Kit を介してコーディングアシスタントに接続された ZCode Desktop](zcode_agent_kit.png)
 
 *kit はローカルで動作し、モデルへのリクエストは ZCode に送られます。*
 
-コーディングアシスタントはそのままに、ローカル接続を通じて既存の ZCode モデルと利用枠を使えます。入口は 2 つあり、どちらも同等です。検出したアシスタントに `y` と答えて kit に設定させるか、表示されたベース URL と API キーを OpenAI/Anthropic 互換の任意のクライアントに自分で設定します。
+kit は、お使いのマシン上で小さなプロキシを起動します。コーディングアシスタントはこのプロキシと通信し、プロキシはそのリクエストをあなた自身のログインで ZCode に転送します。そのため、アシスタントはそのままで、すでに持っている ZCode のモデルと利用枠を使えます。アシスタントを接続する方法は 2 つあります。検出されたアシスタントを kit に設定させる方法と、kit が表示するベース URL と API キーを OpenAI 互換または Anthropic 互換の任意のクライアントにコピーする方法です。
 
-**オプションのアカウントローテーション:** インストーラーは **"Do you want to activate the Account Rotator feature? [y/n]"** と尋ねます。`y` を選ぶと現在のログインが取り込まれ、その後の `zcode-kit auth login zai` による別アカウントのログインは追加のアカウントとして保存されます。保存済みのユーザーとして再ログインすると、通常はその登録情報が更新されます。ユーザーの照合方法と例外はドキュメントで説明しています。後から有効にするには `zcode-kit accounts enable`、保存済みアカウントの確認には `zcode-kit accounts` を使います。`zcode-kit accounts health [--json]` は、課金データに基づくアカウントごとの判定を要求時に表示します。モデルへのリクエストが成功することの証明ではありません。利用枠データのないアカウントは正常とは見なされず、アカウントを継続的にポーリングすることもありません。詳しくは [Account Rotator のドキュメント (英語)](docs/ACCOUNT_ROTATOR.md) を参照してください。
-
-**手順:** アカウントを準備 → kit をインストール → GLM-5.3(-flash) を使って作業開始。
-
-## ステップ 1 — 必要なものを確認
+## ステップ 1 — 必要なものを確認する
 
 - [ZCode Desktop](https://zcode.z.ai/en)。自分のアカウントでログイン済みで、モデルの利用枠が残っていること。
-- [Node.js 20 以降](https://nodejs.org/)。新しいターミナルで `node --version` を実行して確認します。
-- 別途インストールしたコーディングアシスタント。kit が ZCode へ接続します。
+- [Node.js 24 以降](https://nodejs.org/)。新しいターミナルで `node --version` を実行して確認します。Node.js 20 と 22 はサポート対象外になりました。
+- コーディングアシスタント。別途インストールしておきます。kit はこのアシスタントを ZCode に接続します。
 
+## ステップ 2 — kit をインストールする
 
-## ステップ 2 — kit を一度インストール
+次の 2 つの方法から 1 つを選び、更新のときも同じ方法を使ってください。リリース版インストーラーは、セットアップも実行します。npm の場合は、セットアップを自分で実行します。
 
-Choose the release installer or npm below. The release installer runs setup for you, so there is no separate setup command to run afterward. Setup collects consent for detected assistants using the checkbox list described below, or individual **"Configure ZCode for <HARNESS>? [y/n]"** questions on fallback terminals. A checked row in a nonempty confirmation or a line `y` configures that assistant; a deliberate no skips it without refreshing its files. Absent answers save no new decision: a readable existing kit-owned integration may still refresh, as disclosed before input arms.
+> **インストーラーを実行する前に**：インストーラーはスクリプトをダウンロードして実行し、セットアップは同意したアシスタントの設定を変更します。セットアップはさらに小さなモデルリクエストを 1 回送信し、これが利用枠を少し消費します。変更はすべて、ロールバックできるように記録されます。セキュリティポリシーで求められている場合は、先にインストーラーを読んでください。
 
-The installer shows four numbered stages, one result line per assistant (configured, skipped or failed), a connection check and the connection details for manual client setup. Detailed setup output is saved to the displayed `install.log`; set `ZCODE_KIT_VERBOSE=1` for full output and `NO_COLOR=1` for plain text. Interactive installs collect assistant consent and ask a separate Account Rotator question. Ctrl-C aborts an unconfirmed checkbox batch without applying it; on the fallback sequential path, already applied answers remain. For unattended installs, select assistants explicitly with `ZCODE_KIT_HARNESSES=omp,codex` (or `none`) and set `ZCODE_KIT_ACCOUNT_ROTATOR=y` or `n`; without an explicit selection, undecided assistants are skipped and the existing Account Rotator setting is preserved. Answers are stored under `generated/harness-choices/`: a later setup, update or `zcode-kit doctor --fix` refreshes only assistants you consented to (a `y`, an explicit selection or `zcode-kit integrate <assistant>`) and never re-integrates a skipped one; an integration the kit created before it asked is kept current but only counts as consent once you answer `y`. `zcode-kit setup --reask` asks every detected assistant again on a terminal. A failed connection check remains a warning even when installation succeeds.
-
-> **Before you run the installer:** it downloads and executes a script, changes assistant configuration only under current or saved consent (or the disclosed existing-integration refresh), and may register MCP tools only with the separate eligible consent. Setup also attempts a small model request that can use quota. Changes are recorded, but a later failure can leave earlier changes in place. Inspect the installer if required by your security policy.
-
-**Windows — PowerShell、管理者権限は不要:**
+**Windows — PowerShell、管理者権限は不要**：
 
 ```powershell
 irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.ps1 | iex
 ```
 
-**macOS / Linux — POSIX ターミナル:**
+**macOS / Linux**：
 
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
-どのディレクトリからでも実行できます。リポジトリのクローンは不要です。インストーラーはセットアップを実行し、Bun がなければインストールできます。Windows では Git Bash や WSL ではなく PowerShell を使ってください。
+どのディレクトリからでも実行できます。リポジトリをクローンする必要はありません。Bun がない場合、インストーラーは kit 用に Bun 1.4.2 をインストールします。Windows では、Git Bash や WSL ではなく PowerShell を使ってください。
 
-<details>
-<summary>インストール先と macOS/Linux の前提条件</summary>
+**別の方法 — npm（Windows、macOS、Linux）**：
 
-既定の場所は、Windows では `%LOCALAPPDATA%\zcode-agent-kit`、macOS/Linux では `$HOME/.local/share/zcode-agent-kit` です。作業中のプロジェクトとは別のフォルダーにしてください。ホームフォルダーやソースのチェックアウトをインストール先に指定しないでください。更新時にインストール先のファイルが置き換えられます。
-
-macOS/Linux では `curl`、`tar`、SHA-256 ユーティリティも必要です。Bun の導入には `unzip` が必要です。更新では `rsync` があればそれを使い、なければ内蔵の `tar`/`find` によるミラーを使います。現在、実際のクライアントを使った検証は Windows が中心です。日付付きの [サポートマトリクス](SUPPORT_MATRIX.json) を参照してください。
-
-</details>
-
-**代替 — npm (Windows、macOS、Linux):**
-
-Node.js 20+ と [Bun](https://bun.sh/docs/installation) を事前にインストールし、ターミナルから使用できる必要があります (`bun --version`。Bun 1.4.2 で検証)。
+[Bun](https://bun.sh/docs/installation) が PATH 上にある必要があります（`bun --version`。Bun 1.4.2 でテスト済み）。
 
 ```sh
 npm install -g zcode-agent-kit@latest
 zcode-kit setup --harness auto --installer
 ```
 
-npm installs the `zcode-kit` and `zcode-agent-kit` commands. The second command installs the kit's dependencies, collects assistant consent and then asks the separate Account Rotator y/n question. Run it after installing the npm package. Use one installation method to keep your command, configuration and proxy tied to the same kit copy.
+### セットアップで尋ねられること
 
-Received marked paste and contaminated text are discarded. Unmarked valid key bytes cannot be distinguished from identical typing; the selector does not promise universal paste detection. Completed setup ends with five paste-safe commands under **Next steps**, plus at most one concrete launch command for a successfully configured, consented assistant. One plain copy is kept in `install.log`, including installer mode. That launch row confirms configuration, not an installed executable, sign-in, quota or a working model reply.
+セットアップはインストール済みのアシスタントを探し、そのうちどれを設定してよいかを尋ねます。通常のターミナルでは、チェックボックスのリストが表示されます。矢印キーで移動、Space キーで選択の切り替え、`a` ですべての切り替え、Enter キーで確定です。色またはカーソル制御が使えないターミナルでは、代わりにアシスタントごとに `[y/n]` の質問が 1 つずつ表示されます。同意しなかったアシスタントには、何も設定されません。
 
-## ステップ 3 — 好きなアシスタントで GLM-5.3(-flash) を使う
+回答は `generated/harness-choices/` に保存され、以降のセットアップ、更新、`zcode-kit doctor --fix` で再利用されるため、再び尋ねられることはありません。`zcode-kit setup --reask` を実行すると、もう一度尋ねられます。まだ確定していないチェックボックスのリストは、Ctrl-C でキャンセルできます。
 
-新しいターミナルを開き、`zcode-kit help` を実行します。その後、kit フォルダーではなく **自分のプロジェクト内** でターミナルを開きます。インストールしたアシスタントを選ぶか、手動の接続情報を使って他の任意のクライアントを設定してください。
+続いてセットアップは、**Account Rotator** を有効にするかどうかを一度だけ尋ねます。Account Rotator を有効にすると、kit は保存済みの複数の ZCode ログインを使えるようになります。`y` と答えると現在のログインが取り込まれ、それ以降に `zcode-kit auth login zai` で行ったログインは追加のアカウントとして保存されます。この設定は、後から `zcode-kit accounts enable` または `disable` で変更できます。詳しくは [Account Rotator のドキュメント](docs/ACCOUNT_ROTATOR.md) を参照してください。
 
-**手動: ベース URL + API キー（OpenAI/Anthropic 互換の任意のクライアント）**
+インストーラーは、番号の付いた 4 つの段階、アシスタントごとに 1 行の結果、接続チェック、接続情報を表示します。出力の全体は、インストーラーが示す `install.log` に保存されます。セットアップの最後には、次に実行するコマンドの短い一覧が表示されます。接続チェックの失敗は警告であり、インストールの失敗ではありません。Desktop のログインと利用枠を確認してください。
 
-kit にアシスタントを設定させる必要はありません。ローカルプロキシを起動し、表示される接続情報をコピーしてください。プロキシの実行中は `zcode-kit proxy status` でも再表示できます。
+<details>
+<summary>無人インストール、インストール先、前提条件</summary>
+
+ターミナルがない場合、セットアップは何も尋ねず、指定されたものだけを設定します。`ZCODE_KIT_HARNESSES=omp,codex`（または `none`）と、`ZCODE_KIT_ACCOUNT_ROTATOR=y` または `n` を設定してください。指定しなかったアシスタントはスキップされ、Account Rotator を指定しなかった場合は既存の設定がそのまま維持されます。`ZCODE_KIT_VERBOSE=1` を設定するとセットアップの出力がすべて表示され、`NO_COLOR=1` を設定すると色が無効になります。
+
+既定のインストール先は、Windows では `%LOCALAPPDATA%\zcode-agent-kit`、macOS と Linux では `$HOME/.local/share/zcode-agent-kit` です。このフォルダーは自分のプロジェクトとは別にしておいてください。インストーラーのインストール先に、ホームフォルダーやソースのチェックアウトを指定してはいけません。更新のときに、インストール先のファイルが置き換えられるためです。
+
+macOS と Linux では、`curl`、`tar`、SHA-256 ツールも必要です。Bun のインストールには `unzip` が必要です。`rsync` がインストールされていれば、更新時にそれが使われます。実際のアシスタントを使った実地テストの大部分は、Windows で行いました。どの環境で何をテストしたかは、日付入りの [サポートマトリクス](SUPPORT_MATRIX.json) に記載しています。
+
+</details>
+
+## ステップ 3 — 最初のリクエストを送る
+
+kit のフォルダーではなく、**自分のプロジェクトの中で**新しいターミナルを開きます。使っているアシスタントに対応するコマンドを実行してください。
+
+**OMP**：
+
+```sh
+omp -p --model zcode/glm-5.3-flash "Reply with ok"
+```
+
+**Claude Code**：
+
+```sh
+zcode-kit run claude-code -- -p "Reply with ok" --model glm-5.3-flash
+```
+
+**Codex**：
+
+```sh
+zcode-kit run codex -- exec "Reply with ok" -m glm-5.3-flash
+```
+
+これらのコマンドは、プロキシが動いていなければ起動します。`ok` という返答があれば、アカウント、プロキシ、アシスタントが連携して動作していることがわかります。セットアップが成功しただけでは、そこまではわかりません。返答がない場合は、下の「困ったときは」を参照してください。利用枠を使い切っている場合、再インストールしても解決しません。
+
+**その他のクライアント：ベース URL と API キー**
+
+kit にアシスタントを設定させる必要はありません。プロキシを起動し、表示される接続情報をコピーしてください。
 
 ```sh
 zcode-kit proxy start
@@ -80,76 +101,44 @@ zcode-kit proxy start
 Connection details (local ZCode proxy, running and verified)
   OpenAI-compatible base URL:    http://127.0.0.1:8457/v1   (POST /chat/completions, POST /responses, GET /models)
   Anthropic-compatible base URL: http://127.0.0.1:8457      (POST /v1/messages)
-  API key (Bearer / x-api-key):  <ローカルプロキシのキー>
+  API key (Bearer / x-api-key):  <your local proxy key>
   Model IDs:                     glm-5.3, glm-5.3-flash
 ```
 
-クライアントの API 形式に合うベース URL、API キーまたは認証トークンとしてのキー、モデル ID のいずれかを入力します。完全なキーは対話的なターミナルでのみ表示されます。スクリプト向けには `zcode-kit models --show-key` が出力し、プロキシが動いていない間は `zcode-kit proxy status` が値を未検証として表示します。この方法でも kit のプロキシと利用枠のある ZCode ログインは必要で、省略できるのは、kit にアシスタントを設定させる手順だけです。ポートは `proxy/config.yaml` から取得されます。
-
-**OMP:**
-
-```sh
-omp -p --model zcode/glm-5.3-flash "Reply with ok"
-```
-
-**Claude Code:**
-
-```sh
-zcode-kit run claude-code -- -p "Reply with ok" --model glm-5.3-flash
-```
-
-**Codex:**
-
-```sh
-zcode-kit run codex -- exec "Reply with ok" -m glm-5.3-flash
-```
-
-これらのコマンドは必要に応じてプロキシを起動・確認します。`ok` という返答があれば、最初のモデル呼び出しは成功です。セットアップの成功メッセージだけでは確認できません。
-
-**返答がありましたか？** そのリクエストについて、アカウント、プロキシ、選んだクライアントが連携して動きました。自分のプロジェクトで使い始められます。
-
-**返答がありませんか？** 下の「ヘルプ」の確認項目を使ってください。利用枠が尽きている場合、再インストールしても解決しません。
+クライアントの API 形式に合うベース URL を入力し、キーを API キーまたは認証トークンとして入力し、モデル ID のいずれか 1 つを入力します。接続情報は、`zcode-kit proxy status` でもう一度表示できます。キーの全体が表示されるのは、対話的なターミナルだけです。スクリプト向けには、`zcode-kit models --show-key` がキーを出力します。ポートは `proxy/config.yaml` の設定に従います。
 
 ## ステップ 4 — 自分のプロジェクトで使う
 
-OMP の対話セッション:
-
 ```sh
 omp --model zcode/glm-5.3-flash
-```
-
-Claude Code の対話セッション:
-
-```sh
 zcode-kit run claude-code -- --model glm-5.3-flash
 ```
 
-テキストには `glm-5.3`、テキストと画像には `glm-5.3-flash` を選びます。画像への対応はアシスタント側にも依存します。オプションの MCP ブリッジはインストール済みの ZCode ランタイムのツールを提供します。ブリッジを登録するだけではモデルは接続されません。
+テキストには `glm-5.3`、テキストと画像には `glm-5.3-flash` を使います。画像を扱えるかどうかは、アシスタントにも左右されます。
 
-Flash は常に thinking を使用します。thinking を無効にしたリクエストは `low` に正規化され、明示的に選んだ `high` と `max` は維持されます。OMP では `--thinking low`、`--thinking high`、`--thinking max` でレベルを選びます。直接のプロキシ経由と Claude Code で Flash の応答完了を確認済みですが、すべてのアシスタントが検証に合格したことを意味するものではありません。
+Flash は常に thinking を使用します。thinking を無効にするリクエストは、`low` レベルで送信されます。`high` と `max` はそのまま渡されます。OMP では、`--thinking low`、`--thinking high`、`--thinking max` のいずれかでレベルを選びます。[effort レベルの対応表](EFFORT_MAPPING.md) を参照してください。
+
+kit は MCP ブリッジを登録することもできます。MCP ブリッジは、インストール済みの ZCode ランタイムのツールをアシスタントに提供します。これは、モデルの接続とは別のものです。[MCP ブリッジのドキュメント](mcp/zcode-harness-mcp/README.ja.md) を参照してください。
 
 <details>
-<summary>その他のアシスタントと統合の制限</summary>
+<summary>その他のアシスタント</summary>
 
-| アシスタント | セットアップ後の操作 |
+| アシスタント | セットアップ後に行うこと |
 | --- | --- |
-| OpenCode | `zcode-kit run opencode -- .` を実行し、ZCode モデルを選びます。 |
+| OpenCode | `zcode-kit run opencode -- .` を実行し、ZCode のモデルを選びます。 |
 | Aider | `zcode-kit run aider -- --model openai/glm-5.3-flash` を実行します。 |
-| pi | プロキシを手動で起動してから `pi --model zcode/glm-5.3` を実行します。 |
-| Goose | プロキシを手動で起動してから `goose session --provider zcode` を実行します。 |
-| Continue | 先に Continue を開いて設定します。`zcode-kit integrate continue` を実行し、プロキシを起動して UI でモデルを選びます。 |
-| Cline / Kilo Code | そのアシスタントに `y` と答えた後、生成された値を拡張機能の UI に入力してプロキシを起動します。リリース版では、その場合に `generated/cline-zcode-values.md` または `generated/kilo-zcode-values.md` が生成されます。 |
+| pi | プロキシを起動してから、`pi --model zcode/glm-5.3` を実行します。 |
+| Goose | プロキシを起動してから、`goose session --provider zcode` を実行します。 |
+| Continue | Continue の設定が作成されるように、Continue を一度開きます。`zcode-kit integrate continue` を実行してプロキシを起動し、UI でモデルを選びます。 |
+| Cline / Kilo Code | セットアップは、設定値を `generated/cline-zcode-values.md` または `generated/kilo-zcode-values.md` に書き出します。その値を拡張機能の設定にコピーし、プロキシを起動します。 |
 
-OMP は直接実行します。`zcode-kit run` は使用しません。kit のランチャーがあるのは Claude Code、Codex、Aider、OpenCode のみです。Codex は分離したプロファイルを使うため、通常の設定やスキルは自動では引き継がれません。Claude Code のルーティングはコミュニティによる互換機能です。アダプターがあっても、すべてのクライアントやバージョンを実環境で検証したことにはなりません。
+OMP は `zcode-kit run` を介さず、直接起動してください。kit のランチャーがあるのは、Claude Code、Codex、Aider、OpenCode だけです。Codex は専用のプロファイルで動作するため、個人の Codex の設定やスキルは引き継がれません。`zcode-kit integrate <assistant> --dry-run` は、書き込まれる内容を、実際には書き込まずに一覧表示します。
 
-[アシスタント別のドキュメント](harnesses/README.ja.md) と [サポートマトリクス](SUPPORT_MATRIX.json) を参照してください。
+アダプターがあるからといって、そのアシスタントのすべてのバージョンを実際のモデルの返答でテストしたわけではありません。何をテストしたかは、[アシスタント別ガイド](harnesses/README.ja.md) と [サポートマトリクス](SUPPORT_MATRIX.json) に記載しています。
 
 </details>
 
-<details>
-<summary>プロキシを手動で起動・停止・再起動</summary>
-
-次のコマンドはすべてのプラットフォームで、リリース版と npm のどちらのインストールでも同じように使えます。
+## プロキシ
 
 ```sh
 zcode-kit proxy start
@@ -159,57 +148,61 @@ zcode-kit proxy restart
 zcode-kit proxy stop
 ```
 
-`stop`、`restart`、および自動再起動は、接続中のクライアントと処理中のリクエストを中断します。その後リクエストを再試行してください。`zcode-kit proxy` のないリリースでは、同じコマンドを付けて `node <インストール先>/proxy/zcode-proxy-manager.mjs` を実行します。`start` と `status` は、プロキシがこのインストールのものと検証できた時点で接続情報（ベース URL、キー、モデル ID）を表示します。停止中のプロキシは未起動として報告され、設定値にはその旨のラベルが付きます。
+`start` と `status` は、プロキシがこのインストール自身のものだと確認できたときに、接続情報を表示します。`zcode-kit proxy status --json` は、スクリプト向けに、ヘルス状態、ベース URL、モデル ID、利用枠を含む JSON オブジェクトを 1 つ出力します。この出力にキーが含まれることはなく、終了コードが 0 になるのは、kit 自身のプロキシが応答した場合だけです。
 
-**応答しないプロキシ:** `start`、`restart`、`stop` が応答しないプロキシを終了するのは、それがこの kit 自身のものと証明できた場合だけです。条件は、60 秒の起動猶予期間を過ぎていること、起動時刻が記録と一致すること、コマンドラインが kit のプロキシであること、ヘルスチェックが 3 回連続（約 25 秒）で失敗することです。所有者が不明なプロセスは決して終了せず、コマンドはその旨を報告して中止します。`zcode-kit doctor --fix` は管理対象の設定を再適用し、プロキシが停止しているか応答しないことが証明された場合は同じ方法で起動します。
+<details>
+<summary>停止、再起動、過負荷時の動作</summary>
 
-**自動再起動:** プロキシのメインスレッドが応答しなくなった場合やメモリ使用量が高いままの場合、プロキシは kit のマネージャーに新しい起動を依頼します。受け付けるのは 15 分間に最大 3 回までです。それを超えた場合や再起動履歴が読めない場合は依頼が拒否され、`zcode-kit proxy logs 50` を確認して起動するまでプロキシは停止したままになります。残った起動ロックは意図的に引き継ぎません。起動処理が実行中でなければ、メッセージに示されたロックファイルを削除して再試行してください。
+**停止と再起動**：kit は、自身のプロキシに停止を依頼します。プロキシは、処理中のリクエストが完了するまで最大 6 秒待ち、10 秒以内に終了します。その間に届いたリクエストには、`Retry-After` ヘッダー付きの HTTP 503 が返されます。6 秒を過ぎても実行中のリクエストは打ち切られるため、送り直す必要があります。プロキシがその期限を 2 秒過ぎても終了していない場合に限り、kit が自らプロセスを終了させます。
+
+**kit が終了させるのは自身のプロキシだけ**：プロセスを終了させるのは、そのプロセスがローカルキーを使った確認に対してこのインストールのプロキシとして応答し、pid が記録と一致し、開始時刻が起動時の記録と一致する場合だけです。応答しなくなったプロキシを終了させるのは、次の条件をすべて満たす場合だけです。60 秒の起動猶予期間を過ぎていること、開始時刻とコマンドラインが一致すること、ヘルスチェックが 3 回連続で失敗することです。そのポートを使っているそれ以外のものは、報告するだけで手を加えません。
+
+**中断された起動**：起動が中断された場合、次の起動は、先の起動がもう存在しないと証明できたときに処理を引き継ぎます。まだ実行中の起動から引き継ぐことはありません。起動中に Ctrl-C を押すと、ロックは直ちに解放されます。
+
+**大きなリクエストが同時に多すぎる場合**：プロキシが同時に受け入れるリクエストボディは、合計 64 MiB までです。それを超えるリクエストは、空きができるのを最大 15 秒待ち、その後は HTTP 503 と `Retry-After: 2` が返されます。レート制限エラーが返されることはありません。この上限は、`proxy/config.yaml` の `server.admission.maxInFlightMB` です。
+
+**自動再起動**：プロキシは、応答しなくなったとき、または 15 秒間隔の 3 回のチェックでメモリ使用量が 1024 MB を超えたままだったときに、kit に新しい起動を依頼します。512 MB を超えた場合は、ログに警告を書き込むだけです。このような再起動が受け付けられるのは、15 分間に最大 3 回です。それ以降は、停止したプロキシは、`zcode-kit proxy logs 50` を確認して自分で起動するまで停止したままになります。これらの上限は、`proxy/config.yaml` の `health.memory` の下にあります。
+
+**ログ**：`logs/proxy.log` は 5 MB でローテーションされ、古いファイルが 1 つ、`proxy.log.1` として残ります。ログファイルを読めるのは自分のユーザーだけで、プロキシキーとトークンはログの行から取り除かれます。
 
 </details>
 
-## ヘルプ
+## 困ったときは
 
 ```sh
 zcode-kit doctor
 zcode-kit auth status
+zcode-kit --version
 ```
 
-- **コマンドが見つからない:** ターミナルを開き直してください。リリース版のインストールでは、`%LOCALAPPDATA%\Microsoft\WindowsApps` (Windows) または `$HOME/.local/bin` (macOS/Linux) が PATH にあるか確認します。
-- **セットアップでアシスタントをスキップした:** 次回 `y` と答えるか、`zcode-kit integrate <アシスタント>`（複数なら `zcode-kit setup --harness <リスト>`）を実行するか、`zcode-kit setup --reask` で検出したすべてのアシスタントについて改めて質問させます。ターミナルがない場合は `ZCODE_KIT_HARNESSES` でアシスタントを選択します。
-- **クライアントの手動設定:** `zcode-kit proxy status` はプロキシの実行中にベース URL、キー、モデル ID を表示します。完全なキーは対話的なターミナルでのみ表示されます（それ以外は `zcode-kit models --show-key`）。
-- **複数のアシスタントをまとめて選ぶ:** `zcode-kit setup --select` は、アシスタントごとの質問の代わりに、検出されたアシスタントの番号付きリストを 1 つ表示します（`1,3`、`all`、`none`）。選んだものは設定され、選ばなかった検出済みのものはスキップとして記録されます。ターミナルが必要で、`--harness`/`ZCODE_KIT_HARNESSES` による明示的な選択があるときは無視され、検出されたすべてのアシスタントの保存済みの回答を置き換えます。
-- **保存した回答を忘れる:** `zcode-kit doctor` は読めない決定ファイルや対象のない決定ファイルを報告します。`zcode-kit doctor --forget <アシスタント>` でそれを削除できます（統合はそのまま残り、次のセットアップで再び質問されます。`zcode-kit rollback` で元に戻せます）。
-- **スクリプトと監視:** `zcode-kit proxy status --json` は、状態、ベース URL、モデル ID を含む JSON オブジェクトを 1 つ出力します。kit 自身のプロキシが動作中のときだけクォータも含まれ、そのときだけ終了コード 0 になります。キーは含まれません。
-- **ベンダーがゲートウェイを移した?** `zcode-kit doctor --upstream` は、kit のプロキシが使うゲートウェイを、ZCode クライアントが現在受け取るプロバイダー設定と比較します（zcode.z.ai とその CDN への認証情報なしのリクエストが最大 3 回。明示的に指定した場合のみ）。
-- **モデルから返答がない:** Desktop のログインと残りの利用枠を確認します。クライアントがプロキシを起動しない場合は、手動で起動します。ローカルのヘルスチェックだけではモデルへのアクセスは確認できません。
-- **プロキシが停止している、または応答しない:** `zcode-kit doctor --fix` または `zcode-kit proxy restart` を実行します。終了されるのは、kit 自身のものと証明された応答のないプロキシだけです。上の手動操作のセクションを参照してください。
-- **OMP の自動起動:** OMP を直接起動します。セットアップでネイティブの Node/Bun を固定し、拡張機能は kit モジュールを OMP にインポートせず、新しい子プロセスで事前確認を行います。失敗時は機密情報を含まないカテゴリを表示し、子プロセスの実行時間は最大 120 秒です。原因を修正し、セッションごとの 60 秒の待機時間後に再試行してください。同じセッション内で復旧できます。ランタイムを移動した場合は `zcode-kit setup --harness auto` を再実行し、拡張機能を再読み込みします。ポートを使用している不明なプロセスには干渉しません。
-- **Desktop のログインをインポート:** `zcode-kit auth login zai --import` で Desktop 0.16.9 の現在アクティブな `zai`/`start-plan` ログインを取り込みます。プランの明示的な設定が必要です。`credentials.json` が存在する場合はそれが正となり、認証情報が無効でも旧 `config.json` へ暗黙にはフォールバックしません。新形式の `coding-plan` ログインでは、代わりに `zcode-kit auth login zai` で通常の OAuth を使います。インポーターは API キーの作成や取得を行いません。
-- **401 またはポートが使用中:** 別の kit がインストールされていないか確認します。キーを削除したり、不明なプロセスを終了したりしないでください。
-- **セットアップが途中で失敗した:** 1 つのアシスタントの失敗が他を取り消すことはありません。そのアシスタント自身の部分的な変更は元に戻され、インストーラーは警告を出して続行します。再実行する前に表示されたロールバックコマンドを確認します。以前の変更が残っている場合があります。
+- **コマンドが見つからない**：ターミナルを開き直してください。リリース版インストールの場合は、`%LOCALAPPDATA%\Microsoft\WindowsApps`（Windows）または `$HOME/.local/bin`（macOS と Linux）が PATH に含まれているか確認します。
+- **モデルから返答がない**：Desktop のログインと利用枠を確認します。クライアントがプロキシを起動しない場合は、プロキシを起動してください。ローカルのプロキシが正常でも、モデルに到達できることの証明にはなりません。
+- **プロキシが停止している、または応答しない**：`zcode-kit doctor --fix` または `zcode-kit proxy restart` を実行します。
+- **プロキシが HTTP 503 を返す**：プロキシが再起動中か、大きなリクエストの処理で手一杯です。`Retry-After` に示された時間が過ぎてから再試行してください。
+- **401、またはポートが使用中**：kit がもう 1 つインストールされていないか調べます。キーを削除したり、心当たりのないプロセスを終了させたりしないでください。
+- **セットアップでアシスタントがスキップされた**：`zcode-kit integrate <assistant>` を実行します。または `zcode-kit setup --reask` を実行すると、検出されたすべてのアシスタントについてもう一度尋ねられます。`zcode-kit setup --select` は、代わりに番号付きのリストを 1 つ表示します（`1,3`、`all`、`none`）。
+- **保存された回答を削除する**：`zcode-kit doctor --forget <assistant>` で削除できます。統合はそのまま残り、次のセットアップでもう一度尋ねられます。
+- **セットアップが一部失敗した**：1 つのアシスタントが失敗しても、他のアシスタントの設定は取り消されません。失敗したアシスタント自身の途中までの変更は元に戻され、セットアップはロールバック用のコマンドを表示します。
+- **Desktop のログインの取り込み**：`zcode-kit auth login zai --import` は、Desktop で現在有効な `zai`/`start-plan` ログインを取り込みます。`coding-plan` ログインの場合は、`--import` を付けずに `zcode-kit auth login zai` を使います。
+- **OMP がプロキシを起動しない**：OMP を直接起動してください。セットアップの後に Node または Bun の場所が変わった場合は、`zcode-kit setup --harness auto` をもう一度実行し、拡張機能を再読み込みします。起動に失敗すると、OMP は 60 秒待ってから同じセッション内で再試行します。
+- **ベンダーがゲートウェイを移した**：`zcode-kit doctor --upstream` は、kit が使うゲートウェイと、ZCode クライアントに渡されるゲートウェイを比較します。このコマンドは、zcode.z.ai に認証なしのリクエストを最大 3 回送信し、明示的に実行したときにだけ動作します。
+
+Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict · 4 safe-start refused · 5 auth/identity failure · 20 setup: at least one harness failed, the others are configured · 130 setup aborted with Ctrl-C (unconfirmed checkbox batch not applied; prior applied answers remain).
 
 ## 実際のプロジェクトデータを使う前に
 
-プロキシは localhost のみで動かし、`.proxykey`、認証情報、生成された設定ファイルを共有しないでください。
+プロキシは localhost にとどめ、`.proxykey`、認証情報、生成された設定ファイルを決して共有しないでください。
 
-**[セキュリティポリシー (英語)](SECURITY.md) を読んでください（[ドイツ語版](SECURITY.de.md) もあります）:** 管理されたプロキシは、OS のサンドボックスなしでベンダーの CAPTCHA JavaScript を実行する場合があります。接続はループバックに限定され、Bearer キーで認証されますが、プロセスの分離とは異なります。CAPTCHA のワーカースレッドはプロキシの応答性を保つためのもので、サンドボックスでも新しい権限境界でもありません。アカウントの制限を回避するものではなく、すべてのチャレンジの成功も保証しません。
+**[セキュリティポリシー](SECURITY.md) を読んでください**。ZCode のセッションを維持するために、プロキシはベンダーの CAPTCHA JavaScript を、オペレーティングシステムのサンドボックスなしで実行します。プロキシはループバックでのみ待ち受け、ローカルキーを要求しますが、これはプロセスの分離ではありません。kit はアカウントの制限を回避するものではなく、すべてのチャレンジが成功することも保証できません。
 
-<details>
-<summary>kit の更新または削除</summary>
+## kit の更新または削除
 
-**更新:**
+**更新**：`zcode-kit update` を実行します。リリース版インストールでは、最新のリリースをダウンロードし、その SHA-256 チェックサムを検証して、その場で更新します。npm インストールでは、パッケージを再インストールします。git チェックアウトでは、`origin/main` まで fast-forward します。プロキシキー、設定、ログ、バックアップ、アカウントは保持されます。`zcode-kit update --version vX.Y.Z` は、指定したバージョンをインストールします。プロキシは、ファイルが変更される前に停止され、その後に再び起動されます。
 
-- どのインストール形態でも `zcode-kit update` を実行できます。リリース版インストールは最新リリースをダウンロードし、SHA-256 で検証してから同一ディレクトリ内で更新し、プロキシキー・設定・ログ・バックアップ・アカウントを保持します。npm インストールは npm のインストールを再実行し、git チェックアウトは `origin/main` へ fast-forward します。バージョンを固定するには `zcode-kit update --version vX.Y.Z` を使います。
-- 手動の代替手段: 同じ専用のインストール先で同じリリース版インストーラーを再実行する（最新版を使う場合、古い `ZCODE_KIT_VERSION` の固定指定は削除）。npm の場合は `npm install -g zcode-agent-kit@latest` を実行してから、その npm インストールで `zcode-kit setup --harness auto --installer` を実行します。
+0.2.x から更新する場合：更新する**前に** Node.js 24 以降をインストールしてください。更新そのものは古い Node.js でも実行されますが、それに続くセットアップは、古い Node.js では実行を拒否します。
 
-`update` はファイルに触れる前にプロキシを停止し、更新後に再起動します。コマンドが成功した時点で、プロキシは更新後のコードで動作しています。更新時も同じインストール方法を使用してください。
-
-**統合の削除:** プロキシを止め（`zcode-kit proxy stop`、上記参照）、`zcode-kit uninstall` を実行します。インストール先、依存関係、ログ、プロキシキー、共有の認証情報は残ります。Desktop からログアウトするわけではありません。残ったファイルを削除する前に確認してください。
-
-npm インストールの場合は、その後 `npm uninstall -g zcode-agent-kit` でグローバルパッケージを削除します。
-
-</details>
+**削除**：`zcode-kit proxy stop` でプロキシを停止してから、`zcode-kit uninstall` を実行します。このコマンドは、kit が記録しておいた、アシスタントの設定への変更をロールバックします。インストールフォルダー、ログ、プロキシキー、共有の認証情報はそのまま残り、Desktop からログアウトされることもありません。npm インストールの場合は、`npm uninstall -g zcode-agent-kit` も実行します。
 
 ## 詳細情報
 
-[アシスタントのガイド](harnesses/README.ja.md) · [サポートマトリクス](SUPPORT_MATRIX.json) · [セキュリティポリシー（英語）](SECURITY.md) · [問題を報告](https://github.com/ZepiGit/ZCode-Agent-Kit/issues) · [コンポーネントマニフェスト（英語）](MANIFEST.md)
+[アシスタント別ガイド](harnesses/README.ja.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.md) · [MCP ブリッジ](mcp/zcode-harness-mcp/README.ja.md) · [kit の仕組み](docs/ARCHITECTURE.md) · [用語集](docs/GLOSSARY.md) · [サポートマトリクス](SUPPORT_MATRIX.json) · [セキュリティポリシー](SECURITY.md) · [ライセンスと同梱コンポーネント](MANIFEST.md) · [問題を報告](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)
