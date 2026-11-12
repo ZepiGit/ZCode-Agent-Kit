@@ -30,6 +30,7 @@ const fakeSolver = {
     lastSdkScripts: null,
     capMB: null,
     enforcement: "none" as const,
+    capExits: 0,
     lastFootprintMB: null,
     abnormalExits: 0,
     failFast: false,

@@ -221,14 +221,22 @@ describe("thread transport", () => {
     `, { ZCODE_SOLVER_TEST_INHERITED: "from-parent" });
   });
 
-  it("a solver thread gets none of the proxy's credentials, keys, stop token, respawn variables or ambient proxy variables", async () => {
+  it("a solver thread gets none of the proxy's credentials, keys, stop token, respawn variables or ambient proxy variables, nor any variable named like a secret", async () => {
     const withheld = {
       ZCODE_KIT_STOP_TOKEN: "x", ZCODE_KIT_RESPAWN_NODE: "x", zcode_kit_respawn_args: "x",
       ZCODE_PROXY_CREDENTIAL_SECRET: "x", ZCODE_PROXY_CREDENTIAL_MASTER_KEY: "x", ZCODE_PROXY_MASTER_KEY: "x", zcode_proxy_api_key: "x",
       ZCODE_CREDENTIAL_SECRET: "x", ZCODE_PROXY_CREDENTIALS_PATH: "x", ZCODE_PROXY_ACCOUNTS_PATH: "x", ZCODE_CONTROL_CAPABILITY: "x",
       HTTP_PROXY: "http://127.0.0.1:9", https_proxy: "http://127.0.0.1:9", NO_PROXY: "x", npm_proxy: "http://127.0.0.1:9",
+      ZCODE_PROXY_KEY: "x",
+      // Named like a secret, whoever set them.
+      OPENAI_API_KEY: "x", gh_token: "x", AWS_SECRET_ACCESS_KEY: "x", AWS_ACCESS_KEY_ID: "x", Db_Password: "x", MY_SECRET: "x",
+      GOOGLE_APPLICATION_CREDENTIALS: "x", SOME_API_KEY_FILE: "x", SSH_KEY: "x",
     };
-    const kept = { ZCODE_PROXY_UPSTREAM_PROXY: "http://127.0.0.1:9", CAPTCHA_CDN_CACHE_TTL_MS: "1234", ZCODE_PROXY_CONFIG: "config.yaml" };
+    const kept = {
+      ZCODE_PROXY_UPSTREAM_PROXY: "http://127.0.0.1:9", CAPTCHA_CDN_CACHE_TTL_MS: "1234", ZCODE_PROXY_CONFIG: "config.yaml",
+      // Near misses that stay.
+      KEYBOARD_LAYOUT: "x", TOKENIZERS_PARALLELISM: "x", SECRET_SANTA: "x", MONKEY: "x",
+    };
     const pattern = `^(${[...Object.keys(withheld), ...Object.keys(kept)].join("|")})$`;
     const out = await threadScenario(`
       const s = solver.createCaptchaSolver({ transport: solver.threadTransport() });

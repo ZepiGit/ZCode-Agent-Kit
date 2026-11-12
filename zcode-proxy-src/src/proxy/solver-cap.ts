@@ -13,7 +13,8 @@
  *   sampling    The OS enforces nothing here (macOS, a Linux without a
  *               delegated memory controller, a Job Object that could not be
  *               set up). The solver process then measures its own memory
- *               footprint and ends itself at the cap (captcha-solver-process.ts).
+ *               footprint and ends itself at the cap (captcha-solver-process.ts),
+ *               after telling the proxy with SOLVER_AT_CAP_MARKER.
  *   none        No cap at all (the thread transport).
  *
  * A mode is never reported on the strength of a call that merely succeeded:
@@ -27,6 +28,13 @@ export type SolverEnforcement = "job-object" | "cgroup" | "sampling" | "none";
 
 /** The config.yaml key that sets the cap; the log line of a cap kill names it. */
 export const SOLVER_CAP_KEY = "solver.memoryCapMB";
+/**
+ * What a solver process under sampling writes at the end of its stderr right
+ * before it ends itself at the cap, followed by ` footprintMB=<n>` and a
+ * newline. The proxy takes it out of the relayed output, so the output bound
+ * cannot drop it, and writes the cap's event line itself.
+ */
+export const SOLVER_AT_CAP_MARKER = "@@zcode-solver-at-cap";
 export const DEFAULT_SOLVER_CAP_MB = 300;
 /** Below this the solver cannot load its DOM runtime and solve at all (about 50 MB before the first solve). */
 export const MIN_SOLVER_CAP_MB = 128;
@@ -92,6 +100,12 @@ export function configuredSolverCapMB(): number {
 // ---------------------------------------------------------------- Linux
 
 const SYSTEMD_TIMEOUT_MS = 5_000;
+// Operating systems whose user systemd failed to start a scope (or did not
+// answer in time). It is not asked again for the life of the proxy: every
+// later solver process would wait for the same failure before its first solve.
+// A success is not remembered, so a later failure is still noticed.
+const systemdUnavailable = new WeakSet<SolverCapOs>();
+const NO_SYSTEMD_SCOPE = "no systemd user scope could be started";
 /** How long the solver process may take to show up in its scope after systemd accepted the request. */
 const SCOPE_ENTER_MS = 2_000;
 const CGROUP_ROOT = "/sys/fs/cgroup";
@@ -103,6 +117,7 @@ function cgroupOf(pid: number, os: SolverCapOs): string | null {
 }
 
 async function applyCgroup(pid: number, capBytes: number, os: SolverCapOs): Promise<SolverCap> {
+  if (systemdUnavailable.has(os)) return sampling(NO_SYSTEMD_SCOPE);
   // Unique per solver process: a failed scope of an earlier process with a
   // reused pid must not collide with this one.
   const unit = `zcode-captcha-solver-${process.pid}-${pid}-${randomBytes(4).toString("hex")}.scope`;
@@ -115,7 +130,10 @@ async function applyCgroup(pid: number, capBytes: number, os: SolverCapOs): Prom
     "MemorySwapMax", "t", "0",
     "0",
   ], SYSTEMD_TIMEOUT_MS);
-  if (started.code !== 0) return sampling("no systemd user scope could be started");
+  if (started.code !== 0) {
+    systemdUnavailable.add(os);
+    return sampling(NO_SYSTEMD_SCOPE);
+  }
 
   // systemd moves the process asynchronously.
   let directory: string | null = null;

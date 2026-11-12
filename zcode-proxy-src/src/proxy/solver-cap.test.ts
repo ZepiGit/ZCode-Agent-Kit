@@ -17,7 +17,7 @@ interface FakeLinux {
 }
 
 /** A Linux whose systemd puts the process into the requested scope; `files` are the scope's cgroup files. */
-function linux(opts: { busctl?: number | null; enters?: boolean; scopeFiles?: Record<string, string>; result?: string } = {}): FakeLinux {
+function linux(opts: { busctl?: number | null | (() => number | null); enters?: boolean; scopeFiles?: Record<string, string>; result?: string } = {}): FakeLinux {
   const commands: string[][] = [];
   const files = new Map<string, string>();
   const os: SolverCapOs = {
@@ -25,7 +25,7 @@ function linux(opts: { busctl?: number | null; enters?: boolean; scopeFiles?: Re
     async run(command, args) {
       commands.push([command, ...args]);
       if (command === "busctl") {
-        const code = opts.busctl === undefined ? 0 : opts.busctl;
+        const code = opts.busctl === undefined ? 0 : typeof opts.busctl === "function" ? opts.busctl() : opts.busctl;
         if (code === 0 && opts.enters !== false) {
           const unit = args[args.indexOf("StartTransientUnit") + 2]!;
           const scope = `/user.slice/user-1000.slice/user@1000.service/app.slice/${unit}`;
@@ -84,6 +84,38 @@ describe("solver cap: Linux (systemd user scope)", () => {
       const cap = await applySolverCap(PID, CAP, linux(failure).os);
       expect(cap.enforcement).toBe("sampling");
       expect(await cap.endedAtCap()).toBe(false);
+    }
+  });
+
+  it("does not ask systemd again once a scope request has failed or timed out: later solver processes go straight to sampling", async () => {
+    for (const busctl of [1, null]) {
+      const { os, commands } = linux({ busctl });
+      const first = await applySolverCap(PID, CAP, os);
+      const second = await applySolverCap(PID + 1, CAP, os);
+      const third = await applySolverCap(PID + 2, CAP, os);
+      expect([first, second, third].map((cap) => [cap.enforcement, cap.reason])).toEqual(Array(3).fill(["sampling", "no systemd user scope could be started"]));
+      expect(commands).toHaveLength(1);
+    }
+  });
+
+  it("does not remember a success: systemd is asked for every solver process until a request fails", async () => {
+    let fail = false;
+    const { os, commands } = linux({ busctl: () => (fail ? 1 : 0) });
+    expect((await applySolverCap(PID, CAP, os)).enforcement).toBe("cgroup");
+    expect((await applySolverCap(PID, CAP, os)).enforcement).toBe("cgroup");
+    fail = true;
+    expect((await applySolverCap(PID, CAP, os)).enforcement).toBe("sampling");
+    fail = false;
+    expect((await applySolverCap(PID, CAP, os)).enforcement).toBe("sampling");
+    expect(commands.filter(([command]) => command === "busctl")).toHaveLength(3);
+  });
+
+  it("asks again after a scope that carried no limit or was never entered: only a failed request is remembered", async () => {
+    for (const failure of [{ enters: false }, { scopeFiles: { "memory.max": "max\n" } }]) {
+      const { os, commands } = linux(failure);
+      await applySolverCap(PID, CAP, os);
+      await applySolverCap(PID, CAP, os);
+      expect(commands.filter(([command]) => command === "busctl")).toHaveLength(2);
     }
   });
 
