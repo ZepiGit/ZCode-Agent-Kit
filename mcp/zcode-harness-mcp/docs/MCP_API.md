@@ -263,6 +263,14 @@ when a task ends, on every lookup and at startup.
 A removed task loses its record, its stored result and its events. Calls with
 its id fail with `unknown task: <taskId>`.
 
+Several bridges can share one data directory. Each task record carries
+`owner: { pid, startedAt }`, the bridge process that last wrote it. A bridge
+does not interrupt, load or remove a task that another running bridge owns. If
+the stored files of a finished task are gone when it is read, `zcode_task_get`
+and `zcode_task_result` answer once with the tool error
+`task expired: its stored result was removed (<taskId>)` and afterwards with
+`unknown task: <taskId>`.
+
 `zcode_task_start` with an `idempotencyKey` that belongs to a kept task returns
 that task, in whatever state it is, and starts nothing. The same key with
 another workspace fails (`idempotency key belongs to a different workspace`).
@@ -274,7 +282,7 @@ task.
 | Tool | Arguments | Behaviour |
 | --- | --- | --- |
 | `zcode_interactions_list` | `status?` (`pending`, `resolved`, `all`; default `all`) | Permission requests and questions with their id, kind, offered options, task and session, state and answer. `resolved` covers everything that is no longer pending. |
-| `zcode_interaction_respond` | `interactionId`, `optionId?`, `value?`, `cancel?` | Answers a pending interaction. A permission request takes one of the offered `optionId`s, or `cancel: true` to deny. A question takes `value` with the answers, or `cancel: true`. A second answer, or one after the time limit, is refused. Changes state. |
+| `zcode_interaction_respond` | `interactionId`, `optionId?`, `value?`, `cancel?` | Answers a pending interaction. A permission request takes one of the offered `optionId`s, or `cancel: true` to deny. A question takes `value` with the answers, or `cancel: true`. An option is sent as approval only when its kind is `allow_once`, `allow_always` or `allow_project`, and as refusal when its kind names one (`deny`, `reject`, `cancel`). For any other option the tool returns an error, sends nothing and leaves the interaction pending. A second answer, or one after the time limit, is refused. Changes state. |
 
 Which interactions reach the client depends on `--interaction-policy`; see the
 [README](../README.md#permission-requests). The bridge answers these requests of

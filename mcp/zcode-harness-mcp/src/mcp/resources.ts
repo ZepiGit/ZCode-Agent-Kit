@@ -54,9 +54,7 @@ export async function readResource(ctx: ResourceContext, uri: string): Promise<{
     const taskId = mTask[1]!;
     const kind = mTask[2]!;
     if (kind === "status") {
-      const rec = ctx.tasks.get(taskId);
-      if (!rec) throw new Error(`unknown task: ${taskId}`);
-      return send(safeJsonStringify(rec));
+      return send(safeJsonStringify(ctx.tasks.read(taskId)));
     }
     if (kind === "result") {
       return send(safeJsonStringify(await ctx.tasks.buildResult(taskId)));

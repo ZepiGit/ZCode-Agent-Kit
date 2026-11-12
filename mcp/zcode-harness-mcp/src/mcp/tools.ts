@@ -768,9 +768,7 @@ export function buildTools(ctx: ToolContext): ToolSpec[] {
     },
     mutating: false,
     handler: async (args) => {
-      const rec = ctx.tasks.get(str(args, "taskId"));
-      if (!rec) throw new Error(`unknown task: ${String(args.taskId)}`);
-      return rec;
+      return ctx.tasks.read(str(args, "taskId"));
     },
   });
 
