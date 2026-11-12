@@ -192,18 +192,21 @@ function link(target, path) {
   return cpSync(target, path);
 }
 
+// The version every fixture kit reports unless a scenario names another one.
+// It is fixed so that a release, which changes package.json, does not change
+// the captured banners and update lines.
+const FIXTURE_VERSION = "0.2.42";
+
 /** Copy the kit members a CLI run needs into `root` (a release-shaped tree, no .git). */
-function writeKitTree(root, { srcLinks = true, version } = {}) {
+function writeKitTree(root, { srcLinks = true, version = FIXTURE_VERSION } = {}) {
   for (const rel of KIT_FILES) cpSync(join(KIT, rel), join(root, rel), { recursive: true });
   // Fixture rule: the template port is the scenario's own port (nextPort()), so
   // no code path can reach 8457.
   const tpl = join(root, "proxy", "config.example.yaml");
   writeFileSync(tpl, readFileSync(tpl, "utf8").replace(/^  port: 8457$/m, `  port: ${PORT}`));
-  if (version) {
-    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-    pkg.version = version;
-    writeFileSync(join(root, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
-  }
+  const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  pkg.version = version;
+  writeFileSync(join(root, "package.json"), JSON.stringify(pkg, null, 2) + "\n");
   mkdirSync(join(root, "zcode-proxy-src", "src"), { recursive: true });
   writeFileSync(join(root, "zcode-proxy-src", "src", "index.ts"), fakeProxySource());
   // The release payload ships the shared token set and width core (pack
