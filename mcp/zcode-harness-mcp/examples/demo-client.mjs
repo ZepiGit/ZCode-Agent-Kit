@@ -137,7 +137,8 @@ step(5, "Session-Modell und Modus nativ auswählen (keine Workspace-Defaults)");
 const schema = await tool("zcode_settings_schema", { workspacePath: workspace });
 const modeSetting = schema.settings.find((s) => s.path === "mode");
 console.log(`  workspace mode: effektiv=${modeSetting.effective}, schreibbar=${modeSetting.writable}`);
-const session = await tool("zcode_session_create", { workspacePath: workspace, mode: "build" });
+// zcode_session_create answers { session: { sessionId, … }, … }.
+const session = (await tool("zcode_session_create", { workspacePath: workspace, mode: "build" })).session;
 const selection = await tool("zcode_model_set", {
   scope: "session", sessionId: session.sessionId, model: preferred, mode: "build",
 });

@@ -121,7 +121,7 @@ export const MCP_RESTART = {
   maxSpawns: 1 + PROCESSES.respawnsPer15Min, // the first start + 3 restarts, for K = 20 failing calls
 };
 
-// The OMP no-op floor (ticket 03's floor test): n fresh
+// The OMP no-op floor (the floor test of the OMP stub-host leg): n fresh
 // stub hosts charged for a hook that does nothing. The median must be below
 // half the waiter gate (a floor at the gate could not tell a waiter from
 // noise) and every repetition below the gate itself (the gate stays one
