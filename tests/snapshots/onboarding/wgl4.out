@@ -1,0 +1,7 @@
+
+[1mNext steps[0m [2m─────────────────────────────────────────────────────────────────────[0m
+  [1mzcode-kit doctor      [0m  [2mCheck the installation[0m
+  [1mzcode-kit proxy start [0m  [2mStart the proxy for manual clients[0m
+  [1mzcode-kit proxy status[0m  [2mCheck proxy health and connection details[0m
+  [1mzcode-kit auth status [0m  [2mCheck sign-in status[0m
+  [1mzcode-kit --help      [0m  [2mBrowse all commands[0m

@@ -34,6 +34,7 @@ import {
   RESPAWN_ACK_POLL_MS, RESPAWN_ACK_WAIT_MS, type RespawnAnswer, type RespawnOutcome, type WatchdogHandle,
 } from "./watchdog.js";
 import { DEFAULT_MEMORY_THRESHOLDS, type MemoryThresholds } from "./memory-thresholds.js";
+import { STOP_GRACE_MS } from "./stop-deadlines.mjs";
 import { SHED_RETRY_AFTER_SECONDS } from "../server/admission.js";
 // Type-only: erased at runtime.
 import type { ProxyServer } from "../server/server.js";
@@ -306,8 +307,8 @@ export function createHealthSupervisor(opts: HealthSupervisorOptions): HealthSup
 
 // ------------------------------------------------------------------ shutdown
 
-/** What started a graceful shutdown. Ticket 22 adds the stop request, update later. */
-export type ShutdownReason = "signal" | "memory";
+/** What started a graceful shutdown. The stop request is ticket 22's; update later. */
+export type ShutdownReason = "signal" | "memory" | "stop";
 
 export interface ShutdownTiming {
   /** How long requests already accepted may run before the force point. */
@@ -317,18 +318,21 @@ export interface ShutdownTiming {
 }
 
 /**
- * Per trigger. A signal comes from the kit manager's `stop` (SIGTERM; on POSIX
- * it sends SIGKILL 5 s later until ticket 22 shares the deadline) or Ctrl-C,
- * so drain + the 3 s account-metadata flush + exit stay inside 5 s. The memory
- * respawn keeps today's 10 s cap: 6 s for the requests in flight, then the
- * flush. ADR-0008 cond 3, ADR-0014.
+ * Per trigger. A signal comes from Ctrl-C, an external supervisor, or the kit
+ * manager's fallback against a proxy that does not know the stop request, so
+ * drain + the 3 s account-metadata flush + exit stay inside the 5 s
+ * SIGTERM→SIGKILL escalation. The memory respawn keeps today's 10 s cap: 6 s
+ * for the requests in flight, then the flush. The stop request (ADR-0014
+ * cond 4) takes the shared STOP_GRACE_MS as its own hard deadline: 6 s of
+ * drain, then the flush and the close inside the 10 s.
  */
 export const SHUTDOWN_TIMING: Readonly<Record<ShutdownReason, Readonly<ShutdownTiming>>> = Object.freeze({
   signal: Object.freeze({ drainMs: 1_000, deadlineMs: 4_500 }),
   memory: Object.freeze({ drainMs: 6_000, deadlineMs: 10_000 }),
+  stop: Object.freeze({ drainMs: 6_000, deadlineMs: STOP_GRACE_MS }),
 });
 
-const CAUSE: Record<ShutdownReason, string> = { signal: "it was asked to stop", memory: "a memory respawn" };
+const CAUSE: Record<ShutdownReason, string> = { signal: "it was asked to stop", memory: "a memory respawn", stop: "a stop request" };
 
 /** Longest wait for the listener to close after the force point. */
 const CLOSE_WAIT_MS = 1_000;
@@ -413,7 +417,13 @@ export function createGracefulShutdown(opts: GracefulShutdownOptions): GracefulS
         const fields = { reason, waitedMs: Date.now() - startedAt, cut, shed: opts.server.drainShed() };
         if (cut > 0) log.warn("drain finished", fields);
         else log.info("drain finished", fields);
-        try { await opts.flush?.(); } catch { /* bounded by the caller and by the deadline */ }
+        try {
+          await opts.flush?.();
+          // The flush's marker line (ADR-0014 cond 6): the windows-latest
+          // `proxy stop` proof reads it from proxy.log, between the drain
+          // finished line and the exit.
+          if (opts.flush) log.info("flush finished", { reason });
+        } catch { /* bounded by the caller and by the deadline */ }
         const closeWait = delay(CLOSE_WAIT_MS);
         await Promise.race([opts.server.close().catch(() => {}), closeWait.promise]);
         closeWait.cancel();

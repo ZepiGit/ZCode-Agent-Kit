@@ -22,11 +22,11 @@
 
 ## ステップ 2 — kit を一度インストール
 
-以下のリリース版インストーラーまたは npm を選びます。リリース版インストーラーはセットアップも実行するため、後から別のセットアップコマンドを実行する必要はありません。セットアップは検出したアシスタントごとに **"Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]"**（アシスタント名入り）と 1 回ずつ質問し、`y` と答えた場合だけそのアシスタントの設定を変更します。`n` はスキップし、設定には触れません。ターミナルでの回答がない場合、新しく設定されるものはありません。アシスタントが設定されるのは明示的に選択したとき（後述）か、以前に同意したときだけで、質問より前に kit が作成した統合は最新に保たれるだけです。
+Choose the release installer or npm below. The release installer runs setup for you, so there is no separate setup command to run afterward. Setup collects consent for detected assistants using the checkbox list described below, or individual **"Configure ZCode for <HARNESS>? [y/n]"** questions on fallback terminals. A checked row in a nonempty confirmation or a line `y` configures that assistant; a deliberate no skips it without refreshing its files. Absent answers save no new decision: a readable existing kit-owned integration may still refresh, as disclosed before input arms.
 
-インストーラーは番号付きの 4 段階、アシスタントごとの結果行（設定済み、スキップ、失敗）、接続確認、および手動でクライアントを設定するための接続情報を表示します。詳しいセットアップ出力は表示された `install.log` に保存されます。`ZCODE_KIT_VERBOSE=1` で全出力、`NO_COLOR=1` でプレーンテキストにできます。対話的なインストールでは、アシスタントごとに、さらに別途 Account Rotator について `y` または `n` を尋ねます。Ctrl-C で質問を中止でき、`y` と答えていないものはすべてそのままです。無人インストールでは `ZCODE_KIT_HARNESSES=omp,codex`（または `none`）でアシスタントを明示的に選択し、`ZCODE_KIT_ACCOUNT_ROTATOR=y` または `n` を指定してください。明示的な選択がなければ、未決定のアシスタントはスキップされ、既存の Account Rotator 設定が維持されます。回答は `generated/harness-choices/` に保存されます。その後のセットアップ、update、`zcode-kit doctor --fix` は同意したアシスタント（`y`、明示的な選択、または `zcode-kit integrate <アシスタント>`）だけを更新し、スキップしたアシスタントを再統合することはありません。質問より前に kit が作成した統合は最新に保たれますが、`y` と答えるまで同意とは見なされません。`zcode-kit setup --reask` はターミナルで、検出したすべてのアシスタントについて改めて質問します。接続確認に失敗しても、インストール自体が成功した場合は警告として扱われます。
+The installer shows four numbered stages, one result line per assistant (configured, skipped or failed), a connection check and the connection details for manual client setup. Detailed setup output is saved to the displayed `install.log`; set `ZCODE_KIT_VERBOSE=1` for full output and `NO_COLOR=1` for plain text. Interactive installs collect assistant consent and ask a separate Account Rotator question. Ctrl-C aborts an unconfirmed checkbox batch without applying it; on the fallback sequential path, already applied answers remain. For unattended installs, select assistants explicitly with `ZCODE_KIT_HARNESSES=omp,codex` (or `none`) and set `ZCODE_KIT_ACCOUNT_ROTATOR=y` or `n`; without an explicit selection, undecided assistants are skipped and the existing Account Rotator setting is preserved. Answers are stored under `generated/harness-choices/`: a later setup, update or `zcode-kit doctor --fix` refreshes only assistants you consented to (a `y`, an explicit selection or `zcode-kit integrate <assistant>`) and never re-integrates a skipped one; an integration the kit created before it asked is kept current but only counts as consent once you answer `y`. `zcode-kit setup --reask` asks every detected assistant again on a terminal. A failed connection check remains a warning even when installation succeeds.
 
-> **インストーラーを実行する前に:** スクリプトをダウンロードして実行し、`y` と答えたアシスタントだけ設定を変更し、そのアシスタント向けに MCP ツールを登録する場合があります。セットアップでは、利用枠を消費する小さなモデルリクエストも試みます。変更は記録されますが、途中で失敗するとそれ以前の変更が残ることがあります。セキュリティポリシーで必要な場合は、実行前にスクリプトを確認してください。
+> **Before you run the installer:** it downloads and executes a script, changes assistant configuration only under current or saved consent (or the disclosed existing-integration refresh), and may register MCP tools only with the separate eligible consent. Setup also attempts a small model request that can use quota. Changes are recorded, but a later failure can leave earlier changes in place. Inspect the installer if required by your security policy.
 
 **Windows — PowerShell、管理者権限は不要:**
 
@@ -60,7 +60,9 @@ npm install -g zcode-agent-kit@latest
 zcode-kit setup --harness auto --installer
 ```
 
-npm は `zcode-kit` と `zcode-agent-kit` のコマンドをインストールします。2 行目のコマンドは kit の依存関係をインストールし、検出したアシスタントごとに y/n の質問をしてから、Account Rotator の y/n 質問を表示します。npm パッケージをインストールした後に実行してください。コマンド、設定、プロキシが同じ kit に属するよう、インストール方法を統一してください。
+npm installs the `zcode-kit` and `zcode-agent-kit` commands. The second command installs the kit's dependencies, collects assistant consent and then asks the separate Account Rotator y/n question. Run it after installing the npm package. Use one installation method to keep your command, configuration and proxy tied to the same kit copy.
+
+Received marked paste and contaminated text are discarded. Unmarked valid key bytes cannot be distinguished from identical typing; the selector does not promise universal paste detection. Completed setup ends with five paste-safe commands under **Next steps**, plus at most one concrete launch command for a successfully configured, consented assistant. One plain copy is kept in `install.log`, including installer mode. That launch row confirms configuration, not an installed executable, sign-in, quota or a working model reply.
 
 ## ステップ 3 — 好きなアシスタントで GLM-5.3(-flash) を使う
 

@@ -20,7 +20,27 @@
 
 ## `zcode-kit setup` によるセットアップ（検出されたハーネス、同意がある場合のみ）
 
-`zcode-kit setup --harness auto` はインストール済みのハーネスを検出し、保存済みの決定がないハーネスごとに "Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]" と質問します。`y` でそのハーネスを設定し、`n` はスキップしてファイルに触れません。ターミナルがなければ未決定のハーネスはすべてスキップされます。Ctrl-C で質問を中止できます（終了コード 130）。すでに `y` と答えたものは設定されたままです。OMP しかない場合、Claude/Codex の設定や生成ラッパーは作られません。決定はハーネスごとに 1 ファイルとして `generated/harness-choices/` に保存され、セットアップのトランザクションの一部です（ロールバックで再び削除されます）。`zcode-kit update` と `zcode-kit doctor --fix` は同意済みの統合（`y`、明示的な選択、または `zcode-kit integrate <harness>`）だけを再適用し、保存された `n` は `--harness`、`integrate`、または `zcode-kit setup --reask`（ターミナルで再質問）で変えるまで尊重されます。質問より前に kit が作成した統合は無人実行でも更新されますが、同意と見なされることはありません。無人実行では `--harness omp,codex` または `ZCODE_KIT_HARNESSES=omp,codex` でハーネスを選択します（`none` は検出されたすべてをスキップ）。不明な id はエラーです。kit の MCP ブリッジは別個の同意がある場合だけ登録されます。明示的な選択か、セットアップが質問の前に表示する MCP の注記の後に答えた `y` です（`--no-mcp` で無効化）。`integrate`、更新、その注記なしの保存済み決定では登録されません。1 つのハーネスが失敗しても他は止まりません。そのハーネス自身の部分的な書き込みは元に戻され、サマリーに失敗として表示され、セットアップは終了コード 20 で終わります（インストーラーは警告を出して続行します）。
+`zcode-kit setup --harness auto` detects installed harnesses and collects
+consent in a fitting-terminal checkbox list. Arrows move, Space toggles,
+`a` toggles all editable rows, and nonempty Enter confirms checked yes and
+unchecked no. Saved choices stay locked unless `--reask`. Esc, empty Enter
+and EOF save no new decision: readable owned integrations may refresh;
+unowned or unreadable choices skip. The full per-row consequence is shown
+before input arms. Ctrl-C aborts an unconfirmed batch with exit 130 and no
+provisional apply. No-color/dumb/small/unknown-size terminals retain
+individual "Configure ZCode for <HARNESS>? [y/n]" questions; already applied
+line answers remain on later abort. CI/pipes ask nothing. A user with only
+OMP gets no Claude/Codex configuration or generated wrapper files.
+
+Marked paste/text contamination resets provisional edits; identical valid
+unmarked key bytes cannot be distinguished from typing. The one lexical CR
+bit consumes an immediately adjacent LF even across the next-question
+handoff: an indistinguishable fresh LF-only key can be consumed once; CR or
+a later LF works. Completed setup prints five Next steps commands and at
+most one concrete qualified launch row, with one plain install.log copy.
+The launch row certifies configuration, not sign-in or a model reply.
+
+決定はハーネスごとに 1 ファイルとして `generated/harness-choices/` に保存され、セットアップのトランザクションの一部です（ロールバックで再び削除されます）。`zcode-kit update` と `zcode-kit doctor --fix` は同意済みの統合（`y`、明示的な選択、または `zcode-kit integrate <harness>`）だけを再適用し、保存された `n` は `--harness`、`integrate`、または `zcode-kit setup --reask`（ターミナルで再質問）で変えるまで尊重されます。質問より前に kit が作成した統合は無人実行でも更新されますが、同意と見なされることはありません。無人実行では `--harness omp,codex` または `ZCODE_KIT_HARNESSES=omp,codex` でハーネスを選択します（`none` は検出されたすべてをスキップ）。不明な id はエラーです。kit の MCP ブリッジは別個の同意がある場合だけ登録されます。明示的な選択か、セットアップが質問の前に表示する MCP の注記の後に答えた `y` です（`--no-mcp` で無効化）。`integrate`、更新、その注記なしの保存済み決定では登録されません。1 つのハーネスが失敗しても他は止まりません。そのハーネス自身の部分的な書き込みは元に戻され、サマリーに失敗として表示され、セットアップは終了コード 20 で終わります（インストーラーは警告を出して続行します）。
 
 | ハーネス | 仕組み | 既存 config への影響 |
 |---|---|---|

@@ -21,13 +21,25 @@ installation-specific state directory, outside `node_modules`.
 
 ## Set up by `zcode-kit setup` (detected harnesses, only with consent)
 
-`zcode-kit setup --harness auto` detects installed harnesses and asks, for each
-one without a stored decision, "Configure ZCode as a provider with its
-supported models in <HARNESS>? [y/n]". A `y` configures that harness; `n`
-skips it and leaves its files untouched, and without a terminal every
-undecided harness is skipped. Ctrl-C stops the questions (exit code 130);
-what you already answered `y` to stays configured. A user with only OMP gets
-no Claude/Codex configuration or generated wrapper files.
+`zcode-kit setup --harness auto` detects installed harnesses and collects
+consent in a fitting-terminal checkbox list. Arrows move, Space toggles,
+`a` toggles all editable rows, and nonempty Enter confirms checked yes and
+unchecked no. Saved choices stay locked unless `--reask`. Esc, empty Enter
+and EOF save no new decision: readable owned integrations may refresh;
+unowned or unreadable choices skip. The full per-row consequence is shown
+before input arms. Ctrl-C aborts an unconfirmed batch with exit 130 and no
+provisional apply. No-color/dumb/small/unknown-size terminals retain
+individual "Configure ZCode for <HARNESS>? [y/n]" questions; already applied
+line answers remain on later abort. CI/pipes ask nothing. A user with only
+OMP gets no Claude/Codex configuration or generated wrapper files.
+
+Marked paste/text contamination resets provisional edits; identical valid
+unmarked key bytes cannot be distinguished from typing. The one lexical CR
+bit consumes an immediately adjacent LF even across the next-question
+handoff: an indistinguishable fresh LF-only key can be consumed once; CR or
+a later LF works. Completed setup prints five Next steps commands and at
+most one concrete qualified launch row, with one plain install.log copy.
+The launch row certifies configuration, not sign-in or a model reply.
 
 Decisions are stored one file per harness under `generated/harness-choices/`
 and are part of the setup transaction (a rollback removes them again).

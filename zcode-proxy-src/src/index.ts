@@ -242,13 +242,24 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
 
   if (debug) printDebugBanner(config, path, cred);
 
-  const server = await startServer(buildServerOptions(config, auth, debug));
+  // The stop request (ADR-0014, ticket 22): only a manager-spawned proxy
+  // carries the per-spawn token (ZCODE_KIT_STOP_TOKEN, ticket 18); the TUI and
+  // the Android entry build their options without it, so their stop route
+  // answers the unknown-route 404. The trigger is hung onto the shutdown
+  // through a ref, since the shutdown exists after the listener is up; the
+  // window between the two is synchronous, so no request can slip through.
+  const stopToken = process.env.ZCODE_KIT_STOP_TOKEN;
+  const stopTrigger: { run: (() => void) | null } = { run: null };
+  const server = await startServer(buildServerOptions(config, auth, debug, {
+    ...(stopToken ? { stopToken } : {}),
+    onStopRequest: () => stopTrigger.run?.(),
+  }));
   let claimScheduler: { stop(): void } | null = null;
-  // The single graceful shutdown sequence (signals, memory respawn). Signals
-  // are handled before the listening line is printed, so whoever waits for
-  // that line never meets a proxy that a SIGTERM would kill outright.
-  // Unsaved account metadata (a store write that lost a lock race) gets one
-  // last, bounded write before the process exits.
+  // The single graceful shutdown sequence (signals, the stop request, memory
+  // respawn). Signals are handled before the listening line is printed, so
+  // whoever waits for that line never meets a proxy that a SIGTERM would kill
+  // outright. Unsaved account metadata (a store write that lost a lock race)
+  // gets one last, bounded write before the process exits.
   const shutdown = createGracefulShutdown({
     server,
     stopBackground: () => {
@@ -258,6 +269,7 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     },
     flush: () => flushAccountMetadata(auth),
   });
+  stopTrigger.run = () => { void shutdown.run("stop"); };
   handleShutdownSignals(shutdown);
   const url = `http://${server.hostname}:${server.port}`;
   console.log(`zcode-proxy listening on ${url}`);

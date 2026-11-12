@@ -20,7 +20,27 @@ Schlüssel im separaten Zustand dieser Installation außerhalb von `node_modules
 
 ## Einrichtung durch `zcode-kit setup` (erkannte Harnesses, nur mit Zustimmung)
 
-`zcode-kit setup --harness auto` erkennt installierte Harnesses und fragt für jeden ohne gespeicherte Entscheidung: "Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]". Ein `y` richtet diesen Harness ein; `n` überspringt ihn und lässt seine Dateien unberührt, und ohne Terminal wird jeder unentschiedene Harness übersprungen. Strg-C beendet die Fragen (Exit-Code 130); was du bereits mit `y` beantwortet hast, bleibt eingerichtet. Bei ausschließlich OMP werden keine Claude-/Codex-Konfigurationen oder Wrapper-Dateien erzeugt. Entscheidungen werden pro Harness als Datei unter `generated/harness-choices/` gespeichert und gehören zur Setup-Transaktion (ein Rollback entfernt sie wieder); `zcode-kit update` und `zcode-kit doctor --fix` wenden nur zugestimmte Integrationen erneut an (ein `y`, eine ausdrückliche Auswahl oder `zcode-kit integrate <harness>`), und ein gespeichertes `n` gilt, bis `--harness`, `integrate` oder `zcode-kit setup --reask` (fragt im Terminal erneut) es ändern. Eine Integration, die das Kit vor der Frage angelegt hat, wird bei unbeaufsichtigten Läufen aktualisiert, aber nie zur Zustimmung umgedeutet. Für unbeaufsichtigte Läufe wählst du Harnesses mit `--harness omp,codex` oder `ZCODE_KIT_HARNESSES=omp,codex` (`none` überspringt alle erkannten); unbekannte IDs sind Fehler. Die MCP-Bridge des Kits wird nur mit gesonderter Zustimmung registriert: bei ausdrücklicher Auswahl oder nach einem `y`, dem das Setup vor der Frage den MCP-Hinweis vorangestellt hat (`--no-mcp` schaltet es ab); `integrate`, eine Auffrischung oder eine gespeicherte Entscheidung ohne diesen Hinweis registrieren sie nie. Ein fehlgeschlagener Harness stoppt die anderen nicht: Seine eigenen Teiländerungen werden zurückgenommen, die Zusammenfassung führt ihn als fehlgeschlagen, und das Setup endet mit Exit-Code 20 (die Installer fahren mit einer Warnung fort).
+`zcode-kit setup --harness auto` detects installed harnesses and collects
+consent in a fitting-terminal checkbox list. Arrows move, Space toggles,
+`a` toggles all editable rows, and nonempty Enter confirms checked yes and
+unchecked no. Saved choices stay locked unless `--reask`. Esc, empty Enter
+and EOF save no new decision: readable owned integrations may refresh;
+unowned or unreadable choices skip. The full per-row consequence is shown
+before input arms. Ctrl-C aborts an unconfirmed batch with exit 130 and no
+provisional apply. No-color/dumb/small/unknown-size terminals retain
+individual "Configure ZCode for <HARNESS>? [y/n]" questions; already applied
+line answers remain on later abort. CI/pipes ask nothing. A user with only
+OMP gets no Claude/Codex configuration or generated wrapper files.
+
+Marked paste/text contamination resets provisional edits; identical valid
+unmarked key bytes cannot be distinguished from typing. The one lexical CR
+bit consumes an immediately adjacent LF even across the next-question
+handoff: an indistinguishable fresh LF-only key can be consumed once; CR or
+a later LF works. Completed setup prints five Next steps commands and at
+most one concrete qualified launch row, with one plain install.log copy.
+The launch row certifies configuration, not sign-in or a model reply.
+
+Entscheidungen werden pro Harness als Datei unter `generated/harness-choices/` gespeichert und gehören zur Setup-Transaktion (ein Rollback entfernt sie wieder); `zcode-kit update` und `zcode-kit doctor --fix` wenden nur zugestimmte Integrationen erneut an (ein `y`, eine ausdrückliche Auswahl oder `zcode-kit integrate <harness>`), und ein gespeichertes `n` gilt, bis `--harness`, `integrate` oder `zcode-kit setup --reask` (fragt im Terminal erneut) es ändern. Eine Integration, die das Kit vor der Frage angelegt hat, wird bei unbeaufsichtigten Läufen aktualisiert, aber nie zur Zustimmung umgedeutet. Für unbeaufsichtigte Läufe wählst du Harnesses mit `--harness omp,codex` oder `ZCODE_KIT_HARNESSES=omp,codex` (`none` überspringt alle erkannten); unbekannte IDs sind Fehler. Die MCP-Bridge des Kits wird nur mit gesonderter Zustimmung registriert: bei ausdrücklicher Auswahl oder nach einem `y`, dem das Setup vor der Frage den MCP-Hinweis vorangestellt hat (`--no-mcp` schaltet es ab); `integrate`, eine Auffrischung oder eine gespeicherte Entscheidung ohne diesen Hinweis registrieren sie nie. Ein fehlgeschlagener Harness stoppt die anderen nicht: Seine eigenen Teiländerungen werden zurückgenommen, die Zusammenfassung führt ihn als fehlgeschlagen, und das Setup endet mit Exit-Code 20 (die Installer fahren mit einer Warnung fort).
 
 | Harness | Mechanismus | Eingriff in bestehende Config |
 |---|---|---|
