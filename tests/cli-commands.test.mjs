@@ -448,7 +448,7 @@ test("entry: a command that throws after collecting records prints them first, t
 // are asserted on `{ exitCode, records }` with the manager, the proxy CLI
 // (spawnSync), the PATH commands (runCommandSync) and the proxy's HTTP
 // endpoint (fetch) faked at the system boundary.
-import { chmodSync, cpSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { chmodSync, closeSync, cpSync, existsSync, openSync, readFileSync, readdirSync } from "node:fs";
 const CONTRACT_MODULES = ["index", "help", "usage", "auth", "accounts", "rollback", "uninstall", "integrate", "run", "update", "setup"];
 for (const name of CONTRACT_MODULES) {
   test(`importing cli/commands/${name}.mjs has no side effects`, () => {
@@ -899,14 +899,22 @@ esac
     noExecve: preload("no-execve.mjs", `process.execve = undefined;\n`),
   };
   /** One `zcode-kit run opencode -- --version`: how the harness ended, what it reported, and whether it ran as the launcher's own process. */
-  const kitRun = ({ end = 0, env = {}, preload: file = null } = {}) => new Promise((resolve, reject) => {
+  const kitRun = ({ end = 0, env = {}, preload: file = null, piped = false } = {}) => new Promise((resolve, reject) => {
     const full = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, ZCODE_KIT_SKIP_DEPS: "1", FAKE_HARNESS_END: String(end), ...env };
-    const child = spawn(process.execPath, [...(file ? ["--import", file] : []), join(root, "cli", "zcode-kit.mjs"), "run", "opencode", "--", "--version"], { env: full, stdio: ["ignore", "pipe", "pipe"] });
+    // Output goes to files unless the run asks for pipes: the launcher stays
+    // resident when its output is a pipe.
+    const capture = mkdtempSync(join(root, "run-"));
+    const files = piped ? null : [openSync(join(capture, "out"), "w"), openSync(join(capture, "err"), "w")];
+    const child = spawn(process.execPath, [...(file ? ["--import", file] : []), join(root, "cli", "zcode-kit.mjs"), "run", "opencode", "--", "--version"], { env: full, stdio: ["ignore", ...(files ?? ["pipe", "pipe"])] });
     let stdout = "", stderr = "";
-    child.stdout.on("data", (d) => { stdout += d; });
-    child.stderr.on("data", (d) => { stderr += d; });
+    child.stdout?.on("data", (d) => { stdout += d; });
+    child.stderr?.on("data", (d) => { stderr += d; });
     child.on("error", reject);
     child.on("close", (code, signal) => {
+      if (files) {
+        for (const fd of files) closeSync(fd);
+        stdout = readFileSync(join(capture, "out"), "utf8"); stderr = readFileSync(join(capture, "err"), "utf8");
+      }
       const seen = /^harness pid=(\d+) ppid=(\d+) key=(\S*) args=(.*)$/m.exec(stdout);
       const pid = seen ? Number(seen[1]) : null, ppid = seen ? Number(seen[2]) : null;
       resolve({
@@ -960,6 +968,11 @@ test("entry: run hands its process over to the harness once the launcher's work 
     const still = await kit.kitRun({ env: { ZCODE_KIT_RESIDENT_LAUNCHER: value } });
     assert.equal(still.ran, "as the launcher's process", `ZCODE_KIT_RESIDENT_LAUNCHER=${JSON.stringify(value)}`);
   }
+  // With piped output the launcher stays: Node has put the pipe into
+  // non-blocking mode, which the harness must not inherit.
+  const piped = await kit.kitRun({ piped: true });
+  assert.equal(piped.ran, "as the launcher's child", piped.stdout + piped.stderr);
+  assert.equal(piped.code, 0, piped.stderr);
 });
 
 test("entry: run keeps the launcher resident with ZCODE_KIT_RESIDENT_LAUNCHER=1, on a Node without the handover, and behaves as before", { skip: POSIX_HARNESS }, async (t) => {
@@ -1014,7 +1027,7 @@ test("run decides the handover on the opt-out, the platform, the Node version, p
   writeFileSync(join(dir, "tool"), "#!/bin/sh\n"); chmodSync(join(dir, "tool"), 0o755);
   writeFileSync(join(dir, "plain"), "#!/bin/sh\n"); chmodSync(join(dir, "plain"), 0o644);
   const env = { PATH: dir };
-  const able = { optOut: undefined, platform: "linux", execve: () => {}, nodeVersion: "26.1.0", exitHandlers: 0 };
+  const able = { optOut: undefined, platform: "linux", execve: () => {}, nodeVersion: "26.1.0", exitHandlers: 0, piped: () => false };
   assert.equal(handoverTarget("tool", env, able), join(dir, "tool"));
   assert.equal(handoverTarget("tool", env, { ...able, platform: "darwin" }), join(dir, "tool"));
   for (const optOut of ["yes", "true", "0", "", "11", " 1"]) assert.equal(handoverTarget("tool", env, { ...able, optOut }), join(dir, "tool"), JSON.stringify(optOut));
@@ -1023,6 +1036,7 @@ test("run decides the handover on the opt-out, the platform, the Node version, p
   assert.equal(handoverTarget("tool", env, { ...able, platform: "win32", optOut: "1" }), null, "the opt-out changes nothing on Windows");
   assert.equal(handoverTarget("tool", env, { ...able, execve: null }), null);
   assert.equal(handoverTarget("tool", env, { ...able, exitHandlers: 1 }), null, "something still expects to clean up at exit");
+  assert.equal(handoverTarget("tool", env, { ...able, piped: () => true }), null, "a harness must not inherit a non-blocking pipe");
   for (const [nodeVersion, hands] of [["24.11.0", false], ["25.9.0", false], ["26.0.9", false], ["26.1.0", true], ["26.7.0", true], ["27.0.0", true], ["garbage", false]]) {
     assert.equal(handoverTarget("tool", env, { ...able, nodeVersion }) !== null, hands, nodeVersion);
   }

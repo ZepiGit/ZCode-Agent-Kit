@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, fstatSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createCtx } from './context.mjs';
@@ -17,19 +17,31 @@ import { resolveCommand, runCommandSync } from '../lib/process.mjs';
 // released, heal.log written) and its lines are printed.
 const HANDOVER_NODE = [26, 1];
 
+// Is stdout or stderr a pipe or a socket? Node puts a pipe it writes to into
+// non-blocking mode, and that mode stays on the pipe across the exec. A
+// harness that expects ordinary blocking output would then fail or lose text
+// on a large write. A child started by the resident launcher gets its output
+// streams back in blocking mode. Terminals and files are not affected.
+function pipedOutput() {
+  return [1, 2].some((fd) => {
+    try { const stat = fstatSync(fd); return stat.isFIFO() || stat.isSocket(); } catch { return true; }
+  });
+}
+
 /**
  * The executable `run` replaces itself with, or null to stay resident.
  * Resident when: ZCODE_KIT_RESIDENT_LAUNCHER is exactly "1" (the opt-out);
  * Windows; a Node without process.execve or older than 26.1; an exit handler
  * is registered (something still expects to clean up when this process
- * ends); or the command is not an executable on PATH (the resident path then
- * reports it as it always did).
+ * ends); stdout or stderr is a pipe or a socket; or the command is not an
+ * executable on PATH (the resident path then reports it as it always did).
  */
 export function handoverTarget(command, env, {
   optOut = process.env.ZCODE_KIT_RESIDENT_LAUNCHER, platform = process.platform, execve = process.execve,
-  nodeVersion = process.versions.node, exitHandlers = process.listenerCount('exit'),
+  nodeVersion = process.versions.node, exitHandlers = process.listenerCount('exit'), piped = pipedOutput,
 } = {}) {
   if (optOut === '1' || platform === 'win32' || typeof execve !== 'function' || exitHandlers > 0) return null;
+  if (piped()) return null;
   const [major, minor] = String(nodeVersion).split('.').map(Number);
   if (!(major > HANDOVER_NODE[0] || (major === HANDOVER_NODE[0] && minor >= HANDOVER_NODE[1]))) return null;
   try { return resolveCommand(command, env); } catch { return null; }
