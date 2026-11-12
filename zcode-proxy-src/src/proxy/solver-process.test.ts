@@ -538,8 +538,7 @@ function systemdScopeCaps(): boolean {
 const expectedEnforcement = process.platform === "win32" ? "job-object" : systemdScopeCaps() ? "cgroup" : "sampling";
 
 const SAMPLING_CAP = "async () => ({ enforcement: 'sampling', reason: 'test', endedAtCap: async () => false, release() {} })";
-const KILLED_BY_OS = /^\S+ WARN solver solver process ended by the operating system at its memory cap capMB=128 enforcement=(cgroup|job-object) key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"$/m;
-const ENDED_ITSELF = /^\S+ WARN solver solver process reached its memory cap and ended itself capMB=128 enforcement=sampling key=solver\.memoryCapMB footprintMB=\d+$/m;
+const AT_CAP = (mode: string) => new RegExp(String.raw`^\S+ WARN solver solver process ended at its memory cap capMB=128 enforcement=${mode} key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"${mode === "sampling" ? String.raw` footprintMB=\d+` : ""}$`, "m");
 
 describe("solver process: memory cap", () => {
   /** The real entry behind the module probe, started the way the transport starts it. */
@@ -653,17 +652,20 @@ describe("solver process: memory cap", () => {
     expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
     expect(next).not.toBe(first);
     expect(stats).toMatchObject({ capMB: 128, enforcement: expectedEnforcement, generation: 2, totalSolves: 2, totalFailures: 1 });
-    if (expectedEnforcement === "sampling") expect(run.stderr.toString()).toMatch(ENDED_ITSELF);
-    else expect(run.stdout).toMatch(KILLED_BY_OS);
+    expect(run.stdout).toMatch(AT_CAP(expectedEnforcement));
+    expect(stats.capExits).toBe(1);
   }, 50_000);
 
-  it("ends itself at the cap where the operating system enforces nothing (sampling), with the config key in its log line", async () => {
+  it("ends itself at the cap where the operating system enforces nothing (sampling); the proxy logs the cap exit with the config key even when the solver's output allowance is used up", async () => {
+    const noise = Buffer.from(Array.from({ length: 260 }, (_, i) => `noise ${i}\n`).join("") + "left open without a newline").toString("base64");
     const run = await expectOk(host(`${REPORT}
       const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 128, applyCap: ${SAMPLING_CAP} }) });
       s.configure({ backendModule, idleMs: 2000 });
+      await s.run('stderr-line:${noise}', 'sgp', 'p');
       let failure = null;
       try { await s.run('balloon:600', 'sgp', 'p'); } catch (e) { failure = [e.name, e.message, classify(e)]; }
       const after = label(await s.run('token:after', 'sgp', 'p'));
+      await new Promise(resolve => setTimeout(resolve, 300));
       report({ failure, after, stats: s.stats() });
       s.shutdown();
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -671,12 +673,33 @@ describe("solver process: memory cap", () => {
     const { failure, after, stats } = reported(run);
     expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
     expect(after).toBe("token:after:active=1");
-    expect(stats).toMatchObject({ capMB: 128, enforcement: "sampling" });
-    expect(run.stderr.toString()).toMatch(ENDED_ITSELF);
-    expect(run.stdout).not.toMatch(KILLED_BY_OS);
+    expect(stats).toMatchObject({ capMB: 128, enforcement: "sampling", capExits: 1, abnormalExits: 1 });
+    // The allowance was spent before the cap: 200 lines went through, the rest was dropped ...
+    expect(run.stderr.toString()).toBe(Array.from({ length: 200 }, (_, i) => `noise ${i}\n`).join(""));
+    expect(run.stdout).toMatch(/further lines were dropped droppedLines=61 limitLines=200 limitKiB=64$/m);
+    // ... and the cap exit is logged by the proxy all the same, once; the solver's marker is never shown.
+    expect(run.stdout.match(new RegExp(AT_CAP("sampling").source, "gm"))).toHaveLength(1);
+    expect(run.stdout + run.stderr.toString()).not.toContain("@@zcode-solver-at-cap");
     // Said once, not per generation.
     expect(run.stdout.match(/WARN solver the operating system does not enforce the solver's memory cap; the solver process measures itself and ends at the cap capMB=128 enforcement=sampling why=test/g)).toHaveLength(1);
   }, 50_000);
+
+  it("does not log a cap exit for a solver process that ends for another reason", async () => {
+    const run = await expectOk(host(`${REPORT}
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 128, applyCap: ${SAMPLING_CAP} }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      const pid = Number(label(await s.run('pid', 'sgp', 'p')).slice(4));
+      const running = s.run('slow:2000', 'sgp', 'p').catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 200));
+      process.kill(pid, 'SIGKILL');
+      await running;
+      await new Promise(resolve => setTimeout(resolve, 300));
+      report(s.stats());
+      s.shutdown();
+    `));
+    expect(reported(run)).toMatchObject({ capExits: 0, abnormalExits: 1 });
+    expect(run.stdout).not.toContain("ended at its memory cap");
+  });
 
   it.skipIf(process.platform !== "linux")("reports sampling, never cgroup, when the scope's memory.max does not show the requested limit", async () => {
     const run = await expectOk(host(`${REPORT}
@@ -729,7 +752,12 @@ const PROXY_LIKE = [
 const CREDENTIAL_NAMES = [
   "ZCODE_PROXY_CREDENTIAL_SECRET", "ZCODE_PROXY_CREDENTIAL_MASTER_KEY", "ZCODE_PROXY_MASTER_KEY", "Zcode_Proxy_Api_Key",
   "ZCODE_CREDENTIAL_SECRET", "zcode_proxy_credentials_path", "ZCODE_PROXY_ACCOUNTS_PATH", "ZCODE_CONTROL_CAPABILITY",
+  "ZCODE_PROXY_KEY",
+  // Named like a secret, whoever set them.
+  "OPENAI_API_KEY", "gh_token", "AWS_SECRET_ACCESS_KEY", "AWS_ACCESS_KEY_ID", "Db_Password", "MY_SECRET", "GOOGLE_APPLICATION_CREDENTIALS", "SOME_API_KEY_FILE", "SSH_KEY",
 ];
+// Near misses that stay.
+const NOT_SECRETS = ["KEYBOARD_LAYOUT", "TOKENIZERS_PARALLELISM", "SECRET_SANTA", "MONKEY"];
 
 describe("solver process: environment", () => {
   it("passes the worker's inputs and strips the stop token, the respawn chain, the proxy's credentials and keys and every ambient proxy name, in any case", async () => {
@@ -746,7 +774,7 @@ describe("solver process: environment", () => {
       Zcode_Kit_Respawn_Manager: "/kit/manager.mjs",
       ZCODE_KIT_RESPAWN_ARGS: "[]",
     };
-    for (const name of CREDENTIAL_NAMES) env[name] = "test-credential-value";
+    for (const name of [...CREDENTIAL_NAMES, ...NOT_SECRETS]) env[name] = "test-credential-value";
     for (const name of PROXY_LIKE) env[name] = "http://127.0.0.1:9";
     const run = await expectOk(host(`${REPORT}
       const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
@@ -754,7 +782,7 @@ describe("solver process: environment", () => {
       const seen = {};
       for (const name of ['ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA', 'CAPTCHA_CDN_CACHE_DIR', 'CAPTCHA_CDN_CACHE_TTL_MS',
         'ZCODE_PROXY_UPSTREAM_PROXY', 'ZCODE_KIT_LOG_DIR', 'ZCODE_SOLVER_TEST_PLAIN']) seen[name] = label(await s.run('env:' + name, 'sgp', 'p'));
-      const names = label(await s.run(${JSON.stringify(`env-names:stop_token|respawn|credential|master_key|api_key|accounts_path|capability|^(${[...PROXY_LIKE, "ZCODE_PROXY_UPSTREAM_PROXY", "BUN_OPTIONS"].join("|")})$`)}, 'sgp', 'p'));
+      const names = label(await s.run(${JSON.stringify(`env-names:stop_token|respawn|accounts_path|capability|^(${[...CREDENTIAL_NAMES, ...NOT_SECRETS, ...PROXY_LIKE, "ZCODE_PROXY_UPSTREAM_PROXY", "BUN_OPTIONS"].join("|")})$`)}, 'sgp', 'p'));
       const guard = label(await s.run('env:BUN_OPTIONS', 'sgp', 'p'));
       s.shutdown();
       report({ seen, names, guard });
@@ -770,7 +798,7 @@ describe("solver process: environment", () => {
     });
     // Kept: the egress setting, the near misses, and the egress guard's preload.
     const keptProxyLike = ["HTTP_PROXY_EXTRA", "MY_HTTP_PROXY", "SOCKS_PROXY", "ZCODE_PROXY_UPSTREAM_PROXY", "npm_config_proxy"];
-    expect(names).toBe(`env-names:${["BUN_OPTIONS", ...keptProxyLike].sort().join(",")}`);
+    expect(names).toBe(`env-names:${["BUN_OPTIONS", ...NOT_SECRETS, ...keptProxyLike].sort().join(",")}`);
     // The proxy suite's egress guard reaches the solver process.
     expect(guard).toContain("egress-guard");
   });
