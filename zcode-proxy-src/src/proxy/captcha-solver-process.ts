@@ -15,8 +15,11 @@
  * DOM runtime; when it does not arrive within HANDSHAKE_TIMEOUT_MS the
  * process ends itself with exit code 3. Where the operating system does not
  * enforce the cap (`sampling`), the watcher thread below measures the
- * process's own memory footprint and ends the process at the cap, with one
- * event line that names the config key.
+ * process's own memory footprint and ends the process at the cap. Right
+ * before that it writes a marker with the footprint to stderr; the proxy
+ * takes the marker out of the output and writes the event line that names the
+ * config key. The marker comes from the watcher thread because the main
+ * thread may be parked in a solve and could not send a message.
  *
  * It dies with the proxy. The IPC channel's EOF ends it (`disconnect`), and so
  * does a small watcher thread for the case where the solve has parked or spun
@@ -25,9 +28,9 @@
  * this process. Windows keeps a stale parent pid, so the watcher checks only
  * the parent's liveness there.
  */
-import { createEventLogger, formatEventLine } from "../log/event-line.mjs";
+import { createEventLogger } from "../log/event-line.mjs";
 import { serveSolverGeneration } from "./captcha-solver-generation.js";
-import { SOLVER_CAP_KEY } from "./solver-cap.js";
+import { SOLVER_AT_CAP_MARKER } from "./solver-cap.js";
 import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
 
 /** How often the watcher thread checks the parent. */
@@ -48,9 +51,7 @@ const reparented = (parentPid: number): boolean => process.platform !== "win32" 
 
 /**
  * Plain JS for a Worker built from a Blob, so the watcher needs no extra
- * compile entrypoint. A `{ capBytes, line }` message starts the footprint
- * sampling; `line` is the event line of a cap kill without its time and
- * footprint.
+ * compile entrypoint. A `{ capBytes }` message starts the footprint sampling.
  */
 function watcherSource(parentPid: number): string {
   return `
@@ -63,14 +64,14 @@ const gone = () => {
 setInterval(() => { if (gone()) process.kill(process.pid, "SIGKILL"); }, ${PARENT_CHECK_MS});
 let sampler = null;
 self.onmessage = (event) => {
-  const { capBytes, line } = event.data ?? {};
+  const { capBytes } = event.data ?? {};
   if (sampler || !(capBytes > 0)) return;
   sampler = setInterval(() => {
     let used;
     try { used = Bun.unsafe.memoryFootprint(); } catch { used = undefined; }
     if (!(used > 0)) used = process.memoryUsage.rss();
     if (used < capBytes) return;
-    try { fs.writeSync(2, new Date().toISOString() + " " + line + " footprintMB=" + Math.round(used / ${MB}) + "\\n"); } catch {}
+    try { fs.writeSync(2, ${JSON.stringify(SOLVER_AT_CAP_MARKER)} + " footprintMB=" + Math.round(used / ${MB}) + "\\n"); } catch {}
     process.kill(process.pid, "SIGKILL");
   }, ${CAP_SAMPLE_MS});
 };
@@ -121,12 +122,7 @@ export function runSolverProcess(args: readonly string[] = process.argv.slice(2)
     clearTimeout(handshake);
     process.off("message", onAcknowledgement);
     if (msg.enforcement === "sampling" && typeof msg.capMB === "number" && msg.capMB > 0) {
-      const line = formatEventLine({
-        time: new Date(0), level: "WARN", component: "solver",
-        message: "solver process reached its memory cap and ended itself",
-        fields: { capMB: msg.capMB, enforcement: "sampling", key: SOLVER_CAP_KEY },
-      });
-      watcher.postMessage({ capBytes: msg.capMB * MB, line: line.slice(line.indexOf(" ") + 1) });
+      watcher.postMessage({ capBytes: msg.capMB * MB });
     }
     serveSolverGeneration({
       post: (message) => { send(message); },

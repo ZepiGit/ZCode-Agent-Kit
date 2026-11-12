@@ -41,7 +41,7 @@ import {
 } from "./captcha-token.js";
 import { createEventLogger } from "../log/event-line.mjs";
 import {
-  NO_SOLVER_CAP, SOLVER_CAP_KEY, applySolverCap, configuredSolverCapMB,
+  NO_SOLVER_CAP, SOLVER_AT_CAP_MARKER, SOLVER_CAP_KEY, applySolverCap, configuredSolverCapMB,
   type SolverCap, type SolverEnforcement,
 } from "./solver-cap.js";
 import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
@@ -72,6 +72,8 @@ export interface CaptchaSolverStats {
    * (`none`). Null until the first solver process has been capped.
    */
   enforcement: SolverEnforcement | null;
+  /** Solver processes that ended at the memory cap since start. */
+  capExits: number;
   /** The solver process's own memory footprint after its latest solve, in MB; null on the thread transport. */
   lastFootprintMB: number | null;
   /** Abnormal exits (crash, kill at the cap, fatal error, deadline kill) within the last 10 minutes. */
@@ -261,6 +263,8 @@ function writeBounded(line: Buffer, terminated: boolean, to: NodeJS.WritableStre
   to.write(terminated ? Buffer.concat([shown, NEWLINE]) : shown);
 }
 
+const AT_CAP_LINE = new RegExp(`${SOLVER_AT_CAP_MARKER} footprintMB=(\\d{1,7})$`);
+
 const DROPPED_OUTPUT = "solver wrote more output than one generation may; further lines were dropped";
 const droppedFields = (budget: OutputBudget) => ({
   droppedLines: budget.dropped, limitLines: SOLVER_OUTPUT_LIMITS.lines, limitKiB: SOLVER_OUTPUT_LIMITS.bytes / 1024,
@@ -274,8 +278,13 @@ const droppedFields = (budget: OutputBudget) => ({
  * a line without its newline is held until the newline or the stream's end.
  * Bounded per solver process: a line is cut at 2 KiB, and past 200 lines or
  * 64 KiB further lines are counted in `budget.dropped` instead of written.
+ * A line that ends with the at-cap marker is the solver process saying that it
+ * ends itself at its cap: the marker is reported to `atCap` with the
+ * footprint and never written, whatever the allowance or the line before it.
  */
-function relayLines(from: NodeJS.ReadableStream, to: () => NodeJS.WritableStream, budget: OutputBudget): void {
+function relayLines(
+  from: NodeJS.ReadableStream, to: () => NodeJS.WritableStream, budget: OutputBudget, atCap?: (footprintMB: number) => void,
+): void {
   let held: Buffer | null = null;
   // The held line is already over the per-line limit: the rest of it is skipped.
   let overlong = false;
@@ -284,8 +293,15 @@ function relayLines(from: NodeJS.ReadableStream, to: () => NodeJS.WritableStream
     let buf = held ? Buffer.concat([held, chunk]) : chunk;
     held = null;
     for (let end = buf.indexOf(10); end >= 0; end = buf.indexOf(10)) {
+      let line = buf.subarray(0, end);
+      // The marker ends the line; a line the main thread had left open may precede it.
+      const marker = atCap ? AT_CAP_LINE.exec(line.subarray(Math.max(0, line.length - 96)).toString("latin1")) : null;
+      if (marker) {
+        atCap!(Number(marker[1]));
+        line = line.subarray(0, line.length - marker[0].length);
+      }
       if (overlong) overlong = false;
-      else emit(buf.subarray(0, end), true);
+      else if (!marker || line.length > 0) emit(line, true);
       buf = buf.subarray(end + 1);
     }
     if (overlong || buf.length === 0) return;
@@ -348,7 +364,8 @@ export function threadTransport(opts: { writeLog?: (line: string) => void } = {}
 // - the ambient proxy variables — the set lib/proxy-env.mjs strips — would
 //   route captcha egress past ZCODE_PROXY_UPSTREAM_PROXY (Bun < 1.4.3 ignores
 //   `proxy: false`);
-// - the proxy's credentials and keys, and where it keeps them.
+// - the proxy's credentials and keys, and where it keeps them, and every
+//   other variable named like a key, token, secret, password or credentials.
 // Everything else passes: ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA, the CAPTCHA_*
 // variables and ZCODE_PROXY_UPSTREAM_PROXY, which the solver code reads,
 // included.
@@ -357,9 +374,14 @@ const EXCLUDED_FROM_SOLVER_ENV: readonly RegExp[] = [
   /^ZCODE_KIT_STOP_TOKEN$/i,
   /^(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i,
   /^(?:npm|yarn|pnpm)_(?:http_proxy|https_proxy|all_proxy|no_proxy|proxy)$/i,
-  /^ZCODE_PROXY_(?:CREDENTIAL_SECRET|CREDENTIAL_MASTER_KEY|MASTER_KEY|API_KEY|CREDENTIALS_PATH|ACCOUNTS_PATH)$/i,
+  /^ZCODE_PROXY_(?:CREDENTIAL_SECRET|CREDENTIAL_MASTER_KEY|MASTER_KEY|API_KEY|KEY|CREDENTIALS_PATH|ACCOUNTS_PATH)$/i,
   /^ZCODE_CREDENTIAL_SECRET$/i,
   /^ZCODE_CONTROL_CAPABILITY$/i,
+  // Anything that is named like a secret, whoever set it (OPENAI_API_KEY,
+  // GH_TOKEN, AWS_SECRET_ACCESS_KEY, …). No name the solver code reads
+  // matches.
+  /_(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIALS)$/i,
+  /API_KEY|ACCESS_KEY/i,
 ];
 
 /** The environment of a solver generation: `source` without the names above. */
@@ -389,6 +411,8 @@ export interface SolverCapState {
   capMB: number | null;
   /** How the cap is enforced; null until the first solver process has been capped. */
   enforcement: SolverEnforcement | null;
+  /** Solver processes that ended at the cap since start (ended by the operating system, or by themselves under sampling). */
+  capExits?: number;
 }
 
 export interface SolverProcessTransportOptions {
@@ -432,10 +456,11 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
   // Settles when the latest generation's process has exited (or never started).
   let lastExit: Promise<void> = Promise.resolve();
   let capState: SolverCapState = { capMB: configuredCap(), enforcement: null };
+  let capExits = 0;
   let saidWhyNotEnforced = false;
 
   return {
-    cap: () => ({ ...capState }),
+    cap: () => ({ ...capState, capExits }),
     spawn(events) {
       const command = opts.command ?? solverProcessCommand();
       let child: ChildProcess | null = null;
@@ -444,6 +469,8 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
       let acknowledged = false;
       let greeted = false;
       let cap: SolverCap | null = null;
+      // Under sampling: the footprint at which the process said it ends itself.
+      let endedItselfAtMB: number | null = null;
       const held: SolverHostMessage[] = [];
       const { promise: exited, resolve: markExited } = Promise.withResolvers<void>();
 
@@ -507,20 +534,25 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
           const applied = cap;
           if (!applied) return;
           // The operating system ends a process at its cap with SIGKILL (Linux)
-          // or lets its allocation fail (Windows); ask only then.
-          const ask = unexpected || signal === "SIGKILL" ? applied.endedAtCap() : Promise.resolve(false);
-          void ask.then((atCap) => {
-            if (atCap && unexpected) {
-              log.warn("solver process ended by the operating system at its memory cap", {
+          // or lets its allocation fail (Windows); ask only then. Under
+          // sampling the process said so itself, at the end of its stderr.
+          const ask = unexpected || signal === "SIGKILL" ? applied.endedAtCap().catch(() => false) : Promise.resolve(false);
+          void Promise.all([ask, outputEnded]).then(([byOs]) => {
+            if ((byOs || endedItselfAtMB !== null) && unexpected) {
+              capExits += 1;
+              log.warn("solver process ended at its memory cap", {
                 capMB: capState.capMB, enforcement: applied.enforcement, key: SOLVER_CAP_KEY,
                 next: `raise ${SOLVER_CAP_KEY} in the proxy's config.yaml if solves need more memory`,
+                ...(endedItselfAtMB !== null ? { footprintMB: endedItselfAtMB } : {}),
               });
             }
-          }, () => {}).finally(() => applied.release());
+          }).finally(() => applied.release());
         });
         const output: OutputBudget = { lines: 0, bytes: 0, dropped: 0 };
+        const { promise: outputEnded, resolve: markOutputEnded } = Promise.withResolvers<void>();
+        proc.on("close", () => markOutputEnded());
         relayLines(proc.stdout!, () => process.stdout, output);
-        relayLines(proc.stderr!, () => process.stderr, output);
+        relayLines(proc.stderr!, () => process.stderr, output, (footprintMB) => { endedItselfAtMB = footprintMB; });
         // Both streams have ended: say once what the limits kept out.
         proc.on("close", () => {
           if (output.dropped > 0) log.warn(DROPPED_OUTPUT, droppedFields(output));
@@ -620,7 +652,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
 
   const capState = (): SolverCapState => transport.cap?.() ?? { capMB: null, enforcement: "none" };
 
-  const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth" | "capMB" | "enforcement" | "abnormalExits" | "failFast" | "failFastUntil"> = {
+  const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth" | "capMB" | "enforcement" | "capExits" | "abnormalExits" | "failFast" | "failFastUntil"> = {
     generation: 0,
     solvesSinceSpawn: 0,
     totalSolves: 0,
@@ -860,6 +892,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
         busy: inFlight !== null,
         queueDepth: queue.length,
         ...stats,
+        capExits: 0,
         ...capState(),
         abnormalExits: abnormalExits.filter((at) => at > now() - ABNORMAL_EXIT_WINDOW_MS).length,
         failFast: failFastRemainingMs() > 0,
