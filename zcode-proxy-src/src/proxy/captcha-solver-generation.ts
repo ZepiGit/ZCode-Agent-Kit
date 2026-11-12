@@ -13,6 +13,8 @@
  * Protocol (host → generation):
  *   { type: "init", backendModule: string | null }
  *   { type: "solve", id, scene, region, prefix }
+ * (generation → host, thread transport only):
+ *   { type: "log", text }     (diagnostic text for the proxy's stderr)
  * (generation → host):
  *   { type: "result", id, ok: true, param, heapUsedMB, footprintMB?, scripts? }
  *   { type: "result", id, ok: false, error: { category, message }, heapUsedMB, footprintMB?, scripts? }
@@ -36,6 +38,12 @@ export interface GenerationChannel {
   listen(handler: (message: unknown) => void): void;
   /** The generation's own memory footprint in MB, where it has one (the solver process). */
   footprintMB?(): number;
+  /**
+   * Where a diagnostic line goes instead of this process's stderr (fd 2). The
+   * thread entry sets it: a thread shares fd 2 with the proxy, and a write to
+   * it would pass by the proxy's log writer.
+   */
+  writeLog?(text: string): void;
 }
 
 /** Serves one solver generation over `channel`: the guest error boundary, then init/solve messages. */
@@ -53,7 +61,11 @@ export function serveSolverGeneration(channel: GenerationChannel): void {
   // hold tokens or guest payloads.
   function onUncaught(err: unknown): void {
     if (hasGuestSourceFrame(err)) {
-      try { fs.writeSync(2, `[captcha-guest-error] ${describeGuestError(err)}\n`); } catch {}
+      try {
+        const line = `[captcha-guest-error] ${describeGuestError(err)}\n`;
+        if (channel.writeLog) channel.writeLog(line);
+        else fs.writeSync(2, line);
+      } catch {}
       return;
     }
     const name = (err as Error | null)?.name;

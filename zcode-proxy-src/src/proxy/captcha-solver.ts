@@ -232,42 +232,138 @@ const WORKER_URL = FROM_SOURCE
   ? new URL("./captcha-solver-worker.ts", import.meta.url)
   : new URL("./proxy/captcha-solver-worker.ts", import.meta.url);
 
+const NEWLINE = Buffer.from("\n");
+
+/** What one solver generation may write to the proxy's output: lines, bytes, and bytes per line. */
+export const SOLVER_OUTPUT_LIMITS = Object.freeze({ lines: 200, bytes: 64 * 1024, lineBytes: 2 * 1024 });
+
+/** The output allowance of one solver generation, shared by its stdout and stderr. */
+interface OutputBudget { lines: number; bytes: number; dropped: number }
+
+/** `line` cut to the per-line limit, on a character boundary. */
+function cutLine(line: Buffer): Buffer {
+  if (line.length <= SOLVER_OUTPUT_LIMITS.lineBytes) return line;
+  let end = SOLVER_OUTPUT_LIMITS.lineBytes;
+  while (end > 0 && (line[end]! & 0xc0) === 0x80) end -= 1;
+  return line.subarray(0, end);
+}
+
+/** Writes one solver line to `to` within the generation's allowance, or counts it as dropped. */
+function writeBounded(line: Buffer, terminated: boolean, to: NodeJS.WritableStream, budget: OutputBudget): void {
+  const shown = cutLine(line);
+  const size = shown.length + (terminated ? 1 : 0);
+  if (budget.lines >= SOLVER_OUTPUT_LIMITS.lines || budget.bytes + size > SOLVER_OUTPUT_LIMITS.bytes) {
+    budget.dropped += 1;
+    return;
+  }
+  budget.lines += 1;
+  budget.bytes += size;
+  to.write(terminated ? Buffer.concat([shown, NEWLINE]) : shown);
+}
+
+const DROPPED_OUTPUT = "solver wrote more output than one generation may; further lines were dropped";
+const droppedFields = (budget: OutputBudget) => ({
+  droppedLines: budget.dropped, limitLines: SOLVER_OUTPUT_LIMITS.lines, limitKiB: SOLVER_OUTPUT_LIMITS.bytes / 1024,
+});
+
+/**
+ * Re-emits a child stream on the proxy's own stream (process.stdout or
+ * process.stderr, looked up at every write: a managed proxy routes both
+ * through its proxy.log writer, which rotates the file and masks secrets).
+ * Whole lines at a time, so a child line never interleaves with a proxy line;
+ * a line without its newline is held until the newline or the stream's end.
+ * Bounded per solver process: a line is cut at 2 KiB, and past 200 lines or
+ * 64 KiB further lines are counted in `budget.dropped` instead of written.
+ */
+function relayLines(from: NodeJS.ReadableStream, to: () => NodeJS.WritableStream, budget: OutputBudget): void {
+  let held: Buffer | null = null;
+  // The held line is already over the per-line limit: the rest of it is skipped.
+  let overlong = false;
+  const emit = (line: Buffer, terminated: boolean): void => writeBounded(line, terminated, to(), budget);
+  from.on("data", (chunk: Buffer) => {
+    let buf = held ? Buffer.concat([held, chunk]) : chunk;
+    held = null;
+    for (let end = buf.indexOf(10); end >= 0; end = buf.indexOf(10)) {
+      if (overlong) overlong = false;
+      else emit(buf.subarray(0, end), true);
+      buf = buf.subarray(end + 1);
+    }
+    if (overlong || buf.length === 0) return;
+    if (buf.length > SOLVER_OUTPUT_LIMITS.lineBytes) {
+      // Longer than a line may be: its start is written now, the rest is skipped.
+      emit(buf, true);
+      overlong = true;
+    } else {
+      held = Buffer.from(buf);
+    }
+  });
+  from.on("end", () => {
+    if (held) emit(held, false);
+    held = null;
+  });
+}
+
 /** The thread transport: each solver generation is a Bun Worker of this process. */
-export function threadTransport(): SolverTransport {
+export function threadTransport(opts: { writeLog?: (line: string) => void } = {}): SolverTransport {
+  const log = createEventLogger({ component: "solver", ...(opts.writeLog ? { write: opts.writeLog } : {}) });
   return {
     // A thread shares the proxy's memory: nothing can cap it.
     cap: () => ({ capMB: null, enforcement: "none" }),
     spawn(events) {
-      const w = new Worker(WORKER_URL, { env: { ...process.env } } as WorkerOptions);
+      const w = new Worker(WORKER_URL, { env: solverEnv() } as WorkerOptions);
       // The host never stays alive for an idle solver; an in-flight solve is held
       // by its ref'd deadline timer instead.
       (w as Worker & { unref(): void }).unref(); // Bun runtime API missing from the Worker DOM type
-      w.addEventListener("message", (event: MessageEvent) => events.message(event.data));
+      // The thread's diagnostic lines arrive as messages and are written to
+      // the proxy's stderr here, within the same allowance as a solver process.
+      const output: OutputBudget = { lines: 0, bytes: 0, dropped: 0 };
+      const sayDropped = (): void => {
+        if (output.dropped > 0) log.warn(DROPPED_OUTPUT, droppedFields(output));
+        output.dropped = 0;
+      };
+      w.addEventListener("message", (event: MessageEvent) => {
+        const data = event.data as { type?: unknown; text?: unknown } | null;
+        if (data?.type !== "log") { events.message(event.data); return; }
+        if (typeof data.text !== "string") return;
+        const lines = data.text.split("\n");
+        const tail = lines.pop()!;
+        for (const line of lines) writeBounded(Buffer.from(line), true, process.stderr, output);
+        if (tail) writeBounded(Buffer.from(tail), false, process.stderr, output);
+      });
       w.addEventListener("error", () => events.error());
-      w.addEventListener("close", () => events.exit());
+      w.addEventListener("close", () => { sayDropped(); events.exit(); });
       return {
         post: (message) => w.postMessage(message),
-        terminate: () => w.terminate(),
+        terminate: () => { sayDropped(); w.terminate(); },
       };
     },
   };
 }
 
-// Names the solver process never receives, in any case (Windows names are
-// case-insensitive): the respawn chain's variables and this spawn's stop token
-// belong to the proxy, and the ambient proxy
-// variables — the set lib/proxy-env.mjs strips — would route captcha egress
-// past ZCODE_PROXY_UPSTREAM_PROXY (Bun < 1.4.3 ignores `proxy: false`).
-// Everything else passes as the worker got it: ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA,
-// the CDN cache variables and ZCODE_PROXY_UPSTREAM_PROXY included.
+// Names a solver generation never receives, on either transport, in any case
+// (Windows names are case-insensitive). The solver runs the vendor's code and
+// needs none of them:
+// - the respawn chain's variables and this spawn's stop token belong to the
+//   proxy;
+// - the ambient proxy variables — the set lib/proxy-env.mjs strips — would
+//   route captcha egress past ZCODE_PROXY_UPSTREAM_PROXY (Bun < 1.4.3 ignores
+//   `proxy: false`);
+// - the proxy's credentials and keys, and where it keeps them.
+// Everything else passes: ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA, the CAPTCHA_*
+// variables and ZCODE_PROXY_UPSTREAM_PROXY, which the solver code reads,
+// included.
 const EXCLUDED_FROM_SOLVER_ENV: readonly RegExp[] = [
   /^ZCODE_KIT_RESPAWN_/i,
   /^ZCODE_KIT_STOP_TOKEN$/i,
   /^(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i,
   /^(?:npm|yarn|pnpm)_(?:http_proxy|https_proxy|all_proxy|no_proxy|proxy)$/i,
+  /^ZCODE_PROXY_(?:CREDENTIAL_SECRET|CREDENTIAL_MASTER_KEY|MASTER_KEY|API_KEY|CREDENTIALS_PATH|ACCOUNTS_PATH)$/i,
+  /^ZCODE_CREDENTIAL_SECRET$/i,
+  /^ZCODE_CONTROL_CAPABILITY$/i,
 ];
 
-function solverProcessEnv(source: NodeJS.ProcessEnv): Record<string, string> {
+/** The environment of a solver generation: `source` without the names above. */
+export function solverEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(source)) {
     if (value === undefined || EXCLUDED_FROM_SOLVER_ENV.some((pattern) => pattern.test(name))) continue;
@@ -285,33 +381,6 @@ export function solverProcessCommand(): string[] {
   return FROM_SOURCE
     ? [process.execPath, fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url))]
     : [process.execPath, SOLVER_PROCESS_COMMAND];
-}
-
-/** A child line longer than this is passed on in pieces rather than held. */
-const MAX_RELAYED_LINE = 64 * 1024;
-
-/**
- * Re-emits a child stream on the proxy's own stream, whole lines at a time,
- * bytes unchanged, so a child line never interleaves with a proxy line.
- * A line without its newline is held up to MAX_RELAYED_LINE bytes, then
- * written as it is; the rest is written when the stream ends.
- */
-function relayLines(from: NodeJS.ReadableStream, to: NodeJS.WritableStream): void {
-  let held: Buffer | null = null;
-  from.on("data", (chunk: Buffer) => {
-    const buf = held ? Buffer.concat([held, chunk]) : chunk;
-    const end = buf.lastIndexOf(10) + 1;
-    if (end > 0) to.write(buf.subarray(0, end));
-    held = end < buf.length ? Buffer.from(buf.subarray(end)) : null;
-    if (held && held.length >= MAX_RELAYED_LINE) {
-      to.write(held);
-      held = null;
-    }
-  });
-  from.on("end", () => {
-    if (held) to.write(held);
-    held = null;
-  });
 }
 
 /** The memory cap of the solver, as the transport last applied it. */
@@ -408,7 +477,7 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
           child = spawn(command[0]!, [...command.slice(1), String(process.pid)], {
             stdio: ["ignore", "pipe", "pipe", "ipc"],
             serialization: "json",
-            env: solverProcessEnv(process.env),
+            env: solverEnv(),
             windowsHide: true,
           });
         } catch {
@@ -449,8 +518,13 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
             }
           }, () => {}).finally(() => applied.release());
         });
-        relayLines(proc.stdout!, process.stdout);
-        relayLines(proc.stderr!, process.stderr);
+        const output: OutputBudget = { lines: 0, bytes: 0, dropped: 0 };
+        relayLines(proc.stdout!, () => process.stdout, output);
+        relayLines(proc.stderr!, () => process.stderr, output);
+        // Both streams have ended: say once what the limits kept out.
+        proc.on("close", () => {
+          if (output.dropped > 0) log.warn(DROPPED_OUTPUT, droppedFields(output));
+        });
         // Neither the process nor its relayed pipes may hold the proxy open.
         proc.unref();
         for (const pipe of [proc.stdout, proc.stderr]) (pipe as { unref?: () => void } | null)?.unref?.();
