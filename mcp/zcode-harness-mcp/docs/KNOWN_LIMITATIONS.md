@@ -122,6 +122,16 @@ Die native Providerroute kann von der Proxyroute abweichen.
   the code the 2025-era revisions define. One answer differs: a `tools/call` without a tool name,
   which no client can validly send, is now refused with `-32602` and the message
   `Invalid tools/call request: …` instead of `-32603`.
+- **Why `2026-07-28` is not served yet.** The SDK's combined HTTP entry (`createMcpHandler` with
+  its stateless fallback for 2025-era traffic) was measured against the recorded conversations with
+  SDK 2.4.0: it answers 2025-era requests as `text/event-stream` where the bridge sends
+  `application/json` bodies, and it answers an unknown resource with `-32602` with no place to
+  restore `-32002`. Both would change the wire for today's clients. On stdio the SDK's `serveStdio`
+  entry served both eras in the same measurement (2025-era answers unchanged apart from that error
+  code, `server/discover`, `tools/list`, `tools/call` and `resources/read` on `2026-07-28` with the
+  capabilities unchanged). Serving `2026-07-28` therefore needs the bridge to route HTTP requests by
+  era itself (the SDK's `isLegacyRequest` in front of a `2026-07-28`-only handler) and keep its
+  present path for 2025-era requests; that is not built.
 - **HTTP.** Stateless as before: POST only, no session id, `405` for GET and DELETE, one server and
   one transport per request, both closed when the response closes (also when the client leaves
   while a tool is still running).
