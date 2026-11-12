@@ -108,6 +108,12 @@ sie älter als 7 Tage sind (laufende nie); danach liefern sie den bekannten Fehl
 `unknown task: <taskId>`. Wortlaut der Tool-Beschreibung: "Idempotency keys are remembered for as
 long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after
 that the same key starts a new task."
+Several bridges can share one data directory. Each record carries the additive field
+`owner: { pid, startedAt }` of the bridge process that last wrote it; a bridge does not interrupt,
+load or evict a task that another live bridge owns. If the stored files of a finished task are gone
+when it is read (another bridge's retention removed them), `zcode_task_get` and `zcode_task_result`
+answer once with the tool error `task expired: its stored result was removed (<taskId>)`, and
+afterwards with `unknown task: <taskId>`.
 
 **Harness restart budget.** The bridge starts the harness on the first call that needs it. When the
 harness exits, running tasks become `interrupted` and nothing is started until the next call that
@@ -128,6 +134,12 @@ the state in the additive field `runtime.restartBudget`: `limit`, `windowSec`, `
 | --- | --- | --- |
 | `zcode_interactions_list` | `status? (pending\|resolved\|all)` | Stabile IDs, Art, Optionen, Task/Session-Bezug, Auflösung. |
 | `zcode_interaction_respond` | `interactionId, optionId? / value? / cancel?` | Atomare Auflösung; nur Optionen, die der Harness angeboten hat (keine Autoritätserweiterung); Doppel-/Spätantworten werden abgelehnt; Timeout → sichere Default-Antwort (deny) durch die Bridge. |
+
+`zcode_interaction_respond` sends a chosen permission option to the runtime as an approval only when
+its kind is `allow_once`, `allow_always` or `allow_project`, and as a refusal when its kind names one
+(`deny`, `reject`, `cancel`, also with a suffix); for any other option it answers with a tool error
+that starts with `the bridge cannot tell whether option <id> … approves or refuses the request`,
+sends nothing, and leaves the interaction pending (`cancel:true` or the timeout still refuse it).
 
 Automatisch (ohne Agent) beantwortet: `session/requestRuntimePreferences` (Bridge-Konfiguration),
 `interaction/requestProviderRuntimeHeaders` (`{headersApplied:false}`), `interaction/requestOfficialMcpAuthHeaders`

@@ -31,6 +31,31 @@ export const TERMINAL_STATES = ["completed", "failed", "cancelled", "interrupted
  */
 export const TASK_RETENTION = Object.freeze({ maxTerminalTasks: 500, maxAgeMs: 7 * 24 * 60 * 60 * 1000 });
 const EVICTABLE_STATES = ["completed", "failed", "cancelled", "interrupted"];
+const THIS_PROCESS = Object.freeze({ pid: process.pid, startedAt: new Date(Date.now() - Math.round(process.uptime() * 1000)).toISOString() });
+// The bridge has no task time limit of its own; a day plus a margin.
+const RUNNING_OWNED_MAX_MS = 25 * 60 * 60 * 1000;
+const FINISHED_OWNED_GRACE_MS = 24 * 60 * 60 * 1000;
+// How often the owners of other bridges' tasks are checked for being alive.
+const OWNER_CHECK_INTERVAL_MS = 60_000;
+// A result file without its record is swept at a start once it is this old (a record on its way is not).
+const ORPHAN_RESULT_MIN_AGE_MS = 60 * 60 * 1000;
+function ownerOf(rec) {
+    const o = rec.owner;
+    return o && Number.isSafeInteger(o.pid) && o.pid > 0 && typeof o.startedAt === "string" ? { pid: o.pid, startedAt: o.startedAt } : null;
+}
+/** Whether `owner` is a live process other than this one. This pid under another start time is a dead predecessor. */
+function otherLiveProcess(owner) {
+    if (owner === null || owner.pid === process.pid)
+        return false;
+    try {
+        process.kill(owner.pid, 0);
+        return true;
+    }
+    catch (err) {
+        // ESRCH: no such process. Anything else (EPERM: someone else's process) means it exists.
+        return err.code !== "ESRCH";
+    }
+}
 /** Finish time in ms (createdAt when missing); an unreadable time counts as oldest. */
 function finishedMs(rec) {
     const at = Date.parse(rec.finishedAt ?? rec.createdAt);
@@ -86,6 +111,9 @@ export class TaskManager {
      */
     evictableCount = 0;
     oldestEvictableMs = Infinity;
+    /** How many retained tasks are held by another live bridge, and when their owners were last checked. */
+    heldCount = 0;
+    ownersCheckedAt = 0;
     constructor(runtime, interactions, store, config, clock = () => Date.now()) {
         this.runtime = runtime;
         this.interactions = interactions;
@@ -109,6 +137,8 @@ export class TaskManager {
      * (the retention migration: a no-op when run again). */
     restore() {
         const files = this.store.listFiles("tasks");
+        const now = this.clock();
+        this.sweepOrphanResults(files, now);
         const loaded = [];
         for (const f of files) {
             // Only plain task records: task-<id>.json (not .result.json snapshots).
@@ -119,13 +149,18 @@ export class TaskManager {
                 continue;
             const interrupted = !TERMINAL_STATES.includes(rec.state);
             if (interrupted) {
+                // Running in another live bridge: not this bridge's task, and not cut off by any restart.
+                const written = this.store.modifiedMs(`tasks/${f}`);
+                if (otherLiveProcess(ownerOf(rec)) && written !== null && now - written <= RUNNING_OWNED_MAX_MS)
+                    continue;
                 rec.state = "interrupted";
                 rec.interruptionReason = "bridge restart; harness state not re-verified";
-                rec.finishedAt = rec.finishedAt ?? new Date(this.clock()).toISOString();
+                rec.finishedAt = rec.finishedAt ?? new Date(now).toISOString();
+                rec.owner = THIS_PROCESS;
             }
-            loaded.push({ file: f, rec, interrupted });
+            loaded.push({ file: f, rec, interrupted, heldBy: interrupted ? null : this.holder(rec, now) });
         }
-        const victims = new Set(retentionVictims(loaded.map((l) => l.rec), this.clock()));
+        const victims = new Set(retentionVictims(loaded.filter((l) => l.heldBy === null).map((l) => l.rec), now));
         for (const { file, rec } of loaded) {
             if (!victims.has(rec.taskId))
                 continue;
@@ -133,12 +168,15 @@ export class TaskManager {
             this.store.deleteFile(`tasks/${file}`);
         }
         let n = 0;
-        for (const { file, rec, interrupted } of loaded) {
+        for (const { file, rec, interrupted, heldBy } of loaded) {
             if (victims.has(rec.taskId))
                 continue;
             if (interrupted)
                 this.store.writeJson(`tasks/${file}`, rec);
-            this.tasks.set(rec.taskId, this.internalFromRecord(rec));
+            const t = this.internalFromRecord(rec);
+            t.heldBy = heldBy;
+            t.resultStored = this.store.modifiedMs(`tasks/${rec.taskId}.result.json`) !== null;
+            this.tasks.set(rec.taskId, t);
             if (rec.idempotencyKey)
                 this.byIdempotency.set(rec.idempotencyKey, rec.taskId);
             if (rec.sessionId)
@@ -147,16 +185,91 @@ export class TaskManager {
         }
         if (n > 0)
             log.info("restored tasks from store", victims.size > 0 ? { count: n, evicted: victims.size } : { count: n });
+        this.ownersCheckedAt = now;
         this.reindexRetention();
         this.syncIngress();
         return n;
+    }
+    /** The other live bridge whose finished task this is, or null when this bridge may evict it. */
+    holder(rec, now) {
+        const owner = ownerOf(rec);
+        if (!otherLiveProcess(owner))
+            return null;
+        return finishedMs(rec) < now - TASK_RETENTION.maxAgeMs - FINISHED_OWNED_GRACE_MS ? null : owner;
+    }
+    /** Release the tasks whose holder has exited (or is past its grace); at most once a minute, and only while any are held. */
+    releaseHeld(now) {
+        if (this.heldCount === 0 || now - this.ownersCheckedAt < OWNER_CHECK_INTERVAL_MS)
+            return;
+        this.ownersCheckedAt = now;
+        const alive = new Map();
+        let released = false;
+        for (const t of this.tasks.values()) {
+            if (t.heldBy === null)
+                continue;
+            const pid = t.heldBy.pid;
+            if (!alive.has(pid))
+                alive.set(pid, otherLiveProcess(t.heldBy));
+            if (alive.get(pid) && this.holder(t.record, now) !== null)
+                continue;
+            t.heldBy = null;
+            released = true;
+        }
+        if (released)
+            this.reindexRetention();
+    }
+    /** Delete result files that have no record beside them and are old enough not to be waiting for one. */
+    sweepOrphanResults(files, now) {
+        const present = new Set(files);
+        for (const f of files) {
+            const m = /^(task-[A-Za-z0-9-]+)\.result\.json$/.exec(f);
+            if (!m || present.has(`${m[1]}.json`))
+                continue;
+            const written = this.store.modifiedMs(`tasks/${f}`);
+            if (written !== null && now - written > ORPHAN_RESULT_MIN_AGE_MS)
+                this.store.deleteFile(`tasks/${f}`);
+        }
+    }
+    /** Forget a task in memory (its files are not touched). */
+    forget(taskId) {
+        const t = this.tasks.get(taskId);
+        if (!t)
+            return;
+        this.tasks.delete(taskId);
+        this.startQueue.delete(taskId);
+        const rec = t.record;
+        if (rec.idempotencyKey && this.byIdempotency.get(rec.idempotencyKey) === taskId)
+            this.byIdempotency.delete(rec.idempotencyKey);
+        if (rec.sessionId && this.bySession.get(rec.sessionId) === taskId)
+            this.bySession.delete(rec.sessionId);
+    }
+    /**
+     * A finished task whose stored files are gone (another bridge's retention,
+     * or someone cleaning the directory) has expired: it is forgotten and the
+     * caller is told so. Serving it from memory would give a completed task
+     * with an empty result, and write a result file nothing ever removes.
+     */
+    assertStored(t, withResult) {
+        const { taskId, state } = t.record;
+        if (!TERMINAL_STATES.includes(state))
+            return;
+        const recordGone = this.store.modifiedMs(`tasks/${taskId}.json`) === null;
+        if (!recordGone && !(withResult && t.resultStored && this.store.modifiedMs(`tasks/${taskId}.result.json`) === null))
+            return;
+        this.forget(taskId);
+        this.reindexRetention();
+        this.syncIngress();
+        throw new TaskError("TASK_EXPIRED", `task expired: its stored result was removed (${taskId})`);
     }
     /** Recount the retention index from the retained tasks (restore, and after a scan). */
     reindexRetention() {
         let count = 0;
         let oldest = Infinity;
+        let held = 0;
         for (const t of this.tasks.values()) {
-            t.retentionCounted = EVICTABLE_STATES.includes(t.record.state);
+            if (t.heldBy !== null)
+                held += 1;
+            t.retentionCounted = t.heldBy === null && EVICTABLE_STATES.includes(t.record.state);
             if (!t.retentionCounted)
                 continue;
             count += 1;
@@ -164,10 +277,11 @@ export class TaskManager {
         }
         this.evictableCount = count;
         this.oldestEvictableMs = oldest;
+        this.heldCount = held;
     }
     /** Update the retention index for one task after its record changed. */
     noteRetention(t) {
-        const evictable = EVICTABLE_STATES.includes(t.record.state);
+        const evictable = t.heldBy === null && EVICTABLE_STATES.includes(t.record.state);
         if (evictable !== t.retentionCounted) {
             this.evictableCount += evictable ? 1 : -1;
             t.retentionCounted = evictable;
@@ -185,21 +299,16 @@ export class TaskManager {
     /** Evict the terminal tasks beyond the retention (memory, files, idempotency key). */
     enforceRetention() {
         const now = this.clock();
+        this.releaseHeld(now);
         // O(1) on every request: nothing can be beyond the retention unless the index says so.
         if (this.evictableCount <= TASK_RETENTION.maxTerminalTasks && this.oldestEvictableMs >= now - TASK_RETENTION.maxAgeMs)
             return;
-        const victims = retentionVictims([...this.tasks.values()].map((t) => t.record), now);
+        // Tasks held by another live bridge are neither counted nor evicted here.
+        const victims = retentionVictims([...this.tasks.values()].filter((t) => t.heldBy === null).map((t) => t.record), now);
         for (const taskId of victims) {
-            const t = this.tasks.get(taskId);
-            if (!t)
+            if (!this.tasks.has(taskId))
                 continue;
-            this.tasks.delete(taskId);
-            this.startQueue.delete(taskId);
-            const rec = t.record;
-            if (rec.idempotencyKey && this.byIdempotency.get(rec.idempotencyKey) === taskId)
-                this.byIdempotency.delete(rec.idempotencyKey);
-            if (rec.sessionId && this.bySession.get(rec.sessionId) === taskId)
-                this.bySession.delete(rec.sessionId);
+            this.forget(taskId);
             this.deleteTaskFiles(taskId);
         }
         this.reindexRetention();
@@ -221,7 +330,15 @@ export class TaskManager {
             warnings: [],
             errors: rec.error ? [rec.error] : [],
             retentionCounted: false,
+            heldBy: null,
+            resultStored: false,
             persist: () => {
+                // Whoever writes the record owns the task from here on.
+                rec.owner = THIS_PROCESS;
+                if (t.heldBy !== null) {
+                    t.heldBy = null;
+                    this.heldCount -= 1;
+                }
                 this.store.writeJson(`tasks/${rec.taskId}.json`, rec);
                 this.noteRetention(t);
             },
@@ -246,6 +363,14 @@ export class TaskManager {
     }
     get(taskId) {
         return this.lookup(taskId)?.record ?? null;
+    }
+    /** The record for a caller that reads the task: an unknown task and an expired one are errors. */
+    read(taskId) {
+        const t = this.lookup(taskId);
+        if (!t)
+            throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
+        this.assertStored(t, false);
+        return t.record;
     }
     list(filter) {
         this.enforceRetention();
@@ -577,6 +702,7 @@ export class TaskManager {
                 throw new TaskError("SEND_REJECTED", "follow-up prompt was not accepted");
             if (canSend()) {
                 this.store.deleteFile(`tasks/${taskId}.result.json`);
+                t.resultStored = false;
                 rec.followUpCount += 1;
                 if (rec.state === "starting")
                     rec.state = "running";
@@ -666,6 +792,7 @@ export class TaskManager {
         const t = this.lookup(taskId);
         if (!t)
             throw new TaskError("TASK_NOT_FOUND", `unknown task: ${taskId}`);
+        this.assertStored(t, true);
         const rec = t.record;
         // Terminal results are persisted once and served from the store so they
         // survive bridge restarts (harness transcripts may be gone by then).
@@ -673,6 +800,7 @@ export class TaskManager {
         const state = rec.state;
         const cached = this.store.readJson(`tasks/${taskId}.result.json`);
         if (cached && cached.schemaVersion === 1 && cached.status === state && cached.finishedAt === rec.finishedAt && TERMINAL_STATES.includes(state)) {
+            t.resultStored = true;
             return cached;
         }
         if (rec.sessionId && rec.usage === null && this.runtime.running && TERMINAL_STATES.includes(rec.state)) {
@@ -763,6 +891,7 @@ export class TaskManager {
         };
         if (TERMINAL_STATES.includes(rec.state)) {
             this.store.writeJson(`tasks/${taskId}.result.json`, result);
+            t.resultStored = true;
         }
         return result;
     }
