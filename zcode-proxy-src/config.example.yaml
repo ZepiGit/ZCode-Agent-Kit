@@ -228,3 +228,14 @@ logging:
 #     hardLimitMB: 1024          # 64-65536, above softLimitMB
 #     samples: 3                 # 1-20
 #     sampleIntervalSeconds: 15  # 1-600
+
+# Captcha solver process (optional): the solver runs in a process of its own
+# under a memory cap, in MB. Windows enforces the cap with a Job Object, Linux
+# with a systemd user scope (cgroup) once its limit has been read back from
+# the kernel; where the operating system cannot enforce it (macOS, a Linux
+# without a delegated memory controller) the solver process measures its own
+# footprint and ends itself at the cap. A solver that ends at the cap is
+# logged with this key's name. Raise the cap only if solves need more memory.
+# Default shown; allowed 128-65536; no env override.
+# solver:
+#   memoryCapMB: 300

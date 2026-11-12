@@ -25,6 +25,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { CaptchaSdkError, captchaFailureFromTransport, type CaptchaFailureCategory } from "./captcha-token.js";
+import { createEventLogger } from "../log/event-line.mjs";
+import {
+  NO_SOLVER_CAP, SOLVER_CAP_KEY, applySolverCap, configuredSolverCapMB,
+  type SolverCap, type SolverEnforcement,
+} from "./solver-cap.js";
 import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
 
 const BACKEND = process.env.ZCODE_CAPTCHA_BACKEND?.trim().toLowerCase() || "happy";
@@ -45,6 +50,14 @@ export interface CaptchaSolverStats {
   lastRecycleAt: number | null; // epoch ms
   /** SDK bundle fingerprints of the latest attempt: known basenames or opaque ids + sha256 only. */
   lastSdkScripts: ReadonlyArray<CaptchaSdkScript> | null;
+  /** The solver's memory cap in MB; null when its generations run without one (the thread transport). */
+  capMB: number | null;
+  /**
+   * How the cap is enforced: by the operating system (`job-object`, `cgroup`),
+   * by the solver process measuring itself (`sampling`), or not at all
+   * (`none`). Null until the first solver process has been capped.
+   */
+  enforcement: SolverEnforcement | null;
 }
 
 export interface CaptchaSdkScript {
@@ -86,10 +99,10 @@ interface Job {
 }
 
 type WorkerMessage =
-  | { type: "result"; id: number; ok: true; param: string; heapUsedMB: number | null;
+  | { type: "result"; id: number; ok: true; param: string; heapUsedMB: number | null; footprintMB: number | null;
       scripts: ReadonlyArray<CaptchaSdkScript> | null }
   | { type: "result"; id: number; ok: false; category: CaptchaFailureCategory; message: string;
-      heapUsedMB: number | null; scripts: ReadonlyArray<CaptchaSdkScript> | null }
+      heapUsedMB: number | null; footprintMB: number | null; scripts: ReadonlyArray<CaptchaSdkScript> | null }
   | { type: "fatal"; name: string };
 
 const CATEGORIES: ReadonlySet<string> = new Set<CaptchaFailureCategory>(["rate-limit", "duplicate", "other", "incompatible"]);
@@ -106,6 +119,7 @@ function parseWorkerMessage(raw: unknown): WorkerMessage | null {
   }
   if (m.type !== "result" || typeof m.id !== "number" || !Number.isSafeInteger(m.id)) return null;
   const heapUsedMB = typeof m.heapUsedMB === "number" && Number.isFinite(m.heapUsedMB) ? m.heapUsedMB : null;
+  const footprintMB = typeof m.footprintMB === "number" && Number.isFinite(m.footprintMB) && m.footprintMB >= 0 ? m.footprintMB : null;
   // Health output: only short resource ids and hex digests survive.
   const scripts = Array.isArray(m.scripts)
     ? Object.freeze(m.scripts.slice(0, 16).map((script: { filename?: unknown; sha256?: unknown } | null) => Object.freeze({
@@ -126,12 +140,12 @@ function parseWorkerMessage(raw: unknown): WorkerMessage | null {
             || ("SecurityToken" in token && typeof token.SecurityToken === "string" && token.SecurityToken.length >= 50));
       } catch { /* malformed token */ }
     }
-    if (!valid) return { type: "result", id: m.id, ok: false, category: "other", message: "captcha solver returned invalid token", heapUsedMB, scripts: null };
-    return { type: "result", id: m.id, ok: true, param: String(m.param), heapUsedMB, scripts };
+    if (!valid) return { type: "result", id: m.id, ok: false, category: "other", message: "captcha solver returned invalid token", heapUsedMB, footprintMB, scripts: null };
+    return { type: "result", id: m.id, ok: true, param: String(m.param), heapUsedMB, footprintMB, scripts };
   }
   const error = (m.error && typeof m.error === "object" ? m.error : {}) as Record<string, unknown>;
   return {
-    type: "result", id: m.id, ok: false, heapUsedMB, scripts,
+    type: "result", id: m.id, ok: false, heapUsedMB, footprintMB, scripts,
     category: typeof error.category === "string" && CATEGORIES.has(error.category)
       ? error.category as CaptchaFailureCategory : "other",
     message: typeof error.message === "string" && error.message
@@ -166,6 +180,8 @@ export interface SolverChannel {
  */
 export interface SolverTransport {
   spawn(events: SolverChannelEvents): SolverChannel;
+  /** The memory cap of its generations; a transport without the method runs them uncapped. */
+  cap?(): SolverCapState;
 }
 
 // From source the worker sits next to this module; in a compiled binary
@@ -179,6 +195,8 @@ const WORKER_URL = FROM_SOURCE
 /** The thread transport: each solver generation is a Bun Worker of this process. */
 export function threadTransport(): SolverTransport {
   return {
+    // A thread shares the proxy's memory: nothing can cap it.
+    cap: () => ({ capMB: null, enforcement: "none" }),
     spawn(events) {
       const w = new Worker(WORKER_URL, { env: { ...process.env } } as WorkerOptions);
       // The host never stays alive for an idle solver; an in-flight solve is held
@@ -256,11 +274,25 @@ function relayLines(from: NodeJS.ReadableStream, to: NodeJS.WritableStream): voi
   });
 }
 
+/** The memory cap of the solver, as the transport last applied it. */
+export interface SolverCapState {
+  /** The cap in MB; null when the generations run without one. */
+  capMB: number | null;
+  /** How the cap is enforced; null until the first solver process has been capped. */
+  enforcement: SolverEnforcement | null;
+}
+
 export interface SolverProcessTransportOptions {
   /** argv of the solver process (default: solverProcessCommand()). */
   command?: readonly string[];
   /** How long an ended generation may take to exit after SIGTERM before it is killed. */
   graceMs?: number;
+  /** The memory cap of each solver process in MB, or null for none (default: the configured cap). */
+  capMB?: number | null | (() => number | null);
+  /** Applies the cap to a started solver process (default: the operating system, applySolverCap). */
+  applyCap?: (pid: number, capBytes: number) => Promise<SolverCap>;
+  /** Sink of the transport's event lines (default: the console). */
+  writeLog?: (line: string) => void;
 }
 
 /** Default grace between SIGTERM and SIGKILL for an ended generation. */
@@ -273,19 +305,62 @@ export const SOLVER_EXIT_GRACE_MS = 2_000;
  * are held. The 90 s deadline is armed by the dispatcher at dispatch, so a
  * cold start counts against it. The proxy never stays alive for an idle
  * solver process (unref); the in-flight solve's deadline timer holds it.
+ *
+ * Cap before work: a started process says `hello` and nothing else is sent to
+ * it until its memory cap has been applied and acknowledged (`cap`). The
+ * process loads nothing heavy before that and ends itself when the
+ * acknowledgement does not come. A process the operating system ends at the
+ * cap is reported with one event line that names the config key.
  */
 export function solverProcessTransport(opts: SolverProcessTransportOptions = {}): SolverTransport {
   const graceMs = opts.graceMs ?? SOLVER_EXIT_GRACE_MS;
+  const applyCap = opts.applyCap ?? ((pid: number, capBytes: number) => applySolverCap(pid, capBytes));
+  const configuredCap = (): number | null => {
+    const cap = opts.capMB === undefined ? configuredSolverCapMB() : typeof opts.capMB === "function" ? opts.capMB() : opts.capMB;
+    return typeof cap === "number" && cap > 0 ? cap : null;
+  };
+  const log = createEventLogger({ component: "solver", ...(opts.writeLog ? { write: opts.writeLog } : {}) });
   // Settles when the latest generation's process has exited (or never started).
   let lastExit: Promise<void> = Promise.resolve();
+  let capState: SolverCapState = { capMB: configuredCap(), enforcement: null };
+  let saidWhyNotEnforced = false;
 
   return {
+    cap: () => ({ ...capState }),
     spawn(events) {
       const command = opts.command ?? solverProcessCommand();
       let child: ChildProcess | null = null;
       let ended = false;
+      // The cap acknowledgement has been sent: the process may be given work.
+      let acknowledged = false;
+      let greeted = false;
+      let cap: SolverCap | null = null;
       const held: SolverHostMessage[] = [];
       const { promise: exited, resolve: markExited } = Promise.withResolvers<void>();
+
+      const acknowledge = async (proc: ChildProcess): Promise<void> => {
+        const capMB = configuredCap();
+        const applied = capMB === null || proc.pid === undefined ? NO_SOLVER_CAP
+          : await applyCap(proc.pid, capMB * 1024 * 1024).catch((): SolverCap => ({
+              enforcement: "sampling", reason: "the memory cap could not be applied",
+              endedAtCap: () => Promise.resolve(false), release: () => {},
+            }));
+        if (ended || proc.exitCode !== null || proc.signalCode !== null) { applied.release(); return; }
+        cap = applied;
+        capState = { capMB, enforcement: applied.enforcement };
+        if (applied.enforcement === "sampling" && !applied.designed && !saidWhyNotEnforced) {
+          saidWhyNotEnforced = true;
+          log.warn("the operating system does not enforce the solver's memory cap; the solver process measures itself and ends at the cap", {
+            capMB, enforcement: "sampling", why: applied.reason,
+          });
+        }
+        // A process that died meanwhile reports through "exit".
+        try {
+          proc.send({ type: "cap", enforcement: applied.enforcement, capMB });
+          acknowledged = true;
+          for (const message of held.splice(0)) proc.send(message);
+        } catch {}
+      };
 
       const start = () => {
         if (ended) { markExited(); return; }
@@ -302,23 +377,43 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
           return;
         }
         const proc = child;
-        proc.on("message", (raw) => { if (!ended) events.message(raw); });
+        proc.on("message", (raw) => {
+          if (ended) return;
+          if (acknowledged) { events.message(raw); return; }
+          // Before the acknowledgement only the greeting counts.
+          if (!greeted && (raw as { type?: unknown } | null)?.type === "hello") {
+            greeted = true;
+            void acknowledge(proc);
+          }
+        });
         proc.on("error", () => {
           // A spawn failure has no process to wait for.
           if (proc.pid === undefined) markExited();
           if (!ended) events.error();
         });
-        proc.on("exit", () => {
+        proc.on("exit", (_code, signal) => {
           markExited();
-          if (!ended) events.exit();
+          const unexpected = !ended;
+          if (unexpected) events.exit();
+          const applied = cap;
+          if (!applied) return;
+          // The operating system ends a process at its cap with SIGKILL (Linux)
+          // or lets its allocation fail (Windows); ask only then.
+          const ask = unexpected || signal === "SIGKILL" ? applied.endedAtCap() : Promise.resolve(false);
+          void ask.then((atCap) => {
+            if (atCap && unexpected) {
+              log.warn("solver process ended by the operating system at its memory cap", {
+                capMB: capState.capMB, enforcement: applied.enforcement, key: SOLVER_CAP_KEY,
+                next: `raise ${SOLVER_CAP_KEY} in the proxy's config.yaml if solves need more memory`,
+              });
+            }
+          }, () => {}).finally(() => applied.release());
         });
         relayLines(proc.stdout!, process.stdout);
         relayLines(proc.stderr!, process.stderr);
         // Neither the process nor its relayed pipes may hold the proxy open.
         proc.unref();
         for (const pipe of [proc.stdout, proc.stderr]) (pipe as { unref?: () => void } | null)?.unref?.();
-        // A process that failed at once reports through "error"/"exit".
-        try { for (const message of held.splice(0)) proc.send(message); } catch {}
       };
 
       // Asynchronous in every case: events never come from inside spawn().
@@ -328,7 +423,7 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
 
       return {
         post(message) {
-          if (child) child.send(message);
+          if (child && acknowledged) child.send(message);
           else held.push(message);
         },
         terminate() {
@@ -399,7 +494,9 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
   // Consecutive failures of the current generation (the stat spans generations).
   let generationFailures = 0;
 
-  const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth"> = {
+  const capState = (): SolverCapState => transport.cap?.() ?? { capMB: null, enforcement: "none" };
+
+  const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth" | "capMB" | "enforcement"> = {
     generation: 0,
     solvesSinceSpawn: 0,
     totalSolves: 0,
@@ -585,6 +682,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
         busy: inFlight !== null,
         queueDepth: queue.length,
         ...stats,
+        ...capState(),
       };
     },
     requestRecycle(reason) {

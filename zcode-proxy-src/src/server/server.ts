@@ -21,6 +21,7 @@ import { collectPoolQuotaSnapshot } from "./routes-quota.js";
 import { loadAccountStore } from "../auth/account-store.js";
 import { errorResponse } from "../proxy/handler.js";
 import { healthDetails } from "../runtime/health-monitor.js";
+import { configureSolverCap } from "../proxy/solver-cap.js";
 import { STOP_REQUEST_PATH, STOP_TOKEN_HEADER } from "../runtime/stop-deadlines.mjs";
 import type { ResponseStore } from "../responses/store.js";
 import {
@@ -406,6 +407,9 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
         "(the kit's setup does this; manually: replace GENERATE_ME in proxy/config.yaml)",
     );
   }
+
+  // The solver process a later solve starts gets this cap (default 300 MB).
+  configureSolverCap(opts.config.solver?.memoryCapMB);
 
   const admission = opts.admission ?? admissionFor(opts.config);
   const drain = createDrainGate();
