@@ -50,7 +50,8 @@ async function host(source: string, env: Record<string, string | undefined> = {}
 
 async function expectOk(run: Promise<HostRun>): Promise<HostRun> {
   const result = await run;
-  expect({ code: result.code, stderr: result.code === 0 ? "" : result.stderr.toString() }).toEqual({ code: 0, stderr: "" });
+  // A failed host shows both of its streams: the proxy's event lines are on stdout.
+  expect({ code: result.code, ...(result.code === 0 ? {} : { stderr: result.stderr.toString(), stdout: result.stdout }) }).toEqual({ code: 0 });
   expect(result.stdout).toContain("SCENARIO_OK");
   return result;
 }
@@ -365,8 +366,10 @@ describe("solver process: lifecycle", () => {
       const run = await expectOk(host(`${REPORT}
         const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({
           command: [process.execPath, ${JSON.stringify(entryFixture)}, 'ignore-sigterm'], graceMs: 1200 }) });
-        s.configure({ backendModule, deadlineMs: 400, idleMs: 5000 });
+        s.configure({ backendModule, idleMs: 5000 });
         const first = Number(label(await s.run('pid', 'sgp', 'p')).slice(4));
+        // Only the hung solve gets the short deadline: a cold start on a busy machine can take longer.
+        s.configure({ deadlineMs: 400 });
         await assert.rejects(s.run('hang', 'sgp', 'p'), /deadline exceeded/);
         const killedAt = Date.now();
         s.configure({ deadlineMs: 10000 });
@@ -479,12 +482,14 @@ describe("solver process: output", () => {
 
   it("passes on at most 64 KiB per solver process, stdout and stderr together", async () => {
     // 40 lines of 2000 bytes: 32 of them (64,032 bytes with their newlines) fit.
-    const block = Array.from({ length: 20 }, (_, i) => `${String(i).padStart(2, "0")}${"y".repeat(1998)}\n`).join("");
+    // The host builds the payload itself: on its command line it would pass
+    // the length Windows allows.
     const run = await expectOk(host(`
       const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport() });
       s.configure({ backendModule, idleMs: 2000 });
-      await s.run('stderr-line:${Buffer.from(block).toString("base64")}', 'sgp', 'p');
-      await s.run('stderr-line:${Buffer.from(block).toString("base64")}', 'sgp', 'p');
+      const block = Buffer.from(Array.from({ length: 20 }, (_, i) => String(i).padStart(2, '0') + 'y'.repeat(1998) + '\\n').join('')).toString('base64');
+      await s.run('stderr-line:' + block, 'sgp', 'p');
+      await s.run('stderr-line:' + block, 'sgp', 'p');
       s.shutdown();
       await new Promise(resolve => setTimeout(resolve, 500));
     `));
@@ -538,7 +543,14 @@ function systemdScopeCaps(): boolean {
 const expectedEnforcement = process.platform === "win32" ? "job-object" : systemdScopeCaps() ? "cgroup" : "sampling";
 
 const SAMPLING_CAP = "async () => ({ enforcement: 'sampling', reason: 'test', endedAtCap: async () => false, release() {} })";
-const AT_CAP = (mode: string) => new RegExp(String.raw`^\S+ WARN solver solver process ended at its memory cap capMB=128 enforcement=${mode} key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"${mode === "sampling" ? String.raw` footprintMB=\d+` : ""}$`, "m");
+/**
+ * The cap of the tests that push a solver past it. 128 MB is quick to reach;
+ * on Windows the cap counts commit charge, and a solver process with the DOM
+ * runtime loaded already commits about that much (it could not load, or ended
+ * itself at once, under 128 MB), so the default cap is used there.
+ */
+const TEST_CAP_MB = process.platform === "win32" ? 300 : 128;
+const AT_CAP = (mode: string) => new RegExp(String.raw`^\S+ WARN solver solver process ended at its memory cap capMB=${TEST_CAP_MB} enforcement=${mode} key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"${mode === "sampling" ? String.raw` footprintMB=\d+` : ""}$`, "m");
 
 describe("solver process: memory cap", () => {
   /** The real entry behind the module probe, started the way the transport starts it. */
@@ -627,16 +639,24 @@ describe("solver process: memory cap", () => {
       const before = solver.getCaptchaSolverStats();
       solver.configureCaptchaSolver({ backendModule, idleMs: 2000 });
       await solver.runCaptchaSolve('token:a', 'sgp', 'p');
+      await solver.runCaptchaSolve('real-dom', 'sgp', 'p');
       report({ before: [before.capMB, before.enforcement], after: [solver.getCaptchaSolverStats().capMB, solver.getCaptchaSolverStats().enforcement],
+        footprintMB: solver.getCaptchaSolverStats().lastFootprintMB,
         thread: (({ capMB, enforcement }) => [capMB, enforcement])(solver.createCaptchaSolver({ transport: solver.threadTransport() }).stats()) });
       solver.shutdownCaptchaSolver();
     `));
-    expect(reported(run)).toEqual({ before: [300, null], after: [300, expectedEnforcement], thread: [null, "none"] });
+    const { footprintMB, ...modes } = reported(run);
+    expect(modes).toEqual({ before: [300, null], after: [300, expectedEnforcement], thread: [null, "none"] });
+    // What the cap is measured against on this system (commit charge on
+    // Windows), for the test log: the room a solve has under the cap.
+    console.log(`solver footprint after two solves on ${process.platform}: ${footprintMB} MB of 300`);
+    expect(footprintMB).toBeGreaterThan(0);
+    expect(footprintMB).toBeLessThan(240);
   });
 
   it(`ends a solver that allocates past its cap (${expectedEnforcement}), fails only that solve and names the config key in the log`, async () => {
     const run = await expectOk(host(`${REPORT}
-      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 128 }) });
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: ${TEST_CAP_MB} }) });
       s.configure({ backendModule, idleMs: 2000 });
       const first = label(await s.run('pid', 'sgp', 'p'));
       let failure = null;
@@ -649,17 +669,55 @@ describe("solver process: memory cap", () => {
       s.shutdown();
     `, {}, 40_000));
     const { first, failure, next, stats } = reported(run);
+    expect(stats).toMatchObject({ capMB: TEST_CAP_MB, enforcement: expectedEnforcement, totalSolves: 2, totalFailures: 1 });
+    expect([failure[0], failure[2]]).toEqual(["CaptchaSdkError", "other"]);
+    // A Job Object does not end the process: its allocations fail. The runtime
+    // then either aborts, or hands the failure to the solve as an exception
+    // and lives on, in which case only that solve has failed and nothing ended.
+    const exited = failure[1] === "captcha solver worker exited unexpectedly";
+    if (expectedEnforcement !== "job-object") expect(exited).toBe(true);
+    if (exited) {
+      expect(next).not.toBe(first);
+      expect(run.stdout).toMatch(AT_CAP(expectedEnforcement));
+      expect(stats.capExits).toBe(1);
+    } else {
+      console.log(`solver survived its Job Object limit; the solve failed with: ${failure[1]}`);
+      expect(run.stdout).not.toContain("ended at its memory cap");
+      expect(stats.capExits).toBe(0);
+    }
+  }, 50_000);
+
+  it("takes a solver process that ends itself with an exit code as a cap exit when the operating system says it was at its limit", async () => {
+    // What a Job Object limit looks like from the proxy: no kill and no signal,
+    // the runtime aborts on a failed allocation with an exit code of its own.
+    const run = await expectOk(host(`${REPORT}
+      let released = 0;
+      const applyCap = async () => ({ enforcement: 'job-object', endedAtCap: async () => true, release() { released += 1; } });
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 300, applyCap }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      const first = label(await s.run('pid', 'sgp', 'p'));
+      let failure = null;
+      const crashing = s.run('exit:134', 'sgp', 'p');
+      const queued = s.run('pid', 'sgp', 'p');
+      try { await crashing; } catch (e) { failure = [e.name, e.message, classify(e)]; }
+      const next = label(await queued);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      report({ first, failure, next, released, stats: s.stats() });
+      s.shutdown();
+    `));
+    const { first, failure, next, released, stats } = reported(run);
     expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
     expect(next).not.toBe(first);
-    expect(stats).toMatchObject({ capMB: 128, enforcement: expectedEnforcement, generation: 2, totalSolves: 2, totalFailures: 1 });
-    expect(run.stdout).toMatch(AT_CAP(expectedEnforcement));
-    expect(stats.capExits).toBe(1);
-  }, 50_000);
+    expect(stats).toMatchObject({ enforcement: "job-object", capExits: 1, abnormalExits: 1, generation: 2, totalSolves: 2, totalFailures: 1 });
+    expect(run.stdout.match(/^\S+ WARN solver solver process ended at its memory cap capMB=300 enforcement=job-object key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"$/gm)).toHaveLength(1);
+    // The first process's Job Object was given back when it had ended.
+    expect(released).toBe(1);
+  });
 
   it("ends itself at the cap where the operating system enforces nothing (sampling); the proxy logs the cap exit with the config key even when the solver's output allowance is used up", async () => {
     const noise = Buffer.from(Array.from({ length: 260 }, (_, i) => `noise ${i}\n`).join("") + "left open without a newline").toString("base64");
     const run = await expectOk(host(`${REPORT}
-      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 128, applyCap: ${SAMPLING_CAP} }) });
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: ${TEST_CAP_MB}, applyCap: ${SAMPLING_CAP} }) });
       s.configure({ backendModule, idleMs: 2000 });
       await s.run('stderr-line:${noise}', 'sgp', 'p');
       let failure = null;
@@ -673,7 +731,7 @@ describe("solver process: memory cap", () => {
     const { failure, after, stats } = reported(run);
     expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
     expect(after).toBe("token:after:active=1");
-    expect(stats).toMatchObject({ capMB: 128, enforcement: "sampling", capExits: 1, abnormalExits: 1 });
+    expect(stats).toMatchObject({ capMB: TEST_CAP_MB, enforcement: "sampling", capExits: 1, abnormalExits: 1 });
     // The allowance was spent before the cap: 200 lines went through, the rest was dropped ...
     expect(run.stderr.toString()).toBe(Array.from({ length: 200 }, (_, i) => `noise ${i}\n`).join(""));
     expect(run.stdout).toMatch(/further lines were dropped droppedLines=61 limitLines=200 limitKiB=64$/m);
@@ -681,12 +739,12 @@ describe("solver process: memory cap", () => {
     expect(run.stdout.match(new RegExp(AT_CAP("sampling").source, "gm"))).toHaveLength(1);
     expect(run.stdout + run.stderr.toString()).not.toContain("@@zcode-solver-at-cap");
     // Said once, not per generation.
-    expect(run.stdout.match(/WARN solver the operating system does not enforce the solver's memory cap; the solver process measures itself and ends at the cap capMB=128 enforcement=sampling why=test/g)).toHaveLength(1);
+    expect(run.stdout.match(new RegExp(`WARN solver the operating system does not enforce the solver's memory cap; the solver process measures itself and ends at the cap capMB=${TEST_CAP_MB} enforcement=sampling why=test`, "g"))).toHaveLength(1);
   }, 50_000);
 
   it("does not log a cap exit for a solver process that ends for another reason", async () => {
     const run = await expectOk(host(`${REPORT}
-      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 128, applyCap: ${SAMPLING_CAP} }) });
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: ${TEST_CAP_MB}, applyCap: ${SAMPLING_CAP} }) });
       s.configure({ backendModule, idleMs: 2000 });
       const pid = Number(label(await s.run('pid', 'sgp', 'p')).slice(4));
       const running = s.run('slow:2000', 'sgp', 'p').catch(() => {});
