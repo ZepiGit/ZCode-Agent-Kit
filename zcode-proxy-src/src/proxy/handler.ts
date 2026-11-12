@@ -52,7 +52,8 @@ import { gateStreamPrelude, isGatedStream, type PreludeVerdict } from "./stream-
 import { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 export { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 import { inflateWithCap, decodeContentStream } from "./inflate.js";
-import { settleBodyBytes } from "../server/admission.js";
+import { settleBodyBytes, shedResponse, solverShed } from "../server/admission.js";
+import { CaptchaSolverUnavailableError } from "./captcha-token.js";
 import { buildAnthropicMetadataUserId } from "./trace-headers.js";
 
 /** Options for the proxy handler. */
@@ -428,6 +429,10 @@ export async function proxyRequest(
         if (phase === "solver") {
           if (debug) debugError(reqId, "captcha_solver_failed", err.message);
           printRow(reqId, format, meta, 503, started, Date.now(), 0, 0, 0);
+          // The solver refused the solve: the shed contract, with the time to retry.
+          if (err instanceof CaptchaSolverUnavailableError) {
+            return shedResponse(format === "anthropic" ? "anthropic" : "openai", { ...solverShed(err.reason), retryAfterSeconds: err.retryAfterMs / 1000 });
+          }
           return errorResponse(503, "captcha_solver_failed", err.message);
         }
         if (debug) debugError(reqId, "upstream_unreachable", err.message);

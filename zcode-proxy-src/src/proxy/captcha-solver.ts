@@ -21,10 +21,24 @@
  * child-process adapter; threadTransport() is the Bun Worker, kept for tests
  * and as a fallback. The module-level functions drive the proxy's own
  * dispatcher over the solver process.
+ *
+ * Memory: the solver process runs under a cap the operating system enforces
+ * where it can (solver-cap.ts). After each solve it reports its footprint;
+ * at 80 % of the cap, or after 100 solves, the generation is recycled.
+ *
+ * Failure: a generation that ends abnormally (crash, kill at the cap, fatal
+ * error, deadline kill) fails only the solve in flight. More than 5 such
+ * exits in 10 minutes start the fail-fast window: until the oldest of them is
+ * 10 minutes old no generation is started and solves are refused with
+ * CaptchaSolverUnavailableError, as is a solve that would be the 65th to
+ * wait. The HTTP handlers answer those with 503 + Retry-After.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CaptchaSdkError, captchaFailureFromTransport, type CaptchaFailureCategory } from "./captcha-token.js";
+import {
+  CaptchaSdkError, CaptchaSolverUnavailableError, captchaFailureFromTransport,
+  type CaptchaFailureCategory, type SolverUnavailableReason,
+} from "./captcha-token.js";
 import { createEventLogger } from "../log/event-line.mjs";
 import {
   NO_SOLVER_CAP, SOLVER_CAP_KEY, applySolverCap, configuredSolverCapMB,
@@ -36,16 +50,16 @@ const BACKEND = process.env.ZCODE_CAPTCHA_BACKEND?.trim().toLowerCase() || "happ
 
 export interface CaptchaSolverStats {
   mode: "worker";
-  alive: boolean;              // a worker thread currently exists
+  alive: boolean;              // a solver generation currently exists
   busy: boolean;               // a solve is in flight
   queueDepth: number;          // solves waiting behind the in-flight one
-  generation: number;          // incremented on every worker spawn (0 = never spawned)
+  generation: number;          // incremented on every generation start (0 = never started)
   solvesSinceSpawn: number;
   totalSolves: number;         // completed with a token
   totalFailures: number;
   consecutiveFailures: number;
-  deadlineKills: number;       // workers terminated for exceeding the hard per-solve deadline
-  recycles: number;            // workers terminated for any reason (deadline, failures, quota, idle, request, fatal)
+  deadlineKills: number;       // generations ended for exceeding the hard per-solve deadline
+  recycles: number;            // generations ended for any reason (footprint, solves, failures, idle, request, deadline, exit, fatal)
   lastRecycleReason: string | null;
   lastRecycleAt: number | null; // epoch ms
   /** SDK bundle fingerprints of the latest attempt: known basenames or opaque ids + sha256 only. */
@@ -58,6 +72,16 @@ export interface CaptchaSolverStats {
    * (`none`). Null until the first solver process has been capped.
    */
   enforcement: SolverEnforcement | null;
+  /** The solver process's own memory footprint after its latest solve, in MB; null on the thread transport. */
+  lastFootprintMB: number | null;
+  /** Abnormal exits (crash, kill at the cap, fatal error, deadline kill) within the last 10 minutes. */
+  abnormalExits: number;
+  /** Solves are refused because the abnormal exits used up the restart budget. */
+  failFast: boolean;
+  /** When the fail-fast window ends (epoch ms); null outside it. */
+  failFastUntil: number | null;
+  /** Solves refused without running since start (fail-fast window or full queue). */
+  shedSolves: number;
 }
 
 export interface CaptchaSdkScript {
@@ -70,9 +94,15 @@ export interface CaptchaSolverOptions {
   deadlineMs?: number;
   recycleAfterSolves?: number;
   recycleAfterFailures?: number;
-  /** Worker heap (JSC heapUsed, measured inside the worker after each solve). */
+  /**
+   * Heap of a generation that runs without a memory cap (the thread
+   * transport; JSC heapUsed, measured inside the worker after each solve). A
+   * capped generation is recycled on its footprint instead.
+   */
   maxWorkerHeapMB?: number;
   idleMs?: number;
+  /** Solves that may wait behind the one in flight; a further one is refused. */
+  maxQueuedSolves?: number;
   /** Test fixtures only: module the worker loads instead of captcha-happy. */
   backendModule?: string | null;
 }
@@ -82,12 +112,22 @@ export interface CaptchaSolverOptions {
 // budget is ~30 s wait + ~30 s solve; 90 s only catches a thread that is stuck.
 const DEFAULT_OPTIONS: Readonly<Required<CaptchaSolverOptions>> = Object.freeze({
   deadlineMs: 90_000,
-  recycleAfterSolves: 200,
+  // Only a backstop: a capped generation is recycled on its footprint first.
+  recycleAfterSolves: 100,
   recycleAfterFailures: 3,
   maxWorkerHeapMB: 768,
   idleMs: 10 * 60_000,
+  maxQueuedSolves: 64,
   backendModule: null,
 });
+
+/** A capped generation is recycled once its footprint after a solve reaches this share of the cap. */
+export const FOOTPRINT_RECYCLE_SHARE = 0.8;
+/** Abnormal exits the solver may have inside ABNORMAL_EXIT_WINDOW_MS; one more and solves fail fast. */
+export const MAX_ABNORMAL_EXITS = 5;
+export const ABNORMAL_EXIT_WINDOW_MS = 10 * 60_000;
+/** `Retry-After` of a solve refused because the queue is full (the admission shed's value). */
+export const QUEUE_FULL_RETRY_AFTER_MS = 2_000;
 
 interface Job {
   scene: string;
@@ -460,10 +500,12 @@ export interface CaptchaSolver {
   concurrency(): number;
 }
 
-/** The dispatcher's timers (the per-solve deadline and the idle exit). */
+/** The dispatcher's timers (the per-solve deadline and the idle exit) and its time. */
 export interface SolverClock {
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(timer: unknown): void;
+  /** Epoch ms, for the abnormal-exit window (default: Date.now). */
+  now?(): number;
 }
 
 const realClock: SolverClock = {
@@ -476,12 +518,16 @@ export interface CaptchaSolverDeps {
   transport?: SolverTransport;
   /** Default: the runtime's timers. Tests inject a manual clock. */
   clock?: SolverClock;
+  /** Sink of the dispatcher's event lines (default: the console). */
+  writeLog?: (line: string) => void;
 }
 
 /** A solver dispatcher that owns all of its state: queue, in-flight solve, generation, timers, stats. */
 export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver {
   const transport = deps.transport ?? solverProcessTransport();
   const { setTimeout, clearTimeout } = deps.clock ?? realClock;
+  const now = (): number => deps.clock?.now?.() ?? Date.now();
+  const log = createEventLogger({ component: "solver", ...(deps.writeLog ? { write: deps.writeLog } : {}) });
   const options: Required<CaptchaSolverOptions> = { ...DEFAULT_OPTIONS };
 
   const queue: Job[] = [];
@@ -493,10 +539,14 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
   let nextId = 0;
   // Consecutive failures of the current generation (the stat spans generations).
   let generationFailures = 0;
+  // When the abnormal exits inside the window happened, oldest first.
+  const abnormalExits: number[] = [];
+  // Until then no generation is started and solves are refused (0 = not failing fast).
+  let failFastUntil = 0;
 
   const capState = (): SolverCapState => transport.cap?.() ?? { capMB: null, enforcement: "none" };
 
-  const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth" | "capMB" | "enforcement"> = {
+  const stats: Omit<CaptchaSolverStats, "mode" | "alive" | "busy" | "queueDepth" | "capMB" | "enforcement" | "abnormalExits" | "failFast" | "failFastUntil"> = {
     generation: 0,
     solvesSinceSpawn: 0,
     totalSolves: 0,
@@ -507,7 +557,40 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
     lastRecycleReason: null,
     lastRecycleAt: null,
     lastSdkScripts: null,
+    lastFootprintMB: null,
+    shedSolves: 0,
   };
+
+  function failFastRemainingMs(): number {
+    return Math.max(0, failFastUntil - now());
+  }
+
+  function refuse(reason: SolverUnavailableReason): CaptchaSolverUnavailableError {
+    stats.shedSolves += 1;
+    return new CaptchaSolverUnavailableError(reason, reason === "fail-fast" ? failFastRemainingMs() : QUEUE_FULL_RETRY_AFTER_MS);
+  }
+
+  /**
+   * A generation ended in a way nobody planned: a crash, a kill at the cap, a
+   * fatal error or a deadline kill. The solve in flight has failed with it;
+   * queued solves go to the next generation. Each such exit uses one slot of
+   * the restart budget (MAX_ABNORMAL_EXITS per window). The exit that finds
+   * the budget used up starts no new generation: solves are refused until the
+   * oldest exit has left the window. Planned recycles never come here, and no
+   * solve is ever run a second time.
+   */
+  function noteAbnormalExit(): void {
+    const at = now();
+    while (abnormalExits.length && abnormalExits[0]! <= at - ABNORMAL_EXIT_WINDOW_MS) abnormalExits.shift();
+    abnormalExits.push(at);
+    if (abnormalExits.length <= MAX_ABNORMAL_EXITS) return;
+    failFastUntil = abnormalExits[abnormalExits.length - MAX_ABNORMAL_EXITS - 1]! + ABNORMAL_EXIT_WINDOW_MS;
+    log.error("solver fail-fast: too many abnormal solver exits; solves are refused until the window reopens", {
+      abnormalExits: abnormalExits.length, windowMin: ABNORMAL_EXIT_WINDOW_MS / 60_000, retryAfterS: Math.ceil(failFastRemainingMs() / 1000),
+    });
+    // Nothing would run the solves that wait: refuse them now.
+    for (const job of queue.splice(0)) job.reject(refuse("fail-fast"));
+  }
 
   function spawnWorker(): SolverChannel {
     let w: SolverChannel | null = null;
@@ -522,11 +605,13 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
         console.error("[captcha-solver] worker error; recycling");
         failInFlight(solverError("other", "captcha solver worker failed"));
         recycle("fatal");
+        noteAbnormalExit();
       },
       exit() {
         if (w !== worker) return; // terminated by us; already accounted
         failInFlight(solverError("other", "captcha solver worker exited unexpectedly"));
         recycle("exit");
+        noteAbnormalExit();
       },
     });
     w.post({ type: "init", backendModule: options.backendModule });
@@ -565,6 +650,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
       console.error(`[captcha-solver] worker fault (${msg.name}); recycling`);
       failInFlight(solverError("other", "captcha solver worker fault"));
       recycle("fatal");
+      noteAbnormalExit();
       return;
     }
     const current = inFlight;
@@ -595,10 +681,19 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
       if (generationFailures >= options.recycleAfterFailures) reason ??= "failures";
       current.job.reject(solverError(msg.category, msg.message));
     }
+    stats.lastFootprintMB = msg.footprintMB;
+    const { capMB } = capState();
+    if (capMB !== null) {
+      // The generation's own footprint against its cap: recycled well below
+      // it, so that the operating system's kill stays the exception.
+      if (msg.footprintMB !== null && msg.footprintMB >= capMB * FOOTPRINT_RECYCLE_SHARE) reason ??= "footprint";
+    } else if (msg.heapUsedMB !== null && msg.heapUsedMB > options.maxWorkerHeapMB) {
+      // Without a cap (a Bun worker): heapUsed there is that worker's own JSC
+      // heap (verified: a 150 MB worker allocation leaves the host's figure
+      // unchanged).
+      reason ??= "heap";
+    }
     if (stats.solvesSinceSpawn >= options.recycleAfterSolves) reason ??= "solves";
-    // heapUsed inside a Bun worker is that worker's own JSC heap (verified: a
-    // 150 MB worker allocation leaves the host's figure unchanged).
-    if (msg.heapUsedMB !== null && msg.heapUsedMB > options.maxWorkerHeapMB) reason ??= "heap";
     if (reason) recycle(reason);
     // Let the caller record a provider cooldown before admitting queued work.
     queueMicrotask(pump);
@@ -610,6 +705,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
     // Terminate first: the stuck thread must not deliver a late result.
     recycle("deadline");
     failInFlight(solverError("other", "captcha solver deadline exceeded"));
+    noteAbnormalExit();
   }
 
   function armIdle(): void {
@@ -632,6 +728,10 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
   function pump(): void {
     while (!inFlight && queue.length) {
       const job = queue.shift()!;
+      if (failFastRemainingMs() > 0) {
+        job.reject(refuse("fail-fast"));
+        continue;
+      }
       try {
         // A provider pause may have started while this request waited in the queue.
         job.beforeSolve?.();
@@ -655,6 +755,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
         stats.consecutiveFailures += 1;
         recycle("spawn");
         job.reject(solverError("other", "captcha solver worker unavailable"));
+        noteAbnormalExit();
       }
     }
     armIdle();
@@ -670,6 +771,9 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
       if (BACKEND !== "happy") {
         return Promise.reject(new Error(`captcha backend "${BACKEND}" is not available; use ZCODE_CAPTCHA_BACKEND=happy`));
       }
+      // Refused without running: nothing is queued, and nothing is retried.
+      if (failFastRemainingMs() > 0) return Promise.reject(refuse("fail-fast"));
+      if (queue.length >= options.maxQueuedSolves) return Promise.reject(refuse("queue-full"));
       return new Promise<string>((resolve, reject) => {
         queue.push({ scene, region, prefix, beforeSolve, resolve, reject });
         pump();
@@ -683,6 +787,9 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
         queueDepth: queue.length,
         ...stats,
         ...capState(),
+        abnormalExits: abnormalExits.filter((at) => at > now() - ABNORMAL_EXIT_WINDOW_MS).length,
+        failFast: failFastRemainingMs() > 0,
+        failFastUntil: failFastRemainingMs() > 0 ? failFastUntil : null,
       };
     },
     requestRecycle(reason) {

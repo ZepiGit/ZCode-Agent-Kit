@@ -29,6 +29,7 @@
  *   follows, a stream however long, is not limited.
  */
 import { createEventLogger, type EventLogger } from "../log/event-line.mjs";
+import type { SolverUnavailableReason } from "../proxy/captcha-token.js";
 
 /** The default cap: 64 MB of request bodies in flight. */
 export const DEFAULT_MAX_IN_FLIGHT_MB = 64;
@@ -299,8 +300,9 @@ export type EndpointShape = "anthropic" | "openai";
  * The shed contract: HTTP 503 with `Retry-After`, in the endpoint's
  * own error shape (Anthropic `overloaded_error`; the OpenAI `error` object).
  * Never 429: clients map 429 to quota exhaustion. The message says what
- * happened, why and what to do next. Reused by the supervisor's drain (21)
- * and the solver's fail-fast window (58) with their own why and Retry-After.
+ * happened, why and what to do next. Reused by the supervisor's drain
+ * and by a solve the solver refused (its fail-fast window, a full solve
+ * queue), with their own why and Retry-After.
  */
 export function shedResponse(shape: EndpointShape, opts: { why: string; retryAfterSeconds: number; next?: string }): Response {
   const retry = Math.max(1, Math.ceil(opts.retryAfterSeconds));
@@ -316,6 +318,19 @@ export function shedResponse(shape: EndpointShape, opts: { why: string; retryAft
     status: 503,
     headers: { "content-type": "application/json", "retry-after": String(retry) },
   });
+}
+
+/** The why and the next step of a request whose CAPTCHA solve the solver refused. */
+export function solverShed(reason: SolverUnavailableReason): { why: string; next: string } {
+  return reason === "fail-fast"
+    ? {
+        why: "It needs a CAPTCHA solve, and the solver is paused because it ended abnormally too often in the last 10 minutes.",
+        next: "if this keeps happening, look for the solver's lines in the proxy log (zcode-kit proxy logs)",
+      }
+    : {
+        why: "It needs a CAPTCHA solve, and too many solves are already waiting.",
+        next: "if this keeps happening, send fewer requests at once",
+      };
 }
 
 /** The why of an admission shed. */

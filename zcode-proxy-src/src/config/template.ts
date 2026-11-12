@@ -156,6 +156,11 @@ logging:
 # without a delegated memory controller) the solver process measures its own
 # footprint and ends itself at the cap. A solver that ends at the cap is
 # logged with this key's name. Raise the cap only if solves need more memory.
+# The solver process is replaced by a fresh one at 80 % of the cap or after
+# 100 solves. One that ends abnormally (a crash, the cap, a fatal error, a
+# solve over 90 s) fails only the solve that was running. After more than 5
+# such exits in 10 minutes, requests that need a solve get HTTP 503 with
+# Retry-After until the oldest of those exits is 10 minutes old.
 # Default shown; allowed 128-65536; no env override.
 # solver:
 #   memoryCapMB: 300
