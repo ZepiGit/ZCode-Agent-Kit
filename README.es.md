@@ -132,7 +132,7 @@ El kit también puede registrar un puente MCP que ofrece al asistente herramient
 | Continue | Abre Continue una vez para que exista su configuración. Ejecuta `zcode-kit integrate continue`, inicia el proxy y luego selecciona el modelo en la interfaz. |
 | Cline / Kilo Code | La configuración escribe los valores en `generated/cline-zcode-values.md` o `generated/kilo-zcode-values.md`. Cópialos en los ajustes de la extensión e inicia el proxy. |
 
-Inicia OMP directamente, no mediante `zcode-kit run`. Solo Claude Code, Codex, Aider y OpenCode tienen un lanzador del kit. Codex se ejecuta con su propio perfil, por lo que tus ajustes y skills personales de Codex no se trasladan. `zcode-kit integrate <asistente> --dry-run` enumera lo que se escribiría, sin escribirlo.
+Inicia OMP directamente, no mediante `zcode-kit run`. Cuando varias ventanas de OMP se inician en el mismo momento, una de ellas comprueba e inicia el proxy y las demás esperan su resultado. Solo Claude Code, Codex, Aider y OpenCode tienen un lanzador del kit. En Linux y macOS con Node.js 26.1 o posterior, `zcode-kit run` se sustituye a sí mismo por el asistente cuando el proxy está listo, de modo que no queda ningún proceso del kit junto a él; define `ZCODE_KIT_RESIDENT_LAUNCHER=1` para conservar el lanzador como proceso padre del asistente. Codex se ejecuta con su propio perfil, por lo que tus ajustes y skills personales de Codex no se trasladan. `zcode-kit integrate <asistente> --dry-run` enumera lo que se escribiría, sin escribirlo.
 
 Que exista un adaptador no significa que cada versión de ese asistente se haya probado con una respuesta real de un modelo. Las [guías de asistentes](harnesses/README.es.md) y la [matriz de compatibilidad](SUPPORT_MATRIX.json) indican qué se probó.
 
@@ -162,6 +162,8 @@ zcode-kit proxy stop
 **Demasiadas solicitudes grandes a la vez.** El proxy admite a la vez cuerpos de solicitud que sumen hasta 64 MiB. Las demás solicitudes esperan hasta 15 segundos a que haya sitio y después reciben HTTP 503 y `Retry-After: 2`, nunca un error de límite de frecuencia. El límite es `server.admission.maxInFlightMB` en `proxy/config.yaml`.
 
 **Reinicios automáticos.** El proxy pide al kit un inicio nuevo cuando deja de responder, o cuando su memoria se mantiene por encima de 1024 MB durante tres comprobaciones separadas por 15 segundos. Por encima de 512 MB solo escribe una advertencia en el registro. Se aceptan como máximo 3 reinicios de este tipo en 15 minutos; después, un proxy que se haya caído sigue detenido hasta que revises `zcode-kit proxy logs 50` y lo inicies. Los límites están en `health.memory`, en `proxy/config.yaml`.
+
+**Solucionador de CAPTCHA.** El solucionador se ejecuta en un proceso propio con un límite de memoria de 300 MB (`solver.memoryCapMB` en `proxy/config.yaml`) y se sustituye por uno nuevo al llegar al 80 % del límite. Si termina de forma anómala más de 5 veces en 10 minutos, las solicitudes que necesitan un CAPTCHA reciben HTTP 503 y `Retry-After` hasta que la más antigua de esas terminaciones tenga 10 minutos; las demás solicitudes no se ven afectadas.
 
 **Registros.** `logs/proxy.log` se rota al llegar a 5 MB y se conserva un archivo anterior como `proxy.log.1`. Solo tu usuario puede leer los archivos de registro, y la clave del proxy y los tokens se eliminan de las líneas de registro.
 

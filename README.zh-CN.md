@@ -132,7 +132,7 @@ Kit 还可以注册一个 MCP 桥接，把你已安装的 ZCode 运行时中的�
 | Continue | 先打开一次 Continue，让它生成自己的配置。运行 `zcode-kit integrate continue`，启动代理，然后在界面中选择模型。 |
 | Cline / Kilo Code | 设置程序会把配置值写入 `generated/cline-zcode-values.md` 或 `generated/kilo-zcode-values.md`。把这些值复制到扩展的设置中，然后启动代理。 |
 
-请直接启动 OMP，不要通过 `zcode-kit run` 启动。只有 Claude Code、Codex、Aider 和 OpenCode 有 Kit 启动器。Codex 使用一套独立的配置运行，因此你个人的 Codex 设置和技能不会带过来。`zcode-kit integrate <assistant> --dry-run` 会列出将要写入的内容，但不实际写入。
+请直接启动 OMP，不要通过 `zcode-kit run` 启动。多个 OMP 窗口同时启动时，其中一个负责检查并启动代理，其余的等待它的结果。只有 Claude Code、Codex、Aider 和 OpenCode 有 Kit 启动器。在使用 Node.js 26.1 或更高版本的 Linux 和 macOS 上，代理就绪后 `zcode-kit run` 会把自身替换为助手，因此助手旁边不会留下 Kit 进程；设置 `ZCODE_KIT_RESIDENT_LAUNCHER=1` 可以让启动器作为助手的父进程保留下来。Codex 使用一套独立的配置运行，因此你个人的 Codex 设置和技能不会带过来。`zcode-kit integrate <assistant> --dry-run` 会列出将要写入的内容，但不实际写入。
 
 有适配器并不代表该助手的每个版本都用真实的模型回复测试过。测试过的内容见[助手指南](harnesses/README.zh-CN.md)和[支持矩阵](SUPPORT_MATRIX.json)。
 
@@ -162,6 +162,8 @@ zcode-kit proxy stop
 **同时有太多大请求**：代理同一时间接纳的请求体总计不超过 64 MiB。超出的请求会等待空位，最多等 15 秒，之后会收到 HTTP 503 和 `Retry-After: 2`，而绝不会收到限流错误。这个上限是 `proxy/config.yaml` 中的 `server.admission.maxInFlightMB`。
 
 **自动重启**：当代理停止响应，或者内存在间隔 15 秒的三次检查中都高于 1024 MB 时，代理会请求 Kit 重新启动它。高于 512 MB 时，它只在日志中写入一条警告。15 分钟内最多接受 3 次这样的重启；超过之后，已经停止的代理会一直保持停止，直到你查看 `zcode-kit proxy logs 50` 并启动它。这些上限位于 `proxy/config.yaml` 的 `health.memory` 下。
+
+**CAPTCHA 求解器**：求解器在独立的进程中运行，内存上限为 300 MB（`proxy/config.yaml` 中的 `solver.memoryCapMB`），达到上限的 80 % 时会被一个新进程替换。如果它在 10 分钟内异常结束超过 5 次，需要 CAPTCHA 的请求会收到 HTTP 503 和 `Retry-After`，直到其中最早的一次结束已过去 10 分钟；其他请求不受影响。
 
 **日志**：`logs/proxy.log` 达到 5 MB 时轮转，并保留一个旧文件 `proxy.log.1`。日志文件只有你的用户可以读取，代理密钥和令牌会从日志行中去除。
 

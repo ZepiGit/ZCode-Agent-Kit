@@ -17,12 +17,15 @@ Sicherheitszertifizierung.
   ohne Betriebssystem-Sandbox ausführen. Behandle diesen Code als nicht
   vertrauenswürdig. Loopback-Bindung und Bearer-Authentifizierung isolieren ihn
   nicht.
-- Der CAPTCHA-Solver läuft in einem eigenen Worker-Thread innerhalb des
-  Proxy-Prozesses. So bleibt der Proxy erreichbar: Eine hängende Lösung
-  blockiert ihn nicht, und der Worker kann bei Fristablauf beendet und ersetzt
-  werden. Das ist keine Betriebssystem-Sandbox und schafft keine
-  Berechtigungsgrenze; der Worker hat dieselben Nutzer-, Dateisystem-,
-  Netzwerk- und Zugangsdatenrechte wie der Proxy.
+- Der CAPTCHA-Solver läuft in einem eigenen Prozess, den der Proxy startet,
+  mit einer Speichergrenze (standardmäßig 300 MB). Eine hängende oder zu große
+  Lösung blockiert den Proxy nicht und lässt ihn nicht wachsen, und der
+  Solver-Prozess kann beendet und ersetzt werden. Seine Umgebung enthält weder
+  das Stopp-Token des Proxys noch Zugangsdaten-Geheimnisse oder den
+  API-Schlüssel.
+  Das ist keine Betriebssystem-Sandbox und schafft keine Berechtigungsgrenze:
+  Der Solver-Prozess läuft als derselbe Nutzer, mit demselben Zugriff auf
+  Dateien und das Netzwerk wie der Proxy.
 - Lokale Konfigurationen, Zugangsdaten, Schlüssel, Logs und Backups können
   sensible Daten enthalten. Beschränke den Zugriff und entferne Geheimnisse,
   bevor du solche Daten weitergibst. CAPTCHA-Debug-Diagnosen enthalten nur

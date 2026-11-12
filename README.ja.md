@@ -132,7 +132,7 @@ kit は MCP ブリッジを登録することもできます。MCP ブリッジ�
 | Continue | Continue の設定が作成されるように、Continue を一度開きます。`zcode-kit integrate continue` を実行してプロキシを起動し、UI でモデルを選びます。 |
 | Cline / Kilo Code | セットアップは、設定値を `generated/cline-zcode-values.md` または `generated/kilo-zcode-values.md` に書き出します。その値を拡張機能の設定にコピーし、プロキシを起動します。 |
 
-OMP は `zcode-kit run` を介さず、直接起動してください。kit のランチャーがあるのは、Claude Code、Codex、Aider、OpenCode だけです。Codex は専用のプロファイルで動作するため、個人の Codex の設定やスキルは引き継がれません。`zcode-kit integrate <assistant> --dry-run` は、書き込まれる内容を、実際には書き込まずに一覧表示します。
+OMP は `zcode-kit run` を介さず、直接起動してください。複数の OMP ウィンドウが同時に起動した場合は、そのうちの 1 つがプロキシを確認して起動し、残りはその結果を待ちます。kit のランチャーがあるのは、Claude Code、Codex、Aider、OpenCode だけです。Node.js 26.1 以降を使う Linux と macOS では、プロキシの準備ができると `zcode-kit run` は自分自身をアシスタントに置き換えるため、アシスタントの横に kit のプロセスは残りません。ランチャーをアシスタントの親プロセスとして残すには、`ZCODE_KIT_RESIDENT_LAUNCHER=1` を設定してください。Codex は専用のプロファイルで動作するため、個人の Codex の設定やスキルは引き継がれません。`zcode-kit integrate <assistant> --dry-run` は、書き込まれる内容を、実際には書き込まずに一覧表示します。
 
 アダプターがあるからといって、そのアシスタントのすべてのバージョンを実際のモデルの返答でテストしたわけではありません。何をテストしたかは、[アシスタント別ガイド](harnesses/README.ja.md) と [サポートマトリクス](SUPPORT_MATRIX.json) に記載しています。
 
@@ -162,6 +162,8 @@ zcode-kit proxy stop
 **大きなリクエストが同時に多すぎる場合**：プロキシが同時に受け入れるリクエストボディは、合計 64 MiB までです。それを超えるリクエストは、空きができるのを最大 15 秒待ち、その後は HTTP 503 と `Retry-After: 2` が返されます。レート制限エラーが返されることはありません。この上限は、`proxy/config.yaml` の `server.admission.maxInFlightMB` です。
 
 **自動再起動**：プロキシは、応答しなくなったとき、または 15 秒間隔の 3 回のチェックでメモリ使用量が 1024 MB を超えたままだったときに、kit に新しい起動を依頼します。512 MB を超えた場合は、ログに警告を書き込むだけです。このような再起動が受け付けられるのは、15 分間に最大 3 回です。それ以降は、停止したプロキシは、`zcode-kit proxy logs 50` を確認して自分で起動するまで停止したままになります。これらの上限は、`proxy/config.yaml` の `health.memory` の下にあります。
+
+**CAPTCHA ソルバー**：ソルバーは、メモリ上限が 300 MB（`proxy/config.yaml` の `solver.memoryCapMB`）の独立したプロセスで動作し、上限の 80 % に達すると新しいプロセスに置き換えられます。10 分間に 5 回を超えて異常終了した場合、CAPTCHA が必要なリクエストには、それらの終了のうち最も古いものから 10 分が経過するまで、HTTP 503 と `Retry-After` が返されます。それ以外のリクエストには影響しません。
 
 **ログ**：`logs/proxy.log` は 5 MB でローテーションされ、古いファイルが 1 つ、`proxy.log.1` として残ります。ログファイルを読めるのは自分のユーザーだけで、プロキシキーとトークンはログの行から取り除かれます。
 
