@@ -8,11 +8,10 @@
 //   E cold start of a fresh generation, then the idle exit
 //   K (two more hosts) the host SIGKILLed with a live generation: hung, idle
 // The S2 body plays the proxy: the dispatcher lives in it exactly as in the
-// proxy. Today the solver is a worker thread of that process (its RSS is the
-// captcha cost); with the solver process it is a child
-// with the `solver` role, and the process-level claims become observable:
-// ≤ 1 solver per proxy at every sample, 0 after an idle exit, 0 after the
-// proxy is SIGKILLed.
+// proxy. The solver is a child process of it with the `solver` role, so the
+// captcha cost is that process's memory and the process-level claims are
+// observable: ≤ 1 solver per proxy at every sample, 0 after an idle exit,
+// 0 after the proxy is SIGKILLed.
 import { spawn } from "node:child_process";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
