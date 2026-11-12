@@ -519,7 +519,10 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
           // Before the acknowledgement only the greeting counts.
           if (!greeted && (raw as { type?: unknown } | null)?.type === "hello") {
             greeted = true;
-            void acknowledge(proc);
+            // Nothing awaits the handshake: a failure in it must not become
+            // an unhandled rejection. The process then gets no acknowledgement
+            // and ends itself.
+            void acknowledge(proc).catch(() => {});
           }
         });
         proc.on("error", () => {
@@ -533,8 +536,9 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
           if (unexpected) events.exit();
           const applied = cap;
           if (!applied) return;
-          // The operating system ends a process at its cap with SIGKILL (Linux)
-          // or lets its allocation fail (Windows); ask only then. Under
+          // The operating system ends a process at its cap with SIGKILL (Linux),
+          // or lets its allocations fail (Windows), after which the runtime
+          // aborts with an exit code of its own; ask in both cases. Under
           // sampling the process said so itself, at the end of its stderr.
           const ask = unexpected || signal === "SIGKILL" ? applied.endedAtCap().catch(() => false) : Promise.resolve(false);
           void Promise.all([ask, outputEnded]).then(([byOs]) => {
@@ -546,7 +550,7 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
                 ...(endedItselfAtMB !== null ? { footprintMB: endedItselfAtMB } : {}),
               });
             }
-          }).finally(() => applied.release());
+          }).catch(() => {}).finally(() => { try { applied.release(); } catch {} });
         });
         const output: OutputBudget = { lines: 0, bytes: 0, dropped: 0 };
         const { promise: outputEnded, resolve: markOutputEnded } = Promise.withResolvers<void>();
