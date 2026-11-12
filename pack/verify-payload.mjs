@@ -36,6 +36,8 @@ const REQUIRED_FILES = [
   // share, and the heal log it writes.
   "lib/proxy-lifecycle.mjs",
   "lib/heal-log.mjs",
+  // The preflight's admission check for a start by an OMP host.
+  "lib/autostart-admission.mjs",
   // The manager's doctor checks, which the manager CLI and
   // zcode-kit doctor both read as a check record.
   "lib/proxy-doctor.mjs",

@@ -15,6 +15,7 @@ import { acquireLock, releaseLock, beginTransaction, rollbackTransaction } from 
 import { formatEventLine } from '../lib/event-line.mjs';
 import { NODE_FLOOR, nodeMajor } from '../lib/node-floor.mjs';
 import { CAUSES, appendHealLine, logHeal } from '../lib/heal-log.mjs';
+import { autostartAdmitted } from '../lib/autostart-admission.mjs';
 export { logHeal } from '../lib/heal-log.mjs';
 
 function outcome(ctx, code, cause, detail, action = 'quota-check') {
@@ -273,6 +274,10 @@ export async function repairManaged(ctx, adapters, log = () => {}) {
 let entry = '';
 try { entry = realpathSync(process.argv[1] ?? ''); } catch {}
 if (entry && import.meta.url === pathToFileURL(entry).href) {
+  // Started by an OMP host for its autostart token: run only while that token
+  // names this process. Otherwise the host is gone and another host may
+  // already run its own preflight; leave without touching anything.
+  if (!autostartAdmitted(process.argv.slice(2))) process.exit(4);
   startupPreflight(createCtx()).then(result => {
     if (process.argv.includes('--diagnostic-code')) {
       if (result.recovered) console.error('[zcode-preflight] cause=hung');

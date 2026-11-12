@@ -282,6 +282,8 @@ export default {
       .replaceAll("__ZCODE_OM_ROOT__", () => literal(ctx.root))
       .replaceAll("__ZCODE_OM_KEY_FILE__", () => literal(ctx.keyFile))
       .replaceAll("__ZCODE_OM_RUNTIME__", () => literal(runtime))
+      // Where the hosts of this installation share their autostart token.
+      .replaceAll("__ZCODE_OM_LOG_DIR__", () => literal(ctx.logDir ?? join(dirname(ctx.keyFile), "logs")))
       .replaceAll("__ZCODE_OM_FAILURE_DETAILS__", () => JSON.stringify(JSON.stringify(PREFLIGHT_DETAILS)).slice(1, -1))
       .replaceAll("__ZCODE_OM_WARNINGS__", () => JSON.stringify(JSON.stringify(PREFLIGHT_WARNINGS)).slice(1, -1))
       .replaceAll("__ZCODE_OM_PORT__", () => String(port));

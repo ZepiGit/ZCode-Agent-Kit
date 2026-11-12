@@ -45,7 +45,7 @@ function packageFixture(t) {
     // The CLI command modules, required by verify-payload since ticket 08.
     ...readdirSync(join(KIT, "cli", "commands")).filter((f) => f.endsWith(".mjs")).map((f) => `cli/commands/${f}`),
     // The proxy lifecycle module and the heal log, required by verify-payload since ticket 15.
-    "lib/proxy-lifecycle.mjs", "lib/heal-log.mjs",
+    "lib/proxy-lifecycle.mjs", "lib/heal-log.mjs", "lib/autostart-admission.mjs",
     // The manager's doctor module, required by verify-payload since ticket 38.
     "lib/proxy-doctor.mjs",
     // The status record, the log tail and the CLI's report builders, required since ticket 40.
