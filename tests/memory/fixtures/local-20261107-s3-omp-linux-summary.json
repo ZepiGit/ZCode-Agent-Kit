@@ -305,8 +305,8 @@
       "units": null,
       "overhead": null
     },
-    "isolation.stateDir": "/home/AgentKit/overhaul-tools/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/tmp/kit-tG7lg9/state",
-    "isolation.home": "/home/AgentKit/overhaul-tools/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/tmp/kit-tG7lg9/home",
+    "isolation.stateDir": "/tmp/memloop/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/tmp/kit-tG7lg9/state",
+    "isolation.home": "/tmp/memloop/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/tmp/kit-tG7lg9/home",
     "isolation.port": 19030,
     "rounds": [
       {
@@ -523,5 +523,5 @@
     ]
   },
   "samples": 36,
-  "csv": "/home/AgentKit/overhaul-tools/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/samples.csv"
+  "csv": "/tmp/memloop/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/samples.csv"
 }

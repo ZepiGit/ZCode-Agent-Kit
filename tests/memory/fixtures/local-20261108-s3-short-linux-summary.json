@@ -291,8 +291,8 @@
       "units": null,
       "overhead": null
     },
-    "isolation.stateDir": "/home/AgentKit/overhaul-tools/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/tmp/kit-xph9lM/state",
-    "isolation.home": "/home/AgentKit/overhaul-tools/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/tmp/kit-xph9lM/home",
+    "isolation.stateDir": "/tmp/memloop/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/tmp/kit-xph9lM/state",
+    "isolation.home": "/tmp/memloop/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/tmp/kit-xph9lM/home",
     "isolation.port": 43613,
     "afterKillHolder": {
       "nextPreflight": 0,
@@ -733,5 +733,5 @@
     ]
   },
   "samples": 121,
-  "csv": "/home/AgentKit/overhaul-tools/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/samples.csv"
+  "csv": "/tmp/memloop/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/samples.csv"
 }

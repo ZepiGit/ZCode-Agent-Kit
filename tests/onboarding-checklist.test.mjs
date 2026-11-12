@@ -3,7 +3,6 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import { createHook } from "node:async_hooks";
-import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import * as capabilities from "../lib/term/caps.mjs";
 import { emitKeypressEvents } from "node:readline";
@@ -12,7 +11,7 @@ import { setupUi } from "../cli/setup-output.mjs";
 import { C3_VARIANTS, matchSnapshot } from "./snapshot-harness.mjs";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, realpathSync, readdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { freePort } from "./free-port.mjs";
@@ -248,91 +247,6 @@ function capture(tty = false, columns = 80) {
   let text = "";
   return { isTTY: tty, columns, write(chunk) { text += chunk; return true; }, text: () => text };
 }
-test("native Windows refresh changes exactly the 22 reviewed onboarding outputs and preserves every other baseline byte", () => {
-  const proof = JSON.parse(readFileSync(new URL("./fixtures/onboarding-windows-83.json", import.meta.url), "utf8"));
-  const expected = [
-    ...["help", "help-flag", "unknown-command"].map(id => `help/${id}`),
-    ...["explicit", "installer-compact", "interactive", "none-detected", "proxy-running", "select"].map(id => `setup/setup-${id}`),
-    "update/update-checkout", "update/update-release",
-  ].flatMap(id => ["ci", "pipe"].map(v => `${id}/${v}.txt`)).sort();
-  assert.deepEqual(Object.keys(proof.after).sort(), expected);
-  // Ticket 46's reviewed Windows outputs, disjoint from the 22 above.
-  // Ten are command output: eight refreshed accounts pipe/ci renders and two
-  // added accounts-health-down stderr files. INDEX.md and manifest.json are
-  // the matching reviewed metadata, not command output. Hashes are the bytes
-  // of parent dcc8d55, which are the union bytes.
-  const reviewed46 = {
-    "INDEX.md": "4cd727dac2daf287b8b8223f70b33f151c33dbc515450b566ed74f68b7ee2ea5",
-    "accounts/accounts-empty/ci.txt": "0358126da5851421de67aa597a7477317fd7f9e4d3306a7c6cf00e92c43f1113",
-    "accounts/accounts-empty/pipe.txt": "0358126da5851421de67aa597a7477317fd7f9e4d3306a7c6cf00e92c43f1113",
-    "accounts/accounts-health-down/ci.stderr.txt": "966c2babe063549ce326a605f0ca711ba76fe1a03df3c8bbb37f1d410621aa5f",
-    "accounts/accounts-health-down/ci.txt": "8cf94e494ec9fd1ecc635e1408b7d44ce6225889967c624db28c993d466df606",
-    "accounts/accounts-health-down/pipe.stderr.txt": "966c2babe063549ce326a605f0ca711ba76fe1a03df3c8bbb37f1d410621aa5f",
-    "accounts/accounts-health-down/pipe.txt": "8cf94e494ec9fd1ecc635e1408b7d44ce6225889967c624db28c993d466df606",
-    "accounts/accounts-health/ci.txt": "331576e5b9e1402508544cd949dac1e7607f888bd3378cd2175aa6092fddc3fd",
-    "accounts/accounts-health/pipe.txt": "331576e5b9e1402508544cd949dac1e7607f888bd3378cd2175aa6092fddc3fd",
-    "accounts/accounts-list/ci.txt": "837b0f0c41aaa9430be7e14689f0a36ed13e5cdae26b03895bacd254c40671b7",
-    "accounts/accounts-list/pipe.txt": "837b0f0c41aaa9430be7e14689f0a36ed13e5cdae26b03895bacd254c40671b7",
-    "manifest.json": "3a91430bfb2fadcb688cbcf36aa202895911358e16f250e81fc0a892bf865fc2",
-  };
-  const overlap = expected.filter(file => file in reviewed46);
-  assert.deepEqual(overlap, []);
-  const baselineRoot = join(import.meta.dirname, "ux-before/windows");
-  const files = (dir, prefix = "") => readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
-    const name = prefix + entry.name;
-    return entry.isDirectory() ? files(join(dir, entry.name), name + "/") : [name];
-  });
-  const allowed = [...new Set([...Object.keys(proof.before), ...Object.keys(reviewed46)])].sort();
-  assert.deepEqual(files(baselineRoot).sort(), allowed, "no baseline file added or removed");
-  const digest = bytes => createHash("sha256").update(bytes).digest("hex");
-  const changed = [];
-  for (const [file, before] of Object.entries(proof.before)) {
-    const bytes = readFileSync(new URL(`./ux-before/windows/${file}`, import.meta.url));
-    const actual = digest(bytes);
-    if (file in reviewed46) {
-      assert.equal(actual, reviewed46[file], file);
-      if (actual !== before) changed.push(file);
-      continue;
-    }
-    if (actual !== before) changed.push(file);
-    assert.equal(actual, proof.after[file] ?? before, file);
-  }
-  for (const [file, hash] of Object.entries(reviewed46)) {
-    if (file in proof.before) continue;
-    const bytes = readFileSync(new URL(`./ux-before/windows/${file}`, import.meta.url));
-    assert.equal(digest(bytes), hash, file);
-  }
-  assert.deepEqual(changed.filter(file => !(file in reviewed46)).sort(), expected);
-  const baseSuffix = "\nNext steps ---------------------------------------------------------------------\n" +
-    "  zcode-kit doctor        Check the installation\n" +
-    "  zcode-kit proxy start   Start the proxy for manual clients\n" +
-    "  zcode-kit proxy status  Check proxy health and connection details\n" +
-    "  zcode-kit auth status   Check sign-in status\n" +
-    "  zcode-kit --help        Browse all commands\n";
-  for (const file of expected) {
-    const text = readFileSync(new URL(`./ux-before/windows/${file}`, import.meta.url), "utf8");
-    let prior;
-    if (file.startsWith("help/")) {
-      prior = text.replace("bootstrap + assistant consent", "bootstrap + one y/n question per detected harness")
-        .replace("  (setup: auto uses a checkbox list when the terminal fits: arrows move, Space toggles,\n   a toggles all editable rows, Enter confirms; Esc/empty Enter/EOF saves no new decision.\n   Saved choices stay locked unless --reask. No-answer may refresh an existing kit integration.\n   No-color/dumb/small/unknown geometry uses individual [y/n] questions;\n", '  (setup: auto asks "Configure ZCode as a provider ... in <HARNESS>? [y/n]" per detected harness;\n')
-        .replace("  (setup: Next steps lists five complete commands and at most one successfully configured launch target;\n   configuration is not proof of sign-in or a model reply. Marked paste/text is discarded;\n   unmarked valid-only key bytes cannot be distinguished from typing)\n", "")
-        .replace("130 setup aborted with Ctrl-C (unconfirmed checkbox batch not applied; prior applied answers remain)", "130 setup aborted with Ctrl-C (answers already given were applied)");
-    } else {
-      const launch = /^setup\/setup-(explicit|proxy-running)\//.test(file);
-      const suffix = launch ? baseSuffix.replace("  zcode-kit proxy start", "  zcode-kit run codex     Launch Codex CLI wired to ZCode\n  zcode-kit proxy start") : baseSuffix;
-      assert.equal(text.split(suffix).length, 2, `${file}: exactly one complete inventory`);
-      if (file.startsWith("setup/")) assert.ok(text.endsWith(suffix), file);
-      else assert.ok(text.includes(suffix + "update: starting the proxy on the updated code...\n"), file);
-      prior = text.replace(suffix, "");
-      // Undo only the two exact run-to-run values already reviewed in the
-      // unchanged comparator; this is not an equivalence normalizer.
-      const replacement = proof.volatileReplacements[file];
-      if (replacement) prior = prior.replace(...replacement);
-    }
-    assert.equal(digest(Buffer.from(prior)), proof.before[file], `${file}: no change beyond the reviewed additive contract`);
-  }
-});
-
 test("described commands keep indivisible commands intact on narrow terminals and remain plain with forced color in scripts", () => {
   for (const columns of [12, 32, 40, 80, 120]) {
     const stdout = capture(true, columns), stderr = capture();

@@ -231,7 +231,7 @@ async function main() {
   let expected, issueIds;
   try {
     expected = readExpectedRed(join(HERE, "expected-red.json"));
-    issueIds = issueIdsIn(join(ROOT, ".scratch", "kit-overhaul", "issues"));
+    issueIds = issueIdsIn(join(HERE, "known-issues"));
   } catch (err) { console.error(`memory-budget: cannot read the expected-RED list or the issues: ${err.message}`); return 2; }
   mkdirSync(args.out, { recursive: true });
   console.log(args.measureStalled

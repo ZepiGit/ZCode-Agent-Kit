@@ -39,7 +39,7 @@
 //   - a listed run is GREEN with no name marked `flips`;
 //   - a run is a harness failure (exit 2): never expected, never listed;
 //   - an entry names an OS leg, scenario or variant the job does not run;
-//   - an entry's ticket id has no `.scratch/kit-overhaul/issues/<NN>-*.md`;
+//   - an entry's ticket id has no `tests/memory/known-issues/<NN>-*.md`;
 //   - a listed run did not run at all;
 //   - a listed repeated run (lib/budgets.mjs REPEATED) is RED on anything but
 //     its median check: a ceiling breach or another RED check in any
@@ -186,7 +186,7 @@ function kindErrors(os, key, entry, { repeated, unstable }) {
 /** Why a ticket id cannot name an owner, or null (Round 3 Q8 condition 2). */
 function ticketIdError(ticket, issueIds) {
   if (typeof ticket !== "string" || !/^\d{2}$/.test(ticket)) return `ticket id must be a two-digit string, got ${JSON.stringify(ticket)}`;
-  if (!issueIds.has(ticket)) return `ticket ${ticket} has no issue file (.scratch/kit-overhaul/issues/${ticket}-*.md)`;
+  if (!issueIds.has(ticket)) return `ticket ${ticket} has no issue file (tests/memory/known-issues/${ticket}-*.md)`;
   return null;
 }
 

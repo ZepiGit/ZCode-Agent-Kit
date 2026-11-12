@@ -1,2 +1,0 @@
-No accounts configured.
-Add one with: zcode-proxy auth login <zai|bigmodel> --account ID

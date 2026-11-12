@@ -114,7 +114,7 @@
       "budget": 0,
       "unit": "refused starts",
       "detail": [
-        "hung-10-with-stale-lock: manager start exited 1: manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+        "hung-10-with-stale-lock: manager start exited 1: manager error: stale or unreadable manager start lock at /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
       ]
     },
     {
@@ -282,7 +282,7 @@
         "budget": 0,
         "unit": "refused starts",
         "detail": [
-          "hung-10-with-stale-lock: manager start exited 1: manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+          "hung-10-with-stale-lock: manager start exited 1: manager error: stale or unreadable manager start lock at /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
         ]
       },
       {
@@ -301,22 +301,22 @@
       "units": null,
       "overhead": null
     },
-    "isolation.stateDir": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state",
-    "isolation.home": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/home",
+    "isolation.stateDir": "/tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state",
+    "isolation.home": "/tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/home",
     "isolation.port": 19654,
     "afterKillHolder": {
       "nextPreflight": 4,
       "nextPreflightTail": "[zcode-preflight] cause=startup",
       "stopCode": 4,
-      "stopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
+      "stopTail": "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
       "proxiesLeft": 0,
       "staleLock": true
     },
     "hung-10-with-stale-lock.startRefused": {
       "startCode": 1,
-      "stderr": "manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
+      "stderr": "manager error: stale or unreadable manager start lock at /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
       "lock": {
-        "path": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock",
+        "path": "/tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock",
         "holderPid": 2138131,
         "holderAlive": false
       },
@@ -377,7 +377,7 @@
           "label": "kill-holder-10",
           "code": 4,
           "tail": [
-            "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+            "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
           ],
           "proxiesLeft": 0
         }
@@ -422,9 +422,9 @@
         "adversary": null,
         "startRefused": {
           "startCode": 1,
-          "stderr": "manager error: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
+          "stderr": "manager error: stale or unreadable manager start lock at /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry.",
           "lock": {
-            "path": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock",
+            "path": "/tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock",
             "holderPid": 2138131,
             "holderAlive": false
           },
@@ -435,7 +435,7 @@
           "label": "hung-10-with-stale-lock",
           "code": 4,
           "tail": [
-            "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
+            "ERROR: stop refused while lifecycle ownership is unavailable: stale or unreadable manager start lock at /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock (holder pid 2138131 is not alive, started 2026-11-07T18:52:21.588Z) — refusing automatic takeover. If no start is actually running, remove /tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/tmp/kit-1WDxPa/state/logs/manager.lock manually and retry."
           ],
           "proxiesLeft": 0
         }
@@ -496,5 +496,5 @@
     ]
   },
   "samples": 628,
-  "csv": "/home/AgentKit/overhaul-tools/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/samples.csv"
+  "csv": "/tmp/memloop/t65-memloop/fixdelay1/S3-hung/S3-short-hung-2026-11-07T1852-c74fae/samples.csv"
 }

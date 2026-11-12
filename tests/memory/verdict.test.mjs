@@ -205,7 +205,7 @@ test("ratchet: a ticket id with no issue file fails", () => {
 test("the committed expected-red.json is valid: known runs of each leg's job, tickets with issue files", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
-  const ids = issueIdsIn(join(here, "..", "..", ".scratch", "kit-overhaul", "issues"));
+  const ids = issueIdsIn(join(here, "known-issues"));
   assert.deepEqual(validateExpectedRed(expected, { issueIds: ids }), []);
 });
 
@@ -884,7 +884,7 @@ test("the S3 OMP leg runs on both legs and is expected RED until single-flight l
 test("S3/omp is listed on both legs with 35 owning the concurrent preflights and 37 the flipping role peaks: RED passes, GREEN passes on the flips, `unstable` is refused", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
-  const issueIds = issueIdsIn(join(here, "..", "..", ".scratch", "kit-overhaul", "issues"));
+  const issueIds = issueIdsIn(join(here, "known-issues"));
   // Round 15 Q1 condition 3.
   assert.deepEqual(expected.linux["S3/omp"], { owners: { 35: ["omp:concurrent-preflights"], 37: ["procPeak:proxy", "procPeak:preflight"] }, flips: ["procPeak:proxy", "procPeak:preflight"] });
   assert.deepEqual(expected.windows["S3/omp"], { owners: { 35: ["omp:concurrent-preflights"], 37: ["peak:kit"] }, flips: ["peak:kit"] });
@@ -1114,7 +1114,7 @@ test("flips: a GREEN pass needs every owned name produced by the run (a stale fl
 test("the committed expected-red.json: each leg passes with every listed run RED on its owned checks, and fails on one unowned RED", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
-  const ids = issueIdsIn(join(here, "..", "..", ".scratch", "kit-overhaul", "issues"));
+  const ids = issueIdsIn(join(here, "known-issues"));
   const namesOf = (v) => Object.values(v.owners).flat();
   const ownersOf = (v) => Object.keys(v.owners).sort();
   for (const os of ["linux", "windows"]) {
