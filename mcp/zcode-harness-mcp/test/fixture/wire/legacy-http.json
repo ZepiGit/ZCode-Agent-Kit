@@ -126,12 +126,12 @@
   "response": {
    "status": 200,
    "headers": [
-    "content-length: 23397",
+    "content-length: 23437",
     "content-type: application/json"
    ],
    "body": {
-    "sha256": "14702549731c4a7a1c3416e7119e30f5a2a6d12fa167a6cc5ca460181dc73e22",
-    "bytes": 23397,
+    "sha256": "8226c2964907942cd4db4c71cd745132b9e376b79a03d07efd3b97146203d2e4",
+    "bytes": 23437,
     "head": "{\"result\":{\"contents\":[{\"uri\":\"zcode://capabilities\",\"mimeType\":\"application/json\",\"text\":\"{\\n  \\\"bridgeVersion\\\": \\\"0.1.0\\\",\\n  \\\"protocol\\\": \\\"ZCode Protocol "
    }
   }
@@ -193,12 +193,12 @@
   "response": {
    "status": 200,
    "headers": [
-    "content-length: 35880",
+    "content-length: 35960",
     "content-type: application/json"
    ],
    "body": {
-    "sha256": "d4ddd36976d7a1bf6cf82d7bda4240388658320a0ec41191c5f4aa39938f5254",
-    "bytes": 35880,
+    "sha256": "2d0c35a39d71814851c661de93747e4d17763e0b59f2a056c0537562cb1602b1",
+    "bytes": 35960,
     "head": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"bridgeVersion\\\":\\\"0.1.0\\\",\\\"protocol\\\":\\\"ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher insp"
    }
   }
@@ -644,12 +644,12 @@
   "response": {
    "status": 200,
    "headers": [
-    "content-length: 23397",
+    "content-length: 23437",
     "content-type: application/json"
    ],
    "body": {
-    "sha256": "14702549731c4a7a1c3416e7119e30f5a2a6d12fa167a6cc5ca460181dc73e22",
-    "bytes": 23397,
+    "sha256": "8226c2964907942cd4db4c71cd745132b9e376b79a03d07efd3b97146203d2e4",
+    "bytes": 23437,
     "head": "{\"result\":{\"contents\":[{\"uri\":\"zcode://capabilities\",\"mimeType\":\"application/json\",\"text\":\"{\\n  \\\"bridgeVersion\\\": \\\"0.1.0\\\",\\n  \\\"protocol\\\": \\\"ZCode Protocol "
    }
   }
@@ -711,12 +711,12 @@
   "response": {
    "status": 200,
    "headers": [
-    "content-length: 35880",
+    "content-length: 35960",
     "content-type: application/json"
    ],
    "body": {
-    "sha256": "d4ddd36976d7a1bf6cf82d7bda4240388658320a0ec41191c5f4aa39938f5254",
-    "bytes": 35880,
+    "sha256": "2d0c35a39d71814851c661de93747e4d17763e0b59f2a056c0537562cb1602b1",
+    "bytes": 35960,
     "head": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"bridgeVersion\\\":\\\"0.1.0\\\",\\\"protocol\\\":\\\"ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher insp"
    }
   }

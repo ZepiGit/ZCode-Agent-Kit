@@ -41,15 +41,15 @@
    },
    "{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":5}",
    {
-    "sha256": "14702549731c4a7a1c3416e7119e30f5a2a6d12fa167a6cc5ca460181dc73e22",
-    "bytes": 23397,
+    "sha256": "8226c2964907942cd4db4c71cd745132b9e376b79a03d07efd3b97146203d2e4",
+    "bytes": 23437,
     "head": "{\"result\":{\"contents\":[{\"uri\":\"zcode://capabilities\",\"mimeType\":\"application/json\",\"text\":\"{\\n  \\\"bridgeVersion\\\": \\\"0.1.0\\\",\\n  \\\"protocol\\\": \\\"ZCode Protocol "
    },
    "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32002,\"message\":\"unknown task: task-missing\"}}",
    "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"unknown resource: zcode://nothing/here\"}}",
    {
-    "sha256": "d4ddd36976d7a1bf6cf82d7bda4240388658320a0ec41191c5f4aa39938f5254",
-    "bytes": 35880,
+    "sha256": "2d0c35a39d71814851c661de93747e4d17763e0b59f2a056c0537562cb1602b1",
+    "bytes": 35960,
     "head": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"bridgeVersion\\\":\\\"0.1.0\\\",\\\"protocol\\\":\\\"ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher insp"
    },
    "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown tool: zcode_no_such_tool\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":10}",
@@ -110,15 +110,15 @@
    },
    "{\"result\":{\"resources\":[{\"uri\":\"zcode://capabilities\",\"name\":\"Capability registry\",\"description\":\"All known harness capabilities with status\",\"mimeType\":\"application/json\"}]},\"jsonrpc\":\"2.0\",\"id\":5}",
    {
-    "sha256": "14702549731c4a7a1c3416e7119e30f5a2a6d12fa167a6cc5ca460181dc73e22",
-    "bytes": 23397,
+    "sha256": "8226c2964907942cd4db4c71cd745132b9e376b79a03d07efd3b97146203d2e4",
+    "bytes": 23437,
     "head": "{\"result\":{\"contents\":[{\"uri\":\"zcode://capabilities\",\"mimeType\":\"application/json\",\"text\":\"{\\n  \\\"bridgeVersion\\\": \\\"0.1.0\\\",\\n  \\\"protocol\\\": \\\"ZCode Protocol "
    },
    "{\"jsonrpc\":\"2.0\",\"id\":7,\"error\":{\"code\":-32002,\"message\":\"unknown task: task-missing\"}}",
    "{\"jsonrpc\":\"2.0\",\"id\":8,\"error\":{\"code\":-32002,\"message\":\"unknown resource: zcode://nothing/here\"}}",
    {
-    "sha256": "d4ddd36976d7a1bf6cf82d7bda4240388658320a0ec41191c5f4aa39938f5254",
-    "bytes": 35880,
+    "sha256": "2d0c35a39d71814851c661de93747e4d17763e0b59f2a056c0537562cb1602b1",
+    "bytes": 35960,
     "head": "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"bridgeVersion\\\":\\\"0.1.0\\\",\\\"protocol\\\":\\\"ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher insp"
    },
    "{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"unknown tool: zcode_no_such_tool\"}],\"isError\":true},\"jsonrpc\":\"2.0\",\"id\":10}",

@@ -6,6 +6,10 @@
  * the wire a client of protocol revision 2025-06-18 or 2025-11-25 has always
  * seen, whatever MCP library the bridge is built with.
  *
+ * The two answers that carry the capability registry (pinned by digest)
+ * were recorded again when a registry note was corrected; nothing else in
+ * the recording has been touched since.
+ *
  * One answer differs from the recording, to a request no client can validly
  * send (DIVERGED below); the recording itself stays as SDK 1.32.2 wrote it.
  */
