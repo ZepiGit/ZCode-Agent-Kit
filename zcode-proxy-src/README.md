@@ -23,7 +23,10 @@ quotas, or resolve/create API keys. See [account management](../docs/ACCOUNT_ROT
 
 ## CAPTCHA solver and cache
 
-The in-process solver runs one CAPTCHA window at a time. It warms one token
+The solver runs in a process of its own, with a memory cap of 300 MB
+(`solver.memoryCapMB`), and runs one CAPTCHA window at a time. It is replaced
+by a fresh process at 80 % of the cap or after 100 solves; see "The solver
+process" in [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md). It warms one token
 and grows its bank only with demand, up to four tokens; legacy parallel sizing
 values are capped to this capacity. Provider rate limits still pause solving;
 queued work, cache invalidation and diagnostic hashes cannot bypass that pause.

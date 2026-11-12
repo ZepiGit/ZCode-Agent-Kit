@@ -20,7 +20,7 @@ The harness versions are the ones recorded as tested in [SUPPORT_MATRIX.json](SU
 - Node.js 24 or newer. Node.js 20 and 22 are not supported; `zcode-kit setup`, `zcode-kit update` and both installers refuse to run on them before changing anything.
 - Bun runs the proxy. The pinned version is 1.4.2: the installers install it when Bun is missing, and the automated checks run on it.
 - zcode-proxy (`zcode-proxy-src/package.json`): `happy-dom` ^21.0.4, `undici` ^8.12.4, `yaml` ^2.9.1. `zcode-proxy-src/bun.lock` resolves them to 21.0.4, 8.12.4 and 2.9.1. Development only: `typescript` 7.0.2 and `@types/bun` 1.4.2.
-- zcode-harness-mcp (`mcp/zcode-harness-mcp/package.json`): `@modelcontextprotocol/sdk` ^1.32.2 and `zod` ^4.6.6. `mcp/zcode-harness-mcp/bun.lock` resolves them to 1.32.2 and 4.6.7. Development only: `typescript` 7.0.2 and `@types/node` ^24.19.2.
+- zcode-harness-mcp (`mcp/zcode-harness-mcp/package.json`): `@modelcontextprotocol/server` ^2.4.0, `@modelcontextprotocol/node` ^2.1.2 and `zod` ^4.6.6. `mcp/zcode-harness-mcp/bun.lock` resolves them to 2.4.0, 2.1.2 and 4.6.7. Development only: `typescript` 7.0.2 and `@types/node` ^24.19.2.
 
 Setup installs both dependency sets with `bun install --frozen-lockfile`.
 

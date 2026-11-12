@@ -14,11 +14,13 @@ its bundled integrations. It is not a security certification.
 - Some provider challenge flows can execute provider-supplied JavaScript
   without an operating-system sandbox. Treat that code as untrusted. Loopback
   binding and bearer authentication do not isolate it.
-- The CAPTCHA solver runs on a dedicated worker thread inside the proxy
-  process. This keeps the proxy responsive: a stuck solve does not block it,
-  and the worker can be ended at a deadline and replaced. It is not an
-  operating-system sandbox and adds no permission boundary; the worker has the
-  same user, file-system, network, and credential access as the proxy.
+- The CAPTCHA solver runs in a process of its own, started by the proxy, with
+  a memory cap (300 MB by default). A stuck or oversized solve does not block
+  or grow the proxy, and the solver process can be ended and replaced. Its
+  environment does not contain the proxy's stop token, credential secrets or
+  API key. It is not an operating-system sandbox and adds no permission
+  boundary: the solver process runs as the same user, with the same access to
+  files and the network as the proxy.
 - Local configuration, credentials, keys, logs, and backups may contain
   sensitive data. Restrict access and remove secrets before sharing them.
   CAPTCHA debug diagnostics are metadata-only. The old bytecode-VM diagnostic

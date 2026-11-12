@@ -32,7 +32,7 @@ An agent CLI or editor extension that uses the proxy as its model provider, such
 The configuration the kit writes for one harness, with your consent, so that the harness uses the proxy.
 
 **Launcher**:
-The `zcode-kit run <harness>` process. It runs the preflight, starts the harness and stays until the harness exits, then returns the harness's exit code.
+The `zcode-kit run <harness>` process. It runs the preflight and starts the harness. Where a handover is possible it then replaces itself with the harness; otherwise it stays until the harness exits and returns the harness's exit code.
 
 **Preflight**:
 A short check before a harness uses the proxy. It makes sure the proxy is up and is the installation's own, starts it if needed, and checks the quota.
@@ -45,6 +45,12 @@ The record of the file changes that one run of a command such as `setup`, `integ
 
 **Memory footprint**:
 The memory the operating system charges to the proxy process. The proxy's memory limits are judged against it; where the runtime cannot report it, the resident set size (RSS) is used instead.
+
+**Handover**:
+The launcher replacing itself with the assistant, so that the assistant keeps the launcher's process id and no kit process stays beside it. Linux and macOS with Node.js 26.1 or newer; `ZCODE_KIT_RESIDENT_LAUNCHER=1` turns it off.
+
+**Shared preflight**:
+One preflight for several OMP windows of an installation that start together. The window that creates `logs/omp-autostart.token` runs it; the others wait for its result.
 
 ## Proxy lifecycle and the start lock
 
@@ -99,10 +105,16 @@ A stop followed by a start of the proxy, requested with `zcode-kit proxy restart
 One run of the vendor's captcha challenge inside a headless page, which produces a token or a failure.
 
 **Solver**:
-The part of the proxy that performs solves, one at a time, in arrival order, on a worker thread of the proxy process.
+The part of the proxy that performs solves, one at a time, in arrival order.
+
+**Solver process**:
+The process the proxy starts for the solver. There is at most one per proxy. It has a memory cap (`solver.memoryCapMB`, 300 MB by default) that the operating system enforces where it can.
 
 **Recycle**:
-Ending the solver's worker thread so that the next solve starts on a fresh one.
+Replacing the solver process with a fresh one before the next solve: at 80 % of the memory cap, or after 100 solves.
+
+**Fail-fast**:
+The time during which the proxy starts no solver process because more than 5 of them ended abnormally within 10 minutes. Requests that need a solve are answered with HTTP 503 and `Retry-After`.
 
 ## Admission
 
@@ -142,6 +154,9 @@ The time during which an account is not used after a quota error.
 
 **Task retention**:
 How long finished MCP tasks and their results are kept before they are removed: at most 500 finished tasks and at most 7 days. A task's idempotency key is remembered exactly as long as the task is retained.
+
+**Restart budget**:
+How often the MCP bridge starts its ZCode runtime again after the runtime has exited: at most 3 times in 15 minutes. With the budget used up, tools that need the runtime fail with `HARNESS_RESTART_BUDGET_EXHAUSTED` until a slot is free again.
 
 ## Logs
 
