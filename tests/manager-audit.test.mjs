@@ -37,7 +37,6 @@ for (const [name, override, startedMs] of [
   ['its command line is not the kit proxy', { processCommandLineImpl: () => ({ commandLine: 'node -e setInterval', executablePath: process.execPath }) }, OLD],
   ['its command line is unreadable', { processCommandLineImpl: () => null }, OLD],
   ['it is still inside the startup grace', {}, () => Date.now()],
-  ['its start time does not match the record', { processStartMsImpl: () => Date.now() - 365 * 86400_000 }, OLD],
 ]) {
   test(`start refuses to overwrite a live PID record while the listener is down when ${name}`, async t => {
     const root = fixture(t, await freePort());
@@ -54,6 +53,20 @@ for (const [name, override, startedMs] of [
     assert.doesNotMatch(lines.join('\n'), /must not spawn/);
   });
 }
+
+test('start drops a PID record whose pid now belongs to a process with another start time, and never signals that process', async t => {
+  // The recorded proxy is gone and the system reused its pid: the live process
+  // is somebody else's. It is left alone, and the stale record does not block the start.
+  const root = fixture(t, await freePort());
+  const live = dummy(t);
+  const recorded = OLD();
+  writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: live.pid, startedMs: recorded }) + '\n');
+  const impl = { processStartMsImpl: () => recorded - 365 * 86400_000, processCommandLineImpl: () => ({...BUN_PROXY, cwd: join(root, 'zcode-proxy-src')}) };
+  const { lines } = await quiet(() => createManager({ root, home: root, ...FAST, ...impl, bunResolver: () => { throw new Error('must not spawn'); } }).start({ waitMs: 1000 }));
+  assert.equal(live.exitCode, null, 'the process that owns the pid now stays alive');
+  assert.equal(existsSync(join(root, 'logs', 'proxy.pid')), false, 'the stale record is removed');
+  assert.doesNotMatch(lines.join('\n'), /not proven to be a hung kit proxy/);
+});
 
 /** A real process that binds the proxy port and accepts connections but never answers. */
 function hungListener(t, port) {

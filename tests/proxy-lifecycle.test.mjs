@@ -1522,8 +1522,30 @@ test("the manager never rotates proxy.log while its proxy answers, without the s
   const live = kitFixture(t, await freePort());
   writeFileSync(join(live, "logs", "proxy.pid"), JSON.stringify({ pid: process.pid, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z" }) + "\n", { mode: 0o600 });
   const liveLog = oversizedLog(live);
-  assert.equal((await (await lifecycleFor(live)).ensureRunning({ waitMs: 1000 })).outcome, "unproven-live-record");
+  assert.equal((await (await lifecycleFor(live, { processStartMsImpl: () => 1 })).ensureRunning({ waitMs: 1000 })).outcome, "unproven-live-record");
   assertNotRotated(liveLog, "over a live recorded proxy");
+});
+
+test("a pid record whose pid now belongs to a process with another start time is stale: start drops it and goes on, stop reports not running", async (t) => {
+  // The proxy died without a stop (a crash, a reboot) and the system gave its
+  // pid to another process. That process is alive, but it is not the recorded
+  // proxy, so the record must not block the installation.
+  const stale = () => JSON.stringify({ pid: process.pid, startedMs: 1, startedIso: "1970-01-01T00:00:00.001Z" }) + "\n";
+  const otherStart = { processStartMsImpl: () => 5_000_000 };
+
+  const starting = kitFixture(t, await freePort());
+  const pidFile = join(starting, "logs", "proxy.pid");
+  writeFileSync(pidFile, stale(), { mode: 0o600 });
+  const started = await (await lifecycleFor(starting, otherStart)).ensureRunning({ waitMs: 1000 });
+  // The fixture kit has no proxy dependencies: the start got past the record and stopped there.
+  assert.equal(started.outcome, "dependencies-missing");
+  assert.equal(existsSync(pidFile), false, "the stale record is gone");
+
+  const stopping = kitFixture(t, await freePort());
+  writeFileSync(join(stopping, "logs", "proxy.pid"), stale(), { mode: 0o600 });
+  const stopped = await (await lifecycleFor(stopping, otherStart)).stop();
+  assert.deepEqual([stopped.code, stopped.outcome], [0, "not-running"]);
+  assert.equal(existsSync(join(stopping, "logs", "proxy.pid")), false);
 });
 
 test("under the start lock with no live recorded proxy, a start rotates proxy.log first: the old bytes in proxy.log.1, its own lines in a new proxy.log", async (t) => {

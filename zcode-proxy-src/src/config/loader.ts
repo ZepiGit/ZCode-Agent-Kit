@@ -196,6 +196,21 @@ const HEALTH_MEMORY_BOUNDS = {
 function resolveHealthConfig(raw: unknown): HealthConfig | undefined {
   if (raw === undefined || raw === null) return undefined;
   const obj = typeof raw === "object" ? raw as Record<string, unknown> : {};
+  // A limit written one level too high, or `memory` given a plain value,
+  // would otherwise be ignored silently and the defaults would apply.
+  const misplaced = Object.keys(HEALTH_MEMORY_BOUNDS).filter((key) => key in obj);
+  if (misplaced.length > 0) {
+    throw new Error(
+      `health.${misplaced[0]} is not a setting: the memory limits belong under health.memory (health.memory.${misplaced[0]}). ` +
+        "Move the key one level down, or remove it to keep the default (soft 512 MB, hard 1024 MB, 3 samples 15 s apart).",
+    );
+  }
+  if (obj.memory !== undefined && obj.memory !== null && (typeof obj.memory !== "object" || Array.isArray(obj.memory))) {
+    throw new Error(
+      `health.memory must be a block of settings (softLimitMB, hardLimitMB, samples, sampleIntervalSeconds), got ${JSON.stringify(obj.memory)}. ` +
+        "Write the limits as keys under health.memory, or remove the key to keep the defaults.",
+    );
+  }
   const mem = obj.memory && typeof obj.memory === "object" ? obj.memory as Record<string, unknown> : {};
   const read = (key: keyof typeof HEALTH_MEMORY_BOUNDS): number | undefined => {
     const value = mem[key];

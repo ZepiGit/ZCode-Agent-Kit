@@ -162,9 +162,12 @@ export function setupUi({ out, log, verbose = false, banner = [], stdout = proce
       });
     },
 
-    /** Verbatim stdout rows (connection details card). */
-    dataLine(text) {
-      log(text);
+    /**
+     * Verbatim stdout rows (connection details card). `logText` is what
+     * install.log gets instead: the screen may show the key, the log never does.
+     */
+    dataLine(text, logText = text) {
+      log(logText);
       if (verbose) return void console.log(text);
       report(() => out.data(text));
     },

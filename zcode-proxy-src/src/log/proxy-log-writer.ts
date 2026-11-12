@@ -22,13 +22,17 @@
  *   sharing violation surfaces as EPERM, EBUSY or EACCES) leaves the writer
  *   appending to the current file. It writes one WARN event line per blocked
  *   spell and retries at every check; nothing is lost.
- * - File modes: the logs directory is created `0o700`,
- *   `proxy.log` is created `0o600` on open and on every reopen. `proxy.log.1`
- *   is the renamed file and keeps its mode.
+ * - File modes: the logs directory is created `0o700`, `proxy.log` is
+ *   created `0o600` on open and on every reopen, and a directory or file
+ *   that already existed is set to those modes once, when the writer opens.
+ *   `proxy.log.1` is the renamed file and keeps its mode.
+ * - Only what goes through this writer follows a rotation. A thread or child
+ *   that writes to the inherited fd 1 or 2 directly stays on the renamed file;
+ *   such writers append to the log by path instead (runtime/watchdog.ts).
  * - If the file cannot be (re)opened, a chunk goes to the original stream it
  *   was written to (the inherited stdio), so it is never dropped.
  */
-import { closeSync, fstatSync, mkdirSync, openSync, renameSync, unlinkSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, fchmodSync, fstatSync, mkdirSync, openSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { format } from "node:util";
 import { createEventLogger, redactLine } from "./event-line.mjs";
@@ -115,6 +119,11 @@ export function openProxyLogWriter({ dir, maxBytes = PROXY_LOG_MAX_BYTES, fallba
   };
 
   open();
+  // The modes given to mkdir and open apply only when the directory or the
+  // file is created. A log an older kit created with the default mode is
+  // tightened once, here; every file created later starts owner-only.
+  try { chmodSync(dir, 0o700); } catch {}
+  try { fchmodSync(fd!, 0o600); } catch {}
   return {
     path,
     write(text: string) {

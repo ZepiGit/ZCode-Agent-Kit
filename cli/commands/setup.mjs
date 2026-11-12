@@ -32,6 +32,7 @@ import { BRIDGE_NODE_FLAGS, bridgeArgs, bridgeScriptOf, claudeRegistrationState,
 import { bootstrap } from "../context.mjs";
 import { decideAccountRotator, restartForAccountChange, rotatorChoice } from "../account-setup.mjs";
 import { setupOutput } from "../setup-output.mjs";
+import { REDACTED_KEY } from "../connection-details.mjs";
 import { installedVersion } from "../../lib/self-update.mjs";
 import {
   ABORTED, HARNESS_SELECTION_ENV, NO_CONSENT_HINT, createPrompter, decideHarness,
@@ -164,6 +165,9 @@ export async function run({ flags }, cmd) {
     const mcpIds = [];
     for (const id of ADAPTER_IDS) {
       const { default: adapter } = await loadAdapter(id);
+      // Ctrl-C after the selection was confirmed: the answers are in hand, so
+      // no question is left to reject. What is configured stays; the rest is skipped.
+      if (prompter.aborted === true) abortedByUser = true;
       if (abortedByUser) {
         if (detected[id] || explicit?.ids.includes(id)) {
           outcome.skipped.push({ id, label: adapter.label, reason: "aborted" });
@@ -280,7 +284,7 @@ export async function run({ flags }, cmd) {
       runProxyCli: (cliArgs, opts) => proxyCli(cmd, cliArgs, opts),
     });
     accountChange = rotator.changed;
-    abortedByUser = rotator.aborted;
+    abortedByUser = abortedByUser || rotator.aborted;
   } finally {
     prompter.close();
     let finishErr = null;
@@ -345,7 +349,12 @@ export async function run({ flags }, cmd) {
     const { identity } = await manager.readState();
     if (identity === "ours" || identity === "down") {
       try {
-        for (const line of await manager.connectionDetails(identity === "ours" ? "running" : "configured")) ui.dataLine(line);
+        // On a terminal the card shows the key in full; install.log gets the
+        // redaction marker in its place, like every other log.
+        let key = "";
+        try { key = ctx.key(); } catch {}
+        const forLog = (line) => (key ? line.split(key).join(REDACTED_KEY) : line);
+        for (const line of await manager.connectionDetails(identity === "ours" ? "running" : "configured")) ui.dataLine(line, forLog(line));
       } catch (err) {
         progress(`  connection details unavailable: ${err.message}`);
       }

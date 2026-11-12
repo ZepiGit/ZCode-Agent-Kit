@@ -197,7 +197,11 @@ writeFileSync(process.env.WATCHDOG_MARKER, process.argv.slice(2).join(" "));
     await promise;
     clearTimeout(guard);
     const pid = Number(/pid:(\d+)/.exec(stdout)?.[1]);
-    return { stdout, stderr, pid, elapsedMs: Date.now() - started };
+    // With the manager's logs dir the watcher thread appends its lines to
+    // proxy.log by path (the inherited fd 2 would stay on a rotated file).
+    const logFile = extraEnv.ZCODE_KIT_LOG_DIR ? join(extraEnv.ZCODE_KIT_LOG_DIR, "proxy.log") : null;
+    const logged = logFile && existsSync(logFile) ? readFileSync(logFile, "utf8") : "";
+    return { stdout, stderr, logged, pid, elapsedMs: Date.now() - started };
   }
 
   async function waitForFile(path: string, timeoutMs: number): Promise<boolean> {
@@ -311,7 +315,9 @@ const timer = setInterval(() => { if (existsSync(join(dir, "stop")) || Date.now(
     await withHooks("ack", async (env) => {
       const result = await runChild(env);
       expect(result.stdout).not.toContain("survived");
-      expect(result.stderr).toMatch(OUTCOME_LINE("INFO", "acknowledged"));
+      expect(result.logged).toMatch(OUTCOME_LINE("INFO", "acknowledged"));
+      expect(result.logged).toMatch(/\[watchdog\] main thread unresponsive for \d+ms — requesting restart/);
+      expect(result.stderr).not.toContain("watchdog");
       expect(result.elapsedMs).toBeLessThan(STALL_MS + 6_000);
     });
   }, 40_000);
@@ -320,7 +326,7 @@ const timer = setInterval(() => { if (existsSync(join(dir, "stop")) || Date.now(
     await withHooks("refuse", async (env) => {
       const result = await runChild(env);
       expect(result.stdout).not.toContain("survived");
-      expect(result.stderr).toMatch(OUTCOME_LINE("ERROR", "refused"));
+      expect(result.logged).toMatch(OUTCOME_LINE("ERROR", "refused"));
       expect(result.elapsedMs).toBeLessThan(STALL_MS + 6_000);
     });
   }, 40_000);
@@ -329,8 +335,8 @@ const timer = setInterval(() => { if (existsSync(join(dir, "stop")) || Date.now(
     await withHooks("silent", async (env) => {
       const result = await runChild(env, 30_000);
       expect(result.stdout).not.toContain("survived");
-      expect(result.stderr).toMatch(OUTCOME_LINE("ERROR", "no-acknowledgement"));
-      const waited = Number(/outcome=no-acknowledgement waitedMs=(\d+)/.exec(result.stderr)?.[1]);
+      expect(result.logged).toMatch(OUTCOME_LINE("ERROR", "no-acknowledgement"));
+      const waited = Number(/outcome=no-acknowledgement waitedMs=(\d+)/.exec(result.logged)?.[1]);
       expect(waited).toBeGreaterThanOrEqual(9_900);
       expect(waited).toBeLessThan(10_500);
       // Stall detection + the 10 s wait + process start-up, far below the 30 s block.

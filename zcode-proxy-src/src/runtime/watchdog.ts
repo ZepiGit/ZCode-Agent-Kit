@@ -283,7 +283,7 @@ function watcherSource(): string {
   return `
 const { workerData } = require("node:worker_threads");
 const { spawn } = require("node:child_process");
-const { readFileSync, writeSync } = require("node:fs");
+const { appendFileSync, readFileSync, writeSync } = require("node:fs");
 const { join } = require("node:path");
 const watchdogStep = (${watchdogStep.toString()});
 const respawnHookCommand = (${respawnHookCommand.toString()});
@@ -297,8 +297,19 @@ const start = Date.now();
 let state = { beat: Atomics.load(beat, 0), changedAt: start, checkedAt: start };
 let firing = false;
 const kill = () => process.kill(process.pid, "SIGKILL");
+// This thread cannot use the main thread's log writer, and the inherited fd 2
+// stays on the old file once proxy.log has been rotated. With the manager's
+// logs dir, lines are appended to proxy.log by path, so they are in the file
+// a person reads after a hang; without it they go to fd 2 as before.
+const emit = (text) => {
+  const dir = process.env.ZCODE_KIT_LOG_DIR;
+  if (dir) {
+    try { appendFileSync(join(dir, "proxy.log"), text, { mode: 0o600 }); return; } catch {}
+  }
+  writeSync(2, text);
+};
 // An event line (log/event-line.mjs format); every value here is a plain token.
-const event = (level, message, fields) => writeSync(2, new Date().toISOString() + " " + level + " watchdog " + message
+const event = (level, message, fields) => emit(new Date().toISOString() + " " + level + " watchdog " + message
   + Object.entries(fields).filter(([, v]) => v !== undefined).map(([k, v]) => " " + k + "=" + v).join("") + "\\n");
 setInterval(() => {
   if (firing) return;
@@ -306,7 +317,7 @@ setInterval(() => {
   state = step.state;
   if (step.stalledMs === null) return;
   firing = true;
-  writeSync(2, "[watchdog] main thread unresponsive for " + step.stalledMs + "ms — requesting restart\\n");
+  emit("[watchdog] main thread unresponsive for " + step.stalledMs + "ms — requesting restart\\n");
   const hook = respawnHookCommand(process.env, process.pid, "watchdog");
   if (!hook) return kill();
   // Kill regardless of the outcome — a hung proxy is never recoverable in
@@ -316,7 +327,7 @@ setInterval(() => {
     // A manager older than 0.3.0 (no logs dir): wait for the hook's start
     // only, bounded so a wedged spawn cannot keep the hung process alive.
     launchRespawnHook(spawn, hook, process.env, workerData.hookAckMs).then((result) => {
-      if (!result.ok) writeSync(2, "[watchdog] respawn hook failed: " + result.error + "\\n");
+      if (!result.ok) emit("[watchdog] respawn hook failed: " + result.error + "\\n");
       kill();
     }, kill);
     return;

@@ -621,6 +621,13 @@ describe("health.memory (ADR-0008)", () => {
     });
   }
 
+  it("rejects a limit written directly under health, and a memory key that is not a block, instead of ignoring them", () => {
+    const misplaced = failure("health:\n  softLimitMB: 2048\n  hardLimitMB: 4096\n");
+    expect(misplaced).toMatch(/^health\.softLimitMB is not a setting: the memory limits belong under health\.memory \(health\.memory\.softLimitMB\)/);
+    expect(misplaced).toContain("or remove it to keep the default");
+    expect(failure("health:\n  memory: 2048\n")).toMatch(/^health\.memory must be a block of settings \(softLimitMB, hardLimitMB, samples, sampleIntervalSeconds\), got 2048/);
+  });
+
   it("rejects a hard limit at or below the soft limit, with both values", () => {
     const message = failure("health:\n  memory:\n    softLimitMB: 1024\n    hardLimitMB: 1024\n");
     expect(message).toMatch(/^health\.memory\.hardLimitMB \(1024\) must be above health\.memory\.softLimitMB \(1024\)/);

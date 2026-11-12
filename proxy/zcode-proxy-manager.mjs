@@ -90,8 +90,9 @@ export function createManager({
       if (q.fetchError !== undefined) console.log(`  quota: unavailable (${q.fetchError})`);
       else if (q.bodyError !== null) console.log(`  quota: unavailable (${q.bodyError})`);
       else if (q.ok) {
-        for (const b of q.body.balances ?? []) {
-          console.log(`  quota: ${b.showName} ${b.remainingUnits}/${b.totalUnits} ${b.unitType} (expires ${new Date(b.expiresAt * 1000).toISOString()})`);
+        for (const b of q.body?.balances ?? []) {
+          const expires = Number.isFinite(b.expiresAt) ? ` (expires ${new Date(b.expiresAt * 1000).toISOString()})` : "";
+          console.log(`  quota: ${b.showName} ${b.remainingUnits}/${b.totalUnits} ${b.unitType}${expires}`);
         }
       } else console.log(`  quota: HTTP ${q.status}`);
     }

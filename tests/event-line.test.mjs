@@ -100,3 +100,15 @@ test('proxy logs shows every line, masking secrets the proxy wrote and leaving t
   assert.equal(code, 0);
   assert.deepEqual(lines.join('\n').split('\n'), [...clean, '[zcode-proxy] upstream echoed x-api-key: <redacted>', 'stop token <redacted>']);
 });
+
+test('redaction leaves directory names made of plain words and labelled digests readable, and still masks tokens', () => {
+  // A kit installed under a long folder name: the path in an error line is not a secret.
+  const path = 'ERROR: /srv/zcode_agent_kit_release_candidate_2/.proxykey missing';
+  assert.equal(redactLine(path), path);
+  // A digest printed on purpose, so a log line can be matched with an error body.
+  const digest = `captcha SDK failure [len=42 sha256=${'ab12'.repeat(16)}]`;
+  assert.equal(redactLine(digest), digest);
+  // The same 64 hex characters without the label are an opaque token, and so is a base64url key.
+  assert.equal(redactLine(`state ${'ab12'.repeat(16)} end`), 'state <redacted> end');
+  assert.equal(redactLine('key AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcdefg end'), 'key <redacted> end');
+});

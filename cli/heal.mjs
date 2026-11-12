@@ -224,7 +224,10 @@ async function alignOfflineKey(ctx, tx) {
   }
   if (keys[0][1] === key) return; // no config mutation needed
   // Entire known template, not a substring marker, is the ownership boundary.
-  const normalize = s => s.replace(/\r\n/g, '\n').replace(/^  port: \d+$/m, '  port: PORT').replace(/^  proxyApiKey: "[A-Za-z0-9_-]+"$/m, '  proxyApiKey: "KEY"');
+  // Comment and blank lines do not count: a release that only documents new
+  // optional keys in the template must not make every existing config "custom".
+  const normalize = s => s.replace(/\r\n/g, '\n').split('\n').filter(line => !/^\s*(#.*)?$/.test(line)).join('\n')
+    .replace(/^  port: \d+$/m, '  port: PORT').replace(/^  proxyApiKey: "[A-Za-z0-9_-]+"$/m, '  proxyApiKey: "KEY"');
   if (normalize(text) !== normalize(readFileSync(ctx.configExample, 'utf8'))) throw new Error('custom or corrupt proxy config; automatic repair requires an unambiguous kit template');
   // Holding an exclusive loopback bind while replacing the config proves no
   // listener was present and avoids racing a start on this same port.
