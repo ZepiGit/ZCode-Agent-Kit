@@ -39,6 +39,12 @@ Other commands
   The key is shown in full only on an interactive terminal; models --show-key prints it.
   update keeps .proxykey, proxy/config.yaml, logs, backups, generated and node_modules.
 
+Environment
+  ZCODE_KIT_RESIDENT_LAUNCHER=1 keeps the launcher of zcode-kit run alive beside the harness.
+  Without it, on Linux and macOS with Node.js 26.1 or newer, run replaces itself with the
+  harness once the proxy is ready; a harness ended by a signal then reports that signal.
+  Only the exact value 1 counts. On Windows the launcher always stays.
+
 Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
 4 safe-start refused · 5 auth/identity failure ·
 20 setup: at least one harness failed, the others are configured ·
