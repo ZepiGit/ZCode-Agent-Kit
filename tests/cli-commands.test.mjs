@@ -847,6 +847,200 @@ test("entry: run passes the preflight's refusal (3) and the harness's exit code 
   assert.match(refused.stderr, /ZCode port occupied or key mismatched/);
 });
 
+// ── run: handing the process over to the harness ─────────────────────────────
+// On POSIX `run` ends by replacing the launcher with the harness, so the
+// harness runs under the launcher's pid and no launcher stays beside it.
+// Every case below spawns the real CLI against a fake harness (a shell
+// script) with this kit's proxy answering; where a precondition is missing
+// the launcher stays resident and behaves as it always did.
+const POSIX_HARNESS = process.platform === "win32" ? "the fake harness is a POSIX shell script (Windows keeps the resident launcher; cli-audit's claude.cmd test covers it)" : false;
+const CAN_HAND_OVER = typeof process.execve === "function" && (() => { const [major, minor] = process.versions.node.split(".").map(Number); return major > 26 || (major === 26 && minor >= 1); })();
+async function handoverKit(t) {
+  const http = await import("node:http");
+  const { spawn } = await import("node:child_process");
+  const root = mkdtempSync(join(tmpdir(), "cli-commands-handover-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const member of ["cli", "lib", "package.json"]) cpSync(join(ROOT, member), join(root, member), { recursive: true });
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(ROOT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
+  mkdirSync(join(root, "proxy")); mkdirSync(join(root, "logs")); mkdirSync(join(root, "generated"));
+  for (const file of ["config.example.yaml", "zcode-proxy-manager.mjs"]) cpSync(join(ROOT, "proxy", file), join(root, "proxy", file));
+  const home = join(root, "home"); mkdirSync(home);
+  const bin = join(root, "bin"); mkdirSync(bin);
+  // The harness reports who it is, what it was given and what the launcher
+  // had finished when it started, then ends as FAKE_HARNESS_END says.
+  const harness = join(bin, "opencode");
+  writeFileSync(harness, `#!/bin/sh
+echo "harness pid=$$ ppid=$PPID key=$ZCODE_PROXY_KEY args=$*"
+if [ -r /proc/$$/status ]; then echo "ignored=$(grep SigIgn /proc/$$/status | tr -d '[:space:]')"; fi
+echo "logs=$(ls "${join(root, "logs")}" | tr '\\n' ' ')"
+echo "heal-log-lines=$(wc -l < "${join(root, "logs", "heal.log")}" | tr -d ' ')"
+echo "harness started" >&2
+case "$FAKE_HARNESS_END" in
+  term) kill -TERM $$ ;;
+  *) exit "$FAKE_HARNESS_END" ;;
+esac
+`);
+  chmodSync(harness, 0o755);
+  const server = http.createServer((req, res) => {
+    if (req.headers.authorization !== "Bearer synthetic-key") return res.writeHead(401).end("{}");
+    if (req.url === "/health") return res.end(JSON.stringify({ status: "ok", provider: "zai" }));
+    if (req.url === "/quota") return res.end(JSON.stringify({ provider: "zai", serverTime: 1, jwt: null, balances: [], errors: [] }));
+    res.writeHead(404).end("{}");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  writeFileSync(join(root, ".proxykey"), "synthetic-key");
+  writeFileSync(join(root, "proxy", "config.yaml"), `server:\n  port: ${server.address().port}\n  proxyApiKey: "synthetic-key"\n`);
+  // A preload that makes the launcher's Node look like one without the handover.
+  const preload = (name, source) => { const file = join(root, name); writeFileSync(file, source); return file; };
+  const preloads = {
+    oldNode: preload("old-node.mjs", `Object.defineProperty(process, "versions", { value: { ...process.versions, node: "26.0.0" } });\n`),
+    noExecve: preload("no-execve.mjs", `process.execve = undefined;\n`),
+  };
+  /** One `zcode-kit run opencode -- --version`: how the harness ended, what it reported, and whether it ran as the launcher's own process. */
+  const kitRun = ({ end = 0, env = {}, preload: file = null } = {}) => new Promise((resolve, reject) => {
+    const full = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, ZCODE_KIT_SKIP_DEPS: "1", FAKE_HARNESS_END: String(end), ...env };
+    const child = spawn(process.execPath, [...(file ? ["--import", file] : []), join(root, "cli", "zcode-kit.mjs"), "run", "opencode", "--", "--version"], { env: full, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    child.stdout.on("data", (d) => { stdout += d; });
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      const seen = /^harness pid=(\d+) ppid=(\d+) key=(\S*) args=(.*)$/m.exec(stdout);
+      const pid = seen ? Number(seen[1]) : null, ppid = seen ? Number(seen[2]) : null;
+      resolve({
+        code, signal, stdout, stderr, launcherPid: child.pid,
+        // The harness is the launcher's process, or the launcher's child, or it never ran.
+        ran: !seen ? "never" : pid === child.pid ? "as the launcher's process" : ppid === child.pid ? "as the launcher's child" : "elsewhere",
+        key: seen?.[3], args: seen?.[4],
+        ignored: /^ignored=SigIgn:([0-9a-f]+)$/m.exec(stdout)?.[1] ?? null,
+        logs: /^logs=(.*)$/m.exec(stdout)?.[1].trim().split(" ") ?? null,
+        healLogLines: Number(/^heal-log-lines=(\d+)$/m.exec(stdout)?.[1] ?? NaN),
+      });
+    });
+  });
+  /** The same run started from a shell: the status the shell reports for it. */
+  const shellStatus = ({ end }) => new Promise((resolve, reject) => {
+    const env = { PATH: `${bin}:/usr/bin:/bin`, HOME: home, ZCODE_KIT_SKIP_DEPS: "1", FAKE_HARNESS_END: String(end) };
+    const shell = spawn("/bin/sh", ["-c", `"${process.execPath}" "${join(root, "cli", "zcode-kit.mjs")}" run opencode >/dev/null 2>&1; echo "status=$?"`], { env, stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    shell.stdout.on("data", (d) => { stdout += d; });
+    shell.on("error", reject);
+    shell.on("close", () => resolve(stdout.trim().split("\n").at(-1)));
+  });
+  return { root, bin, harness, kitRun, shellStatus, preloads };
+}
+const READY = /ZCode quota check|healthy local proxy|ZCode/; // the preflight's one detail line
+
+test("entry: run hands its process over to the harness once the launcher's work is done", { skip: POSIX_HARNESS || (!CAN_HAND_OVER && "this Node has no process.execve handover (needs Node 26.1)") }, async (t) => {
+  const kit = await handoverKit(t);
+  const res = await kit.kitRun();
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.ran, "as the launcher's process", res.stdout + res.stderr);
+  assert.equal(res.key, "synthetic-key");
+  assert.equal(res.args, "--version");
+  // Everything the launcher had to do was done before the harness existed.
+  const lines = res.stderr.trim().split("\n");
+  assert.equal(lines.length, 2, res.stderr);
+  assert.match(lines[0], READY, "the preflight's detail line is printed first");
+  assert.equal(lines[1], "harness started");
+  assert.ok(res.healLogLines >= 1, "heal.log was written before the handover");
+  assert.equal(res.logs.includes("manager.lock"), false, "no start lock is left with the harness");
+  assert.doesNotMatch(res.stderr, /ExperimentalWarning|execve/, "no kit noise in the harness session");
+  // The harness gets the default signal actions, not the ones Node ignores (SIGPIPE, SIGXFSZ).
+  if (res.ignored !== null) assert.match(res.ignored, /^0+$/, res.ignored);
+  // The harness's own end is what the caller sees: its exit code, or the signal that ended it.
+  for (const end of [7, 130]) assert.equal((await kit.kitRun({ end })).code, end);
+  const killed = await kit.kitRun({ end: "term" });
+  assert.deepEqual({ code: killed.code, signal: killed.signal }, { code: null, signal: "SIGTERM" });
+  assert.equal(await kit.shellStatus({ end: "term" }), "status=143", "a shell reports the signal that ended the harness");
+  // Only the exact value 1 opts out.
+  for (const value of ["yes", "true", "0", ""]) {
+    const still = await kit.kitRun({ env: { ZCODE_KIT_RESIDENT_LAUNCHER: value } });
+    assert.equal(still.ran, "as the launcher's process", `ZCODE_KIT_RESIDENT_LAUNCHER=${JSON.stringify(value)}`);
+  }
+});
+
+test("entry: run keeps the launcher resident with ZCODE_KIT_RESIDENT_LAUNCHER=1, on a Node without the handover, and behaves as before", { skip: POSIX_HARNESS }, async (t) => {
+  const kit = await handoverKit(t);
+  const residents = { "ZCODE_KIT_RESIDENT_LAUNCHER=1": { env: { ZCODE_KIT_RESIDENT_LAUNCHER: "1" } }, "Node 26.0": { preload: kit.preloads.oldNode }, "no process.execve": { preload: kit.preloads.noExecve } };
+  for (const [name, how] of Object.entries(residents)) {
+    const res = await kit.kitRun(how);
+    assert.equal(res.code, 0, `${name}: ${res.stderr}`);
+    assert.equal(res.ran, "as the launcher's child", `${name}: ${res.stdout}`);
+    assert.equal(res.key, "synthetic-key", name);
+    const lines = res.stderr.trim().split("\n");
+    assert.match(lines[0], READY, name);
+    assert.deepEqual(lines.slice(1), ["harness started"], name);
+    for (const end of [7, 130]) assert.equal((await kit.kitRun({ ...how, end })).code, end, name);
+    // The resident launcher reports a harness ended by a signal as exit 1.
+    const killed = await kit.kitRun({ ...how, end: "term" });
+    assert.deepEqual({ code: killed.code, signal: killed.signal }, { code: 1, signal: null }, name);
+  }
+  assert.equal(await kit.shellStatus({ end: 7 }), "status=7");
+});
+
+test("entry: run reports a missing or non-executable harness as before (run: …, exit 2), after the preflight's line", { skip: POSIX_HARNESS }, async (t) => {
+  const kit = await handoverKit(t);
+  const expectMissing = async (label) => {
+    const res = await kit.kitRun();
+    assert.equal(res.code, 2, `${label}: ${res.stderr}`);
+    assert.equal(res.ran, "never", label);
+    const lines = res.stderr.trim().split("\n");
+    assert.match(lines[0], READY, label);
+    assert.deepEqual(lines.slice(1), ["run: command not found on PATH: opencode (ENOENT)"], label);
+  };
+  chmodSync(kit.harness, 0o644);
+  await expectMissing("not executable");
+  rmSync(kit.harness);
+  await expectMissing("missing");
+});
+
+test("entry: run falls back to the resident launcher when the handover itself fails, without a warning", { skip: POSIX_HARNESS || (!CAN_HAND_OVER && "this Node has no process.execve handover (needs Node 26.1)") }, async (t) => {
+  const kit = await handoverKit(t);
+  // Executable, but not a file the kernel runs directly: no interpreter line. A shell still runs it.
+  writeFileSync(kit.harness, `echo "harness pid=$$ ppid=$PPID key=$ZCODE_PROXY_KEY args=$*"\nexit 7\n`);
+  const res = await kit.kitRun();
+  assert.equal(res.ran, "as the launcher's child", res.stdout + res.stderr);
+  assert.equal(res.code, 7, res.stderr);
+  assert.doesNotMatch(res.stderr, /ExperimentalWarning|execve/);
+});
+
+test("run decides the handover on the opt-out, the platform, the Node version, pending exit handlers and the resolved command", { skip: POSIX_HARNESS }, async (t) => {
+  const { handoverTarget } = await import("../cli/launch.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "cli-commands-target-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(join(dir, "tool"), "#!/bin/sh\n"); chmodSync(join(dir, "tool"), 0o755);
+  writeFileSync(join(dir, "plain"), "#!/bin/sh\n"); chmodSync(join(dir, "plain"), 0o644);
+  const env = { PATH: dir };
+  const able = { optOut: undefined, platform: "linux", execve: () => {}, nodeVersion: "26.1.0", exitHandlers: 0 };
+  assert.equal(handoverTarget("tool", env, able), join(dir, "tool"));
+  assert.equal(handoverTarget("tool", env, { ...able, platform: "darwin" }), join(dir, "tool"));
+  for (const optOut of ["yes", "true", "0", "", "11", " 1"]) assert.equal(handoverTarget("tool", env, { ...able, optOut }), join(dir, "tool"), JSON.stringify(optOut));
+  assert.equal(handoverTarget("tool", env, { ...able, optOut: "1" }), null);
+  assert.equal(handoverTarget("tool", env, { ...able, platform: "win32" }), null);
+  assert.equal(handoverTarget("tool", env, { ...able, platform: "win32", optOut: "1" }), null, "the opt-out changes nothing on Windows");
+  assert.equal(handoverTarget("tool", env, { ...able, execve: null }), null);
+  assert.equal(handoverTarget("tool", env, { ...able, exitHandlers: 1 }), null, "something still expects to clean up at exit");
+  for (const [nodeVersion, hands] of [["24.11.0", false], ["25.9.0", false], ["26.0.9", false], ["26.1.0", true], ["26.7.0", true], ["27.0.0", true], ["garbage", false]]) {
+    assert.equal(handoverTarget("tool", env, { ...able, nodeVersion }) !== null, hands, nodeVersion);
+  }
+  assert.equal(handoverTarget("plain", env, able), null, "not executable");
+  assert.equal(handoverTarget("absent", env, able), null, "not on PATH");
+  assert.equal(handoverTarget("tool", { PATH: "" }, able), null);
+});
+
+test("ZCODE_KIT_RESIDENT_LAUNCHER is read by the launcher only, and help names it", async () => {
+  const readers = [];
+  const walk = (dir) => { for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) { const path = `${dir}/${entry.name}`; if (entry.isDirectory()) walk(path); else if (/\.(mjs|ts|cmd|sh|ps1)$/.test(entry.name) && !/\.test\.ts$/.test(entry.name) && readFileSync(join(ROOT, path), "utf8").includes("ZCODE_KIT_RESIDENT_LAUNCHER")) readers.push(path); } };
+  for (const dir of ["cli", "lib", "bin", "proxy", "zcode-proxy-src/src"]) walk(dir);
+  assert.deepEqual(readers.sort(), ["cli/commands/help.mjs", "cli/launch.mjs"]);
+  const { run } = await load("help");
+  const help = (await run()).records.map((r) => r.text).join("");
+  assert.match(help, /^Environment\n  ZCODE_KIT_RESIDENT_LAUNCHER=1 /m);
+});
+
 // update over a temp kit: the PATH commands (git, npm) are faked at
 // runCommandSync, the manager and the setup re-run at spawnSync, the release
 // lookup at fetch.
