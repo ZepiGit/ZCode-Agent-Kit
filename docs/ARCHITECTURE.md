@@ -54,11 +54,21 @@ The proxy samples its own memory every 15 seconds.
 
 A watchdog asks for the same restart when the proxy's main loop stops responding. The manager accepts at most 3 restart requests in 15 minutes and records them in `logs/respawn.json`. A refused request leaves the proxy serving. The thresholds are under `health.memory` in `proxy/config.yaml`.
 
+## The solver process
+
+Some requests need a CAPTCHA token before ZCode accepts them. The proxy gets one by running the vendor's JavaScript in an emulated browser page, and that code keeps memory after every solve. This work runs in a process of its own, the solver process, so its memory never counts against the proxy.
+
+- **Start.** The first solve starts the solver process with the same Bun that runs the proxy; a compiled proxy starts itself with an internal subcommand. The solver process gets the proxy's environment without the stop token, the respawn variables and the ambient `HTTP_PROXY`-style variables. There is never more than one: a new one starts only after the old one has exited. It exits after 10 minutes without a solve, and it ends when the proxy ends, also when the proxy is killed.
+- **Limit.** The solver process has a memory cap of 300 MB (`solver.memoryCapMB` in `proxy/config.yaml`). Before it loads anything heavy it waits until the proxy has confirmed that the cap is in place; without that confirmation it exits and never solves. Windows enforces the cap with a Job Object, Linux with a systemd user scope (a cgroup). Either is reported only after the limit has been read back from the kernel. Where the operating system cannot enforce the cap (macOS, or a Linux whose user systemd has no memory controller), the solver process measures its own memory and ends itself at the cap. `/health` shows the cap and how it is enforced under `details.captcha.solver`: `capMB` and `enforcement` (`job-object`, `cgroup`, `sampling`, or `none` when nothing caps the solver).
+- **Recycling.** After each solve the solver process reports its memory footprint. At 80 % of the cap (240 MB), or after 100 solves, it is replaced by a fresh one before the next solve. This is the normal path. Being ended at the cap is the exception, and the log line for it names the config key.
+- **Failure.** When the solver process crashes, is ended at its cap, reports a fatal error or takes longer than 90 seconds for one solve, only the solve that was running fails. Solves that were waiting run in the next solver process, no solve is run twice, and requests that need no solve are not affected. After more than 5 such exits within 10 minutes the proxy starts no new solver process until the oldest of those exits is 10 minutes old. During that time a request that needs a solve is answered with HTTP 503 and `Retry-After` set to the seconds that remain, in the error format of its endpoint. The same answer, with `Retry-After: 2`, goes to a request whose solve would be the 65th to wait.
+
 ## Bounded stores
 
 | Store | Bound |
 | --- | --- |
 | `logs/proxy.log` | Rotated at 5 MB; one older file is kept as `proxy.log.1` |
+| Solves waiting for the solver | 64 |
 | CAPTCHA asset cache in memory | 256 entries and 32 MiB |
 | CAPTCHA asset cache on disk | 256 MiB, oldest entries removed first; expired entries are removed after 14 days or the configured lifetime, whichever is longer |
 | Log pane of the proxy TUI | 2,000 lines and 8 MB |
