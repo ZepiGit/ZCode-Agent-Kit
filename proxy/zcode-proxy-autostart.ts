@@ -96,6 +96,15 @@ function readSmall(path: string): string | null | undefined {
   }
 }
 
+/** readSmall, read again while the file is busy (Windows only, at most BUSY_MS). */
+function readSettled(path: string): string | null | undefined {
+  for (let wait = 2, waited = 0; ; waited += wait, wait = Math.min(wait * 2, 50)) {
+    const raw = readSmall(path);
+    if (raw !== undefined || PLATFORM !== "win32" || waited >= BUSY_MS) return raw;
+    sleepSync(wait);
+  }
+}
+
 function identity(value: unknown): Identity | null {
   const id = value as Identity | null;
   if (!id || typeof id !== "object" || !Number.isSafeInteger(id.pid) || id.pid <= 0 || !Number.isFinite(id.startMs)) return null;
@@ -252,8 +261,11 @@ const unreleased = new Map<string, string>();
 function release(path: string, nonce: string) {
   let left = true;
   try {
+    const raw = readSettled(path);
+    // Busy: whether it is still ours is unknown, so it stays to be released.
+    if (raw === undefined) left = false;
     // Gone, or a successor's: nothing of ours is left there.
-    if (parseToken(readSmall(path))?.nonce === nonce) patient(() => unlinkSync(path));
+    else if (parseToken(raw)?.nonce === nonce) patient(() => unlinkSync(path));
   } catch (err) { left = codeOf(err) === "ENOENT"; }
   if (left) unreleased.delete(path);
   else unreleased.set(path, nonce);
@@ -356,7 +368,7 @@ function runPreflight(timeoutMs: number, token: Token | null): Promise<Outcome> 
     step("child:spawned");
     try {
       // The host's own token, which only the host changes: replaced in one rename.
-      if (parseToken(readSmall(TOKEN))?.nonce !== token.nonce) throw new Error();
+      if (parseToken(readSettled(TOKEN))?.nonce !== token.nonce) throw new Error();
       const startId = startIdOf(child.pid);
       token.child = { pid: child.pid, startMs: Date.now(), ...(startId ? { startId } : {}) };
       const temp = tempName(TOKEN);
@@ -439,7 +451,7 @@ async function singleFlight(): Promise<void> {
   const since = Date.now(), deadline = since + START_TIMEOUT_MS;
   const remaining = () => Math.max(1, deadline - Date.now());
   const asked = new Map<string, boolean>();
-  let watched: Token | null = null, foreignSince = 0, usable = true;
+  let watched: Token | null = null, foreignSince = 0, usable = true, waitedForOther = false;
   let lastRaw: string | null | undefined = null, last: Token | null = null;
   try {
     for (const [path, nonce] of [...unreleased]) release(path, nonce);
@@ -461,8 +473,15 @@ async function singleFlight(): Promise<void> {
         if (raw !== lastRaw) { lastRaw = raw; last = parseToken(raw); }
         if (last) {
           foreignSince = 0;
-          watched = last;
-          if (await stale(last, asked) && await takeOver(TOKEN, raw as string, last.nonce, asked)) pause = 0;
+          if (unreleased.get(TOKEN) === last.nonce) {
+            // This host's own token from an earlier attempt, which it could
+            // not delete then: there is nothing to wait for.
+            release(TOKEN, last.nonce);
+          } else {
+            watched = last;
+            waitedForOther = true;
+            if (await stale(last, asked) && await takeOver(TOKEN, raw as string, last.nonce, asked)) pause = 0;
+          }
         } else {
           foreignSince ||= Date.now();
           usable = Date.now() - foreignSince < FOREIGN_MS;
@@ -475,7 +494,9 @@ async function singleFlight(): Promise<void> {
       try {
         step("token:acquired");
         sweep(token.nonce);
-        outcome = await runPreflight(remaining(), token);
+        // After waiting for another host's attempt, this host's own preflight
+        // gets the whole start timeout, so that it ends with its own cause.
+        outcome = await runPreflight(waitedForOther ? START_TIMEOUT_MS : remaining(), token);
       } finally {
         writeResult(token, outcome);
         release(TOKEN, token.nonce);
