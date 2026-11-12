@@ -5,6 +5,9 @@
  * recordings were made on the bridge built with MCP SDK 1.32.2, so they hold
  * the wire a client of protocol revision 2025-06-18 or 2025-11-25 has always
  * seen, whatever MCP library the bridge is built with.
+ *
+ * One answer differs from the recording, to a request no client can validly
+ * send (DIVERGED below); the recording itself stays as SDK 1.32.2 wrote it.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,6 +15,24 @@ import { HTTP_REQUESTS, STDIO_SESSIONS, readFixture, recordHttp, recordStdioSess
 
 const stdioFixture = readFixture("legacy-stdio.json");
 const httpFixture = readFixture("legacy-http.json");
+
+// A tools/call without a tool name. Both SDK lines refuse it with the same
+// schema failure before the bridge's handler runs; SDK 1.x reported it as an
+// internal error (-32603) with the bare failure as the message, SDK 2.x
+// reports it as invalid params (-32602) and names the request.
+const DIVERGED = {
+  request: (line) => { const m = JSON.parse(line); return m.method === "tools/call" && m.params?.name === undefined; },
+  answer(recorded) {
+    const was = JSON.parse(recorded);
+    assert.equal(was.error.code, -32603, "the recording holds the SDK 1.x answer");
+    return JSON.stringify({ jsonrpc: was.jsonrpc, id: was.id, error: { code: -32602, message: `Invalid tools/call request: ${was.error.message}` } });
+  },
+};
+
+/** The answer the bridge must give to `line`: the recorded one, except for the one diverged request. */
+function expectedAnswer(line, recorded) {
+  return DIVERGED.request(line) ? DIVERGED.answer(recorded) : recorded;
+}
 
 test("the recorded stdio sessions are the scripted ones", () => {
   assert.deepEqual(stdioFixture.map((s) => [s.name, s.send]), STDIO_SESSIONS.map((s) => [s.name, s.send]));
@@ -24,7 +45,7 @@ for (const session of STDIO_SESSIONS) {
     const got = await recordStdioSession(session);
     const asked = session.send.filter((line) => JSON.parse(line).id !== undefined);
     assert.equal(got.received.length, asked.length, "one answer per request, nothing else on stdout");
-    for (const [i, line] of got.received.entries()) assert.deepEqual(line, want.received[i], `answer to ${asked[i].slice(0, 200)}`);
+    for (const [i, line] of got.received.entries()) assert.deepEqual(line, expectedAnswer(asked[i], want.received[i]), `answer to ${asked[i].slice(0, 200)}`);
     assert.equal(got.end, want.end, "nothing was written after the last scripted answer");
   });
 }
@@ -33,7 +54,14 @@ test("wire replay, HTTP: every status, header and body equals the recording", as
   assert.deepEqual(httpFixture.map((x) => x.name), HTTP_REQUESTS.map((x) => x.name), "the recording covers the scripted requests (re-record with wire-transcript.mjs --write)");
   const got = await recordHttp();
   for (const [i, exchange] of got.entries()) {
-    assert.deepEqual(exchange.response, httpFixture[i].response, `${exchange.name}`);
+    const want = httpFixture[i].response;
+    const single = HTTP_REQUESTS[i].body?.startsWith("{") && want.status === 200 && typeof want.body === "string";
+    if (single && DIVERGED.request(HTTP_REQUESTS[i].body)) {
+      const body = DIVERGED.answer(want.body);
+      assert.deepEqual(exchange.response, { status: 200, headers: [`content-length: ${Buffer.byteLength(body)}`, "content-type: application/json"], body }, exchange.name);
+    } else {
+      assert.deepEqual(exchange.response, want, exchange.name);
+    }
   }
 });
 

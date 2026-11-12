@@ -108,6 +108,16 @@ Der Desktop-Captcha-Flow (`captcha-retry` → Aliyun-Token → Retry) ist eine D
 die Bridge umgeht das **nicht** (siehe SECURITY/KNOWN_LIMITATIONS) und meldet `turn.failed`
 mit voller Attribution. Sessions/Hooks/Events/Usage laufen bis dahin vollständig.
 
+## MCP side of the bridge
+
+The protocol described above is the inner one, between the bridge and the ZCode runtime. Towards
+its clients the bridge speaks MCP through the MCP SDK 2.x (`@modelcontextprotocol/server`, plus
+`@modelcontextprotocol/node` for HTTP), over stdio or stateless Streamable HTTP (`POST /mcp`). It
+serves the 2025-era MCP revisions: `initialize` negotiates at most `2025-11-25` and mirrors
+`2025-06-18`, `2025-03-26`, `2024-11-05` and `2024-10-07`. Revision `2026-07-28` is not served
+(`server/discover` answers `-32601`). The exact bytes of this surface are pinned by recorded
+conversations in `test/fixture/wire/`; see `KNOWN_LIMITATIONS.md`, section 6.
+
 ## Community-Quellen (recherchiert, Commits dokumentiert)
 
 - `william0wang/zcode-acp` @ `ad31b663eab446c2478f573498e5f7e3025d4c20` (Apache-2.0) — NDJSON-Bestätigung, Event-Typen, Backlog („missing dispatch case + live -32601 is the proof“).

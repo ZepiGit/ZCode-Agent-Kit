@@ -102,26 +102,29 @@ Die native Providerroute kann von der Proxyroute abweichen.
 - Getestete MCP-Clients: offizieller SDK-Client (Node 26), eigener HTTP-Client (`fetch`), MCP Inspector
   nicht ausgeführt (nicht installiert); bei Bedarf separat verifizieren.
 
-## 6. Protokollrevision 2025-11-25 und SDK 1.x (bewusster Stay-back)
+## 6. MCP protocol revision: at most 2025-11-25, on MCP SDK 2.x
 
-- **Stand:** Die Bridge nutzt `@modelcontextprotocol/sdk` 1.x (`^1.32.2`) mit dem Low-Level-`Server`
-  und handelt höchstens die Protokollrevision `2025-11-25` aus (`LATEST_PROTOCOL_VERSION` des SDK;
-  ältere unterstützte Revisionen wie `2025-06-18` werden gespiegelt). Die aktuelle Revision
-  `2026-07-28` und die SDK-2.x-Linie (`@modelcontextprotocol/server`) werden **bewusst nicht**
-  übernommen.
-- **Grund:** `2026-07-28` ist ein Architekturschritt, kein Versionssprung: keine Protokoll-Sessions
-  und kein `initialize` mehr, Pflicht-Methode `server/discover`, Pflichtfeld `resultType`,
-  `ttlMs`/`cacheScope` auf List-/Read-Ergebnissen, neue Fehlercodes (unbekannte Resource `-32602`
-  statt des heutigen `-32002`), `logging` abgekündigt. SDK 1.x wird diese Revision nie unterstützen;
-  ein reiner Tausch auf 2.x brächte der Bridge ohne diesen Umbau funktional nichts.
-- **Was gilt bis dahin:** Die HTTP-Seite ist schon heute zustandslos, nur POST, ohne Session-ID und
-  mit 405 auf GET/DELETE, also so, wie `2026-07-28` Legacy-Verkehr erwartet. Clients der neuen Ära
-  müssen ihren Legacy-Pfad (`initialize`) nutzen; ein Client ganz ohne Legacy-Pfad kann die Bridge
-  nicht verwenden.
-- **Frist:** SDK 1.x erhält laut seinem README Bug- und Sicherheitsfixes mindestens sechs Monate nach
-  dem v2-Release (2026-07-27), also mindestens bis **2027-01-27**. Die Migration auf 2.x und
-  `2026-07-28` ist als eigenes Ticket erfasst (Overhaul-Ticket 56, `needs-triage`) und muss vor
-  diesem Datum entschieden werden.
-- Quellen: SDK-Support-Politik
-  <https://github.com/modelcontextprotocol/typescript-sdk/blob/v1.x/README.md>, Änderungen in
-  `2026-07-28` <https://modelcontextprotocol.io/specification/2026-07-28/changelog>.
+- **What the bridge is built on.** The MCP SDK 2.x line: `@modelcontextprotocol/server` 2.4.0, and
+  `@modelcontextprotocol/node` 2.1.2 for the HTTP transport (loaded in HTTP mode only; the stdio
+  bridge loads no HTTP code). The earlier `@modelcontextprotocol/sdk` 1.x package is no longer used.
+- **What it speaks.** The bridge wires the SDK's low-level `Server` to a transport itself and serves
+  the 2025-era protocol revisions only. `initialize` answers with the revision the client asked for
+  when that is `2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05` or `2024-10-07`, and with
+  `2025-11-25` for anything else. Revision `2026-07-28` is not served: `server/discover` is answered
+  with `-32601` (method not found), and an HTTP request that carries
+  `MCP-Protocol-Version: 2026-07-28` is answered with `400`. A client of the new revision has to use
+  its legacy path (`initialize`); a client without one cannot use the bridge.
+- **The wire did not change with the SDK.** Conversations recorded on the bridge built with SDK
+  1.32.2 (stdio and HTTP, revisions 2025-06-18 and 2025-11-25 in full) are replayed against every
+  build by `test/integration/wire-replay.test.mjs` and must match byte for byte: capabilities, tool
+  and resource results, statuses and headers. A failed `resources/read` (an unknown resource or
+  task) still answers with error code `-32002`; SDK 2.x would send `-32602`, and the bridge restores
+  the code the 2025-era revisions define. One answer differs: a `tools/call` without a tool name,
+  which no client can validly send, is now refused with `-32602` and the message
+  `Invalid tools/call request: …` instead of `-32603`.
+- **HTTP.** Stateless as before: POST only, no session id, `405` for GET and DELETE, one server and
+  one transport per request, both closed when the response closes (also when the client leaves
+  while a tool is still running).
+- Sources: SDK 2.x packages <https://www.npmjs.com/package/@modelcontextprotocol/server>,
+  <https://www.npmjs.com/package/@modelcontextprotocol/node>; changes in revision `2026-07-28`
+  <https://modelcontextprotocol.io/specification/2026-07-28/changelog>.

@@ -1,7 +1,7 @@
 # MCP-API-Referenz (zcode-harness-mcp 0.1.0)
 
 Transport: stdio (Standard) oder Streamable-HTTP `http://<host>:<port>/mcp` (nur localhost-Default).
-MCP-Protokoll: offizielles SDK, Legacy-Initialize (`2025-06-18` kompatibel). Alle Tools liefern
+MCP-Protokoll: offizielles SDK 2.x, Legacy-Initialize (höchstens `2025-11-25`, `2025-06-18` kompatibel). Alle Tools liefern
 `structuredContent` (maschinenlesbar) **und** den identischen Inhalt als Text-Block. Fehler erscheinen
 als Tool-Fehler (`isError:true`) mit präziser Meldung (`READ_ONLY_MODE`, `REVISION_CONFLICT`,
 `UNKNOWN_MODEL`, `not in the bridge allowlist`, …).
