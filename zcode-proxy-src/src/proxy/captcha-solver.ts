@@ -1,24 +1,31 @@
 /**
- * Solver dispatch — the happy-dom solver runs on a dedicated worker thread.
+ * Solver dispatch — the happy-dom solver runs in the solver process, a child
+ * OS process of the proxy.
  *
  * Backend (ZCODE_CAPTCHA_BACKEND): "happy" (default) — captcha-happy.ts,
- * loaded inside captcha-solver-worker.ts. Guest sync XHR parks its thread in
- * Atomics.wait and guest DOM state accumulates, so running it on the HTTP
- * server's thread let one stuck solve freeze /health and every request (the
- * 2026-09-24 incident: 83 s stalls, 11 GB RSS). On the worker, the host loop
- * stays responsive, a solve that outlives its deadline is terminated, and
- * recycling the worker returns its heap.
+ * loaded inside the solver generation (captcha-solver-generation.ts). Guest
+ * sync XHR parks its thread in Atomics.wait and guest DOM state accumulates,
+ * so running it on the HTTP server's thread let one stuck solve freeze /health
+ * and every request (the 2026-09-24 incident: 83 s stalls, 11 GB RSS). Out of
+ * the proxy's thread, the host loop stays responsive, a solve that outlives
+ * its deadline is ended with its generation, and a recycle returns its memory.
  *
  * One solve at a time (happy-dom aliases process-global state inside the
- * worker); callers queue FIFO. `bun build --compile` must list
- * src/proxy/captcha-solver-worker.ts as an extra entrypoint.
+ * generation); callers queue FIFO. `bun build --compile` must list
+ * src/proxy/captcha-solver-worker.ts as an extra entrypoint (thread transport);
+ * a compiled proxy starts the solver process by self-exec (index.ts).
  *
  * Shape: the dispatcher is an object built by createCaptchaSolver
  * over a SolverTransport, which starts solver generations and carries the
- * message protocol below unchanged. threadTransport() is the Bun Worker; the
- * module-level functions drive the proxy's own dispatcher over it.
+ * message protocol unchanged. solverProcessTransport() (the default) is the
+ * child-process adapter; threadTransport() is the Bun Worker, kept for tests
+ * and as a fallback. The module-level functions drive the proxy's own
+ * dispatcher over the solver process.
  */
+import { spawn, type ChildProcess } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { CaptchaSdkError, captchaFailureFromTransport, type CaptchaFailureCategory } from "./captcha-token.js";
+import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
 
 const BACKEND = process.env.ZCODE_CAPTCHA_BACKEND?.trim().toLowerCase() || "happy";
 
@@ -164,7 +171,8 @@ export interface SolverTransport {
 // From source the worker sits next to this module; in a compiled binary
 // import.meta.url is the executable inside the embedded root (the common
 // directory of the entrypoints, src/), so the worker lives under ./proxy/.
-const WORKER_URL = import.meta.url.endsWith("captcha-solver.ts")
+const FROM_SOURCE = import.meta.url.endsWith("captcha-solver.ts");
+const WORKER_URL = FROM_SOURCE
   ? new URL("./captcha-solver-worker.ts", import.meta.url)
   : new URL("./proxy/captcha-solver-worker.ts", import.meta.url);
 
@@ -182,6 +190,158 @@ export function threadTransport(): SolverTransport {
       return {
         post: (message) => w.postMessage(message),
         terminate: () => w.terminate(),
+      };
+    },
+  };
+}
+
+// Names the solver process never receives, in any case (Windows names are
+// case-insensitive): the respawn chain's variables and this spawn's stop token
+// belong to the proxy, and the ambient proxy
+// variables — the set lib/proxy-env.mjs strips — would route captcha egress
+// past ZCODE_PROXY_UPSTREAM_PROXY (Bun < 1.4.3 ignores `proxy: false`).
+// Everything else passes as the worker got it: ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA,
+// the CDN cache variables and ZCODE_PROXY_UPSTREAM_PROXY included.
+const EXCLUDED_FROM_SOLVER_ENV: readonly RegExp[] = [
+  /^ZCODE_KIT_RESPAWN_/i,
+  /^ZCODE_KIT_STOP_TOKEN$/i,
+  /^(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)$/i,
+  /^(?:npm|yarn|pnpm)_(?:http_proxy|https_proxy|all_proxy|no_proxy|proxy)$/i,
+];
+
+function solverProcessEnv(source: NodeJS.ProcessEnv): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [name, value] of Object.entries(source)) {
+    if (value === undefined || EXCLUDED_FROM_SOLVER_ENV.some((pattern) => pattern.test(name))) continue;
+    env[name] = value;
+  }
+  return env;
+}
+
+/**
+ * argv of the solver process: from source the running Bun plus the solver
+ * entry module; a compiled binary runs itself with the self-exec subcommand
+ * (never `-e`). The parent pid is appended at spawn.
+ */
+export function solverProcessCommand(): string[] {
+  return FROM_SOURCE
+    ? [process.execPath, fileURLToPath(new URL("./captcha-solver-process.ts", import.meta.url))]
+    : [process.execPath, SOLVER_PROCESS_COMMAND];
+}
+
+/** A child line longer than this is passed on in pieces rather than held. */
+const MAX_RELAYED_LINE = 64 * 1024;
+
+/**
+ * Re-emits a child stream on the proxy's own stream, whole lines at a time,
+ * bytes unchanged, so a child line never interleaves with a proxy line.
+ * A line without its newline is held up to MAX_RELAYED_LINE bytes, then
+ * written as it is; the rest is written when the stream ends.
+ */
+function relayLines(from: NodeJS.ReadableStream, to: NodeJS.WritableStream): void {
+  let held: Buffer | null = null;
+  from.on("data", (chunk: Buffer) => {
+    const buf = held ? Buffer.concat([held, chunk]) : chunk;
+    const end = buf.lastIndexOf(10) + 1;
+    if (end > 0) to.write(buf.subarray(0, end));
+    held = end < buf.length ? Buffer.from(buf.subarray(end)) : null;
+    if (held && held.length >= MAX_RELAYED_LINE) {
+      to.write(held);
+      held = null;
+    }
+  });
+  from.on("end", () => {
+    if (held) to.write(held);
+    held = null;
+  });
+}
+
+export interface SolverProcessTransportOptions {
+  /** argv of the solver process (default: solverProcessCommand()). */
+  command?: readonly string[];
+  /** How long an ended generation may take to exit after SIGTERM before it is killed. */
+  graceMs?: number;
+}
+
+/** Default grace between SIGTERM and SIGKILL for an ended generation. */
+export const SOLVER_EXIT_GRACE_MS = 2_000;
+
+/**
+ * The child-process adapter: each solver generation is a solver process
+ * of its own. One generation at a time: a new process is spawned only after
+ * the previous one has exited; until then (and until it has started) posts
+ * are held. The 90 s deadline is armed by the dispatcher at dispatch, so a
+ * cold start counts against it. The proxy never stays alive for an idle
+ * solver process (unref); the in-flight solve's deadline timer holds it.
+ */
+export function solverProcessTransport(opts: SolverProcessTransportOptions = {}): SolverTransport {
+  const graceMs = opts.graceMs ?? SOLVER_EXIT_GRACE_MS;
+  // Settles when the latest generation's process has exited (or never started).
+  let lastExit: Promise<void> = Promise.resolve();
+
+  return {
+    spawn(events) {
+      const command = opts.command ?? solverProcessCommand();
+      let child: ChildProcess | null = null;
+      let ended = false;
+      const held: SolverHostMessage[] = [];
+      const { promise: exited, resolve: markExited } = Promise.withResolvers<void>();
+
+      const start = () => {
+        if (ended) { markExited(); return; }
+        try {
+          child = spawn(command[0]!, [...command.slice(1), String(process.pid)], {
+            stdio: ["ignore", "pipe", "pipe", "ipc"],
+            serialization: "json",
+            env: solverProcessEnv(process.env),
+            windowsHide: true,
+          });
+        } catch {
+          markExited();
+          if (!ended) events.error();
+          return;
+        }
+        const proc = child;
+        proc.on("message", (raw) => { if (!ended) events.message(raw); });
+        proc.on("error", () => {
+          // A spawn failure has no process to wait for.
+          if (proc.pid === undefined) markExited();
+          if (!ended) events.error();
+        });
+        proc.on("exit", () => {
+          markExited();
+          if (!ended) events.exit();
+        });
+        relayLines(proc.stdout!, process.stdout);
+        relayLines(proc.stderr!, process.stderr);
+        // Neither the process nor its relayed pipes may hold the proxy open.
+        proc.unref();
+        for (const pipe of [proc.stdout, proc.stderr]) (pipe as { unref?: () => void } | null)?.unref?.();
+        // A process that failed at once reports through "error"/"exit".
+        try { for (const message of held.splice(0)) proc.send(message); } catch {}
+      };
+
+      // Asynchronous in every case: events never come from inside spawn().
+      const previous = lastExit;
+      lastExit = exited;
+      void previous.then(start);
+
+      return {
+        post(message) {
+          if (child) child.send(message);
+          else held.push(message);
+        },
+        terminate() {
+          if (ended) return;
+          ended = true;
+          held.length = 0;
+          const proc = child;
+          if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+          try { proc.kill("SIGTERM"); } catch {}
+          const kill = setTimeout(() => { try { proc.kill("SIGKILL"); } catch {} }, graceMs);
+          kill.unref?.();
+          void exited.then(() => clearTimeout(kill));
+        },
       };
     },
   };
@@ -205,20 +365,34 @@ export interface CaptchaSolver {
   concurrency(): number;
 }
 
+/** The dispatcher's timers (the per-solve deadline and the idle exit). */
+export interface SolverClock {
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(timer: unknown): void;
+}
+
+const realClock: SolverClock = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (timer) => clearTimeout(timer as Timer),
+};
+
 export interface CaptchaSolverDeps {
-  /** Default: the thread transport. */
+  /** Default: the child-process adapter (the solver process). */
   transport?: SolverTransport;
+  /** Default: the runtime's timers. Tests inject a manual clock. */
+  clock?: SolverClock;
 }
 
 /** A solver dispatcher that owns all of its state: queue, in-flight solve, generation, timers, stats. */
 export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver {
-  const transport = deps.transport ?? threadTransport();
+  const transport = deps.transport ?? solverProcessTransport();
+  const { setTimeout, clearTimeout } = deps.clock ?? realClock;
   const options: Required<CaptchaSolverOptions> = { ...DEFAULT_OPTIONS };
 
   const queue: Job[] = [];
-  let inFlight: { job: Job; id: number; deadline: Timer } | null = null;
+  let inFlight: { job: Job; id: number; deadline: unknown } | null = null;
   let worker: SolverChannel | null = null;
-  let idleTimer: Timer | null = null;
+  let idleTimer: unknown = null;
   let pendingRecycle: string | null = null;
   let shutdownRequested = false;
   let nextId = 0;
@@ -355,7 +529,7 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
       idleTimer = null;
       if (!inFlight && !queue.length) recycle("idle");
     }, options.idleMs);
-    idleTimer.unref?.();
+    (idleTimer as { unref?: () => void }).unref?.();
   }
 
   function pump(): void {
@@ -428,7 +602,11 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
   };
 }
 
-/** The proxy's solver dispatcher (thread transport). */
+/**
+ * The proxy's solver dispatcher, over the solver process. Nothing outside
+ * tests selects the thread transport: it is reached only by building a
+ * dispatcher with `createCaptchaSolver({ transport: threadTransport() })`.
+ */
 export const defaultCaptchaSolver: CaptchaSolver = createCaptchaSolver();
 
 export function configureCaptchaSolver(opts: CaptchaSolverOptions): void {
