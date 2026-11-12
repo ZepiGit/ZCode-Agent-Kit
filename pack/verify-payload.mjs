@@ -60,7 +60,7 @@ const REQUIRED_FILES = [
   "zcode-proxy-src/src/tui/tokens.d.mts",
   // Ticket 08: the CLI entry dispatches every command through its command
   // module (cli/commands/index.mjs is the dispatch table).
-  ...["index", "common", "help", "setup", "integrate", "run", "doctor", "status", "proxy", "logs", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"]
+  ...["index", "common", "help", "version", "setup", "integrate", "run", "doctor", "status", "proxy", "logs", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"]
     .map((name) => `cli/commands/${name}.mjs`),
 ];
 

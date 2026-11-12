@@ -19,25 +19,32 @@ function usageText() {
   zcode-kit accounts explain --model MODEL --operation OP
   zcode-kit accounts doctor [--json] | accounts quota | accounts health [--json]
   zcode-kit update [--version vX.Y.Z] | rollback [tx-id] | uninstall
-  (update keeps .proxykey, proxy/config.yaml, logs, backups, generated and node_modules)
-  (setup: auto uses a checkbox list when the terminal fits: arrows move, Space toggles,
-   a toggles all editable rows, Enter confirms; Esc/empty Enter/EOF saves no new decision.
-   Saved choices stay locked unless --reask. No-answer may refresh an existing kit integration.
-   No-color/dumb/small/unknown geometry uses individual [y/n] questions;
-   without a terminal, undecided harnesses are skipped — never configured silently)
-  (setup: --harness <list> or ${HARNESS_SELECTION_ENV}=<list> selects harnesses without questions (unattended);
-   none skips all; the selection also limits MCP registration; --no-mcp skips registration;
-   answers are remembered under generated/harness-choices/ — --reask asks again;
-   --select shows one numbered list instead: chosen = configured, the other detected ones = skipped)
-  (setup: Next steps lists five complete commands and at most one successfully configured launch target;
-   configuration is not proof of sign-in or a model reply. Marked paste/text is discarded;
-   unmarked valid-only key bytes cannot be distinguished from typing)
-  (doctor: --forget <harness> removes a stored decision (the integration stays; setup asks again);
-   --upstream compares the kit's gateway with the provider config the ZCode client receives — network, opt-in)
-  (proxy status --json: one object, connection details without the key; exit 0 only when this kit's proxy answers)
-  (setup: --account-rotator y|n for unattended installs; --verbose for full installer output)
-  (proxy start/status and setup print the connection details for manual client setup;
-   the key is shown in full only on an interactive terminal — export: zcode-kit models --show-key)
+  zcode-kit --version
+
+Setup
+  On a terminal, setup shows the detected harnesses as a checkbox list: arrow keys move,
+  Space toggles, a toggles all, Enter confirms. Esc or Enter with nothing ticked saves no answer.
+  Terminals without colour or cursor control get one [y/n] question per harness instead.
+  Without a terminal, undecided harnesses are skipped; nothing is configured silently.
+  Answers are kept under generated/harness-choices/ and reused; --reask asks again.
+  A harness that already has a kit integration may be refreshed even without a new answer.
+  --harness <list> or ${HARNESS_SELECTION_ENV}=<list> picks harnesses without questions; none skips all.
+  --select shows one numbered list instead of the checkbox list.
+  --no-mcp skips the MCP registration; otherwise it follows the chosen harnesses.
+  --account-rotator y|n answers the Account Rotator question for unattended installs.
+  --verbose prints the full installer output.
+  Setup ends with the commands to run next. A configured harness does not prove that sign-in
+  works; check that with the auth status command.
+
+Other commands
+  doctor --forget <harness> removes a stored answer (the integration stays; setup asks again).
+  doctor --upstream compares the kit's gateway with the provider config the ZCode client
+  receives. It uses the network and runs only when asked.
+  proxy status --json prints one object with the connection details, without the key;
+  it exits 0 only when this kit's proxy answers.
+  proxy start, proxy status and setup print the connection details for manual client setup.
+  The key is shown in full only on an interactive terminal; models --show-key prints it.
+  update keeps .proxykey, proxy/config.yaml, logs, backups, generated and node_modules.
 
 Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
 4 safe-start refused · 5 auth/identity failure ·

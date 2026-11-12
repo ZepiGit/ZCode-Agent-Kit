@@ -20,6 +20,7 @@
 //   zcode-kit update [--version vX.Y.Z]          checkout: fast-forward; npm: npm install; release: verified tarball mirror
 //   zcode-kit rollback [tx-id]
 //   zcode-kit uninstall
+//   zcode-kit --version
 //
 // Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflict ·
 // 4 safe-start refused (lock/ownership) · 5 auth/identity failure · 20 setup:
@@ -67,7 +68,11 @@ const command = positional[0] ?? "help";
 const ROOT = kitRoot();
 
 async function main() {
-  if (command === "help" || flags.help) return dispatch(COMMANDS.help, null);
+  // `--version` alone (no command) asks for the version; with a command it is
+  // that command's own flag (`update --version vX.Y.Z`).
+  const wantsVersion = command === "version" || (positional.length === 0 && flags.version === true);
+  if (flags.help || (command === "help" && !wantsVersion)) return dispatch(COMMANDS.help, null);
+  if (wantsVersion) return dispatch(COMMANDS.version, { root: ROOT });
   const module = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : UNKNOWN_COMMAND;
   // ADR-0006: on a Node below the support floor, setup and update refuse
   // before anything else runs (no state read for writing, no lock, no proxy

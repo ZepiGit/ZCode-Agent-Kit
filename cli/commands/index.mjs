@@ -16,9 +16,10 @@ import * as status from "./status.mjs";
 import * as uninstall from "./uninstall.mjs";
 import * as update from "./update.mjs";
 import * as usage from "./usage.mjs";
+import * as version from "./version.mjs";
 
 export const COMMANDS = Object.freeze({
-  help, setup, integrate, run, doctor, status, proxy, models, usage, auth, accounts, update, rollback, uninstall,
+  help, version, setup, integrate, run, doctor, status, proxy, models, usage, auth, accounts, update, rollback, uninstall,
 });
 
 /** A command name the table does not know: the error and the usage text, exit 2. */

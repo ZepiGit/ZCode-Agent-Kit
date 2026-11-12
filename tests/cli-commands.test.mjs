@@ -1005,7 +1005,7 @@ test("setup: a bad --account-rotator answer and a source checkout without the op
 });
 
 test("setup and update declare the Node support floor; no other command does", async () => {
-  for (const name of ["help", "setup", "integrate", "run", "doctor", "status", "proxy", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"]) {
+  for (const name of ["help", "version", "setup", "integrate", "run", "doctor", "status", "proxy", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"]) {
     const mod = await load(name);
     assert.equal(mod.nodeFloor === true, name === "setup" || name === "update", name);
   }
@@ -1016,7 +1016,7 @@ test("setup and update declare the Node support floor; no other command does", a
 // plus `help`. The dispatch table (cli/commands/index.mjs) maps each to its
 // module; the entry parses, refuses below the Node floor, dispatches and
 // renders, and holds no command body.
-const ALL_COMMANDS = ["help", "setup", "integrate", "run", "doctor", "status", "proxy", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"];
+const ALL_COMMANDS = ["help", "version", "setup", "integrate", "run", "doctor", "status", "proxy", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"];
 
 test("every command dispatches through its module in cli/commands/, and every command the help text names is in the table", async () => {
   const { COMMANDS, UNKNOWN_COMMAND } = await load("index");
@@ -1053,6 +1053,15 @@ test("entry: help, --help on any command and an unknown command keep their strea
   assert.match(help.stdout, /^zcode-kit — local ZCode provider for your own agent harnesses\n/);
   assert.deepEqual(await cli(["status", "--help"]), help);
   assert.deepEqual(await cli(["frobnicate"]), { code: 2, stdout: help.stdout, stderr: "unknown command: frobnicate\n" });
+});
+
+test("entry: --version and the version command print the kit's version on stdout, exit 0", async () => {
+  const version = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+  const expected = { code: 0, stdout: `zcode-kit ${version}\n`, stderr: "" };
+  assert.deepEqual(await cli(["--version"]), expected);
+  assert.deepEqual(await cli(["version"]), expected);
+  // With a command, --version is that command's flag and --help still wins.
+  assert.equal((await cli(["version", "--help"])).stdout, (await cli(["help"])).stdout);
 });
 
 test("entry: usage errors of the migrated commands go to stderr only, exit 2", async () => {
