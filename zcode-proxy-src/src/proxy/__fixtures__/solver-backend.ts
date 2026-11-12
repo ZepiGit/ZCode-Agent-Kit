@@ -61,6 +61,9 @@ export async function solveTraceless({ scene, region, prefix }: { scene: string;
         process.stderr.write(Buffer.from(arg!, "base64"));
         return param("stderr-line:written");
       }
+      case "exit":
+        // The process ends itself with an exit code, as a runtime does whose allocation failed.
+        process.exit(Number(arg));
       case "balloon": {
         // Allocates and touches <arg> MB in 8 MB steps and keeps all of it.
         const kept: Uint8Array[] = [];
