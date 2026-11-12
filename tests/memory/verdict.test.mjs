@@ -873,20 +873,20 @@ test("the stub OMP host is the harness: never kit footprint, like the other fixt
   assert.equal(checkNamed(verdict(rows, { peaks: { kit: 200 } }), "peak:kit").value, 130);
 });
 
-test("the S3 OMP leg runs on both legs and is expected RED until single-flight lands (ticket 35)", () => {
+test("the S3 OMP leg runs on both legs; more than one preflight at once is expected RED on Windows only, where the shared preflight is not measured yet", () => {
   assert.ok(JOB.linux.includes("S3/omp") && JOB.windows.includes("S3/omp"));
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
-  assert.deepEqual(expected.linux["S3/omp"].owners["35"], ["omp:concurrent-preflights"]);
+  assert.equal(Object.values(expected.linux["S3/omp"].owners).flat().includes("omp:concurrent-preflights"), false);
   assert.deepEqual(expected.windows["S3/omp"].owners["35"], ["omp:concurrent-preflights"]);
 });
 
-test("S3/omp is listed on both legs with 35 owning the concurrent preflights and 37 the flipping role peaks: RED passes, GREEN passes on the flips, `unstable` is refused", () => {
+test("S3/omp is listed on both legs, on Linux for the flipping role peaks only, on Windows also for the concurrent preflights: RED passes, GREEN passes on the flips, `unstable` is refused", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const expected = readExpectedRed(join(here, "expected-red.json"));
   const issueIds = issueIdsIn(join(here, "known-issues"));
   // Round 15 Q1 condition 3.
-  assert.deepEqual(expected.linux["S3/omp"], { owners: { 35: ["omp:concurrent-preflights"], 37: ["procPeak:proxy", "procPeak:preflight"] }, flips: ["procPeak:proxy", "procPeak:preflight"] });
+  assert.deepEqual(expected.linux["S3/omp"], { owners: { 37: ["procPeak:proxy", "procPeak:preflight"] }, flips: ["procPeak:proxy", "procPeak:preflight"] });
   assert.deepEqual(expected.windows["S3/omp"], { owners: { 35: ["omp:concurrent-preflights"], 37: ["peak:kit"] }, flips: ["peak:kit"] });
   for (const os of ["linux", "windows"]) {
     const results = JOB[os].map((key) => {

@@ -13,7 +13,7 @@
       "flips": ["exactly-one-proxy-after-round", "start-over-stale-lock", "procPeak:preflight", "procPeak:proxy"]
     },
     "S3/omp": {
-      "owners": { "35": ["omp:concurrent-preflights"], "37": ["procPeak:proxy", "procPeak:preflight"] },
+      "owners": { "37": ["procPeak:proxy", "procPeak:preflight"] },
       "flips": ["procPeak:proxy", "procPeak:preflight"]
     },
     "S4/short": {
