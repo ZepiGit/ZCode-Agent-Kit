@@ -433,8 +433,11 @@ const IDENTITY_OF = `
 // <path>.<pid> and makes its first request only once <path>.go exists (at
 // most 90 s), so that hosts started together also ask together however
 // slowly each one starts.
+let hostScripts = 0;
 function runHost(ctx, extension, env = {}) {
-  const script = join(ctx.root, 'omp-host.mjs');
+  // One script file per host: rewriting a shared one while an earlier host
+  // is still reading it can hand that host an empty program.
+  const script = join(ctx.root, `omp-host-${++hostScripts}.mjs`);
   writeFileSync(script, `
     import { existsSync, writeFileSync } from 'node:fs';
     import extension from ${JSON.stringify(pathToFileURL(extension).href)};
@@ -446,9 +449,6 @@ function runHost(ctx, extension, env = {}) {
       for (const end = Date.now() + 90_000; !existsSync(barrier + '.go') && Date.now() < end;) await new Promise(r => setTimeout(r, 5));
     }
     await hook({}, { model: { provider: 'zcode' } });
-    // A host process that ends right after printing can lose what is still
-    // buffered for a pipe; OMP keeps running, this stand-in does not.
-    await new Promise(r => process.stderr.write('', () => r()));
   `);
   return new Promise((resolve, reject) => {
     const child = spawn(resolveBun(ROOT), [script], { env: { ...runtimeEnv(ctx, ''), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
