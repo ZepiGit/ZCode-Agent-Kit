@@ -758,10 +758,13 @@ test("uninstall: an external step it cannot undo, or a claude entry of another k
 
 test("integrate: a missing or unknown harness is a usage error, exit 2, before anything is loaded or written", async () => {
   const { run } = await load("integrate");
-  for (const positional of [["integrate"], ["integrate", "vim"]]) {
+  for (const [positional, message] of [
+    [["integrate"], "missing harness name"],
+    [["integrate", "vim"], 'unknown harness "vim"'],
+  ]) {
     const { ctx, progress } = fakeCtx();
     assert.deepEqual(await run(args(positional), ctx), {
-      exitCode: 2, records: [errLine(`unknown harness "${positional[1]}". Known: ${HARNESS_IDS}\n`)],
+      exitCode: 2, records: [errLine(`${message}. Known: ${HARNESS_IDS}\n`)],
     });
     assert.deepEqual(progress, []);
   }
@@ -788,9 +791,12 @@ test("integrate from a source checkout without the opt-in is refused before any 
 
 test("run: a missing or unknown harness is a usage error, exit 2; a harness without a launcher fails (exit 2 at the entry)", async () => {
   const { run } = await load("run");
-  for (const positional of [["run"], ["run", "vim"]]) {
+  for (const [positional, message] of [
+    [["run"], "missing harness name"],
+    [["run", "vim"], 'unknown harness "vim"'],
+  ]) {
     assert.deepEqual(await run(args(positional), fakeCtx().ctx), {
-      exitCode: 2, records: [errLine(`unknown harness "${positional[1]}". Known: ${HARNESS_IDS}\n`)],
+      exitCode: 2, records: [errLine(`${message}. Known: ${HARNESS_IDS}\n`)],
     });
   }
   await assert.rejects(run(args(["run", "omp"]), fakeCtx().ctx), /^Error: run: no launcher for "omp" \(use setup\/integrate instead\)$/);
@@ -1275,7 +1281,7 @@ test("entry: --version and the version command print the kit's version on stdout
 test("entry: usage errors of the migrated commands go to stderr only, exit 2", async () => {
   const known = "omp, pi, claude-code, codex, opencode, cline, kilo-code, aider, continue, goose";
   assert.deepEqual(await cli(["integrate", "vim"]), { code: 2, stdout: "", stderr: `unknown harness "vim". Known: ${known}\n` });
-  assert.deepEqual(await cli(["run"]), { code: 2, stdout: "", stderr: `unknown harness "undefined". Known: ${known}\n` });
+  assert.deepEqual(await cli(["run"]), { code: 2, stdout: "", stderr: `missing harness name. Known: ${known}\n` });
   assert.deepEqual(await cli(["auth", "frob"]), { code: 2, stdout: "", stderr: "unknown auth subcommand: frob\n" });
   assert.deepEqual(await cli(["accounts", "remove"]), { code: 2, stdout: "", stderr: "Usage: zcode-kit accounts remove ID [--yes]\n" });
   assert.deepEqual(await cli(["setup", "--harness", "vim"]), { code: 2, stdout: "", stderr: `unknown harness "vim" in --harness. Known: ${known}, none (or auto for detection)\n` });
