@@ -125,8 +125,25 @@ const masked = (call) => call.paths.map((p) => basename(p).replace(OWN_TEMP, ".<
 const same = (a, b) => a.name === b.name && masked(a) === masked(b);
 const show = (call) => `${call.name}(${call.paths.map((p) => p.replace(/^.*[\\/]logs[\\/]/, "")).join(", ")})`;
 
+// Transient injections spend the retry budget on backoff, not CI scheduling.
+// Advancing both clocks also lets a regression model a slow first syscall/probe.
+// Persistent-error tests below still exercise the real clock and sleep.
+function retryClock(t) {
+  let elapsed = 0;
+  const wall = Date.now();
+  const monotonic = performance.now();
+  t.mock.method(Date, "now", () => wall + elapsed);
+  t.mock.method(performance, "now", () => monotonic + elapsed);
+  t.mock.method(Atomics, "wait", (_array, _index, _value, ms) => {
+    elapsed += ms;
+    return "timed-out";
+  });
+  return { advance(ms) { elapsed += ms; } };
+}
+
 for (const [scenario, { takeovers, prep }] of Object.entries(SCENARIOS)) {
-  test(`start lock, ${scenario}: EPERM/EBUSY/EACCES at any protocol fs call, once or as a burst of 3, is contention: retried, acquired once, no takeover twice, no non-atomic write, nothing left behind`, () => {
+  test(`start lock, ${scenario}: EPERM/EBUSY/EACCES at any protocol fs call, once or as a burst of 3, is contention: retried, acquired once, no takeover twice, no non-atomic write, nothing left behind`, (t) => {
+    const clock = retryClock(t);
     const clean = run(prep);
     assert.equal(clean.result.status, "acquired", `${scenario}: clean run`);
     assert.equal(clean.takeovers.length, takeovers);
@@ -138,7 +155,11 @@ for (const [scenario, { takeovers, prep }] of Object.entries(SCENARIOS)) {
           let left = 0;
           const r = run(prep, (index, name, paths) => {
             const call = { name, paths };
-            if (index === k && same(call, target)) { left = burst - 1; return code; }
+            if (index === k && same(call, target)) {
+              clock.advance(121); // the initial syscall/scheduling cannot spend the retry budget
+              left = burst - 1;
+              return code;
+            }
             if (left > 0 && index > k && same(call, target)) { left -= 1; return code; }
             return null;
           });
@@ -159,6 +180,100 @@ for (const [scenario, { takeovers, prep }] of Object.entries(SCENARIOS)) {
     assert.deepEqual(failures, [], `${scenario}: ${failures.length} of ${clean.calls.length * CODES.length * 2} injections broke the protocol`);
   });
 }
+
+test("start lock, stale claim: busy at call 5 starts its retry budget after the slow syscall or capability probe", (t) => {
+  const clock = retryClock(t);
+  for (const slow of ["claim", "probe"]) {
+    for (const code of ["EACCES", "EPERM", "EBUSY"]) {
+      let target = null;
+      let probe = false;
+      const r = run(SCENARIOS["stale lock"].prep, (index, name, paths) => {
+        if (index === 5) {
+          assert.equal(name, "linkSync");
+          assert.match(basename(paths[1]), /^manager\.lock\.claim-[0-9a-f]+$/);
+          target = { name, paths };
+          if (slow === "claim") clock.advance(121); // longer than busyMs, before the first failure
+          return code;
+        }
+        if (target && !probe && name === "linkSync" && OWN_TEMP.test(paths[1])) {
+          probe = true;
+          if (slow === "probe") clock.advance(121);
+        }
+        return null;
+      });
+      const label = `${code} x1 at call 5, slow ${slow}`;
+      assert.ok(target, label);
+      assert.ok(probe, `${label}: capability was checked`);
+      assert.equal(r.calls.filter((c) => c.failed).length, 1, label);
+      assert.equal(r.result.status, "acquired", `${label}: ${r.result.message}`);
+      assert.equal(r.calls.filter((c) => same(c, target)).length, 2, `${label}: claim retried once`);
+      assert.equal(JSON.parse(r.onDisk).nonce, r.result.record.nonce, label);
+      assert.equal(r.takeovers.length, 1, label);
+      assert.equal(r.calls.filter((c) => c.name === "writeFileSync").length, 0, label);
+      assert.deepEqual(r.left, [], label);
+    }
+  }
+});
+
+test("start lock, stale claim: a busy capability probe is retried, not mistaken for unsupported hard links", (t) => {
+  retryClock(t);
+  for (const code of CODES) {
+    for (const burst of [1, 3]) {
+      let target = null;
+      let failedProbes = 0;
+      const r = run(SCENARIOS["stale lock"].prep, (index, name, paths) => {
+        if (index === 5) {
+          assert.equal(name, "linkSync");
+          assert.match(basename(paths[1]), /^manager\.lock\.claim-[0-9a-f]+$/);
+          target = { name, paths };
+          return code;
+        }
+        if (target && name === "linkSync" && OWN_TEMP.test(paths[1]) && failedProbes < burst) {
+          failedProbes += 1;
+          return code;
+        }
+        return null;
+      });
+      const label = `${code} at call 5 and probe x${burst}`;
+      assert.ok(target, label);
+      assert.equal(failedProbes, burst, label);
+      assert.equal(r.result.status, "acquired", `${label}: ${r.result.message}`);
+      assert.equal(r.calls.filter((c) => same(c, target)).length, 2, `${label}: claim retried once`);
+      assert.equal(JSON.parse(r.onDisk).nonce, r.result.record.nonce, label);
+      assert.equal(r.takeovers.length, 1, label);
+      assert.equal(r.calls.filter((c) => c.name === "writeFileSync").length, 0, label);
+      assert.deepEqual(r.left, [], label);
+    }
+  }
+});
+
+test("start lock, stale claim: a persistently busy capability probe fails closed within its retry budget", (t) => {
+  retryClock(t);
+  for (const code of CODES) {
+    let target = null;
+    let failedProbes = 0;
+    const r = run(SCENARIOS["stale lock"].prep, (index, name, paths) => {
+      if (index === 5) {
+        assert.equal(name, "linkSync");
+        assert.match(basename(paths[1]), /^manager\.lock\.claim-[0-9a-f]+$/);
+        target = { name, paths };
+        return code;
+      }
+      if (target && name === "linkSync" && OWN_TEMP.test(paths[1])) {
+        failedProbes += 1;
+        return code;
+      }
+      return null;
+    });
+    assert.ok(target, code);
+    assert.ok(failedProbes > 1 && failedProbes <= 8, `${code}: bounded probe retry (${failedProbes})`);
+    assert.equal(r.result.status, "unavailable", code);
+    assert.equal(r.onDisk, STALE, code);
+    assert.equal(r.takeovers.length, 0, code);
+    assert.equal(r.calls.filter((c) => c.name === "writeFileSync").length, 0, code);
+    assert.deepEqual(r.left, ["manager.lock"], code);
+  }
+});
 
 test("start lock, a live holder's lock: EPERM/EBUSY/EACCES at any protocol fs call, once or for good, is never an acquisition and never deletes the lock", () => {
   const prep = (file) => ORIG.writeFileSync(file, LIVE_LOCK);
