@@ -3,7 +3,7 @@
 
 Usa tu cuenta de ZCode en Claude Code, Codex, Aider y otros asistentes de programación a través de un proxy local.
 
-![ZCode Desktop conectado a asistentes de programación mediante Agent Kit](zcode_agent_kit.png)
+![ZCode Desktop conectado a asistentes de programación mediante Agent Kit](docs/assets/zcode-agent-kit-dark.gif)
 
 *El kit se ejecuta localmente; las solicitudes a los modelos se envían a ZCode.*
 
@@ -32,6 +32,8 @@ irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
+
+![Instalación de ZCode Agent Kit con el instalador de PowerShell de una sola línea](docs/assets/setup-demo.gif)
 
 Puedes ejecutarlo desde cualquier directorio; no hace falta clonar el repositorio. Si falta Bun, el instalador instala Bun 1.4.2 para el kit. En Windows usa PowerShell, no Git Bash ni WSL.
 

@@ -3,7 +3,7 @@
 
 通过本地代理，在 Claude Code、Codex、Aider 等编程助手中使用你的 ZCode 账号。
 
-![ZCode Desktop 通过 Agent Kit 连接到编程助手](zcode_agent_kit.png)
+![ZCode Desktop 通过 Agent Kit 连接到编程助手](docs/assets/zcode-agent-kit-dark.gif)
 
 *Kit 在本机运行；模型请求会发送到 ZCode。*
 
@@ -32,6 +32,8 @@ irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
+
+![使用一行 PowerShell 安装命令安装 ZCode Agent Kit](docs/assets/setup-demo.gif)
 
 可以在任意目录运行，无须克隆仓库。如果没有 Bun，安装器会为 Kit 安装 Bun 1.4.2。在 Windows 上请使用 PowerShell，不要使用 Git Bash 或 WSL。
 

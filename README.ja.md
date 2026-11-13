@@ -3,7 +3,7 @@
 
 ローカルのプロキシを介して、Claude Code、Codex、Aider などのコーディングアシスタントで自分の ZCode アカウントを利用できます。
 
-![Agent Kit を介してコーディングアシスタントに接続された ZCode Desktop](zcode_agent_kit.png)
+![Agent Kit を介してコーディングアシスタントに接続された ZCode Desktop](docs/assets/zcode-agent-kit-dark.gif)
 
 *kit はローカルで動作し、モデルへのリクエストは ZCode に送られます。*
 
@@ -32,6 +32,8 @@ irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
+
+![1 行の PowerShell インストーラーで ZCode Agent Kit をインストールする様子](docs/assets/setup-demo.gif)
 
 どのディレクトリからでも実行できます。リポジトリをクローンする必要はありません。Bun がない場合、インストーラーは kit 用に Bun 1.4.2 をインストールします。Windows では、Git Bash や WSL ではなく PowerShell を使ってください。
 
