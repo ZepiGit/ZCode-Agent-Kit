@@ -3,6 +3,7 @@
  * solver worker via configureCaptchaSolver({ backendModule }); the scene name
  * selects the behavior. Never touches the network.
  */
+import { FFIType, dlopen } from "bun:ffi";
 import { captchaFetch, captchaGenerationResources, solveTraceless as realSolveTraceless, syncFetchBlocking } from "../captcha-happy.js";
 import { CaptchaSdkIncompatibleError, normalizeCaptchaError } from "../captcha-token.js";
 
@@ -72,6 +73,27 @@ export async function solveTraceless({ scene, region, prefix }: { scene: string;
           await Bun.sleep(2);
         }
         return param(`balloon:${kept.length * 8}`);
+      }
+      case "commit": {
+        // Windows only. Commits up to <arg> MB in 16 MB steps and never
+        // touches a page: the commit charge grows, the working set does not.
+        // Answers how many MB the operating system granted. A full grant is
+        // kept; a refused step gives everything back, so the answer still fits.
+        const { symbols } = dlopen("kernel32.dll", {
+          VirtualAlloc: { args: [FFIType.ptr, FFIType.u64, FFIType.u32, FFIType.u32], returns: FFIType.ptr },
+          VirtualFree: { args: [FFIType.ptr, FFIType.u64, FFIType.u32], returns: FFIType.i32 },
+        });
+        const MEM_COMMIT_AND_RESERVE = 0x3000, MEM_RELEASE = 0x8000, PAGE_READWRITE = 0x04;
+        type Block = Parameters<typeof symbols.VirtualFree>[0];
+        const blocks: Block[] = [];
+        while (blocks.length * 16 < Number(arg)) {
+          const block = symbols.VirtualAlloc(null, 16 * 1024 * 1024, MEM_COMMIT_AND_RESERVE, PAGE_READWRITE);
+          if (!block) break;
+          blocks.push(block as Block);
+        }
+        const granted = blocks.length * 16;
+        if (granted < Number(arg)) for (const block of blocks) symbols.VirtualFree(block, 0, MEM_RELEASE);
+        return param(`commit:${granted}`);
       }
       case "slow":
         await Bun.sleep(Number(arg));

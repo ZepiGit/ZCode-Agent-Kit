@@ -93,15 +93,16 @@ logging:
 #     sampleIntervalSeconds: 15  # 1-600
 
 # Captcha solver process (optional): the solver runs in a process of its own
-# under a memory cap, in MB. Windows enforces the cap with a Job Object, Linux
-# with a systemd user scope (cgroup) once its limit has been read back from
-# the kernel; where the operating system cannot enforce it (macOS, a Linux
-# without a delegated memory controller) the solver process measures its own
-# footprint and ends itself at the cap. A solver that ends at the cap is
-# logged with this key's name. Raise the cap only if solves need more memory.
-# On Windows the solver needs about 130 MB before its first solve, so a cap
-# under 200 leaves it no room there.
-# The solver process is replaced by a fresh one at 80 % of the cap or after
+# under a memory cap, in MB. The cap counts the memory the solver uses. Linux
+# enforces it with a systemd user scope (cgroup) once its limit has been read
+# back from the kernel. Elsewhere the solver process measures its own
+# footprint and ends itself at the cap: on macOS, on a Linux without a
+# delegated memory controller, and on Windows, where a Job Object can only
+# limit commit charge and stops the solver 1024 MB above the cap. A solver
+# that ends at the cap is logged with this key's name. Raise the cap only if
+# solves need more memory. A solve peaks at about 250 MB, so a cap under 300
+# leaves it no room.
+# The solver process is replaced by a fresh one at 50 % of the cap or after
 # 100 solves. One that ends abnormally (a crash, the cap, a fatal error, a
 # solve over 90 s) fails only the solve that was running. After more than 5
 # such exits in 10 minutes, requests that need a solve get HTTP 503 with

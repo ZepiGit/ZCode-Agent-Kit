@@ -5,9 +5,13 @@
  * same paths against the real operating system run in solver-process.test.ts.
  */
 import { describe, expect, it } from "bun:test";
-import { JOB_LIMIT_INFO, applySolverCap, type JobObjectApi, type SolverCapOs } from "./solver-cap.js";
+import {
+  JOB_COMMIT_ALLOWANCE_MB, JOB_LIMIT_INFO, applySolverCap, solverWatchesItself, type JobObjectApi, type SolverCapOs,
+} from "./solver-cap.js";
 
 const CAP = 300 * 1024 * 1024;
+/** What the Job Object is asked to enforce for CAP: the cap plus the room for commit charge that is never touched. */
+const JOB_LIMIT = CAP + JOB_COMMIT_ALLOWANCE_MB * 1024 * 1024;
 const PID = 4242;
 
 interface FakeLinux {
@@ -182,8 +186,20 @@ describe("solver cap: Windows (Job Object)", () => {
     expect(calls).toEqual(["create", "set 16", `open 0x101 ${PID}`, "assign 16 32", "close 32", "query 16"]);
     // JOB_OBJECT_LIMIT_PROCESS_MEMORY | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, and the limit in bytes.
     expect(limits().getUint32(JOB_LIMIT_INFO.limitFlags, true)).toBe(0x2100);
-    expect(limits().getBigUint64(JOB_LIMIT_INFO.processMemoryLimit, true)).toBe(BigInt(CAP));
+    expect(limits().getBigUint64(JOB_LIMIT_INFO.processMemoryLimit, true)).toBe(BigInt(JOB_LIMIT));
     expect(limits().byteLength).toBe(144);
+  });
+
+  it("puts the limit above the cap by the allowance, whatever the cap: the limit counts commit charge, which runs ahead of the memory in use", async () => {
+    // Measured with real solves (Bun 1.4.2, 16 logical processors): commit
+    // charge 461 MB after the first solve at 178 MB of working set, and 645 MB
+    // at 350 MB. A limit at the cap itself ended every solver in its first solve.
+    expect(JOB_COMMIT_ALLOWANCE_MB).toBeGreaterThanOrEqual(512);
+    for (const capMB of [128, 300, 2048]) {
+      const { os, limits } = windows();
+      expect((await applySolverCap(PID, capMB * 1024 * 1024, os)).enforcement).toBe("job-object");
+      expect(limits().getBigUint64(JOB_LIMIT_INFO.processMemoryLimit, true)).toBe(BigInt((capMB + JOB_COMMIT_ALLOWANCE_MB) * 1024 * 1024));
+    }
   });
 
   it("closes the Job Object handle when the cap is released, once", async () => {
@@ -215,9 +231,17 @@ describe("solver cap: Windows (Job Object)", () => {
     }
   });
 
-  it("takes a peak at the limit as an end at the cap, and a lower peak as something else", async () => {
-    expect(await (await applySolverCap(PID, CAP, windows({ peak: CAP - 4096 }).os)).endedAtCap()).toBe(true);
-    expect(await (await applySolverCap(PID, CAP, windows({ peak: CAP / 2 }).os)).endedAtCap()).toBe(false);
+  it("takes a peak at the limit as an end at the limit, and a lower peak as something else", async () => {
+    expect(await (await applySolverCap(PID, CAP, windows({ peak: JOB_LIMIT - 4096 }).os)).endedAtCap()).toBe(true);
+    expect(await (await applySolverCap(PID, CAP, windows({ peak: JOB_LIMIT / 2 }).os)).endedAtCap()).toBe(false);
+    // Commit charge at the cap is ordinary for a working solver.
+    expect(await (await applySolverCap(PID, CAP, windows({ peak: CAP }).os)).endedAtCap()).toBe(false);
+  });
+});
+
+describe("solver cap: who checks the cap", () => {
+  it("has the solver process watch its own footprint under sampling and under a Job Object, and nowhere else", () => {
+    expect(["sampling", "job-object", "cgroup", "none", undefined, null].map(solverWatchesItself)).toEqual([true, true, false, false, false, false]);
   });
 });
 
