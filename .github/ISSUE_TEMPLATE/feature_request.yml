@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a new feature or a change to an existing one.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You may also write your issue in Deutsch, Español, 日本語 or 简体中文.
+
+        For an idea that is still open, you can start a [Discussion](https://github.com/ZepiGit/ZCode-Agent-Kit/discussions) first.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How the kit could handle it, such as a new command, an option or a different default.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Workarounds you use now or other approaches you thought about.
