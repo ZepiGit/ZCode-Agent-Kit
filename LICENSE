@@ -19,10 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-Third-party components are covered by their own licenses; see MANIFEST.md.
-In particular: the vendored zcode-proxy (zcode-proxy-src/) carries an MIT
-statement in its upstream README while the upstream repository ships no
-LICENSE file — its redistribution status is tracked as a release gate in
-docs/RELEASE_CHECKLIST.md.
