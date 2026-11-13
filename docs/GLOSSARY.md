@@ -111,7 +111,7 @@ The part of the proxy that performs solves, one at a time, in arrival order.
 The process the proxy starts for the solver. There is at most one per proxy. It has a memory cap (`solver.memoryCapMB`, 300 MB by default) that the operating system enforces where it can.
 
 **Recycle**:
-Replacing the solver process with a fresh one before the next solve: at 80 % of the memory cap, or after 100 solves.
+Replacing the solver process with a fresh one before the next solve: at 50 % of the memory cap, or after 100 solves.
 
 **Fail-fast**:
 The time during which the proxy starts no solver process because more than 5 of them ended abnormally within 10 minutes. Requests that need a solve are answered with HTTP 503 and `Retry-After`.

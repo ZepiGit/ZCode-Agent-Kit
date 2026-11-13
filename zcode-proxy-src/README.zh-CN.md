@@ -22,7 +22,7 @@ Desktop 0.16.9 的 `credentials.json` 存在时，以它为权威来源；仅在
 ## CAPTCHA 求解器与缓存
 
 求解器在独立的进程中运行，内存上限为 300 MB（`solver.memoryCapMB`），一次只运行
-一个 CAPTCHA 窗口。达到上限的 80 % 或完成 100 次求解后，它会被一个新进程替换；
+一个 CAPTCHA 窗口。达到上限的 50 % 或完成 100 次求解后，它会被一个新进程替换；
 参见 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) 中的“The solver process”。
 启动时准备一个令牌，随后按需求
 增加储备，最多四个；旧的并行设置会被限制在该容量内。服务商限流仍会暂停求解，
