@@ -22,7 +22,7 @@
 # - A hash published next to the archive protects against corruption, not
 #   against a compromised release host. Verify the hash against a second
 #   channel (repo commit history / signed tag) if you need provenance.
-# - Requires node >= 20 and bun. Offers a user-local, pinned bun install if
+# - Requires node >= 24 and bun. Offers a user-local, pinned bun install if
 #   bun is missing. No admin rights needed; nothing global is modified.
 #
 # NOTE: this file is intentionally ASCII-only (Windows PowerShell 5.1 parses
@@ -59,6 +59,27 @@ if (Test-Path -LiteralPath $InstallDir) {
   }
 }
 if ($env:ZCODE_KIT_VERSION -and $env:ZCODE_KIT_VERSION -notmatch $VersionPattern) { throw 'Invalid release version: ZCODE_KIT_VERSION must be vX.Y.Z or vX.Y.Z-prerelease.' }
+# Node.js support floor: checked before the release lookup, the
+# temp directory and any file write, so an old Node leaves an existing
+# installation exactly as it was.
+$NodeFloor = 24
+$nodeFound = $null
+try { $nodeFound = [string](@(node --version 2>$null) | Select-Object -First 1) } catch { $nodeFound = $null }
+if (-not ($nodeFound -match '^v(\d+)\.' -and [int]$Matches[1] -ge $NodeFloor)) {
+  $shown = if ($nodeFound) { $nodeFound.Trim() } else { 'no readable version' }
+  # Plain what/why/next lines straight to stderr, the same shape as install.sh:
+  # a thrown error would reach the user as a PowerShell error record (source
+  # line, `|` gutter, colour codes, the text wrapped at the console width).
+  # Exit 1 when run as a file; under `irm ... | iex` (no script path) return
+  # instead, because `exit` there would close the user's PowerShell session.
+  [Console]::Error.WriteLine('')
+  [Console]::Error.WriteLine("  [ERROR] Node.js $NodeFloor or newer is required (found $shown)")
+  [Console]::Error.WriteLine("    why:  the kit supports Node.js $NodeFloor and newer; nothing was downloaded, installed or changed")
+  [Console]::Error.WriteLine("    next: winget install --id OpenJS.NodeJS.LTS --exact (or install Node.js $NodeFloor LTS or newer from https://nodejs.org/en/download), then open a new terminal and re-run this installer")
+  if ($PSCommandPath) { exit 1 }
+  $global:LASTEXITCODE = 1
+  return
+}
 $tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "zcode-kit-install-$([guid]::NewGuid().ToString('N'))")
 try {
 # Latest published release by default; explicit pins are validated before download.
@@ -84,16 +105,11 @@ Write-Host "  Install to  $InstallDir"
 Write-InstallStep '[1/4] Checking runtime'
 
 # --- prerequisites -----------------------------------------------------------
-function Test-Node {
-  try { $v = (node --version) 2>$null; return $v -match "^v(\d+)\." -and [int]$Matches[1] -ge 20 } catch { return $false }
-}
+# Node.js was checked against the floor before anything else (top of script).
 function Test-Bun {
   try { (bun --version) 2>$null | Out-Null; return $LASTEXITCODE -eq 0 } catch { return $false }
 }
 
-if (-not (Test-Node)) {
-  Write-Error "node >= 20 is required but not found on PATH. Install from https://nodejs.org and re-run."
-}
 if (-not (Test-Bun)) {
   Write-Host "  Downloading Bun v1.4.2 (bun-windows-x64.zip)..."
   $bunZip = Join-Path $tmp.FullName "bun.zip"

@@ -1,3 +1,15 @@
+import { createHash } from "node:crypto";
+
+// Canonical host-built state is held outside mutable Error objects. Neither an
+// instanceof check nor a readonly TypeScript field makes category/message safe.
+interface HostFailure {
+  readonly category: CaptchaFailureCategory;
+  readonly message: string;
+  readonly kind: "sdk" | "incompatible" | "local-verification";
+}
+const hostFailures = new WeakMap<object, HostFailure>();
+const LOCAL_REFUSAL = /^(solver returned empty param|verify param too short \(\d{1,6} chars\) — degraded result, refused|verify param missing securityToken — degraded result, refused|verify param not base64-JSON)$/;
+
 /** Decode certifyId from a base64 Aliyun verify-param blob. */
 export function parseCertifyId(param: string): string | null {
   try {
@@ -22,6 +34,7 @@ export class CaptchaSdkError extends Error {
       : category === "incompatible" ? "CAPTCHA SDK incompatible"
       : "captcha SDK failure");
     this.name = "CaptchaSdkError";
+    hostFailures.set(this, { category, message: this.message, kind: "sdk" });
   }
 }
 
@@ -31,6 +44,43 @@ export class CaptchaSdkIncompatibleError extends CaptchaSdkError {
     super("incompatible");
     const describe = (value: unknown) => value === undefined ? "missing" : `non-callable (${value === null ? "null" : typeof value})`;
     this.message += `: startTracelessVerification ${describe(primary)}; show ${describe(fallback)}`;
+    hostFailures.set(this, { category: "incompatible", message: this.message, kind: "incompatible" });
+  }
+}
+
+/**
+ * Local verification refusal (GitHub issue 32): our own validation rejected a
+ * solver result (degraded SDK output path). The detail is host-built —
+ * literals plus lengths — and never contains refused payload content; control
+ * characters are stripped and the text bounded so the provenance survives
+ * normalization and can surface on a subsequent request failure.
+ */
+export class CaptchaLocalVerificationError extends CaptchaSdkError {
+  constructor(detail: string) {
+    super("other");
+    this.name = "CaptchaLocalVerificationError";
+    this.message = `verify param refused: ${LOCAL_REFUSAL.test(detail) ? detail : "local validation failure"}`;
+    hostFailures.set(this, { category: "other", message: this.message, kind: "local-verification" });
+  }
+}
+
+/** Why the solver refused a solve without running it. */
+export type SolverUnavailableReason = "fail-fast" | "queue-full";
+
+/**
+ * The solver refused a solve without running it: it is in its fail-fast
+ * window after too many abnormal exits, or too many solves already wait.
+ * `retryAfterMs` says when a solve can be accepted again; the request that
+ * needed the solve is answered with HTTP 503 and `Retry-After`.
+ */
+export class CaptchaSolverUnavailableError extends CaptchaSdkError {
+  constructor(readonly reason: SolverUnavailableReason, readonly retryAfterMs: number) {
+    super("other");
+    this.name = "CaptchaSolverUnavailableError";
+    this.message = reason === "fail-fast"
+      ? "captcha solver unavailable: too many abnormal exits, solves are refused for now"
+      : "captcha solver unavailable: too many solves are waiting";
+    hostFailures.set(this, { category: "other", message: this.message, kind: "sdk" });
   }
 }
 
@@ -65,9 +115,10 @@ function errorField(error: object, key: string): unknown {
  * category/code strings cannot impersonate the trusted incompatible error type.
  */
 export function classifyCaptchaError(error: unknown): CaptchaFailureCategory {
-  if (error instanceof CaptchaSdkError) return error.category;
   if (typeof error === "string") return classifyMessage(error);
   if (!error || typeof error !== "object") return "other";
+  const hostFailure = hostFailures.get(error);
+  if (hostFailure) return hostFailure.category;
   let category: CaptchaFailureCategory = "other";
   for (const key of CAPTCHA_ERROR_FIELDS) {
     const value = errorField(error, key);
@@ -81,8 +132,57 @@ export function classifyCaptchaError(error: unknown): CaptchaFailureCategory {
   return category;
 }
 
+/** Bounded diagnostic provenance; no raw text or guest serialization survives. */
+export function describeCaptchaFailure(error: unknown): string {
+  const canonical = error && typeof error === "object" ? hostFailures.get(error) : undefined;
+  if (canonical) return canonical.message;
+  const category = classifyCaptchaError(error);
+  const raw = typeof error === "string" ? error
+    : error && typeof error === "object" ? errorField(error, "message") : undefined;
+  const message = typeof raw === "string" ? raw : "";
+  return `${new CaptchaSdkError(category).message} [len=${message.length} sha256=${createHash("sha256").update(message).digest("hex")}]`;
+}
+
+/** Validate diagnostic text again after the worker transport (shape unchanged). */
+export function captchaFailureFromTransport(category: CaptchaFailureCategory, message: unknown): CaptchaSdkError {
+  const error = new CaptchaSdkError(category);
+  const text = typeof message === "string" ? message : "";
+  const localDetail = text.startsWith("verify param refused: ") ? text.slice("verify param refused: ".length) : "";
+  const fixed = new Set([
+    "captcha solver worker failed", "captcha solver worker exited unexpectedly",
+    "captcha solver worker fault", "captcha solver deadline exceeded",
+    "captcha solver worker unavailable", "captcha solver returned invalid token",
+    "CAPTCHA DOM cleanup failed; runtime unavailable", "verify param refused: local validation failure",
+  ]);
+  const canonicalSdk = /^(captcha SDK rate limit \(429\)|captcha SDK duplicate \(F008\)|CAPTCHA SDK incompatible|captcha SDK failure)(?: \[len=\d{1,16} sha256=[0-9a-f]{64}\])?$/;
+  const incompatible = /^CAPTCHA SDK incompatible: startTracelessVerification (?:missing|non-callable \((?:null|boolean|number|string|object|bigint|symbol)\)); show (?:missing|non-callable \((?:null|boolean|number|string|object|bigint|symbol)\))$/;
+  // Preserve the dispatcher's pre-existing cleanup recycle predicate using a
+  // fixed sentence only. No matching guest text crosses this boundary.
+  error.message = /cleanup failed/.test(text) ? "CAPTCHA DOM cleanup failed; runtime unavailable"
+    : fixed.has(text) || LOCAL_REFUSAL.test(localDetail) || canonicalSdk.test(text) || incompatible.test(text)
+      ? text : describeCaptchaFailure(text);
+  hostFailures.set(error, { category, message: error.message, kind: "sdk" });
+  return error;
+}
+
+/**
+ * Preserve the registered host subtype, category and method-type/refusal text,
+ * not object identity. Always rebuild: typed errors can acquire hostile message,
+ * stack, cause, own properties or serializers after construction.
+ */
 export function normalizeCaptchaError(error: unknown): CaptchaSdkError {
-  return error instanceof CaptchaSdkError ? error : new CaptchaSdkError(classifyCaptchaError(error));
+  const canonical = error && typeof error === "object" ? hostFailures.get(error) : undefined;
+  const normalized = canonical?.kind === "incompatible"
+    ? new CaptchaSdkIncompatibleError(undefined, undefined)
+    : canonical?.kind === "local-verification"
+      ? new CaptchaLocalVerificationError("")
+      : new CaptchaSdkError(classifyCaptchaError(error));
+  if (canonical) {
+    // The registry holds only host-built strings/enums, never guest values.
+    normalized.message = canonical.message;
+    hostFailures.set(normalized, canonical);
+  }
+  return normalized;
 }
 
 /** Aliyun F008 — certifyId / verify token already consumed or duplicated. */

@@ -90,8 +90,8 @@ export function createOffPeakClient(opts: OffPeakClientOptions): OffPeakClient {
     if (body !== undefined) init.body = JSON.stringify(body);
 
     // Single outer try/finally covers BOTH fetch + body consumption.
-    // Round 4 found that fetch rejection bypassed the body-phase cleanup,
-    // leaving timer + listener leaked. Outer finally guarantees cleanup on every path.
+    // A fetch rejection used to bypass the body-phase cleanup and leak the
+    // timer and the listener. The outer finally guarantees cleanup on every path.
     let resp: Response | undefined;
     let raw = "";
     try {

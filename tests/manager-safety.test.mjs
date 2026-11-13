@@ -11,11 +11,11 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import http from "node:http";
 import { createManager } from "../proxy/zcode-proxy-manager.mjs";
+import { freePort } from "./free-port.mjs";
 
 const TMP = join(import.meta.dirname, "fakehome", "manager");
 const KEY = "test-key-abc123";
 let server = null;
-let portCounter = 18600;
 
 function tmpRoot() {
   const root = join(TMP, `case-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -72,22 +72,29 @@ test("manager imports every child_process helper it calls (H2a: darwin spawnSync
   // The darwin branch of the process-start-time probe calls spawnSync; a
   // missing import throws a ReferenceError that the surrounding catch swallows,
   // so stop/restart would silently refuse on macOS. Enforce import coverage.
-  const src = readFileSync(join(import.meta.dirname, "..", "proxy", "zcode-proxy-manager.mjs"), "utf8");
-  const imported = new Set(
-    [...src.matchAll(/import\s*\{([^}]+)\}\s*from\s*"node:child_process"/g)]
-      .flatMap((m) => m[1].split(",").map((s) => s.trim()))
-      .filter(Boolean),
-  );
-  const used = new Set([...src.matchAll(/\b(spawnSync|spawn|execSync|execFile|exec)\s*\(/g)].map((m) => m[1]));
-  assert.ok(used.has("spawnSync"), "expected the darwin spawnSync call to exist in the manager");
-  for (const fn of used) {
-    assert.ok(imported.has(fn), `${fn} is called but not imported from node:child_process`);
+  // The darwin probe moved to lib/proxy-lifecycle.mjs (ticket 15, guarded in
+  // proxy-lifecycle.test.mjs) and the doctor's Bun probes to
+  // lib/proxy-doctor.mjs: every module the manager CLI runs them from is checked.
+  const usedAnywhere = new Set();
+  for (const rel of [["proxy", "zcode-proxy-manager.mjs"], ["lib", "proxy-doctor.mjs"]]) {
+    const src = readFileSync(join(import.meta.dirname, "..", ...rel), "utf8");
+    const imported = new Set(
+      [...src.matchAll(/import\s*\{([^}]+)\}\s*from\s*"node:child_process"/g)]
+        .flatMap((m) => m[1].split(",").map((s) => s.trim()))
+        .filter(Boolean),
+    );
+    const used = new Set([...src.matchAll(/\b(spawnSync|spawn|execSync|execFile|exec)\s*\(/g)].map((m) => m[1]));
+    for (const fn of used) {
+      usedAnywhere.add(fn);
+      assert.ok(imported.has(fn), `${rel.join("/")}: ${fn} is called but not imported from node:child_process`);
+    }
   }
+  assert.ok(usedAnywhere.has("spawnSync"), "expected the doctor's spawnSync probes in the manager's modules");
 });
 
 test("stop refuses to kill a foreign service on the port", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { mode: "wrong-key" }); // foreign service: 401 for every key
   const dummy = spawnDummy();
@@ -104,7 +111,7 @@ test("stop refuses to kill a foreign service on the port", async () => {
 
 test("stop is fail-closed when the key is missing (identity unverifiable)", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   rmSync(join(root, ".proxykey")); // no key → identity check impossible
   server = await startMockProxy(port, { mode: "ours" }); // would answer as "ours" with any key
@@ -122,7 +129,7 @@ test("stop is fail-closed when the key is missing (identity unverifiable)", asyn
 
 test("stop refuses a reused pid whose start time does not match the pid file", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { mode: "ours" }); // answers the kit identity payload
   const dummy = spawnDummy();
@@ -140,7 +147,7 @@ test("stop refuses a reused pid whose start time does not match the pid file", a
 
 test("stop is fail-closed when the live start time is undeterminable (start-unknown)", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { mode: "ours" });
   const dummy = spawnDummy();
@@ -159,7 +166,7 @@ test("stop is fail-closed when the live start time is undeterminable (start-unkn
 
 test("stop cleanly kills a verified-own process (identity + pid + start time match)", async () => {
   const root = tmpRoot();
-  const port = ++portCounter;
+  const port = await freePort();
   writeConfig(root, port);
   server = await startMockProxy(port, { withAuth: false });
   const dummy = spawnDummy();
@@ -172,8 +179,12 @@ test("stop cleanly kills a verified-own process (identity + pid + start time mat
     const m = createManager({ root, home: TMP });
     const code = await m.stop();
     assert.equal(code, 0, "verified-own process must be stopped");
-    await new Promise((r) => setTimeout(r, 500));
-    assert.equal(m.pidAlive(dummy.pid), false, "the process must be gone");
+    // stop() returns 0 only after it saw the process exit, so no wait belongs
+    // here. Probe the child's own handle, never its PID: once the process is
+    // gone and its handles are closed, Windows may hand that PID to an
+    // unrelated new process at once, and a PID probe then sees a stranger
+    // (CI run 42436186573). The handle cannot be reused.
+    assert.equal(dummy.kill(0), false, "the process must be gone");
     assert.equal(existsSync(join(root, "logs", "proxy.pid")), false, "pid file cleaned up");
   } finally {
     try { dummy.kill(); } catch {}

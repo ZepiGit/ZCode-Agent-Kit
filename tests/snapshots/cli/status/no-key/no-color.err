@@ -1,0 +1,4 @@
+✗ FAIL  The local proxy key is missing
+   why   /kit/.proxykey not found, so the proxy's identity cannot be proven
+   next  zcode-kit setup
+   exit 1

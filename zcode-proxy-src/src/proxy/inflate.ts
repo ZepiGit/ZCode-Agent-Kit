@@ -1,5 +1,5 @@
 /**
- * Shared bounded gzip inflation for request bodies (audit CL-17).
+ * Shared bounded gzip inflation for request bodies.
  *
  * Two call sites used to carry byte-for-byte copies of this
  * DecompressionStream+reader+cancel loop (proxy/handler.ts and

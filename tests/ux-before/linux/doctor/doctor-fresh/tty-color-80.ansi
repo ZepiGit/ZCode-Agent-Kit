@@ -1,0 +1,46 @@
+[31m✗[0m 3 problems: 3 failed
+
+[1mRuntime[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [32m✓ PASS[0m  bun available           [2m<BUN> (1.4.2)[0m
+  [31m✗ FAIL[0m  config exists           [2m<KIT>/proxy/config.yaml[0m
+                                  [2mwhy[0m   setup has not run here, or its files
+                                        were removed
+                                  [2mnext[0m  [1mzcode-kit setup[0m
+  [31m✗ FAIL[0m  key file exists         [2m<KIT>/.proxykey[0m
+                                  [2mwhy[0m   setup has not run here, or its files
+                                        were removed
+                                  [2mnext[0m  [1mzcode-kit setup[0m
+  [32m✓ PASS[0m  proxy source installed  [2m<KIT>/zcode-proxy-src/node_modules[0m
+  [32m✓ PASS[0m  mcp bridge installed    [2m<KIT>/mcp/zcode-harness-mcp/dist/index.js[0m
+  [32m✓ PASS[0m  mcp bridge deps         [2m<KIT>/mcp/zcode-harness-mcp/node_modules[0m
+
+[1mProxy[0m [2m──────────────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  proxy reachable + identity  [2mno config — skipped[0m
+
+[1mAccount[0m [2m────────────────────────────────────────────────────────────────────────[0m
+  [31m✗ FAIL[0m  credentials store  [2mZCODE_PROXY_CREDENTIALS_PATH (explicit store): no[0m
+                             [2mcredential store — run: zcode-kit auth login[0m
+                             [2mwhy[0m   no ZCode login is stored, or this machine
+                                   cannot decrypt it
+                             [2mnext[0m  [1mzcode-kit auth login zai[0m
+
+[1mIntegrations[0m [2m───────────────────────────────────────────────────────────────────[0m
+  [2m– SKIP[0m  omp integration           [2mnot configured (no consent yet) — answer y[0m
+                                    [2min zcode-kit setup or run zcode-kit[0m
+                                    [2mintegrate omp[0m
+  [2m– SKIP[0m  omp: integration          [2mnot configured (no consent yet) — answer y[0m
+                                    [2min zcode-kit setup or run zcode-kit[0m
+                                    [2mintegrate omp[0m
+  [2m– SKIP[0m  pi: integration           [2mnot configured (no consent yet) — answer y[0m
+                                    [2min zcode-kit setup or run zcode-kit[0m
+                                    [2mintegrate pi[0m
+  [2m– SKIP[0m  claude-code: integration  [2mnot detected — skipped[0m
+  [2m– SKIP[0m  codex: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  opencode: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  cline: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  kilo-code: integration    [2mnot detected — skipped[0m
+  [2m– SKIP[0m  aider: integration        [2mnot detected — skipped[0m
+  [2m– SKIP[0m  continue: integration     [2mnot detected — skipped[0m
+  [2m– SKIP[0m  goose: integration        [2mnot detected — skipped[0m
+
+doctor: [31m3 failed[0m, [32m4 passed[0m, [2m12 skipped[0m → exit 1

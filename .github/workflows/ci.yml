@@ -1,30 +1,39 @@
-# CI: run the kit's test suites on push and pull requests.
-# The npm-publish workflow reuses `npm run test` before any publication step.
+# CI: the kit's test suites, on pushes to main and on every pull request.
+# The release workflow runs its own copy of the test job before it publishes.
 name: ci
 
 on:
   push:
-    branches: [main, feature/account-rotator]
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+# A new push to a pull request replaces the run of the push before it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test-kit:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+        # The support floor (24) and the current Active LTS (26).
+        node: [24, 26]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
-      # The proxy + MCP bridge suites need bun (their vendored toolchain).
-      # Pinned to the version the test evidence was produced with (1.4.2);
-      # older bun (e.g. 1.2.20) rejects the mcp bridge's lockfileVersion 2.
+          node-version: ${{ matrix.node }}
+      # The proxy and MCP bridge suites run on Bun, pinned to 1.4.2 in every
+      # job: Bun 1.4.3 and later raise the proxy's memory peak under a burst
+      # of large requests on these runners, and older Bun (1.2.20, for
+      # example) rejects the MCP bridge's lockfileVersion 2.
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
@@ -36,5 +45,162 @@ jobs:
         run: npm run test
       - name: Proxy tests (bun test)
         run: npm run test:proxy
+      # Runs the proxy's own pinned TypeScript, never a runner that fetches
+      # the latest one by name. The baseline has no errors, so any type error
+      # fails the job.
+      - name: Proxy typecheck (pinned tsc)
+        run: npm run test:proxy-typecheck
       - name: MCP bridge tests
         run: npm run test:mcp
+
+  # Output equivalence: every captured CLI output must match the committed
+  # baseline byte for byte (tests/ux-before-equivalence.test.mjs). Linux
+  # compares all seven terminal variants against tests/ux-before/linux,
+  # Windows the pipe and ci variants against tests/ux-before/windows. When the
+  # test fails, the fresh capture is uploaded so the difference can be read
+  # and, if it is intended, committed as the new baseline.
+  ux-before:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install proxy dependencies
+        run: cd zcode-proxy-src && bun install --frozen-lockfile
+      - name: Before-equivalence (byte for byte)
+        env:
+          UX_BEFORE_OUT: ${{ runner.temp }}/ux-before-now
+        run: npm run test:ux-before
+      - name: Upload the fresh capture (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ux-before-now-${{ runner.os }}
+          path: ${{ runner.temp }}/ux-before-now
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Memory loop (tests/memory), short profile. Every run listed in
+  # tests/memory/expected-red.json must be RED and every other run GREEN, so
+  # a new regression and an unnoticed fix both fail the job. Linux runs
+  # scenarios S1 to S7, each in a systemd user scope with a verified memory
+  # limit (or prlimit) and a timeout. Windows runs S1 to S5 and S7 with its
+  # own sampler, each in a Job Object with a memory limit and kill-on-close.
+  memory-budget:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 150 || 75 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      # The loop refuses to run outside a memory-capped wrapper unless this
+      # is set; a disposable CI runner is the one place where that is safe.
+      ZCODE_MEMLOOP_ALLOW: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      # Paired Bun measurement, the tool for deciding whether a newer Bun may
+      # replace the pinned one. It runs only while the marker file
+      # tests/memory/measure-burst1 is committed on the branch under test.
+      # The candidate versions are installed through setup-bun, each copied
+      # aside and checked by its --revision; the pinned 1.4.2 is the
+      # reference. setup-bun always installs to ~/.bun/bin, so the job's own
+      # Bun comes last and stays the one on PATH, and no-cache keeps the post
+      # step from caching that last binary under the candidate versions. A
+      # new candidate gets its own pair of steps here.
+      - name: Bun 1.4.3 for the paired measurement
+        id: bun-143
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+          no-cache: true
+      - name: Keep Bun 1.4.3 aside
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-143.outputs.bun-path }}" 1.4.3 "${{ runner.temp }}/bun-arms"
+      - name: Bun 1.4.4 for the paired measurement
+        id: bun-144
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+      - name: Keep Bun 1.4.4 aside
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-144.outputs.bun-path }}" 1.4.4 "${{ runner.temp }}/bun-arms"
+      # The pinned Bun, the same version as in every other job.
+      - uses: oven-sh/setup-bun@v2
+        id: bun-job
+        with:
+          bun-version: 1.4.2
+      - name: Keep Bun 1.4.2 aside
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: node tests/memory/lib/keep-bun-arm.mjs "${{ steps.bun-job.outputs.bun-path }}" 1.4.2 "${{ runner.temp }}/bun-arms"
+      - name: Install bridge/proxy dependencies
+        run: |
+          cd zcode-proxy-src && bun install --frozen-lockfile
+          cd ../mcp/zcode-harness-mcp && bun install --frozen-lockfile
+      # A measurement run replaces the ratchet with N fresh S1/burst1 runs.
+      # It is on only while the marker tests/memory/measure-burst1 is
+      # committed on the branch under test; a test fails while the marker
+      # exists, so it can never be merged. Its content is "N" (N runs on the
+      # job's Bun) or "N bun=1.4.2,1.4.3,1.4.4" (N runs per version,
+      # interleaved in rotation, the pinned Bun first as the reference). Each
+      # version named in the marker must have been kept aside above.
+      # tests/memory/measure-stalled (content "N") is the same kind of
+      # switch: while it is committed, the ratchet is replaced by N rotations
+      # of S1/stalled and its drained reference.
+      - name: Memory loop (short profile) and expected-RED ratchet
+        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') == ''
+        run: node tests/memory/job.mjs --out "${{ runner.temp }}/memloop"
+      - name: S1/stalled attribution (only with the tests/memory/measure-stalled marker)
+        if: hashFiles('tests/memory/measure-burst1') == '' && hashFiles('tests/memory/measure-stalled') != ''
+        shell: bash
+        run: node tests/memory/job.mjs --measure-stalled "$(tr -d '\r' < tests/memory/measure-stalled)" --out "${{ runner.temp }}/memloop"
+      - name: S1/burst1 measurement (only with the tests/memory/measure-burst1 marker)
+        if: hashFiles('tests/memory/measure-burst1') != ''
+        shell: bash
+        run: |
+          ARMS="${{ runner.temp }}/bun-arms"
+          EXE=""; [ "$RUNNER_OS" = "Windows" ] && EXE=".exe"
+          SPEC="$(tr -d '\r' < tests/memory/measure-burst1)"
+          if grep -q 'bun=' tests/memory/measure-burst1; then
+            BUNS=""
+            for v in $(printf '%s' "${SPEC#*bun=}" | tr ',' ' '); do BUNS="${BUNS:+$BUNS,}$v=$ARMS/$v/bun$EXE"; done
+            node tests/memory/job.mjs --measure-burst1 "$SPEC" --bun "$BUNS" --out "${{ runner.temp }}/memloop"
+          else
+            node tests/memory/job.mjs --measure-burst1 "$(cat tests/memory/measure-burst1)" --out "${{ runner.temp }}/memloop"
+          fi
+      - name: Upload memory loop artefacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: memory-budget-${{ matrix.os == 'windows-latest' && 'windows' || 'linux' }}
+          path: |
+            ${{ runner.temp }}/memloop/job-summary.json
+            ${{ runner.temp }}/memloop/job-summary.md
+            ${{ runner.temp }}/memloop/measure-S1-burst1.json
+            ${{ runner.temp }}/memloop/measure-S1-burst1.md
+            ${{ runner.temp }}/memloop/measure-S1-stalled.json
+            ${{ runner.temp }}/memloop/measure-S1-stalled.md
+            ${{ runner.temp }}/memloop/**/run.log
+            ${{ runner.temp }}/memloop/**/samples.csv
+            ${{ runner.temp }}/memloop/**/summary.json
+            ${{ runner.temp }}/memloop/**/worker-heap.jsonl
+          if-no-files-found: warn
+          retention-days: 14

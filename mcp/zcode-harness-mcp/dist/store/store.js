@@ -145,6 +145,15 @@ export class JsonStore {
             return [];
         }
     }
+    /** When the file was last written (ms since the epoch), or null when it does not exist. */
+    modifiedMs(relPath) {
+        try {
+            return fs.statSync(this.resolveSafe(relPath)).mtimeMs;
+        }
+        catch {
+            return null;
+        }
+    }
     deleteFile(relPath) {
         try {
             fs.rmSync(this.resolveSafe(relPath), { force: true });

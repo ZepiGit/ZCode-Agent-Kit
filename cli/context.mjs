@@ -9,6 +9,7 @@ import { resolveBun } from "../lib/process.mjs";
 import { proxyEnv } from "../lib/proxy-env.mjs";
 import { stateDirectory, ensureState } from "../lib/state.mjs";
 import { commitFile } from "../lib/edit.mjs";
+import { lineEndingOf, withLineEndingsOf } from "../lib/line-endings.mjs";
 
 export function kitRoot() {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,6 +27,7 @@ export function createCtx(root = kitRoot(), home = homeDir()) {
     root,
     home,
     stateDir,
+    platform: process.platform,
     logDir: join(stateDir, "logs"),
     keyFile: join(stateDir, ".proxykey"),
     config: join(stateDir, "proxy", "config.yaml"),
@@ -144,7 +146,8 @@ function ensureLocalGitExclude(ctx) {
   mkdirSync(infoDir, { recursive: true });
   const existing = existsSync(excludeFile) ? readFileSync(excludeFile, "utf8") : "";
   if (existing.includes("zcode-kit local excludes")) return;
-  writeFileSync(excludeFile, existing.replace(/\n*$/, "\n") + "\n" + GIT_EXCLUDE_BLOCK);
+  // The block takes the file's own line endings (lib/line-endings.mjs).
+  writeFileSync(excludeFile, existing.replace(/(?:\r?\n)*$/, lineEndingOf(existing)) + withLineEndingsOf(existing, "\n" + GIT_EXCLUDE_BLOCK));
   console.log("  local git excludes installed (.git/info/exclude — never pushed)");
 }
 

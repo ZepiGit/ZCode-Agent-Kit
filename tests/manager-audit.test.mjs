@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { createManager } from '../proxy/zcode-proxy-manager.mjs';
+import { freePort } from './free-port.mjs';
 
 const KEY = 'synthetic-manager-key';
 function fixture(t, port) {
@@ -36,10 +37,9 @@ for (const [name, override, startedMs] of [
   ['its command line is not the kit proxy', { processCommandLineImpl: () => ({ commandLine: 'node -e setInterval', executablePath: process.execPath }) }, OLD],
   ['its command line is unreadable', { processCommandLineImpl: () => null }, OLD],
   ['it is still inside the startup grace', {}, () => Date.now()],
-  ['its start time does not match the record', { processStartMsImpl: () => Date.now() - 365 * 86400_000 }, OLD],
 ]) {
   test(`start refuses to overwrite a live PID record while the listener is down when ${name}`, async t => {
-    const root = fixture(t, 18795);
+    const root = fixture(t, await freePort());
     const live = dummy(t);
     const recorded = startedMs();
     const record = JSON.stringify({ pid: live.pid, startedMs: recorded }) + '\n';
@@ -54,16 +54,37 @@ for (const [name, override, startedMs] of [
   });
 }
 
+test('start drops a PID record whose pid now belongs to a process with another start time, and never signals that process', async t => {
+  // The recorded proxy is gone and the system reused its pid: the live process
+  // is somebody else's. It is left alone, and the stale record does not block the start.
+  const root = fixture(t, await freePort());
+  const live = dummy(t);
+  const recorded = OLD();
+  writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: live.pid, startedMs: recorded }) + '\n');
+  const impl = { processStartMsImpl: () => recorded - 365 * 86400_000, processCommandLineImpl: () => ({...BUN_PROXY, cwd: join(root, 'zcode-proxy-src')}) };
+  const { lines } = await quiet(() => createManager({ root, home: root, ...FAST, ...impl, bunResolver: () => { throw new Error('must not spawn'); } }).start({ waitMs: 1000 }));
+  assert.equal(live.exitCode, null, 'the process that owns the pid now stays alive');
+  assert.equal(existsSync(join(root, 'logs', 'proxy.pid')), false, 'the stale record is removed');
+  assert.doesNotMatch(lines.join('\n'), /not proven to be a hung kit proxy/);
+});
+
 /** A real process that binds the proxy port and accepts connections but never answers. */
 function hungListener(t, port) {
-  const child = spawn(process.execPath, ['-e', `require('node:net').createServer(()=>{}).listen(${port},'127.0.0.1',()=>console.log('up'))`], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const child = spawn(process.execPath, ['-e', `require('node:net').createServer(()=>{}).listen(${port},'127.0.0.1',()=>console.log('up'))`], { stdio: ['ignore', 'pipe', 'pipe'] });
   t.after(() => { try { child.kill('SIGKILL'); } catch {} });
-  return new Promise(resolve => child.stdout.once('data', () => resolve(child)));
+  // A listener that cannot bind (EADDRINUSE) exits: fail the test instead of waiting forever.
+  let stderr = '';
+  child.stderr.on('data', d => { stderr += d; });
+  return new Promise((resolve, reject) => {
+    child.stdout.once('data', () => resolve(child));
+    child.once('exit', code => reject(new Error(`hung listener on port ${port} exited ${code} before listening: ${stderr.trim().split('\n').find(l => /Error/.test(l)) ?? stderr.trim()}`)));
+  });
 }
 
 test('start terminates a proven hung own proxy and starts a replacement', async t => {
-  const root = fixture(t, 18799);
-  const hung = await hungListener(t, 18799);
+  const port = await freePort();
+  const root = fixture(t, port);
+  const hung = await hungListener(t, port);
   const startedMs = OLD();
   writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: hung.pid, startedMs }) + '\n');
   let spawnAttempts = 0;
@@ -77,14 +98,15 @@ test('start terminates a proven hung own proxy and starts a replacement', async 
   assert.match(output, new RegExp(`hung proxy pid ${hung.pid} \\(no /health answer on 3 probes.*\\) — terminating and restarting`));
   assert.equal(spawnAttempts, 1, 'a new start must follow the kill');
   assert.equal(code, 4, 'the synthetic Bun resolver refuses the actual spawn');
-  assert.equal(manager.pidAlive(hung.pid), false, 'the hung process is gone');
+  // Through the child's handle, not its PID: Windows may reuse a freed PID at once.
+  assert.equal(hung.kill(0), false, 'the hung process is gone');
   assert.equal(existsSync(join(root, 'logs', 'proxy.pid')), false, 'its record is removed');
   assert.equal(manager.lastRecovery()?.pid, hung.pid);
   assert.match(readFileSync(join(root, 'logs', 'heal.log'), 'utf8'), /cause=hung action=recover result=ok/);
 });
 
 test('respawn is rate limited to 3 per 15 minutes and never starts over the limit', async t => {
-  const root = fixture(t, 18800);
+  const root = fixture(t, await freePort());
   const now = Date.now();
   writeFileSync(join(root, 'logs', 'respawn.json'), JSON.stringify({ events: [
     { at: now - 20 * 60_000, pid: 1, reason: 'memory' }, // outside the window: not counted
@@ -120,7 +142,7 @@ for (const [name, mutate] of [
   ['the command line stops matching during the probes', (_root, state) => { state.command = null; }],
 ]) {
   test(`a proven hung proxy is not signalled when ${name}`, async t => {
-    const root = fixture(t, 18802);
+    const root = fixture(t, await freePort());
     const live = dummy(t);
     const startedMs = OLD();
     writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: live.pid, startedMs }) + '\n');
@@ -148,7 +170,7 @@ for (const [name, mutate] of [
 }
 
 test('concurrent respawn helpers cannot exceed the restart budget', async t => {
-  const root = fixture(t, 18803);
+  const root = fixture(t, await freePort());
   writeFileSync(join(root, 'logs', 'respawn.json'), JSON.stringify({ events: [{ at: Date.now() - 60_000, pid: 1, reason: 'watchdog' }, { at: Date.now() - 30_000, pid: 2, reason: 'watchdog' }] }));
   const gone = dummy(t); const gonePid = gone.pid;
   writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: gonePid, startedMs: OLD() }) + '\n');
@@ -163,7 +185,7 @@ test('concurrent respawn helpers cannot exceed the restart budget', async t => {
 });
 
 test('respawn fails closed on an unreadable restart history and never starts', async t => {
-  const root = fixture(t, 18804);
+  const root = fixture(t, await freePort());
   writeFileSync(join(root, 'logs', 'respawn.json'), '{ corrupt');
   const gone = dummy(t); const gonePid = gone.pid;
   writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: gonePid, startedMs: OLD() }) + '\n');
@@ -175,7 +197,7 @@ test('respawn fails closed on an unreadable restart history and never starts', a
 });
 
 test('a stale respawn helper does not restart a proxy that was stopped or replaced while it waited', async t => {
-  const root = fixture(t, 18805);
+  const root = fixture(t, await freePort());
   const requester = dummy(t);
   writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: requester.pid, startedMs: OLD() }) + '\n');
   // While the helper waits, the user stops the requester (record removed).
@@ -191,7 +213,7 @@ test('a stale respawn helper does not restart a proxy that was stopped or replac
 });
 
 test('respawn refuses a pid that is not the recorded proxy', async t => {
-  const root = fixture(t, 18801);
+  const root = fixture(t, await freePort());
   const live = dummy(t);
   const record = JSON.stringify({ pid: live.pid, startedMs: OLD() }) + '\n';
   writeFileSync(join(root, 'logs', 'proxy.pid'), record);
@@ -204,7 +226,7 @@ test('respawn refuses a pid that is not the recorded proxy', async t => {
 });
 
 test('legacy PID records without a timestamp are not treated as verified ownership', async t => {
-  const root = fixture(t, 18796);
+  const root = fixture(t, await freePort());
   const manager = createManager({ root, home: root });
   assert.notEqual(manager.verifyOwnProcess({ pid: process.pid, startedMs: null, startedIso: null }), 'match');
 });
@@ -214,7 +236,7 @@ for (const [name, override, startedMs] of [
   ['with a non-proxy command line', { processCommandLineImpl: () => ({ commandLine: 'node -e setInterval', executablePath: process.execPath }) }, OLD],
 ]) {
   test(`stop with a down listener and live PID ${name} reports unverifiable state instead of not running`, async t => {
-    const root = fixture(t, 18797);
+    const root = fixture(t, await freePort());
     const live = dummy(t);
     const recorded = startedMs();
     writeFileSync(join(root, 'logs', 'proxy.pid'), JSON.stringify({ pid: live.pid, startedMs: recorded }) + '\n');
@@ -227,7 +249,7 @@ for (const [name, override, startedMs] of [
 }
 
 test('failed spawn leaves no PID record and reports an actionable Bun error', async t => {
-  const root = fixture(t, 18798);
+  const root = fixture(t, await freePort());
   const { code, lines } = await quiet(() => createManager({ root, home: root, bunResolver: () => { throw new Error('Bun native executable not found'); } }).start({ waitMs: 1000 }));
   assert.equal(code, 4);
   assert.equal(existsSync(join(root, 'logs', 'proxy.pid')), false);

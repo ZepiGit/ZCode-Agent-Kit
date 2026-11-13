@@ -1,0 +1,3 @@
+doctor: [32m12 passed[0m, [2m3 skipped[0m
+accounts doctor: [33m2 warnings[0m, [32m1 passed[0m
+upstream: nothing checked

@@ -1,0 +1,527 @@
+{
+  "id": "S3-short-omp-2026-11-07T0318-2449bc",
+  "key": "S3/omp",
+  "scenario": "S3",
+  "profile": "short",
+  "variant": "omp",
+  "platform": "linux",
+  "node": "v26.7.0",
+  "outcome": "RED",
+  "metric": "rss",
+  "durationS": 12,
+  "red": true,
+  "checks": [
+    {
+      "name": "peak:kit",
+      "red": false,
+      "value": 372,
+      "budget": 596,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:launcher",
+      "red": false,
+      "value": 0,
+      "budget": 74,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:mcp-bridge",
+      "red": false,
+      "value": 0,
+      "budget": 75,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:preflight",
+      "red": false,
+      "value": 62.9,
+      "budget": 76,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:proxy",
+      "red": false,
+      "value": 60.8,
+      "budget": 62,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:solver",
+      "red": false,
+      "value": 0,
+      "budget": 20,
+      "unit": "MB"
+    },
+    {
+      "name": "count:proxy",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "perParent:solver",
+      "red": false,
+      "value": 0,
+      "budget": 1,
+      "unit": "procs/parent"
+    },
+    {
+      "name": "orphans",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "procs",
+      "detail": []
+    },
+    {
+      "name": "omp:concurrent-preflights",
+      "red": true,
+      "value": 5,
+      "budget": 1,
+      "unit": "procs",
+      "detail": [
+        "omp-5: max 5 at once, 5 spawned",
+        "omp-5-kill-starter: max 5 at once, 5 spawned"
+      ]
+    },
+    {
+      "name": "omp:waiter-cost",
+      "red": false,
+      "value": "no waiter",
+      "budget": 5,
+      "unit": "MB/host",
+      "detail": [
+        "omp-5 host 0 starter +3.1 MB",
+        "omp-5 host 1 starter +3.4 MB",
+        "omp-5 host 2 starter +3.2 MB",
+        "omp-5 host 3 starter +3.1 MB",
+        "omp-5 host 4 starter +3.4 MB",
+        "omp-5-kill-starter host 0 starter +3.4 MB",
+        "omp-5-kill-starter host 1 starter +3.2 MB",
+        "omp-5-kill-starter host 2 killed unmeasured",
+        "omp-5-kill-starter host 3 starter +3.6 MB",
+        "omp-5-kill-starter host 4 starter +3.8 MB"
+      ]
+    },
+    {
+      "name": "omp:waiter-cause-lines",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "waiters without",
+      "detail": []
+    },
+    {
+      "name": "omp:hosts-finished",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "hosts still waiting",
+      "detail": []
+    },
+    {
+      "name": "omp:starter-killed",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "rounds without a kill",
+      "detail": []
+    },
+    {
+      "name": "simultaneous-proxies",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    }
+  ],
+  "summary": {
+    "*": {
+      "peakMB": 600.7,
+      "peakProcMB": 64.9,
+      "peakHwmMB": 64.9,
+      "maxCount": 12,
+      "maxFds": 195,
+      "maxThreads": 140,
+      "distinctPids": 25,
+      "peakHeapMB": 5
+    },
+    "kit": {
+      "peakMB": 372,
+      "peakProcMB": 64.9,
+      "peakHwmMB": 64.9,
+      "maxCount": 6,
+      "maxFds": 118,
+      "maxThreads": 59,
+      "distinctPids": 14,
+      "peakHeapMB": 5
+    },
+    "mock-upstream": {
+      "peakMB": 59.5,
+      "peakProcMB": 59.5,
+      "peakHwmMB": 60.2,
+      "maxCount": 1,
+      "maxFds": 22,
+      "maxThreads": 7,
+      "distinctPids": 1,
+      "peakHeapMB": null
+    },
+    "omp-host": {
+      "peakMB": 170.9,
+      "peakProcMB": 34.6,
+      "peakHwmMB": 34.6,
+      "maxCount": 5,
+      "maxFds": 55,
+      "maxThreads": 74,
+      "distinctPids": 10,
+      "peakHeapMB": null
+    },
+    "preflight": {
+      "peakMB": 312.7,
+      "peakProcMB": 62.9,
+      "peakHwmMB": 62.9,
+      "maxCount": 5,
+      "maxFds": 107,
+      "maxThreads": 35,
+      "distinctPids": 9,
+      "peakHeapMB": null
+    },
+    "proxy": {
+      "peakMB": 60.8,
+      "peakProcMB": 60.8,
+      "peakHwmMB": 60.8,
+      "maxCount": 1,
+      "maxFds": 12,
+      "maxThreads": 24,
+      "distinctPids": 2,
+      "peakHeapMB": 5
+    },
+    "manager": {
+      "peakMB": 64.9,
+      "peakProcMB": 64.9,
+      "peakHwmMB": 64.9,
+      "maxCount": 1,
+      "maxFds": 22,
+      "maxThreads": 7,
+      "distinctPids": 3,
+      "peakHeapMB": null
+    }
+  },
+  "budgets": {
+    "peaks": {
+      "kit": 596
+    },
+    "procPeaks": {
+      "launcher": 74,
+      "mcp-bridge": 75,
+      "preflight": 76,
+      "proxy": 62,
+      "solver": 20
+    },
+    "counts": {
+      "proxy": 1
+    },
+    "perParent": [
+      {
+        "role": "solver",
+        "max": 1
+      }
+    ],
+    "orphans": 0,
+    "commitBackstop": {
+      "role": "proxy",
+      "maxMB": 512
+    },
+    "extra": [
+      {
+        "name": "omp:concurrent-preflights",
+        "red": true,
+        "value": 5,
+        "budget": 1,
+        "unit": "procs",
+        "detail": [
+          "omp-5: max 5 at once, 5 spawned",
+          "omp-5-kill-starter: max 5 at once, 5 spawned"
+        ]
+      },
+      {
+        "name": "omp:waiter-cost",
+        "red": false,
+        "value": "no waiter",
+        "budget": 5,
+        "unit": "MB/host",
+        "detail": [
+          "omp-5 host 0 starter +3.1 MB",
+          "omp-5 host 1 starter +3.4 MB",
+          "omp-5 host 2 starter +3.2 MB",
+          "omp-5 host 3 starter +3.1 MB",
+          "omp-5 host 4 starter +3.4 MB",
+          "omp-5-kill-starter host 0 starter +3.4 MB",
+          "omp-5-kill-starter host 1 starter +3.2 MB",
+          "omp-5-kill-starter host 2 killed unmeasured",
+          "omp-5-kill-starter host 3 starter +3.6 MB",
+          "omp-5-kill-starter host 4 starter +3.8 MB"
+        ]
+      },
+      {
+        "name": "omp:waiter-cause-lines",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "waiters without",
+        "detail": []
+      },
+      {
+        "name": "omp:hosts-finished",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "hosts still waiting",
+        "detail": []
+      },
+      {
+        "name": "omp:starter-killed",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "rounds without a kill",
+        "detail": []
+      },
+      {
+        "name": "simultaneous-proxies",
+        "red": false,
+        "value": 1,
+        "budget": 1,
+        "unit": "procs"
+      }
+    ]
+  },
+  "orphans": [],
+  "observations": [],
+  "notes": {
+    "sampler": {
+      "units": null,
+      "overhead": null
+    },
+    "isolation.stateDir": "/tmp/memloop/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/tmp/kit-tG7lg9/state",
+    "isolation.home": "/tmp/memloop/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/tmp/kit-tG7lg9/home",
+    "isolation.port": 19030,
+    "rounds": [
+      {
+        "name": "omp-5",
+        "tFrom": 191,
+        "tTo": 3910,
+        "killExpected": false,
+        "maxConcurrentPreflights": 5,
+        "distinctPreflights": 5,
+        "maxSimultaneousProxies": 1,
+        "hosts": [
+          {
+            "id": 0,
+            "pid": 1384845,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.12,
+            "baselineMB": 31,
+            "peakMB": 34.12,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 812,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          },
+          {
+            "id": 1,
+            "pid": 1384846,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.42,
+            "baselineMB": 30.37,
+            "peakMB": 33.79,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 804,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          },
+          {
+            "id": 2,
+            "pid": 1384847,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.18,
+            "baselineMB": 30.05,
+            "peakMB": 33.24,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 825,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          },
+          {
+            "id": 3,
+            "pid": 1384848,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.13,
+            "baselineMB": 30.11,
+            "peakMB": 33.24,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 816,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          },
+          {
+            "id": 4,
+            "pid": 1384852,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.37,
+            "baselineMB": 30.18,
+            "peakMB": 33.54,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 825,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          }
+        ],
+        "stop": {
+          "label": "omp-5",
+          "code": 0,
+          "tail": [
+            "stopped (pid 1384960)"
+          ],
+          "proxiesLeft": 0
+        }
+      },
+      {
+        "name": "omp-5-kill-starter",
+        "tFrom": 4364,
+        "tTo": 8066,
+        "killExpected": true,
+        "maxConcurrentPreflights": 5,
+        "distinctPreflights": 5,
+        "maxSimultaneousProxies": 1,
+        "hosts": [
+          {
+            "id": 0,
+            "pid": 1385009,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.39,
+            "baselineMB": 30.25,
+            "peakMB": 33.64,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 793,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          },
+          {
+            "id": 1,
+            "pid": 1385010,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.24,
+            "baselineMB": 30.12,
+            "peakMB": 33.36,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 803,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          },
+          {
+            "id": 2,
+            "pid": 1385011,
+            "killed": true,
+            "preflights": 1,
+            "causeLines": [],
+            "costMB": null,
+            "baselineMB": 30.18,
+            "peakMB": null,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": null,
+            "finished": false,
+            "lastLine": ""
+          },
+          {
+            "id": 3,
+            "pid": 1385015,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.56,
+            "baselineMB": 30.29,
+            "peakMB": 33.85,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 799,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          },
+          {
+            "id": 4,
+            "pid": 1385017,
+            "killed": false,
+            "preflights": 1,
+            "causeLines": [
+              "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+            ],
+            "costMB": 3.79,
+            "baselineMB": 30.11,
+            "peakMB": 33.9,
+            "metric": "rss",
+            "wsCostMB": null,
+            "hookMs": 801,
+            "finished": true,
+            "lastLine": "[zcode-autostart] quota-unavailable: Quota check unavailable; continuing with the healthy local proxy. No retry scheduled."
+          }
+        ],
+        "stop": {
+          "label": "omp-5-kill-starter",
+          "code": 0,
+          "tail": [
+            "stopped (pid 1385122)"
+          ],
+          "proxiesLeft": 0
+        }
+      }
+    ],
+    "isolation.externalConnectionsDuringRun": [],
+    "stop.code": 0,
+    "stop.output": [
+      "not running"
+    ]
+  },
+  "samples": 36,
+  "csv": "/tmp/memloop/t03-memloop/r2-job-s3/S3-omp/S3-short-omp-2026-11-07T0318-2449bc/samples.csv"
+}

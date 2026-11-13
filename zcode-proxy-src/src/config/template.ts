@@ -10,6 +10,14 @@
 export const EXAMPLE_CONFIG_YAML: string = `server:
   port: 8080
   host: "127.0.0.1"
+  # Admission control (optional): cap on the request-body bytes the proxy
+  # holds at once, in MB (default 64, allowed 1-4096). Requests beyond it wait
+  # unread in a FIFO (at most 64 waiting, at most 15 s), then get HTTP 503 with
+  # Retry-After in their endpoint's error shape, never 429. An idle proxy always
+  # admits one request. Open response streams are never limited.
+  # Env override: ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB.
+  # admission:
+  #   maxInFlightMB: 64
 
 auth:
   # Key that clients must provide to use the proxy.
@@ -122,4 +130,40 @@ clientSigning:
 
 logging:
   level: info
+
+# Health supervisor (optional): samples the proxy's memory footprint
+# (Pss on Linux, commit charge on Windows; RSS where neither is available).
+# Soft limit: WARN event line only. Hard limit: asks the kit manager for a
+# respawn (budget 3 per 15 min) and drains only once the manager has
+# acknowledged it (reserved the budget, within 10 s): requests already
+# accepted finish, new ones get 503 + Retry-After. A refused or
+# unacknowledged respawn keeps the proxy serving: one ERROR line, restarts
+# exhausted, no new request until the 15 min window has passed. Without the
+# kit manager (TUI, standalone proxy) it only logs and keeps serving. Each limit must be
+# held for "samples" samples taken "sampleIntervalSeconds" apart.
+# Defaults shown; no env override.
+# health:
+#   memory:
+#     softLimitMB: 512           # 64-65536
+#     hardLimitMB: 1024          # 64-65536, above softLimitMB
+#     samples: 3                 # 1-20
+#     sampleIntervalSeconds: 15  # 1-600
+
+# Captcha solver process (optional): the solver runs in a process of its own
+# under a memory cap, in MB. Windows enforces the cap with a Job Object, Linux
+# with a systemd user scope (cgroup) once its limit has been read back from
+# the kernel; where the operating system cannot enforce it (macOS, a Linux
+# without a delegated memory controller) the solver process measures its own
+# footprint and ends itself at the cap. A solver that ends at the cap is
+# logged with this key's name. Raise the cap only if solves need more memory.
+# On Windows the solver needs about 130 MB before its first solve, so a cap
+# under 200 leaves it no room there.
+# The solver process is replaced by a fresh one at 80 % of the cap or after
+# 100 solves. One that ends abnormally (a crash, the cap, a fatal error, a
+# solve over 90 s) fails only the solve that was running. After more than 5
+# such exits in 10 minutes, requests that need a solve get HTTP 503 with
+# Retry-After until the oldest of those exits is 10 minutes old.
+# Default shown; allowed 128-65536; no env override.
+# solver:
+#   memoryCapMB: 300
 `;

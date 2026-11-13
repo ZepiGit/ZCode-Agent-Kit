@@ -28,6 +28,7 @@ zcode-proxy-src/zcode-proxy-linux-*
 zcode-proxy-src/zcode-proxy-darwin-*
 tests/fakehome/
 coverage/
+.memloop/
 test-results/
 playwright-report/
 *.log
@@ -42,3 +43,9 @@ SETUP_REPORT*.md
 /IMPLEMENTATION_STATUS.md
 /mcp/zcode-harness-mcp/IMPLEMENTATION_STATUS.md
 /patches/zcode-proxy-local-patches.patch
+
+# Local planning notes and agent tooling (kept out of the published repo)
+.scratch/
+/AGENTS.md
+/CLAUDE.md
+/docs/agents/

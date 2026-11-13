@@ -1,0 +1,111 @@
+{
+  "ok": false,
+  "failed": 4,
+  "skipped": 12,
+  "warned": 0,
+  "checks": [
+    {
+      "name": "bun available",
+      "ok": true,
+      "detail": "<BUN> (<VERSION>)",
+      "status": "pass"
+    },
+    {
+      "name": "config exists",
+      "ok": false,
+      "detail": "<KIT>/proxy/config.yaml",
+      "status": "fail"
+    },
+    {
+      "name": "key file exists",
+      "ok": false,
+      "detail": "<KIT>/.proxykey",
+      "status": "fail"
+    },
+    {
+      "name": "proxy source installed",
+      "ok": false,
+      "detail": "<KIT>/zcode-proxy-src/node_modules",
+      "status": "fail"
+    },
+    {
+      "name": "credentials store",
+      "ok": false,
+      "detail": "~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login",
+      "status": "fail"
+    },
+    {
+      "name": "omp integration",
+      "ok": null,
+      "detail": "OMP not installed — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "proxy reachable + identity",
+      "ok": null,
+      "detail": "no config — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "omp: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "pi: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "claude-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "codex: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "opencode: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "cline: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "kilo-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "aider: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "continue: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "goose: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    }
+  ]
+}
+[exit 1]

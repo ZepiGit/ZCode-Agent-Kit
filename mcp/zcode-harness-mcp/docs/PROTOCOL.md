@@ -1,116 +1,170 @@
-# ZCode Protocol v1 — Reverse-Engineering-Dokumentation
+# Protocol between the bridge and the ZCode runtime
 
-Dokumentiert den aktuellen nativen 0.16.9-Vertrag und getrennt davon historische
-0.16.5-Nachweise. Unqualifizierte „live“-Angaben in den bestehenden Abschnitten beziehen
-sich auf 2026-09-12 und sind keine aktuelle 0.16.9-Abnahme. Die historischen Überschriften
-bleiben als Linkziele erhalten. Aktuell nachgewiesen ist der vollständige native Katalog
-mit `zai-api/GLM-5.3-Flash`. Der reale Windows-Test bestätigte Modell und `low` vor
-dem Senden, wurde jedoch durch Upstream `1113` (Guthaben/Ressourcenpaket fehlt)
-blockiert; Proxy-Erfolge sind kein MCP-Inferenznachweis.
+The bridge starts `node <zcode.cjs> app-server --stdio` and exchanges messages
+with that process over its stdin and stdout. This document describes what the
+bridge sends and what it expects back. It is taken from the bridge's source
+(`src/protocol`, `src/runtime`, `src/tasks`, `src/interactions`) and is not a
+specification of ZCode. The last section lists what the bridge assumes about
+the runtime without checking it.
 
-##	Runtime / Fingerabdruck (live, 2026-09-12)
+## Runtime identity
 
-| Was | Wert |
-| --- | --- |
-| Harness | `C:\Program Files\ZCode\resources\glm\zcode.cjs` |
-| Version (eigen angegeben) | `zcode 0.16.5` |
-| Bundle-Fingerprint | `e9f1868c0fdb8635` (SHA-256, erste 16 Hex) |
-| Bundle-Größe | 12.615.227 Bytes |
-| Desktop | `ZCode.exe` (Electron), mtime 2026-09-04 |
-| Bundle-Metadaten | `{"runtime":"electron-node","entry":"zcode.cjs","source":"apps/zcode-cli/packages/cli/dist/zcode.cjs"}` |
-| Modellkatalog-Datei | `resources/model-providers/models_catalog_china_llm_zcode_2026-06-03.json` (schemaVersion 24, 10 Provider) |
+`zcode_health` reports the path of `zcode.cjs`, the version it printed for
+`--version`, and a fingerprint: the first 16 hexadecimal characters of the
+file's SHA-256. `npm run probe:runtime` adds the file size and the list of paths
+that were tried. `desktopVersion` is the modification time of `ZCode.exe` in
+the directory three levels above `zcode.cjs`, or `null` if that file does not
+exist.
 
-## Framing und Nachrichtenformat (live verifiziert)
+The bridge names the protocol in `zcode_health` and `zcode_capabilities` as
+`ZCode Protocol v1 (zcode.cjs app-server --stdio, 0.16.9 dispatcher inspected;
+live validation pending)`.
 
-- **NDJSON**: ein JSON-Objekt pro Zeile über stdin/stdout. Kein `Content-Length`, keine Magic Bytes, kein binärer Envelope.
-- **Kein `jsonrpc`-Feld.** Ein Objekt mit `jsonrpc`-Schlüssel wird mit `-32600` und festem `id:"invalid-message"` abgelehnt (Zod-Unions: „Unrecognized key: jsonrpc“).
-- Klassifikation nach Feldern:
-  | Felder | Typ |
+## Framing
+
+- One JSON object per line, in UTF-8, ended by a line feed. There is no
+  `jsonrpc` field and no length header.
+- A message is classified by its fields:
+
+  | Fields | Kind |
   | --- | --- |
-  | `id` + `method` | Request (in **beiden** Richtungen — Reverse-Calls existieren) |
-  | nur `method` | Notification |
-  | nur `id` | Response |
-- Request-Form: `{"id":1,"method":"session/create","params":{…}}` — IDs des Clients numerisch/string; der Server nutzt String-IDs `server-1`, `server-2`, …
-- Fehlerobjekte: `{"error":{"code":-32601,"message":"…","data":{…}},"id":…}` (JSON-RPC-artige Codes).
-- Interne Klasse im Bundle: `ZCodeProtocolNdjsonConnection` (Bestätigung über Fehler-Stacktrace, live).
-- Parse-Fehler: `{"error":{"code":-32700,"message":"Parse error"},"id":"parse-error"}`.
-- Validierungsfehler enthalten Zod-Issues in `error.data.issues` — die primäre Quelle, um Parametern live zu lernen.
-- Kein Initialize-Handshake auf dieser Verbindung: `initialize` antwortet `-32601` (live); die Verbindung beginnt direkt mit Methodenaufrufen. Protokollversion wird in `session/create`-Result unter `result.protocol` gemeldet: `{"name":"ZCode Protocol","version":1}` (live).
+  | `id` and `method` | request, in either direction |
+  | `method` only | notification |
+  | `id` only | response, with `result` or `error` |
 
-## Methoden-Registry (aus dem 0.16.5-Bundle extrahiert, dispatcher-verifiziert)
+- A request of the bridge is `{"id": "client-1000000", "method": "session/list", "params": {}}`.
+  The ids count up from `client-1000000`. A request of the runtime is answered
+  with the id it came with.
+- An error response is `{"id": …, "error": {"code": …, "message": …, "data": …}}`.
+  The bridge turns it into the error text `harness error <code>: <message>`.
+- There is no handshake. After starting the process the bridge waits 400
+  milliseconds; if the process is still running, it is treated as ready.
+- A line that is not JSON is logged and skipped. Output that grows past about
+  32 MiB without a line feed is dropped.
+- A request without an answer fails after the time limit (60 seconds by
+  default, 90 for `session/create`). When the process exits, all open requests
+  fail with `harness exited (code=…, signal=…)`.
+- To stop the runtime, the bridge closes its stdin and kills the process if it
+  has not exited after 3 seconds.
 
-**Aktueller 0.16.9-Vertrag (gezielt im installierten Dispatcher untersucht):**
+## Requests the bridge sends
 
-- `runtime/capabilities` erhält `{}` und liefert `{independentPlanState:true}`.
-- `workspace/readPresentation` erhält `{workspace}` und liefert `{workspace,mode,slashCommands}`:
-  keine Defaults, kein Katalog, keine Settings-Revision. Die Bridge erfindet diese nicht.
-- Der vollständige Katalog stammt aus `session/create` mit `{workspace,persistence:"deferred",
-  mode:"plan",titleGenerationEnabled:false,toolAllowlist:[]}` ohne Modell, Reasoning oder Prompt:
-  `settings.model.available` enthält die vollständigen nativen Metadaten. Die Bridge schließt
-  ihre eigene Session im `finally` über `session/close` mit `{sessionId,expectedPersistence:"deferred"}`;
-  verweigertes Schließen ist ein Fehler. Dies kann Runtime-Dienste initialisieren und ist unter
-  `--read-only` gesperrt. `session/read` liefert nur die aktuelle Modellauswahl, keinen Vollkatalog;
-  auch eine v4-Workspace-Subscription ist kein unabhängiger kalter Vollkatalog.
-- `session/setModel`, `session/setThoughtLevel`, `session/setMode` unterstützen native
-  `expectedRevision`; aufeinanderfolgende Setter verwenden `runtime.stateRevision` aus der Antwort.
-  `persistAsWorkspaceLastUsed` stellt keine persistenten Workspace-Defaults wieder her.
-- `workspace/updateInteractionPreferences` erhält
-  `{workspace,preferences:{askUserQuestionAutoResolutionEnabled:boolean}}`;
-  `workspace/updateModelIoPreferences` erhält `{workspace,preferences:{fullRetentionEnabled:boolean}}`;
-  `workspace/updateOffPeakToolPolicy` und `workspace/updateDynamicWorkflowPolicy` erhalten
-  `{workspace,enabled:boolean}`. Alle vier ändern den **geteilten App-Server-Prozess**, nicht
-  persistente Workspace-Defaults. Kein Getter, Reset, bekannter Default oder CAS-Vertrag;
-  native Bestätigung ist kein unabhängiges Read-back.
-- `workspace/readState`, `workspace/setDefault*`, `workspace/upsertModelProvider`,
-  `workspace/removeModelProvider` und `workspace/updateProviderRegistry` fehlen im 0.16.9-Dispatcher.
-  Keine erfundenen Aliasse oder Fallbacks; frühere Versionskompatibilität wird nicht behauptet.
+A workspace is always sent as `{"workspaceKey": <path>, "workspacePath": <path>}`,
+both with the same path without a trailing separator. A session id is used only
+if it starts with `sess_` followed by 1 to 128 letters, digits, `.`, `_` or `-`.
 
-**Nur historisches 0.16.5-Inventar, keine aktuelle Liste unterstützter Befehle:**
+| Method | Parameters | What the bridge reads from the answer |
+| --- | --- | --- |
+| `session/create` | `{workspace, mode?}` | `session.sessionId` |
+| `session/create` (catalog) | `{workspace, persistence: "deferred", mode: "plan", titleGenerationEnabled: false, toolAllowlist: []}` | `session.sessionId`, `settings.model.available` |
+| `session/close` | `{sessionId}`; for the catalog session `{sessionId, expectedPersistence: "deferred"}` | `closed` must be `true` for the catalog session |
+| `session/list` | `{}` | `sessions[]` with `sessionId` and `workspace.workspacePath` |
+| `session/read` | `{sessionId}` | `projection.status`, `projection.activeToolCalls`, `projection.backgroundJobs`, `projection.pendingPermissions`, `settings.model.current`, `settings.mode.current`, `settings.thoughtLevel.current` (or `settings.reasoning.current`), `runtime.stateRevision` |
+| `session/subscribe` | `{sessionId, deliveryKind: "desktop-continuous"}` | `eventSeq` |
+| `session/send` | `{sessionId, content, toolDenylist?}` | `accepted` must be `true` |
+| `session/stop` | `{sessionId}` | nothing; the bridge checks with `session/read` |
+| `session/messages` | `{sessionId}` | `messages[]`: the last entry with `info.role: "assistant"`, its `parts` (or `content`) of type `text` |
+| `session/usage` | `{sessionId}` | `totalTokens`, `inputTokens`, `outputTokens` |
+| `session/setModel` | `{sessionId, model: {providerId, modelId, options?: {reasoningLevel}}, expectedRevision?}` | `runtime.stateRevision` when a revision was sent |
+| `session/setThoughtLevel` | `{sessionId, thoughtLevel, expectedRevision?}` | as above |
+| `session/setMode` | `{sessionId, mode, expectedRevision?}` | as above |
+| `session/resume` | `{sessionId}` | passed to the client |
+| `session/fork` | `{sessionId, target: {kind: "latestCheckpoint"}}` | passed to the client |
+| `session/compact` | `{sessionId, instructions?}` | passed to the client |
+| `session/goal` | `{sessionId, action, target?}` | passed to the client |
+| `workspace/readPresentation` | `{workspace}` | `mode` (string) and `slashCommands` (array) must be present |
+| `workspace/updateInteractionPreferences` | `{workspace, preferences: {askUserQuestionAutoResolutionEnabled}}` | the same field with the value sent |
+| `workspace/updateModelIoPreferences` | `{workspace, preferences: {fullRetentionEnabled}}` | the same field with the value sent |
+| `workspace/updateOffPeakToolPolicy` | `{workspace, enabled}` | `enabled` with the value sent |
+| `workspace/updateDynamicWorkflowPolicy` | `{workspace, enabled}` | `enabled` with the value sent |
+| `mcp/list`, `plugins/list`, `skills/referenceCatalog` | `{workspace}` | passed to the client |
+| `usage/stats` | `{range}` with `all`, `7d` or `30d` | passed to the client |
 
-Session: `session/create, resume, list, subagents, requestRuntimePreferences¹, read, messages, events, subscribe, send, stop, cancelBackgroundTask, fork, compact, goal, close, setModel, setThoughtLevel, updateRuntimeModelConfig, setMode, usage`
+Through `zcode_operation_invoke` a client can also reach `session/events`,
+`session/subagents`, `runtime/capabilities`, `plugins/overview` and
+`plugins/referenceCatalog`; the bridge passes their answers on unchanged.
 
-Workspace: `workspace/readState, hooks/trustGrant¹, updateProviderRegistry, updateInteractionPreferences, updateModelIoPreferences, upsertModelProvider, removeModelProvider, setDefaultModel, setDefaultThoughtLevel, setDefaultMode, generateText, cancelGenerateText`
+The model catalog is read with the second form of `session/create`: no model,
+no reasoning level and no prompt are sent, and the session is closed again in
+every case. If the runtime does not confirm the close, the call fails.
 
-Discovery/Management: `mcp/list, plugins/list, plugins/referenceCatalog, skills/referenceCatalog, plugins/resolveSuggestedReference, setEnabled, overview, marketplace/add|remove|update, install, cancelOperation, uninstall, update, restoreBuiltin, configure, resetConfig, validate, describe`
+## Events the bridge receives
 
-Reverse-Calls (Server→Client): `session/requestRuntimePreferences¹, interaction/requestPermission, interaction/requestUserInput, interaction/requestProviderRuntimeHeaders, interaction/requestOfficialMcpAuthHeaders², interaction/browserList, interaction/browserExecute, computer-use/operation-event³, process/mcpTelemetry³, state.updated³`
+After `session/subscribe` the runtime sends `session/event` notifications with
+`{sessionId, seq, type, payload}`. While a task runs, the bridge stores the
+events of its session in redacted form and acts on these types:
 
-v4-Face (Desktop-Gateway, `requireV4Gateway`): `v4/conversation/{subscribe,unsubscribe,resync,rowsRange,plans,fileChanges,fileRewindPreview,usage,frame}, v4/controller/{subscribe,resync,unsubscribe}, v4/attachment/{begin,chunk,commit,abort,read,previewSource}, v4/connection/flow, v4/commands/query, v4/command, v4/usage/stats, v4/telemetry/event`
+| Type | What the bridge does |
+| --- | --- |
+| `turn.started` | sets the task to `running` |
+| `turn.failed` | sets the task to `failed` with `payload.error.message` |
+| `turn.completed` | reads the session until it is idle, then sets `completed` |
+| `model.streaming` with `kind: "text_delta"` | appends `payload.text` (or `payload.delta`) to the response text |
+| `tool.updated` | records the tool call (`toolCallId`, `toolName` or `name`); for `Write`, `Edit`, `MultiEdit` and `NotebookEdit` it records the file path unless `state` is `error` |
 
-¹ `session/create` **blockiert**, bis der Client `session/requestRuntimePreferences` beantwortet (live: Fehlerantwort lässt create mit demselben Fehler scheitern; korrekte Antwort: `{nativeSearchEnhancementsEnabled: boolean, memoryEnabled?: boolean, askUserQuestionAutoResolutionEnabled?: boolean, modelContextBudgetStrategy?: "legacy"|"preflight-v1"}`).
-² Neu in 0.16.5; nicht-beantwortet blockiert create nicht (live beobachtet für `image_search` / `document-skills`-Plugin).
-³ Notifications.
+An event whose `seq` is not higher than the last one seen is ignored. If `seq`
+jumps, the bridge stores a `bridge.event_gap` entry and adds a warning to the
+task. Other notifications are not used.
 
-**In 0.16.5 entfernt** (Registry-Strings noch im Bundle, Dispatcher lehnt ab): `automation/{create,update,delete,list,checkTaskBinding}` — live `-32601 „Method not found: automation/list“`. Bereits früher entfernt (live + Quellen): `session/steer`, `session/rewind*`, `session/new`, `prompt`, `initialize`.
+## Requests the runtime sends
 
-## Event-Stream (live)
+| Method | What the bridge answers |
+| --- | --- |
+| `session/requestRuntimePreferences` | `{nativeSearchEnhancementsEnabled: false, memoryEnabled: false, askUserQuestionAutoResolutionEnabled: true, modelContextBudgetStrategy: "preflight-v1"}` |
+| `interaction/requestPermission` | `{decision: "allow" \| "deny", reason}`, decided by the interaction policy or the client |
+| `interaction/requestUserInput` | `{answers, cancelled, reason?}`, decided by the interaction policy or the client |
+| `interaction/requestProviderRuntimeHeaders` | `{headersApplied: false, errorMessage}` |
+| `interaction/requestOfficialMcpAuthHeaders` | `{ok: false, reason: "unsupported"}` |
+| `interaction/browserList`, `interaction/browserExecute`, `workspace/hooks/trustGrant`, any other method | error `-32601` |
 
-`session/subscribe` mit `{sessionId, deliveryKind:"desktop-continuous"}` (ohne `deliveryKind` → `-32602`, live) → Notifications `session/event` mit `{sessionId, seq, type, payload}`; `seq` ist pro Session monoton. Beobachtete Typen (live): `session.updated`, `session.titleUpdated`, `turn.started`, `model.streaming` (payload `kind:"text_delta"|"reasoning_delta"`), `tool.updated`, `usage.delta`, `turn.completed`, `turn.failed` (payload `error.attribution` mit `source:"provider", reason:"auth_failed"` etc.).
+For a permission request the bridge takes the offered options from
+`params.options[]` (`optionId` or `id`, `label` or `name`, `kind`), for a
+question also from `params.questions[].options[].label`. When the client picks
+an option, one whose `kind` is `deny` is sent as `deny` and every other offered
+option as `allow`.
 
-## Wichtige Parametern/-Schemata (live gelernt)
+A request that belongs to the session of a bridge task can wait for the client.
+A request for any other session cannot: where the policy would ask the client,
+the bridge answers with error `-32001`.
 
-- Workspace-Objekt: `{workspaceKey, workspacePath}`; `workspaceKey` ist der normalisierte Pfad selbst (live).
-- `session/send`: `{sessionId, content}` → `{accepted:true, sessionId, stateRevision}`; 0.16+ zusätzlich `attachments, toolDenylist, runtimeModel, expectedRevision, …` (Quellen).
-- `session/goal`: `action`-Enum `show|set|replace|pause|resume|clear` (live aus Validierungsfehler).
-- `usage/stats`: `range`-Enum `all|7d|30d` (live).
-- `session/setModel`: `{sessionId, model:{providerId, modelId}}`; unbekanntes Modell → `-32603` „Unsupported model: … Available models: …“ (live).
-- `interaction/requestProviderRuntimeHeaders` Request: `{requestId, sessionId, turnId?, workspace, modelRef, providerId, reason:"model-request"|"captcha-retry"}`; erwartete Antwort: `{headersApplied: boolean, errorMessage?, providerRevision?}`; Header-Name `x-aliyun-captcha-verify-param` (Bundle). Refresh-Port nur für Provider-IDs `zaiStartPlan`/`bigmodelStartPlan` (Bundle).
-- `interaction/requestOfficialMcpAuthHeaders` Antwort: `{ok:true, headers} | {ok:false, reason}` (Bundle-Diskriminierte Union).
-- `interaction/requestPermission` Optionen (Bundle): `allow_once` / `allow_always|allow_project` / deny-Varianten mit `response:{decision,reason}`.
+## Assumptions about the runtime
 
-## Provider-/Risikokontrolle (live, entscheidend für Live-Verhalten)
+The bridge depends on the following behaviour of the runtime but does not test
+it at run time. The notes come from the bridge's source and its capability
+registry (`zcode_capabilities`), which mark the wire format as observed with
+ZCode 0.16.5 and the workspace and catalog methods as inspected in 0.16.9
+without a live check.
 
-Historischer Befund (0.16.5, 2026-09-12), keine aktuelle Flash-Inferenz-Aussage:
-Turns aus Harness-Prozessen **außerhalb der Desktop-App** wurden vom Provider mit
-HTTP 400 `captcha verify failed` abgelehnt (live auch per `zcode --prompt --json --verbose`):
-`ProviderBusinessError: captcha verify failed … providerId:"zai" … transport:"sse"`.
-Der Desktop-Captcha-Flow (`captcha-retry` → Aliyun-Token → Retry) ist eine Desktop-UI-Fähigkeit;
-die Bridge umgeht das **nicht** (siehe SECURITY/KNOWN_LIMITATIONS) und meldet `turn.failed`
-mit voller Attribution. Sessions/Hooks/Events/Usage laufen bis dahin vollständig.
+- `session/create` does not return until `session/requestRuntimePreferences`
+  has been answered.
+- `session/create` returns the full model catalog in `settings.model.available`.
+  `session/read` returns only the model in use.
+- `workspace/readPresentation` returns the mode and slash commands and nothing
+  about models or revisions. The runtime has no methods to set or reset
+  workspace defaults.
+- The four `workspace/update…` methods change the whole runtime process and
+  return a confirmation. There is no method to read the values.
+- `session/setModel` rejects a model that is not in the catalog.
+- `seq` rises by one per event within a session.
+- `automation/*` methods do not exist any more.
 
-## Community-Quellen (recherchiert, Commits dokumentiert)
+The `verification` value of each registry entry says how it was checked:
+`live_verified`, `fixture_verified`, `untested` or `blocked_by_environment`.
 
-- `william0wang/zcode-acp` @ `ad31b663eab446c2478f573498e5f7e3025d4c20` (Apache-2.0) — NDJSON-Bestätigung, Event-Typen, Backlog („missing dispatch case + live -32601 is the proof“).
-- `tizerluo/zcode-open-bridge` @ `2c1f4ad36fa6942a22b86f23d3d1bbf9643c5fff` (MIT) — recheck-0.16.5: additive Kompatibilität 0.16.1→0.16.5, `automation/*`-Entfernung, `mcp.servers`-Konfigurationsschlüssel in `~/.zcode/cli/config.json`.
-- MCP-Spezifikation (2026-07-28 modern + Legacy ≤2025-11-25) — genutzt für die MCP-Oberfläche dieser Bridge (Legacy-Initialize; strukturierte Tool-Outputs; Resources).
-- Übernommener Code aus diesen Quellen: **keiner** (nur Protokollwissen).
+## The MCP side
+
+Everything above is the inner protocol, between the bridge and the ZCode
+runtime. Toward its clients the bridge speaks MCP through MCP SDK 2
+(`@modelcontextprotocol/server`, and `@modelcontextprotocol/node` for HTTP),
+over stdio or over HTTP at `POST /mcp`. It serves the protocol revisions up to
+`2025-11-25`; `2026-07-28` is not served. The exact answers of this side are
+pinned by recorded conversations in `test/fixture/wire/`. See "MCP clients and
+protocol revision" in [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md).
+
+## Sources
+
+Besides the bridge's own observations, two public projects were consulted for
+the wire format. No code was taken from them.
+
+- `william0wang/zcode-acp` at commit `ad31b663eab446c2478f573498e5f7e3025d4c20` (Apache-2.0)
+- `tizerluo/zcode-open-bridge` at commit `2c1f4ad36fa6942a22b86f23d3d1bbf9643c5fff` (MIT)

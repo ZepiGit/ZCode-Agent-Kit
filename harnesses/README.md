@@ -1,114 +1,103 @@
-# Harness Adapters — How Other Agent CLIs Use the Local Proxy
+# Assistant guides
 **English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-The core of the kit is harness-neutral: a local HTTP proxy with three
-standard formats. The examples below use the default port `8457`;
-`zcode-kit proxy status` prints the port and connection values of your
-installation:
+For each supported coding assistant, this page says what to run, what the kit writes and what is left for you to do. Installation is in the [main README](../README.md). The CLI calls an assistant a "harness", hence `--harness`.
 
-| Endpoint | Format | Used by |
-|---|---|---|
-| `POST /v1/messages` | Anthropic messages (SSE + batch) | Claude-Code-like clients, OMP |
-| `POST /v1/chat/completions` | OpenAI chat-completions (SSE + batch) | OpenAI-compatible clients |
-| `POST /v1/responses` | OpenAI Responses API | Agents-SDK-like clients |
-| `GET /v1/models` | model list | discovery |
-| `GET /health`, `GET /quota` | status/quota (auth required) | diagnostics |
+The kit needs Node.js 24 or newer; on Node.js 20 and 22, which are no longer supported, `zcode-kit setup` and `zcode-kit update` stop without changing anything. The release installers install Bun 1.4.2 when Bun is missing. `zcode-kit --version` prints the installed version; `zcode-kit help` lists all commands.
 
-Authentication: `Authorization: Bearer <contents of .proxykey>`.
-`zcode-kit setup` generates the key locally. In release installs and source checkouts
-`.proxykey` lives in the kit directory; npm installs keep it in a separate
-installation-specific state directory, outside `node_modules`.
+## Choosing assistants in setup
 
-## Set up by `zcode-kit setup` (detected harnesses, only with consent)
+`zcode-kit setup` looks for installed assistants and configures only those you agree to.
 
-`zcode-kit setup --harness auto` detects installed harnesses and asks, for each
-one without a stored decision, "Configure ZCode as a provider with its
-supported models in <HARNESS>? [y/n]". A `y` configures that harness; `n`
-skips it and leaves its files untouched, and without a terminal every
-undecided harness is skipped. Ctrl-C stops the questions (exit code 130);
-what you already answered `y` to stays configured. A user with only OMP gets
-no Claude/Codex configuration or generated wrapper files.
+- **On a terminal** it shows the detected assistants as a checkbox list: arrow keys move, Space ticks or unticks, `a` toggles all, Enter confirms. Ticked assistants are configured, unticked ones are skipped. Esc, or Enter with nothing ticked, stores no answer.
+- **On a terminal without colour or cursor control, or one too small for the list,** it asks `Configure ZCode for <assistant>? [y/n]` once per assistant. `zcode-kit setup --select` shows a numbered list instead and accepts numbers, `all` or `none`.
+- **Without a terminal** (CI, a pipe) it asks nothing and skips every assistant that has no stored answer. Name the assistants instead: `zcode-kit setup --harness omp,codex` or `ZCODE_KIT_HARNESSES=omp,codex` configures exactly those. `none` skips all detected assistants; an unknown id is an error.
 
-Decisions are stored one file per harness under `generated/harness-choices/`
-and are part of the setup transaction (a rollback removes them again).
-`zcode-kit update` and `zcode-kit doctor --fix` re-apply only consented
-integrations (a `y`, an explicit selection or `zcode-kit integrate
-<harness>`); a stored `n` is respected until `--harness`, `integrate` or
-`zcode-kit setup --reask` (asks again on a terminal) changes it. An
-integration the kit created before it asked is refreshed on unattended runs
-but never turned into consent. For unattended runs select harnesses with
-`--harness omp,codex` or `ZCODE_KIT_HARNESSES=omp,codex` (`none` skips all
-detected harnesses); unknown ids are errors. The kit's MCP bridge is
-registered only with separate consent: an explicit selection, or a `y` given
-after the MCP note that setup prints before the question (`--no-mcp` opts
-out); `integrate`, a refresh or a stored decision without that note never
-register it. One failing harness does not stop the others: its own partial
-writes are undone, the summary lists it as failed and setup exits with code
-20 (the installers continue with a warning).
+Answers are stored under `generated/harness-choices/` and reused by later setups, `zcode-kit update` and `zcode-kit doctor --fix`: what you agreed to is kept up to date, what you declined is left alone, and you are not asked again. `zcode-kit setup --reask` asks again on a terminal, and `zcode-kit doctor --forget <assistant>` deletes one stored answer. An integration this kit created earlier may be refreshed even when no answer is stored for it.
 
-| Harness | Mechanism | Impact on existing config |
-|---|---|---|
-| OMP (oh-my-pi) | provider block `zcode` in `~/.omp/agent/models.yml` + autostart extension | additive (managed block, transactional, idempotent); model selection: `omp --model zcode/glm-5.3[-flash] --thinking low\|high\|max` |
-| pi | provider `zcode` in `~/.pi/agent/models.json` (`api: anthropic-messages`, `!node` key resolver) | additive (other providers stay); source: pi-mono docs/models.md |
-| Claude Code | `generated/claude-zcode-settings.json` + `bin/zcode-claude.cmd\|.sh` | `~/.claude` stays untouched (opt-in per invocation) |
-| Codex CLI | isolated `generated/codex-home` + `bin/zcode-codex.cmd\|.sh` | `~/.codex` stays untouched; **difference**: your own skills/rules/MCP do not apply inside the wrapper |
-| OpenCode | provider `zcode` in `opencode.json` (`@ai-sdk/openai-compatible`, apiKey `{env:ZCODE_PROXY_KEY}`) | additive; JSONC comments are preserved |
-| Aider | `generated/aider-zcode.env` + `bin/zcode-aider.cmd\|.sh` (process-local, **no setx**) | model `openai/glm-5.3[-flash]` |
-| Continue | managed block in `~/.continue/config.yaml` (schema v1) | existing models/roles stay |
-| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json` (Windows) or `~/.config/goose/custom_providers/zcode.json` (macOS/Linux) | credential via documented `auth.command` helper (kit key resolver, no shell) |
-| Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | the kit never touches VS Code state; enter the values once in the UI |
-| Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | custom provider (Anthropic messages) in the UI; the kit deliberately does not write kilo.jsonc |
-| MCP-capable harnesses | stdio server `zcode-harness` (`node mcp/zcode-harness-mcp/dist/index.js --stdio`) | OMP: entry in `~/.omp/agent/mcp.json`; Claude Code: `claude mcp add` (only if detected and consented); Codex: inside the isolated home. MCP alone does NOT count as model integration |
+Ctrl-C ends setup with exit code 130. A checkbox list that was not confirmed is not applied; y/n answers already given stay applied. If one assistant fails, its partial changes are undone, the others are still configured and setup exits with code 20. Setup prints the `zcode-kit rollback` command that undoes its changes. A configured assistant means that the files were written, not that sign-in works or that a model replies; check sign-in with `zcode-kit auth status`.
 
-Paths under `generated/` refer to kit state: the kit directory for release
-installs/source checkouts, or the separate state directory for npm installs.
+## Configuring one assistant
 
-Run OMP directly, for example `omp --model zcode/glm-5.3-flash --thinking low`, not through `zcode-kit run`. Setup pins native Node/Bun; autostart preflight uses a fresh child process, not kit-module imports into OMP. The child has a 120-second limit and reports secret-free failure categories. After fixing the cause, retry after the 60-second per-session cooldown; the same session can recover. If the runtime moved, rerun `zcode-kit setup --harness auto` and reload the extension. Unknown port owners are never stopped. A healthy proxy or successful setup alone does not prove that a model reply completes.
-
-## Opt-in wrappers (existing config stays untouched)
-
-| Harness | Wrapper | What it does |
-|---|---|---|
-| Claude Code | `bin\zcode-claude.cmd` | starts the proxy on demand and calls `claude --settings <kit state>\generated\claude-zcode-settings.json` (CLI settings override user settings.json; your normal `claude` keeps running unchanged) |
-| Codex CLI | `bin\zcode-codex.cmd` | sets `CODEX_HOME=<kit state>\generated\codex-home` + `ZCODE_PROXY_KEY` and starts the proxy on demand; your normal `codex` and `~/.codex` stay untouched |
-
-## Wiring a client manually (any OpenAI-/Anthropic-capable client)
-
-This is an equal entry point, not a fallback. The kit proxy must be running
-and ZCode needs a valid login. `zcode-kit proxy start` (also when the proxy is
-already running) and `zcode-kit proxy status` print the current base URLs,
-local key and model IDs. While the proxy is not verified running, the values
-are labelled as coming from configuration and the output says `Start the
-proxy first: zcode-kit proxy start`. The full key appears only in an
-interactive terminal; otherwise use `zcode-kit models --show-key`. Replace the
-example port below with the port the command shows.
-
-```yaml
-# OpenAI format
-base_url: http://127.0.0.1:8457/v1
-api_key: <contents of .proxykey>
-model: glm-5.3            # or glm-5.3-flash
+```sh
+zcode-kit integrate <assistant> --dry-run   # lists what would be written, writes nothing
+zcode-kit integrate <assistant>             # writes it and stores your consent
+zcode-kit rollback                          # undoes the most recent change
 ```
 
-```yaml
-# Anthropic format
-base_url: http://127.0.0.1:8457
-auth_token: <contents of .proxykey>
-model: glm-5.3
-```
+`--dry-run` prints a `would write` line for each file that would change. The real run also stores a yes for that assistant, so later setups and updates keep it current. It never registers the MCP bridge. In a git checkout of the kit, `setup` and `integrate` refuse to write unless `ZCODE_KIT_ALLOW_CHECKOUT=1` is set.
 
-Reasoning/thinking:
-- **Anthropic format**: `thinking: {type: "enabled", budget_tokens: 2048|16384|32768}`
-  paired with `output_config: {effort: "low"|"high"|"max"}` — details in
-  [EFFORT_MAPPING.md](../EFFORT_MAPPING.md).
-- **OpenAI format**: `reasoning_effort: low|high|max` + `thinking: {type: "enabled"}`
-  (the proxy translates into the Anthropic fields).
+## Overview
 
-**Flash:** `glm-5.3-flash` always thinks. Explicitly disabled thinking is normalized to `low`; explicit `high` and `max` are preserved. For Flash, the low Anthropic thinking budget is `8000` tokens (rather than the generic `2048` above), with additional output headroom for the answer; OpenAI uses `reasoning_effort: low`. Do not treat higher thinking effort alone as evidence of a hang. Direct-proxy and Claude Code Flash replies have completed successfully; this does not establish acceptance for every harness.
+| Assistant (id) | Setup writes | Start it with | Tested with a model reply |
+|---|---|---|---|
+| OMP (`omp`) | provider `zcode` in `~/.omp/agent/models.yml`, an autostart extension | `omp --model zcode/glm-5.3-flash` | Windows, version 18.2.9 |
+| pi (`pi`) | provider `zcode` in `~/.pi/agent/models.json` | `zcode-kit proxy start`, then `pi --model zcode/glm-5.3` | Windows, version 0.85.0 |
+| Claude Code (`claude-code`) | `generated/claude-zcode-settings.json` | `zcode-kit run claude-code -- <args>` | Windows, version 2.1.278 |
+| Codex CLI (`codex`) | `generated/codex-home/config.toml` | `zcode-kit run codex -- <args>` | Windows, version 0.155.1 |
+| OpenCode (`opencode`) | provider `zcode` in OpenCode's configuration file | `zcode-kit run opencode -- <args>` | Windows, version 1.18.29 |
+| Aider (`aider`) | `generated/aider-zcode.env` | `zcode-kit run aider -- <args>` | Windows, version 0.86.2 |
+| Continue (`continue`) | two models in `~/.continue/config.yaml` | `zcode-kit proxy start`, then select the model in Continue | no |
+| Goose (`goose`) | `zcode.json` in Goose's `custom_providers` folder | `zcode-kit proxy start`, then `goose session --provider zcode` | no |
+| Cline (`cline`) | `generated/cline-zcode-values.md` | enter the values in Cline, then `zcode-kit proxy start` | no |
+| Kilo Code (`kilo-code`) | `generated/kilo-zcode-values.md` | enter the values in Kilo Code, then `zcode-kit proxy start` | no |
 
-On Windows the isolated Codex profile enables the restricted-token sandbox (`windows.sandbox = "unelevated"`); `workspace-write` remains limited to the project and does not grant full access. OpenCode Flash exposes `--variant low`, `high`, and `max`, with `low` as its default. Its native npm executable wrapper and Brotli/deflate-compressed session streams are supported. Responses tool-result text and image parts are preserved; malformed event items are not treated as successful output.
+The last column is from the [support matrix](../SUPPORT_MATRIX.json): Windows 11, 2026-09-23, kit v0.2.33, `glm-5.3-flash`. Nothing was tested with a real model reply on Linux or macOS. For the rows marked "no", only writing the configuration was tested, without the assistant itself.
 
-## MCP clients (generic)
+`generated/` and the local key `.proxykey` are in the kit directory for release installs and source checkouts, and in a separate state directory outside `node_modules` for npm installs. Some of the written files contain the key in plain text; do not share them, and run `zcode-kit setup` again if the key changes.
+
+`zcode-kit run <assistant> -- <args>` exists for Claude Code, Codex CLI, OpenCode and Aider. It starts the proxy if needed and passes everything after `--` to the assistant. The scripts `bin/zcode-claude`, `bin/zcode-codex` and `bin/zcode-aider` (`.cmd` or `.sh`) in the kit directory do the same.
+
+## Notes per assistant
+
+### OMP
+
+Start OMP directly; there is no `zcode-kit run omp`. Choose the thinking level with `--thinking low`, `high` or `max`; the kit declares `max` as the default. Setup adds a marked block to `models.yml`, copies the extension to `~/.omp/agent/extensions/` and, if `config.yml` exists, registers the extension there and removes `zcode` from `disabledProviders`. It skips OMP when `models.yml` does not exist, and it changes nothing when the file has a `zcode` provider that you wrote yourself.
+
+The extension starts the proxy on OMP's first request to a `zcode` model. The start check runs in a separate process for at most 120 seconds. If it fails, OMP prints a `[zcode-autostart]` line with the reason and tries again no earlier than 60 seconds later. The extension stores the path of the Node.js that setup found; if that Node.js is removed or is older than version 24, run `zcode-kit setup` again and restart OMP.
+
+### pi
+
+pi does not start the proxy itself. The entry uses the Anthropic messages format, and your other providers are kept. The key is not written into the file: pi obtains it by running the kit's script `proxy/resolve-zcode-proxy-key.mjs`. Setup skips pi when `~/.pi/agent` does not exist and changes nothing when the file has a `zcode` provider that the kit did not write. The kit sets no thinking levels for pi.
+
+### Claude Code
+
+`~/.claude/settings.json` is not changed. `zcode-kit run claude-code -- <args>` runs `claude --settings <generated file> <args>`, so only that call goes to ZCode and plain `claude` works as before. The settings use `glm-5.3` as the main model and `glm-5.3-flash` as the small, fast model; add `--model glm-5.3-flash` to use Flash throughout. Anthropic does not officially support Claude Code with models other than Claude.
+
+### Codex CLI
+
+`zcode-kit run codex -- <args>` sets `CODEX_HOME` to `generated/codex-home` for that call; `~/.codex` and plain `codex` stay as they are. Because it is a separate home, your own Codex settings, skills, rules and MCP servers do not apply there. Its `config.toml` uses the Responses API with `glm-5.3` as the default model and always contains an entry for the kit's MCP bridge. On Windows it also sets `sandbox = "unelevated"` under `[windows]`.
+
+### OpenCode
+
+Setup edits the file named by `OPENCODE_CONFIG`, otherwise `opencode.jsonc` or `opencode.json` in `OPENCODE_CONFIG_DIR`, `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, and creates it if it is missing. Other settings, and comments outside the `provider` section, are kept. A `zcode` provider that the kit did not write stops the change with an error. The entry reads the key from the environment variable `ZCODE_PROXY_KEY`, which `zcode-kit run opencode` sets. If you start `opencode` directly, set the variable yourself and start the proxy first. `glm-5.3-flash` has the variants `low`, `high` and `max`, with `low` as the default.
+
+### Aider
+
+`zcode-kit run aider` sets `OPENAI_API_BASE` and `OPENAI_API_KEY` for that one process; nothing is set system-wide and `~/.aider.conf.yml` is not touched. Without arguments it runs `aider --model openai/glm-5.3`. With arguments, name the model yourself, for example `zcode-kit run aider -- --model openai/glm-5.3-flash`. `generated/aider-zcode.env` holds the same values for manual use.
+
+### Continue
+
+Setup appends "ZCode GLM-5.3" and "ZCode GLM-5.3-Flash" in a marked block at the end of the `models:` list; existing models stay. Setup skips Continue when `config.yaml` does not exist; once it does, run `zcode-kit integrate continue`. A `models:` list written on one line with entries is not edited; rewrite it as a block list first.
+
+### Goose
+
+The folder is `%APPDATA%\Block\goose\config\custom_providers` on Windows and `~/.config/goose/custom_providers` on macOS and Linux. The key is not stored in `zcode.json`; Goose obtains it by running the kit's key script. A `zcode.json` that this kit did not write is not overwritten.
+
+### Cline and Kilo Code
+
+The kit does not write into the storage that VS Code keeps for these extensions. Setup writes a sheet with the values, and you enter them once in the extension's settings:
+
+- **Cline:** API Provider "OpenAI Compatible", the base URL ending in `/v1`, the key and a model ID. The sheet also gives the `cline auth` command for the Cline CLI.
+- **Kilo Code:** a custom provider with the API "Anthropic Messages", the base URL ending in `/v1`, the key and both models, which you add by hand. The kit does not write `kilo.jsonc`.
+
+The sheets do not contain the key; print it with `zcode-kit models --show-key`. Setup finds the two extensions only in `~/.vscode/extensions`. For another editor, run `zcode-kit integrate cline` or `zcode-kit integrate kilo-code`.
+
+## MCP bridge
+
+The bridge `zcode-harness` is a local MCP server that lets an assistant work with sessions and tasks of your installed ZCode. Registering it does not connect a model.
+
+Setup registers the bridge for OMP (in `~/.omp/agent/mcp.json`) and for Claude Code (`claude mcp add zcode-harness --scope user`) when you tick or answer `y` for that assistant, or name it with `--harness`; the list and the questions say so. `--no-mcp` leaves the bridge out, and `integrate` never registers it. For Claude Code this is the only change to your normal configuration; `claude mcp remove zcode-harness --scope user` or `zcode-kit uninstall` removes it. Other MCP clients can use this entry:
 
 ```json
 {
@@ -116,28 +105,47 @@ On Windows the isolated Codex profile enables the restricted-token sandbox (`win
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<absolute kit installation path>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["--max-semi-space-size=1", "<absolute kit installation path>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
 ```
 
-The bridge drives the **real installed ZCode harness** (app-server protocol:
-sessions, turns, tasks). Desktop may be needed for interactive verification;
-the provider can still reject a model turn. Bridge reasoning levels are
-`low/high/max`. Its live model catalog can differ from the proxy catalog;
-GLM-5.3-Flash is verified through the proxy path. A native catalog entry is
-not proof of a successful native model turn, and proxy acceptance does not
-establish native-provider acceptance. Details:
-[mcp/zcode-harness-mcp/README.md](../mcp/zcode-harness-mcp/README.md).
+The bridge needs ZCode Desktop installed and signed in, and its model list can differ from the proxy's. In the recorded test (Windows 11, ZCode 0.16.9, 2026-09-23) it listed and selected GLM-5.3-Flash, but the provider rejected the model request with code 1113 (insufficient balance), so a model reply through the bridge is not confirmed. See the [bridge documentation](../mcp/zcode-harness-mcp/README.md).
 
-## Quota & error modes
+## Other clients
 
-- `GET /quota` (authenticated) shows the token buckets per model.
-- Quota exhausted → HTTP 400 `[1005] exceed quota limit`. The proxy retries the same account on a growing schedule (up to ~65s by default) before failing over to another account, when the rotator has one; if you still see it, wait for the provider to restore quota.
-- `[3007] captcha verify failed` → gateway anti-abuse. The proxy retries once with a freshly minted captcha token; if it still fails, take a pause.
-- Transient failures before any output (connection refused or reset, HTTP 500/502/503/504/524/529, 429, and the gateway error codes the official client retries) are retried up to 3 times on the same account with a growing delay; the budget is smaller than the official client's (base delay 1 s doubling, `Retry-After` honoured up to 15 seconds), and the account is re-checked before every retry. Gateway verdicts (quota, balance, captcha, model, authentication), request errors and anything after output has started are never retried; a `Retry-After` above 15 seconds is passed to the client on 429, 503 and 529. Tune with `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` (base delay in milliseconds, default 500, capped at 10000; `off` keeps only the retry of connections that were never established; proxy start/restart passes it through).
-- A stream that fails before its first content event (an error event such as `overloaded_error`, or a cut connection) is retried like a failed request, so the harness sees the good stream only; after the first content event nothing is retried. On start-plan every retry after a response takes a fresh captcha token.
-- A stream that the upstream cuts off ends with an error payload instead of a silent truncation: chat streams get `data: {"error":…}`, Responses streams `response.failed`, native Anthropic streams one `event: error` frame of type `api_error` whose message names the cause (`upstream_incomplete` or `upstream_stream_error`); an unfinished last frame is dropped so that the error frame stays parseable. Nothing is replayed after output has started; send the turn again from the harness.
-- `401 start_plan_jwt_invalid` → check your Desktop login and renew it with `zcode-kit auth login zai`. Use `zcode-kit auth login zai --import` for the current active Desktop 0.16.9 `zai`/`start-plan` login with an explicitly configured plan. Existing `credentials.json` is authoritative; invalid credentials do not silently fall back to `config.json`. Modern `coding-plan` logins use normal OAuth instead; import does not create or resolve API keys.
-- `[1210]` with Flash → check that thinking is enabled and choose `low`, `high`, or `max`, rather than disabling it. The proxy normalizes disabled thinking to `low`; see the Flash note above.
+Any client that speaks the OpenAI or Anthropic API can use the proxy without an integration. `zcode-kit proxy start` and `zcode-kit proxy status` print the base URLs, the key and the model IDs. The full key is shown only on an interactive terminal; `zcode-kit models --show-key` prints it elsewhere. The examples use the default port `8457`.
+
+```yaml
+# OpenAI format
+base_url: http://127.0.0.1:8457/v1
+api_key: <local proxy key>
+model: glm-5.3            # or glm-5.3-flash
+```
+
+```yaml
+# Anthropic format
+base_url: http://127.0.0.1:8457
+auth_token: <local proxy key>
+model: glm-5.3
+```
+
+The proxy serves `POST /v1/messages` (Anthropic), `POST /v1/chat/completions` and `POST /v1/responses` (OpenAI), `GET /v1/models`, `GET /health` and `GET /quota`. All of them need the key, as `Authorization: Bearer <key>` or as `x-api-key`.
+
+### Thinking levels
+
+Both models take the levels `low`, `high` and `max`; see the [effort mapping](../EFFORT_MAPPING.md).
+
+- **OpenAI format:** send `reasoning_effort`. `medium` is treated as `high`, and a request without the field runs at `max`. The proxy adds a thinking budget of 8000, 16000 or 32000 tokens.
+- **Anthropic format:** send `thinking: {type: "enabled", budget_tokens: <n>}` together with `output_config: {effort: "low"|"high"|"max"}`.
+- **Flash always thinks.** A request to `glm-5.3-flash` that turns thinking off is sent with `low`.
+
+## Errors and quota
+
+- **`[1005] exceed quota limit` (HTTP 400):** the quota is used up. The proxy retries for about 65 seconds and then tries another account if the Account Rotator has one. If the error still reaches you, wait until the quota is restored; `zcode-kit proxy status` shows it.
+- **`[3007] captcha verify failed`:** the provider's abuse check rejected the request. The proxy retries once with a new token; if that fails too, wait before you retry.
+- **`[1210]` with Flash:** choose `low`, `high` or `max` instead of turning thinking off.
+- **HTTP 401:** `Invalid or missing proxy API key` means that the client sent the wrong local key. Otherwise check sign-in with `zcode-kit auth status` and renew it with `zcode-kit auth login zai`. Add `--import` to take over the active Desktop `zai`/`start-plan` login; `coding-plan` logins sign in without it.
+- **Temporary failures before any output** (connection refused or reset, HTTP 429, 500, 502, 503, 504, 524 or 529, or a stream that fails before its first content) are retried up to 3 times with a growing delay. Nothing is retried once output has started. `ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS`, read when the proxy starts, sets the base delay in milliseconds (default 500, at most 10000).
+- **A reply that is cut off** ends with an error instead of stopping silently: `data: {"error":…}` in chat streams, `response.failed` in Responses streams, `event: error` in Anthropic streams. Send the request again from the assistant.

@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { BoundedCollection } from "../runtime/bounded-collection.js";
+import { CDN_DISK_MAX_BYTES, CdnDiskPruner, cdnDiskAgeLimit } from "./captcha-cdn-disk.js";
 
 export const DEFAULT_CDN_TTL_MS = 24 * 60 * 60 * 1000;
 export const MAX_CDN_TTL_MS = 2_147_483_647;
@@ -32,15 +34,37 @@ export interface CdnCacheOptions {
   directory?: string;
   ttlMs?: number;
   now?: () => number;
+  /**
+   * Body budget of the memory tier. Tests only (the seam-3 replay compares
+   * 32 and 64 MiB); production always uses CDN_MEMORY_MAX_BYTES. Deliberately
+   * not a config key or env override.
+   */
+  memoryMaxBytes?: number;
+  /**
+   * Byte cap of the disk directory. Tests only (the seam-3 replay records a
+   * workload above the cap); production always uses CDN_DISK_MAX_BYTES.
+   */
+  diskMaxBytes?: number;
 }
 
 const sha256 = (body: Buffer | string) => crypto.createHash("sha256").update(body).digest("hex");
+
+// The memory tier's bound: ≤ 64 MB of memory and ≤ 256
+// entries. It lives in the solver, so it also resets with each solver
+// generation. Eviction changes memory use only: an evicted entry is read back
+// from its disk envelope or fetched again.
+// Bodies are capped at half the memory bound because the runtime keeps the
+// memory of evicted bodies for a while: S2 measured a steady +26 MB over the
+// held bytes (64 MiB held → 90 MB, 32 MiB → 58 MB).
+export const CDN_MEMORY_MAX_ENTRIES = 256;
+export const CDN_MEMORY_MAX_BYTES = 32 * 1024 * 1024;
 
 export class CaptchaCdnCache {
   readonly directory: string;
   readonly ttlMs: number;
   private readonly now: () => number;
-  private readonly memory = new Map<string, CdnEntry>();
+  private readonly memory: BoundedCollection<string, CdnEntry>;
+  private readonly disk: CdnDiskPruner;
   private readonly pending = new Map<string, Promise<CdnEntry>>();
   // Only failed deletions need a tombstone. Do not read an invalidated disk
   // entry again merely because the filesystem temporarily refused unlink.
@@ -50,11 +74,30 @@ export class CaptchaCdnCache {
   private readonly generations = new Map<string, object>();
 
   constructor(options: CdnCacheOptions = {}) {
+    this.memory = new BoundedCollection<string, CdnEntry>({
+      maxEntries: CDN_MEMORY_MAX_ENTRIES,
+      maxBytes: options.memoryMaxBytes ?? CDN_MEMORY_MAX_BYTES,
+      sizeOf: (entry) => entry.body.length,
+    });
     this.directory = options.directory ?? process.env.CAPTCHA_CDN_CACHE_DIR ??
       path.join(os.homedir(), ".zcode-captcha-cdn-cache");
     if (!this.directory.trim()) throw new Error("CAPTCHA_CDN_CACHE_DIR must not be empty");
     this.ttlMs = parseCdnTtl(options.ttlMs);
     this.now = options.now ?? Date.now;
+    this.disk = new CdnDiskPruner({
+      directory: this.directory,
+      now: this.now,
+      maxBytes: options.diskMaxBytes ?? CDN_DISK_MAX_BYTES,
+      ageLimitMs: cdnDiskAgeLimit(this.ttlMs),
+    });
+    // Pruned at start and after each write. A TTL of 0 disables the
+    // disk tier, so such an installation leaves the directory alone.
+    if (this.ttlMs > 0) this.disk.prune();
+  }
+
+  /** What the memory tier holds now: entries and body bytes (diagnostics and tests). */
+  memoryUsage(): { entries: number; bytes: number } {
+    return { entries: this.memory.size, bytes: this.memory.bytes };
   }
 
   private file(url: string): string {
@@ -163,6 +206,7 @@ export class CaptchaCdnCache {
       } catch {} finally {
         if (directoryFd !== undefined) fs.closeSync(directoryFd);
       }
+      this.disk.afterWrite(path.basename(target), header.length + entry.body.length, entry.fetchedAt);
     } catch {
       // Disk availability must not turn a valid CDN response into a solve error.
     } finally {

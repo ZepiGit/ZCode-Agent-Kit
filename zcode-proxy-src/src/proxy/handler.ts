@@ -22,7 +22,7 @@ import { getDefaultEndpointRouting, type EndpointRoutingService } from "./endpoi
 import { getDefaultClientSigning, sendWithClientSigning, type ClientSigningManager } from "./client-signing.js";
 import { credentialString, type Credential } from "../auth/types.js";
 import { isPostWriteError, sendOrderedUpstreamRequest } from "./ordered-transport.js";
-import { transformRequestBody } from "./body-transformer.js";
+import { applyRequestBodyTransforms, jsonCopy, transformRequestBody } from "./body-transformer.js";
 import { CAPTCHA_CHALLENGE_HEADER, isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
 import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
@@ -47,10 +47,13 @@ import { anthropicSseToOpenaiSse, openaiSseToAnthropicSse } from "../translator/
 import type { OpenAIChatRequest, OpenAIChatResponse, AnthropicMessagesRequest, AnthropicMessagesResponse } from "../translator/types.js";
 import { dumpPhase, dumpHeaders, dumpBody, dumpEnabled, SENSITIVE_HEADERS } from "./dump.js";
 import { ensureAnthropicSseTerminal } from "./sse-terminal.js";
+import { observeInClientPath } from "./response-body.js";
 import { gateStreamPrelude, isGatedStream, type PreludeVerdict } from "./stream-prelude.js";
 import { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 export { RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES } from "./gateway-codes.js";
 import { inflateWithCap, decodeContentStream } from "./inflate.js";
+import { settleBodyBytes, shedResponse, solverShed } from "../server/admission.js";
+import { CaptchaSolverUnavailableError } from "./captcha-token.js";
 import { buildAnthropicMetadataUserId } from "./trace-headers.js";
 
 /** Options for the proxy handler. */
@@ -100,9 +103,9 @@ export async function proxyRequest(
   const started = Date.now();
   const reqId = nextReqId();
 
-  let body: string | undefined;
+  let bodyBytes: Uint8Array | undefined;
   try {
-    body = await readBody(clientReq);
+    bodyBytes = await readBodyBytes(clientReq);
   } catch (err) {
     if (err instanceof InflatedBodyTooLargeError) {
       return errorResponse(413, "request_too_large", err.message);
@@ -110,13 +113,32 @@ export async function proxyRequest(
     return errorResponse(400, "invalid_request_error", (err as Error).message);
   }
 
-  if (body) {
+  // The body is parsed once: validation, the request meta, the
+  // OpenAI translation and the body transforms all read this one object. A
+  // large body is parsed straight from its bytes, which decodes them exactly
+  // as TextDecoder does but holds no JS copy of the text; the text is decoded
+  // only if it is sent as is. Debug and dump output keep the text path.
+  const parseFromBytes = bodyBytes !== undefined && bodyBytes.byteLength >= PARSE_FROM_BYTES_MIN && !debug && !dumpEnabled();
+  let body: string | undefined;
+  if (!parseFromBytes) {
+    body = bodyBytes === undefined ? undefined : new TextDecoder().decode(bodyBytes);
+    bodyBytes = undefined;
+  }
+  let parsedBody: Record<string, unknown> | undefined;
+  if (parseFromBytes) {
+    try {
+      const parsed: unknown = await new Response(bodyBytes as BodyInit).json();
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse(400, 'invalid_request_error', 'Request body must be a JSON object');
+      parsedBody = parsed as Record<string, unknown>;
+    } catch { return errorResponse(400, format === 'openai' ? 'translation_failed' : 'invalid_request_error', 'Request body is not valid JSON'); }
+  } else if (body) {
     try {
       const parsed = JSON.parse(body);
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return errorResponse(400, 'invalid_request_error', 'Request body must be a JSON object');
+      parsedBody = parsed as Record<string, unknown>;
     } catch { return errorResponse(400, format === 'openai' ? 'translation_failed' : 'invalid_request_error', 'Request body is not valid JSON'); }
   }
-  const meta = peekBody(body);
+  const meta = requestMeta(parsedBody);
 
   if (dumpEnabled()) {
     dumpPhase(reqId, "client_in", {
@@ -169,15 +191,22 @@ export async function proxyRequest(
   const translateAnthropicToOpenAI = false;
   const translateOpenAIToAnthropic = format === "openai";
   const upstreamFormat: Format = "anthropic";
-  const clientSession = resolveSessionContext({ clientReq, body, upstreamFormat, model: meta.model, config });
+  const clientSession = resolveSessionContext({ clientReq, body, parsedBody, upstreamFormat, model: meta.model, config });
   if (debug && clientSession) {
     const shortSession = clientSession.sessionId ? clientSession.sessionId.slice(0, 10) : "-";
     debugLine(reqId, `clientIdentity source=${clientSession.source} action=${clientSession.action} confidence=${clientSession.confidence.toFixed(2)} session=${shortSession}`);
   }
 
   let upstreamBody = body;
-  if (translateOpenAIToAnthropic) {
-    const translated = translateOpenAIBody(body);
+  // A translated request kept as an object: it is transformed and
+  // serialised once below. Debug mode serialises it here to log its size.
+  let translatedRequest: object | undefined;
+  if (translateOpenAIToAnthropic && !debug) {
+    const translated = translateOpenAIRequest(body, parsedBody);
+    if (translated instanceof Response) return translated;
+    translatedRequest = translated;
+  } else if (translateOpenAIToAnthropic) {
+    const translated = translateOpenAIBody(body, parsedBody);
     if (translated instanceof Response) return translated;
     upstreamBody = translated;
     if (debug) debugLine(reqId, `translated OpenAI→Anthropic (bytes=${upstreamBody?.length ?? 0})`);
@@ -191,7 +220,41 @@ export async function proxyRequest(
   // Bundle `E2e` fires for EVERY anthropic-kind request (both plans) — the
   // injected user_id is the device/session blob, never the account uuid.
   const metadataUserId = buildAnthropicMetadataUserId(config.identity.deviceMid, clientSession?.sessionId);
-  const transformedBody = transformRequestBody(upstreamBody, { format: upstreamFormat, metadataUserId, startPlan });
+  const transformContext = { format: upstreamFormat, metadataUserId, startPlan };
+  // Passthrough transforms the parsed client body in place; a translated
+  // request is transformed as built; translated text (debug mode) goes
+  // through the text form. Every way, the bytes are those of
+  // transformRequestBody(the text the request would have been).
+  let transformedBody: string | undefined;
+  if (translatedRequest) {
+    body = upstreamBody = undefined;
+    bodyBytes = undefined;
+    parsedBody = undefined;
+    // translatedRequest is already a jsonCopy: transformBuiltRequestBody minus its copy.
+    applyRequestBodyTransforms(translatedRequest, transformContext);
+    transformedBody = JSON.stringify(translatedRequest);
+    translatedRequest = undefined;
+  } else if (upstreamBody === body && parsedBody) {
+    if (applyRequestBodyTransforms(parsedBody, transformContext)) {
+      // The client's text is not sent: let it go before the new text is
+      // built. Debug output still compares the two.
+      if (!debug) body = upstreamBody = undefined;
+      bodyBytes = undefined;
+      transformedBody = JSON.stringify(parsedBody);
+    } else {
+      // Sent as the client wrote it: the text, decoded now when the body was
+      // parsed from its bytes.
+      transformedBody = upstreamBody ?? (bodyBytes === undefined ? undefined : new TextDecoder().decode(bodyBytes));
+      bodyBytes = undefined;
+    }
+  } else {
+    // A translated body: the client's text and object were read already.
+    if (!debug) body = undefined;
+    parsedBody = undefined;
+    transformedBody = transformRequestBody(upstreamBody, transformContext);
+  }
+  // From here on only the text sent upstream is held for retries.
+  parsedBody = undefined;
   if (debug && transformedBody !== upstreamBody) {
     debugLine(reqId, `body transformed (upstreamFormat=${upstreamFormat}, startPlan=${startPlan}, bytes=${transformedBody?.length ?? 0})`);
   }
@@ -366,6 +429,10 @@ export async function proxyRequest(
         if (phase === "solver") {
           if (debug) debugError(reqId, "captcha_solver_failed", err.message);
           printRow(reqId, format, meta, 503, started, Date.now(), 0, 0, 0);
+          // The solver refused the solve: the shed contract, with the time to retry.
+          if (err instanceof CaptchaSolverUnavailableError) {
+            return shedResponse(format === "anthropic" ? "anthropic" : "openai", { ...solverShed(err.reason), retryAfterSeconds: err.retryAfterMs / 1000 });
+          }
           return errorResponse(503, "captcha_solver_failed", err.message);
         }
         if (debug) debugError(reqId, "upstream_unreachable", err.message);
@@ -417,12 +484,12 @@ export async function proxyRequest(
   }
   const isSSE = upstreamResp.headers.get("content-type")?.includes("text/event-stream") ?? false;
 
+  // Streamed answers are observed in the client's path: the
+  // upstream is read no faster than the client drains it.
   if (translateOpenAIToAnthropic) {
     if (isSSE && upstreamResp.body) {
       const translated = anthropicSseToOpenaiSse(upstreamResp.body, meta.model);
-      const [clientBody, statsBody] = translated.tee();
-      observeStream(reqId, format, meta, upstreamResp.status, started, statsBody, null);
-      return translatedSseResponse(clientBody);
+      return translatedSseResponse(observeStream(reqId, format, meta, upstreamResp.status, started, translated, null));
     }
     return await translatedBatchResponse(clientReq, upstreamResp, meta.model, reqId, format, meta, started, headersAt);
   }
@@ -430,16 +497,13 @@ export async function proxyRequest(
   if (translateAnthropicToOpenAI) {
     if (isSSE && upstreamResp.body) {
       const translated = openaiSseToAnthropicSse(upstreamResp.body, meta.model);
-      const [clientBody, statsBody] = translated.tee();
-      observeStream(reqId, format, meta, upstreamResp.status, started, statsBody, null);
-      return translatedSseResponse(clientBody);
+      return translatedSseResponse(observeStream(reqId, format, meta, upstreamResp.status, started, translated, null));
     }
     return await translatedOpenAIToAnthropicBatchResponse(clientReq, upstreamResp, reqId, format, meta, started, headersAt);
   }
 
   if (isSSE && upstreamResp.body) {
-    const [clientBody, statsBody] = upstreamResp.body.tee();
-    observeStream(reqId, format, meta, upstreamResp.status, started, statsBody, upstreamResp.headers.get("content-encoding"));
+    const clientBody = observeStream(reqId, format, meta, upstreamResp.status, started, upstreamResp.body, upstreamResp.headers.get("content-encoding"));
     // Native Anthropic streams get a terminal `event: error` when the upstream
     // ends without message_stop or the read fails (only where the bytes are
     // readable: an uncompressed stream, or one this proxy decompresses).
@@ -500,11 +564,11 @@ async function decodeBodyText(resp: Response): Promise<string | null> {
  * response fields, or null when the body is a legitimate message response.
  *
  * Statuses are chosen to match Anthropic client retry semantics:
- * quota/balance exhaustion (1005/1113) and captcha/capability rejections
- * (3006/3007/3012) are deterministic for the current account/window, so they
- * map to non-retryable 400/403 — mirroring Anthropic's own "credit balance
- * too low" 400 — instead of a retryable 429 that only provokes more
- * gateway anti-abuse (captcha) challenges.
+ * quota/balance exhaustion (1005/1113), the captcha rejection (3007) and
+ * model/authorization rejections (3006/3012) are deterministic for the
+ * current account/window, so they map to non-retryable 400/403 — mirroring
+ * Anthropic's own "credit balance too low" 400 — instead of a retryable 429
+ * that only provokes more gateway anti-abuse (captcha) challenges.
  */
 
 export function shouldUseOrderedTransport(config: ProxyConfig, clientSession: ClientSessionResult | undefined, hasCustomFetchImpl: boolean): boolean {
@@ -855,6 +919,15 @@ async function sendUpstreamRequest(
  * payload cannot expand into unbounded proxy memory).
  */
 export async function readBody(req: Request): Promise<string | undefined> {
+  const bytes = await readBodyBytes(req);
+  return bytes === undefined ? undefined : new TextDecoder().decode(bytes);
+}
+
+/**
+ * readBody before decoding: the body bytes (inflated when gzip), undefined for
+ * an empty wire body. Same limits and errors as readBody.
+ */
+async function readBodyBytes(req: Request): Promise<Uint8Array | undefined> {
   if (req.method === "GET" || req.method === "HEAD") return undefined;
   const maxWireBytes = 32 * 1024 * 1024;
   if (Number(req.headers.get('content-length')) > maxWireBytes) {
@@ -863,30 +936,61 @@ export async function readBody(req: Request): Promise<string | undefined> {
   }
   if (!req.body) return undefined;
   const reader = req.body.getReader();
+  // A body with a Content-Length is read straight into one buffer of that
+  // size, so each chunk can be dropped once copied instead of
+  // holding every chunk plus their joined copy. Bytes beyond the declared
+  // length (a Request built in-process can declare anything) fall back to the
+  // chunk list.
+  const declared = Number(req.headers.get("content-length"));
+  let buffer: Uint8Array | null = Number.isSafeInteger(declared) && declared > 0 ? new Uint8Array(declared) : null;
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
-      size += value.byteLength;
-      if (size > maxWireBytes) {
+      if (size + value.byteLength > maxWireBytes) {
         void reader.cancel().catch(() => {});
         throw new InflatedBodyTooLargeError(maxWireBytes);
       }
-      chunks.push(value);
+      if (buffer && size + value.byteLength <= buffer.byteLength) {
+        buffer.set(value, size);
+      } else {
+        if (buffer) { chunks.push(buffer.subarray(0, size)); buffer = null; }
+        chunks.push(value);
+      }
+      size += value.byteLength;
     }
   } finally { reader.releaseLock(); }
+  // Admission: from now on the request is charged the bytes it
+  // really holds, not its reservation (a body without Content-Length).
+  settleBodyBytes(req, size);
   if (size === 0) return undefined;
-  const bytes = new Uint8Array(size);
-  let position = 0;
-  for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength; }
+  let bytes: Uint8Array;
+  if (buffer) {
+    bytes = size === buffer.byteLength ? buffer : buffer.subarray(0, size);
+  } else {
+    bytes = new Uint8Array(size);
+    let position = 0;
+    for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength; }
+  }
+  chunks.length = 0;
   const encoding = req.headers.get("content-encoding")?.toLowerCase().trim() ?? "";
   if (encoding === "gzip" || encoding === "x-gzip") {
-    return new TextDecoder().decode(await inflateGzipBody(bytes));
+    const inflated = await inflateGzipBody(bytes);
+    // A gzip body is charged its inflated size once it is inflated.
+    settleBodyBytes(req, Math.max(size, inflated.byteLength));
+    return inflated;
   }
-  return new TextDecoder().decode(bytes);
+  return bytes;
 }
+
+/**
+ * From this size on a request body is parsed from its bytes.
+ * Smaller bodies take the text path: an empty decoded text (a lone BOM) must
+ * stay "no body", and their copies are cheap.
+ */
+const PARSE_FROM_BYTES_MIN = 1024 * 1024;
 
 /**
  * Decompressed-size ceiling, separate from the 32 MiB wire-body limit.
@@ -991,19 +1095,40 @@ export function errorResponse(status: number, type: string, message: string): Re
 }
 
 /** Translate an OpenAI request body string to Anthropic JSON. Returns error Response on failure. */
-function translateOpenAIBody(body: string | undefined): Response | string | undefined {
+function translateOpenAIBody(body: string | undefined, alreadyParsed?: unknown): Response | string | undefined {
   if (body === undefined || body.length === 0) {
     return errorResponse(400, "translation_failed", "OpenAI request body is empty; cannot translate.");
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(body);
+    parsed = alreadyParsed ?? JSON.parse(body);
   } catch (err) {
     return errorResponse(400, "translation_failed", `OpenAI request body is not valid JSON: ${(err as Error).message}`);
   }
   try {
     const translated = translateRequestOpenAIToAnthropic(parsed as OpenAIChatRequest);
     return JSON.stringify(translated);
+  } catch (err) {
+    return errorResponse(400, "translation_failed", `OpenAI→Anthropic translation failed: ${(err as Error).message}`);
+  }
+}
+
+/**
+ * translateOpenAIBody without the text: the translated request as the object
+ * JSON.parse would give for that text (jsonCopy), or the same error response.
+ */
+function translateOpenAIRequest(body: string | undefined, alreadyParsed: unknown): Response | object {
+  if (alreadyParsed === undefined && (body === undefined || body.length === 0)) {
+    return errorResponse(400, "translation_failed", "OpenAI request body is empty; cannot translate.");
+  }
+  let parsed: unknown;
+  try {
+    parsed = alreadyParsed ?? JSON.parse(body as string);
+  } catch (err) {
+    return errorResponse(400, "translation_failed", `OpenAI request body is not valid JSON: ${(err as Error).message}`);
+  }
+  try {
+    return jsonCopy(translateRequestOpenAIToAnthropic(parsed as OpenAIChatRequest)) as object;
   } catch (err) {
     return errorResponse(400, "translation_failed", `OpenAI→Anthropic translation failed: ${(err as Error).message}`);
   }
@@ -1159,17 +1284,13 @@ interface RequestMeta {
   stream: boolean;
 }
 
-function peekBody(body: string | undefined): RequestMeta {
-  if (!body) return { model: "-", stream: false };
-  try {
-    const p = JSON.parse(body) as Record<string, unknown>;
-    return {
-      model: typeof p.model === "string" ? p.model : "-",
-      stream: p.stream === true,
-    };
-  } catch {
-    return { model: "-", stream: false };
-  }
+/** Model and stream flag for the request log, from the parsed body. */
+function requestMeta(parsed: Record<string, unknown> | undefined): RequestMeta {
+  if (!parsed) return { model: "-", stream: false };
+  return {
+    model: typeof parsed.model === "string" ? parsed.model : "-",
+    stream: parsed.stream === true,
+  };
 }
 
 let reqCounter = 0;
@@ -1245,6 +1366,31 @@ function previewBody(body: string): string {
 
 const COMPACT_LOG = process.env.ZCODE_LOG_FORMAT === "compact";
 
+/*
+ * The request row (table, or one line with ZCODE_LOG_FORMAT=compact), printed
+ * once per request of the routes this handler serves: /v1/messages and
+ * /v1/chat/completions. /v1/responses and the /async/v1/* routes print no row.
+ *
+ * - TTFB: from the request reaching the proxy to the first chunk of a streamed
+ *   answer from the upstream (to the upstream's headers for any other answer).
+ * - Tok: for a streamed answer, the upstream's usage total (completion_tokens
+ *   or output_tokens) if a usage event was among the events read, otherwise
+ *   the counted text deltas; for a translated batch answer, the body's usage
+ *   total; "-" for none and for any other answer.
+ * - tok/s: Tok / Total for a streamed answer; "-" otherwise.
+ * - Total: for a streamed answer, from the request reaching the proxy to the
+ *   end of the upstream stream at the proxy (its end, a read failure or the
+ *   client leaving); "-" for any other answer.
+ *
+ * Streamed answers on these two routes are read from the upstream at the
+ * client's pace instead of being buffered ahead of a slow client
+ * (response-body.ts). So for a client that reads slower than the upstream
+ * sends, Total and tok/s include the time the client takes to read the answer;
+ * if such a client disconnects early, Tok reflects only what was read before
+ * it left (the usage total if it arrived by then, otherwise the counted text
+ * deltas). For a client that keeps up the values are what they were before
+ * that change. TTFB, the column names and the compact format are unchanged.
+ */
 function printHeader(): void {
   if (headerPrinted) return;
   headerPrinted = true;
@@ -1306,6 +1452,11 @@ function fmtMs(ms: number): string {
   return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
+/**
+ * The stream the client reads, observed in its path (response-body.ts): the
+ * request row (and the dump summary) is printed once the stream ends, fails
+ * or is cancelled by the client.
+ */
 function observeStream(
   reqId: string,
   format: Format,
@@ -1314,75 +1465,29 @@ function observeStream(
   requestSentAt: number,
   body: ReadableStream<Uint8Array>,
   contentEncoding: string | null,
-): void {
+): ReadableStream<Uint8Array> {
   const compressed = contentEncoding !== null;
   const dumpOn = dumpEnabled();
-  let tokens = 0;
-  let sseBuffer = "";
-  let firstChunkAt = 0;
-  let totalBytes = 0;
-  let firstBytesSample = "";
-
-  function parseSse(text: string): void {
-    for (const line of text.split("\n")) {
-      if (!line.startsWith("data:") || line.includes("[DONE]")) continue;
-      try {
-        const j = JSON.parse(line.slice(5).trim());
-        if (j.usage?.completion_tokens) { tokens = j.usage.completion_tokens; continue; }
-        if (j.usage?.output_tokens) { tokens = j.usage.output_tokens; continue; }
-        // OpenAI content delta: choices[0].delta.content
-        const oai = j.choices?.[0]?.delta?.content;
-        if (typeof oai === "string" && oai.length > 0) { tokens++; continue; }
-        // Anthropic content delta: type=content_block_delta, delta.type=text_delta
-        if (j.type === "content_block_delta" && j.delta?.type === "text_delta") {
-          const t = j.delta?.text;
-          if (typeof t === "string" && t.length > 0) tokens++;
-        }
-      } catch {}
-    }
-  }
-
-  (async () => {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (firstChunkAt === 0) firstChunkAt = Date.now();
-        if (dumpOn && value) {
-          totalBytes += value.byteLength;
-          if (firstBytesSample.length < 4096) {
-            firstBytesSample += decoder.decode(value.slice(0, 4096 - firstBytesSample.length), { stream: true });
-          }
-        }
-        if (!compressed) {
-          sseBuffer += decoder.decode(value, { stream: true });
-          const idx = sseBuffer.lastIndexOf("\n");
-          if (idx >= 0) {
-            parseSse(sseBuffer.slice(0, idx));
-            sseBuffer = sseBuffer.slice(idx + 1);
-          }
-        }
+  return observeInClientPath(body, {
+    compressed,
+    sample: dumpOn,
+    onEnd: ({ firstChunkAt, endAt, tokens, totalBytes, firstBytesSample }) => {
+      const ttfbMs = (firstChunkAt > 0 ? firstChunkAt : endAt) - requestSentAt;
+      const totalMs = endAt - requestSentAt;
+      const avgTps = tokens > 0 && totalMs > 0 ? tokens / (totalMs / 1000) : 0;
+      printRow(reqId, format, meta, status, requestSentAt, requestSentAt + ttfbMs, tokens, avgTps, endAt);
+      if (dumpOn) {
+        dumpPhase(reqId, "upstream_stream_summary", {
+          status,
+          contentEncoding,
+          compressed,
+          totalBytes,
+          tokensObserved: tokens,
+          ttfbMs,
+          totalMs,
+          firstBytesSample: firstBytesSample.length > 0 ? firstBytesSample.slice(0, 4096) : "(empty stream)",
+        });
       }
-      if (!compressed && sseBuffer) parseSse(sseBuffer);
-    } catch {}
-    const endAt = Date.now();
-    const ttfbMs = (firstChunkAt > 0 ? firstChunkAt : endAt) - requestSentAt;
-    const totalMs = endAt - requestSentAt;
-    const avgTps = tokens > 0 && totalMs > 0 ? tokens / (totalMs / 1000) : 0;
-    printRow(reqId, format, meta, status, requestSentAt, requestSentAt + ttfbMs, tokens, avgTps, endAt);
-    if (dumpOn) {
-      dumpPhase(reqId, "upstream_stream_summary", {
-        status,
-        contentEncoding,
-        compressed,
-        totalBytes,
-        tokensObserved: tokens,
-        ttfbMs,
-        totalMs,
-        firstBytesSample: firstBytesSample.length > 0 ? firstBytesSample.slice(0, 4096) : "(empty stream)",
-      });
-    }
-  })().catch(() => {});
+    },
+  });
 }

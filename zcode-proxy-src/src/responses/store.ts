@@ -15,6 +15,7 @@
  * Thread-safety: single-process; JS event loop serialises access.
  */
 
+import { BoundedCollection } from "../runtime/bounded-collection.js";
 import type { ResponsesInputItem, ResponsesOutputItem, ResponsesUsage } from "../translator/responses-types.js";
 
 /** A stored response entry — enough to reconstruct the next turn's history. */
@@ -48,24 +49,24 @@ const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 
 /**
- * Bounded LRU + TTL cache of stored responses. Iteration order = insertion
- * order; `get()` re-inserts to refresh LRU position. Stale entries are evicted
- * lazily on access and proactively on `set()` overflow (count AND bytes).
+ * Bounded LRU + TTL cache of stored responses, held in the shared bounded
+ * collection (runtime/bounded-collection.ts). `get()` refreshes the LRU
+ * position. Stale entries are evicted lazily on access and proactively on
+ * `set()` overflow (count AND bytes).
  */
 export class ResponseStore {
-  private readonly maxEntries: number;
-  private readonly ttlMs: number;
-  private readonly maxTotalBytes: number;
-  private readonly map = new Map<string, StoredResponse>();
-  private totalBytes = 0;
+  private readonly entries: BoundedCollection<string, StoredResponse>;
 
   constructor(opts: ResponseStoreOptions = {}) {
-    this.maxEntries = opts.maxEntries ?? DEFAULT_MAX_ENTRIES;
-    this.ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
-    this.maxTotalBytes = opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+    this.entries = new BoundedCollection<string, StoredResponse>({
+      maxEntries: opts.maxEntries ?? DEFAULT_MAX_ENTRIES,
+      ttlMs: opts.ttlMs ?? DEFAULT_TTL_MS,
+      maxBytes: opts.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES,
+      sizeOf: ResponseStore.byteSize,
+    });
   }
 
-  /** Serialized UTF-8 byte size of an entry (ZAK-014: bytes, not UTF-16 code units). */
+  /** Serialized UTF-8 byte size of an entry (bytes, not UTF-16 code units). */
   private static byteSize(entry: StoredResponse): number {
     let size = 128; // structural overhead baseline
     try {
@@ -82,26 +83,9 @@ export class ResponseStore {
     const now = Date.now();
     entry.createdAt = now;
     entry.lastAccessedAt = now;
-    const size = ResponseStore.byteSize(entry);
-    if (size > this.maxTotalBytes) {
-      // A single entry beyond the whole budget is not stored (bounded memory
-      // beats remembering one huge transcript).
-      return;
-    }
-    const replaced = this.map.get(entry.id);
-    if (replaced) {
-      this.totalBytes -= ResponseStore.byteSize(replaced);
-      this.map.delete(entry.id);
-    }
-    this.map.set(entry.id, entry);
-    this.totalBytes += size;
-    while (this.map.size > this.maxEntries || this.totalBytes > this.maxTotalBytes) {
-      const oldestKey = this.map.keys().next().value;
-      if (oldestKey === undefined) break;
-      const oldest = this.map.get(oldestKey);
-      if (oldest) this.totalBytes -= ResponseStore.byteSize(oldest);
-      this.map.delete(oldestKey);
-    }
+    // A single entry beyond the whole budget is not stored (bounded memory
+    // beats remembering one huge transcript); the collection refuses it.
+    this.entries.set(entry.id, entry, now);
   }
 
   /**
@@ -109,39 +93,26 @@ export class ResponseStore {
    * Refreshes LRU position on hit.
    */
   get(id: string): StoredResponse | undefined {
-    const entry = this.map.get(id);
-    if (!entry) return undefined;
     const now = Date.now();
-    if (now - entry.createdAt > this.ttlMs) {
-      this.totalBytes -= ResponseStore.byteSize(entry);
-      this.map.delete(id);
-      return undefined;
-    }
-    entry.lastAccessedAt = now;
-    // Re-insert at the tail so the LRU eviction touches it last.
-    this.map.delete(id);
-    this.map.set(id, entry);
+    const entry = this.entries.get(id, now);
+    if (entry) entry.lastAccessedAt = now;
     return entry;
   }
 
   delete(id: string): boolean {
-    const entry = this.map.get(id);
-    if (!entry) return false;
-    this.totalBytes -= ResponseStore.byteSize(entry);
-    return this.map.delete(id);
+    return this.entries.delete(id);
   }
 
   clear(): void {
-    this.map.clear();
-    this.totalBytes = 0;
+    this.entries.clear();
   }
 
   size(): number {
-    return this.map.size;
+    return this.entries.size;
   }
 
   /** Approximate total serialized bytes currently retained (for diagnostics/tests). */
   totalBytesUsed(): number {
-    return this.totalBytes;
+    return this.entries.bytes;
   }
 }

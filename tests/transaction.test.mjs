@@ -134,7 +134,7 @@ test("untouched in-progress op is marked rolled back without deleting its journa
   assert.deepEqual(listTransactions(backupDir), [], "fully recovered journal is no longer active");
 });
 
-// AUD-001: no automatic stale takeover — the unconditional unlink after a
+// No automatic stale takeover — the unconditional unlink after a
 // stale observation lets two contenders delete each other's fresh locks
 // (lost mutual exclusion). Live holders block; stale locks must be removed
 // manually.
@@ -182,7 +182,7 @@ test("pidAlive treats EPERM as alive (fail-closed lock decision)", () => {
   }
 });
 
-// ZAK-007: a live holder must never be displaced by lock age, and a released
+// A live holder must never be displaced by lock age, and a released
 // lock must never delete a successor's lock.
 test("lock is nonce-owned: live holders keep it, release never deletes a successor's lock", () => {
   const backupDir = freshDir("lock-nonce");

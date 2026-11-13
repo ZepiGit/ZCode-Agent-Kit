@@ -1,0 +1,737 @@
+{
+  "id": "S3-short-2026-11-08T1831-9ac735",
+  "key": "S3/short",
+  "scenario": "S3",
+  "profile": "short",
+  "variant": null,
+  "platform": "linux",
+  "node": "v26.7.0",
+  "outcome": "RED",
+  "metric": "rss",
+  "durationS": 33,
+  "red": true,
+  "checks": [
+    {
+      "name": "peak:kit",
+      "red": true,
+      "value": 795.5,
+      "budget": 596,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:launcher",
+      "red": true,
+      "value": 78.7,
+      "budget": 74,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:mcp-bridge",
+      "red": false,
+      "value": 74,
+      "budget": 75,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:preflight",
+      "red": false,
+      "value": 74.2,
+      "budget": 76,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:proxy",
+      "red": true,
+      "value": 62.1,
+      "budget": 62,
+      "unit": "MB"
+    },
+    {
+      "name": "procPeak:solver",
+      "red": false,
+      "value": 0,
+      "budget": 20,
+      "unit": "MB"
+    },
+    {
+      "name": "count:proxy",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "perParent:solver",
+      "red": false,
+      "value": 0,
+      "budget": 1,
+      "unit": "procs/parent"
+    },
+    {
+      "name": "orphans",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "procs",
+      "detail": []
+    },
+    {
+      "name": "simultaneous-proxies",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "exactly-one-proxy-after-round",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "rounds without exactly 1",
+      "detail": []
+    },
+    {
+      "name": "proxy-generations/round",
+      "red": false,
+      "value": 1,
+      "budget": 1,
+      "unit": "procs"
+    },
+    {
+      "name": "failed-launches",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "launches"
+    },
+    {
+      "name": "start-over-stale-lock",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "refused starts",
+      "detail": []
+    },
+    {
+      "name": "stale-lock-after-round",
+      "red": false,
+      "value": 0,
+      "budget": 0,
+      "unit": "rounds"
+    }
+  ],
+  "summary": {
+    "*": {
+      "peakMB": 1105.1,
+      "peakProcMB": 78.5,
+      "peakHwmMB": 78.7,
+      "maxCount": 17,
+      "maxFds": 403,
+      "maxThreads": 154,
+      "distinctPids": 64,
+      "peakHeapMB": 5
+    },
+    "kit": {
+      "peakMB": 795.5,
+      "peakProcMB": 78.5,
+      "peakHwmMB": 78.7,
+      "maxCount": 11,
+      "maxFds": 266,
+      "maxThreads": 112,
+      "distinctPids": 55,
+      "peakHeapMB": 5
+    },
+    "mock-upstream": {
+      "peakMB": 59.7,
+      "peakProcMB": 59.7,
+      "peakHwmMB": 60.3,
+      "maxCount": 1,
+      "maxFds": 22,
+      "maxThreads": 7,
+      "distinctPids": 1,
+      "peakHeapMB": null
+    },
+    "launcher": {
+      "peakMB": 377.8,
+      "peakProcMB": 78.5,
+      "peakHwmMB": 78.7,
+      "maxCount": 5,
+      "maxFds": 140,
+      "maxThreads": 38,
+      "distinctPids": 8,
+      "peakHeapMB": null
+    },
+    "preflight": {
+      "peakMB": 644.8,
+      "peakProcMB": 74.2,
+      "peakHwmMB": 74.2,
+      "maxCount": 10,
+      "maxFds": 211,
+      "maxThreads": 74,
+      "distinctPids": 28,
+      "peakHeapMB": null
+    },
+    "proxy": {
+      "peakMB": 62.1,
+      "peakProcMB": 62.1,
+      "peakHwmMB": 62.1,
+      "maxCount": 1,
+      "maxFds": 21,
+      "maxThreads": 24,
+      "distinctPids": 5,
+      "peakHeapMB": 5
+    },
+    "fake-harness": {
+      "peakMB": 249.8,
+      "peakProcMB": 50,
+      "peakHwmMB": 50,
+      "maxCount": 5,
+      "maxFds": 115,
+      "maxThreads": 35,
+      "distinctPids": 8,
+      "peakHeapMB": null
+    },
+    "mcp-bridge": {
+      "peakMB": 366.6,
+      "peakProcMB": 74,
+      "peakHwmMB": 74,
+      "maxCount": 5,
+      "maxFds": 105,
+      "maxThreads": 55,
+      "distinctPids": 8,
+      "peakHeapMB": null
+    },
+    "manager": {
+      "peakMB": 64.8,
+      "peakProcMB": 64.8,
+      "peakHwmMB": 64.8,
+      "maxCount": 1,
+      "maxFds": 21,
+      "maxThreads": 7,
+      "distinctPids": 6,
+      "peakHeapMB": null
+    }
+  },
+  "budgets": {
+    "peaks": {
+      "kit": 596
+    },
+    "procPeaks": {
+      "launcher": 74,
+      "mcp-bridge": 75,
+      "preflight": 76,
+      "proxy": 62,
+      "solver": 20
+    },
+    "counts": {
+      "proxy": 1
+    },
+    "perParent": [
+      {
+        "role": "solver",
+        "max": 1
+      }
+    ],
+    "orphans": 0,
+    "commitBackstop": {
+      "role": "proxy",
+      "maxMB": 512
+    },
+    "extra": [
+      {
+        "name": "simultaneous-proxies",
+        "red": false,
+        "value": 1,
+        "budget": 1,
+        "unit": "procs"
+      },
+      {
+        "name": "exactly-one-proxy-after-round",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "rounds without exactly 1",
+        "detail": []
+      },
+      {
+        "name": "proxy-generations/round",
+        "red": false,
+        "value": 1,
+        "budget": 1,
+        "unit": "procs"
+      },
+      {
+        "name": "failed-launches",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "launches"
+      },
+      {
+        "name": "start-over-stale-lock",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "refused starts",
+        "detail": []
+      },
+      {
+        "name": "stale-lock-after-round",
+        "red": false,
+        "value": 0,
+        "budget": 0,
+        "unit": "rounds"
+      }
+    ]
+  },
+  "orphans": [],
+  "observations": [],
+  "notes": {
+    "sampler": {
+      "units": null,
+      "overhead": null
+    },
+    "isolation.stateDir": "/tmp/memloop/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/tmp/kit-xph9lM/state",
+    "isolation.home": "/tmp/memloop/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/tmp/kit-xph9lM/home",
+    "isolation.port": 43613,
+    "afterKillHolder": {
+      "nextPreflight": 0,
+      "nextPreflightTail": "[zcode-preflight] cause=quota-unavailable",
+      "stopCode": 0,
+      "stopTail": "stopped (pid 31775)",
+      "proxiesLeft": 0,
+      "staleLock": false
+    },
+    "rounds": [
+      {
+        "name": "race-5#0",
+        "n": 5,
+        "kind": "mixed",
+        "tFrom": 132,
+        "tTo": 11027,
+        "proxiesBefore": 0,
+        "maxSimultaneousProxies": 1,
+        "maxSimultaneousListeners": 1,
+        "distinctProxyProcesses": 1,
+        "proxiesAfter": 1,
+        "pidFileMatchesListener": true,
+        "failedLaunches": [],
+        "killedByAdversary": [],
+        "launches": [
+          {
+            "i": 0,
+            "via": "run",
+            "pid": 30627,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 1,
+            "via": "preflight",
+            "pid": 30628,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 2,
+            "via": "run",
+            "pid": 30629,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 3,
+            "via": "preflight",
+            "pid": 30630,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 4,
+            "via": "run",
+            "pid": 30636,
+            "code": 0,
+            "signal": null
+          }
+        ],
+        "launchMs": [
+          841,
+          845,
+          9310,
+          9315,
+          9320
+        ],
+        "staleLockLeft": null,
+        "adversary": null,
+        "startRefused": null,
+        "stop": {
+          "label": "race-5#0",
+          "code": 0,
+          "tail": [
+            "stopped (pid 30675)"
+          ],
+          "proxiesLeft": 0
+        }
+      },
+      {
+        "name": "race-10#0",
+        "n": 10,
+        "kind": "mixed",
+        "tFrom": 11452,
+        "tTo": 22457,
+        "proxiesBefore": 0,
+        "maxSimultaneousProxies": 1,
+        "maxSimultaneousListeners": 1,
+        "distinctProxyProcesses": 1,
+        "proxiesAfter": 1,
+        "pidFileMatchesListener": true,
+        "failedLaunches": [],
+        "killedByAdversary": [],
+        "launches": [
+          {
+            "i": 0,
+            "via": "run",
+            "pid": 31207,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 1,
+            "via": "preflight",
+            "pid": 31208,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 2,
+            "via": "run",
+            "pid": 31209,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 3,
+            "via": "preflight",
+            "pid": 31215,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 4,
+            "via": "run",
+            "pid": 31217,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 5,
+            "via": "preflight",
+            "pid": 31222,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 6,
+            "via": "run",
+            "pid": 31228,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 7,
+            "via": "preflight",
+            "pid": 31234,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 8,
+            "via": "run",
+            "pid": 31245,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 9,
+            "via": "preflight",
+            "pid": 31252,
+            "code": 0,
+            "signal": null
+          }
+        ],
+        "launchMs": [
+          832,
+          842,
+          842,
+          871,
+          927,
+          9314,
+          9335,
+          9352,
+          9362,
+          9367
+        ],
+        "staleLockLeft": null,
+        "adversary": null,
+        "startRefused": null,
+        "stop": {
+          "label": "race-10#0",
+          "code": 0,
+          "tail": [
+            "stopped (pid 31284)"
+          ],
+          "proxiesLeft": 0
+        }
+      },
+      {
+        "name": "race-10-preflight#0",
+        "n": 10,
+        "kind": "preflight",
+        "tFrom": 22882,
+        "tTo": 25398,
+        "proxiesBefore": 0,
+        "maxSimultaneousProxies": 1,
+        "maxSimultaneousListeners": 1,
+        "distinctProxyProcesses": 1,
+        "proxiesAfter": 1,
+        "pidFileMatchesListener": true,
+        "failedLaunches": [],
+        "killedByAdversary": [],
+        "launches": [
+          {
+            "i": 0,
+            "via": "preflight",
+            "pid": 31530,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 1,
+            "via": "preflight",
+            "pid": 31531,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 2,
+            "via": "preflight",
+            "pid": 31532,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 3,
+            "via": "preflight",
+            "pid": 31533,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 4,
+            "via": "preflight",
+            "pid": 31540,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 5,
+            "via": "preflight",
+            "pid": 31550,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 6,
+            "via": "preflight",
+            "pid": 31551,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 7,
+            "via": "preflight",
+            "pid": 31562,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 8,
+            "via": "preflight",
+            "pid": 31568,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 9,
+            "via": "preflight",
+            "pid": 31569,
+            "code": 0,
+            "signal": null
+          }
+        ],
+        "launchMs": [
+          785,
+          797,
+          828,
+          841,
+          851,
+          855,
+          865,
+          874,
+          877,
+          878
+        ],
+        "staleLockLeft": null,
+        "adversary": null,
+        "startRefused": null,
+        "stop": {
+          "label": "race-10-preflight#0",
+          "code": 0,
+          "tail": [
+            "stopped (pid 31604)"
+          ],
+          "proxiesLeft": 0
+        }
+      },
+      {
+        "name": "kill-holder-10",
+        "n": 10,
+        "kind": "preflight",
+        "tFrom": 25825,
+        "tTo": 28249,
+        "proxiesBefore": 0,
+        "maxSimultaneousProxies": 1,
+        "maxSimultaneousListeners": 1,
+        "distinctProxyProcesses": 1,
+        "proxiesAfter": 1,
+        "pidFileMatchesListener": true,
+        "failedLaunches": [],
+        "killedByAdversary": [
+          "preflight#6 code=null starting zcode-proxy ..."
+        ],
+        "launches": [
+          {
+            "i": 0,
+            "via": "preflight",
+            "pid": 31656,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 1,
+            "via": "preflight",
+            "pid": 31657,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 2,
+            "via": "preflight",
+            "pid": 31658,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 3,
+            "via": "preflight",
+            "pid": 31664,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 4,
+            "via": "preflight",
+            "pid": 31665,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 5,
+            "via": "preflight",
+            "pid": 31671,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 6,
+            "via": "preflight",
+            "pid": 31679,
+            "code": null,
+            "signal": "SIGKILL"
+          },
+          {
+            "i": 7,
+            "via": "preflight",
+            "pid": 31683,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 8,
+            "via": "preflight",
+            "pid": 31694,
+            "code": 0,
+            "signal": null
+          },
+          {
+            "i": 9,
+            "via": "preflight",
+            "pid": 31696,
+            "code": 0,
+            "signal": null
+          }
+        ],
+        "launchMs": [
+          182,
+          541,
+          844,
+          846,
+          856,
+          858,
+          858,
+          863,
+          872,
+          875
+        ],
+        "staleLockLeft": null,
+        "adversary": {
+          "killed": 31679,
+          "afterMs": 167,
+          "proxiesAtKill": 1,
+          "pidRecordAfterKill": {
+            "pid": 31733,
+            "startedMs": 1794162726830,
+            "startedIso": "2026-11-08T18:32:06.830Z"
+          }
+        },
+        "startRefused": null,
+        "stop": {
+          "label": "kill-holder-10",
+          "code": 0,
+          "tail": [
+            "stopped (pid 31733)"
+          ],
+          "proxiesLeft": 0
+        }
+      }
+    ],
+    "cleanup": {
+      "staleLockRemoved": false,
+      "finalStop": {
+        "label": "final",
+        "code": 0,
+        "tail": [
+          "not running"
+        ],
+        "proxiesLeft": 0
+      }
+    },
+    "isolation.externalConnectionsDuringRun": [],
+    "stop.code": 0,
+    "stop.output": [
+      "not running"
+    ]
+  },
+  "samples": 121,
+  "csv": "/tmp/memloop/t16-memloop/r2-fixture/S3-short/S3-short-2026-11-08T1831-9ac735/samples.csv"
+}

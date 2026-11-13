@@ -24,9 +24,10 @@ import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
 import { credentialString } from "../auth/types.js";
 import { errorResponse } from "../proxy/handler.js";
-import { transformRequestBody } from "../proxy/body-transformer.js";
+import { transformBuiltRequestBody } from "../proxy/body-transformer.js";
 import { buildAnthropicMetadataUserId } from "../proxy/trace-headers.js";
 import { inflateWithCap } from "../proxy/inflate.js";
+import { settleBodyBytes } from "../server/admission.js";
 import { translateRequestOpenAIToAnthropic, translateResponseAnthropicToOpenAI } from "../translator/openai-to-anthropic.js";
 import { anthropicSseToOpenaiSseWithKeepalive } from "./openai-stream-adapter.js";
 import type { AnthropicMessagesRequest, OpenAIChatRequest, AnthropicMessagesResponse } from "../translator/types.js";
@@ -103,6 +104,8 @@ async function readBody(req: Request): Promise<{ ok: true; body: string } | { ok
   }
   // Inflate `content-encoding: gzip` request bodies with the cap enforced on
   // the DECOMPRESSED size — a small gzip bomb must not bypass the byte cap.
+  // Admission: charge the bytes really held from now on.
+  settleBodyBytes(req, total);
   const encoding = req.headers.get("content-encoding")?.toLowerCase().trim() ?? "";
   let bytes: Uint8Array = Buffer.concat(chunks);
   if (encoding === "gzip" || encoding === "x-gzip") {
@@ -114,6 +117,7 @@ async function readBody(req: Request): Promise<{ ok: true; body: string } | { ok
       return { ok: false, response: errorResponse(400, "invalid_request_error", "could not decompress gzip request body") };
     }
     bytes = inflated.bytes;
+    settleBodyBytes(req, Math.max(total, bytes.byteLength));
   }
   const body = new TextDecoder().decode(bytes);
   if (!body || body.length === 0) {
@@ -234,7 +238,8 @@ export async function handleAsyncMessages(req: Request, opts: AsyncHandlerOption
     model: resolveModel({ model: modelStr }, opts.config),
     stream: true,
   } as AnthropicMessagesRequest;
-  const upstreamBodyText = transformRequestBody(JSON.stringify(upstreamBody), { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) }) ?? JSON.stringify(upstreamBody);
+  // Transformed as built, serialised once: the bytes of transformRequestBody(JSON.stringify(upstreamBody)).
+  const upstreamBodyText = transformBuiltRequestBody(upstreamBody, { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) });
 
   // Now we're safe to take a ticket
   try {
@@ -293,7 +298,8 @@ export async function handleAsyncChat(req: Request, opts: AsyncHandlerOptions): 
     return errorResponse(400, "invalid_request_error", `OpenAI→Anthropic translation failed: ${(err as Error).message}`);
   }
   anthropicReq.stream = true;
-  const upstreamBodyText = transformRequestBody(JSON.stringify(anthropicReq), { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) }) ?? JSON.stringify(anthropicReq);
+  // Transformed as built, serialised once: the bytes of transformRequestBody(JSON.stringify(anthropicReq)).
+  const upstreamBodyText = transformBuiltRequestBody(anthropicReq, { format: "anthropic", metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined) });
 
   try {
     if (typeof (opts.auth as AuthManager & { validateAccountHandle?: unknown }).validateAccountHandle === "function"

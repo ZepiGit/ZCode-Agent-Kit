@@ -1,0 +1,37 @@
+4 problems: 4 failed
+
+Runtime ------------------------------------------------------------------------
+PASS  bun available — <BUN> (<VERSION>)
+FAIL  config exists — <KIT>/proxy/config.yaml
+  why: setup has not run here, or its files were removed
+  next: zcode-kit setup
+FAIL  key file exists — <KIT>/.proxykey
+  why: setup has not run here, or its files were removed
+  next: zcode-kit setup
+FAIL  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+  why: the proxy's dependencies are not installed
+  next: zcode-kit setup
+
+Proxy --------------------------------------------------------------------------
+SKIP  proxy reachable + identity — no config — skipped
+
+Account ------------------------------------------------------------------------
+FAIL  credentials store — ~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login
+  why: no ZCode login is stored, or this machine cannot decrypt it
+  next: zcode-kit auth login zai
+
+Integrations -------------------------------------------------------------------
+SKIP  omp integration — OMP not installed — skipped
+SKIP  omp: integration — not detected — skipped
+SKIP  pi: integration — not detected — skipped
+SKIP  claude-code: integration — not detected — skipped
+SKIP  codex: integration — not detected — skipped
+SKIP  opencode: integration — not detected — skipped
+SKIP  cline: integration — not detected — skipped
+SKIP  kilo-code: integration — not detected — skipped
+SKIP  aider: integration — not detected — skipped
+SKIP  continue: integration — not detected — skipped
+SKIP  goose: integration — not detected — skipped
+
+doctor: 4 failed, 1 passed, 12 skipped -> exit 1
+[exit 1]

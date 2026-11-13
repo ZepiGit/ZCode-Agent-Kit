@@ -223,7 +223,7 @@ describe("proxy API key auth", () => {
     return config;
   };
 
-  // ZAK-002: startServer enforces serve invariants — loopback host + a real
+  // StartServer enforces serve invariants — loopback host + a real
   // bearer key — before binding. Without them it must refuse to serve.
   it("startServer refuses to bind without a proxy key or with the placeholder", async () => {
     const auth = oauthAuth("test");

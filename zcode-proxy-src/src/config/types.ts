@@ -196,6 +196,8 @@ export interface ProxyConfig {
   server: {
     port: number;
     host: string;
+    /** Admission control. Absent = the defaults (64 MB). */
+    admission?: AdmissionConfig;
   };
   auth: AuthConfig;
   /** Active upstream provider. */
@@ -233,4 +235,32 @@ export interface ProxyConfig {
   logging: {
     level: "debug" | "info" | "warn" | "error";
   };
+  /** Health supervisor settings. Absent = the defaults. */
+  health?: HealthConfig;
+  /** Captcha solver process settings. Absent = the defaults. */
+  solver?: SolverConfig;
+}
+
+/** `solver` in config.yaml. Every key is optional. */
+export interface SolverConfig {
+  /** Memory cap of the solver process in MB; left out keeps the default (300). */
+  memoryCapMB?: number;
+}
+
+/** `health` in config.yaml. Every key is optional. */
+export interface HealthConfig {
+  /** Memory thresholds; keys left out keep the supervisor's defaults (512 / 1024 MB × 3 samples 15 s apart). */
+  memory: {
+    softLimitMB?: number;
+    hardLimitMB?: number;
+    samples?: number;
+    /** `sampleIntervalSeconds` × 1000. */
+    sampleIntervalMs?: number;
+  };
+}
+
+/** `server.admission` in config.yaml. */
+export interface AdmissionConfig {
+  /** Cap on request-body bytes in flight (`maxInFlightMB` × 1 MiB). */
+  maxInFlightBytes: number;
 }

@@ -1,0 +1,37 @@
+3 problems: 3 failed
+
+Runtime ------------------------------------------------------------------------
+PASS  bun available — <BUN> (<VERSION>)
+PASS  config exists — <KIT>/proxy/config.yaml
+PASS  key file exists — <KIT>/.proxykey
+FAIL  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+  why: the proxy's dependencies are not installed
+  next: zcode-kit setup
+
+Proxy --------------------------------------------------------------------------
+PASS  proxy reachable + identity — health=ours
+
+Account ------------------------------------------------------------------------
+FAIL  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present but NOT decryptable here — re-run: zcode-kit auth login
+  why: no ZCode login is stored, or this machine cannot decrypt it
+  next: zcode-kit auth login zai
+FAIL  account auth valid — ZCode authentication rejected. Check the local key and Desktop login; use zcode-kit doctor --fix for managed config drift.
+  why: the account endpoint did not accept the stored login
+  next: zcode-kit auth login zai
+
+Integrations -------------------------------------------------------------------
+SKIP  omp integration — not configured (your choice) — zcode-kit integrate omp to change
+SKIP  omp: integration — not configured (your choice) — zcode-kit integrate omp to change
+SKIP  pi: integration — not detected — skipped
+SKIP  claude-code: integration — not detected — skipped
+SKIP  codex: integration — not detected — skipped
+SKIP  opencode: integration — not detected — skipped
+SKIP  cline: integration — not detected — skipped
+SKIP  kilo-code: integration — not detected — skipped
+SKIP  aider: integration — not detected — skipped
+SKIP  continue: integration — not detected — skipped
+SKIP  goose: integration — not detected — skipped
+PASS  harness decisions — 1 stored decision(s) readable
+
+doctor: 3 failed, 5 passed, 11 skipped -> exit 1
+[exit 1]

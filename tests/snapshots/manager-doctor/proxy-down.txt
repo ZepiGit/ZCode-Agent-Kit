@@ -1,0 +1,15 @@
+PASS  bun available — <BUN> (<VERSION>)
+PASS  config exists — <KIT>/proxy/config.yaml
+PASS  key file exists — <KIT>/.proxykey
+PASS  proxy source installed — <KIT>/zcode-proxy-src/node_modules
+FAIL  proxy env overrides — ignored by the kit-managed proxy (unset them): ZCODE_PROXY_PORT, ZCODE_CLAIM_FIXTURE
+PASS  credentials store — ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine
+PASS  omp provider registered — zcode block in ~/.omp/agent/models.yml
+PASS  extension installed — ~/.omp/agent/extensions/zcode-proxy-autostart.ts
+PASS  mcp bridge installed — <KIT>/mcp/zcode-harness-mcp/dist/index.js
+PASS  mcp bridge deps — <KIT>/mcp/zcode-harness-mcp/node_modules
+PASS  claude adapter artifact — generated/claude-zcode-settings.json
+PASS  codex adapter artifact — generated/codex-home/config.toml
+FAIL  proxy reachable + identity — health=down
+doctor: 2 check(s) failed
+[exit 1]

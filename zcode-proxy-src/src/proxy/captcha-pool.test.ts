@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
+import { CaptchaTokenPool as SolverBackedPool, type CaptchaPoolOptions } from "./captcha-pool.js";
+import { CaptchaSdkError, CaptchaLocalVerificationError } from "./captcha-token.js";
 
 const solveMock = mock(async (_scene: string, _region: string, _prefix: string, _beforeSolve?: () => void) => {
   return "x".repeat(64);
@@ -6,12 +8,13 @@ const solveMock = mock(async (_scene: string, _region: string, _prefix: string, 
 
 const recycleMock = mock((_reason: string) => {});
 
-mock.module("./captcha-solver.js", () => ({
-  runCaptchaSolve: solveMock,
-  shutdownCaptchaSolver: () => {},
-  captchaSolverConcurrency: () => 2,
-  getCaptchaSolverStats: () => ({
-    mode: "worker",
+// The pool's solver dispatcher, injected at the dispatcher interface
+// instead of replacing the captcha-solver module process-wide.
+const fakeSolver = {
+  run: solveMock,
+  concurrency: () => 2,
+  stats: () => ({
+    mode: "worker" as const,
     alive: false,
     busy: false,
     queueDepth: 0,
@@ -25,12 +28,24 @@ mock.module("./captcha-solver.js", () => ({
     lastRecycleReason: null,
     lastRecycleAt: null,
     lastSdkScripts: null,
+    capMB: null,
+    enforcement: "none" as const,
+    capExits: 0,
+    lastFootprintMB: null,
+    abnormalExits: 0,
+    failFast: false,
+    failFastUntil: null,
+    shedSolves: 0,
   }),
-  requestCaptchaSolverRecycle: recycleMock,
-  CAPTCHA_NODE_DIR: "/tmp",
-}));
+  requestRecycle: recycleMock,
+};
 
-const { CaptchaTokenPool } = await import("./captcha-pool.js");
+/** Every pool in this file runs over the fake dispatcher. */
+class CaptchaTokenPool extends SolverBackedPool {
+  constructor(opts: CaptchaPoolOptions = {}) {
+    super(opts, fakeSolver);
+  }
+}
 
 const CFG = {
   enabled: true,
@@ -527,5 +542,194 @@ describe("CaptchaTokenPool mint-storm breaker", () => {
     expect(pool.stats().mintSuccessRate10m).toBe(1);
     await failMints(pool, 4);
     expect(pool.stats().storm).toBe(false);
+  });
+});
+
+describe("CaptchaTokenPool — sanitized mint-failure provenance on later take failures (issue 32)", () => {
+  let clock = 0;
+  const tick = () => Bun.sleep(0);
+  // The sanitized refusal the real chain produces once the local verification
+  // detail survives normalization (see captcha-happy extractVerifyParam).
+  const REFUSAL = "verify param refused: verify param too short (76 chars) — degraded result, refused";
+
+  function provenancePool(): InstanceType<typeof CaptchaTokenPool> {
+    return new CaptchaTokenPool({
+      poolSizeMin: 1,
+      poolSizeMax: 1,
+      tokenTtlMs: 60_000,
+      refillIntervalMs: 600_000,
+      staggerMs: 0,
+      solveRetries: 1,
+      solveConcurrency: 1,
+      emptyTakeRace: 1,
+      scaleDownIdleMs: 600_000,
+      deepIdleAfterMs: 600_000,
+      now: () => clock,
+    });
+  }
+
+  beforeEach(() => {
+    clock = 2_000_000;
+    solveMock.mockClear();
+    recycleMock.mockClear();
+  });
+  afterEach(() => {
+    pool?.stopBackgroundRefill?.();
+    solveMock.mockImplementation(async () => "x".repeat(64));
+  });
+
+  /** Await a take's rejection as an Error (typed for the pinned tsc run). */
+  const rejection = async (p: Promise<string>): Promise<Error> => {
+    try { await p; } catch (e) {
+      return e instanceof Error ? e : new Error(String(e));
+    }
+    throw new Error("expected the take to reject");
+  };
+
+  for (const typed of [false, true]) {
+    it(`keeps ${typed ? 'mutable typed SDK' : 'raw dispatcher'} text out of warnings and storm/probe takes`, async () => {
+      const marker = typed ? 'SyntheticTypedSdkCredential' : 'SyntheticRawSolverCredential';
+      pool = provenancePool();
+      const warn = console.warn;
+      const warnings: string[] = [];
+      solveMock.mockImplementation(async () => {
+        const error = typed ? new CaptchaSdkError('other') : new Error('synthetic solver failure');
+        error.message += ` | ${marker}\u001b[31m`;
+        throw error;
+      });
+      try {
+        console.warn = (...values) => { warnings.push(values.map(String).join(' ')); };
+        for (let i = 0; i < 5; i++) await pool.prefill(CFG);
+        expect(pool.stats().storm).toBe(true);
+        expect(solveMock).toHaveBeenCalledTimes(5);
+        const error = await rejection(pool.takeToken(CFG));
+        expect(error.message).toContain('last local mint failure:');
+        expect(error.message).not.toContain(marker);
+        expect(error.message.length).toBeLessThan(400);
+        clock += 61_000;
+        pool.requestUrgentRefill(); // real one-attempt failed storm probe + warning
+        await tick();
+        expect(solveMock).toHaveBeenCalledTimes(6);
+        expect(warnings.join('\n')).toContain('storm probe mint failed');
+        expect(warnings.join('\n')).not.toContain(marker);
+        expect(warnings.join('\n')).not.toContain('\u001b');
+      } finally { console.warn = warn; }
+    });
+  }
+
+  it("keeps returned duplicate certifyIds out of exact storm/probe errors and warnings", async () => {
+    const marker = "SyntheticReturnedCertifyIdCredential\u001b[31m\n";
+    const param = Buffer.from(JSON.stringify({ certifyId: marker, securityToken: "offline-fixture" })).toString("base64");
+    const parallelWarning = "[captcha-pool] parallel solve failed: captcha SDK failure [len=52 sha256=8e4ac8107f5bc2cf05206e31d060905549fcffe00631df1115602a68ea7da3a3]";
+    const metadata = "captcha SDK failure [len=52 sha256=8e4ac8107f5bc2cf05206e31d060905549fcffe00631df1115602a68ea7da3a3]";
+    const warn = console.warn;
+    const warnings: string[] = [];
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => param);
+    try {
+      console.warn = (...values) => { warnings.push(values.map(String).join(" ")); };
+      await pool.prefill(CFG);
+      // Issuing the successful token registers its id; invalidate() would erase
+      // that registry and miss the returned-token branch entirely.
+      expect(await pool.takeToken(CFG)).toBe(param);
+      await tick(); // the take's refill returns the first duplicate
+      expect(pool.stats().ready).toBe(0);
+      expect(pool.stats().mintSuccessRate10m).toBe(0.5);
+      for (let i = 0; i < 4; i++) await pool.prefill(CFG);
+      expect(solveMock).toHaveBeenCalledTimes(6); // one success, five duplicates
+      expect(pool.stats().storm).toBe(true);
+      expect(pool.stats().mintSuccessRate10m).toBeCloseTo(1 / 6);
+      expect(recycleMock.mock.calls).toEqual([["storm"]]);
+      const error = await rejection(pool.takeToken(CFG));
+      expect(error.message).not.toContain(marker);
+      expect(error.message).not.toContain(param);
+      expect(error.message).toBe("captcha minting degraded (storm) — retry later (last local mint failure: duplicate certifyId)");
+      expect(warnings).toEqual([
+        parallelWarning, parallelWarning, parallelWarning, parallelWarning,
+        "[captcha] mint storm: 17% of 6 mints succeeded in 10 min — pausing minting for 60s and recycling the solver",
+        parallelWarning,
+      ]);
+      clock += 60_000;
+      pool.requestUrgentRefill();
+      await tick(); // the single probe also returns the already-issued token
+      expect(solveMock).toHaveBeenCalledTimes(7);
+      expect(pool.stats().storm).toBe(true);
+      expect(warnings.at(-1)).toBe(`[captcha] storm probe mint failed — backing off 120s: ${metadata}`);
+      expect((await rejection(pool.takeToken(CFG))).message).toBe(`captcha minting degraded (storm) — retry later (last local mint failure: ${metadata})`);
+      expect(warnings.join("\n")).not.toContain(marker);
+      expect(warnings.join("\n")).not.toContain(param);
+    } finally { console.warn = warn; }
+  });
+
+  it("keeps returned duplicate certifyIds out of the exact later take deadline", async () => {
+    const marker = "SyntheticDeadlineCertifyIdCredential\u001b[31m\n";
+    const param = Buffer.from(JSON.stringify({ certifyId: marker, securityToken: "offline-fixture" })).toString("base64");
+    const warn = console.warn;
+    const warnings: string[] = [];
+    const savedDeadline = process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS;
+    const savedGrace = process.env.CAPTCHA_TAKE_GRACE_MS;
+    const stuck = Promise.withResolvers<string>();
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => param);
+    try {
+      console.warn = (...values) => { warnings.push(values.map(String).join(" ")); };
+      await pool.prefill(CFG);
+      expect(await pool.takeToken(CFG)).toBe(param);
+      await tick(); // returned duplicate establishes provenance before the hang
+      expect(solveMock).toHaveBeenCalledTimes(2);
+      expect(pool.stats().mintSuccessRate10m).toBe(0.5);
+      expect(pool.stats().storm).toBe(false);
+      solveMock.mockImplementation(() => stuck.promise);
+      process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = "1000";
+      process.env.CAPTCHA_TAKE_GRACE_MS = "0";
+      const error = await rejection(pool.takeToken(CFG));
+      expect(error.message).not.toContain(marker);
+      expect(error.message).not.toContain(param);
+      expect(error.message).toBe("captcha take deadline (1000ms) (last local mint failure: duplicate certifyId)");
+      expect(warnings).toEqual(["[captcha-pool] parallel solve failed: captcha SDK failure [len=52 sha256=8e4ac8107f5bc2cf05206e31d060905549fcffe00631df1115602a68ea7da3a3]"]);
+      expect(solveMock).toHaveBeenCalledTimes(3);
+      expect(recycleMock).not.toHaveBeenCalled();
+    } finally {
+      // Settle the owned synthetic solve rather than leaving work behind.
+      stuck.resolve(param);
+      await tick();
+      console.warn = warn;
+      if (savedDeadline === undefined) delete process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS; else process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = savedDeadline;
+      if (savedGrace === undefined) delete process.env.CAPTCHA_TAKE_GRACE_MS; else process.env.CAPTCHA_TAKE_GRACE_MS = savedGrace;
+    }
+    expect(pool.stats().activeSolves).toBe(0);
+  });
+
+  it("the storm take failure names the last local mint failure (sanitized, bounded)", async () => {
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => { throw new CaptchaLocalVerificationError(REFUSAL.slice("verify param refused: ".length)); });
+    for (let i = 0; i < 5; i++) await pool.prefill(CFG);
+    expect(pool.stats().storm).toBe(true);
+    // The generic storm sentence stays intact (clients match on it), and the
+    // recorded LOCAL failure provenance is surfaced alongside it.
+    await expect(pool.takeToken(CFG)).rejects.toThrow("captcha minting degraded (storm) — retry later");
+    const err = await rejection(pool.takeToken(CFG));
+    expect(err.message).toMatch(/last local mint failure: verify param refused/);
+    expect(err.message).toContain("too short (76 chars)");
+    expect(err.message.length).toBeLessThan(400);
+  });
+
+  it("the empty-pool take deadline names why the raced mints failed", async () => {
+    pool = provenancePool();
+    solveMock.mockImplementation(async () => { throw new CaptchaLocalVerificationError(REFUSAL.slice("verify param refused: ".length)); });
+    await pool.prefill(CFG); // one failed mint → provenance recorded
+    solveMock.mockImplementation(() => new Promise<string>(() => {})); // stuck mint
+    const savedDeadline = process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS;
+    const savedGrace = process.env.CAPTCHA_TAKE_GRACE_MS;
+    process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = "1000";
+    process.env.CAPTCHA_TAKE_GRACE_MS = "0";
+    try {
+      const err = await rejection(pool.takeToken(CFG));
+      expect(err.message).toContain("captcha take deadline (1000ms)");
+      expect(err.message).toMatch(/last local mint failure: verify param refused/);
+    } finally {
+      if (savedDeadline === undefined) delete process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS; else process.env.CAPTCHA_SOLVE_RACE_DEADLINE_MS = savedDeadline;
+      if (savedGrace === undefined) delete process.env.CAPTCHA_TAKE_GRACE_MS; else process.env.CAPTCHA_TAKE_GRACE_MS = savedGrace;
+    }
   });
 });

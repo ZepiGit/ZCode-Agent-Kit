@@ -3,13 +3,15 @@
 // kit writes an "x-zcode-agent-kit" marker inside its provider entry and only
 // ever updates entries carrying that marker (or byte-identical legacy kit
 // entries from before the marker existed). A hand-written "zcode" entry
-// without either proof is a hard conflict — nothing is written (ZAK-004).
-// Efforts: pi's thinking system is separate from OMP's; the kit advertises
-// reasoning models with verified low/high/max levels via thinkingLevelMap
-// (documented in EFFORT_MAPPING.md); unverified capabilities are not claimed.
+// without either proof is a hard conflict — nothing is written.
+// Efforts: pi's thinking system is separate from OMP's. The kit writes no
+// thinkingLevelMap: on anthropic-messages pi sends the mapped values only with
+// compat.forceAdaptiveThinking, otherwise it sends a thinking budget and clamps
+// xhigh/max to the high budget (pi v1.5.0), so a mapped `max` would be the
+// `high` request under another name. Unverified capabilities are not claimed.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
+import { parseJsonc, setTopLevelKey, withFinalNewline } from "../../lib/jsonc.mjs";
 import { commitFile } from "../../lib/edit.mjs";
 
 const MANAGED_NOTE = "// zcode provider block managed by zcode-kit — GLM via local proxy";
@@ -49,7 +51,7 @@ export default {
   id: "pi",
   label: "pi",
   protocol: "pi custom provider (models.json, anthropic-messages)",
-  primarySource: "https://github.com/badlogic/pi-mono — packages/coding-agent/docs/models.md (checked 2026-09-13)",
+  primarySource: "https://github.com/earendil-works/pi — packages/coding-agent/docs/models-configuration.md (checked 2026-11-06)",
 
   apply(ctx, tx, log) {
     const agentDir = join(ctx.home, ".pi", "agent");
@@ -98,7 +100,7 @@ export default {
     const rendered = existed
       ? setManagedProvider(readFileSync(modelsJson, "utf8"), doc)
       : `${MANAGED_NOTE}\n${JSON.stringify(doc, null, 2)}\n`;
-    const { wrote } = commitFile(ctx, tx, modelsJson, rendered.endsWith("\n") ? rendered : rendered + "\n");
+    const { wrote } = commitFile(ctx, tx, modelsJson, withFinalNewline(rendered));
     if (wrote) log("  pi: models.json updated (zcode provider, anthropic-messages via local proxy)");
     return { changed: wrote };
   },

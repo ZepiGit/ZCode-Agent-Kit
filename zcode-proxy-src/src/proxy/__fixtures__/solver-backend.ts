@@ -3,7 +3,7 @@
  * solver worker via configureCaptchaSolver({ backendModule }); the scene name
  * selects the behavior. Never touches the network.
  */
-import { solveTraceless as realSolveTraceless } from "../captcha-happy.js";
+import { captchaFetch, captchaGenerationResources, solveTraceless as realSolveTraceless, syncFetchBlocking } from "../captcha-happy.js";
 import { CaptchaSdkIncompatibleError, normalizeCaptchaError } from "../captcha-token.js";
 
 let active = 0;
@@ -13,7 +13,14 @@ const param = (label: string) => Buffer.from(JSON.stringify({
   certifyId: label, sceneId: "fixture", isSign: true, securityToken: "fixture-".repeat(40),
 })).toString("base64");
 
-export async function solveTraceless({ scene }: { scene: string }): Promise<string> {
+/** The generation's CDN memory tier and stall counters, as `cdn:<entries>:<bytes>:stalls:<urls>`. */
+function resources(): string {
+  const { cdnCache, stallCounts } = captchaGenerationResources();
+  const { entries, bytes } = cdnCache.memoryUsage();
+  return `cdn:${entries}:${bytes}:stalls:${stallCounts.size}`;
+}
+
+export async function solveTraceless({ scene, region, prefix }: { scene: string; region?: string; prefix?: string }): Promise<string> {
   active += 1;
   try {
     const [kind, arg] = scene.split(":");
@@ -21,6 +28,51 @@ export async function solveTraceless({ scene }: { scene: string }): Promise<stri
     switch (kind) {
       case "token":
         return param(`token:${arg}:${concurrency}`);
+      case "env":
+        // Environment parity: what the solver generation sees of one variable.
+        return param(`env:${process.env[arg!] ?? "unset"}`);
+      case "env-names":
+        // The names (any case) of the generation's environment matching a pattern.
+        return param(`env-names:${Object.keys(process.env).filter((name) => new RegExp(arg!, "i").test(name)).sort().join(",")}`);
+      case "args":
+        // Solve inputs as the generation received them.
+        return param(`args:${JSON.stringify({ scene, region, prefix })}`);
+      case "pid":
+        return param(`pid:${process.pid}`);
+      case "keep-loop":
+        // Leaves work on the generation's event loop, as uncleared guest timers do.
+        setInterval(() => {}, 1000);
+        return param("keep-loop:armed");
+      case "egress": {
+        // Captcha egress from inside the generation (loopback targets only):
+        // the real captchaFetch over http and https, and the sync-XHR path.
+        const { target, tlsPort } = JSON.parse(Buffer.from(arg!, "base64").toString()) as { target: string; tlsPort: number };
+        const out: Record<string, string> = {};
+        try { const r = await captchaFetch(`${target}/fetch`); out.fetch = `${r.status} ${await r.text()}`; }
+        catch { out.fetch = "error"; }
+        const s = syncFetchBlocking(`${target}/sync-xhr`, { method: "GET", headers: {} }, 5000);
+        out.syncXhr = "error" in s ? "error" : `${s.status} ${s.body.toString()}`;
+        try { const r = await captchaFetch(`https://127.0.0.1:${tlsPort}/tls`); out.tls = String(r.status); await r.body?.cancel(); }
+        catch { out.tls = "error"; }
+        return param(`egress:${JSON.stringify(out)}`);
+      }
+      case "stderr-line": {
+        // A child log line, as captcha-happy writes its own (e.g. [pe-cache-evict]).
+        process.stderr.write(Buffer.from(arg!, "base64"));
+        return param("stderr-line:written");
+      }
+      case "exit":
+        // The process ends itself with an exit code, as a runtime does whose allocation failed.
+        process.exit(Number(arg));
+      case "balloon": {
+        // Allocates and touches <arg> MB in 8 MB steps and keeps all of it.
+        const kept: Uint8Array[] = [];
+        for (let mb = 0; mb < Number(arg); mb += 8) {
+          kept.push(new Uint8Array(8 * 1024 * 1024).fill(1));
+          await Bun.sleep(2);
+        }
+        return param(`balloon:${kept.length * 8}`);
+      }
       case "slow":
         await Bun.sleep(Number(arg));
         return param(`token:slow:${concurrency}`);
@@ -69,6 +121,32 @@ export async function solveTraceless({ scene }: { scene: string }): Promise<stri
               } });
             };</script></body></html>`,
         });
+      case "cdn-fill": {
+        // cdn-fill:<count>/<bytes each>: the generation's real CDN cache.
+        const [count, bytes] = arg.split("/").map(Number);
+        const { cdnCache } = captchaGenerationResources();
+        for (let i = 0; i < count; i++) {
+          cdnCache.put(`https://g.alicdn.com/captcha-frontend/dynamicJS/fill/${bytes}/${i}/pe.js`, Buffer.alloc(bytes, i % 251));
+        }
+        return param(resources());
+      }
+      case "stall-fill": {
+        const { stallCounts } = captchaGenerationResources();
+        for (let i = 0; i < Number(arg); i++) stallCounts.stalled(`https://g.alicdn.com/captcha-frontend/dynamicJS/stall/${i}/pe.js`);
+        return param(resources());
+      }
+      case "stall-evict": {
+        // Two stalls of a cached pe URL evict it from the generation's cache.
+        const { cdnCache, stallCounts } = captchaGenerationResources();
+        const url = "https://g.alicdn.com/captcha-frontend/dynamicJS/evict/pe.js";
+        cdnCache.put(url, Buffer.from("var pe = 1;"));
+        const before = cdnCache.get(url)?.source ?? "none";
+        stallCounts.stalled(url);
+        stallCounts.stalled(url);
+        return param(`evict:${before}:${cdnCache.get(url)?.source ?? "none"}`);
+      }
+      case "resources":
+        return param(resources());
       default:
         throw new Error(`unknown fixture scene ${scene}`);
     }

@@ -1,0 +1,4 @@
+  [1;2mACCOUNT   LABEL         PROVIDER  PLAN         STATE[0m
+  work      Work account  zai       coding-plan  ready
+  personal  Personal      zai       start-plan   ready
+  backup                  bigmodel  coding-plan  paused

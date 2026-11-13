@@ -6,6 +6,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { commitFile } from "../../lib/edit.mjs";
+import { lineEndingOf, withLineEndingsOf } from "../../lib/line-endings.mjs";
 
 const BLOCK_BEGIN = "# >>> zcode-kit managed models — do not edit inside";
 const BLOCK_END = "# <<< zcode-kit";
@@ -20,7 +21,7 @@ function kitModels(ctx) {
       apiBase: base,
       apiKey: ctx.key(),
       roles: ["chat", "edit", "apply"],
-      capabilities: { toolUse: true },
+      capabilities: ["tool_use"],
     },
     {
       name: "ZCode GLM-5.3-Flash",
@@ -29,7 +30,7 @@ function kitModels(ctx) {
       apiBase: base,
       apiKey: ctx.key(),
       roles: ["chat", "edit", "apply"],
-      capabilities: { toolUse: true, imageInput: true },
+      capabilities: ["tool_use", "image_input"],
     },
   ];
 }
@@ -43,14 +44,19 @@ function yamlBlock(ctx, indent = "  ") {
     lines.push(`    apiBase: ${m.apiBase}`);
     lines.push(`    apiKey: ${JSON.stringify(m.apiKey)}`);
     lines.push(`    roles: [${m.roles.join(", ")}]`);
-    const caps = Object.entries(m.capabilities).map(([k, v]) => `${k}: ${v}`).join(", ");
-    lines.push(`    capabilities: { ${caps} }`);
+    // Continue's schema takes a string array (modelCapabilitySchema.array());
+    // the earlier `{ toolUse: true }` map fails its validation.
+    lines.push(`    capabilities: [${m.capabilities.join(", ")}]`);
   }
   lines.push(BLOCK_END);
   return lines.map((line) => line.startsWith("  ") ? indent + line.slice(2) : line).join("\n");
 }
 
 function upsertModels(text, ctx) {
+  // What the kit inserts takes the file's own line endings; the user's bytes
+  // around it stay as they are (lib/line-endings.mjs).
+  const newline = lineEndingOf(text);
+  const fit = (fragment) => withLineEndingsOf(text, fragment);
   // Check before replacing an existing managed block as well as inserting one.
   // Quoted keys are recognized for refusal, not silently duplicated.
   const keys = [...text.matchAll(/^(?:models|"models"|'models')[ \t]*:[^\r\n]*/gm)];
@@ -86,7 +92,6 @@ function upsertModels(text, ctx) {
   }
   if (header) {
     const headerEnd = header.index + header[0].length;
-    const newline = text.slice(headerEnd, headerEnd + 2) === "\r\n" ? "\r\n" : "\n";
     let indent;
     let sequenceEnd;
     // Append after the existing sequence, not before the user's default model.
@@ -113,20 +118,20 @@ function upsertModels(text, ctx) {
     if (sequenceEnd !== undefined) {
       const before = text.slice(0, sequenceEnd);
       const separator = before.endsWith("\n") ? "" : newline;
-      return before + separator + yamlBlock(ctx, indent) + newline + text.slice(sequenceEnd);
+      return before + separator + fit(yamlBlock(ctx, indent)) + newline + text.slice(sequenceEnd);
     }
-    return text.slice(0, headerEnd) + newline + yamlBlock(ctx) + text.slice(headerEnd);
+    return text.slice(0, headerEnd) + newline + fit(yamlBlock(ctx)) + text.slice(headerEnd);
   }
   // Commented-out or indented occurrences are inert and safe to append to.
   const sep = text.trimEnd() === "" ? "" : text.replace(/\s*$/, "").endsWith("---") ? "\n" : "\n";
-  return text.replace(/\s*$/, "") + `${sep}models:\n${yamlBlock(ctx)}\n`;
+  return text.replace(/\s*$/, "") + fit(`${sep}models:\n${yamlBlock(ctx)}\n`);
 }
 
 export default {
   id: "continue",
   label: "Continue",
   protocol: "OpenAI-compatible (provider: openai, apiBase → /v1)",
-  primarySource: "https://docs.continue.dev/customize/model-providers/top-level/openai (checked 2026-09-13; schema v1)",
+  primarySource: "https://docs.continue.dev/reference (checked 2026-10-26; schema v1)",
 
   apply(ctx, tx, log) {
     const configYaml = join(ctx.home, ".continue", "config.yaml");
@@ -167,7 +172,7 @@ export default {
     const end = text.indexOf(BLOCK_END, begin);
     const block = begin >= 0 && end >= 0 ? text.slice(begin, end + BLOCK_END.length) : "";
     const indent = block.match(/^([ ]*)- /m)?.[1] ?? "  ";
-    const current = block === yamlBlock(ctx, indent);
+    const current = block.replace(/\r\n/g, "\n") === yamlBlock(ctx, indent);
     return [{
       name: "continue models registered",
       ok: current,

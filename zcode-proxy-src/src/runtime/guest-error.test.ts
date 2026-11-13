@@ -17,6 +17,37 @@ function withStack(message: string, stack: string): Error {
   return err;
 }
 
+describe("guest metadata counterexamples (issue 32)", () => {
+  const source = "https://g.alicdn.com/captcha/feilin071.js:1:1";
+  for (const [id, name, callback, url, marker] of [
+    ["function", "TypeError", "SyntheticFunctionCredential", source, "SyntheticFunctionCredential"],
+    ["class identifier", "SyntheticClassCredential", "callback", source, "SyntheticClassCredential"],
+    ["fragment", "TypeError", "callback", "https://g.alicdn.com/captcha/feilin071.js#SyntheticFragmentCredential:1:1", "SyntheticFragmentCredential"],
+    ["filename", "TypeError", "callback", "https://g.alicdn.com/captcha/SyntheticFilenameCredential.js:1:1", "SyntheticFilenameCredential"],
+    ["path", "TypeError", "callback", "https://g.alicdn.com/SyntheticPathCredential/feilin071.js:1:1", "SyntheticPathCredential"],
+    ["query", "TypeError", "callback", "https://g.alicdn.com/captcha/feilin071.js?token=SyntheticQueryCredential:1:1", "SyntheticQueryCredential"],
+    ["controls", "TypeError", "SyntheticControlCredential\u001b[31m", source, "SyntheticControlCredential"],
+    ["long selected frame", "TypeError", "SyntheticCallback".repeat(200), source, "SyntheticCallback"],
+  ]) {
+    test(`never echoes guest ${id}`, () => {
+      const err = withStack("synthetic diagnostic message", `Error: synthetic diagnostic message\n    at ${callback} (${url})`);
+      err.name = name!;
+      const rendered = describeGuestError(err);
+      expect(rendered).not.toContain(marker!);
+      expect(rendered).not.toMatch(/[\r\n\u001b]/);
+      expect(rendered.length).toBeLessThan(300);
+      expect(rendered).toMatch(/len=28 sha256=[0-9a-f]{64}/);
+    });
+  }
+  test("the message line is never rendered as a source frame", () => {
+    const message = "prefix https://g.alicdn.com/x.js suffix SyntheticHostFrameCredential";
+    const err = withStack(message, `Error: ${message}\n    at host (/app/host.ts:1:1)`);
+    expect(isGuestOriginError(err)).toBe(false);
+    expect(describeGuestError(err)).not.toContain("SyntheticHostFrameCredential");
+    expect(describeGuestError(err)).not.toContain("resource-");
+  });
+});
+
 describe("guest-origin classification", () => {
   test("the captcha SDK crash that killed the TUI is attributed to the guest", () => {
     expect(isGuestOriginError(fieldCrash())).toBe(true);
@@ -68,10 +99,42 @@ describe("guest-origin classification", () => {
     expect(isGuestOriginError(a)).toBe(false);
   });
 
-  test("the log line names the error and the bundle, without the content hash", () => {
+  test("the guest log line is metadata-only: class, message length+hash, bundle filename", () => {
     const line = describeGuestError(fieldCrash());
-    expect(line).toContain("ReferenceError: moveBy is not defined");
+    expect(line).toContain("ReferenceError");
+    expect(line).toContain("len=21"); // "moveBy is not defined".length
+    expect(line).toMatch(/sha256=[0-9a-f]{64}/);
     expect(line).toContain("feilin008");
+    // The message TEXT is guest-controlled and can carry page/token data.
+    expect(line).not.toContain("moveBy is not defined");
     expect(line).not.toContain("https://");
+  });
+
+  test("a synthetic secret in the guest message or stack URL never reaches the diagnostics", () => {
+    const SECRET = "SYNTHETIC-SECRET-MARKER-9f2c41ab";
+    const err = withStack(
+      `solver callback failed jwt=${SECRET}`,
+      `Error: solver callback failed jwt=${SECRET}\n    at f (https://g.alicdn.com/captcha-frontend/FeiLin/feilin008.js:1:1?access_token=${SECRET})`,
+    );
+    const line = describeGuestError(err);
+    expect(line).toContain("feilin008");
+    expect(line).not.toContain(SECRET);
+    expect(line).not.toContain("access_token");
+  });
+
+  test("a guest-controlled error class name is not echoed verbatim", () => {
+    const err = withStack("x", "at f (https://g.alicdn.com/captcha/a.js:1:1)");
+    (err as { name?: unknown }).name = `Bearer ${"y".repeat(40)}`;
+    const line = describeGuestError(err);
+    expect(line).not.toContain("Bearer");
+    expect(line.startsWith("Error ")).toBe(true);
+  });
+
+  test("guest diagnostics stay bounded even for huge messages and stacks", () => {
+    const huge = withStack(
+      "m".repeat(100_000),
+      `at f (https://g.alicdn.com/captcha/a.js:1:1)\n${"s".repeat(100_000)}`,
+    );
+    expect(describeGuestError(huge).length).toBeLessThan(300);
   });
 });

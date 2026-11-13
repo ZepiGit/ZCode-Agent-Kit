@@ -1,83 +1,105 @@
-# ハーネスアダプター — 他のエージェント CLI がローカルプロキシを使う方法（日本語）
+# アシスタント別ガイド
 [English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · **日本語** · [简体中文](README.zh-CN.md)
 
 > 本ドキュメントは英語原文の翻訳です。相違がある場合は英語版が正となります。
 
-キットの中核はハーネス非依存です。ローカル HTTP プロキシが 3 つの標準形式を提供します。以下の例はデフォルトポート `8457` を使います。実際のポートと接続情報は `zcode-kit proxy status` が表示します：
+このページでは、対応するコーディングアシスタントごとに、実行するコマンド、kit が書き込む内容、自分で行う作業を説明します。インストール方法は[メインの README](../README.ja.md) にあります。CLI ではアシスタントを「harness」と呼ぶため、フラグ名は `--harness` です。
 
-| エンドポイント | 形式 | 用途 |
-|---|---|---|
-| `POST /v1/messages` | Anthropic messages（SSE + バッチ） | Claude Code 系クライアント、OMP |
-| `POST /v1/chat/completions` | OpenAI chat-completions（SSE + バッチ） | OpenAI 互換クライアント |
-| `POST /v1/responses` | OpenAI Responses API | Agents SDK 系クライアント |
-| `GET /v1/models` | モデル一覧 | ディスカバリー |
-| `GET /health`, `GET /quota` | ステータス/クォータ（要認証） | 診断 |
+kit には Node.js 24 以降が必要です。Node.js 20 と 22 はサポート対象外になり、これらのバージョンでは `zcode-kit setup` と `zcode-kit update` は何も変更せずに停止します。リリース版のインストーラーは、Bun がない場合に Bun 1.4.2 をインストールします。`zcode-kit --version` はインストール済みのバージョンを、`zcode-kit help` はすべてのコマンドを表示します。
 
-認証：`Authorization: Bearer <.proxykey の内容>`。
-`zcode-kit setup` が鍵をローカルで生成します。リリース版とソースの
-チェックアウトでは kit 内に `.proxykey` を置きます。npm インストールでは
-`node_modules` の外にあるインストール固有の状態ディレクトリに保存します。
+## セットアップでアシスタントを選ぶ
 
-## `zcode-kit setup` によるセットアップ（検出されたハーネス、同意がある場合のみ）
+`zcode-kit setup` はインストール済みのアシスタントを探し、同意したものだけを設定します。
 
-`zcode-kit setup --harness auto` はインストール済みのハーネスを検出し、保存済みの決定がないハーネスごとに "Configure ZCode as a provider with its supported models in <HARNESS>? [y/n]" と質問します。`y` でそのハーネスを設定し、`n` はスキップしてファイルに触れません。ターミナルがなければ未決定のハーネスはすべてスキップされます。Ctrl-C で質問を中止できます（終了コード 130）。すでに `y` と答えたものは設定されたままです。OMP しかない場合、Claude/Codex の設定や生成ラッパーは作られません。決定はハーネスごとに 1 ファイルとして `generated/harness-choices/` に保存され、セットアップのトランザクションの一部です（ロールバックで再び削除されます）。`zcode-kit update` と `zcode-kit doctor --fix` は同意済みの統合（`y`、明示的な選択、または `zcode-kit integrate <harness>`）だけを再適用し、保存された `n` は `--harness`、`integrate`、または `zcode-kit setup --reask`（ターミナルで再質問）で変えるまで尊重されます。質問より前に kit が作成した統合は無人実行でも更新されますが、同意と見なされることはありません。無人実行では `--harness omp,codex` または `ZCODE_KIT_HARNESSES=omp,codex` でハーネスを選択します（`none` は検出されたすべてをスキップ）。不明な id はエラーです。kit の MCP ブリッジは別個の同意がある場合だけ登録されます。明示的な選択か、セットアップが質問の前に表示する MCP の注記の後に答えた `y` です（`--no-mcp` で無効化）。`integrate`、更新、その注記なしの保存済み決定では登録されません。1 つのハーネスが失敗しても他は止まりません。そのハーネス自身の部分的な書き込みは元に戻され、サマリーに失敗として表示され、セットアップは終了コード 20 で終わります（インストーラーは警告を出して続行します）。
+- **ターミナルでは**、検出したアシスタントをチェックボックスのリストで表示します。矢印キーで移動、Space でチェックの切り替え、`a` で全項目の切り替え、Enter で確定します。チェックしたアシスタントは設定され、チェックしなかったものはスキップされます。Esc を押した場合や、何もチェックせずに Enter を押した場合は、回答を保存しません。
+- **色やカーソル制御が使えないターミナル、またはリストを表示するには小さすぎるターミナルでは**、アシスタントごとに `Configure ZCode for <アシスタント>? [y/n]` と質問します。`zcode-kit setup --select` を使うと、代わりに番号付きのリストを表示し、番号、`all`、`none` で答えられます。
+- **ターミナルがない場合**（CI、パイプ）は何も質問せず、回答が保存されていないアシスタントをすべてスキップします。この場合はアシスタントを指定してください。`zcode-kit setup --harness omp,codex` または `ZCODE_KIT_HARNESSES=omp,codex` とすると、指定したものだけが設定されます。`none` は検出したアシスタントをすべてスキップし、不明な id はエラーになります。
 
-| ハーネス | 仕組み | 既存 config への影響 |
-|---|---|---|
-| OMP (oh-my-pi) | `~/.omp/agent/models.yml` の provider ブロック `zcode` + 自動起動拡張 | 追加型（管理ブロック、トランザクション、冪等）。モデル指定： `omp --model zcode/glm-5.3[-flash] --thinking low\|high\|max` |
-| pi | `~/.pi/agent/models.json` の provider `zcode`（`api: anthropic-messages`、`!node` キーリゾルバ） | 追加型（他の provider は保持）。出典：pi-mono docs/models.md |
-| Claude Code | `generated/claude-zcode-settings.json` + `bin/zcode-claude.cmd\|.sh` | `~/.claude` は変更しない（呼び出しごとのオプトイン） |
-| Codex CLI | 隔離された `generated/codex-home` + `bin/zcode-codex.cmd\|.sh` | `~/.codex` は変更しない。**違い**：独自の skills/ルール/MCP はラッパー内では適用されない |
-| OpenCode | `opencode.json` の provider `zcode`（`@ai-sdk/openai-compatible`、apiKey `{env:ZCODE_PROXY_KEY}`） | 追加型。JSONC コメントは保持される |
-| Aider | `generated/aider-zcode.env` + `bin/zcode-aider.cmd\|.sh`（プロセスローカル、**setx しない**） | モデル `openai/glm-5.3[-flash]` |
-| Continue | `~/.continue/config.yaml` の管理ブロック（schema v1） | 既存のモデル/ロールは保持 |
-| Goose | `%APPDATA%/Block/goose/config/custom_providers/zcode.json`（Windows）または `~/.config/goose/custom_providers/zcode.json`（macOS/Linux） | 認証情報は文書化された `auth.command` ヘルパー経由（kit のキーリゾルバ、シェルなし） |
-| Cline | `generated/cline-zcode-values.md` — **manual-confirmation-required** | kit は VS Code の状態に一切触れない。UI で一度だけ値を入力する |
-| Kilo Code | `generated/kilo-zcode-values.md` — **manual-confirmation-required** | UI でカスタム provider（Anthropic messages）を設定。kilo.jsonc は意図的に書かない |
-| MCP 対応ハーネス | stdio サーバー `zcode-harness`（`node mcp/zcode-harness-mcp/dist/index.js --stdio`） | OMP：`~/.omp/agent/mcp.json` にエントリー。Claude Code：`claude mcp add`（検出され同意した場合のみ）。Codex：隔離 home 内。MCP 単体はモデル統合としてカウントされない |
+回答は `generated/harness-choices/` に保存され、以降のセットアップ、`zcode-kit update`、`zcode-kit doctor --fix` で再利用されます。同意したものは最新の状態に保たれ、断ったものには手を加えず、再度質問されることもありません。`zcode-kit setup --reask` はターミナルでもう一度質問し、`zcode-kit doctor --forget <アシスタント>` は保存済みの回答を 1 つ削除します。この kit が以前に作成した統合は、回答が保存されていなくても更新されることがあります。
 
-`generated/` 以下のパスは kit の状態を指します。リリース版/ソースでは
-kit ディレクトリ内、npm では別の状態ディレクトリ内です。
+Ctrl-C を押すと、セットアップは終了コード 130 で終わります。確定していないチェックボックスのリストは適用されません。y/n の質問ですでに答えた分は適用されたままです。1 つのアシスタントが失敗した場合、その部分的な変更は元に戻され、他のアシスタントは設定され、セットアップは終了コード 20 で終わります。セットアップは、変更を元に戻す `zcode-kit rollback` コマンドを表示します。アシスタントが設定済みであることは、ファイルが書き込まれたことを意味するだけで、ログインが有効であることやモデルが応答することを示すものではありません。ログインは `zcode-kit auth status` で確認してください。
 
-OMP は `omp --model zcode/glm-5.3-flash --thinking low` などで直接起動し、`zcode-kit run` は使いません。セットアップでネイティブの Node/Bun を固定し、自動起動の事前確認は kit モジュールを OMP にインポートせず、新しい子プロセスで行います。子プロセスは最大 120 秒で終了し、失敗時は機密情報を含まないカテゴリを表示します。原因を修正し、セッションごとの 60 秒の待機時間後に再試行してください。同じセッションで復旧できます。ランタイムを移動した場合は `zcode-kit setup --harness auto` を再実行し、拡張機能を再読み込みします。ポートを使用している不明なプロセスを終了することはありません。プロキシが正常、またはセットアップが成功しただけでは、モデルの応答が完了する証拠にはなりません。
+## アシスタントを 1 つだけ設定する
 
-## オプトインのラッパー（既存 config は変更されない）
-
-| ハーネス | ラッパー | 動作 |
-|---|---|---|
-| Claude Code | `bin\zcode-claude.cmd` | 必要時にプロキシを起動し、`claude --settings <kit の状態>\generated\claude-zcode-settings.json` を呼び出す（CLI settings は user settings.json より優先。通常の `claude` はそのまま動く） |
-| Codex CLI | `bin\zcode-codex.cmd` | `CODEX_HOME=<kit の状態>\generated\codex-home` + `ZCODE_PROXY_KEY` を設定し、必要時にプロキシを起動。通常の `codex` と `~/.codex` は変更されない |
-
-## 手動での接続（OpenAI/Anthropic 対応の任意のクライアント）
-
-これは同等の入口であり、代替手段ではありません。kit のプロキシが起動しており、ZCode に有効なログインが必要です。`zcode-kit proxy start`（すでに起動中の場合も）と `zcode-kit proxy status` は現在のベース URL、ローカルキー、モデル ID を表示します。プロキシの起動が検証できない場合、値は設定由来としてラベル付けされ、出力に `Start the proxy first: zcode-kit proxy start` と表示されます。完全なキーは対話的なターミナルでのみ表示されます。それ以外では `zcode-kit models --show-key` を使ってください。以下の例のポートは、コマンドが表示するポートに置き換えてください。
-
-```yaml
-# OpenAI 形式
-base_url: http://127.0.0.1:8457/v1
-api_key: <.proxykey の内容>
-model: glm-5.3            # または glm-5.3-flash
+```sh
+zcode-kit integrate <アシスタント> --dry-run   # 書き込まれる内容を一覧表示し、何も書き込まない
+zcode-kit integrate <アシスタント>             # 書き込み、同意を保存する
+zcode-kit rollback                             # 直近の変更を元に戻す
 ```
 
-```yaml
-# Anthropic 形式
-base_url: http://127.0.0.1:8457
-auth_token: <.proxykey の内容>
-model: glm-5.3
-```
+`--dry-run` は、変更されるファイルごとに `would write` の行を表示します。実際の実行では、そのアシスタントへの同意も保存するため、以降のセットアップと更新で最新の状態に保たれます。MCP ブリッジを登録することはありません。kit の git チェックアウト内では、`ZCODE_KIT_ALLOW_CHECKOUT=1` を設定しない限り、`setup` と `integrate` は書き込みを拒否します。
 
-推論/thinking：
-- **Anthropic 形式**： `thinking: {type: "enabled", budget_tokens: 2048|16384|32768}`
-  と `output_config: {effort: "low"|"high"|"max"}` を組み合わせる — 詳細は
-  [EFFORT_MAPPING.md](../EFFORT_MAPPING.md)。
-- **OpenAI 形式**： `reasoning_effort: low|high|max` + `thinking: {type: "enabled"}`
-  （プロキシが Anthropic 側のフィールドに変換）。
+## 一覧
 
-**Flash:** `glm-5.3-flash` は常に thinking を使用します。明示的に無効にした thinking は `low` に正規化され、明示的に選んだ `high` と `max` は維持されます。Flash の Anthropic 形式における低レベルの thinking 予算は、上記の一般的な `2048` ではなく `8000` トークンで、回答用の追加出力枠も確保します。OpenAI 形式では `reasoning_effort: low` を使用します。thinking の強度が高いという理由だけでハングと判断しないでください。直接のプロキシ経由と Claude Code で Flash の応答完了を確認済みですが、すべてのハーネスの動作確認を意味しません。
+| アシスタント (id) | セットアップが書き込むもの | 起動方法 | モデル応答での検証 |
+|---|---|---|---|
+| OMP (`omp`) | `~/.omp/agent/models.yml` の provider `zcode`、自動起動拡張 | `omp --model zcode/glm-5.3-flash` | Windows、バージョン 18.2.9 |
+| pi (`pi`) | `~/.pi/agent/models.json` の provider `zcode` | `zcode-kit proxy start` の後に `pi --model zcode/glm-5.3` | Windows、バージョン 0.85.0 |
+| Claude Code (`claude-code`) | `generated/claude-zcode-settings.json` | `zcode-kit run claude-code -- <args>` | Windows、バージョン 2.1.278 |
+| Codex CLI (`codex`) | `generated/codex-home/config.toml` | `zcode-kit run codex -- <args>` | Windows、バージョン 0.155.1 |
+| OpenCode (`opencode`) | OpenCode の設定ファイルの provider `zcode` | `zcode-kit run opencode -- <args>` | Windows、バージョン 1.18.29 |
+| Aider (`aider`) | `generated/aider-zcode.env` | `zcode-kit run aider -- <args>` | Windows、バージョン 0.86.2 |
+| Continue (`continue`) | `~/.continue/config.yaml` のモデル 2 つ | `zcode-kit proxy start` の後、Continue でモデルを選択 | なし |
+| Goose (`goose`) | Goose の `custom_providers` フォルダーの `zcode.json` | `zcode-kit proxy start` の後に `goose session --provider zcode` | なし |
+| Cline (`cline`) | `generated/cline-zcode-values.md` | Cline に値を入力した後、`zcode-kit proxy start` | なし |
+| Kilo Code (`kilo-code`) | `generated/kilo-zcode-values.md` | Kilo Code に値を入力した後、`zcode-kit proxy start` | なし |
 
-Windows の独立した Codex プロファイルでは制限付きトークンのサンドボックス（`windows.sandbox = "unelevated"`）を有効にします。`workspace-write` はプロジェクト内に制限され、全面的なアクセスは許可しません。OpenCode Flash は `--variant low`、`high`、`max` に対応し、既定値は `low` です。ネイティブ実行ファイル用 npm ラッパーと Brotli/deflate 圧縮のセッションストリームに対応します。Responses のツール結果のテキストと画像は保持され、不正なイベントを成功した出力と見なしません。
+最後の列は[サポートマトリクス](../SUPPORT_MATRIX.json)に基づきます（Windows 11、2026-09-23、kit v0.2.33、`glm-5.3-flash`）。Linux と macOS では、実際のモデル応答による検証は行っていません。「なし」の行は、アシスタント本体を使わず、設定の書き込みだけを検証しています。
 
-## MCP クライアント（汎用）
+`generated/` とローカルキー `.proxykey` は、リリース版のインストールとソースのチェックアウトでは kit ディレクトリ内に、npm インストールでは `node_modules` の外にある別の状態ディレクトリ内にあります。書き込まれるファイルの一部にはキーが平文で含まれます。これらのファイルは共有しないでください。キーが変わった場合は `zcode-kit setup` を再実行してください。
+
+`zcode-kit run <アシスタント> -- <args>` は Claude Code、Codex CLI、OpenCode、Aider で使えます。必要ならプロキシを起動し、`--` より後ろをすべてアシスタントに渡します。kit ディレクトリの `bin/zcode-claude`、`bin/zcode-codex`、`bin/zcode-aider`（`.cmd` または `.sh`）も同じ動作をします。
+
+## アシスタントごとの注意点
+
+### OMP
+
+OMP は直接起動します。`zcode-kit run omp` はありません。thinking のレベルは `--thinking low`、`high`、`max` で選びます。kit は既定値として `max` を設定します。セットアップは `models.yml` にマーカー付きのブロックを追加し、拡張機能を `~/.omp/agent/extensions/` にコピーします。`config.yml` がある場合は、そこに拡張機能を登録し、`disabledProviders` から `zcode` を取り除きます。`models.yml` がない場合は OMP をスキップし、自分で書いた `zcode` provider がファイルにある場合は何も変更しません。
+
+拡張機能は、OMP が `zcode` のモデルに最初のリクエストを送るときにプロキシを起動します。起動の確認は別プロセスで実行され、最長 120 秒です。失敗した場合、OMP は理由を示す `[zcode-autostart]` の行を表示し、次の試行は早くても 60 秒後です。拡張機能は、セットアップが見つけた Node.js のパスを保存します。その Node.js が削除された場合や、バージョン 24 より古い場合は、`zcode-kit setup` を再実行して OMP を再起動してください。
+
+### pi
+
+pi はプロキシを自動では起動しません。エントリーは Anthropic messages 形式を使い、他の provider は保持されます。キーはファイルに書き込まれません。pi は kit のスクリプト `proxy/resolve-zcode-proxy-key.mjs` を実行してキーを取得します。`~/.pi/agent` がない場合、セットアップは pi をスキップします。kit が書いたものではない `zcode` provider がファイルにある場合は、何も変更しません。kit は pi の thinking レベルを設定しません。
+
+### Claude Code
+
+`~/.claude/settings.json` は変更されません。`zcode-kit run claude-code -- <args>` は `claude --settings <生成されたファイル> <args>` を実行するため、その呼び出しだけが ZCode に送られ、通常の `claude` はこれまでどおり動きます。この設定では `glm-5.3` をメインのモデル、`glm-5.3-flash` を小型で高速なモデルとして使います。すべてで Flash を使うには `--model glm-5.3-flash` を付けます。Anthropic は、Claude 以外のモデルでの Claude Code の利用を公式にはサポートしていません。
+
+### Codex CLI
+
+`zcode-kit run codex -- <args>` は、その呼び出しに限って `CODEX_HOME` を `generated/codex-home` に設定します。`~/.codex` と通常の `codex` はそのままです。別の home なので、自分の Codex の設定、skills、ルール、MCP サーバーはそこでは適用されません。その中の `config.toml` は Responses API を使い、`glm-5.3` を既定のモデルとし、kit の MCP ブリッジのエントリーを常に含みます。Windows では `[windows]` に `sandbox = "unelevated"` も設定します。
+
+### OpenCode
+
+セットアップは `OPENCODE_CONFIG` が指すファイルを編集します。指定がなければ、`OPENCODE_CONFIG_DIR`、`$XDG_CONFIG_HOME/opencode`、`~/.config/opencode` のいずれかにある `opencode.jsonc` または `opencode.json` を編集し、ファイルがなければ作成します。他の設定と、`provider` セクションの外にあるコメントは保持されます。kit が書いたものではない `zcode` provider がある場合は、エラーで変更を中止します。エントリーは環境変数 `ZCODE_PROXY_KEY` からキーを読み取り、この変数は `zcode-kit run opencode` が設定します。`opencode` を直接起動する場合は、自分でこの変数を設定し、先にプロキシを起動してください。`glm-5.3-flash` には `low`、`high`、`max` のバリアントがあり、既定値は `low` です。
+
+### Aider
+
+`zcode-kit run aider` は、そのプロセスに限って `OPENAI_API_BASE` と `OPENAI_API_KEY` を設定します。システム全体には何も設定せず、`~/.aider.conf.yml` にも触れません。引数がなければ `aider --model openai/glm-5.3` を実行します。引数を渡す場合は、モデルを自分で指定してください（例：`zcode-kit run aider -- --model openai/glm-5.3-flash`）。`generated/aider-zcode.env` には、手動で使うための同じ値が入っています。
+
+### Continue
+
+セットアップは「ZCode GLM-5.3」と「ZCode GLM-5.3-Flash」を、`models:` リストの末尾にマーカー付きのブロックとして追加します。既存のモデルは保持されます。`config.yaml` がない場合、セットアップは Continue をスキップします。ファイルができたら `zcode-kit integrate continue` を実行してください。項目を 1 行に書いた `models:` リストは編集しません。先にブロック形式のリストに書き直してください。
+
+### Goose
+
+フォルダーは、Windows では `%APPDATA%\Block\goose\config\custom_providers`、macOS と Linux では `~/.config/goose/custom_providers` です。キーは `zcode.json` に保存されません。Goose は kit のキー取得スクリプトを実行してキーを取得します。この kit が書いたものではない `zcode.json` は上書きしません。
+
+### Cline と Kilo Code
+
+kit は、VS Code がこれらの拡張機能のために保持しているストレージには書き込みません。セットアップが値をまとめたファイルを書き出すので、拡張機能の設定画面で一度だけ入力してください。
+
+- **Cline：** API Provider「OpenAI Compatible」、末尾が `/v1` のベース URL、キー、モデル ID。ファイルには Cline CLI 用の `cline auth` コマンドも記載されています。
+- **Kilo Code：** API を「Anthropic Messages」にしたカスタム provider、末尾が `/v1` のベース URL、キー、手動で追加する 2 つのモデル。kit は `kilo.jsonc` を書きません。
+
+この 2 つのファイルにキーは含まれません。キーは `zcode-kit models --show-key` で表示できます。セットアップがこれらの拡張機能を探すのは `~/.vscode/extensions` だけです。他のエディターの場合は `zcode-kit integrate cline` または `zcode-kit integrate kilo-code` を実行してください。
+
+## MCP ブリッジ
+
+ブリッジ `zcode-harness` はローカルの MCP サーバーで、アシスタントからインストール済みの ZCode のセッションやタスクを扱えるようにします。登録してもモデルは接続されません。
+
+セットアップは、そのアシスタントにチェックを付けるか `y` と答えた場合、または `--harness` で指定した場合に、OMP（`~/.omp/agent/mcp.json`）と Claude Code（`claude mcp add zcode-harness --scope user`）にブリッジを登録します。リストと質問にその旨が表示されます。`--no-mcp` を付けるとブリッジは登録されず、`integrate` がブリッジを登録することはありません。Claude Code では、これが通常の設定に対する唯一の変更です。`claude mcp remove zcode-harness --scope user` または `zcode-kit uninstall` で削除できます。他の MCP クライアントでは次のエントリーを使えます。
 
 ```json
 {
@@ -85,29 +107,47 @@ Windows の独立した Codex プロファイルでは制限付きトークン�
     "zcode-harness": {
       "type": "stdio",
       "command": "node",
-      "args": ["<kit の絶対インストールパス>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
+      "args": ["--max-semi-space-size=1", "<kit の絶対インストールパス>/mcp/zcode-harness-mcp/dist/index.js", "--stdio"]
     }
   }
 }
 ```
 
-ブリッジは**実際にインストールされた ZCode ハーネス**を制御します
-（app-server プロトコル：セッション、ターン、タスク）。対話的な認証には
-Desktop が必要な場合がありますが、プロバイダーがモデル呼び出しを拒否
-することもあります。ブリッジの推論レベルは `low/high/max` です。
-ライブのモデル一覧はプロキシ側と異なる場合があり、GLM-5.3-Flash
-はプロキシ経由で検証されています。ネイティブのモデル一覧に載っていても、
-ネイティブ経由のモデル呼び出しが成功する証拠にはなりません。プロキシの
-動作確認は、ネイティブプロバイダーの動作確認とは別です。
-詳細：[MCP ブリッジ](../mcp/zcode-harness-mcp/README.ja.md)。
+ブリッジには、インストール済みでログイン済みの ZCode Desktop が必要です。モデル一覧はプロキシのものと異なる場合があります。記録されている検証（Windows 11、ZCode 0.16.9、2026-09-23）では、ブリッジは GLM-5.3-Flash を一覧に表示して選択できましたが、プロバイダーがモデルへのリクエストをコード 1113（残高不足）で拒否したため、ブリッジ経由のモデル応答は確認できていません。詳しくは[ブリッジのドキュメント](../mcp/zcode-harness-mcp/README.ja.md)を参照してください。
 
-## クォータとエラーの型
+## その他のクライアント
 
-- `GET /quota`（認証付き）はモデルごとのトークンバケットを表示します。
-- クォータ消費済み → HTTP 400 `[1005] exceed quota limit`。プロキシは同じアカウントを成長間隔で再試行し（既定で最大約65秒）、ローテーターに別のアカウントがあればその後に切り替えます。それでも表示される場合は、プロバイダーによる利用枠の回復を待ってください。
-- `[3007] captcha verify failed` → ゲートウェイ側のアンチアビューズ。プロキシは新しく発行した CAPTCHA トークンで一度再試行します。それでも失敗する場合は、しばらく休憩してください。
-- 出力前の一時的な障害（接続拒否やリセット、HTTP 500/502/503/504/524/529、429、公式クライアントが再試行するゲートウェイのエラーコード）は、同じアカウントで待ち時間を増やしながら最大 3 回再試行します。予算は公式クライアントより小さく（基本待ち時間 1 秒で倍増、`Retry-After` は 15 秒まで尊重）、再試行のたびにアカウントを再確認します。ゲートウェイの判定（クォータ、残高、CAPTCHA、モデル、認証）、リクエストのエラー、出力開始後の障害は再試行しません。15 秒を超える `Retry-After` は 429/503/529 でクライアントにそのまま渡します。`ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` で調整できます（基本待ち時間をミリ秒で指定、既定 500、上限 10000。`off` にすると接続が確立しなかった場合の再試行だけを残します。proxy start/restart が値を引き継ぎます）。
-- 最初のコンテンツイベントの前に失敗したストリーム（`overloaded_error` などのエラーイベントや切断）は、失敗したリクエストと同じように再試行されるため、ハーネスには正常なストリームだけが届きます。最初のコンテンツイベントの後は何も再試行しません。start-plan では、レスポンス後の再試行ごとに新しい CAPTCHA トークンを取得します。
-- アップストリームが途中で切断したストリームは、無言で途切れる代わりにエラーで終わります。チャットのストリームは `data: {"error":…}`、Responses は `response.failed`、ネイティブの Anthropic ストリームは `api_error` 型の `event: error` フレーム 1 つで、メッセージに原因（`upstream_incomplete` または `upstream_stream_error`）が入ります。未完成の最後のフレームは、エラーフレームを正しく解析できるよう破棄します。出力開始後は何も再送しません。ハーネスからターンを送り直してください。
-- `401 start_plan_jwt_invalid` → Desktop のログインを確認し、`zcode-kit auth login zai` で更新。プランが明示的に設定された Desktop 0.16.9 の現在アクティブな `zai`/`start-plan` ログインには `zcode-kit auth login zai --import` を使います。`credentials.json` が存在する場合はそれが正となり、認証情報が無効でも `config.json` へ暗黙にはフォールバックしません。新形式の `coding-plan` ログインでは通常の OAuth を使います。インポートは API キーの作成や取得を行いません。
-- Flash で `[1210]` → thinking が有効か確認し、無効にする代わりに `low`、`high`、`max` を選びます。プロキシは、無効にした thinking を `low` に正規化します。上記の Flash の注記を参照してください。
+OpenAI または Anthropic の API に対応したクライアントであれば、統合なしでプロキシを使えます。`zcode-kit proxy start` と `zcode-kit proxy status` は、ベース URL、キー、モデル ID を表示します。完全なキーは対話的なターミナルでのみ表示されます。それ以外では `zcode-kit models --show-key` で表示できます。以下の例はデフォルトポート `8457` を使います。
+
+```yaml
+# OpenAI 形式
+base_url: http://127.0.0.1:8457/v1
+api_key: <ローカルのプロキシキー>
+model: glm-5.3            # または glm-5.3-flash
+```
+
+```yaml
+# Anthropic 形式
+base_url: http://127.0.0.1:8457
+auth_token: <ローカルのプロキシキー>
+model: glm-5.3
+```
+
+プロキシは `POST /v1/messages`（Anthropic）、`POST /v1/chat/completions` と `POST /v1/responses`（OpenAI）、`GET /v1/models`、`GET /health`、`GET /quota` を提供します。いずれもキーが必要で、`Authorization: Bearer <キー>` または `x-api-key` で送ります。
+
+### thinking のレベル
+
+どちらのモデルも `low`、`high`、`max` のレベルに対応します。[effort の対応表](../EFFORT_MAPPING.md)（英語）を参照してください。
+
+- **OpenAI 形式：** `reasoning_effort` を送ります。`medium` は `high` として扱われ、このフィールドがないリクエストは `max` で実行されます。プロキシは 8000、16000、32000 トークンのいずれかの thinking 予算を付けます。
+- **Anthropic 形式：** `thinking: {type: "enabled", budget_tokens: <n>}` を `output_config: {effort: "low"|"high"|"max"}` と一緒に送ります。
+- **Flash は常に thinking を使用します。** thinking を無効にした `glm-5.3-flash` へのリクエストは `low` で送られます。
+
+## エラーとクォータ
+
+- **`[1005] exceed quota limit`（HTTP 400）：** クォータを使い切っています。プロキシは約 65 秒間再試行し、その後 Account Rotator に別のアカウントがあればそちらを試します。それでもエラーが返る場合は、クォータが回復するまで待ってください。クォータは `zcode-kit proxy status` で確認できます。
+- **`[3007] captcha verify failed`：** プロバイダーの不正利用チェックがリクエストを拒否しました。プロキシは新しいトークンで一度だけ再試行します。それも失敗した場合は、時間を置いてから再試行してください。
+- **Flash で `[1210]`：** thinking を無効にする代わりに、`low`、`high`、`max` のいずれかを選んでください。
+- **HTTP 401：** `Invalid or missing proxy API key` は、クライアントが誤ったローカルキーを送ったことを意味します。それ以外の場合は、`zcode-kit auth status` でログインを確認し、`zcode-kit auth login zai` で更新してください。`--import` を付けると、Desktop で現在有効な `zai`/`start-plan` のログインを取り込みます。`coding-plan` のログインでは、このオプションを付けずにログインします。
+- **出力が始まる前の一時的な障害**（接続の拒否やリセット、HTTP 429、500、502、503、504、524、529、最初のコンテンツの前に失敗したストリーム）は、待ち時間を延ばしながら最大 3 回再試行されます。出力が始まった後は何も再試行しません。`ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS` はプロキシの起動時に読み込まれ、基本の待ち時間をミリ秒で指定します（既定 500、上限 10000）。
+- **途中で切れた応答**は、何も示さずに止まるのではなく、エラーで終わります。チャットのストリームでは `data: {"error":…}`、Responses のストリームでは `response.failed`、Anthropic のストリームでは `event: error` です。アシスタントからリクエストを送り直してください。

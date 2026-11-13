@@ -5,7 +5,7 @@
 // ZCODE_PROXY_KEY; users can alternatively run /connect inside OpenCode.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { parseJsonc, setTopLevelKey } from "../../lib/jsonc.mjs";
+import { parseJsonc, setTopLevelKey, withFinalNewline } from "../../lib/jsonc.mjs";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";
 
 /** Platform-correct global config location (exported for tests). */
@@ -28,6 +28,9 @@ function zcodeProvider(ctx) {
       "glm-5.3": { name: "GLM-5.3", limit: { context: 1000000, output: 128000 } },
       "glm-5.3-flash": {
         name: "GLM-5.3-Flash", limit: { context: 1000000, output: 128000 },
+        // Without modalities the model gets OpenCode's text-only defaults and
+        // images are never sent (V1 shape, migrated to V2 capabilities.input).
+        modalities: { input: ["text", "image"], output: ["text"] },
         options: { reasoningEffort: "low" },
         variants: {
           low: { reasoningEffort: "low" },
@@ -53,7 +56,7 @@ export default {
   id: "opencode",
   label: "OpenCode",
   protocol: "OpenAI-compatible (ai-sdk openai-compatible → /v1/chat/completions)",
-  primarySource: "https://opencode.ai/docs/providers/ (checked 2026-09-13)",
+  primarySource: "https://opencode.ai/v2/docs/providers (checked 2026-11-05; the V1 provider shape is still accepted and migrated)",
 
   apply(ctx, tx, log) {
     const target = configPath(ctx.home);
@@ -71,7 +74,7 @@ export default {
       log("  opencode: zcode provider already current");
       return { changed: false };
     }
-    // AUD-003: fail closed on foreign entries — an existing provider.zcode
+    // Fail closed on foreign entries — an existing provider.zcode
     // that does not match the kit signature is never overwritten (same
     // ownership model as the pi adapter).
     if (doc.provider?.zcode && !isKitOwned(doc.provider.zcode)) {
@@ -87,7 +90,7 @@ export default {
     text = setTopLevelKey(text, "provider", { ...(doc.provider ?? {}), zcode: wanted });
     // Validate the merged document still parses before writing.
     parseJsonc(text);
-    const { wrote } = commitFile(ctx, tx, target, text.endsWith("\n") ? text : text + "\n");
+    const { wrote } = commitFile(ctx, tx, target, withFinalNewline(text));
     if (wrote) log(`  opencode: provider "zcode" written to ${target} (apiKey references ZCODE_PROXY_KEY — set by the kit launcher)`);
     log("  use via: zcode-kit run opencode -- <args>  |  openai-compatible chat/completions only");
     return { changed: wrote };

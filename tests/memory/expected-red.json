@@ -1,0 +1,48 @@
+{
+  "linux": {
+    "S2/short": {
+      "owners": { "58": ["solver:cost-per-generation", "growth:scenario", "procPeak:solver"] },
+      "flips": ["solver:cost-per-generation", "growth:scenario", "procPeak:solver"]
+    },
+    "S3/short": {
+      "owners": { "16": ["exactly-one-proxy-after-round"], "17": ["orphans"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+      "flips": ["exactly-one-proxy-after-round", "orphans", "procPeak:preflight", "procPeak:proxy"]
+    },
+    "S3/hung": {
+      "owners": { "16": ["exactly-one-proxy-after-round", "start-over-stale-lock"], "37": ["peak:kit", "procPeak:launcher", "procPeak:mcp-bridge", "procPeak:preflight", "procPeak:proxy"] },
+      "flips": ["exactly-one-proxy-after-round", "start-over-stale-lock", "procPeak:preflight", "procPeak:proxy"]
+    },
+    "S3/omp": {
+      "owners": { "37": ["procPeak:proxy", "procPeak:preflight"] },
+      "flips": ["procPeak:proxy", "procPeak:preflight"]
+    },
+    "S4/short": {
+      "owners": { "17": ["unstoppable-proxy-after-ctrl-c"] },
+      "flips": ["unstoppable-proxy-after-ctrl-c"]
+    },
+    "S5/short": { "owners": { "74": ["growth:mcp-bridge"] }, "flips": ["growth:mcp-bridge"] }
+  },
+  "windows": {
+    "S2/short": {
+      "owners": { "58": ["solver:cost-per-generation", "growth:scenario", "procPeak:solver"] },
+      "flips": ["solver:cost-per-generation", "growth:scenario", "procPeak:solver"]
+    },
+    "S3/short": {
+      "owners": { "16": ["exactly-one-proxy-after-round"], "17": ["orphans"], "37": ["peak:kit"] },
+      "flips": ["exactly-one-proxy-after-round", "orphans"]
+    },
+    "S3/hung": {
+      "owners": { "16": ["exactly-one-proxy-after-round", "start-over-stale-lock"], "17": ["orphans"], "37": ["peak:kit"] },
+      "flips": ["exactly-one-proxy-after-round", "start-over-stale-lock", "orphans", "peak:kit"]
+    },
+    "S3/omp": {
+      "owners": { "35": ["omp:concurrent-preflights"], "37": ["peak:kit"] },
+      "flips": ["peak:kit"]
+    },
+    "S4/short": {
+      "owners": { "17": ["proxy-left-after-stop", "failed-lifecycle-steps", "count:proxy"], "81": ["stale-lock-after-ctrl-c"] },
+      "flips": ["proxy-left-after-stop", "failed-lifecycle-steps", "count:proxy"]
+    },
+    "S5/short": { "ticket": "74", "state": "unstable" }
+  }
+}

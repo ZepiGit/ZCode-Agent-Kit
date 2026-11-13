@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { proxyEnv } from '../lib/proxy-env.mjs';
+import { randomBytes } from 'node:crypto';
+import { proxyEnv, proxyServeEnv } from '../lib/proxy-env.mjs';
 
 test('managed proxies enable captcha solving without ambient opt-in', () => {
   const source = { PATH: 'keep-me' };
@@ -68,4 +69,53 @@ test('managed env passes the quota retry schedule knob through to the proxy', ()
   const source = { ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS: 'off' };
   const env = proxyEnv({ config: 'C:/kit/proxy/config.yaml' }, source);
   assert.equal(env.ZCODE_PROXY_QUOTA_RETRY_DELAYS_MS, 'off');
+});
+
+test('managed env passes the admission byte-cap override through to the proxy (ADR-0004)', () => {
+  const source = { ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB: '128', ZCODE_PROXY_ADMISSION_MAX_QUEUED: '9' };
+  const env = proxyEnv({ config: 'C:/kit/proxy/config.yaml' }, source);
+  assert.equal(env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB, '128');
+  // Only the documented key is an exception; other ZCODE_PROXY_* names stay stripped.
+  assert.equal(env.ZCODE_PROXY_ADMISSION_MAX_QUEUED, undefined);
+});
+
+// Per-spawn variables. Tokens are
+// generated fixtures; assertions compare them without printing them (B2).
+const PER_SPAWN = ['ZCODE_KIT_STOP_TOKEN', 'ZCODE_KIT_LOG_DIR'];
+const kitCtx = { config: '/kit/proxy/config.yaml', logDir: '/kit/logs' };
+
+test('the serving proxy gets the manager logs dir and the given stop token, overwriting ambient values in any casing', () => {
+  const ambient = randomBytes(32).toString('base64url');
+  const fresh = randomBytes(32).toString('base64url');
+  const source = {
+    ZCODE_KIT_STOP_TOKEN: ambient, zcode_kit_stop_token: ambient,
+    ZCODE_KIT_LOG_DIR: '/ambient/logs', Zcode_Kit_Log_Dir: '/ambient/logs',
+    ZCODE_KIT_WATCHDOG: '0', PATH: 'keep-me',
+  };
+  const snapshot = { ...source };
+  const env = proxyServeEnv(kitCtx, fresh, source);
+  assert.equal(env.ZCODE_KIT_LOG_DIR, '/kit/logs');
+  assert.ok(env.ZCODE_KIT_STOP_TOKEN === fresh, 'the stop token is the one the manager generated for this spawn');
+  // Windows env names are case-insensitive: a second spelling would make the
+  // child's value depend on block order, so exactly one of each remains.
+  for (const name of PER_SPAWN) {
+    assert.deepEqual(Object.keys(env).filter((k) => k.toUpperCase() === name), [name], `${name} appears once`);
+  }
+  assert.equal(env.ZCODE_KIT_WATCHDOG, '0', 'other ZCODE_KIT_* variables still pass');
+  assert.equal(env.PATH, 'keep-me');
+  assert.equal(env.ZCODE_PROXY_CONFIG, '/kit/proxy/config.yaml');
+  assert.deepEqual(source, snapshot);
+});
+
+test('the serving proxy env refuses a missing or empty stop token instead of spawning without one', () => {
+  for (const bad of [undefined, null, '', 42]) {
+    assert.throws(() => proxyServeEnv(kitCtx, bad, {}), /stop token/);
+  }
+});
+
+test('other proxy children (login, store probes) inherit neither per-spawn variable', () => {
+  const source = { ZCODE_KIT_STOP_TOKEN: randomBytes(32).toString('base64url'), zcode_kit_log_dir: '/ambient/logs', ZCODE_KIT_WATCHDOG: '0' };
+  const env = proxyEnv({ config: '/kit/proxy/config.yaml' }, source);
+  assert.deepEqual(Object.keys(env).filter((k) => PER_SPAWN.includes(k.toUpperCase())), []);
+  assert.equal(env.ZCODE_KIT_WATCHDOG, '0');
 });

@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   EventLoopLagMonitor,
-  MemoryGuard,
   healthDetails,
   registerCaptchaRuntime,
   type CaptchaHealth,
@@ -74,6 +73,14 @@ describe("healthDetails captcha section", () => {
       lastRecycleReason: null,
       lastRecycleAt: null,
       lastSdkScripts: null,
+      capMB: null,
+      enforcement: "none",
+      capExits: 0,
+      lastFootprintMB: null,
+      abnormalExits: 0,
+      failFast: false,
+      failFastUntil: null,
+      shedSolves: 0,
     },
   };
 
@@ -90,90 +97,5 @@ describe("healthDetails captcha section", () => {
   it("degrades to null when the stats provider throws", () => {
     registerCaptchaRuntime({ stats: () => { throw new Error("pool broken"); }, recycle: () => {}, shutdown: () => {} });
     expect(healthDetails().captcha).toBeNull();
-  });
-});
-
-describe("MemoryGuard", () => {
-  function harness(opts: { hook: boolean; launches?: boolean }) {
-    let rss = 500;
-    const events: string[] = [];
-    const guard = new MemoryGuard({
-      sampleRssMB: () => rss,
-      recycle: (reason) => events.push(`recycle:${reason}`),
-      canRestart: () => opts.hook,
-      restart: async () => {
-        events.push("restart");
-        return opts.launches ?? true;
-      },
-      log: (line) => events.push(line),
-    });
-    return {
-      events,
-      at(mb: number) {
-        rss = mb;
-        guard.sample();
-      },
-    };
-  }
-
-  it("recycles once per episode above the soft limit and resets below it", () => {
-    const h = harness({ hook: true });
-    h.at(1_536);
-    expect(h.events).toEqual([]);
-    h.at(1_600);
-    h.at(1_700);
-    h.at(2_000);
-    expect(h.events.filter((e) => e === "recycle:memory")).toHaveLength(1);
-    h.at(1_000); // episode over
-    h.at(1_600);
-    expect(h.events.filter((e) => e === "recycle:memory")).toHaveLength(2);
-    expect(h.events).not.toContain("restart");
-  });
-
-  it("restarts via the hook after 3 consecutive post-recycle samples above the hard limit", async () => {
-    const h = harness({ hook: true });
-    h.at(4_000); // first sample over soft: recycle, never an immediate restart
-    h.at(3_100);
-    h.at(3_100);
-    h.at(3_000); // dips below hard: streak resets
-    h.at(3_100);
-    h.at(3_100);
-    expect(h.events).not.toContain("restart");
-    h.at(3_200);
-    expect(h.events.filter((e) => e === "restart")).toHaveLength(1);
-    expect(h.events).toContain("[memory] rss 3200 MB — requesting restart");
-    await Promise.resolve();
-    // Restart is requested exactly once.
-    h.at(3_300);
-    h.at(3_300);
-    h.at(3_300);
-    expect(h.events.filter((e) => e === "restart")).toHaveLength(1);
-  });
-
-  it("keeps serving and stops retrying for the episode when the hook fails to launch", async () => {
-    const h = harness({ hook: true, launches: false });
-    for (const mb of [4_000, 3_500, 3_500, 3_500]) h.at(mb);
-    expect(h.events.filter((e) => e === "restart")).toHaveLength(1);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(h.events).toContain("[memory] kit manager respawn hook did not start — not restarting, still serving");
-    for (const mb of [3_500, 3_500, 3_500, 3_500]) h.at(mb);
-    expect(h.events.filter((e) => e === "restart")).toHaveLength(1);
-    // A new episode tries again.
-    h.at(800);
-    for (const mb of [4_000, 3_500, 3_500, 3_500]) h.at(mb);
-    expect(h.events.filter((e) => e === "restart")).toHaveLength(2);
-  });
-
-  it("only logs once per episode without the respawn hook", () => {
-    const h = harness({ hook: false });
-    for (const mb of [4_000, 3_500, 3_500, 3_500, 3_500, 3_500]) h.at(mb);
-    expect(h.events).not.toContain("restart");
-    const warnings = h.events.filter((e) => e.includes("no kit manager respawn hook"));
-    expect(warnings).toHaveLength(1);
-    h.at(800);
-    for (const mb of [4_000, 3_500, 3_500, 3_500]) h.at(mb);
-    expect(h.events.filter((e) => e.includes("no kit manager respawn hook"))).toHaveLength(2);
-    expect(h.events.filter((e) => e === "recycle:memory")).toHaveLength(2);
   });
 });

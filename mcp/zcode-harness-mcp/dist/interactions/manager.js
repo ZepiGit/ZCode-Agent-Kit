@@ -4,18 +4,48 @@
  *
  * Policies:
  *  - "deny":      every permission is denied automatically.
- *  - "allowlist": tool names matching a configured prefix are auto-approved,
- *                 everything else is denied.
+ *  - "allowlist": a tool whose name equals a configured entry (exact match)
+ *                 is auto-approved, everything else is denied.
  *  - "ask":       the interaction is surfaced over MCP and waits for
  *                 zcode_interaction_respond until a timeout; on timeout the
  *                 safe default (deny) applies. This policy never expands the
  *                 caller's own authority: responders can only answer with
- *                 options the harness itself offered.
+ *                 options the harness itself offered, and an offered
+ *                 option is sent as an approval only when it is known to
+ *                 approve (optionVerdict below).
  */
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../util/log.js";
 import { redactDeep } from "../security/redact.js";
 const log = createLogger("interactions");
+/**
+ * What choosing an offered permission option means. The runtime's options
+ * carry a kind: `allow_once`, `allow_always` or `allow_project` approve, and
+ * `deny` (with variants such as `deny_once`) refuses; the bridge answers the
+ * runtime with `{decision: "allow" | "deny"}`.
+ *
+ * Fail closed: only those three kinds are an approval. A kind that names a
+ * refusal (deny, reject or cancel, alone or followed by `_…`) is a refusal.
+ * Anything else is "unknown" and is never sent as an approval. An option
+ * without a kind is judged by its id in the same way. A refusing kind wins;
+ * an approving kind on an option whose id names a refusal is contradictory
+ * and therefore unknown.
+ */
+const APPROVING_KINDS = new Set(["allow_once", "allow_always", "allow_project"]);
+const REFUSING_KIND = /^(?:deny|reject|cancel)(?:_[a-z_]+)?$/;
+function nameVerdict(name) {
+    if (APPROVING_KINDS.has(name))
+        return "allow";
+    return REFUSING_KIND.test(name) ? "deny" : "unknown";
+}
+export function optionVerdict(option) {
+    if (option.kind === undefined)
+        return nameVerdict(option.id);
+    const byKind = nameVerdict(option.kind);
+    if (byKind === "allow" && nameVerdict(option.id) === "deny")
+        return "unknown";
+    return byKind;
+}
 function kindForMethod(method) {
     if (method === "interaction/requestPermission")
         return "permission";
@@ -178,7 +208,15 @@ export class InteractionManager {
                         error: `optionId must be one of: ${rec.options.map((o) => o.id).join(", ") || "(none)"}${choice.cancel ? ", or omit optionId with cancel:true" : ""}`,
                     };
                 }
-                result = opt.kind === "deny" ? { decision: "deny", reason: `denied via option ${opt.id}` } : { decision: "allow", reason: `allowed via option ${opt.id}` };
+                const verdict = optionVerdict(opt);
+                if (verdict === "unknown") {
+                    // Nothing is sent and the interaction stays pending: an approval is never guessed.
+                    return {
+                        error: `the bridge cannot tell whether option ${opt.id} (${opt.kind === undefined ? "no kind" : `kind ${JSON.stringify(opt.kind)}`}) approves or refuses the request, ` +
+                            `so nothing was sent to the runtime. Choose an option of kind allow_once, allow_always, allow_project or deny, or answer with cancel:true to refuse.`,
+                    };
+                }
+                result = verdict === "deny" ? { decision: "deny", reason: `denied via option ${opt.id}` } : { decision: "allow", reason: `allowed via option ${opt.id}` };
             }
         }
         else if (rec.kind === "user_input") {

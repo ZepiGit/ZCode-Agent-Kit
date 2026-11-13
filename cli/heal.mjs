@@ -1,36 +1,22 @@
 #!/usr/bin/env node
 // One-shot shared startup preflight. Never guess ownership, print provider
 // bodies, or schedule recurring provider checks. The only process it can end
-// is a proven hung own proxy, via the manager's hung-own proof in start().
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+// is a proven hung own proxy, via the lifecycle's hung-own proof (ensure running).
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, realpathSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
+import { spawnSync } from 'node:child_process';
 import { createCtx } from './context.mjs';
 import { diagnoseQuota } from './quota-diagnostics.mjs';
 export { diagnoseQuota, isQuotaSnapshot } from './quota-diagnostics.mjs';
 import { acquireLock, releaseLock, beginTransaction, rollbackTransaction } from '../lib/transaction.mjs';
-
-const CAUSES = new Set(['healthy', 'auth3012', 'balance1113', 'balance3001', 'auth', 'balance', 'foreign', 'startup', 'quota-unavailable', 'smoke', 'skipped', 'repair', 'hung', 'respawn', 'unknown']);
-const ACTIONS = new Set(['safe-start', 'quota-check', 'smoke-check', 'reapply', 'recover', 'respawn', 'none']);
-const RESULTS = new Set(['ok', 'failed', 'refused', 'skipped', 'warning', 'unknown']);
-const LOG_LIMIT = 64 * 1024;
-export function logHeal(ctx, { cause, action, result }) {
-  // Allow-list, not redaction: provider text, paths and credentials can never
-  // become log fields. A bounded second file is the only retained rotation.
-  try {
-    const dir = ctx.logDir ?? join(ctx.root, 'logs'); mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const file = join(dir, 'heal.log');
-    const line = `${new Date().toISOString()} cause=${CAUSES.has(cause) ? cause : 'unknown'} action=${ACTIONS.has(action) ? action : 'none'} result=${RESULTS.has(result) ? result : 'unknown'}\n`;
-    if (existsSync(file) && statSync(file).size + Buffer.byteLength(line) > LOG_LIMIT) {
-      rmSync(file + '.1', { force: true });
-      if (statSync(file).size <= LOG_LIMIT) renameSync(file, file + '.1');
-      else { writeFileSync(file + '.1', 'previous oversized heal log discarded\n'); rmSync(file); }
-    }
-    appendFileSync(file, line, { mode: 0o600 });
-  } catch { /* logging must not break a launch */ }
-}
+import { formatEventLine } from '../lib/event-line.mjs';
+import { NODE_FLOOR, nodeMajor } from '../lib/node-floor.mjs';
+import { CAUSES, appendHealLine, logHeal } from '../lib/heal-log.mjs';
+import { autostartAdmitted } from '../lib/autostart-admission.mjs';
+export { logHeal } from '../lib/heal-log.mjs';
 
 function outcome(ctx, code, cause, detail, action = 'quota-check') {
   logHeal(ctx, { cause, action, result: code ? 'failed' : cause === 'quota-unavailable' ? 'warning' : 'ok' });
@@ -57,24 +43,84 @@ export const PREFLIGHT_WARNINGS = {
   balance: 'Account balance warning; check the account plan/quota.',
   'quota-unavailable': 'Quota check unavailable; continuing with the healthy local proxy. No retry scheduled.',
   hung: 'Recovered an unresponsive ZCode proxy (restarted automatically).',
+  'runtime-floor': `The autostart's pinned Node.js is below the support floor (Node.js ${NODE_FLOOR}); run zcode-kit setup with Node.js ${NODE_FLOOR} or newer, then restart OMP.`,
+  'runtime-missing': `The autostart's pinned Node.js path no longer exists; run zcode-kit setup with Node.js ${NODE_FLOOR} or newer, then restart OMP.`,
 };
+
+// The OMP autostart runs this preflight with the
+// absolute interpreter path setup pinned. A version manager can remove that
+// Node or leave it below the floor after an upgrade; report both. Only this
+// installation's autostart is checked, a pinned Bun is out of scope (the floor
+// is a Node floor), and nothing is changed: setup re-pins.
+const AUTOSTART_MAX_BYTES = 256 * 1024;
+const RUNTIME_NEXT = 'zcode-kit setup, then restart OMP';
+function templateLiteral(source, name) {
+  const raw = source.match(new RegExp(`^const ${name} = "((?:[^"\\\\\\r\\n]|\\\\.)*)";\\r?$`, 'm'))?.[1];
+  if (raw === undefined || raw.startsWith('__ZCODE_OM_')) return null;
+  try { return JSON.parse(`"${raw}"`); } catch { return null; }
+}
+const samePath = (a, b) => {
+  const canonical = (p) => { let r = resolve(p); try { r = realpathSync(r); } catch {} return process.platform === 'win32' ? r.toLowerCase() : r; };
+  return canonical(a) === canonical(b);
+};
+export function autostartRuntimeCheck(ctx) {
+  let source;
+  try {
+    const file = join(ctx.home, '.omp', 'agent', 'extensions', 'zcode-proxy-autostart.ts');
+    if (!existsSync(file) || statSync(file).size > AUTOSTART_MAX_BYTES) return null;
+    source = readFileSync(file, 'utf8');
+  } catch { return null; }
+  const root = templateLiteral(source, 'ROOT');
+  const runtime = templateLiteral(source, 'RUNTIME');
+  if (!root || !runtime || !samePath(root, ctx.root)) return null;
+  if (/^bun(?:\.exe)?$/i.test(basename(runtime))) return null;
+  if (!existsSync(runtime)) return { cause: 'runtime-missing', detail: 'the pinned Node.js path no longer exists', next: RUNTIME_NEXT };
+  let version = null;
+  if (samePath(runtime, process.execPath)) version = process.version;
+  else {
+    const probe = spawnSync(runtime, ['--version'], { encoding: 'utf8', timeout: 5000, windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'ignore'] });
+    if (probe.error?.code === 'ENOENT') return { cause: 'runtime-missing', detail: 'the pinned Node.js path no longer exists', next: RUNTIME_NEXT };
+    if (!probe.error && probe.status === 0) version = String(probe.stdout ?? '').trim().split(/\r?\n/)[0];
+  }
+  const major = nodeMajor(version);
+  if (major === null || major >= NODE_FLOOR) return null; // unreadable is not a claim the preflight makes
+  return { cause: 'runtime-floor', detail: `the pinned Node.js ${version} is below the support floor (Node.js ${NODE_FLOOR})`, next: RUNTIME_NEXT };
+}
+/** The off-TTY check rows for a runtime warning. */
+export function runtimeWarningLines(runtime) {
+  return runtime ? [`WARN  OMP autostart runtime \u2014 ${runtime.detail}`, `  next: ${runtime.next}`] : [];
+}
+function logRuntimeWarning(ctx, runtime) {
+  appendHealLine(ctx, formatEventLine({ level: 'WARN', component: 'preflight', message: 'OMP autostart runtime check',
+    fields: { cause: runtime.cause, action: 'runtime-check', result: 'warning' } }));
+}
 
 const inFlight = new Map();
 export function startupPreflight(ctx, options = {}) {
   const id = `${ctx.root}\n${ctx.home}`;
   if (inFlight.has(id)) return inFlight.get(id);
-  const work = preflight(ctx, options).finally(() => inFlight.delete(id));
+  const work = preflight(ctx, options).then((result) => {
+    let runtime = null;
+    try { runtime = autostartRuntimeCheck(ctx); } catch { /* the check must never break a launch */ }
+    if (!runtime) return result;
+    logRuntimeWarning(ctx, runtime);
+    return { ...result, runtime };
+  }).finally(() => inFlight.delete(id));
   inFlight.set(id, work);
   return work;
 }
 async function preflight(ctx, { timeoutMs = 8000 } = {}) {
   let code, recovered = false;
   try {
-    const { createManager } = await import('../proxy/zcode-proxy-manager.mjs');
-    const manager = createManager({ root: ctx.root, home: ctx.home });
-    code = await manager.start({ waitMs: 20000 });
-    // The manager already logged cause=hung action=recover to heal.log.
-    recovered = manager.lastRecovery() !== null;
+    // The lifecycle intent, not the manager CLI: the preflight imports no
+    // presentation code. Its narration lines stream to stdout as
+    // the manager printed them.
+    const { createLifecycle } = await import('../lib/proxy-lifecycle.mjs');
+    const started = await createLifecycle({ root: ctx.root, home: ctx.home }).ensureRunning({ waitMs: 20000, observe: line => console.log(line) });
+    if (started.outcome === 'start-lock-unavailable') throw new Error(started.error);
+    code = started.code;
+    // The lifecycle already logged cause=hung action=recover to heal.log.
+    recovered = started.recovered !== null;
   }
   catch { return outcome(ctx, 4, 'startup', 'ZCode safe start refused; inspect manager ownership lock/config with zcode-kit doctor. No takeover attempted.', 'safe-start'); }
   if (code !== 0) return outcome(ctx, code, code === 3 ? 'foreign' : 'startup', code === 3 ? 'ZCode port occupied or key mismatched. Listener left untouched; run zcode-kit doctor --fix or inspect ownership manually.' : 'ZCode safe start failed. Run zcode-kit proxy restart, then zcode-kit doctor; inspect logs/proxy.log and manager lock ownership.', 'safe-start');
@@ -169,7 +215,9 @@ function assertRepairAllowed(ctx) {
 }
 async function alignOfflineKey(ctx, tx) {
   const text = readFileSync(ctx.config, 'utf8');
-  const keys = [...text.matchAll(/^  proxyApiKey: "([A-Za-z0-9_-]+)"\r?$/gm)];
+  // The match ends before the line break, so the replacement below keeps the
+  // file's own line ending (a CRLF config stays CRLF).
+  const keys = [...text.matchAll(/^  proxyApiKey: "([A-Za-z0-9_-]+)"(?=\r?$)/gm)];
   const ports = [...text.matchAll(/^  port: (\d+)\r?$/gm)];
   const key = ctx.key();
   if (keys.length !== 1 || ports.length !== 1 || !/^[A-Za-z0-9_-]+$/.test(key) || Number(ports[0][1]) < 1 || Number(ports[0][1]) > 65535) {
@@ -177,7 +225,10 @@ async function alignOfflineKey(ctx, tx) {
   }
   if (keys[0][1] === key) return; // no config mutation needed
   // Entire known template, not a substring marker, is the ownership boundary.
-  const normalize = s => s.replace(/\r\n/g, '\n').replace(/^  port: \d+$/m, '  port: PORT').replace(/^  proxyApiKey: "[A-Za-z0-9_-]+"$/m, '  proxyApiKey: "KEY"');
+  // Comment and blank lines do not count: a release that only documents new
+  // optional keys in the template must not make every existing config "custom".
+  const normalize = s => s.replace(/\r\n/g, '\n').split('\n').filter(line => !/^\s*(#.*)?$/.test(line)).join('\n')
+    .replace(/^  port: \d+$/m, '  port: PORT').replace(/^  proxyApiKey: "[A-Za-z0-9_-]+"$/m, '  proxyApiKey: "KEY"');
   if (normalize(text) !== normalize(readFileSync(ctx.configExample, 'utf8'))) throw new Error('custom or corrupt proxy config; automatic repair requires an unambiguous kit template');
   // Holding an exclusive loopback bind while replacing the config proves no
   // listener was present and avoids racing a start on this same port.
@@ -188,7 +239,7 @@ async function alignOfflineKey(ctx, tx) {
   });
   try {
     if (readFileSync(ctx.config, 'utf8') !== text || ctx.key() !== key) throw new Error('runtime files changed concurrently; retry after inspecting ownership');
-    // AUD-005/B-12: unique staging name — a fixed name left by a crash would
+    // Unique staging name — a fixed name left by a crash would
     // block every later repair with EEXIST.
     tx.touch(ctx.config);
     const temp = `${ctx.config}.zcode-staging-${process.pid}-${randomBytes(6).toString('hex')}`;
@@ -211,7 +262,7 @@ export async function repairManaged(ctx, adapters, log = () => {}) {
   } catch (err) {
     // Commit post-hashes first so rollback remains conflict-aware, rather than
     // blindly restoring an in-progress journal over unrelated concurrent edits.
-    // B-24: a failure here must not mask the original error or skip logging.
+    // A failure here must not mask the original error or skip logging.
     try {
       const id = tx.finish();
       if (id) rollbackTransaction(ctx.backupDir, id);
@@ -226,12 +277,18 @@ export async function repairManaged(ctx, adapters, log = () => {}) {
 let entry = '';
 try { entry = realpathSync(process.argv[1] ?? ''); } catch {}
 if (entry && import.meta.url === pathToFileURL(entry).href) {
+  // Started by an OMP host for its autostart token: run only while that token
+  // names this process. Otherwise the host is gone and another host may
+  // already run its own preflight; leave without touching anything.
+  if (!autostartAdmitted(process.argv.slice(2))) process.exit(4);
   startupPreflight(createCtx()).then(result => {
     if (process.argv.includes('--diagnostic-code')) {
       if (result.recovered) console.error('[zcode-preflight] cause=hung');
+      if (result.runtime) console.error(`[zcode-preflight] cause=${result.runtime.cause}`);
       console.error(`[zcode-preflight] cause=${CAUSES.has(result.cause) ? result.cause : 'unknown'}`);
     } else {
       if (result.recovered) console.error(PREFLIGHT_WARNINGS.hung);
+      for (const line of runtimeWarningLines(result.runtime)) console.error(line);
       console.error(result.detail);
     }
     process.exitCode = result.code;

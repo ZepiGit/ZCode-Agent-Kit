@@ -4,11 +4,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, copyFileSync, mkdirSync, symlinkSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const KIT = join(import.meta.dirname, "..");
+// The shared width core and token set the CLI and the TUI load.
+const SHARED_OUTPUT_FILES = [
+  "zcode-proxy-src/src/tui/width-core.mjs", "zcode-proxy-src/src/tui/width-core.d.mts",
+  "zcode-proxy-src/src/tui/tokens.mjs", "zcode-proxy-src/src/tui/tokens.d.mts",
+];
 
 function packageFixture(t) {
   const root = mkdtempSync(join(tmpdir(), "zcode-package-"));
@@ -28,13 +33,19 @@ function packageFixture(t) {
   for (const path of ["cli/zcode-kit.mjs", "cli/heal.mjs", "cli/adapters/omp.mjs", "cli/adapters/pi.mjs",
     "cli/adapters/goose.mjs", "proxy/zcode-proxy-manager.mjs", "proxy/resolve-zcode-proxy-key.mjs",
     "proxy/config.example.yaml", "mcp/zcode-harness-mcp/dist/index.js", "setup.mjs",
-    "bin/zcode-claude.cmd", "bin/zcode-codex.cmd", "lib/transaction.mjs", "scripts/verify-release-marker.mjs"]) put(path);
+    "bin/zcode-claude.cmd", "bin/zcode-codex.cmd", "lib/transaction.mjs", "scripts/verify-release-marker.mjs",
+    ...SHARED_OUTPUT_FILES]) put(path);
   put('proxy/config.example.yaml', 'auth:\n  proxyApiKey: "GENERATE_ME"\n');
   for (const args of [["init", "--quiet"], ["add", "."]]) {
     const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
   }
   for (const member of ["cli", "lib"]) cpSync(join(KIT, member), join(root, member), { recursive: true });
+  // The output module's token set and width core re-export the
+  // shared files under zcode-proxy-src/src/tui — part of every real kit
+  // layout, so the fixture kit carries them too.
+  mkdirSync(join(root, "zcode-proxy-src", "src", "tui"), { recursive: true });
+  for (const f of ["tokens.mjs", "width-core.mjs"]) cpSync(join(KIT, "zcode-proxy-src", "src", "tui", f), join(root, "zcode-proxy-src", "src", "tui", f));
   put("cli/local-only.mjs");
   const build = (...args) => {
     const result = spawnSync(process.execPath, [join(root, "pack/build.mjs"), ...args], { encoding: "utf8" });
@@ -99,6 +110,65 @@ test("payload verification rejects a missing transaction runtime import", (t) =>
   const bad = verify();
   assert.equal(bad.status, 1, "a package missing transaction support must fail closed");
   assert.match(bad.stderr, /required file missing: lib\/transaction\.mjs/);
+});
+
+test("payload verification rejects a payload without the proxy lifecycle module or the heal log (ticket 15)", (t) => {
+  const { root, build } = packageFixture(t);
+  const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
+  for (const file of ["lib/proxy-lifecycle.mjs", "lib/heal-log.mjs"]) {
+    build();
+    const good = verify();
+    assert.equal(good.status, 0, good.stderr);
+    rmSync(join(root, "pack/dist", file));
+    const bad = verify();
+    assert.equal(bad.status, 1, `a package missing ${file} must fail closed`);
+    assert.match(bad.stderr, new RegExp(`required file missing: ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  }
+});
+
+test("payload verification rejects a payload without the manager's doctor module (ticket 38)", (t) => {
+  // The manager CLI and zcode-kit doctor both load lib/proxy-doctor.mjs.
+  const { root, build } = packageFixture(t);
+  const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
+  build();
+  const good = verify();
+  assert.equal(good.status, 0, good.stderr);
+  rmSync(join(root, "pack/dist/lib/proxy-doctor.mjs"));
+  const bad = verify();
+  assert.equal(bad.status, 1, "a package missing the doctor module must fail closed");
+  assert.match(bad.stderr, /required file missing: lib\/proxy-doctor\.mjs/);
+});
+
+test("payload verification rejects a payload without the shared width core, token set or their type declarations", (t) => {
+  const { root, build } = packageFixture(t);
+  const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
+  for (const file of SHARED_OUTPUT_FILES) {
+    build();
+    const good = verify();
+    assert.equal(good.status, 0, good.stderr);
+    rmSync(join(root, "pack/dist", file));
+    const bad = verify();
+    assert.equal(bad.status, 1, `a package missing ${file} must fail closed`);
+    assert.match(bad.stderr, new RegExp(`required file missing: ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  }
+});
+
+test("payload verification rejects a payload without any one of the CLI command modules (ticket 08)", (t) => {
+  const { root, build } = packageFixture(t);
+  const verify = () => spawnSync(process.execPath, [join(root, "pack/verify-payload.mjs")], { encoding: "utf8" });
+  // The checkout's own cli/commands/ is the source of truth: the entry
+  // dispatches every command through these files.
+  const modules = readdirSync(join(KIT, "cli", "commands")).filter((f) => f.endsWith(".mjs")).map((f) => `cli/commands/${f}`);
+  assert.ok(modules.includes("cli/commands/index.mjs") && modules.length >= 15, `${modules}`);
+  for (const file of modules) {
+    build();
+    const good = verify();
+    assert.equal(good.status, 0, good.stderr);
+    rmSync(join(root, "pack/dist", file));
+    const bad = verify();
+    assert.equal(bad.status, 1, `a package missing ${file} must fail closed`);
+    assert.match(bad.stderr, new RegExp(`required file missing: ${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  }
 });
 
 for (const notes of [false, true]) {

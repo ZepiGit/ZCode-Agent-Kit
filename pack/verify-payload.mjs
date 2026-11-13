@@ -32,6 +32,21 @@ const REQUIRED_FILES = [
   "cli/adapters/pi.mjs",
   "cli/adapters/goose.mjs",
   "proxy/zcode-proxy-manager.mjs",
+  // The proxy lifecycle module the manager CLI and the preflight
+  // share, and the heal log it writes.
+  "lib/proxy-lifecycle.mjs",
+  "lib/heal-log.mjs",
+  // The preflight's admission check for a start by an OMP host.
+  "lib/autostart-admission.mjs",
+  // The manager's doctor checks, which the manager CLI and
+  // zcode-kit doctor both read as a check record.
+  "lib/proxy-doctor.mjs",
+  // The status record and the log tail the manager CLI and
+  // zcode-kit status / proxy logs both read, and the CLI's report builders.
+  "lib/proxy-status.mjs",
+  "lib/proxy-logs.mjs",
+  "cli/doctor-report.mjs",
+  "cli/proxy-report.mjs",
   "proxy/resolve-zcode-proxy-key.mjs",
   "proxy/config.example.yaml",
   "mcp/zcode-harness-mcp/dist/index.js",
@@ -39,6 +54,16 @@ const REQUIRED_FILES = [
   "bin/zcode-claude.cmd",
   "bin/zcode-codex.cmd",
   "scripts/verify-release-marker.mjs",
+  // The width core and token set shared by the CLI (lib/term/) and
+  // the proxy TUI, with their type declarations.
+  "zcode-proxy-src/src/tui/width-core.mjs",
+  "zcode-proxy-src/src/tui/width-core.d.mts",
+  "zcode-proxy-src/src/tui/tokens.mjs",
+  "zcode-proxy-src/src/tui/tokens.d.mts",
+  // The CLI entry dispatches every command through its command
+  // module (cli/commands/index.mjs is the dispatch table).
+  ...["index", "common", "help", "version", "setup", "integrate", "run", "doctor", "status", "proxy", "logs", "models", "usage", "auth", "accounts", "update", "rollback", "uninstall"]
+    .map((name) => `cli/commands/${name}.mjs`),
 ];
 
 const SECRET_PATTERNS = [

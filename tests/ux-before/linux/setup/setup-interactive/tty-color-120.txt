@@ -1,0 +1,109 @@
+y
+n
+n
+y
+y
+n
+n
+  ZCODE  /  AGENT KIT
+  v0.2.42  |  Your local AI workspace
+
+
+| Runtime and configuration
+! WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+   next  cd <KIT>/zcode-proxy-src
+     or  ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
+
+  ✓ OK    Runtime and configuration  runtime ready
+Assistant integrations ─────────────────────────────────────────────────────────
+Configure ZCode as a provider in these assistants?
+Enter with editable checks answers yes for checked rows and no for unchecked rows.
+Esc or Enter with no editable checks saves no harness decision.
+A nonempty confirmation saves readable editable choices; unreadable choices apply only to this run.
+Esc, an empty confirmation or input closing skips OMP / Oh My Pi for this run, even if its saved choice is yes. No
+harness decision is saved.
+Esc, an empty confirmation or input closing skips pi for this run, even if its saved choice is yes. No harness decision
+is saved.
+Esc, an empty confirmation or input closing skips Claude Code for this run, even if its saved choice is yes. No harness
+decision is saved.
+Esc, an empty confirmation or input closing skips Codex CLI for this run, even if its saved choice is yes. No harness
+decision is saved.
+Esc, an empty confirmation or input closing skips OpenCode for this run, even if its saved choice is yes. No harness
+decision is saved.
+Esc, an empty confirmation or input closing skips Continue for this run, even if its saved choice is yes. No harness
+decision is saved.
+Selecting OMP / Oh My Pi or Claude Code also registers the kit's MCP bridge "zcode-harness" (skip with --no-mcp).
+
+  ▸ [ ] OMP / Oh My Pi  new / editable
+    [ ] pi              new / editable
+    [ ] Claude Code     new / editable
+    [ ] Codex CLI       new / editable
+    [ ] OpenCode        new / editable
+    [ ] Continue        new / editable
+
+Arrows move  Space toggle  a toggle all editable  Enter confirm
+Esc no new harness decision  Ctrl-C abort
+0 of 6 editable checked; saved yes kept: 0
+
+Configure ZCode as a provider in these assistants?
+Enter with editable checks answers yes for checked rows and no for unchecked rows.
+Esc or Enter with no editable checks saves no harness decision.
+A nonempty confirmation saves readable editable choices; unreadable choices apply only to this run.
+Esc, an empty confirmation or input closing skips OMP / Oh My Pi for this run, even if its saved choice is yes. No
+harness decision is saved.
+Esc, an empty confirmation or input closing skips pi for this run, even if its saved choice is yes. No harness decision
+is saved.
+Esc, an empty confirmation or input closing skips Claude Code for this run, even if its saved choice is yes. No harness
+decision is saved.
+Esc, an empty confirmation or input closing skips Codex CLI for this run, even if its saved choice is yes. No harness
+decision is saved.
+Esc, an empty confirmation or input closing skips OpenCode for this run, even if its saved choice is yes. No harness
+decision is saved.
+Esc, an empty confirmation or input closing skips Continue for this run, even if its saved choice is yes. No harness
+decision is saved.
+Selecting OMP / Oh My Pi or Claude Code also registers the kit's MCP bridge "zcode-harness" (skip with --no-mcp).
+
+  ▸ [ ] OMP / Oh My Pi  new / editable
+    [ ] pi              new / editable
+    [ ] Claude Code     new / editable
+    [ ] Codex CLI       new / editable
+    [ ] OpenCode        new / editable
+    [ ] Continue        new / editable
+
+Arrows move  Space toggle  a toggle all editable  Enter confirm
+Esc no new harness decision  Ctrl-C abort
+0 of 6 editable checked; saved yes kept: 0
+
+
+  – SKIP  OMP / Oh My Pi — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+  – SKIP  pi — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+  – SKIP  Claude Code — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+  – SKIP  Codex CLI — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+  – SKIP  OpenCode — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+  – SKIP  Continue — no interactive consent (select explicitly: --harness <list> or ZCODE_KIT_HARNESSES=<list>)
+Account Rotator ────────────────────────────────────────────────────────────────
+  Keep authorized logins as separate encrypted accounts.
+  New logins are saved automatically while the feature is enabled.
+  Account Rotator setting unchanged (no interactive answer).
+  Enable later: zcode-kit accounts enable
+
+  Assistants  0 configured, 6 skipped, 0 failed
+  Setup log   <KIT>/logs/install.log
+    Undecided harnesses can be configured later: zcode-kit setup --harness <list>, or zcode-kit integrate <harness>.
+
+| Connection check
+  ✓ OK    Connection check  Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+
+  Connection details (local ZCode proxy, from configuration; proxy not verified running)
+    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
+    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
+    API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
+    Model IDs:                     glm-5.3, glm-5.3-flash
+    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+
+Next steps ─────────────────────────────────────────────────────────────────────
+  zcode-kit doctor        Check the installation
+  zcode-kit proxy start   Start the proxy for manual clients
+  zcode-kit proxy status  Check proxy health and connection details
+  zcode-kit auth status   Check sign-in status
+  zcode-kit --help        Browse all commands

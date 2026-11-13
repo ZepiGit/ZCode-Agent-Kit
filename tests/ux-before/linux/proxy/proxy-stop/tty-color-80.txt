@@ -1,0 +1,6 @@
+
+| Proxy stop
+/ Proxy stop
+- Proxy stop
+\ Proxy stop
+  ✓ OK    Proxy stop  stopped (pid <PID>)

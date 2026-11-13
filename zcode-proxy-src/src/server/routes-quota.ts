@@ -305,6 +305,10 @@ export async function collectQuotaSnapshot(
 
   const claimablePlans: QuotaPlanEntry[] = [];
   const previewData = (preview?.data ?? {}) as { plans?: any[] };
+  // Fail-closed (GitHub issue 32): a code-0 preview whose data object is
+  // missing or malformed is NOT a successful empty preview — record it the
+  // same way the balance guard above does. Never invent plan data.
+  if (preview?.code === 0 && !Array.isArray(previewData.plans)) errors.push("preview: provider_unknown");
   for (const p of Array.isArray(previewData.plans) ? previewData.plans : []) {
     claimablePlans.push({
       planId: String(p.plan_id ?? ""),
@@ -349,7 +353,7 @@ export async function handleQuota(
   try {
     // Singleflight + short TTL: parallel UI probes (manager status, doctor,
     // webui) share one billing round-trip instead of hammering the gateway.
-    // Cache states are kept distinct (ZAK-009): an in-flight entry carries a
+    // Cache states are kept distinct: an in-flight entry carries a
     // null snapshot and is always awaited — never spread as if it were a
     // completed snapshot. A completed entry is served only within its TTL;
     // afterwards a fresh fetch starts instead of serving stale data forever.

@@ -12,6 +12,7 @@
  * card absorbs the remaining terminal rows.
  */
 import { displayWidth, truncateToWidth } from "./width.js";
+import { BOX, GLYPHS, ROLES } from "./tokens.mjs";
 
 export type Seg = { t: string; c?: string };
 
@@ -67,12 +68,18 @@ export interface FrameState {
   height: number;
 }
 
+// Colours, chrome and glyphs come from the shared token set; this
+// renderer uses the full glyph tier. DIM stays the TUI's own bright-black
+// (90): the token role `muted` is SGR 2, and this frame keeps today's bytes
+// until the TUI redesign moves it onto the roles and tiers.
 const DIM = "90";
-const RED = "31";
-const GREEN = "32";
-const AMBER = "33";
-const CYAN = "36";
-const BOLD = "1";
+const RED = ROLES.fail;
+const GREEN = ROLES.ok;
+const AMBER = ROLES.warn;
+const CYAN = ROLES.info;
+const BOLD = ROLES.heading;
+const B = BOX.full;
+const G = GLYPHS.full;
 const LABEL_W = 12; // fixed label column inside cards
 
 // Solid filled buttons — GitHub dark-theme button palette via 24-bit
@@ -114,7 +121,7 @@ function renderTopBorder(w: number, left: Seg[], right: Seg[] = []): string {
     // ╭(1) ─(1) sp(1) left sp(1) fill ╮(1) = w
     if (5 + segWidth(l) > w - 1) l = [{ t: truncateToWidth(segPlain(l), Math.max(0, w - 7)) }];
     const fill = Math.max(1, w - 5 - segWidth(l));
-    return paint(DIM, "╭─ ") + paintSegs(l) + paint(DIM, ` ${"─".repeat(fill)}╮`);
+    return paint(DIM, `${B.tl}${B.h} `) + paintSegs(l) + paint(DIM, ` ${B.h.repeat(fill)}${B.tr}`);
   }
   // ╭(1) ─(1) sp(1) left sp(1) fill sp(1) right sp(1) ─(1) ╮(1) = w
   const lw = segWidth(l);
@@ -131,13 +138,13 @@ function renderTopBorder(w: number, left: Seg[], right: Seg[] = []): string {
     }
   }
   return (
-    paint(DIM, "╭─ ") + paintSegs(l) + paint(DIM, ` ${"─".repeat(fill)} `) +
-    paintSegs(r) + paint(DIM, " ─╮")
+    paint(DIM, `${B.tl}${B.h} `) + paintSegs(l) + paint(DIM, ` ${B.h.repeat(fill)} `) +
+    paintSegs(r) + paint(DIM, ` ${B.h}${B.tr}`)
   );
 }
 
 function renderBottomBorder(w: number): string {
-  return paint(DIM, `╰${"─".repeat(Math.max(0, w - 2))}╯`);
+  return paint(DIM, `${B.bl}${B.h.repeat(Math.max(0, w - 2))}${B.br}`);
 }
 
 interface Part {
@@ -183,7 +190,7 @@ function composeRow(
   }
   const pad = " ".repeat(Math.max(0, contentW - col));
   return {
-    line: `${paint(DIM, "│")} ${prefixPainted}${painted.join("")}${pad} ${paint(DIM, "│")}`,
+    line: `${paint(DIM, B.v)} ${prefixPainted}${painted.join("")}${pad} ${paint(DIM, B.v)}`,
     regions,
   };
 }
@@ -234,10 +241,10 @@ export function buildFrame(s: FrameState): Frame {
   }
 
   const pill: Seg[] = s.loginInFlight
-    ? [{ t: "● logging in…", c: AMBER }]
+    ? [{ t: `${G.run} logging in${G.ellipsis}`, c: AMBER }]
     : s.loggedIn
-      ? [{ t: "● ready", c: GREEN }]
-      : [{ t: "● logged out", c: AMBER }];
+      ? [{ t: `${G.run} ready`, c: GREEN }]
+      : [{ t: `${G.run} logged out`, c: AMBER }];
 
   const busy = s.serverStatus === "running" || s.serverStatus === "starting";
 
@@ -269,12 +276,12 @@ export function buildFrame(s: FrameState): Frame {
   regions.push(...planRow.regions);
 
   const authSegs: Seg[] = s.loggedIn
-    ? [{ t: "● ", c: GREEN }, { t: `logged in · ${s.apiKeyPreview}` }]
-    : [{ t: "○ not logged in", c: AMBER }];
+    ? [{ t: `${G.run} `, c: GREEN }, { t: `logged in ${G.separator} ${s.apiKeyPreview}` }]
+    : [{ t: `${G.stop} not logged in`, c: AMBER }];
   emit((composeRow(w, lines.length, "Auth", authSegs.map((g) => ({ t: g.t, c: g.c })))).line);
 
   const loginRow = composeRow(w, lines.length, "", s.loginInFlight
-    ? [{ t: " Logging in… ", c: DIM }]
+    ? [{ t: ` Logging in${G.ellipsis} `, c: DIM }]
     : s.loggedIn
       ? [
           { t: " Logged In ", c: DIM },
@@ -297,7 +304,7 @@ export function buildFrame(s: FrameState): Frame {
     // High-contrast attention chip (black on bright yellow): the headless
     // paste fallback hint must not be missed — plain amber text reads as
     // ordinary on many terminal palettes.
-    emit((composeRow(w, lines.length, "Login", [{ t: ` ▸ ${s.loginHint} `, c: HINT_CHIP }])).line);
+    emit((composeRow(w, lines.length, "Login", [{ t: ` ${G.pointer} ${s.loginHint} `, c: HINT_CHIP }])).line);
   }
 
   emit(renderBottomBorder(w));
@@ -308,20 +315,20 @@ export function buildFrame(s: FrameState): Frame {
 
   const statusSegs: Seg[] =
     s.serverStatus === "running"
-      ? [{ t: "● running", c: GREEN }, { t: "  " + s.serverUrl, c: CYAN }]
+      ? [{ t: `${G.run} running`, c: GREEN }, { t: "  " + s.serverUrl, c: CYAN }]
       : s.serverStatus === "starting"
-        ? [{ t: "● starting…", c: AMBER }]
+        ? [{ t: `${G.run} starting${G.ellipsis}`, c: AMBER }]
         : s.serverStatus === "error"
-          ? [{ t: "✗ failed", c: RED }]
-          : [{ t: "○ stopped", c: DIM }];
+          ? [{ t: `${G.fail} failed`, c: RED }]
+          : [{ t: `${G.stop} stopped`, c: DIM }];
   emit((composeRow(w, lines.length, "Status", statusSegs.map((g) => ({ t: g.t, c: g.c })))).line);
 
   const configText = [
-    `${s.provider} · ${s.plan} · ${s.modelCount} models`,
+    `${s.provider} ${G.separator} ${s.plan} ${G.separator} ${s.modelCount} models`,
     s.responsesEnabled ? "/v1/responses" : "",
     s.claimAuto ? "claim:auto" : "",
     `v${s.version}`,
-  ].filter(Boolean).join(" · ");
+  ].filter(Boolean).join(` ${G.separator} `);
   emit((composeRow(w, lines.length, "Config", [{ t: configText, c: DIM }])).line);
 
   const startEnabled = s.serverStatus === "stopped" || s.serverStatus === "error";
@@ -343,7 +350,7 @@ export function buildFrame(s: FrameState): Frame {
   // --- Logs card (absorbs remaining height) -------------------------------
   const logRight: Seg[] = s.logFollowing
     ? [{ t: "following", c: GREEN }]
-    : [{ t: `▼ ${s.logFromBottom} more · g follow`, c: AMBER }];
+    : [{ t: `${G.more} ${s.logFromBottom} more ${G.separator} g follow`, c: AMBER }];
   const fixed =
     lines.length + 2 /* log card borders */ + 1 /* footer */ + (s.toast ? 1 : 0);
   const logRows = Math.max(1, h - fixed);
@@ -353,7 +360,7 @@ export function buildFrame(s: FrameState): Frame {
     regions.push({ row: logBorderRow, col: 0, width: w, action: { kind: "follow" } });
   }
   if (s.logView.length === 0) {
-    emit((composeRow(w, lines.length, null, [{ t: "(no logs yet — start the server and send requests)", c: DIM }])).line);
+    emit((composeRow(w, lines.length, null, [{ t: `(no logs yet ${G.dash} start the server and send requests)`, c: DIM }])).line);
   } else {
     for (const line of s.logView.slice(-logRows)) {
       emit((composeRow(w, lines.length, null, [{ t: truncateToWidth(line.text, w - 6), c: logLineCode(line.level) }])).line);
@@ -364,7 +371,7 @@ export function buildFrame(s: FrameState): Frame {
   // --- Toast + footer ------------------------------------------------------
   if (s.toast) {
     const color = s.toast.kind === "ok" ? GREEN : s.toast.kind === "err" ? RED : CYAN;
-    emit(" " + paint(color, truncateToWidth(`▸ ${s.toast.text}`, w - 2)));
+    emit(" " + paint(color, truncateToWidth(`${G.pointer} ${s.toast.text}`, w - 2, G.ellipsis)));
   }
   const footerRow = lines.length;
   const footerParts: Part[] = [];
@@ -374,9 +381,9 @@ export function buildFrame(s: FrameState): Frame {
     ["s", "start/stop"], ["l", "login"], ["o", "logout"], ["g", "follow"], ["q", "quit"],
     ["p", "provider"], ["t", "plan"], ["c", "clear"],
   ];
-  footerParts.push({ t: "↑↓ scroll", c: DIM });
+  footerParts.push({ t: `${G.up}${G.down} scroll`, c: DIM });
   for (const [key, label] of footerItems) {
-    footerParts.push({ t: " · ", c: DIM });
+    footerParts.push({ t: ` ${G.separator} `, c: DIM });
     footerParts.push({ t: `[${key}] ${label}`, c: DIM, action: { kind: "key", key } });
   }
   // The footer lives outside the card borders — no chrome, plain indent.

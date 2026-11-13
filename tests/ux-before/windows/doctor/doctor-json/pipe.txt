@@ -1,0 +1,164 @@
+{
+  "ok": true,
+  "failed": 0,
+  "skipped": 8,
+  "warned": 0,
+  "checks": [
+    {
+      "name": "bun available",
+      "ok": true,
+      "detail": "<BUN> (1.4.2)",
+      "status": "pass"
+    },
+    {
+      "name": "config exists",
+      "ok": true,
+      "detail": "<KIT>\\proxy\\config.yaml",
+      "status": "pass"
+    },
+    {
+      "name": "key file exists",
+      "ok": true,
+      "detail": "<KIT>\\.proxykey",
+      "status": "pass"
+    },
+    {
+      "name": "proxy source installed",
+      "ok": true,
+      "detail": "<KIT>\\zcode-proxy-src\\node_modules",
+      "status": "pass"
+    },
+    {
+      "name": "credentials store",
+      "ok": true,
+      "detail": "ZCODE_PROXY_CREDENTIALS_PATH (explicit store): present and decryptable on this machine",
+      "status": "pass"
+    },
+    {
+      "name": "omp provider registered",
+      "ok": true,
+      "detail": "zcode block in ~/.omp/agent/models.yml",
+      "status": "pass"
+    },
+    {
+      "name": "extension installed",
+      "ok": true,
+      "detail": "~/.omp/agent/extensions/zcode-proxy-autostart.ts",
+      "status": "pass"
+    },
+    {
+      "name": "mcp bridge installed",
+      "ok": true,
+      "detail": "<KIT>\\mcp\\zcode-harness-mcp\\dist\\index.js",
+      "status": "pass"
+    },
+    {
+      "name": "mcp bridge deps",
+      "ok": true,
+      "detail": "<KIT>\\mcp\\zcode-harness-mcp\\node_modules",
+      "status": "pass"
+    },
+    {
+      "name": "codex adapter artifact",
+      "ok": true,
+      "detail": "generated/codex-home/config.toml",
+      "status": "pass"
+    },
+    {
+      "name": "proxy reachable + identity",
+      "ok": true,
+      "detail": "health=ours",
+      "status": "pass"
+    },
+    {
+      "name": "account auth valid",
+      "ok": true,
+      "detail": "valid",
+      "status": "pass"
+    },
+    {
+      "name": "start-plan JWT age (info)",
+      "ok": true,
+      "detail": "5.2h since issue — age is informational, validity is the auth check above",
+      "status": "pass"
+    },
+    {
+      "name": "omp: omp provider registered",
+      "ok": true,
+      "detail": "providers.zcode in models.yml",
+      "status": "pass"
+    },
+    {
+      "name": "omp: omp key resolver",
+      "ok": true,
+      "detail": "key current",
+      "status": "pass"
+    },
+    {
+      "name": "omp: omp extension installed",
+      "ok": true,
+      "detail": "",
+      "status": "pass"
+    },
+    {
+      "name": "pi: integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate pi",
+      "status": "skip"
+    },
+    {
+      "name": "claude-code: integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate claude-code",
+      "status": "skip"
+    },
+    {
+      "name": "codex: codex adapter artifact",
+      "ok": true,
+      "detail": "generated/codex-home/config.toml",
+      "status": "pass"
+    },
+    {
+      "name": "opencode: integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate opencode",
+      "status": "skip"
+    },
+    {
+      "name": "cline: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "kilo-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "aider: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "continue: integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate continue",
+      "status": "skip"
+    },
+    {
+      "name": "goose: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "harness decisions",
+      "ok": true,
+      "detail": "2 stored decision(s) readable",
+      "status": "pass"
+    }
+  ]
+}

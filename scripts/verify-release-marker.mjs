@@ -1,4 +1,4 @@
-// prepublishOnly gate inside the generated launcher package (ZAK-012): an
+// prepublishOnly gate inside the generated launcher package: an
 // `npm publish` from the package must fail unless the shipped ALLOW_PUBLISH
 // marker names the version being published. This is a version consistency
 // check; the owner-authorized workflow creates the marker automatically.

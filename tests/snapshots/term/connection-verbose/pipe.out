@@ -1,0 +1,8 @@
+Connection details (manual clients) --------------------------------------------
+  OpenAI base URL     http://127.0.0.1:18458/v1
+  OpenAI routes       POST /chat/completions, POST /responses, GET /models
+  Anthropic base URL  http://127.0.0.1:18458
+  Anthropic routes    POST /v1/messages
+  API key             (redacted - print it with: zcode-kit models --show-key)
+  Models              glm-5.3, glm-5.3-flash (configured; live list unavailable)
+  State               * running, identity verified

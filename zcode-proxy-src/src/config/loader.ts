@@ -3,7 +3,9 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
-import type { AccountsConfig, ClientIdentityConfig, ProxyConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
+import type { AccountsConfig, AdmissionConfig, ClientIdentityConfig, HealthConfig, ProxyConfig, SolverConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
+import { DEFAULT_MEMORY_THRESHOLDS } from "../runtime/memory-thresholds.js";
+import { DEFAULT_SOLVER_CAP_MB, MAX_SOLVER_CAP_MB, MIN_SOLVER_CAP_MB, SOLVER_CAP_KEY } from "../proxy/solver-cap.js";
 
 /**
  * Environment variable keys that override YAML values.
@@ -31,11 +33,12 @@ const ENV = {
   CLIENT_SIGNING_ENABLED: "ZCODE_CLIENT_SIGNING",
   ACCOUNTS_ENABLED: "ZCODE_ACCOUNTS_ENABLED",
   ACCOUNTS_PATH: "ZCODE_PROXY_ACCOUNTS_PATH",
+  ADMISSION_MAX_INFLIGHT_MB: "ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB",
 } as const;
 
 const DEFAULTS = {
   PORT: 8080,
-  // ZAK-002: loopback is the enforced invariant — the default must match it
+  // Loopback is the enforced invariant — the default must match it
   // (was 0.0.0.0, which validate() now rejects).
   HOST: "127.0.0.1",
   PROVIDER: "zai" as const,
@@ -104,6 +107,7 @@ export function loadConfig(path: string): ProxyConfig {
   // --- server ---
   const port = resolvePort(process.env[ENV.PORT] ?? parsed?.server?.port);
   const host = typeof parsed?.server?.host === "string" ? parsed.server.host : DEFAULTS.HOST;
+  const admission = resolveAdmissionConfig(parsed?.server?.admission);
 
   // --- auth ---
   const proxyApiKey = process.env[ENV.PROXY_API_KEY] ?? parsed?.auth?.proxyApiKey;
@@ -149,9 +153,11 @@ export function loadConfig(path: string): ProxyConfig {
   const claimCfg = resolveClaimConfig(parsed?.claim);
   const endpointRouting = resolveEndpointRoutingConfig(parsed?.endpointRouting);
   const clientSigning = resolveClientSigningConfig(parsed?.clientSigning);
+  const health = resolveHealthConfig(parsed?.health);
+  const solver = resolveSolverConfig(parsed?.solver);
 
   const config: ProxyConfig = {
-    server: { port, host },
+    server: { port, host, ...(admission ? { admission } : {}) },
     auth: { proxyApiKey, oauthCredentialsPath, accounts },
     provider,
     plan,
@@ -167,10 +173,84 @@ export function loadConfig(path: string): ProxyConfig {
     async: asyncCfg,
     claim: claimCfg,
     logging: { level: logLevel },
+    ...(health ? { health } : {}),
+    ...(solver ? { solver } : {}),
   };
 
   validate(config);
   return config;
+}
+
+/** Bounds of the `health.memory` keys. */
+const HEALTH_MEMORY_BOUNDS = {
+  softLimitMB: { min: 64, max: 65536, unit: " MB" },
+  hardLimitMB: { min: 64, max: 65536, unit: " MB" },
+  samples: { min: 1, max: 20, unit: "" },
+  sampleIntervalSeconds: { min: 1, max: 600, unit: " s" },
+} as const;
+
+/**
+ * `health.memory`: the health supervisor's soft and hard memory
+ * limits, how many samples each must be held for and the time between two
+ * samples. Every key is optional; a key left out keeps the default
+ * (512 / 1024 MB × 3 samples 15 s apart). No env override.
+ * An invalid value stops the load with what/why/next.
+ */
+function resolveHealthConfig(raw: unknown): HealthConfig | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = typeof raw === "object" ? raw as Record<string, unknown> : {};
+  // A limit written one level too high, or `memory` given a plain value,
+  // would otherwise be ignored silently and the defaults would apply.
+  const misplaced = Object.keys(HEALTH_MEMORY_BOUNDS).filter((key) => key in obj);
+  if (misplaced.length > 0) {
+    throw new Error(
+      `health.${misplaced[0]} is not a setting: the memory limits belong under health.memory (health.memory.${misplaced[0]}). ` +
+        "Move the key one level down, or remove it to keep the default (soft 512 MB, hard 1024 MB, 3 samples 15 s apart).",
+    );
+  }
+  if (obj.memory !== undefined && obj.memory !== null && (typeof obj.memory !== "object" || Array.isArray(obj.memory))) {
+    throw new Error(
+      `health.memory must be a block of settings (softLimitMB, hardLimitMB, samples, sampleIntervalSeconds), got ${JSON.stringify(obj.memory)}. ` +
+        "Write the limits as keys under health.memory, or remove the key to keep the defaults.",
+    );
+  }
+  const mem = obj.memory && typeof obj.memory === "object" ? obj.memory as Record<string, unknown> : {};
+  const read = (key: keyof typeof HEALTH_MEMORY_BOUNDS): number | undefined => {
+    const value = mem[key];
+    if (value === undefined || value === null) return undefined;
+    const { min, max, unit } = HEALTH_MEMORY_BOUNDS[key];
+    const text = typeof value === "string" ? value.trim() : value;
+    const n = typeof text === "number" ? text : typeof text === "string" && /^\d+$/.test(text) ? Number(text) : NaN;
+    if (!Number.isInteger(n) || n < min || n > max) {
+      throw new Error(
+        `health.memory.${key} must be a whole number from ${min} to ${max}${unit} (got ${JSON.stringify(value)}). ` +
+          "It sets when the health supervisor warns about the proxy's memory footprint or asks the kit manager for a respawn. " +
+          "Set a whole number in that range or remove the key to keep the default (soft 512 MB, hard 1024 MB, 3 samples 15 s apart).",
+      );
+    }
+    return n;
+  };
+  const softLimitMB = read("softLimitMB");
+  const hardLimitMB = read("hardLimitMB");
+  const samples = read("samples");
+  const intervalS = read("sampleIntervalSeconds");
+  const soft = softLimitMB ?? DEFAULT_MEMORY_THRESHOLDS.softLimitMB;
+  const hard = hardLimitMB ?? DEFAULT_MEMORY_THRESHOLDS.hardLimitMB;
+  if (hard <= soft) {
+    throw new Error(
+      `health.memory.hardLimitMB (${hard}) must be above health.memory.softLimitMB (${soft}). ` +
+        "The soft limit only warns; the hard limit asks for a respawn, so it has to be the higher one. " +
+        "Raise health.memory.hardLimitMB or lower health.memory.softLimitMB, or remove both keys to keep the defaults (512 / 1024 MB).",
+    );
+  }
+  return {
+    memory: {
+      ...(softLimitMB !== undefined ? { softLimitMB } : {}),
+      ...(hardLimitMB !== undefined ? { hardLimitMB } : {}),
+      ...(samples !== undefined ? { samples } : {}),
+      ...(intervalS !== undefined ? { sampleIntervalMs: intervalS * 1000 } : {}),
+    },
+  };
 }
 
 /** Resolve the optional encrypted account pool configuration. */
@@ -219,6 +299,56 @@ function resolveAccountsConfig(raw: unknown): AccountsConfig {
       : {}),
     ...(allowedOrigins ? { allowedOrigins } : {}),
   };
+}
+
+/**
+ * `solver.memoryCapMB`: the memory cap of the captcha solver process, in MB.
+ * Absent = the default (300). No env override. A value below the minimum
+ * leaves the solver no room to load its DOM runtime and solve, so it is
+ * rejected here, with what/why/next, instead of failing every solve later.
+ */
+function resolveSolverConfig(raw: unknown): SolverConfig | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const obj = typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const value = obj.memoryCapMB;
+  if (value === undefined || value === null) return undefined;
+  const text = typeof value === "string" ? value.trim() : value;
+  const n = typeof text === "number" ? text : typeof text === "string" && /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isInteger(n) || n < MIN_SOLVER_CAP_MB || n > MAX_SOLVER_CAP_MB) {
+    throw new Error(
+      `${SOLVER_CAP_KEY} must be a whole number of MB from ${MIN_SOLVER_CAP_MB} to ${MAX_SOLVER_CAP_MB} (got ${JSON.stringify(value)}). ` +
+        `It caps the memory of the captcha solver process; below ${MIN_SOLVER_CAP_MB} MB the solver cannot load and run a solve at all. ` +
+        `Set it to a whole number such as ${DEFAULT_SOLVER_CAP_MB} (the default) or remove the key.`,
+    );
+  }
+  return { memoryCapMB: n };
+}
+
+/** Admission bounds for `server.admission.maxInFlightMB`. */
+const ADMISSION_MAX_INFLIGHT_MB = { min: 1, max: 4096 };
+
+/**
+ * `server.admission`: the cap on request-body bytes in flight, in
+ * MB, overridable by ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB. Absent = the
+ * proxy's default (64 MB). An invalid value stops the load with what/why/next.
+ */
+function resolveAdmissionConfig(raw: unknown): AdmissionConfig | undefined {
+  const obj = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+  const envValue = process.env[ENV.ADMISSION_MAX_INFLIGHT_MB];
+  const fromEnv = envValue !== undefined;
+  const value: unknown = fromEnv ? envValue : obj.maxInFlightMB;
+  if (value === undefined || value === null) return undefined;
+  const text = typeof value === "string" ? value.trim() : value;
+  const n = typeof text === "number" ? text : typeof text === "string" && /^\d+$/.test(text) ? Number(text) : NaN;
+  if (!Number.isInteger(n) || n < ADMISSION_MAX_INFLIGHT_MB.min || n > ADMISSION_MAX_INFLIGHT_MB.max) {
+    const name = fromEnv ? ENV.ADMISSION_MAX_INFLIGHT_MB : "server.admission.maxInFlightMB";
+    throw new Error(
+      `${name} must be a whole number of MB from ${ADMISSION_MAX_INFLIGHT_MB.min} to ${ADMISSION_MAX_INFLIGHT_MB.max} (got ${JSON.stringify(value)}). ` +
+        "It caps the request-body bytes the proxy holds at once; requests beyond it wait, then get 503 + Retry-After. " +
+        `Set it to a whole number such as 64 (the default) or remove the key${fromEnv ? ` (unset ${ENV.ADMISSION_MAX_INFLIGHT_MB})` : ""}.`,
+    );
+  }
+  return { maxInFlightBytes: n * 1024 * 1024 };
 }
 
 function resolveClientIdentity(raw: unknown): ClientIdentityConfig {
@@ -450,10 +580,10 @@ function validate(config: ProxyConfig): void {
     throw new Error(`server.port ${config.server.port} is out of range (1-65535)`);
   }
 
-  // ZAK-002: loopback binding is a startup invariant, not a template default.
+  // Loopback binding is a startup invariant, not a template default.
   // Reject non-loopback hosts (including 0.0.0.0/:: and DNS names) so an
   // account-backed proxy can never end up reachable from other interfaces.
-  // AUD-011: normalize the bracketed IPv6 literal — Node's server.listen
+  // Normalize the bracketed IPv6 literal — Node's server.listen
   // expects "::1", not "[::1]".
   const rawHost = (config.server.host ?? "").trim().toLowerCase();
   const host = rawHost === "[::1]" ? "::1" : rawHost;

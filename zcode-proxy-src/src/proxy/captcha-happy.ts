@@ -21,7 +21,8 @@ import crypto from "node:crypto";
 import vm from "node:vm";
 import { Worker } from "node:worker_threads";
 import { CaptchaCdnCache } from "./captcha-cdn-cache.js";
-import { normalizeCaptchaError } from "./captcha-token.js";
+import { isPeBundleUrl, StallCounts } from "./captcha-stall-counts.js";
+import { CaptchaLocalVerificationError, normalizeCaptchaError } from "./captcha-token.js";
 import { beginCaptchaAttempt, recordCaptchaRequest, recordCaptchaLoad, recordCaptchaEvaluation,
   lastCaptchaActivity, lastCaptchaPeUrl, captchaResourceId, captchaFailureSummary,
   captchaDiagnostics, startCaptchaInstance } from "./captcha-diagnostics.js";
@@ -57,14 +58,18 @@ const SYNC_WORKER_SRC = `
       };
       try {
         // Bounded by the host's wait: a fetch that outlives it is abandoned.
-        let dispatcher;
-        if (m.proxyUrl) {
+        // Same routing as captchaFetch: Bun takes its own proxy option (it
+        // ignores undici's dispatcher), Node keeps the ProxyAgent dispatcher.
+        let route = {};
+        if (typeof Bun !== "undefined") {
+          route = { proxy: m.proxyUrl ?? false };
+        } else if (m.proxyUrl) {
           const { ProxyAgent } = require("undici");
-          dispatcher = new ProxyAgent(m.proxyUrl);
+          route = { dispatcher: new ProxyAgent(m.proxyUrl) };
         }
         const res = await fetch(m.url, {
           ...m.init,
-          ...(dispatcher ? { dispatcher } : {}),
+          ...route,
           signal: AbortSignal.timeout(m.timeoutMs),
         });
         const body = Buffer.from(await res.arrayBuffer());
@@ -159,6 +164,15 @@ function shutdownSyncFetchWorker(): void {
 // Lazy construction validates environment settings on first use, not import.
 let _cdnCache: CaptchaCdnCache | undefined;
 function defaultCdnCache() { return _cdnCache ??= new CaptchaCdnCache(); }
+
+/**
+ * The solver generation's own bounded resources: this module is loaded once
+ * per solver generation (worker), so a new generation starts with an empty
+ * CDN memory tier and no stall counts. Diagnostics and seam-3 tests only.
+ */
+export function captchaGenerationResources() {
+  return { cdnCache: defaultCdnCache(), stallCounts: _stallCounts };
+}
 let _cookieCache = { cookies: [], ts: 0 };
 const COOKIE_CACHE_TTL_MS = 5 * 60 * 1000;
 const _DEBUG = /^(1|true|yes)$/i.test(
@@ -168,9 +182,16 @@ const _DEBUG = /^(1|true|yes)$/i.test(
 // Captcha traffic may use an explicitly configured upstream proxy. Ambient
 // HTTP(S)_PROXY variables are intentionally ignored: this process is a long
 // lived daemon and must not inherit a proxy meant for an unrelated command.
+// Bun ignores undici's `dispatcher` (oven-sh/bun#38840) and, without a
+// `proxy` option, reads HTTP(S)_PROXY/ALL_PROXY on every fetch, so on Bun the
+// route is its own `proxy` option: the configured URL, or `false` for direct.
+// `proxy: false` takes effect from Bun 1.4.3; 1.4.2 still reads the ambient
+// variables when the setting is unset.
+// Node keeps the ProxyAgent dispatcher.
 const CAPTCHA_PROXY_URL = process.env.ZCODE_PROXY_UPSTREAM_PROXY?.trim() || undefined;
 let _captchaProxyAgent;
 function captchaFetch(input, init = {}) {
+  if (typeof Bun !== "undefined") return globalThis.fetch(input, { ...init, proxy: CAPTCHA_PROXY_URL ?? false });
   if (!CAPTCHA_PROXY_URL) return globalThis.fetch(input, init);
   _captchaProxyAgent ??= new ProxyAgent(CAPTCHA_PROXY_URL);
   return globalThis.fetch(input, { ...init, dispatcher: _captchaProxyAgent });
@@ -178,29 +199,27 @@ function captchaFetch(input, init = {}) {
 
 // ── Globals shared across solves ────────────────────────────────────────────
 // Request history lives in a WeakMap keyed by its actual window.
-const solveTimes = [];
 // Consecutive-stall tracker per pe bundle URL: the same cached pe version
 // can stall every attempt (bad rotated VM variant / stale cache). After two
 // stalls on one URL, evict its memory + disk cache entry so the next init
-// fetches fresh bytes from the CDN instead of re-stalling on them.
-const _stallCounts = new Map();
+// fetches fresh bytes from the CDN instead of re-stalling on them. Bounded to
+// 1,024 URLs (captcha-stall-counts.ts); like the CDN cache it lives in the
+// solver, so each solver generation starts with none.
+const _stallCounts = new StallCounts((peUrl, n) => {
+  if (!_DEBUG) {
+    process.stderr.write(`[pe-cache-evict] ${captchaResourceId(peUrl)} stalled ${n}x — evicting cache\n`);
+  }
+  defaultCdnCache().invalidate(peUrl);
+});
 // Set after a stall: the next solve in this process fetches dynamicJS fresh
 // (bypassing mem+disk cache) instead of re-using the bytes that just stalled.
 let _bypassPeCacheOnce = false;
 
 function noteStallAndMaybeEvict(peUrl) {
   try {
-    if (!peUrl || !/dynamicJS\//.test(peUrl)) return;
+    if (!isPeBundleUrl(peUrl)) return;
     _bypassPeCacheOnce = true;
-    const n = (_stallCounts.get(peUrl) || 0) + 1;
-    _stallCounts.set(peUrl, n);
-    if (n >= 2 && !_DEBUG) {
-      process.stderr.write(`[pe-cache-evict] ${captchaResourceId(peUrl)} stalled ${n}x — evicting cache\n`);
-    }
-    if (n >= 2) {
-      defaultCdnCache().invalidate(peUrl);
-      _stallCounts.delete(peUrl);
-    }
+    _stallCounts.stalled(peUrl);
   } catch (_) {}
 }
 
@@ -1804,6 +1823,11 @@ async function createDom(region: string, prefix: string, resources?: DomResource
     settings: {
       enableJavaScriptEvaluation: true,
       enableImageFileLoading: true,
+      // happy-dom 21 turned these off by default (GHSA-c8p4-j97h-3vg8). Kept on
+      // so a solve loads what it loaded on 20.x: the surface is unchanged, not
+      // stricter (B1). Dropping either needs a live vendor solve.
+      enableCSSFileLoading: true,
+      enableIframePageLoading: true,
       suppressInsecureJavaScriptEnvironmentWarning: true,
       navigator: { userAgent: fp.userAgent },
       viewport: { width: fp.screen.w, height: fp.screen.h, devicePixelRatio: 1 },
@@ -2212,34 +2236,33 @@ function extractVerifyParam(param) {
     verifyParam = param.verifyParam || param.data || param.param;
   }
   if (!verifyParam || String(verifyParam).length < 20) {
-    throw new Error("solver returned empty param");
+    throw new CaptchaLocalVerificationError("solver returned empty param");
   }
   const str = String(verifyParam);
   // Strict validation: a REAL Aliyun verify param is ~280 chars of base64
   // JSON containing certifyId + sceneId + isSign + a long securityToken.
   // Len-76 junk like {"certifyId":"70bdb",...,"isSign":true} (no securityToken)
   // comes from a degraded SDK result path and WILL 3007 upstream — never let
-  // it out of the solver.
+  // it out of the solver. Refusals are typed so the sanitized detail (lengths,
+  // host-built text, never the refused payload) survives normalization and
+  // surfaces on request failures instead of collapsing into a generic
+  // "captcha SDK failure" (GitHub issue 32).
   if (str.length < 200) {
-    throw new Error(
-      "verify param too short (" + str.length + " chars) — degraded result, refusing: ",
+    throw new CaptchaLocalVerificationError(
+      "verify param too short (" + str.length + " chars) — degraded result, refused",
     );
   }
   try {
     const decoded = JSON.parse(Buffer.from(str, "base64").toString("utf8"));
     const secTok = decoded && (decoded.securityToken || decoded.SecurityToken);
     if (!secTok || String(secTok).length < 50) {
-      throw new Error(
-        "verify param missing securityToken — refusing degraded result: ",
+      throw new CaptchaLocalVerificationError(
+        "verify param missing securityToken — degraded result, refused",
       );
     }
   } catch (err) {
-    if (err instanceof SyntaxError || /securityToken/.test(String(err.message))) {
-      throw err instanceof SyntaxError
-        ? new Error("verify param not base64-JSON: ")
-        : err;
-    }
-    throw err;
+    if (err instanceof CaptchaLocalVerificationError) throw err;
+    throw new CaptchaLocalVerificationError("verify param not base64-JSON");
   }
   return str;
 }
@@ -2407,7 +2430,7 @@ async function solveTraceless(opts, resources?: DomResources) {
     // only report errors from solves after this success.
     try {
       const okPe = w.__lastPeUrl;
-      if (okPe) _stallCounts.delete(okPe);
+      if (okPe) _stallCounts.solved(okPe);
       w.__capErrs = [];
     } catch (_) {}
 
@@ -2455,4 +2478,6 @@ async function solveTraceless(opts, resources?: DomResources) {
   }
 }
 
-export { solveTraceless, createDom, destroyDom, lastCaptchaSdkScripts };
+// captchaFetch and syncFetchBlocking are exported as the egress-routing seam
+// (captcha-egress.test.ts); the solve path keeps using them internally.
+export { solveTraceless, createDom, destroyDom, lastCaptchaSdkScripts, captchaFetch, syncFetchBlocking, extractVerifyParam };

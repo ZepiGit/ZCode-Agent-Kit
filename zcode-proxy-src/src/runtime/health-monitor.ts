@@ -1,6 +1,7 @@
 /**
- * health-monitor.ts — cheap process vitals for `/health` `details`, and the
- * serve-side memory guard.
+ * health-monitor.ts — cheap process vitals for `/health` `details`. The memory
+ * thresholds and the respawn request live in the health supervisor
+ * (`supervisor.ts`).
  *
  * Before this existed the proxy had no memory or event-loop signal at all: a
  * process at 11 GB RSS with a parked main thread looked identical to a
@@ -173,110 +174,4 @@ export function healthDetails(): HealthDetails {
     eventLoopLagMaxMs: lagMonitor?.maxMs() ?? 0,
     captcha: captchaSnapshot(),
   };
-}
-
-export interface MemoryGuardOptions {
-  intervalMs?: number;
-  /** RSS above which the captcha solver is recycled once per episode. */
-  softLimitMB?: number;
-  /** RSS that, sustained after a recycle, requests a process restart. */
-  hardLimitMB?: number;
-  /** Consecutive post-recycle samples above hardLimitMB before restarting. */
-  hardSamples?: number;
-  sampleRssMB?: () => number;
-  recycle?: (reason: string) => void;
-  /** True when the kit manager's respawn hook is available. */
-  canRestart: () => boolean;
-  /**
-   * Hand the process over to the kit manager. Resolves true once the
-   * manager is running (the process is then exiting); false when it could
-   * not be started — the guard keeps serving and retries next episode.
-   */
-  restart: () => Promise<boolean>;
-  log?: (line: string) => void;
-}
-
-/**
- * Memory guard. Solver worker recycling returns the solver's heap to the
- * process (spike: 469 → 54 MB), so the first response to growth is a
- * recycle. Only when RSS stays far above the ceiling after that — the growth
- * is elsewhere — does the proxy ask the kit manager for a restart. Without
- * the manager's hook there is nobody to bring the proxy back, so it only
- * logs: a standalone proxy at 3 GB still serves, a dead one does not.
- */
-export class MemoryGuard {
-  private readonly intervalMs: number;
-  private readonly softLimitMB: number;
-  private readonly hardLimitMB: number;
-  private readonly hardSamples: number;
-  private readonly sampleRssMB: () => number;
-  private readonly recycle: (reason: string) => void;
-  private readonly log: (line: string) => void;
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private recycled = false;
-  private hardStreak = 0;
-  /** Restart in flight or handed over: no further samples act. */
-  private restartPending = false;
-  /** Once per episode: missing hook or failed hook launch was reported. */
-  private gaveUpThisEpisode = false;
-
-  constructor(private readonly opts: MemoryGuardOptions) {
-    this.intervalMs = opts.intervalMs ?? 60_000;
-    this.softLimitMB = opts.softLimitMB ?? 1536;
-    this.hardLimitMB = opts.hardLimitMB ?? 3072;
-    this.hardSamples = Math.max(1, opts.hardSamples ?? 3);
-    this.sampleRssMB = opts.sampleRssMB ?? (() => Math.round(process.memoryUsage.rss() / MB));
-    this.recycle = opts.recycle ?? ((reason) => { requestCaptchaRecycle(reason); });
-    this.log = opts.log ?? ((line) => console.error(line));
-  }
-
-  start(): void {
-    if (this.timer) return;
-    this.timer = setInterval(() => this.sample(), this.intervalMs);
-    (this.timer as { unref?: () => void }).unref?.();
-  }
-
-  stop(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
-  }
-
-  sample(): void {
-    if (this.restartPending) return;
-    const rss = this.sampleRssMB();
-    if (rss <= this.softLimitMB) {
-      // Episode over: a later climb earns a fresh recycle (and restart try).
-      this.recycled = false;
-      this.hardStreak = 0;
-      this.gaveUpThisEpisode = false;
-      return;
-    }
-    if (!this.recycled) {
-      this.recycled = true;
-      this.hardStreak = 0;
-      this.log(`[memory] rss ${rss} MB above ${this.softLimitMB} MB — recycling captcha solver`);
-      try { this.recycle("memory"); } catch {}
-      return;
-    }
-    this.hardStreak = rss > this.hardLimitMB ? this.hardStreak + 1 : 0;
-    if (this.hardStreak < this.hardSamples || this.gaveUpThisEpisode) return;
-    if (!this.opts.canRestart()) {
-      this.gaveUpThisEpisode = true;
-      this.log(`[memory] rss ${rss} MB above ${this.hardLimitMB} MB — no kit manager respawn hook, not restarting`);
-      return;
-    }
-    this.restartPending = true;
-    this.log(`[memory] rss ${rss} MB — requesting restart`);
-    const failed = () => {
-      // Nobody would bring a stopped proxy back: keep serving at high RSS.
-      this.restartPending = false;
-      this.gaveUpThisEpisode = true;
-      this.hardStreak = 0;
-      this.log(`[memory] kit manager respawn hook did not start — not restarting, still serving`);
-    };
-    this.opts.restart().then((started) => {
-      if (started) this.stop();
-      else failed();
-    }, failed);
-  }
 }

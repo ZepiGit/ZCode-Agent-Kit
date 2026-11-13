@@ -1,0 +1,39 @@
+  ZCODE  /  AGENT KIT
+  v0.2.42  |  Your local AI workspace
+
+
+| Runtime and configuration
+! WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+   next  cd <KIT>/zcode-proxy-src
+     or  ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
+
+  ✓ OK    Runtime and configuration  runtime ready
+Assistant integrations ─────────────────────────────────────────────────────────
+  ✓ OK    OMP / Oh My Pi
+  ✓ OK    Codex CLI
+Account Rotator ────────────────────────────────────────────────────────────────
+  Keep authorized logins as separate encrypted accounts.
+  New logins are saved automatically while the feature is enabled.
+  ✓ OK    Account Rotator disabled. Saved accounts are kept.
+
+  Assistants  2 configured, 0 skipped, 0 failed
+  Undo        zcode-kit rollback <TX>
+  Setup log   <KIT>/logs/install.log
+
+| Connection check
+  ✓ OK    Connection check  Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).
+
+  Connection details (local ZCode proxy, from configuration; proxy not verified running)
+    OpenAI-compatible base URL:    http://127.0.0.1:18458/v1   (POST /chat/completions, POST /responses, GET /models)
+    Anthropic-compatible base URL: http://127.0.0.1:18458      (POST /v1/messages)
+    API key (Bearer / x-api-key):  UXFIXTURE-not-a-secret-0000000000000000000
+    Model IDs:                     glm-5.3, glm-5.3-flash
+    Works with any OpenAI- or Anthropic-compatible client; no harness auto-configuration required. Start the proxy first: zcode-kit proxy start
+
+Next steps ─────────────────────────────────────────────────────────────────────
+  zcode-kit doctor        Check the installation
+  zcode-kit run codex     Launch Codex CLI wired to ZCode
+  zcode-kit proxy start   Start the proxy for manual clients
+  zcode-kit proxy status  Check proxy health and connection details
+  zcode-kit auth status   Check sign-in status
+  zcode-kit --help        Browse all commands

@@ -17,13 +17,15 @@
  * State management: in-memory only (process restart clears the store); see
  * `responses/store.ts`.
  */
-import { transformRequestBody } from "./body-transformer.js";
+import { transformBuiltRequestBody } from "./body-transformer.js";
 import { getProvider } from "../provider/providers.js";
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
 import { buildUpstreamRequest, buildUpstreamHeaderPairs, type UpstreamHeaderPair } from "./upstream.js";
 import { isCaptchaChallenged, retryOnCaptchaChallenge } from "./captcha-retry.js";
+import { CaptchaSolverUnavailableError } from "./captcha-token.js";
+import { shedResponse, solverShed } from "../server/admission.js";
 import { accountHandleStillCurrent, dispatchWithConnectRetry } from "./handler.js";
 import { gateStreamPrelude } from "./stream-prelude.js";
 import { recoverAndMapUpstream } from "./upstream-errors.js";
@@ -196,11 +198,13 @@ export async function handleResponses(
     // same device/session blob as coding-plan. The /v1/responses path has no
     // client-session resolution — session_id falls back to "" (a legal `bnt`
     // output in the bundle).
-    upstreamRequestBody = transformRequestBody(JSON.stringify(anthropicReq), {
+    // Transformed as built, serialised once; the bytes are those
+    // of transformRequestBody(JSON.stringify(anthropicReq)).
+    upstreamRequestBody = transformBuiltRequestBody(anthropicReq, {
       format: "anthropic",
       metadataUserId: buildAnthropicMetadataUserId(opts.config.identity.deviceMid, undefined),
       startPlan,
-    }) ?? JSON.stringify(anthropicReq);
+    });
   }
   const transformedBody = upstreamRequestBody;
 
@@ -310,9 +314,11 @@ export async function handleResponses(
           buildUpstreamHeaderPairs(clientReq, upstreamFormat, cred, opts.config.identity, opts.config.plan, retryHeaders, undefined),
         ),
         mapError: (err, phase) =>
-          phase === "solver"
-            ? errorResponse(503, "captcha_solver_failed", err.message)
-            : errorResponse(502, "upstream_unreachable", "Upstream request could not be completed."),
+          phase !== "solver" ? errorResponse(502, "upstream_unreachable", "Upstream request could not be completed.")
+            // The solver refused the solve: the shed contract, with the time to retry.
+            : err instanceof CaptchaSolverUnavailableError
+              ? shedResponse("openai", { ...solverShed(err.reason), retryAfterSeconds: err.retryAfterMs / 1000 })
+              : errorResponse(503, "captcha_solver_failed", err.message),
       });
       if (!outcome.ok) return outcome.resp;
       upstreamResp = outcome.resp;

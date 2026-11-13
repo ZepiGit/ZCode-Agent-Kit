@@ -8,6 +8,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { commitFile, ensureDir } from "../../lib/edit.mjs";
+import { lineEndingOf, withLineEndingsOf } from "../../lib/line-endings.mjs";
 import { resolveCommand, resolveBun } from "../../lib/process.mjs";
 import { PREFLIGHT_DETAILS, PREFLIGHT_WARNINGS } from "../heal.mjs";
 
@@ -136,9 +137,13 @@ function editConfigYaml(ctx, text, extensionPath) {
     changed = true;
   }
 
-  return { text: changed ? String(doc) : text, changed };
+  // The yaml library renders LF: write the document with the file's own line endings.
+  return { text: changed ? withLineEndingsOf(text, String(doc)) : text, changed };
 }
 
+// `auth: apiKey`: a custom anthropic-messages provider without `auth` gets
+// OAuth-style (Claude Code) request shaping (omp docs/models.md). `compat`
+// lists only AnthropicCompat keys models.yml honors; others are dropped by omp.
 function ompProviderBlock(ctx, port, indent = "  ") {
   const rootPath = ctx.root.replace(/\\/g, "/");
   const block = `${MARKER_BEGIN}
@@ -149,6 +154,7 @@ function ompProviderBlock(ctx, port, indent = "  ") {
     baseUrl: http://127.0.0.1:${port}
     api: anthropic-messages
     apiKey: ${JSON.stringify(ctx.key())}
+    auth: apiKey
     modelOverrides:
       glm-5.3:
         thinking:
@@ -160,10 +166,8 @@ function ompProviderBlock(ctx, port, indent = "  ") {
           defaultLevel: max
           requiresEffort: true
         compat:
-          supportsOutputEffort: true
           supportsContextManagement: false
           replayUnsignedThinking: true
-          injectClaudeCodeInstruction: false
       glm-5.3-flash:
         thinking:
           mode: anthropic-budget-effort
@@ -174,10 +178,8 @@ function ompProviderBlock(ctx, port, indent = "  ") {
           defaultLevel: max
           requiresEffort: true
         compat:
-          supportsOutputEffort: true
           supportsContextManagement: false
           replayUnsignedThinking: true
-          injectClaudeCodeInstruction: false
     models:
       - id: glm-5.3
         name: GLM-5.3
@@ -212,7 +214,7 @@ export default {
   id: "omp",
   label: "OMP / Oh My Pi",
   protocol: "OMP native provider (anthropic-messages + output_config.effort)",
-  primarySource: "https://omp.sh/docs/custom-models (checked 2026-09-13)",
+  primarySource: "https://github.com/can1357/oh-my-pi/blob/v18.16.0/docs/models.md (checked 2026-11-06)",
 
   apply(ctx, tx, log) {
     const agentDir = join(ctx.home, ".omp", "agent");
@@ -247,9 +249,14 @@ export default {
       );
     }
     const { indent, insertAt } = providerLayout(newModels, providersPair);
-    const block = ompProviderBlock(ctx, port, indent);
-    const separator = insertAt > 0 && newModels[insertAt - 1] !== "\n" ? "\n" : "";
-    newModels = newModels.slice(0, insertAt) + separator + block + "\n" + newModels.slice(insertAt);
+    // The block takes the line endings of the user's own lines; the bytes
+    // around it stay as they are (lib/line-endings.mjs). An earlier block of
+    // the kit is not counted: one written with LF into a CRLF file would
+    // otherwise outvote the user's lines.
+    const newline = lineEndingOf(newModels);
+    const block = withLineEndingsOf(newModels, ompProviderBlock(ctx, port, indent));
+    const separator = insertAt > 0 && newModels[insertAt - 1] !== "\n" ? newline : "";
+    newModels = newModels.slice(0, insertAt) + separator + block + newline + newModels.slice(insertAt);
     parseYamlDocument(ctx, newModels, "models.yml (staged)");
 
     let newConfig = existsSync(configYml) ? readFileSync(configYml, "utf8") : null;
@@ -277,6 +284,8 @@ export default {
       .replaceAll("__ZCODE_OM_ROOT__", () => literal(ctx.root))
       .replaceAll("__ZCODE_OM_KEY_FILE__", () => literal(ctx.keyFile))
       .replaceAll("__ZCODE_OM_RUNTIME__", () => literal(runtime))
+      // Where the hosts of this installation share their autostart token.
+      .replaceAll("__ZCODE_OM_LOG_DIR__", () => literal(ctx.logDir ?? join(dirname(ctx.keyFile), "logs")))
       .replaceAll("__ZCODE_OM_FAILURE_DETAILS__", () => JSON.stringify(JSON.stringify(PREFLIGHT_DETAILS)).slice(1, -1))
       .replaceAll("__ZCODE_OM_WARNINGS__", () => JSON.stringify(JSON.stringify(PREFLIGHT_WARNINGS)).slice(1, -1))
       .replaceAll("__ZCODE_OM_PORT__", () => String(port));

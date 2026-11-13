@@ -1,0 +1,10 @@
+From <FIXTURE>/origin
+   4d8d0c2..c5fd6d8  main       -> origin/main
+Runtime and configuration ...
+
+WARN  MANUAL STEP REQUIRED (once): log in with your ZCode account:
+  next: cd <KIT>/zcode-proxy-src
+  next: ZCODE_PROXY_CONFIG="<KIT>/proxy/config.yaml" bun run src/index.ts auth login zai
+OK  Runtime and configuration - runtime ready
+Connection check ...
+OK  Connection check - Setup live smoke skipped (CI/test or explicit ZCODE_KIT_SKIP_SMOKE=1).

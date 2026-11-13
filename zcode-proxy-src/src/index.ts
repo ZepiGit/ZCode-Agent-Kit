@@ -14,6 +14,7 @@ import type { Credential } from "./auth/types.js";
 import type { ProviderId } from "./provider/types.js";
 import type { ProxyConfig } from "./config/types.js";
 import { updateConfigYaml, updateAccountPolicyYaml, ensureConfigFile } from "./config/edit.js";
+import { withLineEndingsOf } from "./config/line-endings.mjs";
 import { openBrowser } from "./runtime/open-browser.js";
 import { pasteLoginInstructions, readPastedLine, boldIfTTY } from "./runtime/paste-login.js";
 import { buildServerOptions } from "./server/server-options.js";
@@ -21,8 +22,10 @@ import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { ensureNodeFetchNoTimeouts } from "./runtime/node-fetch-compat.js";
 import { installGuestErrorBoundary } from "./runtime/guest-error.js";
-import { MemoryGuard, shutdownCaptchaRuntime, startEventLoopMonitor } from "./runtime/health-monitor.js";
-import { installWatchdog, respawnHookCommand, spawnRespawnHook } from "./runtime/watchdog.js";
+import { shutdownCaptchaRuntime } from "./runtime/health-monitor.js";
+import { SOLVER_PROCESS_COMMAND } from "./proxy/solver-process-command.js";
+import { createEventLogger } from "./log/event-line.mjs";
+import { createGracefulShutdown, createHealthSupervisor, handleShutdownSignals } from "./runtime/supervisor.js";
 import {
   addAccount,
   getAccountStorePath,
@@ -36,6 +39,7 @@ import {
   unlockAccountStore,
 } from "./auth/account-store.js";
 import { createAccountRotator } from "./auth/account-rotator.js";
+import { startProxyLog } from "./log/proxy-log-writer.js";
 import { accountIdentity } from "./auth/account-identity.js";
 import { buildHealthReport, parseLiveQuota, parseLiveStatus, renderHealthText, type OfflineAccount } from "./auth/account-health.js";
 
@@ -77,6 +81,19 @@ export function main(): void {
 
 function runCli(): void {
   const args = process.argv.slice(2);
+
+  // A compiled proxy's solver process: the binary runs itself with
+  // this internal subcommand. Nothing else of the CLI runs in it.
+  if (args[0] === SOLVER_PROCESS_COMMAND) {
+    import("./proxy/captcha-solver-process.js")
+      .then((m) => m.runSolverProcess(args.slice(1)))
+      .catch((err: unknown) => {
+        createEventLogger({ component: "solver", write: (line) => process.stderr.write(`${line}\n`) })
+          .error("solver process failed to start", { error: err instanceof Error ? err : String(err) });
+        process.exit(1);
+      });
+    return;
+  }
 
   // `--cli` opts out of the default TUI and restores the classic CLI dispatch
   // (bare `--cli` = the old no-arg default: serve).
@@ -204,6 +221,9 @@ Examples:
 }
 
 async function serve(configPath: string | undefined, debug: boolean): Promise<void> {
+  // A manager-started proxy (ZCODE_KIT_LOG_DIR) writes proxy.log itself,
+  // through the size-capped writer, before anything else prints.
+  const proxyLog = startProxyLog();
   if (process.env.ZCODE_PROXY_ALLOW_UNSANDBOXED_CAPTCHA === "1") installGuestErrorBoundary();
   const path = configPath ?? process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
   if (ensureConfigFile(path)) {
@@ -212,6 +232,7 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     console.log(`Run: zcode-proxy auth login <zai|bigmodel>\n`);
   }
   const config = loadConfig(path);
+  proxyLog?.addSecret(config.auth.proxyApiKey);
 
   let auth = await createStoredAuthManagerWithAccounts(config.plan, {
     ...(config.auth.accounts ?? { enabled: false }),
@@ -236,8 +257,35 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
 
   if (debug) printDebugBanner(config, path, cred);
 
-  const server = await startServer(buildServerOptions(config, auth, debug));
+  // The stop request: only a manager-spawned proxy
+  // carries the per-spawn token (ZCODE_KIT_STOP_TOKEN); the TUI and
+  // the Android entry build their options without it, so their stop route
+  // answers the unknown-route 404. The trigger is hung onto the shutdown
+  // through a ref, since the shutdown exists after the listener is up; the
+  // window between the two is synchronous, so no request can slip through.
+  const stopToken = process.env.ZCODE_KIT_STOP_TOKEN;
+  const stopTrigger: { run: (() => void) | null } = { run: null };
+  const server = await startServer(buildServerOptions(config, auth, debug, {
+    ...(stopToken ? { stopToken } : {}),
+    onStopRequest: () => stopTrigger.run?.(),
+  }));
   let claimScheduler: { stop(): void } | null = null;
+  // The single graceful shutdown sequence (signals, the stop request, memory
+  // respawn). Signals are handled before the listening line is printed, so
+  // whoever waits for that line never meets a proxy that a SIGTERM would kill
+  // outright. Unsaved account metadata (a store write that lost a lock race)
+  // gets one last, bounded write before the process exits.
+  const shutdown = createGracefulShutdown({
+    server,
+    stopBackground: () => {
+      claimScheduler?.stop();
+      claimScheduler = null;
+      shutdownCaptchaRuntime();
+    },
+    flush: () => flushAccountMetadata(auth),
+  });
+  stopTrigger.run = () => { void shutdown.run("stop"); };
+  handleShutdownSignals(shutdown);
   const url = `http://${server.hostname}:${server.port}`;
   console.log(`zcode-proxy listening on ${url}`);
   const configuredCaptchaProxy = process.env.ZCODE_PROXY_UPSTREAM_PROXY?.trim();
@@ -251,30 +299,12 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     }
   }
   console.log(`  captcha egress: ${egress}`);
-  startEventLoopMonitor();
-  installWatchdog();
-  const memoryGuard = new MemoryGuard({
-    canRestart: () => respawnHookCommand(process.env, process.pid, "memory") !== null,
-    restart: async () => {
-      // Exit only once the manager is actually running: a proxy that stops
-      // without it stays down for good.
-      if (!(await spawnRespawnHook("memory"))) return false;
-      // The manager waits for this pid to exit before starting the
-      // replacement; give in-flight responses a bounded chance to finish.
-      claimScheduler?.stop();
-      claimScheduler = null;
-      shutdownCaptchaRuntime();
-      const forceExit = setTimeout(() => process.exit(0), 10_000);
-      forceExit.unref();
-      // Long streams may keep close() busy past the 10 s cap: give it 6 s,
-      // then the bounded (3 s) metadata write, then exit — all inside the cap.
-      void Promise.race([server.close(), new Promise<void>((resolve) => setTimeout(resolve, 6_000))])
-        .then(() => flushAccountMetadata(auth))
-        .then(() => process.exit(0));
-      return true;
-    },
-  });
-  memoryGuard.start();
+  // The health supervisor: heartbeat watcher, memory thresholds and the
+  // respawn handoff, whose confirmed respawn runs the same shutdown sequence.
+  createHealthSupervisor({
+    ...(config.health?.memory ? { thresholds: config.health.memory } : {}),
+    shutdown: (reason) => shutdown.run(reason),
+  }).start();
   if (config.plan === "start-plan") {
     // Pre-solve the captcha token pool in the background so first requests
     // don't pay the full solve latency (in-process happy-dom backend).
@@ -298,23 +328,6 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     console.log(config.plan === "coding-plan" ? `  /async/v1/*: ON` : `  /async/v1/*: OFF (requires plan "coding-plan")`);
   }
   if (debug) console.log(`  debug: ON`);
-
-  // Unsaved account metadata (a store write that lost a lock race) gets one
-  // last, bounded write before the process exits.
-  let stopping = false;
-  const stop = (): void => {
-    if (stopping) return;
-    stopping = true;
-    claimScheduler?.stop();
-    claimScheduler = null;
-    shutdownCaptchaRuntime();
-    void flushAccountMetadata(auth).finally(() => server.stop(true));
-  };
-  process.on("SIGINT", () => {
-    console.log("\nShutting down...");
-    stop();
-  });
-  process.on("SIGTERM", stop);
 }
 
 /** Bounded final write of unsaved account metadata (referenced timer: shutdown waits for it). */
@@ -1053,7 +1066,10 @@ function ensureConfigWithDeviceMid(): string {
  * the boot-time `serve` path.
  */
 export function ensureDeviceMidInConfig(path: string): string {
-  const deviceMidLine = /^(\s*)deviceMid:\s*(.*)$/m;
+  // The value is the rest of the `deviceMid:` line only: the separator never
+  // crosses a line break (LF or CRLF), so an empty unquoted `deviceMid:` reads
+  // as empty, as `loadConfig` reads it, not as the next line's text.
+  const deviceMidLine = /^(\s*)deviceMid:[^\S\r\n]*(.*)$/m;
   const identityBlockLine = /^identity:\s*$/m;
   const raw = readFileSync(path, "utf-8");
 
@@ -1073,7 +1089,9 @@ export function ensureDeviceMidInConfig(path: string): string {
     const block = `identity:\n  deviceMid: "${mid}"\n`;
     updated = raw.endsWith("\n") || raw.length === 0 ? raw + block : raw + "\n" + block;
   }
-  writeFileSync(path, updated, "utf-8");
+  // Only the line-break bytes follow the file (a CRLF config stays CRLF,
+  // config/line-endings.mjs); the value and when it is generated are unchanged.
+  writeFileSync(path, withLineEndingsOf(raw, updated), "utf-8");
   console.log(`Device identity generated: ${mid.slice(0, 8)}… (stored in ${path})`);
   return mid;
 }

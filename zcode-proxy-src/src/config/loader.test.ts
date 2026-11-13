@@ -440,7 +440,7 @@ provider: openai
     expect(() => loadConfig(path)).toThrow(/Invalid provider/);
   });
 
-  // ZAK-002: loopback binding is a load-time invariant, not a template default.
+  // Loopback binding is a load-time invariant, not a template default.
   it("throws on non-loopback server.host (0.0.0.0, LAN address, DNS name)", () => {
     for (const host of ["0.0.0.0", "::", "192.168.1.10", "proxy.example.com"]) {
       const path = writeYaml(`
@@ -542,4 +542,123 @@ identity:
     const cfg = loadConfig(path);
     expect(cfg.identity.appVersion).toBe("3.14.3");
   });
+});
+
+describe("server.admission.maxInFlightMB (ADR-0004)", () => {
+  const base = (admission: string) => writeYaml(`server:\n  port: 8080\n  host: "127.0.0.1"\n${admission}auth:\n  proxyApiKey: "${PROXY_KEY}"\n`);
+  afterEach(() => { delete process.env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB; });
+
+  it("is optional: without the key the proxy uses the 64 MB default", () => {
+    const cfg = loadConfig(base(""));
+    expect(cfg.server.admission?.maxInFlightBytes ?? 64 * 1024 * 1024).toBe(64 * 1024 * 1024);
+  });
+
+  it("reads the cap in MB from config.yaml", () => {
+    const cfg = loadConfig(base("  admission:\n    maxInFlightMB: 128\n"));
+    expect(cfg.server.admission?.maxInFlightBytes).toBe(128 * 1024 * 1024);
+  });
+
+  it("takes the ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB env override over config.yaml", () => {
+    process.env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB = "32";
+    const cfg = loadConfig(base("  admission:\n    maxInFlightMB: 128\n"));
+    expect(cfg.server.admission?.maxInFlightBytes).toBe(32 * 1024 * 1024);
+  });
+
+  for (const bad of ["0", "-5", "1.5", "lots", "4097", "\"\""]) {
+    it(`rejects ${bad} with what, why and next`, () => {
+      const path = base(`  admission:\n    maxInFlightMB: ${bad}\n`);
+      let message = "";
+      try { loadConfig(path); } catch (err) { message = (err as Error).message; }
+      expect(message).toMatch(/^server\.admission\.maxInFlightMB must be a whole number of MB from 1 to 4096 \(got /);
+      expect(message).toContain("caps the request-body bytes the proxy holds at once");
+      expect(message).toContain("Set it to a whole number such as 64 (the default) or remove the key");
+    });
+  }
+
+  it("rejects an invalid env override, naming the env var", () => {
+    process.env.ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB = "big";
+    let message = "";
+    try { loadConfig(base("")); } catch (err) { message = (err as Error).message; }
+    expect(message).toMatch(/^ZCODE_PROXY_ADMISSION_MAX_INFLIGHT_MB must be a whole number of MB from 1 to 4096 \(got "big"\)/);
+  });
+});
+
+describe("health.memory (ADR-0008)", () => {
+  const base = (health: string) => writeYaml(`server:\n  port: 8080\n  host: "127.0.0.1"\nauth:\n  proxyApiKey: "${PROXY_KEY}"\n${health}`);
+  const failure = (yaml: string): string => {
+    try { loadConfig(base(yaml)); } catch (err) { return (err as Error).message; }
+    return "";
+  };
+
+  it("is optional: without the block the supervisor keeps its defaults", () => {
+    expect(loadConfig(base("")).health).toBeUndefined();
+    expect(loadConfig(base("health:\n  memory: {}\n")).health).toEqual({ memory: {} });
+  });
+
+  it("reads the limits, the sample count and the interval from config.yaml", () => {
+    const cfg = loadConfig(base("health:\n  memory:\n    softLimitMB: 768\n    hardLimitMB: 2048\n    samples: 4\n    sampleIntervalSeconds: 10\n"));
+    expect(cfg.health).toEqual({ memory: { softLimitMB: 768, hardLimitMB: 2048, samples: 4, sampleIntervalMs: 10_000 } });
+  });
+
+  it("a partial block keeps the defaults for the keys it leaves out", () => {
+    expect(loadConfig(base("health:\n  memory:\n    hardLimitMB: 1536\n")).health).toEqual({ memory: { hardLimitMB: 1536 } });
+  });
+
+  for (const [key, bad, range] of [
+    ["softLimitMB", "0", "64 to 65536"],
+    ["softLimitMB", "lots", "64 to 65536"],
+    ["hardLimitMB", "1.5", "64 to 65536"],
+    ["samples", "0", "1 to 20"],
+    ["samples", "21", "1 to 20"],
+    ["sampleIntervalSeconds", "0", "1 to 600"],
+    ["sampleIntervalSeconds", "\"\"", "1 to 600"],
+  ] as const) {
+    it(`rejects ${key}: ${bad} with what, why and next`, () => {
+      const message = failure(`health:\n  memory:\n    ${key}: ${bad}\n`);
+      expect(message).toMatch(new RegExp(`^health\\.memory\\.${key} must be a whole number from ${range}( MB| s)? \\(got `));
+      expect(message).toContain("health supervisor");
+      expect(message).toContain("or remove the key");
+    });
+  }
+
+  it("rejects a limit written directly under health, and a memory key that is not a block, instead of ignoring them", () => {
+    const misplaced = failure("health:\n  softLimitMB: 2048\n  hardLimitMB: 4096\n");
+    expect(misplaced).toMatch(/^health\.softLimitMB is not a setting: the memory limits belong under health\.memory \(health\.memory\.softLimitMB\)/);
+    expect(misplaced).toContain("or remove it to keep the default");
+    expect(failure("health:\n  memory: 2048\n")).toMatch(/^health\.memory must be a block of settings \(softLimitMB, hardLimitMB, samples, sampleIntervalSeconds\), got 2048/);
+  });
+
+  it("rejects a hard limit at or below the soft limit, with both values", () => {
+    const message = failure("health:\n  memory:\n    softLimitMB: 1024\n    hardLimitMB: 1024\n");
+    expect(message).toMatch(/^health\.memory\.hardLimitMB \(1024\) must be above health\.memory\.softLimitMB \(1024\)/);
+    // Defaults count: a soft limit above the default hard limit needs a hard limit too.
+    expect(failure("health:\n  memory:\n    softLimitMB: 2048\n")).toMatch(/^health\.memory\.hardLimitMB \(1024\) must be above health\.memory\.softLimitMB \(2048\)/);
+  });
+});
+
+describe("solver.memoryCapMB", () => {
+  const base = (solver: string) => writeYaml(`server:\n  port: 8080\n  host: "127.0.0.1"\nauth:\n  proxyApiKey: "${PROXY_KEY}"\n${solver}`);
+  const failure = (yaml: string): string => {
+    try { loadConfig(base(yaml)); } catch (err) { return (err as Error).message; }
+    return "";
+  };
+
+  it("is optional: without the key the solver process keeps its 300 MB default", () => {
+    expect(loadConfig(base("")).solver).toBeUndefined();
+    expect(loadConfig(base("solver: {}\n")).solver).toBeUndefined();
+  });
+
+  it("reads the cap in MB from config.yaml, down to the documented minimum", () => {
+    expect(loadConfig(base("solver:\n  memoryCapMB: 512\n")).solver).toEqual({ memoryCapMB: 512 });
+    expect(loadConfig(base("solver:\n  memoryCapMB: 128\n")).solver).toEqual({ memoryCapMB: 128 });
+  });
+
+  for (const bad of ["127", "0", "-300", "1.5", "lots", "65537", "\"\""]) {
+    it(`rejects ${bad} with what, why and next`, () => {
+      const message = failure(`solver:\n  memoryCapMB: ${bad}\n`);
+      expect(message).toMatch(/^solver\.memoryCapMB must be a whole number of MB from 128 to 65536 \(got /);
+      expect(message).toContain("below 128 MB the solver cannot load and run a solve at all");
+      expect(message).toContain("Set it to a whole number such as 300 (the default) or remove the key.");
+    });
+  }
 });

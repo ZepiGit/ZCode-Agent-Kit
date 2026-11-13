@@ -89,7 +89,7 @@ async function runGateAssertions() {
   assert.ok(gatePassed(okOrigin), `legit origin must reach the MCP layer (got ${okOrigin.status})`);
 }
 
-// ZAK-010: the 4 MiB body bound must hold on the ACTUAL stream — a chunked
+// The 4 MiB body bound must hold on the ACTUAL stream — a chunked
 // request without Content-Length used to bypass the declared-size check.
 test("http gate: oversized chunked body without content-length is refused with 413", async () => {
   const probe = http.createServer();
@@ -297,6 +297,54 @@ test("http gate: abandoned upload leaves the bridge healthy", async () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
     });
     assert.ok(healthy.status !== 401 && healthy.status !== 403 && healthy.status !== 413, `bridge must serve normally after an abandoned upload (got ${healthy.status})`);
+  } finally {
+    await closeServer();
+  }
+});
+
+// GHSA-f897-62hf-6gxq (SDK < 1.30.1): a JSON-RPC batch had no length bound,
+// so one POST under the 4 MiB body cap could fan out into tens of thousands
+// of handler calls. The bound must hold on the bridge's pre-parsed-body path:
+// an over-long batch is refused as a whole and NO message in it runs.
+test("http gate: a JSON-RPC batch longer than 100 messages is refused before any message runs", async () => {
+  const probe = http.createServer();
+  await new Promise((r) => probe.listen(0, "127.0.0.1", r));
+  port = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  let handlerRuns = 0;
+  const resourceCtx = { tasks: { list() { handlerRuns += 1; return []; } } };
+  const closeServer = await serveHttp(
+    { toolCtx: {}, resourceCtx, serverInfo: { name: "test", version: "0.0.0" } },
+    "127.0.0.1",
+    port,
+    KEY,
+  );
+  const batch = (n) => JSON.stringify(Array.from({ length: n }, (_, i) => ({ jsonrpc: "2.0", id: i + 1, method: "resources/list" })));
+  const headers = {
+    "content-type": "application/json",
+    accept: "application/json, text/event-stream",
+    authorization: `Bearer ${KEY}`,
+  };
+  try {
+    // At the bound: a 100-message batch is still served, one handler run each.
+    const atBound = await request({ headers, body: batch(100) });
+    assert.equal(atBound.status, 200, `a 100-message batch must be served (got ${atBound.status}: ${atBound.body.slice(0, 200)})`);
+    assert.equal(JSON.parse(atBound.body).length, 100, "every message of the 100-message batch must be answered");
+    assert.equal(handlerRuns, 100);
+
+    // One past the bound: refused as a whole, nothing runs.
+    handlerRuns = 0;
+    const overBound = await request({ headers, body: batch(101) });
+    assert.equal(overBound.status, 400, `a 101-message batch must be refused (got ${overBound.status}: ${overBound.body.slice(0, 200)})`);
+    assert.equal(JSON.parse(overBound.body).error?.code, -32600, "refusal must be a JSON-RPC Invalid Request");
+    assert.equal(handlerRuns, 0, "no message of a refused batch may reach a handler");
+
+    // Amplification attempt well under the body cap: 20,000 messages (~1.4 MB).
+    const flood = batch(20_000);
+    assert.ok(Buffer.byteLength(flood) < 4 * 1024 * 1024, "flood must stay under the body cap to exercise the batch bound");
+    const flooded = await request({ headers, body: flood });
+    assert.equal(flooded.status, 400, `a 20,000-message batch must be refused (got ${flooded.status})`);
+    assert.equal(handlerRuns, 0, "a flood batch must not reach any handler");
   } finally {
     await closeServer();
   }

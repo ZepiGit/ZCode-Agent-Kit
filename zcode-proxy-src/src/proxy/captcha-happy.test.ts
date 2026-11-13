@@ -3,14 +3,54 @@ import { GlobalWindow } from "happy-dom";
 import {
   createDom,
   destroyDom,
+  extractVerifyParam,
   installGlobalWindowAlias,
   removeGlobalWindowAlias,
 } from "./captcha-happy.js";
+import { normalizeCaptchaError } from "./captcha-token.js";
 
 const HERMETIC_RESOURCES = {
   primeCookies: async () => [],
   documentHtml: "<!doctype html><html><body><div id=\"cap\"></div><button id=\"btn\"></button></body></html>",
 };
+
+// GitHub issue 32: the solver's local verification refusals must keep their
+// sanitized provenance through normalization (they surface on request
+// failures) while never carrying refused payload content. The synthetic
+// marker stands in for any secret-shaped material in a degraded token.
+const SECRET = "SYNTHETIC-SECRET-MARKER-9f2c41ab";
+const b64 = (obj: unknown): string => Buffer.from(JSON.stringify(obj)).toString("base64");
+
+describe("extractVerifyParam — local verification refusals (issue 32 provenance)", () => {
+  test("a too-short degraded param is refused with length metadata, never its content", () => {
+    const param = b64({ certifyId: "70bdb", isSign: true, note: SECRET });
+    let thrown: unknown;
+    try { extractVerifyParam(param); } catch (err) { thrown = err; }
+    expect(thrown).toBeInstanceOf(Error);
+    const msg = (thrown as Error).message;
+    expect(msg).toMatch(/too short/);
+    expect(msg).toContain(String(param.length));
+    expect(msg).not.toContain(SECRET);
+    // The refusal must survive normalization so the reason can surface on a
+    // subsequent request failure instead of collapsing into "captcha SDK failure".
+    expect(normalizeCaptchaError(thrown).message).toMatch(/too short/);
+  });
+
+  test("a missing securityToken is refused; a secret in the refused payload never leaks", () => {
+    const param = b64({ certifyId: "70bdb", sceneId: "11xygtvd", isSign: true, pad: "p".repeat(160) + SECRET });
+    let thrown: unknown;
+    try { extractVerifyParam(param); } catch (err) { thrown = err; }
+    const msg = (thrown as Error).message;
+    expect(msg).toMatch(/securityToken/);
+    expect(msg).not.toContain(SECRET);
+    expect(normalizeCaptchaError(thrown).message).toMatch(/securityToken/);
+  });
+
+  test("a valid param passes through unchanged", () => {
+    const param = b64({ certifyId: "c".repeat(48), sceneId: "11xygtvd", isSign: true, securityToken: "t".repeat(96) });
+    expect(extractVerifyParam(param)).toBe(param);
+  });
+});
 
 describe("createDom resource injection", () => {
   test("remote guest JavaScript is disabled without operator opt-in", async () => {
@@ -36,6 +76,88 @@ describe("createDom resource injection", () => {
       await destroyDom(dom.window);
     }
   });
+});
+
+// ADR-0007 / B1: happy-dom 21 turned CSS file and iframe page loading off by
+// default. The solver re-enables both so a solve loads what it loaded on 20.x
+// (surface unchanged, not stricter). Dropping a flag needs a live solve against
+// the vendor SDK (owner action), so these tests fail if either flag goes.
+describe("solve DOM loading surface (ADR-0007)", () => {
+  type Recorded = { level: string; text: string };
+
+  /** Swap the page console for a recorder: happy-dom reports "loading is disabled" there. */
+  function recordConsole(dom: { browserFrame: { page: { console: unknown } } }): Recorded[] {
+    const seen: Recorded[] = [];
+    const rec = (level: string) => (...a: unknown[]) => {
+      seen.push({ level, text: a.map((x) => String((x as Error)?.message ?? x)).join(" ") });
+    };
+    dom.browserFrame.page.console = { log: rec("log"), warn: rec("warn"), error: rec("error"), info: rec("info"), debug: rec("debug"), trace: rec("trace") };
+    return seen;
+  }
+
+  // Structural type: happy-dom's EventTarget is not the DOM lib's.
+  type Listenable = { addEventListener(type: string, listener: () => void, options: { once: boolean }): void };
+  function settled(el: Listenable): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("neither load nor error fired")), 5_000);
+      el.addEventListener("load", () => { clearTimeout(timer); resolve("load"); }, { once: true });
+      el.addEventListener("error", () => { clearTimeout(timer); resolve("error"); }, { once: true });
+    });
+  }
+
+  test("the solve window is constructed with CSS file and iframe page loading enabled", async () => {
+    const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
+    try {
+      const settings = (dom.window as unknown as { happyDOM: { settings: Record<string, unknown> } }).happyDOM.settings;
+      expect(settings.enableCSSFileLoading).toBe(true);
+      expect(settings.enableIframePageLoading).toBe(true);
+      // The deprecated inverse switches must not override the flags.
+      expect(settings.disableCSSFileLoading).toBe(false);
+      expect(settings.disableIframePageLoading).toBe(false);
+    } finally {
+      await destroyDom(dom.window);
+    }
+  });
+
+  test("a stylesheet link in the solve DOM is fetched through the interceptor", async () => {
+    const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
+    try {
+      const seen = recordConsole(dom as never);
+      const doc = dom.window.document;
+      const link = doc.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://zcode.z.ai/__adr0007.css";
+      const outcome = settled(link);
+      doc.head.appendChild(link);
+      // The hermetic interceptor answers every request with 503, so the link
+      // errors either way; what matters is that the request was made.
+      expect(await outcome).toBe("error");
+      const texts = seen.map((s) => s.text).join("\n");
+      expect(texts).not.toMatch(/loading is disabled/i);
+      expect(texts).toMatch(/__adr0007\.css/);
+      expect(texts).toMatch(/503/);
+    } finally {
+      await destroyDom(dom.window);
+    }
+  }, 20_000);
+
+  test("an iframe in the solve DOM gets a child frame (page loading enabled)", async () => {
+    const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
+    try {
+      const seen = recordConsole(dom as never);
+      const doc = dom.window.document;
+      const iframe = doc.createElement("iframe");
+      iframe.src = "https://zcode.z.ai/__adr0007-frame.html";
+      const outcome = settled(iframe);
+      doc.getElementById("cap")!.appendChild(iframe);
+      await outcome;
+      expect(seen.map((s) => s.text).join("\n")).not.toMatch(/loading is disabled/i);
+      expect(iframe.contentWindow).not.toBeNull();
+      expect((dom.browserFrame as unknown as { childFrames: unknown[] }).childFrames.length).toBe(1);
+    } finally {
+      await destroyDom(dom.window);
+    }
+  }, 20_000);
 });
 
 // The guest-timer contract, stated behaviourally: a timer armed by guest code

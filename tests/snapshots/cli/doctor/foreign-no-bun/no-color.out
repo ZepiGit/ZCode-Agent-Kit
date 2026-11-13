@@ -1,0 +1,43 @@
+✗ 3 problems: 3 failed
+
+Runtime ────────────────────────────────────────────────────────────────────────
+  ✗ FAIL  bun available           Bun native executable not found; install Bun
+                                  or set ZCODE_KIT_BUN to its executable path
+                                  why   the local proxy runs on Bun and none
+                                        could be started: install Bun, or set
+                                        ZCODE_KIT_BUN to its executable path
+                                  next  zcode-kit doctor
+  ✓ PASS  config exists           /kit/proxy/config.yaml
+  ✓ PASS  key file exists         /kit/.proxykey
+  ✓ PASS  proxy source installed  /kit/zcode-proxy-src/node_modules
+
+Proxy ──────────────────────────────────────────────────────────────────────────
+  ✗ FAIL  proxy reachable + identity  health=foreign
+                                      why   another service answers on the
+                                            configured port; the kit never stops
+                                            a service it did not start
+                                      next  zcode-kit proxy status
+
+Account ────────────────────────────────────────────────────────────────────────
+  ✗ FAIL  credentials store  ~/.zcode-proxy/credentials.json: no credential
+                             store — run: zcode-kit auth login
+                             why   no ZCode login is stored, or this machine
+                                   cannot decrypt it
+                             next  zcode-kit auth login zai
+
+Integrations ───────────────────────────────────────────────────────────────────
+  – SKIP  omp integration           not configured (no consent yet) — answer y
+                                    in zcode-kit setup or run zcode-kit
+                                    integrate omp
+  – SKIP  omp: integration          not detected — skipped
+  – SKIP  pi: integration           not detected — skipped
+  – SKIP  claude-code: integration  not detected — skipped
+  – SKIP  codex: integration        not detected — skipped
+  – SKIP  opencode: integration     not detected — skipped
+  – SKIP  cline: integration        not detected — skipped
+  – SKIP  kilo-code: integration    not detected — skipped
+  – SKIP  aider: integration        not detected — skipped
+  – SKIP  continue: integration     not detected — skipped
+  – SKIP  goose: integration        not detected — skipped
+
+doctor: 3 failed, 3 passed, 11 skipped → exit 1

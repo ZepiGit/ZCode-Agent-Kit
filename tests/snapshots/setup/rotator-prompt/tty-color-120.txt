@@ -1,0 +1,5 @@
+
+  Keep authorized logins as separate encrypted accounts.
+  New logins are saved automatically while the feature is enabled.
+? Do you want to activate the Account Rotator feature? [y/N] n
+  [OK] Account Rotator disabled. Saved accounts are kept.

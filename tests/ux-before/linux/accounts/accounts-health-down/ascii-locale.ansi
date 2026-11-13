@@ -1,0 +1,8 @@
+[31mx FAIL  live data unavailable[0m
+   [2mwhy[0m   the kit proxy is not reachable, so runtime state and quota are unknown
+   [2mnext[0m  [1mzcode-kit proxy start[0m
+  [1;2mACCOUNT   VERDICT  PLAN         QUOTA  USED[0m
+  work      unknown  coding-plan         never used
+  personal  unknown  start-plan          never used
+  backup    unknown  coding-plan         never used
+  [2musable: 0 of 3[0m

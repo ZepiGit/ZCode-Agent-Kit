@@ -1,0 +1,4 @@
+  Logged in  no
+x FAIL  the proxy did not answer
+   why   fetch failed
+   next  zcode-kit proxy start

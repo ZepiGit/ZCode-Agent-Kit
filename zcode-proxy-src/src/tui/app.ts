@@ -23,7 +23,7 @@ import { ZaiOAuthClient, BigmodelOAuthClient, LOGIN_TIMEOUT_MS, parsePastedCallb
 import { KeyResolver } from "../auth/resolver.js";
 import { openBrowser } from "../runtime/open-browser.js";
 import { pasteLoginInstructions, readPastedLine, boldIfTTY } from "../runtime/paste-login.js";
-import { isGuestOriginError, describeGuestError } from "../runtime/guest-error.js";
+import { hasGuestSourceFrame, describeGuestError } from "../runtime/guest-error.js";
 import { ensureDeviceMidInConfig, VERSION, type ServeArgs } from "../index.js";
 import { appendFileSync } from "node:fs";
 import type { ProxyConfig } from "../config/types.js";
@@ -670,7 +670,7 @@ export async function runTui(args: ServeArgs): Promise<void> {
   // report: "tui crashed: ReferenceError: moveBy is not defined" from
   // feilin008.js). The pool retries the solve; the proxy keeps serving.
   process.on("uncaughtException", (err: Error) => {
-    if (isGuestOriginError(err)) {
+    if (hasGuestSourceFrame(err)) {
       emit(`[warn] captcha SDK error (ignored): ${describeGuestError(err)}`, "warn");
       return;
     }

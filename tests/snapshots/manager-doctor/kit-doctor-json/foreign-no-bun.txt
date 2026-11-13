@@ -1,0 +1,123 @@
+{
+  "ok": false,
+  "failed": 3,
+  "skipped": 11,
+  "warned": 0,
+  "checks": [
+    {
+      "name": "bun available",
+      "ok": false,
+      "detail": "Bun native executable not found; install Bun or set ZCODE_KIT_BUN to its executable path",
+      "status": "fail"
+    },
+    {
+      "name": "config exists",
+      "ok": true,
+      "detail": "<KIT>/proxy/config.yaml",
+      "status": "pass"
+    },
+    {
+      "name": "key file exists",
+      "ok": true,
+      "detail": "<KIT>/.proxykey",
+      "status": "pass"
+    },
+    {
+      "name": "proxy source installed",
+      "ok": true,
+      "detail": "<KIT>/zcode-proxy-src/node_modules",
+      "status": "pass"
+    },
+    {
+      "name": "credentials store",
+      "ok": false,
+      "detail": "~/.zcode-proxy/credentials.json: no credential store — run: zcode-kit auth login",
+      "status": "fail"
+    },
+    {
+      "name": "omp integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp",
+      "status": "skip"
+    },
+    {
+      "name": "mcp bridge installed",
+      "ok": true,
+      "detail": "<KIT>/mcp/zcode-harness-mcp/dist/index.js",
+      "status": "pass"
+    },
+    {
+      "name": "mcp bridge deps",
+      "ok": true,
+      "detail": "<KIT>/mcp/zcode-harness-mcp/node_modules",
+      "status": "pass"
+    },
+    {
+      "name": "proxy reachable + identity",
+      "ok": false,
+      "detail": "health=foreign",
+      "status": "fail"
+    },
+    {
+      "name": "omp: integration",
+      "ok": null,
+      "detail": "not configured (no consent yet) — answer y in zcode-kit setup or run zcode-kit integrate omp",
+      "status": "skip"
+    },
+    {
+      "name": "pi: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "claude-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "codex: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "opencode: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "cline: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "kilo-code: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "aider: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "continue: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    },
+    {
+      "name": "goose: integration",
+      "ok": null,
+      "detail": "not detected — skipped",
+      "status": "skip"
+    }
+  ]
+}
+[exit 1]

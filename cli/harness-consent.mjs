@@ -1,8 +1,8 @@
 // Per-harness consent for `zcode-kit setup`.
 //
 // Setup never configures a harness silently: each detected harness gets its
-// own question ("Configure ZCode as a provider with its supported models in
-// <HARNESS>? [y/n]"), an explicit selection (`--harness a,b`,
+// own question ("? Configure ZCode for <HARNESS>? [y/n]", on stderr), an
+// explicit selection (`--harness a,b`,
 // `ZCODE_KIT_HARNESSES=a,b`, `none`) counts as consent for exactly those ids,
 // and a missing terminal is never consent. Decisions are stored one file per
 // harness under `<state>/generated/harness-choices/` through the setup
@@ -13,7 +13,9 @@
 // turned into consent: the next interactive run still asks.
 import { existsSync, readFileSync, readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
+import { createInterface, emitKeypressEvents } from "node:readline";
+import { PassThrough } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { commitFile, ensureDir } from "../lib/edit.mjs";
 
 export const HARNESS_CHOICES_DIR = "harness-choices";
@@ -22,7 +24,7 @@ export const NO_CONSENT_HINT = `no interactive consent (select explicitly: --har
 export const ABORTED = "ABORTED";
 
 export function harnessQuestion(label) {
-  return `Configure ZCode as a provider with its supported models in ${label}?`;
+  return `Configure ZCode for ${label}?`;
 }
 
 export function isInteractive({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
@@ -41,44 +43,82 @@ function abortError() {
  * interface owns stdin for the whole setup: lines typed ahead are queued and
  * answer the following questions in order instead of being swallowed by a
  * closed interface. `ask` resolves true/false for an explicit answer, or
- * undefined when no interactive answer is possible: no TTY on either side,
- * CI, or input closed before an answer (EOF must never count as consent).
- * Ctrl-C rejects with an error whose `code` is ABORTED so the caller can stop
- * asking instead of treating it as "no answer".
+ * undefined when no interactive answer is possible: no TTY on stdin or the
+ * prompt stream, CI, or input closed before an answer (EOF must never count
+ * as consent). Ctrl-C rejects with an error whose `code` is ABORTED so the
+ * caller can stop asking instead of treating it as "no answer".
+ *
+ * A prompt is a diagnostic: without an
+ * explicit stream it is written to stderr, in the `? <question> [y/n]` form,
+ * and questions appear only when stdin AND stderr are terminals — with
+ * stderr redirected the question would be invisible, so nothing is asked.
+ *
+ * How a question is drawn is the capability record's decision
+ * (lib/term/out.mjs promptStyle, from `output`, `env` and `platform`), never
+ * the process's own TERM (Node's readline redraws a prompt unless
+ * process.env.TERM is "dumb"). The kit always writes the question text itself.
+ *   redraw: readline owns the line (raw mode): it echoes, edits and redraws the
+ *           question on resize with cursor control. Only where motion and
+ *           colour are allowed.
+ *   plain:  readline only reads lines (terminal: false). The terminal's own
+ *           line discipline echoes and edits, nothing the kit writes carries
+ *           an escape sequence, and Ctrl-C arrives as SIGINT. TERM=dumb,
+ *           NO_COLOR, colour off.
+ * `redraw` forces the decision (true/false); by default it is taken on the
+ * first question, loading the capability record lazily: the proxy manager
+ * imports this module and never loads presentation code.
  */
-export function createPrompter({ input = process.stdin, output = process.stdout, env = process.env } = {}) {
+export function createPrompter({ input = process.stdin, output = process.stderr, env = process.env, platform = process.platform, redraw } = {}) {
   const interactive = isInteractive({ input, output, env });
   const queue = [];
   const waiters = [];
   let rl = null;
   let closed = false;
   let aborted = false;
+  let style = redraw === undefined ? null : { redraw: redraw === true };
+  let onSignal = null;
+  let selectorSession = null;
   function settleWaiters() {
     while (waiters.length) {
       const waiter = waiters.shift();
       if (aborted) waiter.reject(abortError()); else waiter.resolve(undefined);
     }
   }
-  function ensure() {
+  function detachSignal() {
+    if (onSignal) process.removeListener("SIGINT", onSignal);
+    onSignal = null;
+  }
+  function abort() {
+    aborted = true;
+    queue.length = 0;
+    output.write("\n");
+    const current = rl;
+    rl = null;
+    closed = true;
+    detachSignal();
+    current?.close();
+    settleWaiters();
+  }
+  async function ensure() {
     if (rl || closed) return;
-    rl = createInterface({ input, output, terminal: true });
+    if (!style) {
+      const { loadPromptStyle } = await import("../lib/term/load.mjs");
+      style = await loadPromptStyle(output, { env, platform });
+    }
+    if (rl || closed) return;
+    const lineInput = selectorSession ? await selectorSession.lineInput() : input;
+    if (closed) return;
+    rl = createInterface({ input: lineInput, output, terminal: style.redraw });
     rl.on("line", (line) => {
       const waiter = waiters.shift();
       if (waiter) waiter.resolve(line); else queue.push(line);
     });
-    rl.on("SIGINT", () => {
-      aborted = true;
-      queue.length = 0;
-      output.write("\n");
-      const current = rl;
-      rl = null;
-      closed = true;
-      current.close();
-      settleWaiters();
-    });
+    if (style.redraw) rl.on("SIGINT", abort);
+    else { onSignal = abort; process.on("SIGINT", onSignal); }
     rl.on("close", () => {
       closed = true;
       rl = null;
+      detachSignal();
       settleWaiters();
     });
   }
@@ -93,20 +133,116 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
     if (closed) return Promise.resolve(undefined);
     return new Promise((resolve, reject) => {
       waiters.push({ resolve, reject });
-      rl.setPrompt(promptText);
-      rl.prompt();
+      // Not rl.prompt(): its bytes depend on process.env.TERM. The question is
+      // written as text; in redraw mode readline also keeps it as the line to
+      // redraw on resize or editing.
+      if (style.redraw) rl.setPrompt(promptText);
+      if (rl.paused) rl.resume();
+      if (selectorSession) {
+        output.write(promptText, (err) => {
+          if (err) {
+            selectorSession.close();
+            const index = waiters.findIndex((waiter) => waiter.resolve === resolve);
+            if (index !== -1) waiters.splice(index, 1);
+            reject(err);
+          }
+          else selectorSession.armLine();
+        });
+      } else output.write(promptText);
     });
   }
   return {
     interactive,
     get aborted() { return aborted; },
-    async ask(question) {
+    /** Automatic checkbox consent; null means the untouched legacy path. */
+    async selectHarnesses({ rows, reask = false, mcpIds = [] }) {
+      if (!interactive || closed || rl || redraw === false || typeof input.setRawMode !== "function") return null;
+      const { selectorCaps } = await import("../lib/term/caps.mjs");
+      const { displayWidth, padEndWidth } = await import("../lib/term/width.mjs");
+      const { GLYPHS } = await import("../lib/term/tokens.mjs");
+      if (!Array.isArray(rows) || rows.length > 10) throw new TypeError("selector needs at most ten rows");
+      const inventory = rows.map((row) => ({ ...row,
+        locked: !reask && !row.unreadable && (row.stored === "configured" || row.stored === "skipped"),
+        checked: !row.unreadable && row.stored === "configured",
+      }));
+      const editable = inventory.filter((row) => !row.locked);
+      if (!editable.length) return null;
+      const offers = new Set(mcpIds.filter((id) => editable.some((row) => row.id === id)));
+      let focus = inventory.findIndex((row) => !row.locked), hint = "";
+      const initialFocus = focus;
+      const reset = () => { for (const row of inventory) row.checked = !row.unreadable && row.stored === "configured"; focus = initialFocus; hint = ""; };
+      function frame(caps, feedback = hint) {
+        if (!caps.eligible || caps.width < 1) return null;
+        const width = caps.width;
+        const wrap = (text, indent = "") => {
+          const lines = []; let line = indent;
+          for (const word of text.split(" ")) {
+            if (displayWidth(indent + word) > width) return null;
+            if (line !== indent && displayWidth(line + " " + word) > width) { lines.push(line); line = indent + word; }
+            else line += (line === indent ? "" : " ") + word;
+          }
+          lines.push(line); return lines;
+        };
+        const prose = [
+          "Configure ZCode as a provider in these assistants?",
+          "Enter with editable checks answers yes for checked rows and no for unchecked rows.",
+          "Esc or Enter with no editable checks saves no harness decision.",
+          "A nonempty confirmation saves readable editable choices; unreadable choices apply only to this run.",
+          ...(reask ? ["--reask: saved choices are editable. Esc, an empty confirmation or input closing keeps their saved decision files unchanged."] : inventory.some((row) => row.locked) ? ["Saved choices are locked. Change them with: zcode-kit setup --reask"] : []),
+          ...editable.flatMap((row) => row.unreadable
+            ? [`Esc, an empty confirmation or input closing skips ${row.label} without refreshing it. Its unreadable decision file is never overwritten.`]
+            : row.owned ? [
+              `Esc, an empty confirmation or input closing refreshes the existing kit integration for ${row.label}, even if its saved choice is no. No harness decision is saved.`,
+              `In a nonempty confirmation, an unchecked ${row.label} is skipped without refreshing its integration and its readable choice is saved as no.`,
+            ] : [`Esc, an empty confirmation or input closing skips ${row.label} for this run, even if its saved choice is yes. No harness decision is saved.`]),
+          ...(offers.size ? [`Selecting ${editable.filter((row) => offers.has(row.id)).map((row) => row.label).join(" or ")} also registers the kit's MCP bridge "zcode-harness" (skip with --no-mcp).`] : []),
+        ];
+        const lines = [];
+        const append = (text, indent) => { const part = wrap(text, indent); if (!part) return false; lines.push(...part); return true; };
+        for (const text of prose) if (!append(text)) return null;
+        lines.push("");
+        const labelWidth = Math.max(...inventory.map((row) => displayWidth(row.label)));
+        for (const [i, row] of inventory.entries()) {
+          const state = row.unreadable ? "unreadable / not saved" : row.stored === "configured" ? `saved yes / ${row.locked ? "locked" : "editable"}` : row.stored === "skipped" ? `saved no / ${row.locked ? "locked" : "editable"}` : "new / editable";
+          const prefix = `  ${i === focus ? GLYPHS[caps.glyphs].pointer : " "} [${row.checked ? "x" : " "}] `;
+          const full = prefix + padEndWidth(row.label, labelWidth) + "  " + state;
+          if (displayWidth(full) <= width) lines.push(full);
+          else { if (!append(row.label, prefix)) return null; if (!append(state, "        ")) return null; }
+        }
+        lines.push("");
+        for (const text of ["Arrows move  Space toggle  a toggle all editable  Enter confirm", "Esc no new harness decision  Ctrl-C abort", `${editable.filter((row) => row.checked).length} of ${editable.length} editable checked; saved yes kept: ${inventory.filter((row) => row.locked && row.checked).length}`, feedback || ""]) if (!append(text)) return null;
+        return lines;
+      }
+      let caps = selectorCaps(output, { env, platform });
+      const maximum = frame(caps, "Saved choice is locked; use zcode-kit setup --reask");
+      if (!maximum || maximum.length + 1 > caps.rows) return null;
+      selectorSession = createSelectorSession({ input, output,
+        onClosed: () => { closed = true; }, onAborted: () => {
+          aborted = true; closed = true; queue.length = 0;
+          // Close the later readline owner before session cleanup restores the
+          // original raw state; a process SIGINT may arrive in either phase.
+          if (rl) { const current = rl; rl = null; current.close(); }
+          detachSignal(); settleWaiters();
+        },
+        getCaps: () => selectorCaps(output, { env, platform }), frame, reset, inventory, editable, offers,
+        getFocus: () => focus, setFocus: (value) => { focus = value; hint = ""; },
+        setHint: (value) => { hint = value; },
+      });
+      return selectorSession.select();
+    },
+    /**
+     * `defaultAnswer: false` marks the question `[y/N]` and an empty line
+     * (Enter) answers n; without it the marker is `[y/n]` and Enter asks again.
+     */
+    async ask(question, { defaultAnswer } = {}) {
       if (!interactive) return undefined;
-      ensure();
-      const promptText = `${question} [y/n] `;
+      await ensure();
+      const defaultNo = defaultAnswer === false;
+      const promptText = `? ${question} ${defaultNo ? "[y/N]" : "[y/n]"} `;
       for (;;) {
         const line = await nextLine(promptText);
         if (line === undefined) return undefined; // Closed input must never count as consent.
+        if (defaultNo && line.trim() === "") return false;
         if (/^[yn]$/i.test(line.trim())) return line.trim().toLowerCase() === "y";
         output.write("Please answer y or n.\n");
       }
@@ -118,7 +254,7 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
      */
     async askLine(promptText, parse, retryHint) {
       if (!interactive) return undefined;
-      ensure();
+      await ensure();
       for (;;) {
         const line = await nextLine(promptText);
         if (line === undefined) return undefined;
@@ -129,8 +265,269 @@ export function createPrompter({ input = process.stdin, output = process.stdout,
     },
     close() {
       closed = true;
+      detachSignal();
       if (rl) { const current = rl; rl = null; current.close(); }
+      selectorSession?.close();
       settleWaiters();
+    },
+  };
+}
+
+// Owns only the selector epoch and its subsequent fresh line transport. The
+// legacy path never constructs this session, so its typed-ahead queue is intact.
+function createSelectorSession({ input, output, onClosed, onAborted, getCaps, frame, reset, inventory, editable, offers, getFocus, setFocus, setHint }) {
+  let phase = "disclosing", ended = false, settled = false, pendingCR = false;
+  let prefix = "", paste = false, pasteMatch = 0, quarantine = false;
+  let controlString = false, stringEscape = false;
+  let decoder = null, utf8 = new StringDecoder("utf8"), line = null, inKey = false;
+  let resolve, reject, drawn = 0, painting = false, dirty = false;
+  let generation = 0;
+  const priorRaw = input.isRaw === true;
+  const endMarker = "\x1b[201~";
+  const write = (text) => new Promise((done, fail) => {
+    if (output.destroyed || output.writableEnded) return fail(new Error("selector output closed"));
+    try { output.write(text, (err) => err ? fail(err) : done()); } catch (err) { fail(err); }
+  });
+  function disposeDecoder() {
+    if (!decoder) return;
+    const current = decoder; decoder = null;
+    // Public decoder has no disposer. Flush disarmed private transport so its
+    // supported ESC timeout is cleared, then destroy only this owned stream.
+    const dispose = () => {
+      current.write(Buffer.alloc(32));
+      current.removeListener("keypress", current.selectorKey);
+      current.destroy();
+    };
+    // At most one callback is active. Other reset paths dispose synchronously,
+    // so repeated contamination cannot grow a microtask/decoder queue.
+    if (inKey) queueMicrotask(dispose); else dispose();
+  }
+  function freshDecoder() {
+    disposeDecoder(); prefix = ""; utf8 = new StringDecoder("utf8");
+    decoder = new PassThrough();
+    emitKeypressEvents(decoder);
+    const current = decoder;
+    current.selectorKey = (...args) => {
+      if (decoder !== current) return;
+      inKey = true;
+      try { onKey(...args); } finally { inKey = false; }
+    };
+    decoder.on("keypress", current.selectorKey);
+  }
+  function restore() {
+    disposeDecoder();
+    try { input.setRawMode(priorRaw); }
+    catch (err) { return err; }
+    finally { output.removeListener("resize", resize); }
+  }
+  function cleanup() {
+    if (phase === "closed") return;
+    phase = "closed";
+    const restoreError = restore();
+    input.removeListener("data", onData);
+    input.removeListener("end", eof);
+    input.removeListener("close", eof);
+    input.removeListener("error", fail);
+    // Writable may emit its error after invoking the failed write callback.
+    // Keep only this owned guard through that turn, never remove foreign ones.
+    setImmediate(() => output.removeListener("error", fail));
+    output.removeListener("close", outputClosed);
+    process.removeListener("SIGINT", interrupt);
+    for (const [signal, handler] of signals) process.removeListener(signal, handler);
+    line?.end();
+    return restoreError;
+  }
+  function fail(err) {
+    if (phase === "closed") return;
+    cleanup();
+    settled = true; reject(err);
+  }
+  function outputClosed() { fail(new Error("selector output closed")); }
+  function interrupt() { onAborted(); fail(abortError()); }
+  const signals = ["SIGTERM", "SIGHUP", ...(process.platform === "win32" ? ["SIGBREAK"] : [])].map((signal) => [signal, () => {
+    cleanup();
+    // Preserve default termination after restoring the terminal. Never turn a
+    // handled termination into an absent answer or a successful setup.
+    process.kill(process.pid, signal);
+  }]);
+  function eof() {
+    ended = true; onClosed();
+    if (!settled) finish("eof");
+    else line?.end();
+  }
+  function finish(reason) {
+    if (settled) return;
+    phase = "leaving";
+    const restoreError = restore();
+    if (restoreError) { fail(restoreError); return; }
+    settled = true;
+    const nonempty = reason === "confirm" && editable.some((row) => row.checked);
+    const answers = new Map(editable.map((row) => [row.id, nonempty ? row.checked : undefined]));
+    // Still own input while the newline drains and adapters run; no old key
+    // can become a line answer during this interval.
+    write("\n").then(() => resolve({ answers, mcpIds: offers, reason }), (err) => { cleanup(); reject(err); });
+  }
+  function fallback() {
+    if (settled) return;
+    phase = "leaving"; reset();
+    const restoreError = restore();
+    if (restoreError) { fail(restoreError); return; }
+    settled = true;
+    // Geometry changed: append, since the old physical region is uncertain.
+    write("\nTerminal too small for the selector; continuing with individual questions.\n")
+      .then(() => resolve({ fallback: true }), (err) => { cleanup(); reject(err); });
+  }
+  function fits(caps) {
+    const worst = frame(caps, "Saved choice is locked; use zcode-kit setup --reask");
+    return worst && worst.length + 1 <= caps.rows;
+  }
+  async function paint(disclose = false) {
+    if (painting) { dirty = true; return; }
+    painting = true;
+    try {
+      do {
+        dirty = false;
+        const current = generation, caps = getCaps();
+        if (!fits(caps)) { fallback(); return; }
+        const lines = frame(caps);
+        const erase = drawn && !disclose ? `\x1b[${drawn}A\r\x1b[0J` : "";
+        await write(erase + lines.join("\n") + "\n");
+        drawn = lines.length;
+        if (current !== generation) { dirty = true; continue; }
+        if (phase === "disclosing") { phase = "armed"; freshDecoder(); }
+      } while (dirty && !settled);
+    } catch (err) { fail(err); }
+    finally { painting = false; }
+  }
+  function redisclose() {
+    phase = "disclosing"; reset(); quarantine = false; paste = false; pasteMatch = 0;
+    freshDecoder(); void paint(true);
+  }
+  function contaminate() { reset(); quarantine = true; prefix = ""; freshDecoder(); }
+  function resize() {
+    generation++;
+    if (!fits(getCaps())) { fallback(); return; }
+    // Append on resize rather than guessing old wrapped geometry ownership.
+    drawn = 0; void paint();
+  }
+  function onKey(_, key) {
+    if (phase !== "armed" || !decoder) return;
+    if (key.name === "escape" && prefix === "\x1b") {
+      prefix = "";
+      if (quarantine) redisclose(); else finish("escape");
+      return;
+    }
+    if (key.sequence !== prefix && prefix) return;
+    if (key.ctrl && key.name === "c") { interrupt(); return; }
+    if (key.ctrl && key.name === "d") { eof(); return; }
+    if (quarantine || key.ctrl || key.meta || (key.shift && key.name !== "a")) return;
+    if (["up", "left", "down", "right"].includes(key.name)) {
+      setFocus((getFocus() + (["up", "left"].includes(key.name) ? -1 : 1) + inventory.length) % inventory.length);
+    } else if (key.name === "space") {
+      const row = inventory[getFocus()];
+      if (row.locked) setHint("Saved choice is locked; use zcode-kit setup --reask");
+      else { row.checked = !row.checked; setHint(""); }
+    } else if (key.name === "a") {
+      const checked = !editable.every((row) => row.checked);
+      for (const row of editable) row.checked = checked;
+      setHint("");
+    } else if (key.name === "return" || key.name === "enter") {
+      if (!fits(getCaps())) fallback(); else finish("confirm");
+      return;
+    }
+    else return;
+    void paint();
+  }
+  function character(ch) {
+    if (phase !== "armed") return;
+    if (paste) {
+      pasteMatch = ch === endMarker[pasteMatch] ? pasteMatch + 1 : ch === endMarker[0] ? 1 : 0;
+      if (pasteMatch === endMarker.length) redisclose();
+      return;
+    }
+    if (ch === "\x03") { interrupt(); return; }
+    if (controlString) {
+      if (ch === "\x07" || (stringEscape && ch === "\\")) { controlString = false; stringEscape = false; redisclose(); }
+      else stringEscape = ch === "\x1b";
+      return;
+    }
+    if (quarantine) {
+      if (ch === "\r" || ch === "\n") { redisclose(); return; }
+      if (ch !== "\x1b" && !prefix) return;
+    }
+    if (prefix || ch === "\x1b") {
+      // Node holds ESC + introducer while this guard holds the remainder.
+      // Check before appending: combined undecided state never exceeds 32.
+      if (Buffer.byteLength(prefix) + Buffer.byteLength(ch) > 30) { contaminate(); return; }
+      prefix += ch;
+      if (prefix === "\x1b") { decoder.write(ch); return; }
+      if (["\x1b]", "\x1bP", "\x1b^", "\x1b_"].includes(prefix)) {
+        reset(); controlString = true; stringEscape = false; freshDecoder(); return;
+      }
+      if (prefix === "\x1b[" || prefix === "\x1bO") { decoder.write(ch); return; }
+      const csi = prefix.startsWith("\x1b[");
+      const ss3 = prefix.startsWith("\x1bO");
+      if ((csi || ss3) && !/^[\x20-\x7e]$/.test(ch)) {
+        contaminate();
+        if (ch === "\r" || ch === "\n") redisclose();
+        return;
+      }
+      // readline also supports Linux-console ESC [[ function-key sequences.
+      if (prefix === "\x1b[[") return;
+      if ((csi || ss3) && !/[\x40-\x7e]$/.test(ch)) return;
+      if (prefix === "\x1b[200~") { reset(); paste = true; pasteMatch = 0; freshDecoder(); return; }
+      const complete = prefix;
+      if (csi || ss3) decoder.write(complete.slice(2)); else decoder.write(ch);
+      prefix = "";
+      return;
+    }
+    if (quarantine) return;
+    if (ch.length && ch >= " " && ch !== " " && ch !== "a" && ch !== "A" && ch !== "\x7f") { contaminate(); return; }
+    decoder.write(ch);
+  }
+  function onData(chunk) {
+    try {
+      const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      for (const byte of bytes) {
+        if (pendingCR) { pendingCR = false; if (byte === 10) continue; }
+        if (byte === 13) pendingCR = true;
+        if (phase === "line" && line) { line.write(Buffer.from([byte])); continue; }
+        if (phase !== "armed") continue;
+        const text = utf8.write(Buffer.from([byte]));
+        for (const ch of text) character(ch);
+      }
+    } catch (err) { fail(err); }
+  }
+  return {
+    select() {
+      return new Promise((yes, no) => {
+        resolve = yes; reject = no;
+        input.on("data", onData); input.on("end", eof); input.on("close", eof); input.on("error", fail);
+        output.on("resize", resize); output.on("error", fail); output.on("close", outputClosed);
+        process.on("SIGINT", interrupt);
+        for (const [signal, handler] of signals) process.on(signal, handler);
+        try { input.setRawMode(true); input.resume(); }
+        catch (err) { fail(err); return; }
+        void paint(true);
+      });
+    },
+    async lineInput() {
+      phase = "leaving";
+      line ??= new PassThrough();
+      line.isTTY = input.isTTY;
+      line.setRawMode = (raw) => { input.setRawMode(raw); return line; };
+      if (ended) line.end();
+      return line;
+    },
+    armLine() { if (!ended && phase !== "closed") phase = "line"; },
+    close() {
+      const pending = !settled;
+      const err = cleanup();
+      if (pending) {
+        settled = true;
+        if (err) reject(err);
+        else resolve({ answers: new Map(editable.map((row) => [row.id, undefined])), mcpIds: offers, reason: "eof" });
+      }
     },
   };
 }
@@ -157,10 +554,10 @@ export function parseSelection(answer, count) {
 }
 
 /** Single y/n question on its own terminal session (see createPrompter). */
-export async function askYesNo(question, streams = {}) {
+export async function askYesNo(question, streams = {}, options = {}) {
   const prompter = createPrompter(streams);
   try {
-    return await prompter.ask(question);
+    return await prompter.ask(question, options);
   } finally {
     prompter.close();
   }
@@ -235,12 +632,21 @@ export function isUnreadableChoice(choices, id) {
  * Record one decision through the transaction (rollback of that setup removes
  * it again). `mcp` records consent for the kit's MCP bridge separately from
  * the provider consent; it is never inferred from a stored decision.
+ * In a dry run nothing is written: a decision file the real run WOULD write
+ * is reported through `tx.touch` (the `integrate --dry-run` would-write list),
+ * with the same would-change predicate as the real write.
  * Returns false when nothing could be recorded (unreadable decision file).
  */
 export function recordHarnessChoice(ctx, tx, choices, id, decision, source, now = () => new Date().toISOString(), { mcp = false } = {}) {
-  if (ctx.dryRun) return true;
-  if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
   const previous = choices.harnesses[id];
+  if (ctx.dryRun) {
+    if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
+    if (!(previous && previous.decision === decision && previous.source === source && previous.mcp === mcp)) {
+      tx?.touch?.(join(harnessChoicesDir(ctx), `${id}.json`));
+    }
+    return true;
+  }
+  if (isUnreadableChoice(choices, id)) return false; // never overwrite what could not be read
   if (previous && previous.decision === decision && previous.source === source && previous.mcp === mcp) return true;
   const entry = { schema: 1, harness: id, decision, source, decidedAt: now(), ...(mcp ? { mcp: true } : {}) };
   ensureDir(ctx, harnessChoicesDir(ctx));

@@ -8,7 +8,7 @@
  */
 import { createServer, type Server } from "node:http";
 import { Readable } from "node:stream";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import webuiHtml from "./webui.txt" with { type: "text" };
 import type { ProxyConfig } from "../config/types.js";
 import type { AuthManager } from "../auth/manager.js";
@@ -21,9 +21,27 @@ import { collectPoolQuotaSnapshot } from "./routes-quota.js";
 import { loadAccountStore } from "../auth/account-store.js";
 import { errorResponse } from "../proxy/handler.js";
 import { healthDetails } from "../runtime/health-monitor.js";
+import { configureSolverCap } from "../proxy/solver-cap.js";
+import { STOP_REQUEST_PATH, STOP_TOKEN_HEADER } from "../runtime/stop-deadlines.mjs";
 import type { ResponseStore } from "../responses/store.js";
+import {
+  ADMISSION_SHED_NEXT,
+  admissionCost,
+  admissionShedWhy,
+  bindTicket,
+  createAdmission,
+  DEFAULT_MAX_IN_FLIGHT_BYTES,
+  SHED_RETRY_AFTER_SECONDS,
+  shedResponse,
+  type Admission,
+  type AdmissionStats,
+  type EndpointShape,
+} from "./admission.js";
 
-interface ServerOptions {
+// Transport-only handoff, not a wire header or a second shutdown sequence.
+const stopResponses = new WeakSet<Response>();
+
+export interface ServerOptions {
   config: ProxyConfig;
   auth: AuthManager;
   /** Override fetch for testing. */
@@ -32,6 +50,19 @@ interface ServerOptions {
   debug?: boolean;
   /** Responses-API state store. When absent, `/v1/responses` runs stateless (`previous_response_id` returns 404). */
   responseStore?: ResponseStore;
+  /** Admission control for request bodies. Defaults to one built from `config.server.admission`. */
+  admission?: Admission;
+  /** The drain gate `startServer` shares with its handler. */
+  drain?: DrainGate;
+  /**
+   * This spawn's stop token: `ZCODE_KIT_STOP_TOKEN` as
+   * the manager set it at spawn. A proxy hosted without a manager (the TUI,
+   * standalone) passes none: the stop route then answers the unknown-route
+   * `404 not_found_error` and never accepts without a token.
+   */
+  stopToken?: string;
+  /** Runs the graceful shutdown sequence once the stop request is accepted (serve()'s wiring). */
+  onStopRequest?: () => void;
 }
 
 /** Minimal server handle: what the caller needs to print URLs and shut down. */
@@ -42,6 +73,72 @@ export interface ProxyServer {
   stop(exit?: boolean): void;
   /** Promise that resolves once the server has fully stopped. */
   close(): Promise<void>;
+  /** Admission counters (`inFlightBytes`, `queued`, `shedTotal`, …), for observability. */
+  admission(): AdmissionStats;
+  /**
+   * Start the drain: the listener stays open, every new
+   * request (and every request still waiting for admission) is shed with 503
+   * + `Retry-After` in its endpoint's shape; `/health` keeps answering.
+   * Requests already accepted run on. Irreversible.
+   */
+  beginDrain(opts: DrainOptions): void;
+  draining(): boolean;
+  /** Requests whose response is not finished yet. */
+  inFlight(): number;
+  /** Resolves once no request is in flight. */
+  whenIdle(): Promise<void>;
+  /** Destroy every response still in flight (the force point); returns how many were cut. */
+  cutInFlight(): number;
+  /** Requests shed because the proxy was draining. */
+  drainShed(): number;
+}
+
+export interface DrainOptions {
+  /** Why the proxy drains, in words for the shed message ("a memory respawn"). */
+  cause: string;
+  /** `Retry-After` of a drain shed, in seconds (read per request). */
+  retryAfterSeconds: () => number;
+}
+
+/** The drain state shared by the listener and the handler. */
+export interface DrainGate {
+  active: boolean;
+  /** Aborted when the drain begins: requests waiting for admission leave the queue. */
+  readonly signal: AbortSignal;
+  shed: number;
+  begin(opts: DrainOptions): void;
+  /** The 503 + Retry-After answer for `path` while draining. */
+  shedResponse(path: string): Response;
+}
+
+/** The endpoint's error shape: Anthropic for the messages routes, OpenAI for the rest. */
+function shapeOf(path: string): EndpointShape {
+  return path === "/v1/messages" || path === "/async/v1/messages" ? "anthropic" : "openai";
+}
+
+export function createDrainGate(): DrainGate {
+  const controller = new AbortController();
+  let opts: DrainOptions | null = null;
+  const gate: DrainGate = {
+    active: false,
+    signal: controller.signal,
+    shed: 0,
+    begin(next) {
+      if (gate.active) return;
+      opts = next;
+      gate.active = true;
+      controller.abort();
+    },
+    shedResponse(path) {
+      gate.shed++;
+      return shedResponse(shapeOf(path), {
+        why: `It is shutting down (${opts?.cause ?? "stop"}) and only finishes the requests it had already accepted.`,
+        retryAfterSeconds: opts?.retryAfterSeconds() ?? SHED_RETRY_AFTER_SECONDS,
+        next: "after a respawn a fresh proxy answers on the same port; if it was stopped, start it with: zcode-kit proxy start",
+      });
+    },
+  };
+  return gate;
 }
 
 /** Create a fetch-style handler that routes the request through the proxy. */
@@ -60,6 +157,59 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     auth,
     fetchImpl: opts.fetchImpl,
     debug: opts.debug === true,
+  };
+  const admission = opts.admission ?? admissionFor(config);
+  const drain = opts.drain;
+
+  /**
+   * Run a body-carrying route under admission: the handler (which reads the
+   * body) starts only once the request is admitted, and the request's bytes
+   * are given back when the handler has produced its response, the point
+   * after which it no longer holds the body for a retry. The response body
+   * that follows (a stream, possibly long) is not limited.
+   */
+  const admitted = async (req: Request, shape: EndpointShape, run: () => Promise<Response>): Promise<Response> => {
+    const cost = admissionCost(req);
+    if (cost === null) return run();
+    // A request still waiting for admission when the drain begins leaves the
+    // queue at once and is shed, instead of being admitted and cut later.
+    let waitSignal: AbortSignal = req.signal;
+    let detach = (): void => {};
+    if (drain) {
+      const waiting = new AbortController();
+      const leave = (): void => waiting.abort();
+      if (req.signal.aborted || drain.signal.aborted) waiting.abort();
+      req.signal.addEventListener("abort", leave, { once: true });
+      drain.signal.addEventListener("abort", leave, { once: true });
+      detach = () => {
+        req.signal.removeEventListener("abort", leave);
+        drain.signal.removeEventListener("abort", leave);
+      };
+      waitSignal = waiting.signal;
+    }
+    const result = await admission.admit(cost, waitSignal).finally(detach);
+    if (!result.ok && result.reason === "aborted" && drain?.active && !req.signal.aborted) {
+      return drain.shedResponse(new URL(req.url).pathname);
+    }
+    if (!result.ok) {
+      const why = result.reason === "aborted"
+        ? "The client went away while the request waited for admission."
+        : admissionShedWhy(result.reason, admission.stats(), result.waitedMs);
+      if (result.reason !== "aborted") {
+        admission.recordShed({ reason: result.reason, endpoint: new URL(req.url).pathname, bytes: cost, waitedMs: result.waitedMs });
+      }
+      // Nobody reads an aborted request's answer; the shed shape keeps it uniform.
+      return shedResponse(shape, { why, retryAfterSeconds: SHED_RETRY_AFTER_SECONDS, next: ADMISSION_SHED_NEXT });
+    }
+    const ticket = result.ticket;
+    bindTicket(req, ticket);
+    // A client that goes away ends the handler too (its body read or its
+    // upstream fetch fails on the request's signal), so this releases then.
+    try {
+      return await run();
+    } finally {
+      ticket.release();
+    }
   };
 
   return async (req: Request): Promise<Response> => {
@@ -104,13 +254,45 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
       return errorResponse(401, "authentication_error", "account status requires proxy API key authentication");
     }
 
+    // The graceful stop request: it sits after the Host,
+    // Origin and bearer checks and additionally requires the per-spawn stop
+    // token, both compared in constant time including length. It has no body,
+    // bypasses admission (it is never queued behind the byte cap) and the
+    // drain shed — a repeated request during the drain joins the running
+    // sequence — and answers 202 before the drain starts.
+    if (path === STOP_REQUEST_PATH && method === "POST") {
+      if (!opts.stopToken) {
+        // A proxy spawned without a stop token (TUI-hosted, standalone)
+        // answers the same 404 not_found_error as an unknown route.
+        return errorResponse(404, "not_found_error", `No route for ${method} ${path}`);
+      }
+      const presented = req.headers.get(STOP_TOKEN_HEADER) ?? "";
+      if (!stopTokenMatches(presented, opts.stopToken)) {
+        return errorResponse(403, "forbidden", "the stop token does not match");
+      }
+      // The transport triggers only after the 202 has finished writing. Merely
+      // constructing a Response is not delivery and must not start the drain.
+      const response = new Response(JSON.stringify({ accepted: true }), {
+        status: 202,
+        headers: { "content-type": "application/json" },
+      });
+      stopResponses.add(response);
+      return response;
+    }
+
+    // Draining: shed every new request; /health keeps
+    // answering for the manager's hung-proxy detection.
+    if (drain?.active && path !== "/health" && path !== "/") {
+      return drain.shedResponse(path);
+    }
+
     // --- Routing ---
 
     if (path === "/v1/chat/completions" && method === "POST") {
-      return handleChatCompletions(req, proxyOpts);
+      return admitted(req, "openai", () => handleChatCompletions(req, proxyOpts));
     }
     if (config.responses.enabled && path === "/v1/responses" && method === "POST") {
-      return handleResponsesRoute(req, responsesOpts);
+      return admitted(req, "openai", () => handleResponsesRoute(req, responsesOpts));
     }
     if (path === "/v1/models" && method === "GET") {
       return handleListModels(req, config);
@@ -157,7 +339,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
     }
 
     if (path === "/v1/messages" && method === "POST") {
-      return handleMessages(req, proxyOpts);
+      return admitted(req, "anthropic", () => handleMessages(req, proxyOpts));
     }
 
     if (config.async.enabled) {
@@ -175,10 +357,10 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
         );
       }
       if (path === "/async/v1/messages" && method === "POST") {
-        return handleAsyncMessagesRoute(req, asyncOpts);
+        return admitted(req, "anthropic", () => handleAsyncMessagesRoute(req, asyncOpts));
       }
       if (path === "/async/v1/chat/completions" && method === "POST") {
-        return handleAsyncChatRoute(req, asyncOpts);
+        return admitted(req, "openai", () => handleAsyncChatRoute(req, asyncOpts));
       }
       if (path === "/async/v1/health" && method === "GET") {
         return handleAsyncHealthRoute(req, asyncOpts);
@@ -207,7 +389,7 @@ export function createFetchHandler(opts: ServerOptions): (req: Request) => Promi
  * timeouts.
  */
 export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
-  // ZAK-002: loopback binding and bearer auth are startup invariants for the
+  // Loopback binding and bearer auth are startup invariants for the
   // serve path, not template conventions. Defense in depth: the config loader
   // already rejects non-loopback hosts; here we re-check both right before
   // binding, so no code path can listen without a real key or on a wide host.
@@ -226,11 +408,32 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
     );
   }
 
-  const handler = createFetchHandler(opts);
+  // The solver process a later solve starts gets this cap (default 300 MB).
+  configureSolverCap(opts.config.solver?.memoryCapMB);
+
+  const admission = opts.admission ?? admissionFor(opts.config);
+  const drain = createDrainGate();
+  const handler = createFetchHandler({ ...opts, admission, drain });
   const requestedPort = opts.config.server.port;
   const bindHost = host === 'localhost' ? '127.0.0.1' : host === '[::1]' ? '::1' : host;
 
+  // Responses not finished yet: what the drain waits for and the force point cuts.
+  const active = new Set<import("node:http").ServerResponse>();
+  let idleWaiters: Array<() => void> = [];
+  const settleIdle = (): void => {
+    if (active.size > 0) return;
+    const waiters = idleWaiters;
+    idleWaiters = [];
+    for (const resolve of waiters) resolve();
+  };
+
   const server: Server = createServer(async (req, res) => {
+    active.add(res);
+    const done = (): void => {
+      if (active.delete(res)) settleIdle();
+    };
+    res.once("finish", done);
+    res.once("close", done);
     const abortController = new AbortController();
     const onClientClose = (): void => {
       if (!res.writableEnded) abortController.abort();
@@ -247,8 +450,14 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
     }
 
     try {
-      const webReq = nodeReqToWebRequest(req, abortController.signal);
-      const resp = await handler(webReq).then((r) => addCorsHeaders(r, webReq.headers.get("origin"), opts.config));
+      const webReq = nodeReqToWebRequest(req, abortController.signal, (n) => admission.noteBodyRead(n));
+      const answer = await handler(webReq);
+      if (stopResponses.has(answer)) {
+        res.once("finish", () => {
+          try { opts.onStopRequest?.(); } catch { /* the shutdown logs its own failure */ }
+        });
+      }
+      const resp = addCorsHeaders(answer, webReq.headers.get("origin"), opts.config);
       await writeWebResponseToNodeResp(resp, res, abortController.signal);
     } catch (err) {
       if (abortController.signal.aborted) return;
@@ -282,13 +491,31 @@ export async function startServer(opts: ServerOptions): Promise<ProxyServer> {
           if (exit) process.exit(0);
         },
         close: () => new Promise<void>((r) => server.close(() => r())),
+        admission: () => admission.stats(),
+        beginDrain: (drainOpts) => drain.begin(drainOpts),
+        draining: () => drain.active,
+        inFlight: () => active.size,
+        whenIdle: () => new Promise<void>((resolve) => {
+          idleWaiters.push(resolve);
+          settleIdle();
+        }),
+        cutInFlight: () => {
+          const cut = active.size;
+          for (const res of [...active]) {
+            try { res.destroy(); } catch {}
+          }
+          active.clear();
+          settleIdle();
+          return cut;
+        },
+        drainShed: () => drain.shed,
       });
     });
   });
 }
 
 /** Convert a Node.js IncomingMessage to a Web API Request. */
-function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: AbortSignal): Request {
+function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: AbortSignal, onBodyRead?: (bytes: number) => void): Request {
   const headers = new Headers();
   for (const [key, val] of Object.entries(req.headers)) {
     if (val == null) continue;
@@ -307,7 +534,7 @@ function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: 
   }
 
   // Cast: Node's ReadableStream type ≠ Web ReadableStream type at the type layer, but `Readable.toWeb` returns a spec-compliant stream at runtime.
-  const bodyStream = Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>;
+  const bodyStream = countedPullStream(Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>, onBodyRead);
   const init: RequestInit & { duplex?: "half" } = {
     method,
     headers,
@@ -316,6 +543,53 @@ function nodeReqToWebRequest(req: import("node:http").IncomingMessage, signal?: 
     signal,
   };
   return new Request(url, init);
+}
+
+/**
+ * The request body as a pull-only stream: nothing is read from the socket
+ * before the handler asks for it (a request waiting for admission keeps its
+ * body on the socket), and every chunk handed over is counted.
+ */
+function countedPullStream(source: ReadableStream<Uint8Array>, onRead?: (bytes: number) => void): ReadableStream<Uint8Array> {
+  const reader = source.getReader();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+        return;
+      }
+      onRead?.(value.byteLength);
+      controller.enqueue(value);
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  }, { highWaterMark: 0 });
+}
+
+/** The admission control a proxy builds from its config. */
+function admissionFor(config: ProxyConfig): Admission {
+  return createAdmission({ maxInFlightBytes: config.server.admission?.maxInFlightBytes ?? DEFAULT_MAX_IN_FLIGHT_BYTES });
+}
+
+/**
+ * The largest single write to a client socket. A body chunk can
+ * be hundreds of KB (a late read of an accumulated upstream body); written
+ * whole, whatever a client that does not read leaves of it stays in the
+ * proxy's write buffer. In pieces, that is at most one piece per client.
+ */
+const WRITE_PIECE_BYTES = 64 * 1024;
+
+/** Resolves true once `res` can take more, false if the client went away first. */
+function drained(res: import("node:http").ServerResponse): Promise<boolean> {
+  if (res.destroyed) return Promise.resolve(false);
+  return new Promise<boolean>((resolve) => {
+    const onDrain = (): void => { res.off("close", onClose); resolve(true); };
+    const onClose = (): void => { res.off("drain", onDrain); resolve(false); };
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+  });
 }
 
 /** Write a Web API Response to a Node.js ServerResponse. */
@@ -346,8 +620,12 @@ async function writeWebResponseToNodeResp(resp: Response, res: import("node:http
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (!res.write(Buffer.from(value))) {
-        await new Promise<void>((resolve) => res.once("drain", () => resolve()));
+      for (let at = 0; at < value.byteLength; at += WRITE_PIECE_BYTES) {
+        if (res.write(Buffer.from(value.subarray(at, at + WRITE_PIECE_BYTES)))) continue;
+        // A client that leaves while the proxy waits for room ends the write
+        // here (the abort above cancels the body); before, this wait never
+        // settled for a closed client.
+        if (!(await drained(res))) return;
       }
     }
     res.end();
@@ -364,17 +642,29 @@ async function writeWebResponseToNodeResp(resp: Response, res: import("node:http
 
 /**
  * Check whether the client provided the correct proxy API key.
- * Constant-time comparison (audit R2-10): a plain `===` on the presented vs
+ * Constant-time comparison: a plain `===` on the presented vs
  * expected key is a timing side channel on public-network deployments
  * (default bind is 0.0.0.0). Behavior is unchanged for honest callers.
  */
 function checkProxyKey(authHeader: string, expected: string): boolean {
   const trimmed = authHeader.trim();
   const presented = trimmed.startsWith("Bearer ") ? trimmed.slice(7).trim() : trimmed;
-  const a = Buffer.from(presented, "utf-8");
-  const b = Buffer.from(expected, "utf-8");
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  // Fixed-size digests include the complete value and its length. Never
+  // branch on a secret's byte length before the constant-time comparison.
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+  return timingSafeEqual(digest(presented), digest(expected));
+}
+
+/**
+ * The stop-token check: constant time, length included —
+ * fixed-size digests prevent a secret-length-dependent early return, as for
+ * checkProxyKey. The complete UTF-8 input participates in each digest.
+ */
+function stopTokenMatches(presented: string, expected: string): boolean {
+  // Fixed-size digests include the complete value and its length. Never
+  // branch on a secret's byte length before the constant-time comparison.
+  const digest = (value: string) => createHash("sha256").update(value, "utf8").digest();
+  return timingSafeEqual(digest(presented), digest(expected));
 }
 
 /** Build a CORS preflight response. */

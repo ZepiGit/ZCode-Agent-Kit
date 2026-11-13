@@ -43,7 +43,13 @@ interface ExplicitTraceContext {
 }
 
 export interface ClientSessionResolver {
-  resolve(req: Request, body: string | undefined, format: Format, model: string, config: ClientIdentityConfig): ClientSessionResult;
+  /**
+   * `parsedBody`, when given, is `JSON.parse(body)` done by the caller, so the
+   * resolver reads it instead of parsing the body text again. It
+   * is only read, never changed. With it, `body` may be undefined: a large
+   * body parsed from its bytes has no text.
+   */
+  resolve(req: Request, body: string | undefined, format: Format, model: string, config: ClientIdentityConfig, parsedBody?: unknown): ClientSessionResult;
 }
 
 export function createClientSessionResolver(now: () => number = () => Date.now()): ClientSessionResolver {
@@ -87,14 +93,14 @@ export function createClientSessionResolver(now: () => number = () => Date.now()
   }
 
   return {
-    resolve(req, body, format, model, config) {
+    resolve(req, body, format, model, config, parsedBody) {
       if (config.mode === "off") return { source: "none", action: "off", confidence: 0 };
 
       prune(config);
-      const explicitTrace = requestTraceContext(req, body);
+      const explicitTrace = requestTraceContext(req, body, parsedBody);
       if (explicitTrace.sessionId) return explicitResult(explicitTrace, config);
 
-      const canonical = canonicalize(body, format, model);
+      const canonical = canonicalize(body, format, model, parsedBody);
       if (!canonical) {
         if (hasTraceContext(explicitTrace)) return explicitResult(explicitTrace, config);
         return { source: "none", action: action(config), confidence: 0 };
@@ -132,8 +138,8 @@ function result(source: ClientSessionSource, action: ClientSessionAction, node: 
   };
 }
 
-function requestTraceContext(req: Request, body: string | undefined): ExplicitTraceContext {
-  const bodyTrace = bodyMetadataTrace(body);
+function requestTraceContext(req: Request, body: string | undefined, parsedBody?: unknown): ExplicitTraceContext {
+  const bodyTrace = bodyMetadataTrace(body, parsedBody);
   return {
     requestId: firstHeader(req.headers, ["x-request-id"]) ?? bodyTrace.requestId,
     traceId: firstHeader(req.headers, ["x-zcode-trace-id"]) ?? bodyTrace.traceId,
@@ -177,10 +183,10 @@ function firstHeader(headers: Headers, names: string[]): string | null {
   return null;
 }
 
-function bodyMetadataTrace(body: string | undefined): ExplicitTraceContext {
-  if (!body) return {};
+function bodyMetadataTrace(body: string | undefined, parsedBody?: unknown): ExplicitTraceContext {
+  if (!body && parsedBody === undefined) return {};
   try {
-    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body as string)) as Record<string, unknown>;
     const metadata = parsed?.metadata as Record<string, unknown> | undefined;
     if (!metadata || typeof metadata !== "object") return {};
     return {
@@ -202,11 +208,11 @@ function stringProperty(obj: Record<string, unknown>, names: string[]): string |
   return undefined;
 }
 
-function canonicalize(body: string | undefined, format: Format, fallbackModel: string): CanonicalRequest | null {
-  if (!body) return null;
+function canonicalize(body: string | undefined, format: Format, fallbackModel: string, parsedBody?: unknown): CanonicalRequest | null {
+  if (!body && parsedBody === undefined) return null;
   let parsed: Record<string, unknown>;
   try {
-    parsed = JSON.parse(body);
+    parsed = (parsedBody !== undefined ? parsedBody : JSON.parse(body as string)) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -248,17 +254,115 @@ function newSession(): StoredNode {
   };
 }
 
+/**
+ * SHA-256 of the identity's stable stringification: keys sorted, no
+ * whitespace, leaves as JSON.stringify writes them. The text is fed to the
+ * hash piece by piece instead of being built first: building it
+ * joined a full copy of the conversation at every nesting level. The digest is
+ * that of the whole text, including its quirks: an object property whose value
+ * JSON.stringify drops (undefined, e.g. an absent `system`) is written as the
+ * word `undefined`, such an array element as nothing. Called with objects only.
+ */
 function hashJson(value: unknown): string {
-  return hashString(stableStringify(value));
+  const hash = nodeCrypto.createHash("sha256");
+  // The pieces are UTF-8 encoded into one reused buffer rather than by
+  // update(text, "utf-8"), which allocates a new buffer per piece. The
+  // pieces are well formed (JSON.stringify escapes lone surrogates), so the
+  // bytes are the same; encodeInto never splits a surrogate pair.
+  const encoder = new TextEncoder();
+  const scratch = new Uint8Array(STABLE_SCRATCH_BYTES);
+  const feed = (text: string): void => {
+    for (let at = 0; at < text.length;) {
+      const { read, written } = encoder.encodeInto(at === 0 ? text : text.slice(at), scratch);
+      hash.update(scratch.subarray(0, written));
+      at += read;
+    }
+  };
+  let pending = "";
+  const write = (text: string): void => {
+    if (text.length >= STABLE_FLUSH_CHARS) {
+      if (pending) { feed(pending); pending = ""; }
+      feed(text);
+      return;
+    }
+    pending += text;
+    if (pending.length >= STABLE_FLUSH_CHARS) { feed(pending); pending = ""; }
+  };
+  writeStable(value, write, "undefined");
+  if (pending) feed(pending);
+  return hash.digest("hex");
 }
 
-function hashString(value: string): string {
-  return nodeCrypto.createHash("sha256").update(value, "utf-8").digest("hex");
+/** Small pieces are batched into one hash update of up to this many UTF-16 units. */
+const STABLE_FLUSH_CHARS = 16 * 1024;
+
+/** The reused UTF-8 buffer: one flush of pieces at up to 3 bytes per unit, plus slack. */
+const STABLE_SCRATCH_BYTES = 64 * 1024;
+
+/**
+ * JSON.stringify(text) written in slices, so a long leaf (a pasted file, an
+ * image's base64) is never copied whole. JSON.stringify escapes code unit by
+ * code unit except that a surrogate pair is kept and a lone surrogate is
+ * escaped; a slice therefore never ends on a high surrogate, which keeps every
+ * pair inside one slice and gives each slice the escapes of the whole text.
+ * A slice with nothing to escape is written as it is (it is its own JSON
+ * text), so most of a long leaf is hashed without any copy.
+ */
+function writeLongString(text: string, write: (text: string) => void): void {
+  write("\"");
+  for (let start = 0; start < text.length;) {
+    let end = Math.min(start + STABLE_FLUSH_CHARS, text.length);
+    if (end < text.length) {
+      const last = text.charCodeAt(end - 1);
+      if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    }
+    const slice = text.slice(start, end);
+    write(JSON_ESCAPED.test(slice) ? JSON.stringify(slice).slice(1, -1) : slice);
+    start = end;
+  }
+  write("\"");
 }
 
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+/**
+ * The code units JSON.stringify escapes in a string: `"`, `\`, U+0000–U+001F
+ * and a lone surrogate (a pair is kept). Nothing else is escaped.
+ */
+const JSON_ESCAPED = /["\\\u0000-\u001f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/**
+ * Write the stable stringification of `value` in pieces. Pieces are whole
+ * JSON tokens, so no surrogate pair is split between two hash updates.
+ * `dropped` is the text for a leaf JSON.stringify drops: "undefined" in an
+ * object property (template interpolation), "" in an array element
+ * (Array.prototype.join).
+ */
+function writeStable(value: unknown, write: (text: string) => void, dropped: string): void {
+  if (typeof value === "string" && value.length > STABLE_FLUSH_CHARS) {
+    writeLongString(value, write);
+    return;
+  }
+  if (value === null || typeof value !== "object") {
+    const leaf = JSON.stringify(value) as string | undefined;
+    write(leaf === undefined ? dropped : leaf);
+    return;
+  }
+  if (Array.isArray(value)) {
+    write("[");
+    for (let i = 0; i < value.length; i++) {
+      if (i > 0) write(",");
+      writeStable(value[i], write, "");
+    }
+    write("]");
+    return;
+  }
   const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
+  const keys = Object.keys(obj).sort();
+  write("{");
+  for (let i = 0; i < keys.length; i++) {
+    if (i > 0) write(",");
+    write(JSON.stringify(keys[i]));
+    write(":");
+    writeStable(obj[keys[i]], write, "undefined");
+  }
+  write("}");
 }

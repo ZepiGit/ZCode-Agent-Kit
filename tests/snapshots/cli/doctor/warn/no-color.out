@@ -1,0 +1,31 @@
+✗ 2 problems: 1 failed, 1 warning
+
+Runtime ────────────────────────────────────────────────────────────────────────
+  ✓ PASS  bun available  /opt/bun/bin/bun (<VERSION>)
+
+Proxy ──────────────────────────────────────────────────────────────────────────
+  ✓ PASS  proxy reachable + identity  health=ours
+  ! WARN  solver memory               fail-fast since 10:02 (2 abnormal exits in
+                                      15 min)
+                                      why   the solver was killed at its cap
+                                            twice
+                                      next  zcode-kit proxy logs 50
+                                        or  zcode-kit proxy restart
+  ✗ FAIL  restart budget              3 of 3 restarts used in 15 min
+                                      why   this check did not pass
+                                      next  zcode-kit doctor --fix
+  – SKIP  cap enforcement             not applicable here
+
+Integrations ───────────────────────────────────────────────────────────────────
+  – SKIP  omp: integration          not detected — skipped
+  – SKIP  pi: integration           not detected — skipped
+  – SKIP  claude-code: integration  not detected — skipped
+  – SKIP  codex: integration        not detected — skipped
+  – SKIP  opencode: integration     not detected — skipped
+  – SKIP  cline: integration        not detected — skipped
+  – SKIP  kilo-code: integration    not detected — skipped
+  – SKIP  aider: integration        not detected — skipped
+  – SKIP  continue: integration     not detected — skipped
+  – SKIP  goose: integration        not detected — skipped
+
+doctor: 1 failed, 1 warning, 2 passed, 11 skipped → exit 1

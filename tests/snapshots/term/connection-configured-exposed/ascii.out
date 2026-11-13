@@ -1,0 +1,7 @@
+[1mConnection details (manual clients)[0m [2m--------------------------------------------[0m
+  [2mOpenAI base URL   [0m  http://0.0.0.0:18458/v1
+  [2mAnthropic base URL[0m  http://0.0.0.0:18458
+  [2mAPI key           [0m  (redacted - print it with: zcode-kit models --show-key)
+  [2mModels            [0m  glm-5.3, glm-5.3-flash
+  [2mState             [0m  o not verified running
+  [2mWarning           [0m  server.host 0.0.0.0 is not loopback - do not expose it

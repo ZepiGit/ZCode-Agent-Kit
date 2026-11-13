@@ -3,7 +3,7 @@ import { readArtifact } from "../security/artifact.js";
 import { validateArguments } from "./validate.js";
 import { sessionInScope, sessionWorkspaceOf, workspaceIdentity } from "../security/session.js";
 import { workspaceRef } from "../protocol/types.js";
-import { redactDeep, safeJsonStringify } from "../security/redact.js";
+import { redactDeep, redactExcept, safeJsonStringify } from "../security/redact.js";
 function str(args, key, required = true) {
     const v = args[key];
     if (typeof v === "string" && v.length > 0)
@@ -43,7 +43,7 @@ function requireWritable(ctx, tool) {
     }
 }
 /**
- * D-02: the "yolo" permission mode disables the harness's permission
+ * The "yolo" permission mode disables the harness's permission
  * prompts and therefore the bridge's interaction policy. Only an operator
  * who started the bridge with --allow-yolo may enable it.
  */
@@ -217,7 +217,7 @@ export function buildTools(ctx) {
                 params.workspace = workspaceRef(ctx.allowlist.enforce(String(w.workspacePath)));
             }
             if (typeof params.sessionId === "string") {
-                // D-01: session-scoped reads (messages/events/usage/...) are only
+                // Session-scoped reads (messages/events/usage/...) are only
                 // allowed for sessions whose workspace is allowlisted.
                 const { sessionId } = await sessionInScope(ctx.runtime, ctx.allowlist, params.sessionId);
                 params.sessionId = sessionId;
@@ -479,7 +479,7 @@ export function buildTools(ctx) {
         mutating: false,
         handler: async (args) => {
             const listResult = await ctx.runtime.call("session/list", {});
-            // D-01: the harness session store is shared with the desktop app; only
+            // The harness session store is shared with the desktop app; only
             // sessions of allowlisted workspaces are visible through the bridge.
             const sessions = (listResult?.sessions ?? []).filter((s) => {
                 const wp = sessionWorkspaceOf(s);
@@ -629,7 +629,7 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_task_start",
         title: "Start a task",
-        description: "Start real harness work in an allowlisted workspace: creates (or reuses) a session, optionally selects model/reasoning/mode, sends the prompt and returns a stable taskId immediately (non-blocking). Supports idempotencyKey (repeated calls return the same task), readOnly (harness-enforced plan mode + write-tool denylist) and queued execution under concurrency limits.",
+        description: "Start real harness work in an allowlisted workspace: creates (or reuses) a session, optionally selects model/reasoning/mode, sends the prompt and returns a stable taskId immediately (non-blocking). Supports idempotencyKey (repeated calls return the same task), readOnly (harness-enforced plan mode + write-tool denylist) and queued execution under concurrency limits. Idempotency keys are remembered for as long as the task is retained (at most 500 terminal tasks or 7 days, whichever comes first); after that the same key starts a new task.",
         inputSchema: {
             type: "object",
             properties: {
@@ -655,7 +655,7 @@ export function buildTools(ctx) {
             requireModeAllowed(ctx, mode);
             let sessionIdRaw = optStr(args, "sessionId");
             if (sessionIdRaw) {
-                // D-01: a reused session must belong to the very workspace the task
+                // A reused session must belong to the very workspace the task
                 // claims; otherwise the turn would run (and be attributed) elsewhere.
                 const scoped = await sessionInScope(ctx.runtime, ctx.allowlist, sessionIdRaw);
                 if (workspaceIdentity(scoped.workspacePath) !== workspaceIdentity(workspacePath)) {
@@ -712,10 +712,7 @@ export function buildTools(ctx) {
         },
         mutating: false,
         handler: async (args) => {
-            const rec = ctx.tasks.get(str(args, "taskId"));
-            if (!rec)
-                throw new Error(`unknown task: ${String(args.taskId)}`);
-            return rec;
+            return ctx.tasks.read(str(args, "taskId"));
         },
     });
     tools.push({
@@ -810,7 +807,7 @@ export function buildTools(ctx) {
     tools.push({
         name: "zcode_task_result",
         title: "Task result",
-        description: "Versioned structured result (schemaVersion 1): ids, status, timestamps, requested/effective model, final response text (clearly marked partial when incomplete), usage (null = missing, not zero), tool calls, file changes, artifacts, interactions, errors, warnings, completeness.",
+        description: "Versioned structured result (schemaVersion 1): ids, status, timestamps, requested/effective model, final response text (clearly marked partial when incomplete), usage (null = missing, not zero), tool calls, file changes, artifacts, interactions, errors, warnings, completeness. The response text is capped at 4 MiB of UTF-8: a longer text keeps its first 1 MiB and its last 3 MiB with one marker line [… N bytes truncated …] between them (N in bytes, cuts on code-point boundaries); such a result is completeness partial with the truncation in the explanation and carries truncated: { droppedBytes }. A task keeps at most 200 warnings, 200 errors and 1,000 tool calls. Results cached before the cap are served as stored.",
         inputSchema: {
             type: "object",
             properties: { taskId: { type: "string" } },
@@ -839,6 +836,8 @@ export function buildTools(ctx) {
             additionalProperties: false,
         },
         mutating: false,
+        // The file's bytes: redaction would replace any long or token-shaped run of the base64 with a placeholder.
+        verbatim: ["contentBase64"],
         handler: async (args) => {
             const { workspacePath } = ws(ctx, args);
             const rel = str(args, "path");
@@ -918,6 +917,13 @@ function guessMime(p) {
     };
     return map[ext] ?? "application/octet-stream";
 }
-export function toolTextPayload(value) {
-    return safeJsonStringify(value);
+export function toolTextPayload(value, verbatim = []) {
+    if (verbatim.length === 0)
+        return safeJsonStringify(value);
+    try {
+        return JSON.stringify(redactExcept(value, verbatim)) ?? "undefined";
+    }
+    catch (err) {
+        return JSON.stringify({ unserializable: String(err) });
+    }
 }

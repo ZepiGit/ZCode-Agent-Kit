@@ -1,0 +1,5 @@
+[31m✗ FAIL  The local proxy key is missing[0m
+   [2mwhy[0m   <KIT>/.proxykey not found, so the proxy's identity
+         cannot be proven
+   [2mnext[0m  [1mzcode-kit setup[0m
+   [2mexit[0m 1

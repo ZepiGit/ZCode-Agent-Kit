@@ -1,0 +1,4 @@
+! WARN  not logged in
+   why   ZCode auth3012: not logged in. Refresh the Desktop login, then use
+         zcode-kit auth login if still needed; no repeated retries.
+   next  zcode-kit auth login zai
