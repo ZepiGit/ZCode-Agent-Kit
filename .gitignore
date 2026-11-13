@@ -49,3 +49,4 @@ SETUP_REPORT*.md
 /AGENTS.md
 /CLAUDE.md
 /docs/agents/
+/.omp
