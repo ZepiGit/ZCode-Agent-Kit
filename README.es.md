@@ -1,7 +1,7 @@
 # ZCode Agent Kit
 [English (original)](README.md) · [Deutsch](README.de.md) · **Español** · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-Usa tu cuenta de ZCode con el asistente de programación que ya utilizas.
+Usa tu cuenta de ZCode en Claude Code, Codex, Aider y otros asistentes de programación a través de un proxy local.
 
 ![ZCode Desktop conectado a asistentes de programación mediante Agent Kit](zcode_agent_kit.png)
 
@@ -50,7 +50,7 @@ La configuración busca los asistentes instalados y pregunta cuáles de ellos pu
 
 Tus respuestas se guardan en `generated/harness-choices/` y se reutilizan en configuraciones y actualizaciones posteriores y en `zcode-kit doctor --fix`, así que no se te vuelve a preguntar. `zcode-kit setup --reask` vuelve a preguntar. Ctrl+C cancela una lista de casillas que aún no se ha confirmado.
 
-A continuación, la configuración pregunta una sola vez si quieres activar el **Account Rotator**, que permite al kit usar varios inicios de sesión de ZCode guardados. Si respondes `y`, se importa tu sesión actual y los inicios de sesión posteriores con `zcode-kit auth login zai` se guardan como cuentas adicionales. Puedes cambiarlo más adelante con `zcode-kit accounts enable` o `disable`. Los detalles están en la [documentación de Account Rotator](docs/ACCOUNT_ROTATOR.md).
+A continuación, la configuración pregunta una sola vez si quieres activar el **Account Rotator**, que permite al kit usar varios inicios de sesión de ZCode guardados. Si respondes `y`, se importa tu sesión actual y los inicios de sesión posteriores con `zcode-kit auth login zai` se guardan como cuentas adicionales. Puedes cambiarlo más adelante con `zcode-kit accounts enable` o `disable`. Los detalles están en la [documentación de Account Rotator](docs/ACCOUNT_ROTATOR.es.md).
 
 El instalador imprime cuatro etapas numeradas, una línea de resultado por asistente, una comprobación de conexión y los datos de conexión. La salida completa se guarda en el `install.log` que indica. La configuración termina con una lista breve de comandos para ejecutar a continuación. Una comprobación de conexión fallida es una advertencia, no una instalación fallida: comprueba tu sesión de Desktop y tu cuota.
 
@@ -195,7 +195,7 @@ Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflic
 
 Mantén el proxy en localhost y nunca compartas `.proxykey`, las credenciales ni los archivos de configuración generados.
 
-**Lee la [política de seguridad](SECURITY.md).** Para que tu sesión de ZCode siga funcionando, el proxy ejecuta JavaScript de CAPTCHA del proveedor sin un entorno aislado (sandbox) del sistema operativo. Solo escucha en loopback y exige la clave local, pero eso no es aislamiento de procesos. El kit no elude las restricciones de la cuenta y no puede prometer que todos los desafíos se superen.
+**Lee la [política de seguridad](SECURITY.es.md).** Para que tu sesión de ZCode siga funcionando, el proxy ejecuta JavaScript de CAPTCHA del proveedor sin un entorno aislado (sandbox) del sistema operativo. Solo escucha en loopback y exige la clave local, pero eso no es aislamiento de procesos. El kit no elude las restricciones de la cuenta y no puede prometer que todos los desafíos se superen.
 
 ## Actualizar o eliminar el kit
 
@@ -207,4 +207,4 @@ Si actualizas desde 0.2.x: instala Node.js 24 o posterior **antes** de actualiza
 
 ## Más información
 
-[Guías de asistentes](harnesses/README.es.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.md) · [Puente MCP](mcp/zcode-harness-mcp/README.es.md) · [Cómo funciona el kit](docs/ARCHITECTURE.md) · [Glosario](docs/GLOSSARY.md) · [Matriz de compatibilidad](SUPPORT_MATRIX.json) · [Política de seguridad](SECURITY.md) · [Licencias y componentes incluidos](MANIFEST.md) · [Informar de un problema](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)
+[Guías de asistentes](harnesses/README.es.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.es.md) · [Puente MCP](mcp/zcode-harness-mcp/README.es.md) · [Cómo funciona el kit](docs/ARCHITECTURE.md) · [Glosario](docs/GLOSSARY.es.md) · [Matriz de compatibilidad](SUPPORT_MATRIX.json) · [Política de seguridad](SECURITY.es.md) · [Licencias y componentes incluidos](MANIFEST.md) · [Historial de cambios](CHANGELOG.md) · [Cómo contribuir](CONTRIBUTING.es.md) · [Preguntas e ideas](https://github.com/ZepiGit/ZCode-Agent-Kit/discussions) · [Informar de un problema](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)

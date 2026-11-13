@@ -1,7 +1,7 @@
 # ZCode Agent Kit
 [English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-Nutze dein ZCode-Konto mit dem Coding-Assistenten, den du bereits verwendest.
+Nutze dein ZCode-Konto über einen lokalen Proxy in Claude Code, Codex, Aider und anderen Coding-Assistenten.
 
 ![ZCode Desktop ist über das Agent Kit mit Coding-Assistenten verbunden](zcode_agent_kit.png)
 
@@ -207,4 +207,4 @@ Update von 0.2.x: Installiere Node.js 24 oder neuer, **bevor** du aktualisierst.
 
 ## Weitere Informationen
 
-[Assistenten-Anleitungen](harnesses/README.de.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.de.md) · [MCP-Bridge](mcp/zcode-harness-mcp/README.de.md) · [So funktioniert das Kit](docs/ARCHITECTURE.md) · [Glossar](docs/GLOSSARY.md) · [Support-Matrix](SUPPORT_MATRIX.json) · [Sicherheitsrichtlinie](SECURITY.de.md) · [Lizenzen und enthaltene Komponenten](MANIFEST.de.md) · [Problem melden](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)
+[Assistenten-Anleitungen](harnesses/README.de.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.de.md) · [MCP-Bridge](mcp/zcode-harness-mcp/README.de.md) · [So funktioniert das Kit](docs/ARCHITECTURE.md) · [Glossar](docs/GLOSSARY.de.md) · [Support-Matrix](SUPPORT_MATRIX.json) · [Sicherheitsrichtlinie](SECURITY.de.md) · [Lizenzen und enthaltene Komponenten](MANIFEST.de.md) · [Änderungsprotokoll](CHANGELOG.md) · [Mitwirken](CONTRIBUTING.de.md) · [Fragen und Ideen](https://github.com/ZepiGit/ZCode-Agent-Kit/discussions) · [Problem melden](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)

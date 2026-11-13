@@ -1,7 +1,7 @@
 # ZCode Agent Kit
 [English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · **简体中文**
 
-在你已经使用的编程助手中使用自己的 ZCode 账号。
+通过本地代理，在 Claude Code、Codex、Aider 等编程助手中使用你的 ZCode 账号。
 
 ![ZCode Desktop 通过 Agent Kit 连接到编程助手](zcode_agent_kit.png)
 
@@ -50,7 +50,7 @@ zcode-kit setup --harness auto --installer
 
 你的回答保存在 `generated/harness-choices/` 下，之后的设置、更新和 `zcode-kit doctor --fix` 都会沿用，因此不会再次询问。`zcode-kit setup --reask` 会重新询问。尚未确认的复选框列表可以用 Ctrl-C 取消。
 
-随后，设置程序会询问一次是否开启**账号轮换（Account Rotator）**，开启后 Kit 可以使用多个已保存的 ZCode 登录。回答 `y` 后，当前登录会被导入，之后用 `zcode-kit auth login zai` 进行的登录会保存为额外账号。以后可以用 `zcode-kit accounts enable` 或 `disable` 更改这一设置。详见[账号轮换文档](docs/ACCOUNT_ROTATOR.md)。
+随后，设置程序会询问一次是否开启**账号轮换（Account Rotator）**，开启后 Kit 可以使用多个已保存的 ZCode 登录。回答 `y` 后，当前登录会被导入，之后用 `zcode-kit auth login zai` 进行的登录会保存为额外账号。以后可以用 `zcode-kit accounts enable` 或 `disable` 更改这一设置。详见[账号轮换文档](docs/ACCOUNT_ROTATOR.zh-CN.md)。
 
 安装器会输出四个带编号的阶段、每个助手一行结果、一次连接检查以及连接详情。完整输出保存在安装器给出的 `install.log` 中。设置结束时会列出接下来要运行的几条命令。连接检查失败只是警告，不代表安装失败：请检查 Desktop 登录和额度。
 
@@ -195,7 +195,7 @@ Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflic
 
 让代理仅监听 localhost，绝不要分享 `.proxykey`、凭据或生成的配置文件。
 
-**请阅读[安全政策](SECURITY.md)**。为了让你的 ZCode 会话保持可用，代理会在没有操作系统沙箱的情况下运行供应商的 CAPTCHA JavaScript。代理只监听回环地址，并要求提供本地密钥，但这不等于进程隔离。Kit 不会绕过账号限制，也无法保证每次验证挑战都成功。
+**请阅读[安全政策](SECURITY.zh-CN.md)**。为了让你的 ZCode 会话保持可用，代理会在没有操作系统沙箱的情况下运行供应商的 CAPTCHA JavaScript。代理只监听回环地址，并要求提供本地密钥，但这不等于进程隔离。Kit 不会绕过账号限制，也无法保证每次验证挑战都成功。
 
 ## 更新或移除 Kit
 
@@ -207,4 +207,4 @@ Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflic
 
 ## 更多信息
 
-[助手指南](harnesses/README.zh-CN.md) · [账号轮换](docs/ACCOUNT_ROTATOR.md) · [MCP 桥接](mcp/zcode-harness-mcp/README.zh-CN.md) · [Kit 的工作原理](docs/ARCHITECTURE.md) · [术语表](docs/GLOSSARY.md) · [支持矩阵](SUPPORT_MATRIX.json) · [安全政策](SECURITY.md) · [许可与随附组件](MANIFEST.md) · [报告问题](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)
+[助手指南](harnesses/README.zh-CN.md) · [账号轮换](docs/ACCOUNT_ROTATOR.zh-CN.md) · [MCP 桥接](mcp/zcode-harness-mcp/README.zh-CN.md) · [Kit 的工作原理](docs/ARCHITECTURE.md) · [术语表](docs/GLOSSARY.zh-CN.md) · [支持矩阵](SUPPORT_MATRIX.json) · [安全政策](SECURITY.zh-CN.md) · [许可与随附组件](MANIFEST.md) · [更新日志](CHANGELOG.md) · [参与贡献](CONTRIBUTING.zh-CN.md) · [提问与想法](https://github.com/ZepiGit/ZCode-Agent-Kit/discussions) · [报告问题](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)

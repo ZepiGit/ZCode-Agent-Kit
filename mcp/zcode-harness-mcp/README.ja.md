@@ -219,7 +219,7 @@ HTTP のコードは `--http` を指定したときだけ読み込まれます�
 - HTTP はループバックアドレスに限定され、Bearer キーが必要です。
 
 詳細は [docs/SECURITY.md](docs/SECURITY.md) にあります。キットのセキュリティ
-ポリシーは [SECURITY.md](../../SECURITY.md) にあります。
+ポリシーは [SECURITY.md](../../SECURITY.ja.md) にあります。
 
 ## ZCode 0.16.9
 

@@ -1,7 +1,7 @@
 # ZCode Agent Kit
 **English (original)** · [Deutsch](README.de.md) · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-Use your ZCode account with the coding assistant you already use.
+Use your ZCode account in Claude Code, Codex, Aider and other coding assistants through a local proxy.
 
 ![ZCode Desktop connected through Agent Kit to coding assistants](zcode_agent_kit.png)
 
@@ -207,4 +207,4 @@ Updating from 0.2.x: install Node.js 24 or newer **before** you update. The upda
 
 ## More information
 
-[Assistant guides](harnesses/README.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.md) · [MCP bridge](mcp/zcode-harness-mcp/README.md) · [How the kit works](docs/ARCHITECTURE.md) · [Glossary](docs/GLOSSARY.md) · [Support matrix](SUPPORT_MATRIX.json) · [Security policy](SECURITY.md) · [Licensing and bundled components](MANIFEST.md) · [Report a problem](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)
+[Assistant guides](harnesses/README.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.md) · [MCP bridge](mcp/zcode-harness-mcp/README.md) · [How the kit works](docs/ARCHITECTURE.md) · [Glossary](docs/GLOSSARY.md) · [Support matrix](SUPPORT_MATRIX.json) · [Security policy](SECURITY.md) · [Licensing and bundled components](MANIFEST.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Questions and ideas](https://github.com/ZepiGit/ZCode-Agent-Kit/discussions) · [Report a problem](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)

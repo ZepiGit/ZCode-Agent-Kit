@@ -187,7 +187,7 @@ HTTP 代码只有在指定 `--http` 时才会加载。stdio 桥接从不加载�
 - HTTP 仅限回环地址，并且要求 Bearer 密钥。
 
 详情见 [docs/SECURITY.md](docs/SECURITY.md)。套件的安全策略见
-[SECURITY.md](../../SECURITY.md)。
+[SECURITY.md](../../SECURITY.zh-CN.md)。
 
 ## ZCode 0.16.9
 

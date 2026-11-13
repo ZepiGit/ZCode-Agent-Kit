@@ -227,7 +227,7 @@ El puente se ejecuta con los permisos de tu usuario y no es un sandbox.
 - HTTP está limitado a direcciones de loopback y exige la clave Bearer.
 
 Los detalles están en [docs/SECURITY.md](docs/SECURITY.md). La política de
-seguridad del kit está en [SECURITY.md](../../SECURITY.md).
+seguridad del kit está en [SECURITY.es.md](../../SECURITY.es.md).
 
 ## ZCode 0.16.9
 

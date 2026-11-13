@@ -1,4 +1,5 @@
 # Glossary
+**English (original)** · [Deutsch](GLOSSARY.de.md) · [Español](GLOSSARY.es.md) · [日本語](GLOSSARY.ja.md) · [简体中文](GLOSSARY.zh-CN.md)
 
 The kit runs a local ZCode proxy and connects your own agent harnesses to it. This glossary defines the words the `zcode-kit` output and the kit's documents use.
 
