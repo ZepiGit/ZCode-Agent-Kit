@@ -5,18 +5,22 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Real runTui + its installed uncaughtException handler; no second classifier.
-// CI42916065371 establishes three 5000ms test timeouts, kill and missing tui.log,
-// NOT a measured Windows startup duration or a native root cause. Local earlier
-// firstTuiLogWrite measurements are not readiness measurements either. 10s is a
-// provisional, bounded startup reserve, not twice a measured required duration.
+// Keep the existing bounded 10s startup reserve for process/module initialization
+// and handler registration, PLUS any deliberate fixture delay. Charging a 6s
+// injected delay to that reserve left only 4s for Windows startup in CI. Empty
+// pipes and no tui.log alone cannot distinguish a slow launch/delay from a hang;
+// the delay markers below make that phase visible without pretending it is ready.
 // Readiness observes successful public process.on registration from app.ts,
 // before its boot awaits, using a fixture-only transparent forwarding wrapper.
 // An exact fd-2 line starts the parent's independent 5s handling deadline.
 // Exit and pipe EOF are separate: cleanup has 1000ms to reap/drain and 500ms
 // to cancel stuck readers. Kill, exit, stream and log I/O failures stay visible.
-// Outer timeout = startup10s + handling5s + cleanup1.5s + fixture headroom3.5s.
-// Native win26's original cause remains unattributed; no production/CI change.
+// Outer timeout = injected delay + startup10s + handling5s + cleanup1.5s +
+// fixture headroom3.5s. The handling deadline still starts only at the real ack.
 const STARTUP_READINESS_BUDGET_MS = 10_000;
+// Cross both the original 5s limit and the later fixed 10s startup watchdog,
+// so forgetting to add the injected delay fails even on a fast local runner.
+const DELAYED_BOOT_MS = STARTUP_READINESS_BUDGET_MS + 1_000;
 const CLASSIFICATION_BUDGET_MS = 5_000;
 const CLEANUP_DRAIN_BUDGET_MS = 1_000;
 const CANCEL_BUDGET_MS = 500;
@@ -61,7 +65,7 @@ interface OwnedChild {
 }
 
 // This same supervisor handles real children and fault-injected OS/pipe controls.
-function supervise(proc: OwnedChild, home: string, log: string) {
+function supervise(proc: OwnedChild, home: string, log: string, startupBudgetMs = STARTUP_READINESS_BUDGET_MS) {
   const startedAt = performance.now();
   let ackAt: number | undefined;
   let resolveReady!: (at: number) => void;
@@ -136,7 +140,7 @@ function supervise(proc: OwnedChild, home: string, log: string) {
     }
     return [
       `fixture-phase=${phase}`, `ackObserved=${ackAt !== undefined}`, `child=${status}`,
-      `elapsedMs=${Math.round(performance.now() - startedAt)}`,
+      `elapsedMs=${Math.round(performance.now() - startedAt)}`, `startupBudgetMs=${startupBudgetMs}`,
       `ackAtMs=${ackAt === undefined ? "none" : Math.round(ackAt - startedAt)}`,
       `fixtureHome=${safe(home)}`,
       `stdoutTailSanitized=${JSON.stringify(safe(stdout))}`, `stderrTailSanitized=${JSON.stringify(safe(stderr))}`,
@@ -150,7 +154,7 @@ function supervise(proc: OwnedChild, home: string, log: string) {
       // last pipe chunk; cleanup drains that chunk before final early-exit checks.
       const first = await raceBudget(Promise.race([
         ready.then(() => "ready" as const), exit.then(() => "exit" as const),
-      ]), STARTUP_READINESS_BUDGET_MS - (performance.now() - startedAt));
+      ]), startupBudgetMs - (performance.now() - startedAt));
       if (first === "deadline") phase = "startup-overrun-no-ack";
       else if (ackAt !== undefined) {
         const handled = await raceBudget(exit, CLASSIFICATION_BUDGET_MS - (performance.now() - ackAt));
@@ -161,7 +165,8 @@ function supervise(proc: OwnedChild, home: string, log: string) {
       if (!phase && faults.length) phase = "cleanup-failure";
       outcomeReported = true;
       if (phase) throw new Error(diagnostic(phase));
-      return { code: await exit, stdout, stderr, ackAt: ackAt! - startedAt, elapsedMs: performance.now() - startedAt };
+      return { code: await exit, stdout, stderr, ackAt: ackAt! - startedAt, startupBudgetMs,
+        elapsedMs: performance.now() - startedAt };
     },
     async dispose() {
       try {
@@ -181,6 +186,8 @@ interface FixtureOptions {
   invalidConfig?: boolean;
 }
 function spawnTuiChild(kind: Kind, options: FixtureOptions = {}) {
+  const bootDelayMs = options.bootDelayMs ?? 0;
+  const startupBudgetMs = bootDelayMs + STARTUP_READINESS_BUDGET_MS;
   const home = mkdtempSync(join(tmpdir(), "t82-tui-"));
   const config = join(home, "config.yaml");
   const log = join(home, "tui.log");
@@ -196,7 +203,15 @@ function spawnTuiChild(kind: Kind, options: FixtureOptions = {}) {
     import { mock } from "bun:test";
     // Fail closed on accidental network use. No SDK, login or proxy is started.
     globalThis.fetch = () => { throw new Error("fixture forbids network"); };
-    if (${options.bootDelayMs ?? 0}) await new Promise(r => setTimeout(r, ${options.bootDelayMs ?? 0}));
+    if (${bootDelayMs}) {
+      writeSync(2, "t82-boot-delay-started\\n");
+      // Real time is intentional: fake timers cannot cross the parent's real
+      // subprocess watchdog and prove readiness survives its former deadline.
+      const { promise, resolve } = Promise.withResolvers();
+      setTimeout(resolve, ${bootDelayMs});
+      await promise;
+      writeSync(2, "t82-boot-delay-completed\\n");
+    }
     if (${!!options.noAck}) { setInterval(() => {}, 1000); await new Promise(() => {}); }
     const store = await import(${JSON.stringify(store)});
     mock.module(${JSON.stringify(store)}, () => ({ ...store, loadCredential: async () => {
@@ -239,7 +254,7 @@ function spawnTuiChild(kind: Kind, options: FixtureOptions = {}) {
   });
   // No grandchildren; group is inherited from the capped runner, never signalled.
   process.stderr.write(`owned_tui_pid=${proc.pid} process_group=inherited runner_pid=${process.pid}\n`);
-  return { home, config, log, ...supervise(proc, home, log) };
+  return { home, config, log, ...supervise(proc, home, log, startupBudgetMs) };
 }
 
 async function assertClassification(kind: Kind, options: FixtureOptions = {}) {
@@ -275,10 +290,17 @@ for (const kind of ["guest", "host-cdn-message", "host"] as const) {
 }
 
 test("TUI observes delayed boot beyond the old 5s limit with all guest contracts", async () => {
-  const result = await assertClassification("guest", { bootDelayMs: 6_000 });
+  const result = await assertClassification("guest", { bootDelayMs: DELAYED_BOOT_MS });
+  const delayStarted = result.stderr.indexOf("t82-boot-delay-started\n");
+  const delayCompleted = result.stderr.indexOf("t82-boot-delay-completed\n");
+  expect(delayStarted).toBeGreaterThanOrEqual(0);
+  expect(delayCompleted).toBeGreaterThan(delayStarted);
+  expect(result.stderr.indexOf(READY_LINE + "\n")).toBeGreaterThan(delayCompleted);
   expect(result.ackAt).toBeGreaterThan(5_000);
-  expect(result.ackAt).toBeLessThan(STARTUP_READINESS_BUDGET_MS);
-}, TEST_TIMEOUT_MS);
+  expect(result.ackAt).toBeGreaterThan(STARTUP_READINESS_BUDGET_MS);
+  expect(result.startupBudgetMs).toBe(DELAYED_BOOT_MS + STARTUP_READINESS_BUDGET_MS);
+  expect(result.ackAt).toBeLessThan(result.startupBudgetMs);
+}, TEST_TIMEOUT_MS + DELAYED_BOOT_MS);
 
 test("TUI protocol rejects ack then hang in the handling phase", async () => {
   const child = spawnTuiChild("guest", { hangAfterAck: true });
@@ -306,6 +328,7 @@ test("TUI protocol rejects no ack finitely with sanitized absent-log diagnostics
     let diagnostic = "";
     try { await child.outcome(); } catch (err) { diagnostic = String(err); }
     expect(diagnostic).toContain("fixture-phase=startup-overrun-no-ack | ackObserved=false");
+    expect(diagnostic).toContain(`startupBudgetMs=${STARTUP_READINESS_BUDGET_MS}`);
     expect(diagnostic).toContain("tuiLog=absent");
     expect(diagnostic).toContain("fixtureHome=<fixture>");
     expect(diagnostic).not.toContain(child.home);
