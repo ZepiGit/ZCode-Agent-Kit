@@ -42,10 +42,17 @@ export const EXIT_HARNESS_FAILED = 20;
 // setup: interrupted with Ctrl-C; answers already given were applied.
 export const EXIT_ABORTED = 130;
 
-/** `{ exitCode: 2 }` with the usage line for a harness id this kit has no adapter for, or null. */
+/**
+ * `{ exitCode: 2 }` with the usage line for a harness id this kit has no adapter for, or null.
+ * A missing or empty id gets its own message instead of printing the value as "undefined".
+ */
 export function unknownHarness(id) {
   if (ADAPTER_IDS.includes(id)) return null;
-  return { exitCode: 2, records: [stderrLine(`unknown harness "${id}". Known: ${ADAPTER_IDS.join(", ")}`)] };
+  const known = ADAPTER_IDS.join(", ");
+  const message = id === undefined || id === ""
+    ? `missing harness name. Known: ${known}`
+    : `unknown harness "${id}". Known: ${known}`;
+  return { exitCode: 2, records: [stderrLine(message)] };
 }
 
 /**
