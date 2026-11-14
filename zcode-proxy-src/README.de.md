@@ -27,7 +27,7 @@ API-Schlüssel. Siehe [Kontenverwaltung](../docs/ACCOUNT_ROTATOR.de.md).
 ## CAPTCHA-Solver und Cache
 
 Der Solver läuft in einem eigenen Prozess mit einer Speichergrenze von 300 MB
-(`solver.memoryCapMB`) und bearbeitet jeweils ein CAPTCHA-Fenster. Bei 80 % der
+(`solver.memoryCapMB`) und bearbeitet jeweils ein CAPTCHA-Fenster. Bei 50 % der
 Grenze oder nach 100 Lösungen wird er durch einen neuen Prozess ersetzt; siehe
 „The solver process“ in [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md). Er hält
 anfangs ein Token bereit und erweitert den Vorrat nur nach Bedarf auf höchstens

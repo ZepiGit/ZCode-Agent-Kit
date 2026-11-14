@@ -14,8 +14,9 @@
  * that arrives it accepts no solve and loads neither the solve code nor the
  * DOM runtime; when it does not arrive within HANDSHAKE_TIMEOUT_MS the
  * process ends itself with exit code 3. Where the operating system does not
- * enforce the cap (`sampling`), the watcher thread below measures the
- * process's own memory footprint and ends the process at the cap. Right
+ * enforce the cap (`sampling`), and on Windows, where its limit counts commit
+ * charge and sits above the cap (`job-object`), the watcher thread below
+ * measures the process's own memory footprint and ends the process at the cap. Right
  * before that it writes a marker with the footprint to stderr; the proxy
  * takes the marker out of the output and writes the event line that names the
  * config key. The marker comes from the watcher thread because the main
@@ -30,12 +31,12 @@
  */
 import { createEventLogger } from "../log/event-line.mjs";
 import { serveSolverGeneration } from "./captcha-solver-generation.js";
-import { SOLVER_AT_CAP_MARKER } from "./solver-cap.js";
+import { SOLVER_AT_CAP_MARKER, solverWatchesItself } from "./solver-cap.js";
 import { SOLVER_PROCESS_COMMAND } from "./solver-process-command.js";
 
 /** How often the watcher thread checks the parent. */
 export const PARENT_CHECK_MS = 500;
-/** How often the watcher thread measures the footprint when the cap is enforced by sampling. */
+/** How often the watcher thread measures the footprint when the solver process watches its own cap. */
 export const CAP_SAMPLE_MS = 100;
 /** How long the process waits for the proxy's cap acknowledgement before it ends itself. */
 export const HANDSHAKE_TIMEOUT_MS = 10_000;
@@ -43,6 +44,13 @@ export const HANDSHAKE_TIMEOUT_MS = 10_000;
 export const NO_CAP_EXIT_CODE = 3;
 
 const MB = 1024 * 1024;
+/**
+ * On Windows the runtime reports the commit charge as its footprint. A Bun
+ * process commits a few hundred MB that it never touches (solver-cap.ts,
+ * JOB_COMMIT_ALLOWANCE_MB), so the footprint there is the working set, which
+ * is close to what Linux and macOS report.
+ */
+const FOOTPRINT_IS_WORKING_SET = process.platform === "win32";
 
 // POSIX reparents an orphan, so a changed ppid is proof; Windows keeps the
 // stale ppid, so only the parent's liveness is checked there. Only ESRCH
@@ -68,7 +76,7 @@ self.onmessage = (event) => {
   if (sampler || !(capBytes > 0)) return;
   sampler = setInterval(() => {
     let used;
-    try { used = Bun.unsafe.memoryFootprint(); } catch { used = undefined; }
+    if (!${FOOTPRINT_IS_WORKING_SET}) { try { used = Bun.unsafe.memoryFootprint(); } catch { used = undefined; } }
     if (!(used > 0)) used = process.memoryUsage.rss();
     if (used < capBytes) return;
     try { fs.writeSync(2, ${JSON.stringify(SOLVER_AT_CAP_MARKER)} + " footprintMB=" + Math.round(used / ${MB}) + "\\n"); } catch {}
@@ -78,11 +86,13 @@ self.onmessage = (event) => {
 `;
 }
 
-/** This process's memory footprint in MB (commit charge on Windows), or its RSS where the runtime reports none. */
+/** This process's memory footprint in MB: the runtime's figure, or the working set (RSS) on Windows and where the runtime reports none. */
 function footprintMB(): number {
   let bytes: number | undefined;
-  try { bytes = (globalThis as { Bun?: { unsafe?: { memoryFootprint?: () => number | undefined } } }).Bun?.unsafe?.memoryFootprint?.(); }
-  catch { bytes = undefined; }
+  if (!FOOTPRINT_IS_WORKING_SET) {
+    try { bytes = (globalThis as { Bun?: { unsafe?: { memoryFootprint?: () => number | undefined } } }).Bun?.unsafe?.memoryFootprint?.(); }
+    catch { bytes = undefined; }
+  }
   if (!(typeof bytes === "number" && Number.isFinite(bytes) && bytes > 0)) bytes = process.memoryUsage.rss();
   return Math.round(bytes / MB);
 }
@@ -121,7 +131,7 @@ export function runSolverProcess(args: readonly string[] = process.argv.slice(2)
     if (msg?.type !== "cap") return;
     clearTimeout(handshake);
     process.off("message", onAcknowledgement);
-    if (msg.enforcement === "sampling" && typeof msg.capMB === "number" && msg.capMB > 0) {
+    if (solverWatchesItself(msg.enforcement) && typeof msg.capMB === "number" && msg.capMB > 0) {
       watcher.postMessage({ capBytes: msg.capMB * MB });
     }
     serveSolverGeneration({

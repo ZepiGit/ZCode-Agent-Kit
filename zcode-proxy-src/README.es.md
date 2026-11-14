@@ -28,7 +28,7 @@ claves API. Consulta la [gestión de cuentas](../docs/ACCOUNT_ROTATOR.md).
 
 El solucionador se ejecuta en un proceso propio, con un límite de memoria de
 300 MB (`solver.memoryCapMB`), y ejecuta una ventana CAPTCHA a la vez. Se
-sustituye por un proceso nuevo al llegar al 80 % del límite o tras 100
+sustituye por un proceso nuevo al llegar al 50 % del límite o tras 100
 resoluciones; consulta «The solver process» en
 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md).
 Prepara un token y aumenta la reserva solo según la demanda, hasta cuatro;

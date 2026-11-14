@@ -4,9 +4,14 @@
  * before that process loads anything heavy (captcha-solver.ts runs the
  * handshake) and reports how the cap is enforced:
  *
- *   job-object  Windows: a Job Object with a per-process memory limit (commit
- *               charge) and kill-on-close, through bun:ffi. The limit is read
- *               back before the mode is reported.
+ *   job-object  Windows: a Job Object with a per-process memory limit and
+ *               kill-on-close, through bun:ffi. The limit is read back before
+ *               the mode is reported. Windows limits a process's commit
+ *               charge, and a Bun process commits a few hundred MB more than
+ *               it uses, so the limit sits JOB_COMMIT_ALLOWANCE_MB above the
+ *               cap and stops a solver that runs away. The cap itself is
+ *               checked by the solver process on its working set, as under
+ *               sampling (solverWatchesItself).
  *   cgroup      Linux: a systemd user scope (cgroup v2) with MemoryMax and
  *               MemorySwapMax=0 that adopts the solver process. Reported only
  *               when the scope's own memory.max shows the requested value.
@@ -36,9 +41,28 @@ export const SOLVER_CAP_KEY = "solver.memoryCapMB";
  */
 export const SOLVER_AT_CAP_MARKER = "@@zcode-solver-at-cap";
 export const DEFAULT_SOLVER_CAP_MB = 300;
+/**
+ * How far above the cap the Job Object's limit sits, in MB. The limit counts
+ * commit charge, which includes memory a process has committed and never
+ * touched, and the Bun runtime commits a lot of that: its allocator commits
+ * each of its pages whole, for every thread. Measured with Bun 1.4.2 on 16
+ * logical processors, the solver's commit charge stayed 260 to 320 MB above
+ * its working set through ten solves, and about 150 MB above it with the
+ * runtime held to two processors. 1024 leaves room for larger machines.
+ */
+export const JOB_COMMIT_ALLOWANCE_MB = 1024;
 /** Below this the solver cannot load its DOM runtime and solve at all (about 50 MB before the first solve). */
 export const MIN_SOLVER_CAP_MB = 128;
 export const MAX_SOLVER_CAP_MB = 65536;
+
+/**
+ * Whether the solver process watches its own footprint under `enforcement`
+ * and ends itself at the cap: under `sampling`, where nothing else does, and
+ * under `job-object`, whose limit is above the cap and counts commit charge.
+ */
+export function solverWatchesItself(enforcement: unknown): boolean {
+  return enforcement === "sampling" || enforcement === "job-object";
+}
 
 /** The cap as applied to one solver process. */
 export interface SolverCap {
@@ -47,7 +71,7 @@ export interface SolverCap {
   readonly reason?: string;
   /** Sampling only: this platform has no kernel limit to use, so sampling is the mode it is meant to run in. */
   readonly designed?: boolean;
-  /** Once the process is gone: did the operating system end it at the cap? */
+  /** Once the process is gone: did the operating system end it at its limit? */
   endedAtCap(): Promise<boolean>;
   /** Give the cap's container back (close the Job Object, forget the scope). Idempotent. */
   release(): void;
@@ -208,10 +232,11 @@ async function applyJobObject(pid: number, capBytes: number, os: SolverCapOs): P
     return sampling(reason);
   };
 
+  const limitBytes = capBytes + JOB_COMMIT_ALLOWANCE_MB * 1024 * 1024;
   const info = new Uint8Array(JOB_LIMIT_INFO.size);
   const view = new DataView(info.buffer);
   view.setUint32(JOB_LIMIT_INFO.limitFlags, JOB_LIMIT_FLAGS, true);
-  view.setBigUint64(JOB_LIMIT_INFO.processMemoryLimit, BigInt(capBytes), true);
+  view.setBigUint64(JOB_LIMIT_INFO.processMemoryLimit, BigInt(limitBytes), true);
   if (!api.setLimits(job, info)) return fail("the Job Object limit could not be set");
 
   const process_ = api.openProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, pid);
@@ -227,7 +252,7 @@ async function applyJobObject(pid: number, capBytes: number, os: SolverCapOs): P
   const back = readBack();
   if (!back
     || (back.getUint32(JOB_LIMIT_INFO.limitFlags, true) & JOB_LIMIT_FLAGS) !== JOB_LIMIT_FLAGS
-    || back.getBigUint64(JOB_LIMIT_INFO.processMemoryLimit, true) !== BigInt(capBytes)) {
+    || back.getBigUint64(JOB_LIMIT_INFO.processMemoryLimit, true) !== BigInt(limitBytes)) {
     // The process is in a job whose limit cannot be confirmed. Closing the
     // job may end it (kill-on-close), which is the safe outcome: it never
     // solves under a limit nobody verified.
@@ -241,7 +266,7 @@ async function applyJobObject(pid: number, capBytes: number, os: SolverCapOs): P
     async endedAtCap() {
       if (atCap !== null) return atCap;
       const now = released ? null : readBack();
-      atCap = !!now && Number(now.getBigUint64(JOB_LIMIT_INFO.peakProcessMemoryUsed, true)) >= capBytes * JOB_PEAK_AT_CAP;
+      atCap = !!now && Number(now.getBigUint64(JOB_LIMIT_INFO.peakProcessMemoryUsed, true)) >= limitBytes * JOB_PEAK_AT_CAP;
       return atCap;
     },
     release() {

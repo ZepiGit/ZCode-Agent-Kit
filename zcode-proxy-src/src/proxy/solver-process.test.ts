@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { removeExecutableDirectory, terminateOwnedChild, withinCleanupDeadline } from "./__fixtures__/solver-test-cleanup.js";
+import { JOB_COMMIT_ALLOWANCE_MB, solverWatchesItself } from "./solver-cap.js";
 
 const solverPath = fileURLToPath(new URL("./captcha-solver.ts", import.meta.url));
 const tokenPath = fileURLToPath(new URL("./captcha-token.ts", import.meta.url));
@@ -543,14 +544,9 @@ function systemdScopeCaps(): boolean {
 const expectedEnforcement = process.platform === "win32" ? "job-object" : systemdScopeCaps() ? "cgroup" : "sampling";
 
 const SAMPLING_CAP = "async () => ({ enforcement: 'sampling', reason: 'test', endedAtCap: async () => false, release() {} })";
-/**
- * The cap of the tests that push a solver past it. 128 MB is quick to reach;
- * on Windows the cap counts commit charge, and a solver process with the DOM
- * runtime loaded already commits about that much (it could not load, or ended
- * itself at once, under 128 MB), so the default cap is used there.
- */
-const TEST_CAP_MB = process.platform === "win32" ? 300 : 128;
-const AT_CAP = (mode: string) => new RegExp(String.raw`^\S+ WARN solver solver process ended at its memory cap capMB=${TEST_CAP_MB} enforcement=${mode} key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"${mode === "sampling" ? String.raw` footprintMB=\d+` : ""}$`, "m");
+/** The cap of the tests that push a solver past it: quick to reach, and above a solver process with the DOM runtime loaded. */
+const TEST_CAP_MB = 128;
+const AT_CAP = (mode: string) => new RegExp(String.raw`^\S+ WARN solver solver process ended at its memory cap capMB=${TEST_CAP_MB} enforcement=${mode} key=solver\.memoryCapMB next="raise solver\.memoryCapMB in the proxy's config\.yaml if solves need more memory"${solverWatchesItself(mode) ? String.raw` footprintMB=\d+` : ""}$`, "m");
 
 describe("solver process: memory cap", () => {
   /** The real entry behind the module probe, started the way the transport starts it. */
@@ -647,11 +643,12 @@ describe("solver process: memory cap", () => {
     `));
     const { footprintMB, ...modes } = reported(run);
     expect(modes).toEqual({ before: [300, null], after: [300, expectedEnforcement], thread: [null, "none"] });
-    // What the cap is measured against on this system (commit charge on
-    // Windows), for the test log: the room a solve has under the cap.
+    // What the cap is measured against on this system, for the test log: the
+    // room a solve has under the cap. The fixture stays under the recycle
+    // threshold (50 % of the cap).
     console.log(`solver footprint after two solves on ${process.platform}: ${footprintMB} MB of 300`);
     expect(footprintMB).toBeGreaterThan(0);
-    expect(footprintMB).toBeLessThan(240);
+    expect(footprintMB).toBeLessThan(150);
   });
 
   it(`ends a solver that allocates past its cap (${expectedEnforcement}), fails only that solve and names the config key in the log`, async () => {
@@ -670,22 +667,51 @@ describe("solver process: memory cap", () => {
     `, {}, 40_000));
     const { first, failure, next, stats } = reported(run);
     expect(stats).toMatchObject({ capMB: TEST_CAP_MB, enforcement: expectedEnforcement, totalSolves: 2, totalFailures: 1 });
-    expect([failure[0], failure[2]]).toEqual(["CaptchaSdkError", "other"]);
-    // A Job Object does not end the process: its allocations fail. The runtime
-    // then either aborts, or hands the failure to the solve as an exception
-    // and lives on, in which case only that solve has failed and nothing ended.
-    const exited = failure[1] === "captcha solver worker exited unexpectedly";
-    if (expectedEnforcement !== "job-object") expect(exited).toBe(true);
-    if (exited) {
-      expect(next).not.toBe(first);
-      expect(run.stdout).toMatch(AT_CAP(expectedEnforcement));
-      expect(stats.capExits).toBe(1);
-    } else {
-      console.log(`solver survived its Job Object limit; the solve failed with: ${failure[1]}`);
-      expect(run.stdout).not.toContain("ended at its memory cap");
-      expect(stats.capExits).toBe(0);
-    }
+    // The kernel ends the process at the cap (cgroup), or the process ends
+    // itself there: under sampling, and under a Job Object, whose own limit
+    // is far above memory that is in use.
+    expect(failure).toEqual(["CaptchaSdkError", "captcha solver worker exited unexpectedly", "other"]);
+    expect(next).not.toBe(first);
+    expect(run.stdout).toMatch(AT_CAP(expectedEnforcement));
+    expect(stats.capExits).toBe(1);
   }, 50_000);
+
+  it.skipIf(process.platform !== "win32")("does not count memory a solver has committed and never touched against its cap (Windows)", async () => {
+    // The fault this pins: the Job Object limit was the cap itself, in commit
+    // charge, and a real solver commits more than 300 MB before its first
+    // solve is over while it uses about 180 MB.
+    const run = await expectOk(host(`${REPORT}
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 300 }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      const first = label(await s.run('pid', 'sgp', 'p'));
+      const committed = label(await s.run('commit:400', 'sgp', 'p'));
+      const next = label(await s.run('pid', 'sgp', 'p'));
+      report({ first, committed, next, stats: s.stats() });
+      s.shutdown();
+    `));
+    const { first, committed, next, stats } = reported(run);
+    expect(committed).toBe("commit:400");
+    // The same process serves on: its footprint did not move with the commit charge.
+    expect(next).toBe(first);
+    expect(stats).toMatchObject({ enforcement: "job-object", capExits: 0, abnormalExits: 0, recycles: 0, totalSolves: 3 });
+    expect(stats.lastFootprintMB).toBeLessThan(150);
+    expect(run.stdout).not.toContain("ended at its memory cap");
+  });
+
+  it.skipIf(process.platform !== "win32")("still bounds what a solver can commit: the Job Object refuses memory past the cap plus its allowance (Windows)", async () => {
+    const run = await expectOk(host(`${REPORT}
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 300 }) });
+      s.configure({ backendModule, idleMs: 2000 });
+      report({ granted: Number(label(await s.run('commit:8192', 'sgp', 'p')).slice(7)), stats: s.stats() });
+      s.shutdown();
+    `));
+    const { granted, stats } = reported(run);
+    expect(stats.enforcement).toBe("job-object");
+    // Well past the cap, because untouched memory is not in use, and never
+    // past the limit the kernel holds the process to.
+    expect(granted).toBeGreaterThanOrEqual(512);
+    expect(granted).toBeLessThanOrEqual(300 + JOB_COMMIT_ALLOWANCE_MB);
+  });
 
   it("takes a solver process that ends itself with an exit code as a cap exit when the operating system says it was at its limit", async () => {
     // What a Job Object limit looks like from the proxy: no kill and no signal,
@@ -743,8 +769,10 @@ describe("solver process: memory cap", () => {
   }, 50_000);
 
   it("does not log a cap exit for a solver process that ends for another reason", async () => {
+    // The default cap: the process whose pid the first solve reports has to
+    // serve the second one too, so its footprint must stay under the recycle threshold.
     const run = await expectOk(host(`${REPORT}
-      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: ${TEST_CAP_MB}, applyCap: ${SAMPLING_CAP} }) });
+      const s = solver.createCaptchaSolver({ transport: solver.solverProcessTransport({ capMB: 300, applyCap: ${SAMPLING_CAP} }) });
       s.configure({ backendModule, idleMs: 2000 });
       const pid = Number(label(await s.run('pid', 'sgp', 'p')).slice(4));
       const running = s.run('slow:2000', 'sgp', 'p').catch(() => {});

@@ -24,7 +24,7 @@
  *
  * Memory: the solver process runs under a cap the operating system enforces
  * where it can (solver-cap.ts). After each solve it reports its footprint;
- * at 80 % of the cap, or after 100 solves, the generation is recycled.
+ * at 50 % of the cap, or after 100 solves, the generation is recycled.
  *
  * Failure: a generation that ends abnormally (crash, kill at the cap, fatal
  * error, deadline kill) fails only the solve in flight. More than 5 such
@@ -67,8 +67,9 @@ export interface CaptchaSolverStats {
   /** The solver's memory cap in MB; null when its generations run without one (the thread transport). */
   capMB: number | null;
   /**
-   * How the cap is enforced: by the operating system (`job-object`, `cgroup`),
-   * by the solver process measuring itself (`sampling`), or not at all
+   * How the cap is enforced: by the operating system (`cgroup`), by the solver
+   * process measuring itself (`sampling`), by the solver process measuring
+   * itself under a Job Object that bounds its commit charge (`job-object`), or not at all
    * (`none`). Null until the first solver process has been capped.
    */
   enforcement: SolverEnforcement | null;
@@ -123,8 +124,15 @@ const DEFAULT_OPTIONS: Readonly<Required<CaptchaSolverOptions>> = Object.freeze(
   backendModule: null,
 });
 
-/** A capped generation is recycled once its footprint after a solve reaches this share of the cap. */
-export const FOOTPRINT_RECYCLE_SHARE = 0.8;
+/**
+ * A capped generation is recycled once its footprint after a solve reaches
+ * this share of the cap. The rest has to hold the next solve: measured with
+ * real solves on Windows and Linux, a solve peaks up to about 120 MB above
+ * the footprint it starts from and leaves about 40 MB behind. At 0.8 of the
+ * default cap (60 MB of room) two of four generations on Windows ended at
+ * the cap on their third solve.
+ */
+export const FOOTPRINT_RECYCLE_SHARE = 0.5;
 /** Abnormal exits the solver may have inside ABNORMAL_EXIT_WINDOW_MS; one more and solves fail fast. */
 export const MAX_ABNORMAL_EXITS = 5;
 export const ABNORMAL_EXIT_WINDOW_MS = 10 * 60_000;
@@ -411,7 +419,7 @@ export interface SolverCapState {
   capMB: number | null;
   /** How the cap is enforced; null until the first solver process has been capped. */
   enforcement: SolverEnforcement | null;
-  /** Solver processes that ended at the cap since start (ended by the operating system, or by themselves under sampling). */
+  /** Solver processes that ended at the cap since start (ended by the operating system, or by themselves where they watch their own footprint). */
   capExits?: number;
 }
 
@@ -469,7 +477,7 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
       let acknowledged = false;
       let greeted = false;
       let cap: SolverCap | null = null;
-      // Under sampling: the footprint at which the process said it ends itself.
+      // Where the process watches itself: the footprint at which it said it ends itself.
       let endedItselfAtMB: number | null = null;
       const held: SolverHostMessage[] = [];
       const { promise: exited, resolve: markExited } = Promise.withResolvers<void>();
@@ -536,10 +544,10 @@ export function solverProcessTransport(opts: SolverProcessTransportOptions = {})
           if (unexpected) events.exit();
           const applied = cap;
           if (!applied) return;
-          // The operating system ends a process at its cap with SIGKILL (Linux),
+          // The operating system ends a process at its limit with SIGKILL (Linux),
           // or lets its allocations fail (Windows), after which the runtime
-          // aborts with an exit code of its own; ask in both cases. Under
-          // sampling the process said so itself, at the end of its stderr.
+          // aborts with an exit code of its own; ask in both cases. A process
+          // that watches itself said so itself, at the end of its stderr.
           const ask = unexpected || signal === "SIGKILL" ? applied.endedAtCap().catch(() => false) : Promise.resolve(false);
           void Promise.all([ask, outputEnded]).then(([byOs]) => {
             if ((byOs || endedItselfAtMB !== null) && unexpected) {
@@ -794,8 +802,9 @@ export function createCaptchaSolver(deps: CaptchaSolverDeps = {}): CaptchaSolver
     stats.lastFootprintMB = msg.footprintMB;
     const { capMB } = capState();
     if (capMB !== null) {
-      // The generation's own footprint against its cap: recycled well below
-      // it, so that the operating system's kill stays the exception.
+      // The generation's own footprint against its cap: recycled while the
+      // next solve still fits under it, so that an end at the cap stays the
+      // exception.
       if (msg.footprintMB !== null && msg.footprintMB >= capMB * FOOTPRINT_RECYCLE_SHARE) reason ??= "footprint";
     } else if (msg.heapUsedMB !== null && msg.heapUsedMB > options.maxWorkerHeapMB) {
       // Without a cap (a Bun worker): heapUsed there is that worker's own JSC

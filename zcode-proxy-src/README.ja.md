@@ -27,7 +27,7 @@ Desktop 0.16.9 の `credentials.json` が存在する場合は、それが正式
 ## CAPTCHA ソルバーとキャッシュ
 
 ソルバーはメモリ上限 300 MB（`solver.memoryCapMB`）の独立したプロセスで動作し、
-CAPTCHA ウィンドウを一度に一つだけ実行します。上限の 80 % に達したとき、または
+CAPTCHA ウィンドウを一度に一つだけ実行します。上限の 50 % に達したとき、または
 100 回解いた後に、新しいプロセスに置き換えられます。
 [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md) の「The solver process」を参照してください。
 最初にトークンを一つ準備し、需要に応じて最大四つまで保持します。

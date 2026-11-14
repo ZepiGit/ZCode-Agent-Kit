@@ -8,10 +8,11 @@
 import { describe, expect, it } from "bun:test";
 import { fileURLToPath } from "node:url";
 import {
-  ABNORMAL_EXIT_WINDOW_MS, MAX_ABNORMAL_EXITS, QUEUE_FULL_RETRY_AFTER_MS,
+  ABNORMAL_EXIT_WINDOW_MS, FOOTPRINT_RECYCLE_SHARE, MAX_ABNORMAL_EXITS, QUEUE_FULL_RETRY_AFTER_MS,
   createCaptchaSolver,
   type CaptchaSolver, type SolverCapState, type SolverChannelEvents, type SolverClock, type SolverHostMessage, type SolverTransport,
 } from "./captcha-solver.js";
+import { DEFAULT_SOLVER_CAP_MB } from "./solver-cap.js";
 import { CaptchaTokenPool } from "./captcha-pool.js";
 import { CaptchaSdkError, CaptchaSolverUnavailableError, classifyCaptchaError } from "./captcha-token.js";
 
@@ -108,24 +109,33 @@ const ABNORMAL: Record<string, (d: ReturnType<typeof dispatcher>) => Promise<voi
 };
 
 describe("solver recycle triggers", () => {
-  it("recycles a capped generation once its footprint reaches 80 % of the cap, and not below", async () => {
+  it("recycles a capped generation once its footprint reaches 50 % of the cap, and not below", async () => {
     const { solver, generations } = dispatcher();
-    await solver.run("mem:239", "r", "p");
-    expect(solver.stats()).toMatchObject({ recycles: 0, alive: true, lastFootprintMB: 239 });
-    await solver.run("mem:241", "r", "p");
-    expect(solver.stats()).toMatchObject({ recycles: 1, lastRecycleReason: "footprint", alive: false, lastFootprintMB: 241 });
+    await solver.run("mem:149", "r", "p");
+    expect(solver.stats()).toMatchObject({ recycles: 0, alive: true, lastFootprintMB: 149 });
+    await solver.run("mem:151", "r", "p");
+    expect(solver.stats()).toMatchObject({ recycles: 1, lastRecycleReason: "footprint", alive: false, lastFootprintMB: 151 });
     expect(generations[0]!.terminated).toBe(true);
     // The threshold itself recycles too.
-    await solver.run("mem:240", "r", "p");
+    await solver.run("mem:150", "r", "p");
     expect(solver.stats()).toMatchObject({ recycles: 2, lastRecycleReason: "footprint", generation: 2 });
   });
 
-  it("follows the cap: 80 % of 512 MB is 410 MB", async () => {
+  it("follows the cap: 50 % of 512 MB is 256 MB", async () => {
     const { solver } = dispatcher({ capMB: 512, enforcement: "sampling" });
-    await solver.run("mem:409", "r", "p");
+    await solver.run("mem:255", "r", "p");
     expect(solver.stats().recycles).toBe(0);
-    await solver.run("mem:410", "r", "p");
+    await solver.run("mem:256", "r", "p");
     expect(solver.stats()).toMatchObject({ recycles: 1, lastRecycleReason: "footprint" });
+  });
+
+  it("keeps at least 125 MB under the default cap for the next solve, which peaked up to 122 MB above the footprint it started from", () => {
+    // Measured with real solves on Windows and Linux (ten in a row on each):
+    // a solve peaked 44 to 122 MB above the footprint the generation had
+    // before it. Recycling at 80 % of 300 MB left 60 MB, and two of four
+    // generations ended at the cap on their third solve.
+    const peakAboveStartMB = 125;
+    expect(DEFAULT_SOLVER_CAP_MB * (1 - FOOTPRINT_RECYCLE_SHARE)).toBeGreaterThanOrEqual(peakAboveStartMB);
   });
 
   it("does not use the heap threshold under a cap: the footprint decides there", async () => {

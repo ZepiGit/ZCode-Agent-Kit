@@ -163,7 +163,7 @@ zcode-kit proxy stop
 
 **自动重启**：当代理停止响应，或者内存在间隔 15 秒的三次检查中都高于 1024 MB 时，代理会请求 Kit 重新启动它。高于 512 MB 时，它只在日志中写入一条警告。15 分钟内最多接受 3 次这样的重启；超过之后，已经停止的代理会一直保持停止，直到你查看 `zcode-kit proxy logs 50` 并启动它。这些上限位于 `proxy/config.yaml` 的 `health.memory` 下。
 
-**CAPTCHA 求解器**：求解器在独立的进程中运行，内存上限为 300 MB（`proxy/config.yaml` 中的 `solver.memoryCapMB`），达到上限的 80 % 时会被一个新进程替换。如果它在 10 分钟内异常结束超过 5 次，需要 CAPTCHA 的请求会收到 HTTP 503 和 `Retry-After`，直到其中最早的一次结束已过去 10 分钟；其他请求不受影响。
+**CAPTCHA 求解器**：求解器在独立的进程中运行，内存上限为 300 MB（`proxy/config.yaml` 中的 `solver.memoryCapMB`），达到上限的 50 % 时会被一个新进程替换。如果它在 10 分钟内异常结束超过 5 次，需要 CAPTCHA 的请求会收到 HTTP 503 和 `Retry-After`，直到其中最早的一次结束已过去 10 分钟；其他请求不受影响。
 
 **日志**：`logs/proxy.log` 达到 5 MB 时轮转，并保留一个旧文件 `proxy.log.1`。日志文件只有你的用户可以读取，代理密钥和令牌会从日志行中去除。
 

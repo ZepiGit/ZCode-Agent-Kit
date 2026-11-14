@@ -163,7 +163,7 @@ zcode-kit proxy stop
 
 **Automatische Neustarts.** Der Proxy fordert beim Kit einen Neustart an, wenn er nicht mehr reagiert oder wenn sein Speicherverbrauch bei drei Prüfungen im Abstand von 15 Sekunden über 1024 MB bleibt. Über 512 MB schreibt er nur eine Warnung ins Log. Innerhalb von 15 Minuten werden höchstens 3 solcher Neustarts angenommen; danach bleibt ein ausgefallener Proxy aus, bis du dir `zcode-kit proxy logs 50` ansiehst und ihn startest. Die Grenzwerte stehen unter `health.memory` in `proxy/config.yaml`.
 
-**CAPTCHA-Solver.** Der Solver läuft in einem eigenen Prozess mit einer Speichergrenze von 300 MB (`solver.memoryCapMB` in `proxy/config.yaml`) und wird bei 80 % der Grenze durch einen neuen ersetzt. Endet er innerhalb von 10 Minuten mehr als 5-mal abnormal, werden Anfragen, die ein CAPTCHA brauchen, mit HTTP 503 und `Retry-After` beantwortet, bis das älteste dieser Prozessenden 10 Minuten zurückliegt; andere Anfragen sind nicht betroffen.
+**CAPTCHA-Solver.** Der Solver läuft in einem eigenen Prozess mit einer Speichergrenze von 300 MB (`solver.memoryCapMB` in `proxy/config.yaml`) und wird bei 50 % der Grenze durch einen neuen ersetzt. Endet er innerhalb von 10 Minuten mehr als 5-mal abnormal, werden Anfragen, die ein CAPTCHA brauchen, mit HTTP 503 und `Retry-After` beantwortet, bis das älteste dieser Prozessenden 10 Minuten zurückliegt; andere Anfragen sind nicht betroffen.
 
 **Logs.** `logs/proxy.log` wird bei 5 MB rotiert; eine ältere Datei bleibt als `proxy.log.1` erhalten. Logdateien sind nur für deinen Benutzer lesbar, und der Proxy-Schlüssel und Tokens werden aus den Logzeilen entfernt.
 

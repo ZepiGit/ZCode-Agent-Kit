@@ -30,6 +30,7 @@ The root Git history records every change. In summary:
 
 - Credentials: authoritative import of Desktop 0.16.9 shared credentials.
 - CAPTCHA: strictly validated memory and disk cache TTL and isolated cache directories, passed through the managed environment; atomic cache envelopes and per-loaded-artifact provenance; a static saved-script compatibility helper that does not execute vendor code or prove end-to-end success. The old bytecode-VM diagnostic rewrite was removed after reproduced bundle corruption, along with sensitive DBT dumps; the solver and its security gates remain, with metadata-only debug diagnostics.
+- CAPTCHA solver memory cap: the cap counts the memory the solver uses on every system. On Windows the solver process measures its own working set and ends itself at the cap, and a Job Object stops it 1024 MB of commit charge above the cap. The solver is replaced by a fresh process at 50 % of the cap.
 - Models: Flash requests that disable thinking are normalized to `low`, while `high` and `max` remain available.
 - Transport: Brotli and deflate streams and JSON errors are handled; the Responses adapter preserves tool output and required event fields.
 - Operation: a graceful stop request on the loopback listener, a limit on request bodies in flight, memory and responsiveness monitoring with restart requests to the Kit manager, and a size-capped, rotated `proxy.log`. The [security policy](SECURITY.md) describes their behavior.
