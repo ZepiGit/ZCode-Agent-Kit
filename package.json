@@ -1,6 +1,6 @@
 {
   "name": "zcode-agent-kit",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Use your ZCode account in Claude Code, Codex, Aider and other coding assistants through a local proxy.",
   "private": true,
   "license": "MIT",
