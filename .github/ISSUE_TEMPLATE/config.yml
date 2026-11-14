@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/ZepiGit/ZCode-Agent-Kit/discussions
+    about: Ask a question or discuss an idea in GitHub Discussions.
+  - name: Security policy
+    url: https://github.com/ZepiGit/ZCode-Agent-Kit/blob/main/SECURITY.md
+    about: Report security problems privately as described here, never in a public issue.

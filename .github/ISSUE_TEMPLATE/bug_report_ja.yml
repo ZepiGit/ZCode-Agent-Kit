@@ -1,0 +1,82 @@
+name: 不具合報告
+description: kit がドキュメントどおりに動作しません。
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issue は日本語で書いてかまいません。English、Deutsch、Español、简体中文 でも受け付けます。
+
+        インストールやアシスタントの接続に失敗する場合は、代わりに「Setup help」フォームを使ってください。セキュリティの問題はここではなく、[SECURITY.ja.md](https://github.com/ZepiGit/ZCode-Agent-Kit/blob/main/SECURITY.ja.md) に書かれた方法で報告してください。
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      description: 名前とバージョン（例：Windows 11 24H2、macOS 15.5、Ubuntu 24.04）。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: kit のバージョン
+      description: "`zcode-kit --version` の出力。"
+      placeholder: zcode-kit 0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: インストール方法
+      options:
+        - リリース版インストーラー（install.ps1 または install.sh）
+        - npm（npm install -g zcode-agent-kit）
+        - Git チェックアウト
+    validations:
+      required: true
+  - type: input
+    id: assistant
+    attributes:
+      label: 影響を受けるアシスタント
+      description: コーディングアシスタントとそのバージョン（例：Claude Code 2.1.278）。問題が kit またはプロキシだけで起きている場合は「なし」と書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 実行したコマンドを順番に書いてください。
+      placeholder: |
+        1. zcode-kit proxy start
+        2. zcode-kit run claude-code
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待される動作
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の動作
+      description: 代わりに何が起きたか。エラーメッセージは全文を貼り付けてください。
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **貼り付ける前にシークレットを取り除いてください。** ローカルのプロキシキー、API キー、トークン、アカウント名、メールアドレスは `<redacted>` に置き換えてください。インストーラーがターミナルに表示する接続情報には、プロキシキーがそのまま表示されます。
+  - type: textarea
+    id: doctor
+    attributes:
+      label: zcode-kit doctor の出力
+      description: "`zcode-kit doctor` の出力全体。ファイルパスが含まれ、そこにユーザー名が含まれることがあります。"
+      render: text
+  - type: textarea
+    id: install-log
+    attributes:
+      label: install.log の抜粋
+      description: セットアップ中に問題が起きた場合は、セットアップが出力の最後に示す install.log から、関係する行を貼り付けてください。
+      render: text

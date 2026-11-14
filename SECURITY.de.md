@@ -1,5 +1,5 @@
 # Sicherheitsrichtlinie
-[English (original)](SECURITY.md) · **Deutsch**
+[English (original)](SECURITY.md) · **Deutsch** · [Español](SECURITY.es.md) · [日本語](SECURITY.ja.md) · [简体中文](SECURITY.zh-CN.md)
 
 Diese Richtlinie beschreibt die vorgesehenen Sicherheitsgrenzen des ZCode
 Agent Kit und seiner gebündelten Integrationen. Sie ist keine

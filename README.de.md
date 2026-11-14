@@ -1,9 +1,9 @@
 # ZCode Agent Kit
 [English (original)](README.md) · **Deutsch** · [Español](README.es.md) · [日本語](README.ja.md) · [简体中文](README.zh-CN.md)
 
-Nutze dein ZCode-Konto mit dem Coding-Assistenten, den du bereits verwendest.
+Nutze dein ZCode-Konto über einen lokalen Proxy in Claude Code, Codex, Aider und anderen Coding-Assistenten.
 
-![ZCode Desktop ist über das Agent Kit mit Coding-Assistenten verbunden](zcode_agent_kit.png)
+![ZCode Desktop ist über das Agent Kit mit Coding-Assistenten verbunden](docs/assets/zcode-agent-kit-dark.gif)
 
 *Das Kit läuft lokal; Modellanfragen gehen an ZCode.*
 
@@ -32,6 +32,8 @@ irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.
 ```sh
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
+
+![Installation des ZCode Agent Kit mit dem einzeiligen PowerShell-Installer](docs/assets/setup-demo.gif)
 
 Der Aufruf funktioniert aus jedem Verzeichnis; du musst das Repository nicht klonen. Fehlt Bun, installiert der Installer Bun 1.4.2 für das Kit. Verwende unter Windows PowerShell, nicht Git Bash oder WSL.
 
@@ -207,4 +209,4 @@ Update von 0.2.x: Installiere Node.js 24 oder neuer, **bevor** du aktualisierst.
 
 ## Weitere Informationen
 
-[Assistenten-Anleitungen](harnesses/README.de.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.de.md) · [MCP-Bridge](mcp/zcode-harness-mcp/README.de.md) · [So funktioniert das Kit](docs/ARCHITECTURE.md) · [Glossar](docs/GLOSSARY.md) · [Support-Matrix](SUPPORT_MATRIX.json) · [Sicherheitsrichtlinie](SECURITY.de.md) · [Lizenzen und enthaltene Komponenten](MANIFEST.de.md) · [Problem melden](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)
+[Assistenten-Anleitungen](harnesses/README.de.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.de.md) · [MCP-Bridge](mcp/zcode-harness-mcp/README.de.md) · [So funktioniert das Kit](docs/ARCHITECTURE.md) · [Glossar](docs/GLOSSARY.de.md) · [Support-Matrix](SUPPORT_MATRIX.json) · [Sicherheitsrichtlinie](SECURITY.de.md) · [Lizenzen und enthaltene Komponenten](MANIFEST.de.md) · [Änderungsprotokoll](CHANGELOG.md) · [Mitwirken](CONTRIBUTING.de.md) · [Fragen und Ideen](https://github.com/ZepiGit/ZCode-Agent-Kit/discussions) · [Problem melden](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)

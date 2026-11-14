@@ -1,5 +1,5 @@
 # Automatic Account Rotator
-**English (original)** · [Deutsch](ACCOUNT_ROTATOR.de.md)
+**English (original)** · [Deutsch](ACCOUNT_ROTATOR.de.md) · [Español](ACCOUNT_ROTATOR.es.md) · [日本語](ACCOUNT_ROTATOR.ja.md) · [简体中文](ACCOUNT_ROTATOR.zh-CN.md)
 
 The optional Account Rotator keeps authorized sign-ins as separate accounts.
 While it is enabled, a successful new sign-in is saved as another account. For

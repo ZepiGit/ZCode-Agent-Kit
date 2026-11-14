@@ -1,9 +1,9 @@
 # ZCode Agent Kit
 [English (original)](README.md) · [Deutsch](README.de.md) · [Español](README.es.md) · **日本語** · [简体中文](README.zh-CN.md)
 
-普段使っているコーディングアシスタントで、自分の ZCode アカウントを利用できます。
+ローカルのプロキシを介して、Claude Code、Codex、Aider などのコーディングアシスタントで自分の ZCode アカウントを利用できます。
 
-![Agent Kit を介してコーディングアシスタントに接続された ZCode Desktop](zcode_agent_kit.png)
+![Agent Kit を介してコーディングアシスタントに接続された ZCode Desktop](docs/assets/zcode-agent-kit-dark.gif)
 
 *kit はローカルで動作し、モデルへのリクエストは ZCode に送られます。*
 
@@ -33,6 +33,8 @@ irm https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.
 curl -fsSL https://github.com/ZepiGit/ZCode-Agent-Kit/releases/latest/download/install.sh | sh
 ```
 
+![1 行の PowerShell インストーラーで ZCode Agent Kit をインストールする様子](docs/assets/setup-demo.gif)
+
 どのディレクトリからでも実行できます。リポジトリをクローンする必要はありません。Bun がない場合、インストーラーは kit 用に Bun 1.4.2 をインストールします。Windows では、Git Bash や WSL ではなく PowerShell を使ってください。
 
 **別の方法 — npm（Windows、macOS、Linux）**：
@@ -50,7 +52,7 @@ zcode-kit setup --harness auto --installer
 
 回答は `generated/harness-choices/` に保存され、以降のセットアップ、更新、`zcode-kit doctor --fix` で再利用されるため、再び尋ねられることはありません。`zcode-kit setup --reask` を実行すると、もう一度尋ねられます。まだ確定していないチェックボックスのリストは、Ctrl-C でキャンセルできます。
 
-続いてセットアップは、**Account Rotator** を有効にするかどうかを一度だけ尋ねます。Account Rotator を有効にすると、kit は保存済みの複数の ZCode ログインを使えるようになります。`y` と答えると現在のログインが取り込まれ、それ以降に `zcode-kit auth login zai` で行ったログインは追加のアカウントとして保存されます。この設定は、後から `zcode-kit accounts enable` または `disable` で変更できます。詳しくは [Account Rotator のドキュメント](docs/ACCOUNT_ROTATOR.md) を参照してください。
+続いてセットアップは、**Account Rotator** を有効にするかどうかを一度だけ尋ねます。Account Rotator を有効にすると、kit は保存済みの複数の ZCode ログインを使えるようになります。`y` と答えると現在のログインが取り込まれ、それ以降に `zcode-kit auth login zai` で行ったログインは追加のアカウントとして保存されます。この設定は、後から `zcode-kit accounts enable` または `disable` で変更できます。詳しくは [Account Rotator のドキュメント](docs/ACCOUNT_ROTATOR.ja.md) を参照してください。
 
 インストーラーは、番号の付いた 4 つの段階、アシスタントごとに 1 行の結果、接続チェック、接続情報を表示します。出力の全体は、インストーラーが示す `install.log` に保存されます。セットアップの最後には、次に実行するコマンドの短い一覧が表示されます。接続チェックの失敗は警告であり、インストールの失敗ではありません。Desktop のログインと利用枠を確認してください。
 
@@ -195,7 +197,7 @@ Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflic
 
 プロキシは localhost にとどめ、`.proxykey`、認証情報、生成された設定ファイルを決して共有しないでください。
 
-**[セキュリティポリシー](SECURITY.md) を読んでください**。ZCode のセッションを維持するために、プロキシはベンダーの CAPTCHA JavaScript を、オペレーティングシステムのサンドボックスなしで実行します。プロキシはループバックでのみ待ち受け、ローカルキーを要求しますが、これはプロセスの分離ではありません。kit はアカウントの制限を回避するものではなく、すべてのチャレンジが成功することも保証できません。
+**[セキュリティポリシー](SECURITY.ja.md) を読んでください**。ZCode のセッションを維持するために、プロキシはベンダーの CAPTCHA JavaScript を、オペレーティングシステムのサンドボックスなしで実行します。プロキシはループバックでのみ待ち受け、ローカルキーを要求しますが、これはプロセスの分離ではありません。kit はアカウントの制限を回避するものではなく、すべてのチャレンジが成功することも保証できません。
 
 ## kit の更新または削除
 
@@ -207,4 +209,4 @@ Exit codes: 0 ok · 1 checks failed · 2 runtime error · 3 port/foreign conflic
 
 ## 詳細情報
 
-[アシスタント別ガイド](harnesses/README.ja.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.md) · [MCP ブリッジ](mcp/zcode-harness-mcp/README.ja.md) · [kit の仕組み](docs/ARCHITECTURE.md) · [用語集](docs/GLOSSARY.md) · [サポートマトリクス](SUPPORT_MATRIX.json) · [セキュリティポリシー](SECURITY.md) · [ライセンスと同梱コンポーネント](MANIFEST.md) · [問題を報告](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)
+[アシスタント別ガイド](harnesses/README.ja.md) · [Account Rotator](docs/ACCOUNT_ROTATOR.ja.md) · [MCP ブリッジ](mcp/zcode-harness-mcp/README.ja.md) · [kit の仕組み](docs/ARCHITECTURE.md) · [用語集](docs/GLOSSARY.ja.md) · [サポートマトリクス](SUPPORT_MATRIX.json) · [セキュリティポリシー](SECURITY.ja.md) · [ライセンスと同梱コンポーネント](MANIFEST.md) · [変更履歴](CHANGELOG.md) · [コントリビューション](CONTRIBUTING.ja.md) · [質問とアイデア](https://github.com/ZepiGit/ZCode-Agent-Kit/discussions) · [問題を報告](https://github.com/ZepiGit/ZCode-Agent-Kit/issues)

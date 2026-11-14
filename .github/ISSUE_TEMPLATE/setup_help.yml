@@ -1,0 +1,57 @@
+name: Setup help
+description: The installer fails, or an assistant does not connect to ZCode.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You may also write your issue in Deutsch, Español, 日本語 or 简体中文.
+
+        The [Get help](https://github.com/ZepiGit/ZCode-Agent-Kit#get-help) section of the README covers the most common problems.
+  - type: dropdown
+    id: problem
+    attributes:
+      label: What fails?
+      options:
+        - Installation or setup
+        - Connecting an assistant
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Name and version, for example Windows 11 24H2, macOS 15.5 or Ubuntu 24.04.
+    validations:
+      required: true
+  - type: input
+    id: assistant
+    attributes:
+      label: Assistant
+      description: The coding assistant you want to connect, and its version if you know it.
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened
+      description: What you ran and what you saw.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **Remove secrets before you paste.** In a terminal, the installer prints your local proxy key in full on the `API key (Bearer / x-api-key)` line of its connection details. Replace that key, and any other key, token, account name or email address, with `<redacted>`.
+  - type: textarea
+    id: installer-output
+    attributes:
+      label: Installer output
+      description: The installer prints four numbered stages, [1/4] to [4/4]. Paste its output up to and including the stage that failed.
+      render: text
+  - type: textarea
+    id: doctor
+    attributes:
+      label: zcode-kit doctor output
+      description: The full output of `zcode-kit doctor`, if the `zcode-kit` command is available. It lists file paths, which can include your user name.
+      render: text

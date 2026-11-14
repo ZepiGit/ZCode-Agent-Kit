@@ -15,6 +15,12 @@
 
 Die Harness-Versionen sind die in [SUPPORT_MATRIX.json](SUPPORT_MATRIX.json) als getestet verzeichneten; dort stehen auch die übrigen unterstützten Harnesses. `zcode-kit setup --no-mcp` überspringt die Registrierung der MCP-Bridge.
 
+## Lizenzen
+
+Für den eigenen Code des Kits gilt die MIT-Lizenz in [LICENSE](LICENSE). Die in diesem Manifest aufgeführten Fremdkomponenten behalten ihre eigenen Lizenzen.
+
+Für den vendorten zcode-proxy in `zcode-proxy-src/` nennt das Upstream-README die MIT-Lizenz, das Upstream-Repository enthält aber keine LICENSE-Datei. Ob er weitergegeben werden darf, wird als Release-Bedingung in [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) verfolgt.
+
 ## Laufzeit und Abhängigkeiten
 
 - Node.js 24 oder neuer. Node.js 20 und 22 werden nicht unterstützt; `zcode-kit setup`, `zcode-kit update` und beide Installer brechen dort ab, bevor sie etwas ändern.

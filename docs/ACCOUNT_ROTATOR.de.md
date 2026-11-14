@@ -1,5 +1,5 @@
 # Automatischer Account Rotator
-[English (original)](ACCOUNT_ROTATOR.md) · **Deutsch**
+[English (original)](ACCOUNT_ROTATOR.md) · **Deutsch** · [Español](ACCOUNT_ROTATOR.es.md) · [日本語](ACCOUNT_ROTATOR.ja.md) · [简体中文](ACCOUNT_ROTATOR.zh-CN.md)
 
 Der optionale Account Rotator verwaltet autorisierte Logins als getrennte
 Konten. Ist er aktiviert, wird ein erfolgreicher neuer Login als weiteres

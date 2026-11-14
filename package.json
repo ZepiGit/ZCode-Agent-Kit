@@ -1,7 +1,7 @@
 {
   "name": "zcode-agent-kit",
   "version": "0.3.0",
-  "description": "Local ZCode provider kit: run GLM-5.3 / GLM-5.3-Flash from your own ZCode Desktop account inside your own agent harnesses (OMP, pi, Claude Code, Codex, OpenCode, Cline, Kilo Code, Aider, Continue, Goose).",
+  "description": "Use your ZCode account in Claude Code, Codex, Aider and other coding assistants through a local proxy.",
   "private": true,
   "license": "MIT",
   "type": "module",

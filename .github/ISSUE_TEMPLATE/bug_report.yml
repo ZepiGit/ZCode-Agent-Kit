@@ -1,0 +1,82 @@
+name: Bug report
+description: Something in the kit does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You may also write your issue in Deutsch, Español, 日本語 or 简体中文.
+
+        If installing or connecting an assistant fails, use the "Setup help" form instead. Report security problems as described in [SECURITY.md](https://github.com/ZepiGit/ZCode-Agent-Kit/blob/main/SECURITY.md), not here.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Name and version, for example Windows 11 24H2, macOS 15.5 or Ubuntu 24.04.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Kit version
+      description: The output of `zcode-kit --version`.
+      placeholder: zcode-kit 0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - Release installer (install.ps1 or install.sh)
+        - npm (npm install -g zcode-agent-kit)
+        - Git checkout
+    validations:
+      required: true
+  - type: input
+    id: assistant
+    attributes:
+      label: Affected assistant
+      description: The coding assistant and its version, for example Claude Code 2.1.278. Write "none" if the problem is in the kit or the proxy alone.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands you ran, in order.
+      placeholder: |
+        1. zcode-kit proxy start
+        2. zcode-kit run claude-code
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead, including the full error message.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **Remove secrets before you paste.** Replace your local proxy key, API keys, tokens, account names and email addresses with `<redacted>`. The connection details the installer prints in a terminal show the proxy key in full.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: zcode-kit doctor output
+      description: The full output of `zcode-kit doctor`. It lists file paths, which can include your user name.
+      render: text
+  - type: textarea
+    id: install-log
+    attributes:
+      label: install.log excerpt
+      description: If the problem appeared during setup, the relevant lines from the install.log that setup names at the end of its output.
+      render: text

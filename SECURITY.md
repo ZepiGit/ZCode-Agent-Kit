@@ -1,5 +1,5 @@
 # Security Policy
-**English (original)** · [Deutsch](SECURITY.de.md)
+**English (original)** · [Deutsch](SECURITY.de.md) · [Español](SECURITY.es.md) · [日本語](SECURITY.ja.md) · [简体中文](SECURITY.zh-CN.md)
 
 This policy describes the intended security boundaries of ZCode Agent Kit and
 its bundled integrations. It is not a security certification.

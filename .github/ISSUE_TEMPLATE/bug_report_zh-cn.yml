@@ -1,0 +1,82 @@
+name: 问题报告
+description: Kit 的某项功能没有按文档说明工作。
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        你可以用简体中文填写这份表单。
+
+        如果是安装或连接助手失败，请改用 "Setup help" 表单。安全问题请按 [SECURITY.md](https://github.com/ZepiGit/ZCode-Agent-Kit/blob/main/SECURITY.md) 中的说明报告，不要在这里提交。
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      description: 名称和版本，例如 Windows 11 24H2、macOS 15.5 或 Ubuntu 24.04。
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Kit 版本
+      description: "`zcode-kit --version` 的输出。"
+      placeholder: zcode-kit 0.3.0
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: 安装方式
+      options:
+        - 正式版安装器（install.ps1 或 install.sh）
+        - npm（npm install -g zcode-agent-kit）
+        - Git 检出
+    validations:
+      required: true
+  - type: input
+    id: assistant
+    attributes:
+      label: 受影响的助手
+      description: 编程助手及其版本，例如 Claude Code 2.1.278。如果问题只出在 Kit 或代理本身，请填写 "none"。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 你按顺序运行的命令。
+      placeholder: |
+        1. zcode-kit proxy start
+        2. zcode-kit run claude-code
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么，请附上完整的错误信息。
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: |
+        **粘贴之前请先移除秘密信息。** 把本地代理密钥、API 密钥、令牌、账号名和电子邮件地址替换为 `<redacted>`。安装器在终端中输出的连接详情会完整显示代理密钥。
+  - type: textarea
+    id: doctor
+    attributes:
+      label: zcode-kit doctor 输出
+      description: "`zcode-kit doctor` 的完整输出。其中会列出文件路径，路径中可能包含你的用户名。"
+      render: text
+  - type: textarea
+    id: install-log
+    attributes:
+      label: install.log 摘录
+      description: 如果问题出现在设置过程中，请提供 install.log 中的相关行。设置程序会在输出末尾给出这个文件的位置。
+      render: text
