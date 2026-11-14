@@ -429,12 +429,25 @@ const IDENTITY_OF = `
 `;
 // One stub host process: it loads the generated extension in Bun, as OMP does,
 // and fires its hook once. Resolves with what the extension printed.
+// With ZCODE_TEST_BARRIER=<path> the host loads the extension, writes
+// <path>.<pid> and makes its first request only once <path>.go exists (at
+// most 90 s), so that hosts started together also ask together however
+// slowly each one starts.
+let hostScripts = 0;
 function runHost(ctx, extension, env = {}) {
-  const script = join(ctx.root, 'omp-host.mjs');
+  // One script file per host: rewriting a shared one while an earlier host
+  // is still reading it can hand that host an empty program.
+  const script = join(ctx.root, `omp-host-${++hostScripts}.mjs`);
   writeFileSync(script, `
+    import { existsSync, writeFileSync } from 'node:fs';
     import extension from ${JSON.stringify(pathToFileURL(extension).href)};
     globalThis.fetch = async () => ({ ok: true, json: async () => ({ status: 'ok', provider: 'zai' }) });
     let hook; extension({ on(_event, handler) { hook = handler; } });
+    const barrier = process.env.ZCODE_TEST_BARRIER;
+    if (barrier) {
+      writeFileSync(barrier + '.' + process.pid, '');
+      for (const end = Date.now() + 90_000; !existsSync(barrier + '.go') && Date.now() < end;) await new Promise(r => setTimeout(r, 5));
+    }
     await hook({}, { model: { provider: 'zcode' } });
   `);
   return new Promise((resolve, reject) => {
@@ -495,7 +508,17 @@ test('generated OMP hosts that start together share one preflight, and every wai
 test('generated OMP host processes that start together run one preflight between them', async t => {
   const ctx = sharedPreflight(t, { holdMs: 500 });
   const extension = generateExtension(ctx);
-  const hosts = await Promise.all(Array.from({ length: 5 }, () => runHost(ctx, extension)));
+  const barrier = join(ctx.root, 'barrier');
+  const running = Array.from({ length: 5 }, () => runHost(ctx, extension, { ZCODE_TEST_BARRIER: barrier }));
+  let exited = 0;
+  for (const host of running) host.then(() => { exited++; }, () => { exited++; });
+  const ready = () => readdirSync(ctx.root).filter(name => /^barrier\.\d+$/.test(name)).length;
+  for (const end = Date.now() + 60_000; ready() < 5 && exited === 0 && Date.now() < end;) await new Promise(r => setTimeout(r, 10));
+  const loaded = ready();
+  // Released in every case, so that no host is left waiting.
+  writeFileSync(`${barrier}.go`, '');
+  const hosts = await Promise.all(running);
+  assert.equal(loaded, 5, `every host loaded the extension before the first one asked: ${JSON.stringify(hosts.map(h => ({ code: h.code, signal: h.signal, stderr: h.stderr.slice(-400) })))}`);
   assert.equal(fileText(ctx, 'attempts'), 'x');
   assert.equal(fileText(ctx, 'overlap') + fileText(ctx, 'refused'), '');
   for (const host of hosts) {

@@ -234,9 +234,11 @@ describe("serve with ZCODE_KIT_LOG_DIR: the proxy.log writer", () => {
 
   it.skipIf(!isPosix || isRoot)("POSIX: a rename the filesystem refuses keeps the writer appending, with one WARN event line, and the next check after the refusal ends rotates", async () => {
     const p = await spawnProxy();
-    fillTo(p.log, 5 * MiB + 1024);
     const { chmodSync } = await import("node:fs");
+    // Blocked before the file reaches the limit: any line the proxy writes in
+    // between would otherwise rotate it first.
     chmodSync(p.logDir, 0o500); // no entry may be renamed or removed: rename fails with EACCES
+    fillTo(p.log, 5 * MiB + 1024);
     try {
       const blocked = Array.from({ length: 50 }, (_, i) => `blocked-${String(i).padStart(3, "0")}\n`);
       p.emit(blocked.map((text) => ({ stream: "stdout" as const, text })), { batch: 5, pauseMs: 5 });
@@ -258,8 +260,11 @@ describe("serve with ZCODE_KIT_LOG_DIR: the proxy.log writer", () => {
 
   it.skipIf(process.platform !== "win32")("Windows: a foreign handle without FILE_SHARE_DELETE blocks the rename; the writer keeps appending with one WARN line and rotates once the handle is gone", async () => {
     const p = await spawnProxy();
-    fillTo(p.log, 5 * MiB + 1024);
+    // Held before the file reaches the limit: any line the proxy writes in
+    // between would otherwise rotate it first. The holder shares read and
+    // write, so the filler can still append.
     const holder = await holdOpen(p.log, "foreign");
+    fillTo(p.log, 5 * MiB + 1024);
     let released = false;
     try {
       const blocked = Array.from({ length: 50 }, (_, i) => `blocked-${String(i).padStart(3, "0")}\n`);
