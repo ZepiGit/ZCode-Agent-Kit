@@ -263,6 +263,78 @@ describe("guest timer ownership (lexical scope)", () => {
   }, 20_000);
 });
 
+// feilin091.js (FeiLin 1.5.4) regression. getUniversalCombatFeature probes
+// the page-guard flag through `documentElement.dataset`, calling
+// `S[rh](rc)` with rh="hasOwnProperty", rc="wgscriptallow". happy-dom's
+// DOMStringMap is a Proxy whose get trap answers every lookup with the
+// `data-<key>` attribute, so inherited Object.prototype methods resolve to
+// undefined and the guest throws the field TypeError, redacted in the logs
+// as len=63 sha256=c064d4b…:
+//   TypeError: S[rh] is not a function. (In 'S[rh](rc)', 'S[rh]' is undefined)
+// A real browser's dataset inherits Object.prototype; the shim must restore
+// exactly that (same shim layer as the feilin005 Text and feilin008 moveBy
+// cases, none of which this may weaken).
+describe("feilin091.js dataset shim (getUniversalCombatFeature)", () => {
+  const FEILIN091_URL = "https://g.alicdn.com/captcha-frontend/FeiLin/1.5.4/feilin091.3c74b916557d32365988892a44486dff641d30d9924c18e557c15abefaf36e39.js";
+  // The bundle's own variable names, so a pre-fix throw is byte-identical
+  // to the recovered field message.
+  const GUEST_PROBE = 'var S=document.documentElement["dataset"],rh="hasOwnProperty",rc="wgscriptallow";var W=S[rh](rc);globalThis.__capProbeResult=W;';
+
+  function evaluateScriptSymbol(w: object): symbol | undefined {
+    for (const target of [w, Object.getPrototypeOf(w)]) {
+      const found = Object.getOwnPropertySymbols(target ?? {}).find(
+        (s) => String(s) === "Symbol(evaluateScript)",
+      );
+      if (found) return found;
+    }
+    return undefined;
+  }
+
+  async function probeGuest(): Promise<{ result: unknown; thrown: unknown }> {
+    const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
+    const w = dom.window as unknown as Record<string | symbol, unknown>;
+    try {
+      const sym = evaluateScriptSymbol(w);
+      if (!sym) throw new Error("happy-dom build exposes no evaluateScript symbol");
+      let thrown: unknown;
+      try {
+        (w[sym] as (code: string, options: unknown) => unknown)(GUEST_PROBE, { filename: FEILIN091_URL });
+      } catch (err) {
+        thrown = err;
+      }
+      return { result: (globalThis as Record<string, unknown>).__capProbeResult, thrown };
+    } finally {
+      await destroyDom(w);
+      delete (globalThis as Record<string, unknown>).__capProbeResult;
+    }
+  }
+
+  test("a feilin091-shaped guest probe reads dataset without throwing", async () => {
+    const { result, thrown } = await probeGuest();
+    expect(thrown).toBeUndefined();
+    expect(result).toBe(false); // no data-wgscriptallow attribute on <html>
+  }, 20_000);
+
+  test("dataset answers data-* keys and inherited methods like a browser", async () => {
+    const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
+    const w = dom.window as unknown as Record<string | symbol, unknown>;
+    try {
+      const ds = (w.document.documentElement as Record<string, unknown>).dataset as Record<string, unknown>;
+      (w.document.documentElement as { dataset: Record<string, unknown> }).dataset.wgscriptallow = "1";
+      expect(typeof ds.hasOwnProperty).toBe("function");
+      expect((ds.hasOwnProperty as (k: string) => boolean).call(ds, "wgscriptallow")).toBe(true);
+      expect((ds.hasOwnProperty as (k: string) => boolean).call(ds, "missing")).toBe(false);
+      expect("wgscriptallow" in ds).toBe(true);
+      // A data attribute must still shadow the inherited member, as in a
+      // real browser (own data-* properties sit on the object itself).
+      (w.document.documentElement as { dataset: Record<string, unknown> }).dataset.constructor = "x";
+      expect(ds.constructor).toBe("x");
+    } finally {
+      await destroyDom(w);
+    }
+  }, 20_000);
+});
+
 describe("host timer contract during a solve", () => {
   test("globalThis timers stay pristine while a window is aliased", async () => {
     // Bun internals (node:_http_server keep-alive, undici, AbortSignal.timeout)
