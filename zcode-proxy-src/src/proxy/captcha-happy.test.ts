@@ -319,15 +319,22 @@ describe("feilin091.js dataset shim (getUniversalCombatFeature)", () => {
     const dom = await createDom("sgp", "no8xfe", HERMETIC_RESOURCES);
     const w = dom.window as unknown as Record<string | symbol, unknown>;
     try {
-      const ds = (w.document.documentElement as Record<string, unknown>).dataset as Record<string, unknown>;
-      (w.document.documentElement as { dataset: Record<string, unknown> }).dataset.wgscriptallow = "1";
+      const html = (w.document as { documentElement: { dataset: unknown } }).documentElement;
+      // A dedicated cast: `constructor` inherits Object's Function type on
+      // Record<string, unknown>, which would mis-type the shadowing assertion.
+      const ds = html.dataset as unknown as {
+        [key: string]: unknown;
+        constructor: unknown;
+        hasOwnProperty: (key: string) => boolean;
+      };
+      ds.wgscriptallow = "1";
       expect(typeof ds.hasOwnProperty).toBe("function");
-      expect((ds.hasOwnProperty as (k: string) => boolean).call(ds, "wgscriptallow")).toBe(true);
-      expect((ds.hasOwnProperty as (k: string) => boolean).call(ds, "missing")).toBe(false);
+      expect(ds.hasOwnProperty("wgscriptallow")).toBe(true);
+      expect(ds.hasOwnProperty("missing")).toBe(false);
       expect("wgscriptallow" in ds).toBe(true);
       // A data attribute must still shadow the inherited member, as in a
       // real browser (own data-* properties sit on the object itself).
-      (w.document.documentElement as { dataset: Record<string, unknown> }).dataset.constructor = "x";
+      ds.constructor = "x";
       expect(ds.constructor).toBe("x");
     } finally {
       await destroyDom(w);
