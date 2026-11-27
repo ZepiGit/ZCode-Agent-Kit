@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createCipheriv, createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { platform, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { desktopCredentialRevision, importFromZCodeConfig, parseDesktopCredential } from "./desktop.js";
@@ -220,4 +220,84 @@ test("revision follows the effective store across login update, replacement, and
   expect(load().jwt).toBe(jwt({ exp: 4102444800, sub: "changed-current-user" }));
   rmSync(modernPath);
   expect(desktopCredentialRevision({ home })).not.toBe(updated);
+});
+
+
+// ── Desktop 4.0.0 v2 store (`enc:v2:env:<fingerprint>:<iv.tag.ct>`) ──────────
+// The Desktop client now seals each value as enc:v2:<source>:<fp>:<payload>,
+// where fp = sha256(sha256(managedSecret)).hex.slice(0, 24) — a DOUBLE hash —
+// the managed secret lives beside credentials.json as `credential-secret`
+// (32–4096 bytes, owner-only on POSIX), and the payload wires are the same
+// v1 shape (iv.tag.ct, aes-256-gcm, key = sha256(secretText)). Without this
+// support the 3012 desktop-import recovery path fails with "encryption is
+// unsupported or invalid".
+describe("v2 desktop store import", () => {
+  const MANAGED_SECRET = fixtureSecret("desktop-v2-managed-secret");
+
+  function encryptV2(value: string, secretText = MANAGED_SECRET): string {
+    const key = createHash("sha256").update(secretText).digest();
+    const fingerprint = createHash("sha256").update(key).digest("hex").slice(0, 24);
+    // Synthetic fixture IV; no production encryption is exercised here.
+    const iv = Buffer.alloc(12, 11);
+    const cipher = createCipheriv("aes-256-gcm", key, iv);
+    const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+    return `enc:v2:env:${fingerprint}:${iv.toString("base64url")}.${cipher.getAuthTag().toString("base64url")}.${ciphertext.toString("base64url")}`;
+  }
+
+  // The file content IS the managed secret: the importer derives the key as
+  // sha256(<file text>), exactly like the Desktop does.
+  function writeManagedSecret(text: string = MANAGED_SECRET): void {
+    writeFileSync(join(home, ".zcode", "v2", "credential-secret"), text, { mode: 0o600 });
+  }
+
+  test("v2 env store imports the requested provider through the managed secret", () => {
+    writeManagedSecret();
+    saveModern({
+      "oauth:active_provider": encryptV2("zai"),
+      "oauth:zai:access_token": encryptV2(OAUTH),
+      zcodejwttoken: encryptV2(FUTURE_JWT),
+    });
+    expect(load()).toEqual({ provider: "zai", apiKey: OAUTH, jwt: FUTURE_JWT });
+  });
+
+  test("a v2 store with a stale managed secret fails with the managed-secret diagnosis", () => {
+    writeManagedSecret(); // written, then the values are sealed with a DIFFERENT secret
+    saveModern({
+      "oauth:active_provider": encryptV2("zai", "another-generation-secret"),
+      "oauth:zai:access_token": encryptV2(OAUTH, "another-generation-secret"),
+      zcodejwttoken: encryptV2(FUTURE_JWT, "another-generation-secret"),
+    });
+    const err = failure(() => load());
+    expect(err.message).toMatch(/managed secret .* does not match/);
+  });
+
+  test("an unreadable (group/other-readable) managed secret is refused on POSIX", () => {
+    if (platform() === "win32") return; // the Desktop skips the mode check there
+    writeManagedSecret();
+    chmodSync(join(home, ".zcode", "v2", "credential-secret"), 0o644);
+    saveModern({
+      "oauth:active_provider": encryptV2("zai"),
+      "oauth:zai:access_token": encryptV2(OAUTH),
+      zcodejwttoken: encryptV2(FUTURE_JWT),
+    });
+    expect(() => load()).toThrow(/managed secret|does not match|unsupported/);
+  });
+
+  test("the os-keyring variant is refused with the unsupported-encryption diagnosis", () => {
+    writeManagedSecret();
+    const value = encryptV2("zai").replace(":env:", ":os:");
+    saveModern({ ...current(), "oauth:active_provider": value });
+    expect(() => load()).toThrow(/unsupported or invalid/);
+  });
+
+  test("an expired v2 JWT is refused after successful decryption", () => {
+    writeManagedSecret();
+    const expired = jwt({ exp: 1, sub: "synthetic-current-user" });
+    saveModern({
+      "oauth:active_provider": encryptV2("zai"),
+      "oauth:zai:access_token": encryptV2(OAUTH),
+      zcodejwttoken: encryptV2(expired),
+    });
+    expect(() => load()).toThrow(/expired/);
+  });
 });

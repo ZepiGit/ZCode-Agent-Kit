@@ -1,7 +1,7 @@
 import { createDecipheriv, createHash } from "node:crypto";
 import { lstatSync, readFileSync, statSync } from "node:fs";
 import { homedir, platform, userInfo } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Credential } from "./types.js";
 
 export interface DesktopCredentialOptions {
@@ -59,15 +59,69 @@ function credentialKey(home: string, secret: string | undefined): Buffer {
   return createHash("sha256").update(material).digest();
 }
 
-function parseCurrentCredential(raw: string, provider: Credential["provider"], plan: string | undefined, home: string, secret: string | undefined): Credential {
+/**
+ * Key candidates for a v2 store value, each tagged with how it was derived.
+ * The value's own fingerprint (first 24 hex chars of sha256 over the DERIVED
+ * key — the Desktop double-hashes) selects the right one, so trying extra
+ * candidates is safe and never decrypts with a mismatched key.
+ */
+function v2KeyCandidates(home: string, secret: string | undefined, credentialPath: string): Array<{ key: Buffer; origin: "secret" | "fallback" | "managed-file" }> {
+  const candidates: Array<{ key: Buffer; origin: "secret" | "fallback" | "managed-file" }> = [];
+  if (secret?.trim()) candidates.push({ key: createHash("sha256").update(secret.trim()).digest(), origin: "secret" });
+  // Managed secret file (Desktop "env" source): sits next to credentials.json,
+  // 32–4096 bytes, owner-readable only (the Desktop refuses group/other bits on
+  // POSIX). Its mtime may predate the values; the fingerprint decides.
+  try {
+    const p = join(dirname(credentialPath), "credential-secret");
+    const st = lstatSync(p);
+    if (st.isFile() && st.size >= 32 && st.size <= 4096 && (platform() === "win32" || (st.mode & 0o077) === 0)) {
+      const text = readFileSync(p, "utf8");
+      if (text.trim()) candidates.push({ key: createHash("sha256").update(text).digest(), origin: "managed-file" });
+    }
+  } catch { /* No readable managed secret file: the remaining candidates decide. */ }
+  if (!secret?.trim()) candidates.push({ key: credentialKey(home, undefined), origin: "fallback" });
+  return candidates;
+}
+
+function v2FingerprintOf(key: Buffer): string {
+  return createHash("sha256").update(key).digest("hex").slice(0, 24);
+}
+
+function parseCurrentCredential(raw: string, provider: Credential["provider"], plan: string | undefined, home: string, secret: string | undefined, credentialPath?: string): Credential {
   const record = parseRecord(raw);
   let key: Buffer | undefined;
+  let v2Candidates: Array<{ key: Buffer; origin: "secret" | "fallback" | "managed-file" }> | undefined;
+  const openPayload = (payload: [Buffer, Buffer, Buffer], keyBytes: Buffer): string => {
+    const decipher = createDecipheriv("aes-256-gcm", keyBytes, payload[0]);
+    decipher.setAuthTag(payload[1]);
+    const plaintext = Buffer.concat([decipher.update(payload[2]), decipher.final()]);
+    return new TextDecoder("utf-8", { fatal: true }).decode(plaintext).trim() || undefined;
+  };
   const readValue = (name: string): string | undefined => {
     const stored = record[name];
     if (stored === undefined || stored === null) return undefined;
     if (typeof stored !== "string") throw new Error("Desktop credential value is invalid.");
     const value = stored.trim();
     if (!value.startsWith("enc:")) return value || undefined;
+    const v2 = /^enc:v2:(env|os):([a-f0-9]{24}):([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(value);
+    if (v2) {
+      // The Desktop 4.0.0 store ("env" = managed secret file, "os" = OS
+      // keyring — unsupported here, no Secret Service read in this importer).
+      if (v2[1] !== "env") throw new Error("Desktop credential encryption is unsupported or invalid.");
+      v2Candidates ??= v2KeyCandidates(home, secret, credentialPath ?? join(home, ".zcode", "v2", "credentials.json"));
+      const keyBytes = v2Candidates.find(candidate => v2FingerprintOf(candidate.key) === v2[2]);
+      if (!keyBytes) throw new Error("Desktop credential decryption failed; the Desktop managed secret (credential-secret beside credentials.json) does not match this store.");
+      try {
+        const payload = [v2[3], v2[4], v2[5]].map(part => Buffer.from(part, "base64url")) as [Buffer, Buffer, Buffer];
+        if (payload[0].length !== 12 || payload[1].length !== 16 || payload.some((part, i) => part.toString("base64url") !== v2![i + 3])) {
+          throw new Error("Desktop credential encryption is unsupported or invalid.");
+        }
+        return openPayload(payload, keyBytes.key);
+      } catch (err) {
+        if (err instanceof Error && err.message.startsWith("Desktop credential ")) throw err;
+        throw new Error("Desktop credential decryption failed; check ZCODE_CREDENTIAL_SECRET and the Desktop user.");
+      }
+    }
     const match = /^enc:v1:([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(value);
     if (!match) throw new Error("Desktop credential encryption is unsupported or invalid.");
     const parts = match.slice(1).map(part => Buffer.from(part, "base64url"));
@@ -76,10 +130,7 @@ function parseCurrentCredential(raw: string, provider: Credential["provider"], p
     }
     try {
       key ??= credentialKey(home, secret);
-      const decipher = createDecipheriv("aes-256-gcm", key, parts[0]);
-      decipher.setAuthTag(parts[1]);
-      const plaintext = Buffer.concat([decipher.update(parts[2]), decipher.final()]);
-      return new TextDecoder("utf-8", { fatal: true }).decode(plaintext).trim() || undefined;
+      return openPayload([parts[0], parts[1], parts[2]], key);
     } catch {
       // Never fall back to a machine key after failure with an explicit secret.
       throw new Error("Desktop credential decryption failed; check ZCODE_CREDENTIAL_SECRET and the Desktop user.");
@@ -128,7 +179,7 @@ export function importFromZCodeConfig(provider: Credential["provider"], plan?: s
   try { raw = readFileSync(source.path, "utf8"); }
   catch { throw new Error("Desktop credential store is unavailable."); }
   return source.modern
-    ? parseCurrentCredential(raw, provider, plan, home, options.credentialSecret ?? process.env.ZCODE_CREDENTIAL_SECRET)
+    ? parseCurrentCredential(raw, provider, plan, home, options.credentialSecret ?? process.env.ZCODE_CREDENTIAL_SECRET, source.path)
     : parseDesktopCredential(raw, provider, plan);
 }
 
