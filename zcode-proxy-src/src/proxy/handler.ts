@@ -27,7 +27,7 @@ import { CAPTCHA_CHALLENGE_HEADER, isCaptchaChallenged, retryOnCaptchaChallenge 
 import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
 import { gzipSync } from "node:zlib";
-import { recoverAndMapUpstream, parseGatewayErrorEnvelope, inspectGatewayEnvelope } from "./upstream-errors.js";
+import { recoverAndMapUpstream, parseGatewayErrorEnvelope, inspectGatewayEnvelope, isEmptyGatewaySuccessEnvelope } from "./upstream-errors.js";
 export { parseGatewayErrorEnvelope } from "./upstream-errors.js";
 
 // captcha.ts is loaded lazily inside the `startPlan` branch (only path that
@@ -523,6 +523,10 @@ export async function proxyRequest(
     if (envelope) {
       printRow(reqId, format, meta, envelope.status, started, headersAt, 0, 0, 0);
       return errorResponse(envelope.status, envelope.type, envelope.message);
+    }
+    if (isEmptyGatewaySuccessEnvelope(sniffed)) {
+      printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
+      return errorResponse(502, "upstream_invalid_response", "Upstream returned a success envelope without a model response.");
     }
     const plainHeaders = new Headers(upstreamResp.headers);
     plainHeaders.delete("content-encoding");

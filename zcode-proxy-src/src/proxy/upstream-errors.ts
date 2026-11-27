@@ -112,6 +112,23 @@ export function parseGatewayErrorEnvelope(body: string): GatewayErrorEnvelope | 
   return { status, type, message: `[${String(code)}] ${message}`, code, ...(resetNumber === undefined ? {} : { resetAt: resetNumber }) };
 }
 
+/**
+ * A success-coded envelope without a model reply, e.g.
+ * `{"code":0,"msg":"","logid":"…"}` (issue 94). It is neither a message nor a
+ * recognised error, so `parseGatewayErrorEnvelope` leaves it alone; an
+ * inference route must not hand it to the client as HTTP 200. Such an envelope
+ * is tiny, so larger bodies (real model replies) are not parsed again.
+ */
+export function isEmptyGatewaySuccessEnvelope(body: string): boolean {
+  if (!body || body.length > 4096) return false;
+  let obj: unknown;
+  try { obj = JSON.parse(body); } catch { return false; }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj) || "content" in obj || "choices" in obj) return false;
+  if (("type" in obj && obj.type === "message") || ("data" in obj && obj.data != null)) return false;
+  const code = "code" in obj ? normalizeGatewayCode(obj.code) : undefined;
+  return code === 0 || code === 200;
+}
+
 async function readBounded(stream: ReadableStream<Uint8Array>): Promise<Uint8Array | null> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
