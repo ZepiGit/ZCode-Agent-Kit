@@ -9,6 +9,15 @@ Prerelease tags (`v0.2.22-account-rotator.*`) are folded into the next stable ve
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the agent kit for the newest ZCode harness/desktop version (4.0.0): the start-plan gateway enforces the current client identity, so the proxy mirrors the 4.0.0 system prompt, moves Environment Info and Model Identity into the context-prefix turn, and folds foreign (harness) system text into that turn as reminders instead of the `system` field (75e9df8)
+
+### Fixed
+
+- The captcha solver survives feilin091.js (FeiLin 1.5.4 of the 4.0.0 client): happy-dom's dataset proxy hid Object.prototype methods from the guest's `hasOwnProperty` probe and broke the fingerprint chain with an uncaught TypeError; the shim restores browser inheritance (f9641d4)
+- Desktop credential import reads the 4.0.0 `enc:v2` store, so the built-in desktop-import recovery for gateway 401/3012 rejections works again (47f6377)
+
 ## [0.3.0] - 2026-11-13
 
 Curated notes: [docs/RELEASE_NOTES_v0.3.0.md](docs/RELEASE_NOTES_v0.3.0.md).
