@@ -91,7 +91,7 @@ function parseCurrentCredential(raw: string, provider: Credential["provider"], p
   const record = parseRecord(raw);
   let key: Buffer | undefined;
   let v2Candidates: Array<{ key: Buffer; origin: "secret" | "fallback" | "managed-file" }> | undefined;
-  const openPayload = (payload: [Buffer, Buffer, Buffer], keyBytes: Buffer): string => {
+  const openPayload = (payload: [Buffer, Buffer, Buffer], keyBytes: Buffer): string | undefined => {
     const decipher = createDecipheriv("aes-256-gcm", keyBytes, payload[0]);
     decipher.setAuthTag(payload[1]);
     const plaintext = Buffer.concat([decipher.update(payload[2]), decipher.final()]);
