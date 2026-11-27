@@ -979,6 +979,42 @@ function applyPolyfills(w) {
     };
   }
 
+  // ── dataset inherits Object.prototype like a browser (feilin091.js) ───────
+  // happy-dom's DOMStringMap is a Proxy whose get trap answers EVERY lookup
+  // with the `data-<key>` attribute, so members inherited from
+  // Object.prototype never resolve: the FeiLin 1.5.4 fingerprint engine calls
+  // `documentElement.dataset.hasOwnProperty("wgscriptallow")`
+  // (feilin091.js, getUniversalCombatFeature) and the call throws
+  // "TypeError: S[rh] is not a function. (In 'S[rh](rc)', 'S[rh]' is
+  // undefined)", breaking that collection chain. A real browser's dataset
+  // inherits Object.prototype. Re-wrap the getter so a data attribute still
+  // shadows the inherited member (own property semantics) while prototype
+  // methods resolve.
+  if (typeof w.HTMLElement === "function" && w.HTMLElement.prototype) {
+    const proto = w.HTMLElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, "dataset");
+    if (desc && typeof desc.get === "function" && !(desc.get as { __capDatasetPatched?: boolean }).__capDatasetPatched) {
+      const innerGet = desc.get;
+      const patchedGet = function datasetGet(this: object) {
+        const ds = innerGet.call(this);
+        return new Proxy(ds, {
+          get(_target, prop) {
+            // A data attribute wins, exactly like the browser's own property.
+            const attribute = (ds as Record<string | symbol, unknown>)[prop];
+            if (attribute !== undefined) return attribute;
+            // Then the inherited member, as Object.prototype provides it.
+            if (typeof prop === "string" && Object.prototype.hasOwnProperty.call(Object.prototype, prop)) {
+              return (Object.prototype as Record<string, unknown>)[prop];
+            }
+            return undefined;
+          },
+        });
+      };
+      (patchedGet as { __capDatasetPatched?: boolean }).__capDatasetPatched = true;
+      try { Object.defineProperty(proto, "dataset", { get: patchedGet, configurable: true }); } catch (e) {}
+    }
+  }
+
   // happy-dom lacks alert/prompt/confirm/open/close (same stubs as
   // solve-shim.js line ~559-561)
   if (typeof w.alert !== "function") w.alert = () => {};

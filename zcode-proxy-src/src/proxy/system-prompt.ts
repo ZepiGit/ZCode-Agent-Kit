@@ -73,63 +73,89 @@ export function formatLocalIsoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Environment Info section (`T9o`): lines joined with `\n`; powered-by last. */
-export function buildEnvironmentSection(env: StartPlanEnvInfo, currentModel?: string): string {
+/** Environment Info attachment (`nMo`): meta_user content, lines joined with `\n`. */
+export function buildEnvironmentSection(env: StartPlanEnvInfo): string {
   const e = data.environment;
   const lines = [
     e.heading,
     e.invokedLine,
-    ...(env.cwd ? [`- ${e.cwdLabel}: ${env.cwd}`] : []),
-    `- ${e.gitLabel}: ${e.gitNo}`,
-    `- ${e.platformLabel}: ${env.platform}`,
-    `- ${e.shellLabel}: ${env.shell}`,
-    `- ${e.osVersionLabel}: ${env.osVersion}`,
+    ...(env.cwd ? [` - ${e.cwdLabel}: ${env.cwd}`] : []),
+    ` - ${e.gitLabel}: ${e.gitNo}`,
+    ` - ${e.platformLabel}: ${env.platform}`,
+    ` - ${e.shellLabel}: ${env.shell}`,
+    ` - ${e.osVersionLabel}: ${env.osVersion}`,
+    ` - ${e.untrustedDataLine}`,
   ];
-  if (currentModel && currentModel.trim().length > 0) {
-    lines.push(e.poweredByLine.replace("{model}", currentModel));
-  }
   return lines.join("\n");
+}
+
+/** Model Identity attachment (`M2n`): `You are powered by the model named X.` */
+export function buildModelIdentityLine(currentModel?: string): string | null {
+  const model = currentModel?.trim();
+  return model ? data.modelLineTemplate.replace("{model}", model) : null;
 }
 
 /**
  * Prepend the official ZCode gateway blocks to the request's `system` field,
- * mirroring `assembleSystemMessages` (3 blocks, ephemeral breakpoints, dynamic
- * block `\n\n`-prefixed). Client system blocks (if any) are preserved AFTER
- * the official blocks, with their `cache_control` stripped: the official
- * blocks already consume 3 of Anthropic's 4 cache breakpoints (the last is
- * the last-message marker applied by body-transformer), so client markers
- * would push the request over the cap — the real client never emits foreign
- * markers because it owns the whole body.
+ * mirroring the 4.0.0 client's `assembleSystemMessages` (3 blocks, ephemeral
+ * breakpoints, dynamic block `\n\n`-prefixed). The Environment/Model sections
+ * are meta_user attachments since 4.0.0 and ride in the context-prefix turn
+ * ({@link buildContextPrefixMessage}), not in `system`. Client system blocks
+ * (if any) are preserved AFTER the official blocks, with their `cache_control`
+ * stripped: the official blocks already consume 3 of Anthropic's 4 cache
+ * breakpoints (the last is the last-message marker applied by
+ * body-transformer), so client markers would push the request over the cap —
+ * the real client never emits foreign markers because it owns the whole body.
  */
 export function buildStartPlanSystem(existingSystem: unknown, currentModel: string | undefined, env: StartPlanEnvInfo): SystemBlock[] {
   const stable = data.stableSections.join("\n\n");
-  const dynamic = [
-    data.dynamicSections.beforeEnvironment,
-    buildEnvironmentSection(env, currentModel),
-    data.dynamicSections.afterEnvironment,
-  ].join("\n\n");
-  const official: SystemBlock[] = [
+  const dynamic = data.dynamicSections.join("\n\n");
+  void env;
+  // The gateway's client gate (3012 "This client is not supported") rejects a
+  // `system` field that carries ANY block beyond the official three — the real
+  // client owns the whole body and never sends foreign system blocks. Client
+  // system text therefore does NOT ride in `system`; the caller folds it into
+  // the context-prefix user turn (see buildContextPrefixMessage).
+  void existingSystem;
+  return [
     { type: "text", text: data.cliPrefix, cache_control: { ...EPHEMERAL } },
     { type: "text", text: stable, cache_control: { ...EPHEMERAL } },
     { type: "text", text: `\n\n${dynamic}`, cache_control: { ...EPHEMERAL } },
   ];
-  return [...official, ...normalizeUserSystem(existingSystem)];
+}
+
+/** Normalized client system text blocks — for the context-prefix fold (4.0.0 gate). */
+export function normalizeClientSystemBlocks(existingSystem: unknown): SystemBlock[] {
+  return normalizeUserSystem(existingSystem);
 }
 
 /**
- * The meta_user context_prefix (`tct` + `Vre` + `blt`): a leading user turn
- * whose single text block is the currentDate section wrapped in
- * `<system-reminder>…</system-reminder>` (no inner padding newlines).
+ * The meta_user attachments on the leading user turn: since 4.0.0 the
+ * Environment Info and Model Identity sections ride here (`env_info`/`model`
+ * are meta_user sections in the ContextBuilder), next to the currentDate
+ * section — each wrapped in `<system-reminder>…</system-reminder>` (no inner
+ * padding newlines), exactly one text block per attachment.
  */
-export function buildContextPrefixMessage(now?: Date): { role: "user"; content: SystemBlock[] } {
+export function buildContextPrefixMessage(now?: Date, env?: StartPlanEnvInfo, currentModel?: string, clientSystem?: SystemBlock[]): { role: "user"; content: SystemBlock[] } {
   const cp = data.contextPrefix;
   const date = formatLocalIsoDate(now ?? new Date());
   const currentDateSection = `${cp.currentDateHeading}\n${cp.currentDateLine.replace("{date}", date)}`;
   const body = [cp.intro, currentDateSection, "", cp.outro].join("\n");
-  return {
-    role: "user",
-    content: [{ type: "text", text: `${data.systemReminder.open}${body}${data.systemReminder.close}` }],
-  };
+  const blocks: SystemBlock[] = [{ type: "text", text: `${data.systemReminder.open}${body}${data.systemReminder.close}` }];
+  if (env) {
+    blocks.push({ type: "text", text: `${data.systemReminder.open}${buildEnvironmentSection(env)}${data.systemReminder.close}` });
+  }
+  const modelLine = buildModelIdentityLine(currentModel);
+  if (modelLine) {
+    blocks.push({ type: "text", text: `${data.systemReminder.open}${modelLine}${data.systemReminder.close}` });
+  }
+  // Client system text (e.g. a harness's own agent prompt) rides here as
+  // reminder blocks: the 4.0.0 gate rejects foreign blocks in `system`, but
+  // the first user turn is exactly where the real client carries extra context.
+  for (const b of clientSystem ?? []) {
+    blocks.push({ type: "text", text: `${data.systemReminder.open}${b.text}${data.systemReminder.close}` });
+  }
+  return { role: "user", content: blocks };
 }
 
 function normalizeUserSystem(system: unknown): SystemBlock[] {

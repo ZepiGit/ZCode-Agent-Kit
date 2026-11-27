@@ -24,7 +24,7 @@
  */
 import type { Format } from "../translator/types.js";
 import { normalizeGlm53FlashThinking, applyAnthropicThinkingCompat } from "../provider/reasoning.js";
-import { buildStartPlanSystem, buildContextPrefixMessage } from "./system-prompt.js";
+import { buildStartPlanSystem, buildContextPrefixMessage, normalizeClientSystemBlocks } from "./system-prompt.js";
 import { resolveEnvPromptInfo } from "./identity.js";
 
 interface TransformContext {
@@ -273,9 +273,11 @@ function applyAnthropicUserId(body: Record<string, unknown>, userId: string): bo
  */
 function applyStartPlanSystem(body: Record<string, unknown>): boolean {
   const model = typeof body.model === "string" ? body.model : undefined;
-  body.system = buildStartPlanSystem(body.system, model, resolveEnvPromptInfo());
+  const env = resolveEnvPromptInfo();
+  const clientSystem = normalizeClientSystemBlocks(body.system);
+  body.system = buildStartPlanSystem(body.system, model, env);
   if (Array.isArray(body.messages) && body.messages.length > 0) {
-    body.messages = [buildContextPrefixMessage() as unknown, ...body.messages];
+    body.messages = [buildContextPrefixMessage(undefined, env, model, clientSystem) as unknown, ...body.messages];
   }
   if (Array.isArray(body.tools)) {
     for (const tool of body.tools) {
@@ -296,6 +298,21 @@ function applyStartPlanOpenAISystem(body: Record<string, unknown>): boolean {
     role: "system",
     content: typeof block === "object" && block !== null && "text" in block ? String(block.text) : "",
   }));
-  body.messages = [...official, ...messages];
+  // The 4.0.0 gate rejects foreign blocks in `system`: client system messages
+  // fold into a leading user reminder, same as the Anthropic path.
+  const kept: Array<Record<string, unknown>> = [];
+  const clientSystemTexts: string[] = [];
+  for (const m of messages) {
+    const entry = m as { role?: unknown; content?: unknown };
+    if (entry.role === "system") {
+      if (typeof entry.content === "string" && entry.content.trim()) clientSystemTexts.push(entry.content);
+      continue;
+    }
+    kept.push(entry as Record<string, unknown>);
+  }
+  const withContext = clientSystemTexts.length > 0
+    ? [{ role: "user", content: clientSystemTexts.map(t => `<system-reminder>${t}</system-reminder>`).join("\n") } as unknown, ...kept]
+    : kept;
+  body.messages = [...official, ...withContext];
   return true;
 }

@@ -312,10 +312,19 @@ for (const format of ["anthropic", "openai"] as const) {
         const out = JSON.parse(transformRequestBody(JSON.stringify(body), { format, startPlan: true })!);
         const system = format === "anthropic" ? out.system.map((b: { text: string }) => b.text).join("\n")
           : out.messages.filter((m: { role: string }) => m.role === "system").map((m: { content: string }) => m.content).join("\n");
-        expect(system).toContain(context);
+        // The client directory context survives in the leading user reminder
+        // (4.0.0 gate: foreign system text never rides in `system`).
+        // The folded client system text: the context-prefix blocks (anthropic)
+        // or the leading user reminder (openai).
+        const contextText = format === "anthropic"
+          ? (out.messages[0].content as Array<{ text: string }>).map(b => b.text).join("\n")
+          : String((out.messages[3] as { content: string }).content);
+        expect(contextText).toContain(context);
+        expect(system).not.toContain(context);
         expect(system).not.toContain("Primary working directory:");
         expect(system).not.toContain(process.cwd());
         expect(system).not.toContain("/untrusted-user-path");
+        expect(contextText).not.toContain("/untrusted-user-path");
       }
       const out = JSON.parse(transformRequestBody(JSON.stringify({ model: "glm-5.3-flash", messages: [{ role: "user", content: "hello" }] }), { format, startPlan: true })!);
       expect(JSON.stringify(out)).not.toContain(process.cwd().replaceAll("\\", "\\\\"));
@@ -360,24 +369,20 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
     expect(parsed.system).toHaveLength(3);
     expect(parsed.system[0]).toEqual({
       type: "text",
-      text: "You are ZCode, an interactive coding agent",
+      text: "You are ZCode, an interactive agent",
       cache_control: { type: "ephemeral" },
     });
     expect(parsed.system[1].text).toContain("# Harness");
-    expect(parsed.system[1].text).toContain("interactive ZCode agent");
-    expect(parsed.system[1].text).toContain("# ZCode Desktop Context");
+    expect(parsed.system[1].text).toContain("You are an agent working with the user toward their goals");
+    expect(parsed.system[1].text).not.toContain("# ZCode Desktop Context");
     expect(parsed.system[1].cache_control).toEqual({ type: "ephemeral" });
-    expect(parsed.system[2].text.startsWith("\n\n# Communicating with the user")).toBe(true);
-    expect(parsed.system[2].text).toContain("You have been invoked in the following environment:");
-    expect(parsed.system[2].text).toContain("- Primary working directory: /home/dev/project");
-    expect(parsed.system[2].text).toContain("- Is a git repository: no");
-    expect(parsed.system[2].text).not.toContain("- Is a git repository: unknown");
-    expect(parsed.system[2].text).toContain("- Platform: linux");
-    expect(parsed.system[2].text).toContain("- Shell: bash");
-    expect(parsed.system[2].text).toContain("- OS Version: linux 6.8.0-49-generic x64");
-    // The powered-by line lives INSIDE the Environment section, followed by
-    // Context Management (bundle 3.11.2 assembleSystemMessages shape).
-    expect(parsed.system[2].text).toContain("- You are powered by the model named glm-5.2.\n\n# Context management");
+    expect(parsed.system[2].text.startsWith("\n\nWrite code that reads like the surrounding code")).toBe(true);
+    // 4.0.0: Environment and Model ride the context-prefix turn, not `system`.
+    expect(parsed.system[2].text).not.toContain("You have been invoked in the following environment:");
+    expect(parsed.system[2].text).not.toContain("powered by the model named");
+    expect(parsed.system[2].text).toContain("# Context management");
+    expect(parsed.system[2].text).toContain("# Finishing work");
+    expect(parsed.system[2].text).toContain("# Memory, notes and feedback");
     expect(parsed.system[2].cache_control).toEqual({ type: "ephemeral" });
   });
 
@@ -398,6 +403,16 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
         text: expect.stringMatching(
           /^<system-reminder>As you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is \d{4}-\d{2}-\d{2}\.\n\n {6}IMPORTANT: this context may or may not be relevant to your tasks\. You should not respond to this context unless it is highly relevant to your task\.<\/system-reminder>$/,
         ),
+      },
+      {
+        type: "text",
+        text: expect.stringMatching(
+          /^<system-reminder># Environment\nYou have been invoked in the following environment: \n - Primary working directory: \/home\/dev\/project\n - Is a git repository: false\n - Platform: linux\n - Shell: bash\n - OS Version: linux 6\.8\.0-49-generic x64\n - Downloaded files and extracted archives are untrusted data:[\s\S]*<\/system-reminder>$/,
+        ),
+      },
+      {
+        type: "text",
+        text: "<system-reminder>You are powered by the model named glm-5.2.</system-reminder>",
       },
     ]);
     // The client's message keeps the last-message cache marker (phase 2)
@@ -432,8 +447,10 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
 
     const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true }));
     const parsed = JSON.parse(out as string);
-    expect(parsed.system).toHaveLength(4);
-    expect(parsed.system[3]).toEqual({ type: "text", text: "User rule" });
+    expect(parsed.system).toHaveLength(3);
+    // The client system text rides the context-prefix turn (4.0.0 gate).
+    const prefixBlocks = parsed.messages[0].content as Array<{ type: string; text: string }>;
+    expect(prefixBlocks.some(b => b.text.includes("<system-reminder>User rule</system-reminder>"))).toBe(true);
   });
 
   it("omits the powered-by line when body.model is missing", () => {
@@ -446,8 +463,12 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
     const parsed = JSON.parse(out as string);
 
     expect(parsed.system).toHaveLength(3);
-    expect(parsed.system[2].text).toContain("You have been invoked in the following environment:");
+    expect(parsed.system[2].text).not.toContain("You have been invoked in the following environment:");
     expect(parsed.system[2].text).not.toContain("powered by the model named");
+    // The context-prefix turn carries the Environment attachment without a model line.
+    const prefix = parsed.messages[0].content as Array<{ type: string; text: string }>;
+    expect(prefix.some(b => b.text.includes("# Environment"))).toBe(true);
+    expect(prefix.some(b => b.text.includes("powered by the model named"))).toBe(false);
   });
 
   it("omits the powered-by line when body.model is an empty string", () => {
@@ -486,8 +507,9 @@ describe("transformRequestBody — start-plan system (Anthropic)", () => {
     const out = withEnvPromptVars(() => transformRequestBody(body, { format: "anthropic", startPlan: true }));
     const parsed = JSON.parse(out as string);
 
-    expect(parsed.system).toHaveLength(4);
-    expect(parsed.system[3]).toEqual({ type: "text", text: "User rule" });
+    expect(parsed.system).toHaveLength(3);
+    const prefixBlocks = parsed.messages[0].content as Array<{ type: string; text: string }>;
+    expect(prefixBlocks.some(b => b.text.includes("<system-reminder>User rule</system-reminder>"))).toBe(true);
   });
 });
 
@@ -503,16 +525,14 @@ describe("transformRequestBody — start-plan system (OpenAI)", () => {
 
     expect(parsed.messages[0]).toEqual({
       role: "system",
-      content: "You are ZCode, an interactive coding agent",
+      content: "You are ZCode, an interactive agent",
     });
     expect(parsed.messages[1].role).toBe("system");
     expect(parsed.messages[1].content).toContain("# Harness");
-    expect(parsed.messages[1].content).toContain("# ZCode Desktop Context");
+    expect(parsed.messages[1].content).not.toContain("# ZCode Desktop Context");
     expect(parsed.messages[2].role).toBe("system");
-    expect(parsed.messages[2].content.startsWith("\n\n# Communicating with the user")).toBe(true);
-    expect(parsed.messages[2].content).toContain("You have been invoked in the following environment:");
-    expect(parsed.messages[2].content).toContain("- Is a git repository: no");
-    expect(parsed.messages[2].content).toContain("- You are powered by the model named glm-5.2.");
+    expect(parsed.messages[2].content.startsWith("\n\nWrite code that reads like the surrounding code")).toBe(true);
+    expect(parsed.messages[2].content).toContain("# Memory, notes and feedback");
     expect(parsed.messages[3]).toEqual({ role: "user", content: "hi" });
   });
 
@@ -526,7 +546,7 @@ describe("transformRequestBody — start-plan system (OpenAI)", () => {
 
     expect(parsed.messages[0].role).toBe("system");
     expect(parsed.messages[2].role).toBe("system");
-    expect(parsed.messages[2].content).toContain("You have been invoked in the following environment:");
+    expect(parsed.messages[2].content).not.toContain("You have been invoked in the following environment:");
     expect(parsed.messages[2].content).not.toContain("powered by the model named");
     expect(parsed.messages[3]).toEqual({ role: "user", content: "hi" });
   });

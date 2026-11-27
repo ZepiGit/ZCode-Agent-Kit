@@ -1172,7 +1172,7 @@ describe("proxyRequest — Anthropic compatibility mode (coding-plan)", () => {
         expect(req.headers.get("authorization")).toBe("Bearer jwt-mock");
         expect(req.headers.get("anthropic-version")).toBe("2023-06-01");
         const reqBody = JSON.parse(await req.text());
-        expect(reqBody.system[0].text).toBe("You are ZCode, an interactive coding agent");
+        expect(reqBody.system[0].text).toBe("You are ZCode, an interactive agent");
         // start-plan carries the same device/session user_id blob (bundle E2e is plan-agnostic)
         const uid1 = JSON.parse(reqBody.metadata.user_id);
         expect(uid1.account_uuid).toBe("");
@@ -1182,6 +1182,7 @@ describe("proxyRequest — Anthropic compatibility mode (coding-plan)", () => {
         expect(reqBody.messages[0].content[0].text).toMatch(
           /^<system-reminder>As you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is \d{4}-\d{2}-\d{2}\.\n\n {6}IMPORTANT: this context may or may not be relevant to your tasks\. You should not respond to this context unless it is highly relevant to your task\.<\/system-reminder>$/,
         );
+        expect(reqBody.messages[0].content[2].text).toBe("<system-reminder>You are powered by the model named glm-4.6.</system-reminder>");
         expect(reqBody.messages[1]).toEqual({ role: "user", content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }] });
         // Catalog default (131,072) + default thinking budget 1,024, clamped
         // back to the model ceiling (bundle additive rule).
@@ -1358,7 +1359,7 @@ describe("proxyRequest — Anthropic compatibility mode (coding-plan)", () => {
         expect(req.url).toBe("https://zcode.z.ai/api/v1/zcode-plan/anthropic/v1/messages");
         expect(req.headers.get("authorization")).toBe("Bearer jwt-mock");
         const reqBody = JSON.parse(await req.text());
-        expect(reqBody.system[0].text).toBe("You are ZCode, an interactive coding agent");
+        expect(reqBody.system[0].text).toBe("You are ZCode, an interactive agent");
         const uid2 = JSON.parse(reqBody.metadata.user_id);
         expect(uid2.account_uuid).toBe("");
         expect(typeof uid2.session_id).toBe("string");
@@ -1367,6 +1368,8 @@ describe("proxyRequest — Anthropic compatibility mode (coding-plan)", () => {
         expect(reqBody.messages[0].content[0].text).toMatch(
           /^<system-reminder>As you answer the user's questions, you can use the following context:\n# currentDate\nToday's date is \d{4}-\d{2}-\d{2}\.\n\n {6}IMPORTANT: this context may or may not be relevant to your tasks\. You should not respond to this context unless it is highly relevant to your task\.<\/system-reminder>$/,
         );
+        expect(reqBody.messages[0].content[1].text).toContain("# Environment\nYou have been invoked in the following environment: ");
+        expect(reqBody.messages[0].content[2].text).toBe("<system-reminder>You are powered by the model named glm-4.6.</system-reminder>");
         expect(reqBody.messages[1]).toEqual({ role: "user", content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }] });
         expect(reqBody.max_tokens).toBe(1024);
         return new Response(JSON.stringify({
