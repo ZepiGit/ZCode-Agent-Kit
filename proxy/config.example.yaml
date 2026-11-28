@@ -38,7 +38,7 @@ models:
   - glm-5.3
   - glm-5.3-flash
 identity:
-  appVersion: "3.14.3"
+  appVersion: "4.0.0"
   sourceTitle: "cli"
   refererOrigin: "https://zcode.z.ai"
   # Generated once at first `auth login` (stable device identity).

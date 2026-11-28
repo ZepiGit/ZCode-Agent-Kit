@@ -13,6 +13,7 @@
  * back from index.js), mirroring the claimCommand pattern.
  */
 import { loadConfig } from "../config/loader.js";
+import { CURRENT_APP_VERSION, migrateRetiredAppVersionFile } from "../config/app-version.js";
 import { updateConfigYaml, ensureConfigFile } from "../config/edit.js";
 import { createStoredAuthManagerWithAccounts } from "../auth/runtime.js";
 import { startServer, type ProxyServer } from "../server/server.js";
@@ -54,6 +55,13 @@ export async function runTui(args: ServeArgs): Promise<void> {
     if (ensureConfigFile(path)) {
       ensureDeviceMidInConfig(path);
       process.stderr.write(`Created ${path} from bundled template.\n`);
+    }
+    try {
+      if (migrateRetiredAppVersionFile(path)) {
+        process.stderr.write(`Updated identity.appVersion to ${CURRENT_APP_VERSION} in ${path} (the previous default is rejected by the current ZCode gateway).\n`);
+      }
+    } catch (err) {
+      process.stderr.write(`Could not update identity.appVersion in ${path}: ${(err as Error).message}\n`);
     }
     config = loadConfig(path);
   } catch (err) {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { handleResponses } from "./responses-handler.js";
+import { EMPTY_GATEWAY_SUCCESS_MESSAGE, EMPTY_GATEWAY_SUCCESS_TYPE } from "./upstream-errors.js";
 import { ResponseStore } from "../responses/store.js";
 import type { ProxyConfig } from "../config/types.js";
 import type * as CaptchaExports from "./captcha.js";
@@ -70,6 +71,16 @@ function makeReq(body: unknown): Request {
 }
 
 describe("handleResponses", () => {
+  it("names an empty success envelope as an outdated client identity", async () => {
+    const fetchImpl = chatUpstream(JSON.stringify({ code: 0, msg: "", logid: "responses-private-logid" }));
+    const resp = await handleResponses(makeReq({ model: "glm-5.2", input: "hello" }), { config: CONFIG, auth, fetchImpl });
+    expect(resp.status).toBe(502);
+    const text = await resp.text();
+    expect(JSON.parse(text)).toEqual({ error: { type: EMPTY_GATEWAY_SUCCESS_TYPE, message: EMPTY_GATEWAY_SUCCESS_MESSAGE } });
+    expect(text).not.toContain("responses-private-logid");
+    expect(text).not.toContain("translation_failed");
+  });
+
   it("returns a ResponsesResponse with message output for a basic text request", async () => {
     const fetchImpl = chatUpstream(anthropicMsg("hi back"));
     const resp = await handleResponses(makeReq({ model: "glm-5.2", input: "hello" }), { config: CONFIG, auth, fetchImpl });

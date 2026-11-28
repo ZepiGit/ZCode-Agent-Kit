@@ -3,6 +3,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { parse } from "yaml";
+import { CURRENT_APP_VERSION } from "./app-version.js";
 import type { AccountsConfig, AdmissionConfig, ClientIdentityConfig, HealthConfig, ProxyConfig, SolverConfig, ProviderEndpoints, ProxyIdentity, ResponsesConfig, McpConfig, AsyncConfig, EndpointRoutingConfig, ClientSigningConfig, ClaimConfig } from "./types.js";
 import { DEFAULT_MEMORY_THRESHOLDS } from "../runtime/memory-thresholds.js";
 import { DEFAULT_SOLVER_CAP_MB, MAX_SOLVER_CAP_MB, MIN_SOLVER_CAP_MB, SOLVER_CAP_KEY } from "../proxy/solver-cap.js";
@@ -49,7 +50,7 @@ const DEFAULTS = {
   ZAI_OPENAI_BASE: "https://api.z.ai/api/coding/paas/v4",
   BIGMODEL_ANTHROPIC_BASE: "https://open.bigmodel.cn/api/anthropic",
   BIGMODEL_OPENAI_BASE: "https://open.bigmodel.cn/api/coding/paas/v4",
-  APP_VERSION: "3.14.3",
+  APP_VERSION: CURRENT_APP_VERSION,
   SOURCE_TITLE: "cli",
   REFERER_ORIGIN: "https://zcode.z.ai",
   CLIENT_IDENTITY_MODE: "observe" as const,
@@ -82,7 +83,7 @@ const DEFAULTS = {
   CLAIM_PLAN_ID: "",
   ENDPOINT_ROUTING_ENABLED: true,
   ENDPOINT_ROUTING_ORIGIN: "https://zcode.z.ai",
-  // The current ZCode 3.14.3 service no longer advertises this legacy gate.
+  // The current ZCode 4.0.0 service no longer advertises this legacy gate.
   // Keep the implementation available as an explicit compatibility opt-in.
   CLIENT_SIGNING_ENABLED: false,
   CLIENT_SIGNING_ORIGIN: "https://zcode.z.ai",

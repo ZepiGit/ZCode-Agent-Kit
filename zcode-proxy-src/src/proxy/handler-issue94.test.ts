@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, mock } from "bun:test";
 import { proxyRequest } from "./handler.js";
+import { EMPTY_GATEWAY_SUCCESS_MESSAGE, EMPTY_GATEWAY_SUCCESS_TYPE } from "./upstream-errors.js";
 import type { ProxyConfig, ProxyIdentity } from "../config/types.js";
 import { AuthManager } from "../auth/manager.js";
 import { fixtureSecret } from "../test-fixtures.js";
@@ -46,7 +47,7 @@ const TEST_CONFIG: ProxyConfig = {
   logging: { level: "info" },
 };
 
-async function sendMessages(upstreamBody: unknown, stream: boolean): Promise<Response> {
+async function send(format: "anthropic" | "openai", upstreamBody: unknown, stream: boolean): Promise<Response> {
   mock.module("./captcha.js", () => ({
     detectCaptchaChallenge: (): string | null => null,
     getCaptchaToken: async (_appVersion: string) => ({ verifyParam: "tok", region: "sgp" }),
@@ -62,12 +63,20 @@ async function sendMessages(upstreamBody: unknown, stream: boolean): Promise<Res
   });
   const auth = new AuthManager();
   auth.setOAuthCredential({ apiKey: PLAN_KEY, provider: "zai", jwt: PLAN_JWT });
-  const clientReq = new Request("http://localhost:8080/v1/messages", {
+  const path = format === "openai" ? "/v1/chat/completions" : "/v1/messages";
+  const payload = format === "openai"
+    ? { model: "glm-5.3-flash", stream, messages: [{ role: "user", content: "hi" }] }
+    : { model: "glm-5.3-flash", max_tokens: 64, stream, messages: [{ role: "user", content: "hi" }] };
+  const clientReq = new Request(`http://localhost:8080${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: "glm-5.3-flash", max_tokens: 64, stream, messages: [{ role: "user", content: "hi" }] }),
+    body: JSON.stringify(payload),
   });
-  return proxyRequest(clientReq, "anthropic", { config: TEST_CONFIG, auth, fetchImpl: fetchMock as unknown as typeof fetch });
+  return proxyRequest(clientReq, format, { config: TEST_CONFIG, auth, fetchImpl: fetchMock as unknown as typeof fetch });
+}
+
+function sendMessages(upstreamBody: unknown, stream: boolean): Promise<Response> {
+  return send("anthropic", upstreamBody, stream);
 }
 
 describe("success-coded gateway envelope without a model reply (issue 94)", () => {
@@ -81,9 +90,29 @@ describe("success-coded gateway envelope without a model reply (issue 94)", () =
 
     expect(resp.status).toBe(502);
     const text = await resp.text();
-    expect(JSON.parse(text)).toMatchObject({ error: { type: "upstream_invalid_response" } });
+    expect(JSON.parse(text)).toEqual({ error: { type: EMPTY_GATEWAY_SUCCESS_TYPE, message: EMPTY_GATEWAY_SUCCESS_MESSAGE } });
+    expect(text).toContain("identity.appVersion");
     // Upstream identifiers are never echoed to the client.
     expect(text).not.toContain(LOG_ID);
+  });
+
+  it("OpenAI chat completions names the outdated client identity instead of a translation failure", async () => {
+    const resp = await send("openai", { code: 0, msg: "", logid: LOG_ID }, false);
+
+    expect(resp.status).toBe(502);
+    const text = await resp.text();
+    expect(JSON.parse(text)).toEqual({ error: { type: EMPTY_GATEWAY_SUCCESS_TYPE, message: EMPTY_GATEWAY_SUCCESS_MESSAGE } });
+    expect(text).not.toContain("translation_failed");
+    expect(text).not.toContain(LOG_ID);
+  });
+
+  it("still translates a real Anthropic message for an OpenAI client", async () => {
+    const message = { id: "msg_1", type: "message", role: "assistant", model: "glm-5.3-flash", content: [{ type: "text", text: "OK" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } };
+    const resp = await send("openai", message, false);
+    expect(resp.status).toBe(200);
+    const body = await resp.json() as { object: string; choices: Array<{ message: { content: string } }> };
+    expect(body.object).toBe("chat.completion");
+    expect(body.choices[0].message.content).toBe("OK");
   });
 
   it("still passes a message through when the gateway adds a success code to it", async () => {

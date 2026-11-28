@@ -9,6 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { spawnSync } from 'node:child_process';
 import { createCtx } from './context.mjs';
+import { migrateRetiredAppVersion } from './client-identity.mjs';
 import { diagnoseQuota } from './quota-diagnostics.mjs';
 export { diagnoseQuota, isQuotaSnapshot } from './quota-diagnostics.mjs';
 import { acquireLock, releaseLock, beginTransaction, rollbackTransaction } from '../lib/transaction.mjs';
@@ -214,7 +215,11 @@ function assertRepairAllowed(ctx) {
   }
 }
 async function alignOfflineKey(ctx, tx) {
-  const text = readFileSync(ctx.config, 'utf8');
+  const original = readFileSync(ctx.config, 'utf8');
+  // A stock config that still announces the previous client identity must
+  // match the current template, and the repair must write that identity.
+  // A chosen version is not rewritten (migrateRetiredAppVersion is a no-op).
+  const text = migrateRetiredAppVersion(original);
   // The match ends before the line break, so the replacement below keeps the
   // file's own line ending (a CRLF config stays CRLF).
   const keys = [...text.matchAll(/^  proxyApiKey: "([A-Za-z0-9_-]+)"(?=\r?$)/gm)];
@@ -223,7 +228,8 @@ async function alignOfflineKey(ctx, tx) {
   if (keys.length !== 1 || ports.length !== 1 || !/^[A-Za-z0-9_-]+$/.test(key) || Number(ports[0][1]) < 1 || Number(ports[0][1]) > 65535) {
     throw new Error('proxy config/key corrupt or ambiguous; automatic repair refused');
   }
-  if (keys[0][1] === key) return; // no config mutation needed
+  const next = keys[0][1] === key ? text : text.replace(keys[0][0], `  proxyApiKey: "${key}"`);
+  if (next === original) return; // no config mutation needed
   // Entire known template, not a substring marker, is the ownership boundary.
   // Comment and blank lines do not count: a release that only documents new
   // optional keys in the template must not make every existing config "custom".
@@ -238,12 +244,12 @@ async function alignOfflineKey(ctx, tx) {
     reservation.listen({ host: '127.0.0.1', port: Number(ports[0][1]), exclusive: true }, resolve);
   });
   try {
-    if (readFileSync(ctx.config, 'utf8') !== text || ctx.key() !== key) throw new Error('runtime files changed concurrently; retry after inspecting ownership');
+    if (readFileSync(ctx.config, 'utf8') !== original || ctx.key() !== key) throw new Error('runtime files changed concurrently; retry after inspecting ownership');
     // Unique staging name — a fixed name left by a crash would
     // block every later repair with EEXIST.
     tx.touch(ctx.config);
     const temp = `${ctx.config}.zcode-staging-${process.pid}-${randomBytes(6).toString('hex')}`;
-    writeFileSync(temp, text.replace(keys[0][0], `  proxyApiKey: "${key}"`), { flag: 'wx', mode: 0o600 });
+    writeFileSync(temp, next, { flag: 'wx', mode: 0o600 });
     try { renameSync(temp, ctx.config); } finally { rmSync(temp, { force: true }); }
   } finally { await new Promise(resolve => reservation.close(resolve)); }
 }

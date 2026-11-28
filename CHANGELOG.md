@@ -19,6 +19,8 @@ Prerelease tags (`v0.2.22-account-rotator.*`) are folded into the next stable ve
 
 ### Fixed
 
+- Chat after a valid login no longer fails when the proxy still announces ZCode 3.14.3. The default client identity is the current desktop release (4.0.0); setup, doctor --fix and proxy start rewrite that retired default in an existing config and leave a chosen version alone. An empty upstream `{code:0,msg:""}` envelope is reported as an outdated client identity instead of a generic translation error
+- `zcode-kit doctor` and `zcode-kit auth status` no longer treat an optional billing/preview fault (including `preview: provider_unknown` from the empty preview envelope) as a rejected login when the balance snapshot is healthy. Real auth failures, including `provider_3012` / `provider_401` on either endpoint, still fail
 - The captcha solver survives feilin091.js (FeiLin 1.5.4 of the 4.0.0 client): happy-dom's dataset proxy hid Object.prototype methods from the guest's `hasOwnProperty` probe and broke the fingerprint chain with an uncaught TypeError; the shim restores browser inheritance (f9641d4)
 - Desktop credential import reads the 4.0.0 `enc:v2` store, so the built-in desktop-import recovery for gateway 401/3012 rejections works again (47f6377)
 
