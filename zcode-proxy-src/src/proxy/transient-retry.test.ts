@@ -8,8 +8,11 @@ import { afterEach, describe, it, expect } from "bun:test";
 import {
   dispatchWithConnectRetry, MAX_TRANSIENT_ATTEMPTS, TRANSIENT_RETRY_AFTER_CAP_MS, resetEdgeBlockCooldown, retryAfterMs, transientErrorKind, transientRetryPolicy,
 } from "./handler.js";
+import { createUpstreamGate, resetUpstreamGate } from "./upstream-gate.js";
 
-afterEach(() => resetEdgeBlockCooldown());
+// The ladder holds an upstream lane slot per dispatch; a case that leaves a
+// body unread would hold it past its own end, so every case starts clean.
+afterEach(() => { resetEdgeBlockCooldown(); resetUpstreamGate(); });
 import { CAPTCHA_CHALLENGE_HEADER } from "./captcha-retry.js";
 
 describe("ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS", () => {
@@ -306,5 +309,35 @@ describe("transient pre-output retry ladder", () => {
     expect(transientErrorKind(Object.assign(new Error("aborted"), { name: "AbortError" }))).toBeNull();
     expect(transientErrorKind(new Error("something else"))).toBeNull();
     expect(transientErrorKind(null)).toBeNull();
+  });
+});
+
+describe("upstream lane cap", () => {
+  it("holds a dispatch until its body is read, and caps parallel sends at the configured limit", async () => {
+    process.env.ZCODE_PROXY_MAX_PARALLEL = "2";
+    resetUpstreamGate();
+    try {
+      let live = 0;
+      let peak = 0;
+      const dispatch = async (): Promise<Response> => {
+        live += 1;
+        peak = Math.max(peak, live);
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            live -= 1; // the upstream turns "live" off when it stops producing
+            controller.enqueue(new TextEncoder().encode("ok"));
+            controller.close();
+          },
+        });
+        return new Response(body, { headers: { "content-type": "text/plain" } });
+      };
+      const responses = await Promise.all([1, 2, 3, 4].map(() => dispatchWithConnectRetry(dispatch, { retryDelayMs: 0 })));
+      expect(responses).toHaveLength(4);
+      await Promise.all(responses.map((r) => r.text()));
+      expect(peak).toBeLessThanOrEqual(2); // never more than the cap at the upstream
+    } finally {
+      delete process.env.ZCODE_PROXY_MAX_PARALLEL;
+      resetUpstreamGate();
+    }
   });
 });

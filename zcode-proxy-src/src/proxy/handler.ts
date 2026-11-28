@@ -28,6 +28,7 @@ import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
 import { gzipSync } from "node:zlib";
 import { recoverAndMapUpstream, parseGatewayErrorEnvelope, inspectGatewayEnvelope, isEmptyGatewaySuccessEnvelope } from "./upstream-errors.js";
+import { upstreamGate } from "./upstream-gate.js";
 export { parseGatewayErrorEnvelope } from "./upstream-errors.js";
 
 // captcha.ts is loaded lazily inside the `startPlan` branch (only path that
@@ -818,10 +819,14 @@ export async function dispatchWithConnectRetry(
   for (let attempt = 1; ; attempt++) {
     if (aborted()) throw new Error("client aborted before upstream connect");
     if (Date.now() < edgeBlockUntil) return edgeBlockResponse();
+    // The account's lane cap is enforced upstream; queue here instead of
+    // discovering it. The slot is held until the response body ends.
+    const releaseSlot = await upstreamGate().acquire(opts.signal);
     let resp: Response;
     try {
       resp = await attemptDispatch({ attempt, ...(previous ? { previous } : {}) });
     } catch (err) {
+      releaseSlot();
       const transient = transientErrorKind(err);
       if (!transient || (!extended && transient.kind !== "connect") || attempt >= MAX_TRANSIENT_ATTEMPTS || aborted()) throw err;
       const delayMs = transientDelayMs(transient.kind, attempt, unitMs);
@@ -831,6 +836,8 @@ export async function dispatchWithConnectRetry(
       previous = { kind: transient.kind, reason: transient.reason };
       continue;
     }
+    // Hold the lane slot until the body ends, so a long stream keeps counting.
+    resp = upstreamGate().holdUntilBodyEnds(resp, releaseSlot);
     if (resp.status === 405 && (resp.headers.get("content-type") ?? "").toLowerCase().includes("text/html")) {
       const copy = resp.clone();
       const text = await copy.text().catch(() => "");
