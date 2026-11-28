@@ -226,8 +226,9 @@ describe("handleResponses", () => {
 
       await expect(reader.cancel("client stopped")).resolves.toBeUndefined();
       // Client reader, translator reader, the prelude gate's reader on the
-      // upstream body, and the upstream's own: each layer forwards the cancel.
-      expect(readerCancelCalls).toBe(4);
+      // upstream body, the lane gate's reader (which holds the dispatch slot),
+      // and the upstream's own: each layer forwards the cancel.
+      expect(readerCancelCalls).toBe(5);
     } finally {
       ReadableStreamDefaultReader.prototype.cancel = originalReaderCancel;
       try { upstreamController?.close(); } catch {}

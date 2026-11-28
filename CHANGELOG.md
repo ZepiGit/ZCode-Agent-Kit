@@ -9,6 +9,10 @@ Prerelease tags (`v0.2.22-account-rotator.*`) are folded into the next stable ve
 
 ## [Unreleased]
 
+### Added
+
+- Cap the proxy's parallel model requests, so the gateway's per-account lane limit is never hit: six run at once by default, the rest wait in arrival order, and `ZCODE_PROXY_MAX_PARALLEL` (0 = unlimited) changes the cap
+
 ### Changed
 
 - Updated the agent kit for the newest ZCode harness/desktop version (4.0.0): the start-plan gateway enforces the current client identity, so the proxy mirrors the 4.0.0 system prompt, moves Environment Info and Model Identity into the context-prefix turn, and folds foreign (harness) system text into that turn as reminders instead of the `system` field (75e9df8)

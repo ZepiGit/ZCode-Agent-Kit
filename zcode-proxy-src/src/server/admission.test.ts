@@ -7,7 +7,7 @@
  * is an injected fetch that holds every request until the test opens its gate,
  * so "in flight" is observable from outside as "arrived upstream, not answered".
  */
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
 import net from "node:net";
 import { gzipSync } from "node:zlib";
 import { startServer, type ProxyServer } from "./server.js";
@@ -15,9 +15,20 @@ import { createAdmission, type Admission } from "./admission.js";
 import type { ProxyConfig } from "../config/types.js";
 import { AuthManager } from "../auth/manager.js";
 import { fixtureSecret } from "../test-fixtures.js";
+import { resetUpstreamGate } from "../proxy/upstream-gate.js";
 
 const KEY = fixtureSecret("admission-proxy-key");
 const MB = 1024 * 1024;
+
+// These suites measure ADMISSION (request-body bytes in flight), not the
+// upstream lane cap: 8-20 concurrent sends must reach the injected upstream at
+// once, so the lane gate runs unlimited here.
+const previousMaxParallel = process.env.ZCODE_PROXY_MAX_PARALLEL;
+process.env.ZCODE_PROXY_MAX_PARALLEL = "0";
+
+// Bun shares one process across test files, so the shared gate may already
+// have been built with the production default by an earlier file.
+beforeAll(() => resetUpstreamGate());
 
 function makeConfig(overrides: Partial<ProxyConfig> = {}): ProxyConfig {
   return {
@@ -544,4 +555,9 @@ describe("admission: giving large bodies back", () => {
     await Bun.sleep(50);
     expect(collections).toBe(1);
   }, 30_000);
+});
+
+afterAll(() => {
+  if (previousMaxParallel === undefined) delete process.env.ZCODE_PROXY_MAX_PARALLEL;
+  else process.env.ZCODE_PROXY_MAX_PARALLEL = previousMaxParallel;
 });

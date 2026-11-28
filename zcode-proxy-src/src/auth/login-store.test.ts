@@ -41,7 +41,9 @@ function login(number: number, enabled = true) {
 }
 function cli(args: string[]) {
   return spawnSync(process.execPath, ["run", "src/index.ts", "--cli", ...args], {
-    cwd: proxyRoot, encoding: "utf8", timeout: 15000,
+    // 60 s per spawn: a Windows CI runner starts the CLI in several seconds,
+    // and a 15 s cap killed one of the 15 consecutive logins (status null).
+    cwd: proxyRoot, encoding: "utf8", timeout: 60_000,
     env: { ...process.env, HOME: root, USERPROFILE: root, ZCODE_PROXY_CONFIG: configPath },
   });
 }
