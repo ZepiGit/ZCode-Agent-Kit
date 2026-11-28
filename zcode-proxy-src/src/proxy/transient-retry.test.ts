@@ -4,10 +4,12 @@
  * handed to the recovery layers untouched, and the bounds (attempts,
  * Retry-After cap, client abort).
  */
-import { describe, it, expect } from "bun:test";
+import { afterEach, describe, it, expect } from "bun:test";
 import {
-  dispatchWithConnectRetry, MAX_TRANSIENT_ATTEMPTS, TRANSIENT_RETRY_AFTER_CAP_MS, retryAfterMs, transientErrorKind, transientRetryPolicy,
+  dispatchWithConnectRetry, MAX_TRANSIENT_ATTEMPTS, TRANSIENT_RETRY_AFTER_CAP_MS, resetEdgeBlockCooldown, retryAfterMs, transientErrorKind, transientRetryPolicy,
 } from "./handler.js";
+
+afterEach(() => resetEdgeBlockCooldown());
 import { CAPTCHA_CHALLENGE_HEADER } from "./captcha-retry.js";
 
 describe("ZCODE_PROXY_TRANSIENT_RETRY_UNIT_MS", () => {
@@ -202,6 +204,32 @@ describe("transient pre-output retry ladder", () => {
     let calls = 0;
     await dispatchWithConnectRetry(async () => { calls += 1; return new Response("event: error\n\n", { status: 503, headers: { "content-type": "Text/Event-Stream; charset=utf-8" } }); }, { retryDelayMs: 0 });
     expect(calls).toBe(1);
+  });
+
+  it("stops the whole proxy from sending after an Aliyun HTML 405 edge block", async () => {
+    // The Aliyun edge block page is HTML with a 405, not a gateway JSON
+    // envelope. One such answer must not be retried, and a later request must
+    // not leave the proxy at all while the shared cooldown is in force.
+    let calls = 0;
+    const block = new Response("<html><title>405</title><img src=\"https://errors.aliyun.com/images/block.png\"></html>", {
+      status: 405, headers: { "content-type": "text/html; charset=utf-8" },
+    });
+    const first = await dispatchWithConnectRetry(async () => { calls += 1; return block; }, { retryDelayMs: 0 });
+    expect(first.status).toBe(405);
+    expect(calls).toBe(1);
+    const second = await dispatchWithConnectRetry(async () => { calls += 1; return new Response("ok"); }, { retryDelayMs: 0 });
+    expect(second.status).toBe(405);
+    expect(calls).toBe(1);
+    expect(second.headers.get("retry-after")).toBeTruthy();
+  });
+
+  it("a plain 405 that is not the Aliyun block page is not a cooldown", async () => {
+    let calls = 0;
+    const first = await dispatchWithConnectRetry(async () => { calls += 1; return html(405); }, { retryDelayMs: 0 });
+    expect(first.status).toBe(405);
+    const second = await dispatchWithConnectRetry(async () => { calls += 1; return new Response("ok"); }, { retryDelayMs: 0 });
+    expect(second.status).toBe(200);
+    expect(calls).toBe(2);
   });
 
   it("does not retry request-level errors", async () => {

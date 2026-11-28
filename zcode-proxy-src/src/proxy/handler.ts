@@ -667,6 +667,35 @@ export function transientErrorKind(err: unknown): { kind: TransientKind; reason:
   return null;
 }
 
+/**
+ * Shared cooldown after a confirmed Aliyun edge block page (HTML 405, not a
+ * gateway JSON envelope). One process-wide clock: every model route that
+ * dispatches through this ladder stops sending until it elapses, instead of
+ * each request discovering the block on its own and extending it.
+ */
+const EDGE_BLOCK_COOLDOWN_MS = 15 * 60 * 1000;
+let edgeBlockUntil = 0;
+
+/** Test seam: reset the shared edge-block cooldown between cases. */
+export function resetEdgeBlockCooldown(): void {
+  edgeBlockUntil = 0;
+}
+
+/** True for the Aliyun HTML block page. A JSON 405 from the gateway is not one. */
+function isAliyunEdgeBlock(resp: Response, body: string): boolean {
+  if (resp.status !== 405) return false;
+  const type = (resp.headers.get("content-type") ?? "").toLowerCase();
+  if (!type.includes("text/html")) return false;
+  return /errors\.aliyun\.com/i.test(body) && /<title>\s*405\s*<\/title>/i.test(body);
+}
+
+function edgeBlockResponse(now: number = Date.now()): Response {
+  const retryAfter = Math.max(1, Math.ceil((edgeBlockUntil - now) / 1000));
+  return new Response(JSON.stringify({
+    error: { type: "upstream_error", message: "Upstream edge blocked requests from this machine; not retrying until the cooldown ends." },
+  }), { status: 405, headers: { "content-type": "application/json", "retry-after": String(retryAfter) } });
+}
+
 /** Retry-After as milliseconds: delta-seconds or an HTTP-date (never negative); null when absent or unparseable. */
 export function retryAfterMs(resp: Response, now: number = Date.now()): number | null {
   const raw = resp.headers.get("retry-after")?.trim();
@@ -788,6 +817,7 @@ export async function dispatchWithConnectRetry(
   let previous: DispatchAttempt["previous"];
   for (let attempt = 1; ; attempt++) {
     if (aborted()) throw new Error("client aborted before upstream connect");
+    if (Date.now() < edgeBlockUntil) return edgeBlockResponse();
     let resp: Response;
     try {
       resp = await attemptDispatch({ attempt, ...(previous ? { previous } : {}) });
@@ -800,6 +830,14 @@ export async function dispatchWithConnectRetry(
       if (aborted() || !(await admitted())) throw err;
       previous = { kind: transient.kind, reason: transient.reason };
       continue;
+    }
+    if (resp.status === 405 && (resp.headers.get("content-type") ?? "").toLowerCase().includes("text/html")) {
+      const copy = resp.clone();
+      const text = await copy.text().catch(() => "");
+      if (isAliyunEdgeBlock(resp, text)) {
+        edgeBlockUntil = Date.now() + EDGE_BLOCK_COOLDOWN_MS;
+        return resp;
+      }
     }
     if (!extended || attempt >= MAX_TRANSIENT_ATTEMPTS || aborted()) return resp;
     let reason = await transientResponseReason(resp);
