@@ -27,7 +27,7 @@ import { CAPTCHA_CHALLENGE_HEADER, isCaptchaChallenged, retryOnCaptchaChallenge 
 import { type ClientSessionResult } from "./client-session.js";
 import { resolveSessionContext } from "./session-context.js";
 import { gzipSync } from "node:zlib";
-import { recoverAndMapUpstream, parseGatewayErrorEnvelope, inspectGatewayEnvelope, isEmptyGatewaySuccessEnvelope } from "./upstream-errors.js";
+import { recoverAndMapUpstream, parseGatewayErrorEnvelope, inspectGatewayEnvelope, isEmptyGatewaySuccessEnvelope, EMPTY_GATEWAY_SUCCESS_TYPE, EMPTY_GATEWAY_SUCCESS_MESSAGE } from "./upstream-errors.js";
 import { upstreamGate } from "./upstream-gate.js";
 export { parseGatewayErrorEnvelope } from "./upstream-errors.js";
 
@@ -527,7 +527,7 @@ export async function proxyRequest(
     }
     if (isEmptyGatewaySuccessEnvelope(sniffed)) {
       printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
-      return errorResponse(502, "upstream_invalid_response", "Upstream returned a success envelope without a model response.");
+      return errorResponse(502, EMPTY_GATEWAY_SUCCESS_TYPE, EMPTY_GATEWAY_SUCCESS_MESSAGE);
     }
     const plainHeaders = new Headers(upstreamResp.headers);
     plainHeaders.delete("content-encoding");
@@ -1208,6 +1208,12 @@ async function translatedBatchResponse(
   } catch (err) {
     printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
     return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
+  }
+  // The start-plan gateway answers an outdated client identity with HTTP 200
+  // and `{"code":0,"msg":""}`. That is not a message to translate.
+  if (isEmptyGatewaySuccessEnvelope(raw)) {
+    printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);
+    return errorResponse(502, EMPTY_GATEWAY_SUCCESS_TYPE, EMPTY_GATEWAY_SUCCESS_MESSAGE);
   }
   if (!isAnthropicMessagesResponse(parsedAnthropic)) {
     printRow(reqId, format, meta, 502, started, headersAt, 0, 0, 0);

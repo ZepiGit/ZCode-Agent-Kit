@@ -310,6 +310,49 @@ test('update mirrors a release over the kit without touching a CRLF proxy config
   assert.equal(fs.readFileSync(path.join(dest, '.proxykey'), 'utf8'), 'kept\r\n');
 });
 
+test('bootstrap rewrites a retired identity.appVersion, keeps CRLF, and leaves a chosen version alone', t => {
+  const bump = (eol) => {
+    const ctx = healFixture(t, eol);
+    const before = fs.readFileSync(ctx.config, 'utf8').replace('appVersion: "4.0.0"', 'appVersion: "3.14.3"');
+    fs.writeFileSync(ctx.config, before);
+    quietBootstrap(ctx);
+    const after = fs.readFileSync(ctx.config, 'utf8');
+    assert.equal(after, before.replace('appVersion: "3.14.3"', 'appVersion: "4.0.0"'));
+    quietBootstrap(ctx);
+    assert.equal(fs.readFileSync(ctx.config, 'utf8'), after, 'a replay leaves the migrated config byte-identical');
+    return after;
+  };
+  const lf = bump('lf');
+  const win = bump('crlf');
+  assert.equal(bareLf(win), 0, 'no bare LF in the migrated CRLF config');
+  assert.equal(win, crlf(lf), 'the CRLF result is the LF result with CRLF line endings');
+  const chosen = healFixture(t, 'lf');
+  const custom = fs.readFileSync(chosen.config, 'utf8').replace('appVersion: "4.0.0"', 'appVersion: "3.11.2"') + 'customFlag: true\n';
+  fs.writeFileSync(chosen.config, custom);
+  quietBootstrap(chosen);
+  assert.equal(fs.readFileSync(chosen.config, 'utf8'), custom, 'a chosen version and the rest of a custom config stay');
+  const retiredCustom = healFixture(t, 'lf');
+  const mixed = fs.readFileSync(retiredCustom.config, 'utf8').replace('appVersion: "4.0.0"', 'appVersion: "3.14.3"') + 'customFlag: true\n';
+  fs.writeFileSync(retiredCustom.config, mixed);
+  quietBootstrap(retiredCustom);
+  const mixedAfter = fs.readFileSync(retiredCustom.config, 'utf8');
+  assert.match(mixedAfter, /appVersion: "4\.0\.0"/);
+  assert.match(mixedAfter, /customFlag: true/);
+  assert.doesNotMatch(mixedAfter, /appVersion: "3\.14\.3"/);
+});
+
+test('doctor --fix rewrites a retired identity.appVersion on a stock config and keeps CRLF', async t => {
+  const win = healFixture(t, 'crlf');
+  fs.writeFileSync(win.config, fs.readFileSync(win.config, 'utf8').replace('appVersion: "4.0.0"', 'appVersion: "3.14.3"'));
+  await repairManaged(win, []);
+  const result = fs.readFileSync(win.config, 'utf8');
+  assert.equal(bareLf(result), 0, 'no bare LF in the repaired CRLF config');
+  assert.match(result, /appVersion: "4\.0\.0"/);
+  assert.equal(result.match(/proxyApiKey: "([^"]+)"/)[1], KEY);
+  await repairManaged(win, []);
+  assert.equal(fs.readFileSync(win.config, 'utf8'), result, 'a replay leaves the config byte-identical');
+});
+
 test('bootstrap creates proxy/config.yaml with the example config\'s own CRLF line endings and leaves it alone afterwards', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kit-crlf-bootstrap-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -10,6 +10,7 @@ import { resolveBun } from '../lib/process.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
 import { createCtx, bootstrap } from '../cli/context.mjs';
+import { quotaAuthValid } from '../cli/quota-diagnostics.mjs';
 import { createManager } from '../proxy/zcode-proxy-manager.mjs';
 import { acquireLock, releaseLock, listTransactions } from '../lib/transaction.mjs';
 
@@ -90,10 +91,21 @@ test('quota diagnostics recognize only anchored known billing and proxy error co
       assert.equal(result.cause, cause); assert.ok(!result.detail.includes('SECRET'));
     }
   }
-  for (const message of ['note balance: 3012 SECRET', 'balance: 30120 SECRET', 'preview: 11130 SECRET', 'balance: -1 request 3012', 'SECRET [3012]']) {
+  for (const message of ['note balance: 3012 SECRET', 'balance: 30120 SECRET', 'balance: -1 request 3012', 'SECRET [3012]']) {
     assert.equal(diagnoseQuota(200, snapshot([message])).cause, 'quota-unavailable');
     assert.equal(diagnoseQuota(200, { error: { message } }).cause, 'quota-unavailable');
   }
+  // An unrecognized preview code is not 1113, and it is not a rejected login
+  // when the balance snapshot itself is healthy.
+  assert.equal(diagnoseQuota(200, snapshot(['preview: 11130 SECRET'])).cause, 'healthy');
+  assert.equal(diagnoseQuota(200, { error: { message: 'preview: 11130 SECRET' } }).cause, 'quota-unavailable');
+  const healthyBalance = { ...snapshot(['preview: provider_unknown']), balances: [{ showName: 'Pro', remainingUnits: 90, totalUnits: 100, usedUnits: 10 }] };
+  assert.equal(diagnoseQuota(200, healthyBalance).cause, 'healthy');
+  assert.equal(quotaAuthValid(200, healthyBalance), true);
+  assert.equal(quotaAuthValid(200, snapshot(['preview: provider_401'])), false);
+  assert.equal(diagnoseQuota(200, snapshot(['preview: provider_401'])).cause, 'auth');
+  assert.equal(quotaAuthValid(200, snapshot(['balance: provider_unknown', 'preview: provider_unknown'])), false);
+  assert.equal(quotaAuthValid(401, healthyBalance), false);
   assert.equal(diagnoseQuota(200, {}).cause, 'quota-unavailable');
   assert.equal(diagnoseQuota(200, snapshot(['preview: 1113 SECRET', 'balance: 3012 SECRET'])).cause, 'auth3012');
 });
@@ -103,7 +115,7 @@ test('auth status uses real quota snapshots without leaking provider error text'
   cpSync(join(ROOT, 'lib'), join(ctx.root, 'lib'), { recursive: true });
   const quotaBody = snapshot(); await mock(t, ctx, { quotaBody });
   const env = { ...process.env, HOME: ctx.home, USERPROFILE: ctx.home, ZCODE_PROXY_CREDENTIALS_PATH: join(ctx.home, 'synthetic.json') };
-  for (const [errors, loggedIn] of [[['balance: 3012 SECRET'], false], [['preview:1113 SECRET'], true], [['balance: 3001 SECRET'], true], [['balance: -1 SECRET'], false], [[], true]]) {
+  for (const [errors, loggedIn] of [[['balance: 3012 SECRET'], false], [['preview:1113 SECRET'], true], [['balance: 3001 SECRET'], true], [['balance: -1 SECRET'], false], [[], true], [['preview: provider_unknown'], true], [['preview: provider_500'], true], [['preview: provider_3012'], false], [['balance: provider_3012'], false], [['balance: provider_unknown'], false], [['preview: provider_unknown', 'balance: 3012 SECRET'], false]]) {
     quotaBody.errors = errors;
     const result = await runNode(join(ctx.root, 'cli', 'zcode-kit.mjs'), ['auth', 'status'], env);
     assert.equal(result.code, 0); assert.equal(JSON.parse(result.stdout).logged_in, loggedIn);
@@ -115,7 +127,7 @@ test('auth status uses real quota snapshots without leaking provider error text'
 });
 test('manager doctor shares authentic quota auth diagnostics without treating balance as logout', async t => {
   const ctx = fixture(t); const quotaBody = snapshot(); await mock(t, ctx, { quotaBody });
-  for (const [errors, expectedTag] of [[['balance: 3012 SECRET'], 'FAIL'], [['preview:1113 SECRET'], 'PASS'], [['balance: 3001 SECRET'], 'PASS'], [['balance: -1 SECRET'], 'FAIL'], [[], 'PASS']]) {
+  for (const [errors, expectedTag] of [[['balance: 3012 SECRET'], 'FAIL'], [['preview:1113 SECRET'], 'PASS'], [['balance: 3001 SECRET'], 'PASS'], [['balance: -1 SECRET'], 'FAIL'], [[], 'PASS'], [['preview: provider_unknown'], 'PASS'], [['preview: provider_3012'], 'FAIL'], [['balance: provider_unknown'], 'FAIL']]) {
     quotaBody.errors = errors;
     const messages = []; const original = console.log; console.log = value => messages.push(String(value));
     try {

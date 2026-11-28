@@ -28,7 +28,7 @@ import { CaptchaSolverUnavailableError } from "./captcha-token.js";
 import { shedResponse, solverShed } from "../server/admission.js";
 import { accountHandleStillCurrent, dispatchWithConnectRetry } from "./handler.js";
 import { gateStreamPrelude } from "./stream-prelude.js";
-import { recoverAndMapUpstream } from "./upstream-errors.js";
+import { recoverAndMapUpstream, isEmptyGatewaySuccessEnvelope, EMPTY_GATEWAY_SUCCESS_TYPE, EMPTY_GATEWAY_SUCCESS_MESSAGE } from "./upstream-errors.js";
 import type * as CaptchaExports from "./captcha.js";
 
 // Lazy, runtime-gated module load (exception to the static-import rule, same
@@ -376,6 +376,7 @@ export async function handleResponses(
       } catch (err) {
         return errorResponse(502, "translation_failed", "Upstream returned an invalid JSON response.");
       }
+      if (isEmptyGatewaySuccessEnvelope(rawAnthropic)) return errorResponse(502, EMPTY_GATEWAY_SUCCESS_TYPE, EMPTY_GATEWAY_SUCCESS_MESSAGE);
       if (!parsedAnthropic || !Array.isArray(parsedAnthropic.content)) return errorResponse(502, 'translation_failed', 'Upstream returned an invalid message shape');
       const openaiResp = translateResponseAnthropicToOpenAI(parsedAnthropic, req.model);
       upstreamResp = new Response(JSON.stringify(openaiResp), {

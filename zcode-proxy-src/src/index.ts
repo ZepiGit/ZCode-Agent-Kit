@@ -14,6 +14,7 @@ import type { Credential } from "./auth/types.js";
 import type { ProviderId } from "./provider/types.js";
 import type { ProxyConfig } from "./config/types.js";
 import { updateConfigYaml, updateAccountPolicyYaml, ensureConfigFile } from "./config/edit.js";
+import { CURRENT_APP_VERSION, migrateRetiredAppVersionFile } from "./config/app-version.js";
 import { withLineEndingsOf } from "./config/line-endings.mjs";
 import { openBrowser } from "./runtime/open-browser.js";
 import { pasteLoginInstructions, readPastedLine, boldIfTTY } from "./runtime/paste-login.js";
@@ -231,6 +232,7 @@ async function serve(configPath: string | undefined, debug: boolean): Promise<vo
     console.log(`Created ${path} from bundled template.`);
     console.log(`Run: zcode-proxy auth login <zai|bigmodel>\n`);
   }
+  noteRetiredAppVersion(path);
   const config = loadConfig(path);
   proxyLog?.addSecret(config.auth.proxyApiKey);
 
@@ -369,6 +371,7 @@ async function runAndroid(): Promise<void> {
   applyAndroidIdentityDefaults();
   const path = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
   ensureConfigFile(path);
+  noteRetiredAppVersion(path);
   const config = loadConfig(path);
 
   const logBuffer = new LogBuffer();
@@ -1047,6 +1050,17 @@ async function healthAccounts(args: string[]): Promise<void> {
  * Android's mid comes from NodeRunner env injection instead and is never
  * written here). Returns the mid (existing or freshly generated).
  */
+/** Rewrite a retired shipped client identity before the process reads config. */
+function noteRetiredAppVersion(path: string): void {
+  try {
+    if (migrateRetiredAppVersionFile(path)) {
+      console.log(`Updated identity.appVersion to ${CURRENT_APP_VERSION} in ${path} (the previous default is rejected by the current ZCode gateway).`);
+    }
+  } catch (err) {
+    console.error(`Could not update identity.appVersion in ${path}: ${(err as Error).message}`);
+  }
+}
+
 function ensureConfigWithDeviceMid(): string {
   const path = process.env.ZCODE_PROXY_CONFIG ?? "config.yaml";
   if (ensureConfigFile(path)) {

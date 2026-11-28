@@ -10,6 +10,7 @@ import { proxyEnv } from "../lib/proxy-env.mjs";
 import { stateDirectory, ensureState } from "../lib/state.mjs";
 import { commitFile } from "../lib/edit.mjs";
 import { lineEndingOf, withLineEndingsOf } from "../lib/line-endings.mjs";
+import { CURRENT_APP_VERSION, migrateRetiredAppVersion } from "./client-identity.mjs";
 
 export function kitRoot() {
   return resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -187,6 +188,21 @@ function ensureDeps(ctx, label, dir, log = console.log) {
   log(`  ${label} dependencies installed`);
 }
 
+/**
+ * Rewrite a retired shipped `identity.appVersion` (the gateway rejects it with
+ * an empty success envelope). A version the operator chose is left alone.
+ * Returns true when the file changed.
+ */
+function migrateInstalledAppVersion(ctx, log) {
+  let current;
+  try { current = readFileSync(ctx.config, "utf8"); } catch { return false; }
+  const migrated = migrateRetiredAppVersion(current);
+  if (migrated === current) return false;
+  commitFile(ctx, ctx.tx ?? { touch() {} }, ctx.config, migrated);
+  log(`  updated identity.appVersion to ${CURRENT_APP_VERSION} (the previous default is rejected by the current ZCode gateway)`);
+  return true;
+}
+
 /** Bootstrap the kit's own runtime files. Idempotent; transaction-aware via ctx.tx. */
 export function bootstrap(ctx, log = console.log) {
   log("== bootstrap ==");
@@ -212,7 +228,7 @@ export function bootstrap(ctx, log = console.log) {
     if (/proxyApiKey: "GENERATE_ME"/.test(filled)) throw new Error("config template key substitution failed");
     commitFile(ctx, ctx.tx ?? { touch() {} }, ctx.config, filled);
     log("  wrote proxy/config.yaml from example");
-  } else {
+  } else if (!migrateInstalledAppVersion(ctx, log)) {
     log("  proxy/config.yaml already present — left untouched");
   }
 

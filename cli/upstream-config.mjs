@@ -1,7 +1,7 @@
 // `zcode-kit doctor --upstream`: compare the gateway the kit's proxy uses with
 // the provider configuration the ZCode client itself receives.
 //
-// The ZCode client (3.14) asks GET {origin}/api/v1/client/configs for a
+// The ZCode client (4.0.0) asks GET {origin}/api/v1/client/configs for a
 // remote "builtin provider" release (data.configs.builtin_provider_config_json,
 // a CDN JSON with providerRules[].config.{access,api.baseUrl,builtinModelIds})
 // and overrides its bundled table with it; older app versions get a provider
@@ -13,14 +13,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { configuredModelIds } from "./connection-details.mjs";
+import { CURRENT_APP_VERSION } from "./client-identity.mjs";
 
 export const DEFAULT_UPSTREAM_ORIGIN = "https://zcode.z.ai";
 export const UPSTREAM_ORIGIN_ENV = "ZCODE_KIT_UPSTREAM_ORIGIN";
 /** Platform value the kit's proxy already sends to the same endpoint (captcha config). */
 const PLATFORM = "win32-x64";
 const TIMEOUT_MS = 8000;
-/** Client release the kit was last compared with (zai-org/zcode 3.14.3); used when the configured version gets no plan data. */
-export const REFERENCE_APP_VERSION = "3.14.3";
+/** Client release the kit was last compared with (current ZCode desktop); used when the configured version gets no plan data. */
+export const REFERENCE_APP_VERSION = CURRENT_APP_VERSION;
 const MAX_BYTES = 2 * 1024 * 1024;
 
 /**

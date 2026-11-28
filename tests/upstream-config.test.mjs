@@ -12,6 +12,7 @@ import {
   KIT_GATEWAY_BASES, REFERENCE_APP_VERSION, UPSTREAM_ORIGIN_ENV, compareUpstream, fetchUpstreamProviders, readProxyTarget,
   resolveUpstreamOrigin, upstreamChecks,
 } from "../cli/upstream-config.mjs";
+import { CURRENT_APP_VERSION, RETIRED_APP_VERSIONS, migrateRetiredAppVersion } from "../cli/client-identity.mjs";
 
 const KIT = join(import.meta.dirname, "..");
 let server = null;
@@ -56,7 +57,7 @@ async function vendor(routes) {
 }
 const releaseRoutes = (url, origin) => url.pathname === "/release.json" ? RELEASE
   : { code: 0, data: { configs: { builtin_provider_config_json: `${origin}/release.json` } } };
-function config(dir, { provider = "zai", plan = "start-plan", appVersion = "3.14.3", models = ["glm-5.3", "glm-5.3-flash"] } = {}) {
+function config(dir, { provider = "zai", plan = "start-plan", appVersion = "4.0.0", models = ["glm-5.3", "glm-5.3-flash"] } = {}) {
   const path = join(dir, "config.yaml");
   writeFileSync(path, `provider: ${provider}\nplan: ${plan}\nmodels:\n${models.map((m) => `  - ${m}\n`).join("")}identity:\n  appVersion: "${appVersion}"\n`);
   return path;
@@ -82,6 +83,22 @@ test("readProxyTarget reads provider, plan, identity.appVersion and models", (t)
   const defaults = readProxyTarget(join(dir, "missing.yaml"));
   assert.equal(defaults.plan, "start-plan");
   assert.equal(defaults.provider, "zai");
+  assert.equal(defaults.appVersion, REFERENCE_APP_VERSION);
+});
+
+test("the announced client identity is the current ZCode release, in every definition site", () => {
+  assert.equal(CURRENT_APP_VERSION, "4.0.0");
+  assert.equal(REFERENCE_APP_VERSION, CURRENT_APP_VERSION);
+  assert.deepEqual(RETIRED_APP_VERSIONS, ["3.14.3"]);
+  const proxy = readFileSync(join(KIT, "zcode-proxy-src", "src", "config", "app-version.ts"), "utf8");
+  assert.match(proxy, /CURRENT_APP_VERSION = "4\.0\.0"/);
+  assert.match(proxy, /"3\.14\.3"/);
+  for (const file of ["proxy/config.example.yaml", "zcode-proxy-src/config.example.yaml", "zcode-proxy-src/src/config/template.ts"]) {
+    assert.match(readFileSync(join(KIT, file), "utf8"), /appVersion:\s*"4\.0\.0"/, file);
+  }
+  const retired = 'identity:\n  appVersion: "3.14.3"\n  sourceTitle: "cli"\n';
+  assert.equal(migrateRetiredAppVersion(retired), `identity:\n  appVersion: "${CURRENT_APP_VERSION}"\n  sourceTitle: "cli"\n`);
+  assert.equal(migrateRetiredAppVersion(retired.replace("3.14.3", "3.11.2")), retired.replace("3.14.3", "3.11.2"));
 });
 
 test("release shape: matching base PASS, moved base FAIL with the new URL, models informational; no credentials, platform and version sent", async (t) => {
@@ -95,7 +112,7 @@ test("release shape: matching base PASS, moved base FAIL with the new URL, model
   assert.equal(pass[1].ok, null, "glm-5.3 is not offered for start-plan: informational");
   assert.match(pass[1].detail, /glm-5\.3\b/);
   assert.equal(v.requests[0].path, "/api/v1/client/configs");
-  assert.deepEqual(v.requests[0].query, { app_version: "3.14.3", platform: "win32-x64" });
+  assert.deepEqual(v.requests[0].query, { app_version: "4.0.0", platform: "win32-x64" });
   for (const r of v.requests) assert.equal(r.headers.authorization, undefined);
   const moved = compareUpstream({ provider: "zai", plan: "coding-plan", appVersion: "x", models: ["glm-5.3"] },
     { shape: "release", revision: 24, entries: [{ provider: "zai", mode: "individual-coding-plan", baseUrl: "https://api.z.ai/api/v2/anthropic", models: ["GLM-5.3"] }] });
@@ -114,7 +131,7 @@ test("legacy shape: coding-plan compared from the provider list; start-plan fall
   assert.match(coding[0].detail, /provider list/);
   const start = await upstreamChecks(config(dir, { plan: "start-plan", appVersion: "3.11.2" }), { env });
   assert.equal(start[0].ok, true, JSON.stringify(start));
-  assert.match(start[0].detail, /as served to app 3\.14\.3; the kit announces 3\.11\.2/);
+  assert.match(start[0].detail, /as served to app 4\.0\.0; the kit announces 3\.11\.2/);
 });
 
 test("network boundaries: redirects, foreign release hosts, stalls and junk are SKIPs; non-loopback http origins are refused", async (t) => {

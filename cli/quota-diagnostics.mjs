@@ -18,7 +18,9 @@ export function diagnoseQuota(status, body) {
   // Match the actual billing route's fixed prefixes, not arbitrary numbers
   // in provider prose. Never copy error text into diagnostics or logs.
   for (const error of Array.isArray(body?.errors) ? body.errors : []) {
-    const match = typeof error === 'string' && error.match(/^(?:balance|preview):\s*(3012|1113|3001|401|403)(?=\s|$)/);
+    // The billing route writes `balance: provider_3012` / `preview: provider_401`.
+    // Older diagnostics and tests also use the bare code (`balance: 3012`).
+    const match = typeof error === 'string' && error.match(/^(?:balance|preview):\s*(?:provider_)?(3012|1113|3001|401|403)(?=\s|$)/);
     if (match) codes.push(Number(match[1]));
   }
   const message = body?.error?.message;
@@ -31,7 +33,14 @@ export function diagnoseQuota(status, body) {
   // Empty/missing pools are not proof of exhaustion. Only an explicit primary
   // plan status is authoritative; optional quota observability can be partial.
   if (body?.planUsage?.exhausted === true) return { code: 1, cause: 'balance', detail: 'ZCode plan quota is exhausted; check the plan reset time/account balance.' };
-  if (status < 200 || status >= 300 || !isQuotaSnapshot(body) || body.error || (Array.isArray(body.errors) && body.errors.length) || (raw !== undefined && code !== 0 && code !== 200)) {
+  // Claim/preview is optional observability. After the auth and balance codes
+  // above have been classified, a leftover preview fault (the empty success
+  // envelope recorded as `preview: provider_unknown`, a transport fault, an
+  // unrecognized preview code) is not a rejected login when the balance
+  // snapshot itself is healthy. Balance-side errors still fail.
+  const listed = Array.isArray(body?.errors) ? body.errors : [];
+  const blocking = listed.filter((error) => typeof error !== 'string' || !/^preview:\s*/.test(error));
+  if (status < 200 || status >= 300 || !isQuotaSnapshot(body) || body.error || blocking.length || (raw !== undefined && code !== 0 && code !== 200)) {
     return { code: 0, cause: 'quota-unavailable', detail: 'ZCode quota information unavailable; continuing with the healthy local proxy. No retry scheduled.' };
   }
   return { code: 0, cause: 'healthy', detail: 'ZCode local proxy ready; quota preflight complete.' };

@@ -506,7 +506,7 @@ models:
     const path = writeYaml(`
 `);
     const cfg = loadConfig(path);
-    expect(cfg.identity.appVersion).toBe("3.14.3");
+    expect(cfg.identity.appVersion).toBe("4.0.0");
     expect(cfg.identity.sourceTitle).toBe("cli");
     expect(cfg.identity.refererOrigin).toBe("https://zcode.z.ai");
   });
@@ -540,7 +540,15 @@ identity:
   appVersion: "v3.3.3-中文"
 `);
     const cfg = loadConfig(path);
-    expect(cfg.identity.appVersion).toBe("3.14.3");
+    expect(cfg.identity.appVersion).toBe("4.0.0");
+  });
+
+  it("identity: an explicit retired appVersion is loaded as written (migration rewrites the file before load)", () => {
+    const path = writeYaml(`
+identity:
+  appVersion: "3.14.3"
+`);
+    expect(loadConfig(path).identity.appVersion).toBe("3.14.3");
   });
 });
 

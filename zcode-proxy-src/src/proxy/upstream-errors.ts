@@ -3,6 +3,7 @@ import { isPostWriteError } from "./ordered-transport.js";
 import type { AuthManager } from "../auth/manager.js";
 import type { Credential } from "../auth/types.js";
 import type { AccountHandle } from "../auth/account-rotator.js";
+import { CURRENT_APP_VERSION } from "../config/app-version.js";
 import { normalizeGatewayCode, RETRYABLE_GATEWAY_CODES, TERMINAL_GATEWAY_CODES, type GatewayCode } from "./gateway-codes.js";
 
 /**
@@ -116,9 +117,17 @@ export function parseGatewayErrorEnvelope(body: string): GatewayErrorEnvelope | 
  * A success-coded envelope without a model reply, e.g.
  * `{"code":0,"msg":"","logid":"…"}` (issue 94). It is neither a message nor a
  * recognised error, so `parseGatewayErrorEnvelope` leaves it alone; an
- * inference route must not hand it to the client as HTTP 200. Such an envelope
- * is tiny, so larger bodies (real model replies) are not parsed again.
+ * inference route must not hand it to the client as HTTP 200. The start-plan
+ * gateway returns this shape when the announced client identity is older than
+ * the current desktop release. Such an envelope is tiny, so larger bodies
+ * (real model replies) are not parsed again.
  */
+export const EMPTY_GATEWAY_SUCCESS_TYPE = "upstream_invalid_response";
+
+/** Actionable client error. Never echoes upstream `msg`, `logid`, or other provider text. */
+export const EMPTY_GATEWAY_SUCCESS_MESSAGE =
+  `Upstream returned an empty success envelope. The announced client identity may be outdated; set identity.appVersion to the current ZCode release (${CURRENT_APP_VERSION}) in proxy/config.yaml and restart the proxy.`;
+
 export function isEmptyGatewaySuccessEnvelope(body: string): boolean {
   if (!body || body.length > 4096) return false;
   let obj: unknown;
